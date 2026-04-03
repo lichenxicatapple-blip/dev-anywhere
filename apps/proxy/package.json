@@ -9,6 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cc-anywhere/shared": "workspace:*"
+    "@cc-anywhere/shared": "workspace:*",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2"
   }
 }

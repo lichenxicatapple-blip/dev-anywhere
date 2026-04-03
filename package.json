@@ -25,7 +25,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "@esbuild/*"
+      "@esbuild/*",
+      "node-pty"
     ]
   }
 }
