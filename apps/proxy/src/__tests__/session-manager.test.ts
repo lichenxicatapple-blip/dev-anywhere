@@ -60,10 +60,12 @@ describe("SessionManager", () => {
   describe("listSessions", () => {
     it("returns sessions sorted by createdAt descending", () => {
       const s1 = manager.createSession("pty");
+      // 确保 s2 有更大的 createdAt，避免 Date.now() 同值导致排序不确定
+      manager.getSession(s1.id)!.createdAt = 1000;
       const s2 = manager.createSession("json");
+      manager.getSession(s2.id)!.createdAt = 2000;
       const list = manager.listSessions();
       expect(list).toHaveLength(2);
-      // 后创建的排在前面
       expect(list[0].id).toBe(s2.id);
       expect(list[1].id).toBe(s1.id);
     });

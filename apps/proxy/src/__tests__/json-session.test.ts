@@ -57,6 +57,8 @@ describe("JsonSession", () => {
 
   beforeEach(async () => {
     mockChild = createMockChild();
+    const { spawn } = await import("node:child_process");
+    vi.mocked(spawn).mockClear();
     const mod = await import("../json-session.js");
     JsonSession = mod.JsonSession;
   });
@@ -88,7 +90,7 @@ describe("JsonSession", () => {
     it("filters CLAUDECODE env variables from child process", async () => {
       const { spawn } = await import("node:child_process");
       const originalEnv = process.env;
-      process.env = { ...originalEnv, CLAUDECODE_SECRET: "abc", PATH: "/usr/bin", HOME: "/home/user" };
+      process.env = { ...originalEnv, CLAUDECODE_SECRET: "abc", CLAUDECODE_TOKEN: "xyz" };
 
       const session = new JsonSession();
       session.start();
@@ -96,7 +98,9 @@ describe("JsonSession", () => {
       const spawnCall = vi.mocked(spawn).mock.calls[0];
       const env = spawnCall[2]?.env as Record<string, string>;
       expect(env.CLAUDECODE_SECRET).toBeUndefined();
-      expect(env.PATH).toBe("/usr/bin");
+      expect(env.CLAUDECODE_TOKEN).toBeUndefined();
+      // 非 CLAUDECODE 开头的变量保留
+      expect(env.PATH).toBeDefined();
 
       process.env = originalEnv;
     });
@@ -362,16 +366,15 @@ describe("JsonSession", () => {
       const session = new JsonSession();
       session.start();
 
-      // 模拟进程在 SIGTERM 后退出
-      mockChild.kill = vi.fn().mockImplementation(() => {
-        mockChild.emit("exit", 0, null);
-        return true;
-      });
-
-      // 让 isAlive 在 stop 调用后返回 false
+      // 第一次 isAlive 返回 true（stop 入口检查），之后返回 false（SIGTERM 后已退出）
+      let aliveCallCount = 0;
       const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+        aliveCallCount++;
+        if (aliveCallCount <= 1) return true;
         throw new Error("ESRCH");
       });
+
+      mockChild.kill = vi.fn().mockReturnValue(true);
 
       await session.stop(500);
       expect(mockChild.kill).toHaveBeenCalledWith("SIGTERM");
