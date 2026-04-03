@@ -95,6 +95,11 @@ export class PtyManager {
     });
   }
 
+  // 向 PTY 子进程写入数据，用于远程输入注入
+  write(data: string): void {
+    this.child?.write(data);
+  }
+
   cleanup(exitCode: number): void {
     if (this.stdin.isTTY) {
       try {

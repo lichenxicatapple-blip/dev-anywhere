@@ -1,21 +1,29 @@
-import { PtyManager } from "./pty-manager.js";
-import { createNoopTap } from "./tap.js";
+import { Command } from "commander";
+import { startClient } from "./client.js";
+import { startService } from "./serve.js";
 
-// 所有命令行参数直接透传给 claude
-const claudeArgs = process.argv.slice(2);
+const program = new Command();
 
-const manager = new PtyManager({
-  claudeArgs,
-  tap: createNoopTap(),
-  stdin: process.stdin,
-  stdout: process.stdout,
-  onSessionExit: (code) => process.exit(code),
-});
+program
+  .name("cc-anywhere")
+  .description("CC Anywhere - transparent Claude Code proxy with remote control")
+  .version("0.0.0");
 
-try {
-  manager.start();
-} catch (err) {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`cc-anywhere: failed to start claude: ${message}\n`);
-  process.exit(1);
-}
+program
+  .command("serve")
+  .description("Start the cc-anywhere service daemon")
+  .action(async () => {
+    await startService();
+  });
+
+// 默认命令：以客户端模式运行，所有未识别参数透传给 claude
+program
+  .argument("[args...]", "Arguments passed to claude")
+  .passThroughOptions()
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async (args: string[]) => {
+    await startClient(args);
+  });
+
+program.parse();
