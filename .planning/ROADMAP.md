@@ -34,11 +34,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Changing a message type in `packages/shared` causes type errors in dependent packages at compile time
   3. MessageEnvelope schema with sequence numbers, session IDs, and typed message payloads validates correctly via zod
   4. Project builds and lints cleanly with a single `pnpm build` command
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md — Monorepo scaffolding: root configs, workspace setup, stub app packages
+- [ ] 01-02-PLAN.md — Shared protocol: Zod schemas, types, builders, constants, tests
 
 ### Phase 2: Local Proxy - PTY Transparency
 **Goal**: Users can run `cc-anywhere` instead of `claude` with zero observable difference in terminal behavior
@@ -189,7 +189,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Monorepo & Shared Protocol | 0/2 | Not started | - |
+| 1. Monorepo & Shared Protocol | 0/2 | Planning complete | - |
 | 2. Local Proxy - PTY Transparency | 0/2 | Not started | - |
 | 3. Local Proxy - Agent SDK & Multi-Session | 0/2 | Not started | - |
 | 4. Relay Server - Core Transport | 0/2 | Not started | - |
