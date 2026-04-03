@@ -1,0 +1,93 @@
+# Phase 1: Monorepo & Shared Protocol - Context
+
+**Gathered:** 2026-04-03
+**Status:** Ready for planning
+
+<domain>
+## Phase Boundary
+
+搭建 pnpm monorepo 项目脚手架，定义 zod 消息协议 schema 作为所有组件的共享契约。Phase 1 不含任何业务逻辑，只产出可编译、可测试的项目骨架和协议定义。
+
+</domain>
+
+<decisions>
+## Implementation Decisions
+
+### 消息协议设计
+- **D-01:** 消息类型分类由 Claude 设计，需覆盖 chat、tool、session、system 等场景
+- **D-02:** MessageEnvelope 带元数据：seq（序列号）、sessionId、type、payload、timestamp、source（proxy/client）、version
+- **D-03:** 流式输出粒度为 Agent SDK 事件级，每个 SDKMessage 事件作为一条完整消息发送到小程序，不做 token 级流式
+- **D-04:** 统一错误消息类型，所有错误通过 error 类型消息传递，包含错误码和描述
+- **D-05:** 认证方式由 Claude 设计，需适配 v1 单用户场景
+
+### Monorepo 结构
+- **D-06:** 采用 apps/ + packages/ 分离布局：apps/{proxy,relay,feishu} 为可部署应用，packages/shared 为共享库
+- **D-07:** npm scope 使用 @cc-anywhere/*（如 @cc-anywhere/shared、@cc-anywhere/proxy）
+
+### 构建与开发工具
+- **D-08:** 构建工具使用 tsup，测试框架使用 vitest
+- **D-09:** Lint 使用 ESLint，格式化使用 Prettier
+
+### Claude's Discretion
+- 消息类型的具体分类和命名（需覆盖全部业务场景）
+- shared 包的内容边界（纯契约层 vs 含工具函数）
+- 包间依赖图设计（严格单向 vs 允许层级）
+- 认证机制的具体实现方案
+- zod schema 的组织方式
+
+</decisions>
+
+<specifics>
+## Specific Ideas
+
+- cc-connect 项目 (https://github.com/chenhg5/cc-connect) 可作为消息协议和会话管理的参考实现
+- Agent SDK 的 SDKMessage 类型是协议设计的核心参考，消息类型应与 SDK 事件模型对齐
+- 研究发现飞书小程序限制 1-2 个 WebSocket 并发连接，协议需支持单连接多会话复用
+
+</specifics>
+
+<canonical_refs>
+## Canonical References
+
+**Downstream agents MUST read these before planning or implementing.**
+
+### Agent SDK
+- `.planning/research/STACK.md` -- Agent SDK 版本、API 模式、SDKMessage 类型定义
+- `.planning/research/ARCHITECTURE.md` -- 三层架构设计、组件边界、数据流方向
+
+### Protocol Design
+- `.planning/research/SUMMARY.md` -- 研究综合，包含消息协议设计建议和飞书约束
+- `.planning/research/PITFALLS.md` -- WebSocket 消息排序、UTF-8 截断、重连等协议层陷阱
+
+### Project Context
+- `.planning/PROJECT.md` -- 项目核心价值和约束
+- `.planning/REQUIREMENTS.md` -- 所有 v1 需求，协议需覆盖每条需求涉及的消息类型
+
+</canonical_refs>
+
+<code_context>
+## Existing Code Insights
+
+### Reusable Assets
+- 无（greenfield 项目）
+
+### Established Patterns
+- 无（首个 phase，所有模式从这里建立）
+
+### Integration Points
+- 本 phase 产出的 shared 包是所有后续 phase 的依赖基础
+- zod schema 定义的消息类型将被 proxy、relay、feishu 三个应用直接 import 使用
+
+</code_context>
+
+<deferred>
+## Deferred Ideas
+
+- 飞书小程序通知能力（用户离开后任务完成时通知，回到电脑后自动屏蔽通知） -- Phase 10 (UX-03)
+
+</deferred>
+
+---
+
+*Phase: 01-monorepo-shared-protocol*
+*Context gathered: 2026-04-03*
