@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "apps/proxy" },
+    { "path": "apps/relay" },
+    { "path": "apps/feishu" }
+  ]
+}

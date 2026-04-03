@@ -1,0 +1,31 @@
+{
+  "name": "cc-anywhere",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.2",
+    "tsx": "^4.21.0",
+    "eslint": "^10.1.0",
+    "@eslint/js": "^10.0.1",
+    "typescript-eslint": "^8.58.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "globals": "^17.4.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@esbuild/*"
+    ]
+  }
+}
