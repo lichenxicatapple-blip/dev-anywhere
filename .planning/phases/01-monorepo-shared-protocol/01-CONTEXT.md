@@ -14,11 +14,15 @@
 ## Implementation Decisions
 
 ### 消息协议设计
-- **D-01:** 消息类型分类由 Claude 设计，需覆盖 chat、tool、session、system 等场景
+- **D-01:** 消息类型按功能分为四大类：
+  - chat: user_input, assistant_message, thinking
+  - tool: tool_use_request, tool_approve, tool_deny, tool_result
+  - session: session_create, session_list, session_switch, session_terminate, session_status
+  - system: heartbeat, error, auth, sync_request, sync_response
 - **D-02:** MessageEnvelope 带元数据：seq（序列号）、sessionId、type、payload、timestamp、source（proxy/client）、version
 - **D-03:** 流式输出粒度为 Agent SDK 事件级，每个 SDKMessage 事件作为一条完整消息发送到小程序，不做 token 级流式
 - **D-04:** 统一错误消息类型，所有错误通过 error 类型消息传递，包含错误码和描述
-- **D-05:** 认证方式由 Claude 设计，需适配 v1 单用户场景
+- **D-05:** 认证采用配对码方案：首次连接时本地代理生成 6 位配对码（5 分钟有效），用户在飞书小程序输入后建立绑定，双方获得长期 token 用于后续自动认证，无需重复配对
 
 ### Monorepo 结构
 - **D-06:** 采用 apps/ + packages/ 分离布局：apps/{proxy,relay,feishu} 为可部署应用，packages/shared 为共享库
@@ -28,12 +32,15 @@
 - **D-08:** 构建工具使用 tsup，测试框架使用 vitest
 - **D-09:** Lint 使用 ESLint，格式化使用 Prettier
 
+### shared 包内容与依赖
+- **D-10:** shared 包包含：zod schema 定义、TypeScript 类型导出（从 zod infer）、消息构造器函数、序列号生成器、常量定义（错误码枚举、会话状态枚举）。不包含 WebSocket 连接逻辑、持久化逻辑、业务逻辑。
+- **D-11:** 包间严格单向依赖：shared 无依赖，proxy/relay/feishu 只依赖 shared，三者互不依赖。如 relay 有类型需要 feishu 用，提升到 shared。
+
+### Zod Schema 组织
+- **D-12:** packages/shared/src/ 下按职责分目录：schemas/（按消息类别拆文件：envelope.ts、chat.ts、tool.ts、session.ts、system.ts）、types/（从 zod infer 的 TS 类型）、builders/（消息构造器）、constants/（错误码、会话状态枚举）
+
 ### Claude's Discretion
-- 消息类型的具体分类和命名（需覆盖全部业务场景）
-- shared 包的内容边界（纯契约层 vs 含工具函数）
-- 包间依赖图设计（严格单向 vs 允许层级）
-- 认证机制的具体实现方案
-- zod schema 的组织方式
+- 无（所有设计决策已确定）
 
 </decisions>
 
