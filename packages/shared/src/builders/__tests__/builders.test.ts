@@ -103,7 +103,6 @@ describe("buildMessage", () => {
       buildMessage(
         "user_input",
         "sess-1",
-        // @ts-expect-error -- 故意传空 text 触发验证错误
         { text: "" },
         "client",
       ),
