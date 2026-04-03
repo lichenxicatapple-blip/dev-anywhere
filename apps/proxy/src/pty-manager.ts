@@ -16,6 +16,7 @@ export interface PtyManagerOptions {
   tap: DataTap;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
+  onSessionExit?: (code: number) => void;
 }
 
 export class PtyManager {
@@ -24,12 +25,14 @@ export class PtyManager {
   private readonly tap: DataTap;
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
+  private readonly onSessionExit?: (code: number) => void;
 
   constructor(options: PtyManagerOptions) {
     this.claudeArgs = options.claudeArgs;
     this.tap = options.tap;
     this.stdin = options.stdin;
     this.stdout = options.stdout;
+    this.onSessionExit = options.onSessionExit;
   }
 
   start(): void {
@@ -73,7 +76,7 @@ export class PtyManager {
       }, 50);
     });
 
-    // 子进程退出，按 Unix 惯例处理信号退出码
+    // 子进程退出，按 Unix 惯例处理信号退出码，通过回调通知调用方
     child.onExit(({ exitCode, signal }) => {
       if (isInteractive) {
         try {
@@ -83,21 +86,7 @@ export class PtyManager {
         }
       }
       const code = signal ? 128 + signal : exitCode;
-      process.exit(code);
-    });
-
-    // 信号处理：确保子进程在代理退出时被终止
-    process.on("SIGTERM", () => this.cleanup(143));
-    process.on("SIGHUP", () => this.cleanup(129));
-
-    // 异常处理：输出错误信息并清理退出
-    process.on("uncaughtException", (err) => {
-      process.stderr.write(`cc-anywhere: fatal error: ${err.message}\n`);
-      this.cleanup(1);
-    });
-    process.on("unhandledRejection", (reason) => {
-      process.stderr.write(`cc-anywhere: unhandled rejection: ${reason}\n`);
-      this.cleanup(1);
+      this.onSessionExit?.(code);
     });
 
     // stdin 结束时写入 EOF 控制字符到 PTY
@@ -121,6 +110,6 @@ export class PtyManager {
         // 子进程可能已退出
       }
     }
-    process.exit(exitCode);
+    this.onSessionExit?.(exitCode);
   }
 }

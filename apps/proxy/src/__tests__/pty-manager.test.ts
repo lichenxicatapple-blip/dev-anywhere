@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 
 // 模拟 node-pty 的 IPty 接口
@@ -61,44 +61,10 @@ function createMockStdout(cols = 120, rows = 40) {
 }
 
 describe("PtyManager", () => {
-  let processExitSpy: ReturnType<typeof vi.spyOn>;
-  let originalListeners: {
-    SIGTERM: NodeJS.SignalsListener[];
-    SIGHUP: NodeJS.SignalsListener[];
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
     onDataCallback = null;
     onExitCallback = null;
-
-    // 保存并移除已有的信号处理器，防止测试间干扰
-    originalListeners = {
-      SIGTERM: process.listeners("SIGTERM") as NodeJS.SignalsListener[],
-      SIGHUP: process.listeners("SIGHUP") as NodeJS.SignalsListener[],
-    };
-
-    processExitSpy = vi
-      .spyOn(process, "exit")
-      .mockImplementation((() => {}) as () => never);
-  });
-
-  afterEach(() => {
-    processExitSpy.mockRestore();
-
-    // 清理本次测试注册的信号处理器
-    process.removeAllListeners("SIGTERM");
-    process.removeAllListeners("SIGHUP");
-    process.removeAllListeners("uncaughtException");
-    process.removeAllListeners("unhandledRejection");
-
-    // 恢复原有的信号处理器
-    for (const listener of originalListeners.SIGTERM) {
-      process.on("SIGTERM", listener);
-    }
-    for (const listener of originalListeners.SIGHUP) {
-      process.on("SIGHUP", listener);
-    }
   });
 
   async function createManager(
@@ -108,6 +74,7 @@ describe("PtyManager", () => {
       isTTY?: boolean;
       cols?: number;
       rows?: number;
+      onSessionExit?: (code: number) => void;
     } = {},
   ) {
     const { PtyManager } = await import("../pty-manager.js");
@@ -125,6 +92,7 @@ describe("PtyManager", () => {
       tap,
       stdin,
       stdout,
+      onSessionExit: overrides.onSessionExit,
     });
 
     return { manager, stdin, stdout, tap, pty };
@@ -200,35 +168,66 @@ describe("PtyManager", () => {
     vi.useRealTimers();
   });
 
-  it("propagates child exit code", async () => {
-    const { manager } = await createManager();
+  it("calls onSessionExit with child exit code instead of process.exit", async () => {
+    const onSessionExit = vi.fn();
+    const { manager } = await createManager({ onSessionExit });
 
     manager.start();
     expect(onExitCallback).not.toBeNull();
     onExitCallback!({ exitCode: 42, signal: 0 });
 
-    expect(processExitSpy).toHaveBeenCalledWith(42);
+    expect(onSessionExit).toHaveBeenCalledWith(42);
   });
 
-  it("computes 128+signal for signal-based exit", async () => {
-    const { manager } = await createManager();
+  it("calls onSessionExit with 128+signal for signal-based exit", async () => {
+    const onSessionExit = vi.fn();
+    const { manager } = await createManager({ onSessionExit });
 
     manager.start();
     expect(onExitCallback).not.toBeNull();
     onExitCallback!({ exitCode: 0, signal: 2 });
 
-    expect(processExitSpy).toHaveBeenCalledWith(130);
+    expect(onSessionExit).toHaveBeenCalledWith(130);
   });
 
-  it("cleanup kills child and restores raw mode", async () => {
-    const { manager, stdin } = await createManager({ isTTY: true });
+  it("cleanup kills child, restores raw mode, and calls onSessionExit", async () => {
+    const onSessionExit = vi.fn();
+    const { manager, stdin } = await createManager({
+      isTTY: true,
+      onSessionExit,
+    });
 
     manager.start();
     manager.cleanup(1);
 
     expect(stdin.setRawMode).toHaveBeenCalledWith(false);
     expect(mockPty.kill).toHaveBeenCalled();
-    expect(processExitSpy).toHaveBeenCalledWith(1);
+    expect(onSessionExit).toHaveBeenCalledWith(1);
+  });
+
+  it("does not crash if onSessionExit is not provided", async () => {
+    const { manager } = await createManager();
+
+    manager.start();
+    expect(onExitCallback).not.toBeNull();
+
+    // 不传 onSessionExit 时触发退出不应抛异常
+    expect(() => onExitCallback!({ exitCode: 0, signal: 0 })).not.toThrow();
+  });
+
+  it("does not register global process event handlers", async () => {
+    const sigTermBefore = process.listenerCount("SIGTERM");
+    const sigHupBefore = process.listenerCount("SIGHUP");
+    const uncaughtBefore = process.listenerCount("uncaughtException");
+    const unhandledBefore = process.listenerCount("unhandledRejection");
+
+    const { manager } = await createManager();
+    manager.start();
+
+    expect(process.listenerCount("SIGTERM")).toBe(sigTermBefore);
+    expect(process.listenerCount("SIGHUP")).toBe(sigHupBefore);
+    expect(process.listenerCount("uncaughtException")).toBe(uncaughtBefore);
+    expect(process.listenerCount("unhandledRejection")).toBe(unhandledBefore);
   });
 
   it("handles non-TTY stdin without setRawMode", async () => {

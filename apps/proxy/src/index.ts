@@ -9,6 +9,7 @@ const manager = new PtyManager({
   tap: createNoopTap(),
   stdin: process.stdin,
   stdout: process.stdout,
+  onSessionExit: (code) => process.exit(code),
 });
 
 try {
