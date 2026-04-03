@@ -69,7 +69,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Foundational utilities: LineBuffer, IPC protocol, PtyManager refactor for multi-session
-- [ ] 03-02-PLAN.md — Core business logic: SessionManager with persistence/reaper, JsonSession with stream-json parsing
+- [x] 03-02-PLAN.md — Core business logic: SessionManager with persistence/reaper, JsonSession with stream-json parsing
 - [ ] 03-03-PLAN.md — System wiring: service entry point, client entry point, commander CLI routing
 
 ### Phase 4: Relay Server - Core Transport
