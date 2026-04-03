@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — Monorepo scaffolding: root configs, workspace setup, stub app packages
-- [ ] 01-02-PLAN.md — Shared protocol: Zod schemas, types, builders, constants, tests
+- [x] 01-02-PLAN.md — Shared protocol: Zod schemas, types, builders, constants, tests
 
 ### Phase 2: Local Proxy - PTY Transparency
 **Goal**: Users can run `cc-anywhere` instead of `claude` with zero observable difference in terminal behavior
