@@ -140,7 +140,7 @@ describe("PtyManager", () => {
     manager.start();
 
     expect(pty.spawn).toHaveBeenCalledWith(
-      "claude",
+      expect.stringContaining("claude"),
       ["--help"],
       expect.objectContaining({ cols: 120, rows: 40 }),
     );

@@ -11,4 +11,10 @@ const manager = new PtyManager({
   stdout: process.stdout,
 });
 
-manager.start();
+try {
+  manager.start();
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`cc-anywhere: failed to start claude: ${message}\n`);
+  process.exit(1);
+}

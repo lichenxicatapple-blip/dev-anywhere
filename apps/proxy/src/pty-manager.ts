@@ -1,6 +1,15 @@
+import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import type { DataTap } from "./tap.js";
+
+function resolveClaudePath(): string {
+  try {
+    return execFileSync("which", ["claude"], { encoding: "utf8" }).trim();
+  } catch {
+    throw new Error("claude not found in PATH. Install Claude Code first: https://claude.ai/download");
+  }
+}
 
 export interface PtyManagerOptions {
   claudeArgs: string[];
@@ -27,7 +36,8 @@ export class PtyManager {
     const cols = this.stdout.columns ?? 80;
     const rows = this.stdout.rows ?? 24;
 
-    const child = pty.spawn("claude", this.claudeArgs, {
+    const claudePath = resolveClaudePath();
+    const child = pty.spawn(claudePath, this.claudeArgs, {
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
