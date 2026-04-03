@@ -52,7 +52,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — PTY core: node-pty install, PtyManager class, noop tap, unit tests
+- [x] 02-01-PLAN.md — PTY core: node-pty install, PtyManager class, noop tap, unit tests
 - [ ] 02-02-PLAN.md — CLI entry point: index.ts wiring, bin registration, manual transparency verification
 
 ### Phase 3: Local Proxy - Agent SDK & Multi-Session
