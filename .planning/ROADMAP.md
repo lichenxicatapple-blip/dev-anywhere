@@ -53,7 +53,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — PTY core: node-pty install, PtyManager class, noop tap, unit tests
-- [ ] 02-02-PLAN.md — CLI entry point: index.ts wiring, bin registration, manual transparency verification
+- [x] 02-02-PLAN.md — CLI entry point: index.ts wiring, bin registration, manual transparency verification
 
 ### Phase 3: Local Proxy - Agent SDK & Multi-Session
 **Goal**: The proxy can drive Claude Code programmatically via Agent SDK while maintaining PTY transparency, and manage multiple concurrent sessions
