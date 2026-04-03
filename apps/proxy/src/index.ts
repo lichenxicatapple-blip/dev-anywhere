@@ -1,6 +1,14 @@
-import type { MessageEnvelope, MessageType } from "@cc-anywhere/shared";
+import { PtyManager } from "./pty-manager.js";
+import { createNoopTap } from "./tap.js";
 
-// 类型验证：确保 shared 包的类型在 proxy 中可用
-type _TypeCheck = MessageEnvelope extends { type: MessageType } ? true : never;
-const _check: _TypeCheck = true;
-void _check;
+// 所有命令行参数直接透传给 claude
+const claudeArgs = process.argv.slice(2);
+
+const manager = new PtyManager({
+  claudeArgs,
+  tap: createNoopTap(),
+  stdin: process.stdin,
+  stdout: process.stdout,
+});
+
+manager.start();

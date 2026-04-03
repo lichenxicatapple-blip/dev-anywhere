@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "cc-anywhere": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
