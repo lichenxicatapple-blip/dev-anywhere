@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Monorepo scaffolding: root configs, workspace setup, stub app packages
+- [x] 01-01-PLAN.md — Monorepo scaffolding: root configs, workspace setup, stub app packages
 - [ ] 01-02-PLAN.md — Shared protocol: Zod schemas, types, builders, constants, tests
 
 ### Phase 2: Local Proxy - PTY Transparency
