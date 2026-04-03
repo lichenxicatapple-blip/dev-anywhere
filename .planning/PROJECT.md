@@ -81,5 +81,9 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope -- reasons still valid?
 4. Update Context with current state
 
+## Current State
+
+Phase 1 complete — pnpm monorepo with shared protocol library (16 message types, Zod schemas, builders, 94 tests). Foundation ready for Phase 2 (PTY transparency).
+
 ---
-*Last updated: 2026-04-03 after initialization*
+*Last updated: 2026-04-03 after Phase 1 completion*
