@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Monorepo & Shared Protocol** - Project scaffolding, pnpm monorepo, zod message schemas shared across all packages
 - [ ] **Phase 2: Local Proxy - PTY Transparency** - Transparent CLI wrapper that makes `cc-anywhere` indistinguishable from `claude`
-- [ ] **Phase 3: Local Proxy - Agent SDK & Multi-Session** - Dual-mode architecture with Agent SDK for structured remote control and multi-session lifecycle management
+- [ ] **Phase 3: Local Proxy - Service Architecture & Multi-Session** - Service+client architecture with stream-json remote control and multi-session lifecycle management
 - [ ] **Phase 4: Relay Server - Core Transport** - WebSocket bridge with typed message protocol and sequence-numbered delivery
 - [ ] **Phase 5: Relay Server - Resilience** - Auto-reconnect, message queuing during disconnection, and session state recovery
 - [ ] **Phase 6: Feishu Mini Program - Core Interaction** - Send messages, see streaming output, manage sessions, view history
@@ -55,21 +55,22 @@ Plans:
 - [x] 02-01-PLAN.md — PTY core: node-pty install, PtyManager class, noop tap, unit tests
 - [x] 02-02-PLAN.md — CLI entry point: index.ts wiring, bin registration, manual transparency verification
 
-### Phase 3: Local Proxy - Agent SDK & Multi-Session
-**Goal**: The proxy can drive Claude Code programmatically via Agent SDK while maintaining PTY transparency, and manage multiple concurrent sessions
+### Phase 3: Local Proxy - Service Architecture & Multi-Session
+**Goal**: The proxy runs as a service+client architecture where a long-running service manages all sessions (PTY and JSON modes) and CLI clients connect via Unix domain socket IPC
 **Depends on**: Phase 2
 **Requirements**: PROXY-02, PROXY-03
 **Success Criteria** (what must be TRUE):
-  1. PTY channel and Agent SDK channel run in parallel for the same Claude Code instance without interfering with each other
+  1. PTY sessions (terminal) and JSON sessions (stream-json) coexist in the same service without interfering with each other
   2. User can create multiple concurrent Claude Code sessions, each operating independently
   3. Each session reports its status (idle, working, waiting for approval, error) and can be individually terminated
   4. When a session is terminated or crashes, its claude child process is cleaned up within seconds (no orphaned processes)
   5. A periodic reaper detects and cleans up any orphaned claude processes that escaped normal cleanup
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — Foundational utilities: LineBuffer, IPC protocol, PtyManager refactor for multi-session
+- [ ] 03-02-PLAN.md — Core business logic: SessionManager with persistence/reaper, JsonSession with stream-json parsing
+- [ ] 03-03-PLAN.md — System wiring: service entry point, client entry point, commander CLI routing
 
 ### Phase 4: Relay Server - Core Transport
 **Goal**: Local proxy and remote clients can exchange messages through a public WebSocket relay with guaranteed ordering
@@ -191,7 +192,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 |-------|----------------|--------|-----------|
 | 1. Monorepo & Shared Protocol | 0/2 | Planning complete | - |
 | 2. Local Proxy - PTY Transparency | 0/2 | Planning complete | - |
-| 3. Local Proxy - Agent SDK & Multi-Session | 0/2 | Not started | - |
+| 3. Local Proxy - Service Architecture & Multi-Session | 0/3 | Planning complete | - |
 | 4. Relay Server - Core Transport | 0/2 | Not started | - |
 | 5. Relay Server - Resilience | 0/2 | Not started | - |
 | 6. Feishu Mini Program - Core Interaction | 0/3 | Not started | - |
