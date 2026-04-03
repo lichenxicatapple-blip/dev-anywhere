@@ -85,31 +85,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROXY-01 | - | Pending |
-| PROXY-02 | - | Pending |
-| PROXY-03 | - | Pending |
-| PROXY-04 | - | Pending |
-| RELAY-01 | - | Pending |
-| RELAY-02 | - | Pending |
-| RELAY-03 | - | Pending |
-| RELAY-04 | - | Pending |
-| FEISHU-01 | - | Pending |
-| FEISHU-02 | - | Pending |
-| FEISHU-03 | - | Pending |
-| FEISHU-04 | - | Pending |
-| FEISHU-05 | - | Pending |
-| VOICE-01 | - | Pending |
-| UX-01 | - | Pending |
-| UX-02 | - | Pending |
-| UX-03 | - | Pending |
-| UX-04 | - | Pending |
-| UX-05 | - | Pending |
+| PROXY-01 | Phase 2 | Pending |
+| PROXY-02 | Phase 3 | Pending |
+| PROXY-03 | Phase 3 | Pending |
+| PROXY-04 | Phase 7 | Pending |
+| RELAY-01 | Phase 4 | Pending |
+| RELAY-02 | Phase 5 | Pending |
+| RELAY-03 | Phase 4 | Pending |
+| RELAY-04 | Phase 5 | Pending |
+| FEISHU-01 | Phase 6 | Pending |
+| FEISHU-02 | Phase 7 | Pending |
+| FEISHU-03 | Phase 6 | Pending |
+| FEISHU-04 | Phase 6 | Pending |
+| FEISHU-05 | Phase 8 | Pending |
+| VOICE-01 | Phase 9 | Pending |
+| UX-01 | Phase 8 | Pending |
+| UX-02 | Phase 10 | Pending |
+| UX-03 | Phase 10 | Pending |
+| UX-04 | Phase 10 | Pending |
+| UX-05 | Phase 10 | Pending |
 
 **Coverage:**
 - v1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-03*
-*Last updated: 2026-04-03 after initial definition*
+*Last updated: 2026-04-03 after roadmap creation*
