@@ -51,9 +51,18 @@
 - **D-22:** 服务进程启动 30 秒间隔的 reaper 定时器，遍历所有已跟踪的 JSON 会话，检测 claude 子进程是否存活。PTY 会话由客户端管理，服务只跟踪注册状态。
 - **D-23:** 服务进程退出时，terminateAll() 给所有 JSON 会话的 claude 子进程发 SIGTERM，超时后 SIGKILL。PTY 会话由各自客户端负责清理。
 
+### 客户端退出与注销
+- **D-24:** 客户端进程退出时（正常退出、Ctrl+C、SIGTERM），必须向服务发送注销请求，服务将对应 PTY 会话标记为 terminated。
+- **D-25:** 客户端在 SIGINT/SIGTERM 信号处理器中执行注销，确保非正常退出也能通知服务。
+
+### 心跳检测
+- **D-26:** 客户端每 10 秒向服务发送心跳消息。服务对每个 PTY 会话记录最后心跳时间。
+- **D-27:** 服务检测到连续 3 次（30 秒）未收到心跳的 PTY 会话，自动标记为 terminated 并清理注册信息。这是客户端被 kill -9 或崩溃的兜底机制。
+- **D-28:** 客户端重启后是新进程、新会话。旧会话通过心跳超时自动清理，不支持 PTY 会话 resume（PTY 进程已随客户端死亡）。
+
 ### IPC 协议
-- **D-24:** 服务监听 Unix domain socket（路径如 `~/.cc-anywhere/cc-anywhere.sock`），CLI 客户端连接此 socket 通信。
-- **D-25:** IPC 消息格式复用 shared 包的 MessageEnvelope schema（或其子集），保持协议一致性。
+- **D-29:** 服务监听 Unix domain socket（路径如 `~/.cc-anywhere/cc-anywhere.sock`），CLI 客户端连接此 socket 通信。
+- **D-30:** IPC 消息格式复用 shared 包的 MessageEnvelope schema（或其子集），保持协议一致性。
 
 ### Claude's Discretion
 - Unix socket 路径和权限的具体设计
