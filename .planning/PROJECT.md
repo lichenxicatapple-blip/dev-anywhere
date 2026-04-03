@@ -83,7 +83,7 @@ This document evolves at phase transitions and milestone boundaries.
 
 ## Current State
 
-Phase 1 complete — pnpm monorepo with shared protocol library (16 message types, Zod schemas, builders, 94 tests). Foundation ready for Phase 2 (PTY transparency).
+Phase 2 complete — transparent PTY proxy (`cc-anywhere`) wraps `claude` via node-pty with zero observable difference. PtyManager handles stdin/stdout passthrough, SIGWINCH debounce, exit code propagation (128+signal), process cleanup. 102 tests across 7 files. Human terminal verification pending.
 
 ---
-*Last updated: 2026-04-03 after Phase 1 completion*
+*Last updated: 2026-04-03 after Phase 2 completion*
