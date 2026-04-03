@@ -49,11 +49,11 @@ Plans:
   2. Terminal resize (SIGWINCH) propagates correctly -- resizing the window mid-session adjusts Claude Code's output layout
   3. Ctrl+C, Ctrl+D, and other signal keys behave identically to native Claude Code
   4. Exiting cc-anywhere cleanly terminates the underlying claude process with no orphans
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md — PTY core: node-pty install, PtyManager class, noop tap, unit tests
+- [ ] 02-02-PLAN.md — CLI entry point: index.ts wiring, bin registration, manual transparency verification
 
 ### Phase 3: Local Proxy - Agent SDK & Multi-Session
 **Goal**: The proxy can drive Claude Code programmatically via Agent SDK while maintaining PTY transparency, and manage multiple concurrent sessions
@@ -190,7 +190,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Monorepo & Shared Protocol | 0/2 | Planning complete | - |
-| 2. Local Proxy - PTY Transparency | 0/2 | Not started | - |
+| 2. Local Proxy - PTY Transparency | 0/2 | Planning complete | - |
 | 3. Local Proxy - Agent SDK & Multi-Session | 0/2 | Not started | - |
 | 4. Relay Server - Core Transport | 0/2 | Not started | - |
 | 5. Relay Server - Resilience | 0/2 | Not started | - |
