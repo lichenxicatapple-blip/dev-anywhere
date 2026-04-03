@@ -1,49 +1,63 @@
-# Phase 3: Local Proxy - Agent SDK & Multi-Session - Research
+# Phase 3: Proxy Service & Multi-Session (REVISED) - Research
 
-**Researched:** 2026-04-03
-**Domain:** Agent SDK integration, multi-session process management, TypeScript
+**Researched:** 2026-04-04
+**Domain:** Service+client architecture, Unix domain socket IPC, `claude --stream-json` process management, multi-session lifecycle
 **Confidence:** HIGH
 
 ## Summary
 
-Phase 3 adds two capabilities to the existing PTY proxy: (1) an Agent SDK-driven session mode for structured remote control, and (2) a SessionManager that manages multiple concurrent Claude Code sessions of both types (PTY and SDK). The existing PtyManager from Phase 2 is reused for PTY sessions. SDK sessions use `@anthropic-ai/claude-agent-sdk`'s `query()` function with streaming input mode (`AsyncGenerator<SDKUserMessage>`) to drive Claude Code headlessly. The SessionManager unifies both session types behind a consistent TypeScript API, tracks state using the shared package's `SessionState` enum, and handles lifecycle including creation, status monitoring, graceful termination, and orphan process cleanup via a periodic reaper.
+Phase 3 transforms the Phase 2 standalone CLI proxy into a "service + thin client" architecture. A long-running service process (`cc-anywhere serve`) hosts a SessionManager and listens on a Unix domain socket. The CLI client connects to this service, spawns PTY sessions locally (zero terminal latency), and registers them with the service for centralized visibility. JSON sessions (for future remote/headless use) are spawned directly by the service using `claude --output-format stream-json --input-format stream-json --permission-prompt-tool stdio --verbose`.
 
-The Agent SDK (v0.2.91, current on npm) provides all the primitives needed: `query()` returns a `Query` object that is both an `AsyncGenerator<SDKMessage>` and has a `close()` method for forceful termination. The `canUseTool` callback receives tool name, input, and a unique `toolUseID`, and returns a Promise that blocks SDK execution until resolved -- this maps directly to the future remote approval flow (Phase 7). Streaming input via `AsyncGenerator<SDKUserMessage>` supports multi-turn conversations where messages can be injected from external sources. Each `query()` call spawns a separate Claude Code child process internally, so PTY sessions and SDK sessions never share processes and cannot interfere with each other.
+The architecture is validated by cc-connect (Go reference implementation) which uses the identical `claude --stream-json` approach with pipe-based stdin/stdout JSON communication. cc-connect's `claudeSession` manages the process lifecycle, line-buffered JSON parsing (with non-JSON line skipping), `control_request`/`control_response` for tool approval, and session ID extraction from `system` init events. Our implementation translates these patterns to TypeScript/Node.js.
 
-The key architectural challenge is the PtyManager's `process.exit()` call on child exit (line 87 of pty-manager.ts). In a multi-session context, one PTY session ending must not kill the entire proxy. The solution is to create a new PtySession class that wraps node-pty directly with multi-session-safe lifecycle handling, keeping PtyManager unchanged for backward compatibility with the single-session CLI entry path.
+The key technical challenges are: (1) refactoring PtyManager to not call `process.exit()` on child exit, (2) implementing a reliable line buffer for `--stream-json` stdout parsing (Node.js `data` events split lines arbitrarily), (3) Unix domain socket IPC with a framing protocol for bidirectional message exchange, (4) auto-starting the service daemon from the CLI client, and (5) a reaper timer for orphaned JSON session processes.
 
-**Primary recommendation:** Implement SessionManager as a `Map<string, Session>` with polymorphic session types (PtySession wrapping node-pty directly, SdkSession wrapping Agent SDK `query()`). Use `nanoid` for session IDs. Register a 30-second interval reaper that checks `kill(pid, 0)` on tracked processes. On SessionManager disposal, SIGTERM all children with a 5-second grace period before SIGKILL.
+**Primary recommendation:** Implement the service as a `node:net` server on a Unix domain socket (`~/.cc-anywhere/cc-anywhere.sock`). Use NDJSON (newline-delimited JSON) over the socket for IPC messages, reusing the shared package's MessageEnvelope schema. The SessionManager maintains `Map<sessionId, SessionInfo>` in memory with JSON file persistence. PTY sessions live in the client process; JSON sessions live in the service process. Auto-start the service via `child_process.spawn` with `detached: true` and `stdio: 'ignore'`, writing a PID file for health checks.
 
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
 
 ### Locked Decisions
-- **D-01:** PTY sessions and SDK sessions run independent claude child processes, no process sharing. PTY uses node-pty spawn (Phase 2 PtyManager), SDK uses ClaudeClient/query() in headless mode.
-- **D-02:** Both session types managed through unified SessionManager with consistent interface (create, query, terminate). Internal dispatch by mode.
-- **D-03:** Phase 2 tap points preserved. PTY data flows through tap. SDK data comes from structured event stream, not through tap.
-- **D-04:** SessionManager uses `Map<sessionId, Session>` in memory. Session has: id (nanoid), mode ("pty" | "sdk"), state (SessionState enum from shared), process reference, createdAt, optional name.
-- **D-05:** State machine: idle -> working -> waiting_approval -> idle (cycle), any -> error, any -> terminated.
-- **D-06:** Sessions fully isolated. No shared state between sessions.
-- **D-07:** Phase 3 only exposes programmatic TypeScript API (SessionManager class methods). No CLI subcommands, no HTTP endpoints.
-- **D-08:** API: createSession(mode, options?), listSessions(), getSession(id), terminateSession(id), terminateAll().
-- **D-09:** 30-second interval reaper timer, checks `kill(pid, 0)` for liveness.
-- **D-10:** Dead process detected -> mark terminated, remove from active map, release resources.
-- **D-11:** On SessionManager destroy (process exit): terminateAll() with SIGTERM, short timeout, then SIGKILL for survivors.
-- **D-12:** SDK sessions implement canUseTool callback. Phase 3 default: deny all.
-- **D-13:** canUseTool designed as injectable strategy function, replaced in Phase 7 with remote approval.
+- **D-01:** `cc-anywhere serve` starts a long-running service process with SessionManager, listening on Unix domain socket for CLI client connections.
+- **D-02:** `cc-anywhere` (no args or with claude args) runs as thin client: connects to service, requests PTY session creation, bridges terminal I/O to service-managed session.
+- **D-03:** CLI client auto-starts service in background if not running (Docker daemon-like behavior).
+- **D-04:** PTY managed by client process (not service), ensuring zero terminal latency. Service only does session registration and message relay.
+- **D-05:** Drop `@anthropic-ai/claude-agent-sdk`. Use `claude --output-format stream-json --input-format stream-json --permission-prompt-tool stdio --verbose` for JSON sessions.
+- **D-06:** This is the cc-connect verified approach: depends only on claude CLI, no SDK dependency, immune to Agent SDK v0.2.x churn.
+- **D-07:** `--verbose` is required in pipe mode. stdout may contain non-JSON lines; parse line-by-line with JSON.parse, skip failures (matching cc-connect behavior).
+- **D-08:** Long JSON lines may be split across Node.js `data` events; implement line buffering before parsing.
+- **D-09:** PTY sessions (mode: "pty"): spawned via node-pty in client process. Phase 2 PtyManager reused. Terminal close ends session.
+- **D-10:** JSON sessions (mode: "json"): spawned via `--stream-json` in service process. Structured events for remote consumption. User can close from remote.
+- **D-11:** Both modes clearly labeled in session list so user can distinguish terminal vs remote sessions.
+- **D-12:** PTY session: client registers with service (id, mode, state). PTY output via tap sideband goes to service, service forwards to relay (Phase 4).
+- **D-13:** Feishu can send input to PTY sessions. Service forwards input to client, client writes to PTY stdin.
+- **D-14:** Client disconnect (terminal close) notifies service to deregister session. Service marks as terminated.
+- **D-15:** SessionManager: `Map<sessionId, SessionInfo>` in memory. SessionInfo: id (nanoid), mode ("pty"|"json"), state (shared SessionState), createdAt, name (optional).
+- **D-16:** State machine: idle -> working -> waiting_approval -> idle (cycle), any -> error, any -> terminated.
+- **D-17:** JSON file persistence (cc-connect sessionSnapshot pattern). Service restart recovers session metadata.
+- **D-18:** API: createSession, listSessions, getSession, terminateSession, terminateAll. Types align with shared Session schemas.
+- **D-19:** JSON session tool approval via `--permission-prompt-tool stdio` receives `control_request` events (type: "control_request", subtype: "can_use_tool"). Phase 3 default: deny all.
+- **D-20:** Reply via `control_response` JSON on claude stdin. Phase 7 adds remote approval from Feishu.
+- **D-21:** Approval strategy is an injectable function for future replacement.
+- **D-22:** Service runs 30-second reaper timer for JSON sessions. Checks child process liveness. PTY sessions managed by client.
+- **D-23:** Service exit: terminateAll() sends SIGTERM to all JSON session children, SIGKILL after timeout. PTY sessions cleaned by their clients.
+- **D-24:** Unix domain socket at `~/.cc-anywhere/cc-anywhere.sock`.
+- **D-25:** IPC messages reuse shared MessageEnvelope schema (or subset) for protocol consistency.
 
 ### Claude's Discretion
-- Agent SDK ClaudeClient initialization config (model, systemPrompt, etc.)
-- Session interface precise TypeScript type design
+- Unix socket path and permission details
+- Service auto-start implementation (fork, spawn, lockfile)
+- SessionInfo exact TypeScript type shape
 - Reaper timeout and retry parameters
-- SDK session error recovery and retry strategy
+- Line buffer implementation details
 
 ### Deferred Ideas (OUT OF SCOPE)
 - Relay connection and message bridging -- Phase 4 (RELAY-01)
-- Disconnect reconnection and message queue caching -- Phase 5 (RELAY-02)
-- Feishu mini program UI -- Phase 6 (FEISHU-01)
-- Remote tool approval flow -- Phase 7 (FEISHU-02)
+- Reconnection and message queue caching -- Phase 5 (RELAY-02)
+- Feishu mini program UI and remote JSON session creation -- Phase 6 (FEISHU-01, FEISHU-03)
+- Remote tool approval workflow -- Phase 7 (FEISHU-02)
 - Terminal and mobile dual-surface sync -- Phase 7 (PROXY-04)
+- JSON session idle timeout auto-cleanup -- Phase 6 or Phase 10
 </user_constraints>
 
 <phase_requirements>
@@ -51,603 +65,596 @@ The key architectural challenge is the PtyManager's `process.exit()` call on chi
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| PROXY-02 | PTY channel and Agent SDK channel run in parallel without interference, PTY for local terminal, SDK for structured remote control | Agent SDK `query()` spawns independent claude child processes internally. PTY sessions use node-pty. No process sharing = no interference. Verified via official SDK docs: each `query()` call creates its own process. Session isolation guaranteed by D-06. |
-| PROXY-03 | Multiple concurrent sessions with independent operation, status reporting, individual termination, orphan cleanup | SessionManager with `Map<string, Session>`, nanoid IDs, SessionState enum from shared package, `kill(pid, 0)` reaper every 30s, SIGTERM+SIGKILL cleanup on destroy. All patterns verified against Node.js process APIs and SDK `Query.close()` docs. |
+| PROXY-02 | PTY and JSON channels coexist in parallel without interference | Two distinct session modes (PTY in client, JSON in service) share no process resources. SessionManager tracks both uniformly. IPC protocol keeps them isolated. |
+| PROXY-03 | Multi-session management: create, monitor status, terminate, orphan cleanup | SessionManager with Map-based registry, JSON file persistence, state machine, reaper timer, SIGTERM/SIGKILL lifecycle. Directly modeled on cc-connect's SessionManager. |
 </phase_requirements>
-
-## Project Constraints (from CLAUDE.md)
-
-- Code logs in English, comments and docstrings in Chinese
-- No emoji in code
-- No delayed imports unless circular dependency exists
-- No silent fallback handling, throw errors explicitly
-- Use `rmtrash` instead of `rm`
-- Avoid unnecessary adapter/wrapper layers -- direct modifications preferred during refactoring
-- git commit messages concise, no co-author/test-count info
-- Reuse existing code patterns, avoid reinventing
 
 ## Standard Stack
 
 ### Core
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| `@anthropic-ai/claude-agent-sdk` | 0.2.91 | Programmatic Claude Code control for SDK sessions | First-party SDK. Provides structured streaming, canUseTool callback, session management. Verified current on npm: 0.2.91 (2026-04-03). |
-| `node-pty` | ^1.1.0 | PTY session mode (already installed) | Already in use from Phase 2. No changes needed. |
-| `nanoid` | ^5.1.7 | Session ID generation | Compact, URL-safe, collision-resistant. Verified current on npm: 5.1.7 (2026-04-03). ESM-only, matches project "type": "module" setup. |
+| `node:net` | Node.js built-in | Unix domain socket server/client | Zero dependencies. Part of Node.js core. Provides `createServer()` for IPC with `path` option for Unix sockets. |
+| `node:child_process` | Node.js built-in | Spawn `claude --stream-json` child processes for JSON sessions | Standard Node.js process management. `spawn()` with pipe stdio for JSON communication. |
+| `node-pty` | ^1.1.0 | PTY management for terminal sessions (in client) | Already used in Phase 2. Microsoft-maintained. Prebuilt binaries. |
+| `nanoid` | ^5.1.7 | Session ID generation | Compact, URL-safe, cryptographically secure. 21-char default is collision-resistant for this use case. |
 
-### Supporting (already in project)
+### Supporting
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| `@cc-anywhere/shared` | workspace:* | SessionState enum, Session schemas, MessageEnvelope types | All session state and type definitions |
-| `vitest` | ^2.x | Testing framework | Unit tests for SessionManager and SdkSession |
+| `pino` | ^10.3.1 | Structured JSON logging for service process | Service daemon needs file-based logging since it has no terminal. Pino is the standard high-performance Node.js logger. |
+| `commander` | ^14.0.3 | CLI subcommand parsing (`serve`, default client mode) | Phase 3 needs subcommands. Phase 2 had no commander dependency (all args passed through). Now `cc-anywhere serve` vs `cc-anywhere [claude-args]` requires routing. |
 
-### New Dependencies for apps/proxy/package.json
-Only `@anthropic-ai/claude-agent-sdk` and `nanoid` are new production dependencies. Everything else is already available.
+### Not Needed (Removed from Previous Research)
+| Library | Reason Removed |
+|---------|---------------|
+| `@anthropic-ai/claude-agent-sdk` | Replaced by `claude --stream-json` per D-05. No SDK dependency. |
+| `reconnecting-websocket` | Phase 4 concern, not Phase 3. |
+| `strip-ansi` | Not needed until relay integration. |
 
 **Installation:**
 ```bash
-cd apps/proxy && pnpm add @anthropic-ai/claude-agent-sdk@0.2.91 nanoid@^5.1.7
+# In apps/proxy
+pnpm add nanoid pino commander
+pnpm add -D @types/node
 ```
 
 **Version verification:**
-- `@anthropic-ai/claude-agent-sdk`: 0.2.91 (verified via `npm view` 2026-04-03)
-- `nanoid`: 5.1.7 (verified via `npm view` 2026-04-03)
-- `node-pty`: ^1.1.0 (already installed, Phase 2)
+- nanoid: 5.1.7 (current on npm)
+- pino: 10.3.1 (current on npm)
+- commander: 14.0.3 (current on npm)
+- node-pty: 1.1.0 (already installed)
 
 ## Architecture Patterns
 
-### Recommended Project Structure (Phase 3 additions to apps/proxy/src/)
+### Recommended Project Structure
 ```
 apps/proxy/src/
-  index.ts              # entry point (refactored: SessionManager-driven for multi-session,
-                        #   PtyManager fallback for single-session CLI)
-  pty-manager.ts        # existing Phase 2 PTY manager (unchanged)
-  tap.ts                # existing data tap (unchanged)
-  session-manager.ts    # NEW: multi-session lifecycle manager
-  sdk-session.ts        # NEW: Agent SDK session wrapper implementing Session interface
-  pty-session.ts        # NEW: node-pty session wrapper implementing Session interface
-  types.ts              # NEW: Session interface, SessionMode type, creation options
+  index.ts              # CLI entry point (commander routing: serve vs client)
+  client.ts             # Thin client: connect to service, create PTY session, bridge I/O
+  serve.ts              # Service entry: start Unix socket server, SessionManager, reaper
+  session-manager.ts    # SessionManager class with Map, persistence, CRUD API
+  json-session.ts       # JSON session: spawn claude --stream-json, parse events, handle control
+  line-buffer.ts        # Line buffer utility for splitting data events into complete lines
+  ipc-protocol.ts       # IPC message types, framing, serialize/deserialize over socket
+  pty-manager.ts        # Refactored PtyManager (remove process.exit, add event callbacks)
+  tap.ts                # DataTap interface (unchanged from Phase 2)
   __tests__/
-    pty-manager.test.ts       # existing (unchanged)
-    session-manager.test.ts   # NEW: SessionManager unit tests
-    sdk-session.test.ts       # NEW: SDK session unit tests
-    pty-session.test.ts       # NEW: PTY session unit tests
+    session-manager.test.ts
+    json-session.test.ts
+    line-buffer.test.ts
+    ipc-protocol.test.ts
+    pty-manager.test.ts   # Updated for refactored PtyManager
 ```
 
-### Pattern 1: Polymorphic Session Interface
+### Pattern 1: Service + Thin Client (Docker Daemon Pattern)
 
-**What:** Define a `Session` interface that both PtySession and SdkSession implement. SessionManager operates on this interface without knowing implementation details.
+**What:** The service runs as a background daemon. The CLI client checks if the service is alive (try connecting to socket), auto-starts it if not, then communicates via IPC.
 
-**When to use:** All session operations go through SessionManager, which delegates to the correct implementation based on mode.
+**When to use:** Always -- this is the core architecture for Phase 3.
 
-**Example:**
+**Implementation approach:**
 ```typescript
-// types.ts
-import type { SessionState } from "@cc-anywhere/shared";
+// client.ts -- service auto-start
+import { connect } from "node:net";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, mkdirSync } from "node:fs";
 
-export type SessionMode = "pty" | "sdk";
+const SOCK_PATH = `${process.env.HOME}/.cc-anywhere/cc-anywhere.sock`;
+const PID_PATH = `${process.env.HOME}/.cc-anywhere/cc-anywhere.pid`;
 
-export interface SessionCreateOptions {
-  name?: string;
-  cwd?: string;
-  claudeArgs?: string[];
+function tryConnect(): Promise<net.Socket | null> {
+  return new Promise((resolve) => {
+    const sock = connect(SOCK_PATH);
+    sock.on("connect", () => resolve(sock));
+    sock.on("error", () => resolve(null));
+  });
 }
 
-export interface Session {
-  readonly id: string;
-  readonly mode: SessionMode;
-  readonly createdAt: number;
-  name?: string;
-  state: SessionState;
-  // 子进程 PID，用于 reaper 存活检测
-  readonly pid: number | undefined;
-  // 终止会话并清理资源
-  terminate(): Promise<void>;
-  // 检测子进程是否存活
-  isAlive(): boolean;
-}
+async function ensureService(): Promise<net.Socket> {
+  let sock = await tryConnect();
+  if (sock) return sock;
 
-// SessionManager 返回类型，对齐 shared 包的 SessionListPayload
-export interface SessionInfo {
-  sessionId: string;
-  name?: string;
-  mode: SessionMode;
-  state: SessionState;
-  createdAt: number;
-}
-```
+  // Auto-start service
+  const child = spawn(process.execPath, [/* path to serve entry */], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
 
-### Pattern 2: Agent SDK Session Wrapper (SdkSession)
-
-**What:** Wraps a single `query()` call and its returned `Query` object. Manages the streaming input channel, message iteration, and cleanup.
-
-**When to use:** Creating SDK-mode sessions for headless Claude Code control.
-
-**Key SDK API surface (from official docs):**
-```typescript
-// query() 接口
-function query({
-  prompt,
-  options
-}: {
-  prompt: string | AsyncIterable<SDKUserMessage>;
-  options?: Options;
-}): Query;
-
-// Query 对象 -- extends AsyncGenerator<SDKMessage> 并附加控制方法
-interface Query extends AsyncGenerator<SDKMessage, void> {
-  close(): void;           // 终止底层进程，释放所有资源
-  interrupt(): Promise<void>;  // 中断当前操作（仅 streaming input 模式）
-  streamInput(stream: AsyncIterable<SDKUserMessage>): Promise<void>;
-}
-
-// SDKUserMessage -- 注入到 streaming input 的消息格式
-type SDKUserMessage = {
-  type: "user";
-  uuid?: string;
-  session_id: string;
-  message: MessageParam;  // Anthropic SDK 的 MessageParam
-  parent_tool_use_id: string | null;
-};
-
-// canUseTool 回调签名
-type CanUseTool = (
-  toolName: string,
-  input: Record<string, unknown>,
-  options: {
-    signal: AbortSignal;
-    suggestions?: PermissionUpdate[];
-    toolUseID: string;
-    decisionReason?: string;
+  // Wait for socket to become available (poll with backoff)
+  for (let i = 0; i < 20; i++) {
+    await sleep(100 * (i + 1));
+    sock = await tryConnect();
+    if (sock) return sock;
   }
-) => Promise<PermissionResult>;
-
-// PermissionResult -- allow 或 deny
-type PermissionResult =
-  | { behavior: "allow"; updatedInput?: Record<string, unknown> }
-  | { behavior: "deny"; message: string };
+  throw new Error("Failed to start cc-anywhere service");
+}
 ```
 
-**SdkSession implementation pattern:**
+### Pattern 2: NDJSON IPC Framing over Unix Socket
+
+**What:** Messages are serialized as newline-delimited JSON over the Unix domain socket. Each message is one JSON object followed by `\n`. The line buffer handles partial reads.
+
+**When to use:** All IPC communication between client and service.
+
+**Why NDJSON over length-prefixed framing:** Simpler to implement and debug. Human-readable with `socat`. Consistent with the `claude --stream-json` protocol itself. The shared MessageEnvelope schema already maps naturally to JSON objects.
+
 ```typescript
-// sdk-session.ts
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { Query, SDKUserMessage, SDKMessage, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
-import { nanoid } from "nanoid";
-import { SessionState } from "@cc-anywhere/shared";
+// ipc-protocol.ts
+import { Transform, type TransformCallback } from "node:stream";
 
-// 可从外部注入消息的输入通道
-function createInputChannel() {
-  const queue: SDKUserMessage[] = [];
-  let resolve: (() => void) | null = null;
-  let closed = false;
+// Splits incoming socket data into complete lines
+export class LineTransform extends Transform {
+  private buffer = "";
 
-  async function* gen(): AsyncGenerator<SDKUserMessage> {
-    while (!closed) {
-      if (queue.length === 0) {
-        await new Promise<void>((r) => { resolve = r; });
-        resolve = null;
-      }
-      while (queue.length > 0) {
-        yield queue.shift()!;
+  _transform(chunk: Buffer, _encoding: string, callback: TransformCallback): void {
+    this.buffer += chunk.toString();
+    const lines = this.buffer.split("\n");
+    this.buffer = lines.pop()!; // keep incomplete last segment
+    for (const line of lines) {
+      if (line.trim()) {
+        this.push(line);
       }
     }
+    callback();
   }
 
-  return {
-    generator: gen(),
-    push(msg: SDKUserMessage) {
-      queue.push(msg);
-      resolve?.();
-    },
-    close() {
-      closed = true;
-      resolve?.();
-    },
+  _flush(callback: TransformCallback): void {
+    if (this.buffer.trim()) {
+      this.push(this.buffer);
+    }
+    this.buffer = "";
+    callback();
+  }
+}
+```
+
+### Pattern 3: JSON Session Process Management (cc-connect Pattern)
+
+**What:** Spawn `claude` with `--stream-json` flags, read structured JSON events from stdout, write user messages and control responses to stdin. Parse line-by-line, skip non-JSON.
+
+**When to use:** All JSON (remote/headless) sessions.
+
+**Key reference:** `reference/cc-connect/agent/claudecode/session.go` lines 44-203.
+
+```typescript
+// json-session.ts -- core pattern from cc-connect
+import { spawn, type ChildProcess } from "node:child_process";
+
+const CLAUDE_ARGS = [
+  "--output-format", "stream-json",
+  "--input-format", "stream-json",
+  "--permission-prompt-tool", "stdio",
+  "--verbose",
+];
+
+// Spawn claude with JSON streaming
+function spawnClaudeJson(workDir: string): ChildProcess {
+  const child = spawn("claude", CLAUDE_ARGS, {
+    cwd: workDir,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: filterEnv(process.env, "CLAUDECODE"), // cc-connect pattern: remove CLAUDECODE to prevent nested detection
+  });
+  return child;
+}
+
+// Read loop: line-buffered JSON parsing with non-JSON skip
+function processStdout(child: ChildProcess, onEvent: (event: StreamJsonEvent) => void): void {
+  let buffer = "";
+  child.stdout!.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        onEvent(parsed);
+      } catch {
+        // Non-JSON line (verbose output), skip -- per D-07
+      }
+    }
+  });
+}
+```
+
+### Pattern 4: SessionManager with JSON Persistence (cc-connect Pattern)
+
+**What:** In-memory `Map<string, SessionInfo>` with JSON file snapshot for service restart recovery.
+
+**Key reference:** `reference/cc-connect/core/session.go` lines 162-541.
+
+```typescript
+// session-manager.ts -- simplified from cc-connect
+interface SessionInfo {
+  id: string;           // nanoid
+  mode: "pty" | "json";
+  state: SessionState;  // from shared package
+  createdAt: number;    // Date.now()
+  name?: string;
+  claudeSessionId?: string; // from stream-json system init event
+  pid?: number;         // child process PID (json sessions only)
+}
+
+interface SessionSnapshot {
+  sessions: Record<string, SessionInfo>;
+  counter: number;
+}
+```
+
+### Pattern 5: PtyManager Refactoring (Event-Based Exit)
+
+**What:** Replace `process.exit()` in `onExit` callback with an event emitter or callback function. The caller (client.ts) decides what to do when a PTY session ends.
+
+**Key change:** `pty-manager.ts` line 77-87. Instead of `process.exit(code)`, emit an event or invoke a callback. The existing test that verifies `process.exit` behavior must be updated.
+
+```typescript
+// Before (Phase 2):
+child.onExit(({ exitCode, signal }) => {
+  // ...restore raw mode...
+  const code = signal ? 128 + signal : exitCode;
+  process.exit(code); // KILLS ENTIRE PROCESS
+});
+
+// After (Phase 3):
+child.onExit(({ exitCode, signal }) => {
+  // ...restore raw mode...
+  const code = signal ? 128 + signal : exitCode;
+  this.onSessionExit?.(code); // CALLBACK, caller decides
+});
+```
+
+### Anti-Patterns to Avoid
+
+- **Service managing PTY processes:** PTY must stay in client for zero latency (D-04). Service never spawns node-pty.
+- **Agent SDK as fallback:** D-05 is a hard decision. Do not import or use `@anthropic-ai/claude-agent-sdk` anywhere.
+- **Length-prefixed binary framing for IPC:** Overengineered for this use case. NDJSON is simpler, debuggable, consistent with stream-json protocol.
+- **WebSocket for local IPC:** Unix domain socket is faster, simpler, no HTTP upgrade overhead. WebSocket is for relay (Phase 4).
+- **Polling for service readiness:** Use connect-retry loop with exponential backoff, not filesystem polling on PID file.
+
+## Don't Hand-Roll
+
+| Problem | Don't Build | Use Instead | Why |
+|---------|-------------|-------------|-----|
+| Session IDs | Custom UUID or counter | `nanoid` | Cryptographic randomness, URL-safe, compact (21 chars), zero config |
+| Line buffering for streams | Manual string.split in data handler | Dedicated `LineTransform` class (or `readline` module) | Edge cases with partial UTF-8, empty lines, trailing newlines. The readline approach is well-tested. |
+| Process daemonization | Custom fork/detach logic | `child_process.spawn` with `detached: true, stdio: 'ignore'` + `child.unref()` | Node.js built-in daemonization pattern. Adding a PID file is straightforward. |
+| CLI subcommand routing | Manual `process.argv` parsing | `commander` | Phase 3 needs `serve` subcommand, default client mode, help text. Commander handles this cleanly. |
+| Structured logging | `console.log` with prefixes | `pino` | Service daemon logs to file. Pino provides JSON structured logging, log levels, child loggers for session context. |
+| Atomic file writes (persistence) | Direct `fs.writeFileSync` | Write to temp file then `fs.renameSync` | Prevents corrupt snapshot on crash mid-write. cc-connect uses `AtomicWriteFile` for exactly this. |
+
+**Key insight:** The `claude --stream-json` protocol is already well-proven by cc-connect. Our job is to faithfully translate cc-connect's Go patterns to TypeScript, not to reinvent the protocol handling.
+
+## Common Pitfalls
+
+### Pitfall 1: Node.js Data Events Split JSON Lines
+**What goes wrong:** `child.stdout.on("data", ...)` delivers arbitrary chunks. A single JSON line from `claude --stream-json` may arrive across 2+ data events, especially for long assistant messages or tool call inputs.
+**Why it happens:** Node.js streams chunk at kernel pipe buffer boundaries (typically 64KB on macOS/Linux). Long JSON objects (e.g., file content in tool results) easily exceed this.
+**How to avoid:** Always use a line buffer that accumulates data until `\n` is found, then emits complete lines. The cc-connect reference uses Go's `bufio.Scanner` (line 159-163) with a 10MB max buffer. Our TypeScript equivalent is a `LineTransform` stream or manual buffer accumulation.
+**Warning signs:** `JSON.parse` errors on seemingly valid stream-json output. Errors that appear only with large files or long responses.
+
+### Pitfall 2: Stale Unix Socket File After Unclean Shutdown
+**What goes wrong:** If the service crashes without cleaning up, `~/.cc-anywhere/cc-anywhere.sock` remains on disk. The next `net.createServer().listen(SOCK_PATH)` fails with `EADDRINUSE`.
+**Why it happens:** Unix domain sockets create a filesystem entry. Node.js `net.Server` does not auto-clean on crash.
+**How to avoid:** On service startup: (1) check if socket file exists, (2) try connecting to it -- if connection succeeds, another service is running (exit with message), (3) if connection fails (ECONNREFUSED), the socket is stale -- `fs.unlinkSync` it and proceed. Also write a PID file and verify PID is alive.
+**Warning signs:** Service fails to start with "address already in use" after a crash or `kill -9`.
+
+### Pitfall 3: process.exit() in PtyManager Kills Multi-Session Service
+**What goes wrong:** Phase 2's PtyManager calls `process.exit(code)` when the PTY child exits (line 87). In a multi-session context, one session ending kills the entire client process, terminating all other sessions.
+**Why it happens:** Phase 2 assumed one PTY = one process. This assumption no longer holds.
+**How to avoid:** Refactor PtyManager to use an exit callback instead of `process.exit()`. The client's main loop invokes `process.exit()` only when all sessions are done and the user wants to quit.
+**Warning signs:** All PTY sessions terminate when any single session exits.
+
+### Pitfall 4: CLAUDECODE Environment Variable Causes Nested Session Detection
+**What goes wrong:** Claude Code sets `CLAUDECODE` in its own environment. If we spawn a `claude --stream-json` child from within a Claude Code session (during development), the child detects the env var and refuses to start, thinking it's a nested session.
+**Why it happens:** Claude Code's anti-nesting protection.
+**How to avoid:** Filter `CLAUDECODE` from the child's environment, exactly as cc-connect does (session.go line 96-97: `filterEnv(os.Environ(), "CLAUDECODE")`).
+**Warning signs:** JSON sessions fail to start with a "nested session" error during development.
+
+### Pitfall 5: control_response Format Must Exactly Match
+**What goes wrong:** Sending a malformed `control_response` to claude stdin causes it to hang or crash. The response structure is specific and underdocumented.
+**Why it happens:** The `--permission-prompt-tool stdio` protocol has a precise JSON schema that is not fully documented in official docs.
+**How to avoid:** Follow cc-connect's verified format exactly (session.go lines 500-507):
+```json
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "success",
+    "request_id": "<from control_request>",
+    "response": {
+      "behavior": "allow",
+      "updatedInput": {}
+    }
+  }
+}
+```
+For deny:
+```json
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "success",
+    "request_id": "<from control_request>",
+    "response": {
+      "behavior": "deny",
+      "message": "The user denied this tool use."
+    }
+  }
+}
+```
+**Warning signs:** JSON sessions hang at tool approval step. Claude process exits unexpectedly after receiving a control_response.
+
+### Pitfall 6: Service Auto-Start Race Condition
+**What goes wrong:** Two CLI clients launch simultaneously, both detect no service, both try to start one. Two service processes fight over the socket.
+**Why it happens:** No atomicity between "check if service exists" and "start service".
+**How to avoid:** Use a lock file (`~/.cc-anywhere/cc-anywhere.lock`) with `fs.openSync` using `O_CREAT | O_EXCL` flag for atomic creation. The process that wins the lock starts the service; the loser retries connection. Alternatively, just retry connecting after a short delay -- the first service to bind the socket wins, the second fails harmlessly.
+**Warning signs:** Intermittent "address already in use" errors on first launch. Two service processes running simultaneously.
+
+### Pitfall 7: Forgetting stdin Mutex for JSON Session Writes
+**What goes wrong:** Multiple callers (user message + control_response) write to the claude process stdin concurrently. Interleaved writes produce invalid JSON.
+**Why it happens:** Node.js `Writable.write()` does not guarantee atomicity for individual calls when multiple writes are queued.
+**How to avoid:** Use a write mutex (or sequential queue) for stdin writes, matching cc-connect's `stdinMu sync.Mutex` (session.go line 30). In Node.js, a simple promise-based queue suffices since we're single-threaded.
+**Warning signs:** Corrupted JSON lines in claude's stdin. Claude process crashes with parse errors.
+
+## Code Examples
+
+### stream-json Event Types (from cc-connect + verified test script)
+
+The `claude --stream-json` output emits these top-level event types:
+
+```typescript
+// Verified from cc-connect session.go handleSystem/handleAssistant/handleResult/handleControlRequest
+// and reference/test-stream-json.mjs
+
+type StreamJsonEventType =
+  | "system"           // Init event: contains session_id, tools, model
+  | "assistant"        // Assistant turn: message.content[] with text, tool_use, thinking blocks
+  | "user"             // User turn echo: message.content[] with tool_result blocks
+  | "result"           // Turn complete: result text, session_id, usage (input/output tokens)
+  | "control_request"  // Permission request: request.subtype "can_use_tool", tool_name, input
+  | "control_cancel_request"  // Permission cancelled
+  | "stream_event";    // Low-level streaming deltas (with --include-partial-messages)
+
+// system init event structure
+interface SystemInitEvent {
+  type: "system";
+  subtype: "init";
+  session_id: string;
+  tools: unknown[];
+  model: string;
+  // ...other fields
+}
+
+// control_request event structure (from cc-connect session.go line 326-340)
+interface ControlRequestEvent {
+  type: "control_request";
+  request_id: string;
+  request: {
+    subtype: "can_use_tool";
+    tool_name: string;
+    input: Record<string, unknown>;
   };
 }
 
-// SdkSession 实现 Session 接口
-// query() 内部会 spawn claude 进程，pid 可从 init 消息中获取 session_id
-// close() 终止底层进程
-```
-
-### Pattern 3: PtySession (multi-session-safe node-pty wrapper)
-
-**What:** A new class wrapping node-pty directly, implementing the Session interface. Unlike PtyManager, it does NOT call `process.exit()` on child exit.
-
-**Why not reuse PtyManager:** PtyManager's `onExit` handler (line 77-87) calls `process.exit()`, which is correct for single-session CLI mode but fatal in multi-session mode. PtyManager also takes stdin/stdout directly and sets raw mode, which doesn't work when multiple PTY sessions share the same terminal.
-
-**When to use:** Creating PTY-mode sessions through SessionManager.
-
-**Key difference from PtyManager:**
-```typescript
-// PtyManager (Phase 2) -- single session, owns process lifecycle:
-child.onExit(({ exitCode, signal }) => {
-  // ...
-  process.exit(code);  // kills entire proxy
-});
-
-// PtySession (Phase 3) -- multi-session safe:
-child.onExit(({ exitCode, signal }) => {
-  this.state = SessionState.TERMINATED;
-  // emit event or callback, do NOT exit process
-});
-```
-
-### Pattern 4: SessionManager with Reaper
-
-**What:** Central manager maintaining `Map<string, Session>`, with a periodic reaper timer for orphan detection and graceful shutdown on process exit.
-
-**When to use:** All session CRUD operations.
-
-**Example:**
-```typescript
-// session-manager.ts
-import { nanoid } from "nanoid";
-import { SessionState } from "@cc-anywhere/shared";
-
-export class SessionManager {
-  private sessions = new Map<string, Session>();
-  private reaperTimer: ReturnType<typeof setInterval> | null = null;
-  private shuttingDown = false;
-
-  start(): void {
-    this.reaperTimer = setInterval(() => this.reap(), 30_000);
-    this.reaperTimer.unref(); // 不阻止进程退出
-    const shutdown = () => void this.shutdown();
-    process.once("SIGTERM", shutdown);
-    process.once("SIGINT", shutdown);
-    process.once("beforeExit", shutdown);
-  }
-
-  async createSession(mode: SessionMode, options?: SessionCreateOptions): Promise<Session> {
-    const id = nanoid();
-    const session = mode === "pty"
-      ? new PtySession(id, options)
-      : new SdkSession(id, options);
-    this.sessions.set(id, session);
-    return session;
-  }
-
-  listSessions(): SessionInfo[] {
-    return [...this.sessions.values()].map(toSessionInfo);
-  }
-
-  getSession(id: string): Session | undefined {
-    return this.sessions.get(id);
-  }
-
-  async terminateSession(id: string): Promise<void> {
-    const session = this.sessions.get(id);
-    if (!session) throw new Error(`Session ${id} not found`);
-    await session.terminate();
-    this.sessions.delete(id);
-  }
-
-  async terminateAll(): Promise<void> {
-    await Promise.allSettled(
-      [...this.sessions.values()].map((s) => s.terminate())
-    );
-    this.sessions.clear();
-  }
-
-  private reap(): void {
-    for (const [id, session] of this.sessions) {
-      if (session.state === SessionState.TERMINATED) {
-        this.sessions.delete(id);
-        continue;
-      }
-      if (!session.isAlive()) {
-        session.state = SessionState.TERMINATED;
-        this.sessions.delete(id);
-      }
-    }
-  }
-
-  async shutdown(): Promise<void> {
-    if (this.shuttingDown) return;
-    this.shuttingDown = true;
-    if (this.reaperTimer) {
-      clearInterval(this.reaperTimer);
-      this.reaperTimer = null;
-    }
-    await this.terminateAll();
-  }
+// User message format for stdin (from cc-connect session.go line 392-401)
+interface UserMessageInput {
+  type: "user";
+  message: {
+    role: "user";
+    content: string | ContentBlock[];
+  };
 }
 ```
 
-### Pattern 5: Process Liveness Check
-
-**What:** Use `process.kill(pid, 0)` to check if a process is still running without actually sending a signal.
-
-**When to use:** Reaper timer on every 30-second tick, and in `Session.isAlive()`.
+### Service Auto-Start with PID File
 
 ```typescript
+// Recommended approach for service lifecycle
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { connect, createServer } from "node:net";
+
+const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
+const SOCK_PATH = `${CC_DIR}/cc-anywhere.sock`;
+const PID_PATH = `${CC_DIR}/cc-anywhere.pid`;
+
 function isProcessAlive(pid: number): boolean {
   try {
-    process.kill(pid, 0);
+    process.kill(pid, 0); // signal 0 = check existence only
     return true;
   } catch {
     return false;
   }
 }
+
+function cleanupStaleSocket(): void {
+  if (!existsSync(SOCK_PATH)) return;
+
+  // Check PID file
+  if (existsSync(PID_PATH)) {
+    const pid = parseInt(readFileSync(PID_PATH, "utf8"), 10);
+    if (isProcessAlive(pid)) {
+      throw new Error(`Service already running (PID ${pid})`);
+    }
+    unlinkSync(PID_PATH);
+  }
+  unlinkSync(SOCK_PATH);
+}
+
+function startService(): void {
+  mkdirSync(CC_DIR, { recursive: true });
+  cleanupStaleSocket();
+
+  const server = createServer((socket) => {
+    // Handle IPC connections
+  });
+
+  server.listen(SOCK_PATH, () => {
+    writeFileSync(PID_PATH, String(process.pid));
+    // Socket permissions: only owner can connect
+  });
+
+  // Cleanup on exit
+  function cleanup(): void {
+    try { unlinkSync(SOCK_PATH); } catch {}
+    try { unlinkSync(PID_PATH); } catch {}
+  }
+  process.on("SIGTERM", () => { cleanup(); process.exit(0); });
+  process.on("SIGINT", () => { cleanup(); process.exit(0); });
+}
 ```
 
-### Pattern 6: Graceful Termination with Escalation
-
-**What:** Send SIGTERM, wait grace period, SIGKILL survivors.
-
-**When to use:** `Session.terminate()` and `SessionManager.terminateAll()`.
+### Reaper Timer for Orphaned Processes
 
 ```typescript
-async function terminateProcess(pid: number, graceMs = 5000): Promise<void> {
+// cc-connect checks process liveness; we translate to Node.js
+function startReaper(sessionManager: SessionManager, intervalMs = 30_000): NodeJS.Timeout {
+  return setInterval(() => {
+    for (const session of sessionManager.listJsonSessions()) {
+      if (session.pid && !isProcessAlive(session.pid)) {
+        logger.warn({ sessionId: session.id, pid: session.pid }, "Reaping orphaned session");
+        sessionManager.markTerminated(session.id);
+      }
+    }
+  }, intervalMs);
+}
+```
+
+### Session Termination with Grace Period
+
+```typescript
+// SIGTERM -> wait -> SIGKILL pattern (from cc-connect session.go Close() lines 565-579)
+async function terminateProcess(pid: number, gracePeriodMs = 5000): Promise<void> {
   try {
     process.kill(pid, "SIGTERM");
   } catch {
-    return; // 进程已退出
+    return; // Already dead
   }
-  const deadline = Date.now() + graceMs;
+
+  const deadline = Date.now() + gracePeriodMs;
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 200));
+    await sleep(200);
     if (!isProcessAlive(pid)) return;
   }
+
+  // Grace period expired, force kill
   try {
     process.kill(pid, "SIGKILL");
   } catch {
-    // 在等待期间退出
+    // Already dead
   }
 }
-```
-
-### Anti-Patterns to Avoid
-
-- **Sharing a claude child process between PTY and SDK modes:** The Agent SDK spawns its own process internally. PTY sessions use node-pty's spawn. They are architecturally separate processes (D-01).
-- **Exposing CLI subcommands or HTTP endpoints in Phase 3:** D-07 explicitly restricts to TypeScript API only. Phase 4 relay code will consume SessionManager programmatically.
-- **Using `process.exit()` inside session lifecycle handlers:** Fatal in multi-session context. Only the top-level entry point should call `process.exit()`.
-- **Modifying PtyManager's tested behavior:** PtyManager has 102 passing tests from Phase 2. Do not modify it for multi-session support. Create a new PtySession class instead.
-- **Blocking the event loop with for-await on SDK message stream:** Each SDK session's message consumption must run in its own async context without blocking other operations.
-
-## Common Pitfalls
-
-### Pitfall 1: PtyManager calls process.exit() on child exit
-**What goes wrong:** The existing PtyManager (line 77-87) calls `process.exit()` when the claude child process exits. In multi-session mode, this kills the entire proxy when any single PTY session ends.
-**Why it happens:** Phase 2 designed PtyManager for single-session mode where proxy lifecycle is 1:1 with the claude process.
-**How to avoid:** Create a new PtySession class that wraps node-pty directly but emits events on child exit instead of calling process.exit(). Keep PtyManager unchanged for the single-session CLI code path.
-**Warning signs:** Starting a second PTY session causes the proxy to exit when the first session ends.
-
-### Pitfall 2: Agent SDK query() for-await blocks other sessions
-**What goes wrong:** The `for await (const message of q)` loop is infinite until the session ends. If run synchronously in createSession(), it blocks all subsequent SessionManager operations.
-**Why it happens:** AsyncGenerator iteration is blocking within its async context. If there's only one execution context, everything else waits.
-**How to avoid:** Start the message consumption loop as a detached async operation (fire-and-forget with error handling). The SdkSession constructor starts `query()` and kicks off message processing, but returns immediately. Use callbacks/events for message delivery to external consumers.
-**Warning signs:** Second createSession() call hangs indefinitely.
-
-### Pitfall 3: SDK session PID not immediately available
-**What goes wrong:** The Agent SDK's `query()` spawns a claude child process internally. The PID is not returned as a direct property on the Query object. The session_id in SDKMessage is the SDK's internal session UUID, not a process ID.
-**Why it happens:** The SDK abstracts away process management. The PID of the underlying claude process is not directly exposed in the SDK API.
-**How to avoid:** For process liveness checking, we have two approaches: (a) use `Query.close()` as the primary termination mechanism and track session liveness via the SDK's own message stream (if the stream ends, the session is dead), or (b) inspect child processes spawned around the time of `query()` call. Approach (a) is recommended -- track liveness by whether the async generator has completed rather than by PID.
-**Warning signs:** `session.pid` is undefined for SDK sessions; reaper cannot detect orphaned SDK processes by PID.
-
-### Pitfall 4: Reaper races with API operations
-**What goes wrong:** The reaper timer fires while someone is in the middle of a session operation (e.g., between getSession() and subsequent method calls). The session gets deleted while in use.
-**Why it happens:** The reaper runs on a setInterval, creating a race window with API callers.
-**How to avoid:** Reaper should only update state to TERMINATED and delete from map. API callers should always check `session.state` before performing operations. SessionManager methods should handle "session already terminated" gracefully.
-**Warning signs:** Intermittent "session not found" errors; operations fail on sessions that were just retrieved.
-
-### Pitfall 5: Leaked stdin listeners from PtySession
-**What goes wrong:** If multiple PTY sessions attach stdin listeners and one session ends without cleaning up, the listener remains and corrupts input to other sessions.
-**Why it happens:** PtyManager attaches `stdin.on("data", ...)` directly. In multi-session mode, multiple sessions would fight over the same stdin.
-**How to avoid:** In Phase 3, PTY sessions created via SessionManager do NOT attach to process.stdin/stdout. They are headless PTY processes. Only the single-session CLI entry path (PtyManager in index.ts) attaches to the real terminal. SessionManager's PTY sessions write/read via their own IPty interface, not the process stdin/stdout.
-**Warning signs:** Input typed in terminal appears in wrong session; garbled output.
-
-### Pitfall 6: reaperTimer.unref() forgotten
-**What goes wrong:** The 30-second setInterval keeps the Node.js event loop alive, preventing clean process exit even when all sessions are terminated and the program should exit.
-**Why it happens:** setInterval registers a timer ref that keeps the process running.
-**How to avoid:** Call `this.reaperTimer.unref()` after creating the interval, and `clearInterval()` in shutdown().
-**Warning signs:** Proxy process hangs after all sessions end.
-
-## Code Examples
-
-### Agent SDK query() with streaming input and canUseTool
-
-Verified from official Agent SDK TypeScript Reference (platform.claude.com).
-
-```typescript
-// Source: https://platform.claude.com/docs/en/agent-sdk/typescript
-// Source: https://platform.claude.com/docs/en/agent-sdk/user-input
-
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-
-// Streaming input mode: pass AsyncGenerator as prompt
-async function* messageStream(): AsyncGenerator<SDKUserMessage> {
-  yield {
-    type: "user",
-    message: {
-      role: "user",
-      content: "Explain the authentication flow"
-    }
-  };
-}
-
-const q = query({
-  prompt: messageStream(),
-  options: {
-    includePartialMessages: true,
-    cwd: "/path/to/project",
-    canUseTool: async (toolName, input, opts) => {
-      // opts.toolUseID -- 该次工具调用的唯一标识
-      // opts.signal -- AbortSignal，用于取消
-      // opts.decisionReason -- 为什么需要权限确认
-      return { behavior: "deny", message: "Denied by policy" };
-    },
-  },
-});
-
-// 消费消息流
-for await (const message of q) {
-  switch (message.type) {
-    case "system":
-      // 初始化消息，包含 session_id, tools, model 等
-      break;
-    case "assistant":
-      // 完整的助手回复消息
-      break;
-    case "stream_event":
-      // 增量流式事件（需 includePartialMessages: true）
-      if (message.event.type === "content_block_delta"
-          && message.event.delta.type === "text_delta") {
-        process.stdout.write(message.event.delta.text);
-      }
-      break;
-    case "result":
-      // 最终结果：message.result, message.total_cost_usd, message.usage
-      break;
-  }
-}
-
-// 终止会话
-q.close();
-```
-
-### SDKMessage type union (key types for Phase 3)
-
-```typescript
-// Source: https://platform.claude.com/docs/en/agent-sdk/typescript#sdk-message
-
-type SDKMessage =
-  | SDKAssistantMessage     // type: "assistant" -- 完整助手回复
-  | SDKUserMessage          // type: "user" -- 用户消息
-  | SDKResultMessage        // type: "result" -- 最终结果
-  | SDKSystemMessage        // type: "system" -- 初始化消息
-  | SDKPartialAssistantMessage  // type: "stream_event" -- 流式增量事件
-  | SDKStatusMessage        // type: "status" -- 状态变更
-  | SDKToolProgressMessage  // type: "tool_progress" -- 工具执行进度
-  // ... plus ~10 other specialized types
-
-// SDKResultMessage 包含 subtype 区分成功和各种错误
-type SDKResultMessage =
-  | { type: "result"; subtype: "success"; result: string; total_cost_usd: number; usage: ... }
-  | { type: "result"; subtype: "error_max_turns" | "error_during_execution" | ...; errors: string[] }
-```
-
-### Session state transition mapping
-
-```typescript
-// Source: packages/shared/src/constants/session.ts
-
-// SDK 消息类型 -> SessionState 映射关系
-// SDKSystemMessage (init) -> SessionState.IDLE
-// SDKUserMessage (user input injected) -> SessionState.WORKING
-// canUseTool callback triggered -> SessionState.WAITING_APPROVAL
-// canUseTool callback returns -> SessionState.WORKING
-// SDKResultMessage (success) -> SessionState.IDLE
-// SDKResultMessage (error_*) -> SessionState.ERROR
-// query.close() called -> SessionState.TERMINATED
-// child process dies unexpectedly -> SessionState.TERMINATED
 ```
 
 ## State of the Art
 
-| Old Approach | Current Approach | When Changed | Impact |
-|--------------|------------------|--------------|--------|
-| `@anthropic-ai/claude-code` | `@anthropic-ai/claude-agent-sdk` | 2025 | Package renamed. Import paths changed. |
-| V1 API only | V2 preview available | 2026 | V2 adds `send()` and `stream()` patterns. V1 still supported. Phase 3 uses V1 (stable). |
-| Single prompt string | Streaming input `AsyncGenerator<SDKUserMessage>` | v0.2.x | Streaming input is now recommended for all interactive use cases. |
-| `query.abort()` | `query.close()` | v0.2.x | `close()` terminates underlying process. `abort()` deprecated. |
+| Old Approach (Previous Research) | Current Approach (Revised) | Why Changed | Impact |
+|----------------------------------|---------------------------|-------------|--------|
+| Agent SDK `query()` for remote sessions | `claude --stream-json` child process | Agent SDK v0.2.x instability. cc-connect proves stream-json is mature and sufficient. | Eliminates SDK dependency entirely. Simpler process model. |
+| Standalone CLI with polymorphic sessions | Service + thin client architecture | Need centralized session visibility for relay (Phase 4) and Feishu (Phase 6). | Service becomes the single source of truth for all sessions. |
+| PtySession wrapping node-pty directly | PtyManager refactored with callbacks | PTY stays in client process (D-04). PtyManager already works, just needs process.exit() removed. | Less new code; reuse Phase 2 investment. |
+| Single entry point | Commander with `serve` subcommand | Two distinct runtime modes (service daemon vs client CLI). | Clean separation of concerns. |
 
 **Deprecated/outdated:**
-- Package name `@anthropic-ai/claude-code`: renamed to `@anthropic-ai/claude-agent-sdk`
-- `maxThinkingTokens` option: use `thinking` option instead
-- Single-message input mode for interactive sessions: streaming input mode is recommended
+- `@anthropic-ai/claude-agent-sdk`: Removed from project. Not used in Phase 3 or beyond.
+- Previous RESEARCH.md: Based entirely on Agent SDK. Fully superseded by this document.
 
 ## Open Questions
 
-1. **SDK session PID accessibility**
-   - What we know: The SDK spawns a child claude process internally. `Query.close()` terminates it. The PID is not directly exposed on the Query object.
-   - What's unclear: How to get the PID for process liveness checking in the reaper. The `SDKSystemMessage` has `session_id` (UUID) but not a PID.
-   - Recommendation: Track session liveness by whether the async generator has completed (stream ended = session dead), not by PID. For SDK sessions, `isAlive()` checks if the message stream is still active. `Query.close()` is the primary termination mechanism. The reaper detects "stream ended but session not cleaned up" states.
+1. **Socket file permissions**
+   - What we know: Unix domain sockets inherit umask. Default umask 022 allows group/other read.
+   - What's unclear: Whether we need `fs.chmodSync(SOCK_PATH, 0o600)` for security (only owner access).
+   - Recommendation: Set socket to 0o600 after creation. This is a personal developer tool, not a multi-user server.
 
-2. **SDK session error recovery**
-   - What we know: `SDKResultMessage` has error subtypes: `error_max_turns`, `error_during_execution`, `error_max_budget_usd`.
-   - What's unclear: Whether a failed SDK session can be resumed via the `resume` option, or if a new `query()` call is needed.
-   - Recommendation: For Phase 3, mark errored sessions as `SessionState.ERROR` and let the consumer decide whether to terminate and create a new session. No automatic retry.
+2. **Service log location**
+   - What we know: Daemon has no terminal. Pino can write to file or stdout (redirected to /dev/null when detached).
+   - What's unclear: Best practice for log rotation in a personal dev tool.
+   - Recommendation: Log to `~/.cc-anywhere/service.log`. Keep it simple; no rotation for v1. Users can delete manually.
 
-3. **Streaming incompatibility with extended thinking**
-   - What we know: When `maxThinkingTokens` is explicitly set, `StreamEvent` messages are not emitted. Only complete messages arrive.
-   - What's unclear: Whether the default `thinking: { type: 'adaptive' }` triggers this limitation.
-   - Recommendation: Don't set `maxThinkingTokens` explicitly. Use the default adaptive thinking. If streaming events stop, this is a likely cause.
-
-## Environment Availability
-
-| Dependency | Required By | Available | Version | Fallback |
-|------------|------------|-----------|---------|----------|
-| Node.js | Runtime | Yes | v22.16.0 | -- |
-| Claude CLI | Agent SDK | Yes | 2.1.91 | -- |
-| pnpm | Package manager | Yes | (installed) | -- |
-
-**Missing dependencies:** None. All required tools are available.
+3. **IPC protocol: full MessageEnvelope vs lightweight subset**
+   - What we know: D-25 says reuse MessageEnvelope "or subset". Full envelope has seq, sessionId, timestamp, source, version -- some fields are relay-oriented (seq for replay).
+   - What's unclear: Whether the overhead of full envelope validation is justified for local IPC.
+   - Recommendation: Use full MessageEnvelope. The overhead is negligible (single JSON parse + zod validation). Keeps protocol consistent from IPC through relay. Avoids maintaining two protocol variants.
 
 ## Validation Architecture
 
 ### Test Framework
 | Property | Value |
 |----------|-------|
-| Framework | vitest ^2.x |
-| Config file | `apps/proxy/vitest.config.ts` (per-package) + `vitest.config.ts` (workspace root) |
+| Framework | vitest 4.1.2 |
+| Config file | `apps/proxy/vitest.config.ts` |
 | Quick run command | `pnpm vitest run --project proxy` |
 | Full suite command | `pnpm vitest run` |
 
-### Phase Requirements -> Test Map
+### Phase Requirements to Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| PROXY-02a | SDK session creates and streams messages | unit (mocked SDK) | `pnpm vitest run --project proxy -- sdk-session` | Wave 0 |
-| PROXY-02b | PTY session and SDK session coexist without interference | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-02c | canUseTool callback denies all by default | unit (mocked SDK) | `pnpm vitest run --project proxy -- sdk-session` | Wave 0 |
-| PROXY-03a | createSession creates sessions with unique IDs | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03b | listSessions returns all active sessions | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03c | getSession returns correct session or undefined | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03d | terminateSession terminates and removes session | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03e | terminateAll terminates all sessions | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03f | Session reports correct state (idle/working/waiting_approval/error/terminated) | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03g | Reaper detects dead processes and marks terminated | unit (mocked process.kill) | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03h | Shutdown sends SIGTERM then SIGKILL to all children | unit | `pnpm vitest run --project proxy -- session-manager` | Wave 0 |
-| PROXY-03i | PtySession does not call process.exit() on child exit | unit | `pnpm vitest run --project proxy -- pty-session` | Wave 0 |
+| PROXY-02 | PTY and JSON sessions coexist without interference | integration | `pnpm vitest run --project proxy -- src/__tests__/session-manager.test.ts` | Wave 0 |
+| PROXY-03a | Create multiple concurrent sessions | unit | `pnpm vitest run --project proxy -- src/__tests__/session-manager.test.ts` | Wave 0 |
+| PROXY-03b | Session state monitoring (idle/working/waiting_approval/error/terminated) | unit | `pnpm vitest run --project proxy -- src/__tests__/session-manager.test.ts` | Wave 0 |
+| PROXY-03c | Graceful session termination (SIGTERM + SIGKILL) | unit | `pnpm vitest run --project proxy -- src/__tests__/json-session.test.ts` | Wave 0 |
+| PROXY-03d | Orphan reaper detects dead processes | unit | `pnpm vitest run --project proxy -- src/__tests__/session-manager.test.ts` | Wave 0 |
+| PROXY-03e | JSON persistence and recovery | unit | `pnpm vitest run --project proxy -- src/__tests__/session-manager.test.ts` | Wave 0 |
+| N/A | Line buffer handles split data events | unit | `pnpm vitest run --project proxy -- src/__tests__/line-buffer.test.ts` | Wave 0 |
+| N/A | IPC protocol serialization/deserialization | unit | `pnpm vitest run --project proxy -- src/__tests__/ipc-protocol.test.ts` | Wave 0 |
+| N/A | PtyManager exit callback (no process.exit) | unit | `pnpm vitest run --project proxy -- src/__tests__/pty-manager.test.ts` | Exists, needs update |
 
 ### Sampling Rate
 - **Per task commit:** `pnpm vitest run --project proxy`
-- **Per wave merge:** `pnpm vitest run` (full workspace)
-- **Phase gate:** Full suite green before verification
+- **Per wave merge:** `pnpm vitest run`
+- **Phase gate:** Full suite green before `/gsd:verify-work`
 
 ### Wave 0 Gaps
-- [ ] `apps/proxy/src/__tests__/session-manager.test.ts` -- covers PROXY-03a through PROXY-03h
-- [ ] `apps/proxy/src/__tests__/sdk-session.test.ts` -- covers PROXY-02a, PROXY-02c
-- [ ] `apps/proxy/src/__tests__/pty-session.test.ts` -- covers PROXY-03i
+- [ ] `apps/proxy/src/__tests__/session-manager.test.ts` -- covers PROXY-02, PROXY-03a/b/d/e
+- [ ] `apps/proxy/src/__tests__/json-session.test.ts` -- covers PROXY-03c, stream-json parsing, control_request/response
+- [ ] `apps/proxy/src/__tests__/line-buffer.test.ts` -- covers line splitting edge cases
+- [ ] `apps/proxy/src/__tests__/ipc-protocol.test.ts` -- covers NDJSON framing over socket
+- [ ] `apps/proxy/src/__tests__/pty-manager.test.ts` -- EXISTS but needs update for callback-based exit
+
+## Project Constraints (from CLAUDE.md)
+
+- Log messages in code MUST be in English
+- Comments and docstrings in Chinese
+- No emoji in code
+- No lazy imports unless circular dependency exists
+- All imports at file top
+- Use `rmtrash` instead of `rm`
+- Prefer reusable script files over one-off `python -c` commands
+- Avoid hardcoded directory paths; use config or parameters
+- Errors must be thrown explicitly, no silent fallbacks
+- Git commit messages must be concise one-liners (no Co-Authored-By, no test counts)
+- Do not add unnecessary compatibility layers during refactoring
+- Delete dead code after migration
+- Reuse existing code and patterns; avoid reinventing the wheel
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript) -- query(), Query object, Options, SDKMessage types, CanUseTool, close(), streaming input
-- [Agent SDK Streaming Output](https://platform.claude.com/docs/en/agent-sdk/streaming-output) -- SDKPartialAssistantMessage, StreamEvent, message flow, known limitations
-- [Agent SDK User Input](https://platform.claude.com/docs/en/agent-sdk/user-input) -- canUseTool callback, PermissionResult (allow/deny), toolUseID, complete handler pattern
-- [Agent SDK Streaming vs Single Mode](https://platform.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) -- AsyncGenerator streaming input, multi-turn conversations, recommended over single-message
-- [Node.js process.kill() docs](https://nodejs.org/api/process.html#processkillpid-signal) -- kill(pid, 0) liveness check
-- npm registry: `@anthropic-ai/claude-agent-sdk` v0.2.91, `nanoid` v5.1.7 -- version verification
+- `reference/cc-connect/agent/claudecode/session.go` -- Complete `claude --stream-json` process management, event parsing, control_request/control_response protocol. Verified working implementation.
+- `reference/cc-connect/agent/claudecode/claudecode.go` -- Agent interface, StartSession pattern, session flags (--resume, --continue, --fork-session).
+- `reference/cc-connect/core/session.go` -- SessionManager with JSON persistence, session CRUD, snapshot save/load.
+- `reference/cc-connect/core/interfaces.go` -- Agent/AgentSession/PermissionResult interface definitions.
+- `reference/test-stream-json.mjs` -- Local verification that `claude --stream-json` works via Node.js child_process.
+- [Node.js net module docs](https://nodejs.org/api/net.html) -- Unix domain socket server/client API.
+- [Claude Code headless mode docs](https://code.claude.com/docs/en/headless) -- `--output-format stream-json`, `--verbose`, streaming usage.
 
 ### Secondary (MEDIUM confidence)
-- `.planning/research/PITFALLS.md` -- Orphaned processes (Pitfall 3), Agent SDK instability (Pitfall 6)
-- `.planning/research/ARCHITECTURE.md` -- Dual-mode architecture, message flow patterns
-- `.planning/research/SUMMARY.md` -- Overall project research summary
+- [GitHub Issue #24596](https://github.com/anthropics/claude-code/issues/24596) -- stream-json event type documentation gaps. Confirms event types but notes they're underdocumented.
+- [GitHub Issue #24594](https://github.com/anthropics/claude-code/issues/24594) -- `--input-format stream-json` usage. Reverse-engineered message format matches cc-connect's implementation.
+- [npm: nanoid](https://www.npmjs.com/package/nanoid) -- v5.1.7 current.
+- [npm: pino](https://www.npmjs.com/package/pino) -- v10.3.1 current.
+- [npm: commander](https://www.npmjs.com/package/commander) -- v14.0.3 current.
 
 ### Tertiary (LOW confidence)
-- None for this phase. All critical claims verified against official documentation.
+- [npm: auto-daemon](https://www.npmjs.com/package/auto-daemon) -- Inspiration for auto-start pattern, but we hand-roll since it's a simple spawn+PID file. Not used directly.
 
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH -- Agent SDK v0.2.91 verified on npm, all APIs confirmed in official docs
-- Architecture: HIGH -- SessionManager pattern is straightforward Map + timer, SDK API is well-documented
-- Pitfalls: HIGH -- PtyManager process.exit() issue verified by reading source code, SDK message loop blocking verified from API structure
+- Standard stack: HIGH -- All libraries are well-known Node.js ecosystem standards. No exotic dependencies.
+- Architecture: HIGH -- Service+client pattern is proven (Docker, git daemon). cc-connect validates the `--stream-json` approach in production.
+- Pitfalls: HIGH -- Most pitfalls derived from cc-connect's actual implementation choices (line buffering, CLAUDECODE filtering, stdin mutex, stale socket cleanup).
+- stream-json protocol: MEDIUM -- Official docs are thin (acknowledged by Issues #24596 and #24594). However, cc-connect provides a complete working reference, and our own `test-stream-json.mjs` confirms basic operation.
 
-**Research date:** 2026-04-03
-**Valid until:** 2026-04-17 (Agent SDK v0.2.x may release updates; check changelog before implementation)
+**Research date:** 2026-04-04
+**Valid until:** 2026-05-04 (30 days -- the `claude --stream-json` protocol may change, but cc-connect tracks changes actively)
