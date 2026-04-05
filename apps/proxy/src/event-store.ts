@@ -81,7 +81,7 @@ export class EventStore {
   private flushTimer: NodeJS.Timeout | null = null;
   private readonly flushIntervalMs: number;
 
-  constructor(sessionId: string, flushIntervalMs = 1000, baseDir?: string) {
+  constructor(sessionId: string, flushIntervalMs = 200, baseDir?: string) {
     this.sessionId = sessionId;
     this.flushIntervalMs = flushIntervalMs;
     if (baseDir) {

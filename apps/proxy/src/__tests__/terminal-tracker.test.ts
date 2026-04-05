@@ -109,4 +109,61 @@ describe("TerminalTracker", () => {
     expect(content).toContain("Bold text");
     expect(content).toContain("Red text");
   });
+
+  it("snapshot + post-snapshot events reproduce final state", async () => {
+    // 快照前：喂数据到虚拟终端 + 写入 EventStore（模拟 serve 的行为）
+    const preData1 = "Line 1: hello\r\n";
+    const preData2 = "Line 2: world\r\n";
+    await tracker.feed(preData1);
+    store.append(EventType.PTY_OUTPUT, preData1);
+    store.flush();
+    await tracker.feed(preData2);
+    store.append(EventType.PTY_OUTPUT, preData2);
+    store.flush();
+
+    tracker.takeSnapshot();
+
+    // 快照后：继续喂数据
+    const postData1 = "Line 3: after snapshot\r\n";
+    const postData2 = "\x1b[1mLine 4: bold\x1b[0m\r\n";
+    await tracker.feed(postData1);
+    store.append(EventType.PTY_OUTPUT, postData1);
+    store.flush();
+    await tracker.feed(postData2);
+    store.append(EventType.PTY_OUTPUT, postData2);
+    store.flush();
+
+    const snapshot = store.getLatestSnapshot();
+    expect(snapshot).not.toBeNull();
+
+    // 快照之后的事件
+    const postSnapshotEvents = store.readEvents(snapshot!.seq);
+    expect(postSnapshotEvents.length).toBeGreaterThan(0);
+
+    // 新建终端，加载快照，回放后续事件
+    const pkg = await import("@xterm/headless");
+    const serializePkg = await import("@xterm/addon-serialize");
+    const restoreTerminal = new pkg.default.Terminal({ cols: 120, rows: 40, allowProposedApi: true });
+    const restoreSerialize = new serializePkg.default.SerializeAddon();
+    restoreTerminal.loadAddon(restoreSerialize);
+
+    await new Promise<void>((resolve) => {
+      restoreTerminal.write(snapshot!.payload.toString(), () => resolve());
+    });
+
+    for (const event of postSnapshotEvents) {
+      if (event.type === EventType.PTY_OUTPUT) {
+        await new Promise<void>((resolve) => {
+          restoreTerminal.write(event.payload.toString(), () => resolve());
+        });
+      }
+    }
+
+    // 恢复后的终端应该包含快照后的内容
+    const restored = restoreSerialize.serialize({ scrollback: 0 });
+    expect(restored).toContain("Line 3: after snapshot");
+    expect(restored).toContain("Line 4: bold");
+
+    restoreTerminal.dispose();
+  });
 });

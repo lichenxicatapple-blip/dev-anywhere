@@ -41,7 +41,7 @@ export class TerminalTracker {
   }
 
   takeSnapshot(): void {
-    const serialized = this.serialize.serialize();
+    const serialized = this.serialize.serialize({ scrollback: 0 });
     const payload = Buffer.from(serialized, "utf-8");
 
     this.store.writeSnapshot(payload);

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -156,6 +156,81 @@ serve
     await startDaemon();
   });
 
+// 还原 PTY onlcr 对 OSC 9 的 \r\n 污染
+function fixOsc9(data: string): string {
+  return data.replace(
+    /\x1b\]9;([\s\S]*?)\x07/g,
+    (_, content: string) => `\x1b]9;${content.replace(/\r\n/g, "\n")}\x07`,
+  );
+}
+
+// 过滤掉所有触发终端响应的序列，防止响应污染 shell
+function stripTerminalRequests(data: string): string {
+  return data
+    // 触发终端响应的请求序列
+    .replace(/\x1b\[c/g, "")           // Primary DA
+    .replace(/\x1b\[>[0-9]*c/g, "")    // Secondary DA
+    .replace(/\x1b\[=c/g, "")          // Tertiary DA
+    .replace(/\x1b\[>[0-9]*q/g, "")    // XTVERSION
+    .replace(/\x1b\[[0-9]*n/g, "")     // DSR (cursor position etc.)
+    .replace(/\x1b\[>[0-9;]*m/g, "")   // Key modifier options
+    .replace(/\x1b\[>[0-9;]*u/g, "")   // Key encoding mode
+    .replace(/\x1b\[\?[0-9;]*\$/g, "") // DECRQM (mode query)
+    // 不影响渲染的输入侧模式，replay 时不应开启
+    .replace(/\x1b\[\?1004[hl]/g, "")  // Focus reporting
+    .replace(/\x1b\[\?2004[hl]/g, "")  // Bracketed paste
+    .replace(/\x1b\[\?2031[hl]/g, ""); // Key reporting
+}
+
+function sanitizeReplayData(data: string): string {
+  return stripTerminalRequests(fixOsc9(data));
+}
+
+// replay 前保存终端状态，replay 后恢复
+let savedStty: string | null = null;
+
+function saveTerminalState(): void {
+  if (process.platform !== "win32") {
+    try {
+      savedStty = execSync("stty -g", { encoding: "utf-8" }).trim();
+    } catch {}
+  }
+}
+
+function restoreTerminalState(): void {
+  if (process.platform === "win32") {
+    process.stdout.write("\x1b[0m\x1b[?25h");
+  } else if (savedStty) {
+    try {
+      execSync(`stty ${savedStty}`, { stdio: "inherit" });
+    } catch {}
+  }
+  process.stdout.write(
+    "\x1b[?2004l" +
+    "\x1b[?1004l" +
+    "\x1b[?2031l" +
+    "\x1b[0m" +
+    "\x1b[?25h" +
+    "\n"
+  );
+}
+
+function listSessions(): void {
+  if (existsSync(DATA_DIR)) {
+    const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory());
+    if (dirs.length === 0) {
+      console.log("  (none)");
+    } else {
+      for (const d of dirs) {
+        console.log(`  ${d.name}`);
+      }
+    }
+  } else {
+    console.log("  (none)");
+  }
+}
+
 serve
   .command("replay [sessionId]")
   .description("Replay a session's event log to terminal")
@@ -163,19 +238,7 @@ serve
   .action(async (sessionId: string | undefined, opts: { speed: string }) => {
     if (!sessionId) {
       console.log("Available sessions:");
-      if (existsSync(DATA_DIR)) {
-        const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
-          .filter((d) => d.isDirectory());
-        if (dirs.length === 0) {
-          console.log("  (none)");
-        } else {
-          for (const d of dirs) {
-            console.log(`  ${d.name}`);
-          }
-        }
-      } else {
-        console.log("  (none)");
-      }
+      listSessions();
       console.log("\nUsage: serve replay <sessionId> [-s speed]");
       return;
     }
@@ -188,21 +251,48 @@ serve
     }
 
     const speed = Number(opts.speed);
+    saveTerminalState();
     console.log(`Replaying ${events.length} events (speed: ${speed}x). Press Ctrl+C to stop.\n`);
-    for (let i = 0; i < events.length; i++) {
-      const event = events[i];
-      if (event.type === EventType.PTY_OUTPUT) {
-        process.stdout.write(event.payload);
-      }
-      if (i < events.length - 1) {
-        const delay = (events[i + 1].ts - event.ts) / speed;
-        if (delay > 0 && delay < 5000) {
-          await new Promise(r => setTimeout(r, delay));
+    try {
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i];
+        if (event.type === EventType.PTY_OUTPUT) {
+          process.stdout.write(sanitizeReplayData(event.payload.toString()));
+        }
+        if (i < events.length - 1) {
+          const delay = (events[i + 1].ts - event.ts) / speed;
+          if (delay > 0 && delay < 5000) {
+            await new Promise(r => setTimeout(r, delay));
+          }
         }
       }
+    } finally {
+      restoreTerminalState();
     }
-    process.stdout.write("\x1b[?2004l\x1b[?1004l\x1b[?2031l\x1b[?25h\x1b[0m\x1bc");
-    console.log("\n--- Replay complete ---");
+    console.log("--- Replay complete ---");
+  });
+
+serve
+  .command("snapshot [sessionId]")
+  .description("Display the latest terminal snapshot for a session")
+  .action((sessionId: string | undefined) => {
+    if (!sessionId) {
+      console.log("Available sessions:");
+      listSessions();
+      console.log("\nUsage: serve snapshot <sessionId>");
+      return;
+    }
+
+    const store = new EventStore(sessionId);
+    const snapshot = store.getLatestSnapshot();
+    if (!snapshot) {
+      console.error(`No snapshot found for session: ${sessionId}`);
+      return;
+    }
+
+    console.log(`Snapshot (seq=${snapshot.seq}, ${new Date(snapshot.ts).toLocaleString()}):\n`);
+    process.stdout.write(snapshot.payload.toString());
+    console.log("\n\n--- Snapshot end ---");
   });
 
 // 路由：serve 开头走 Commander，其他全部透传给 claude
