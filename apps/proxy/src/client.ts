@@ -1,5 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
@@ -12,6 +13,7 @@ import {
 
 const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
 const SOCK_PATH = `${CC_DIR}/cc-anywhere.sock`;
+const STOPPED_PATH = `${CC_DIR}/stopped`;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,10 +30,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 自动启动 service 进程并等待连接就绪
-async function ensureService(): Promise<Socket> {
+// autoStart 为 true 时允许自动拉起服务，为 false 时只尝试连接
+async function ensureService(autoStart = true): Promise<Socket> {
   const existing = await tryConnect(SOCK_PATH);
   if (existing) return existing;
+
+  if (!autoStart) throw new Error("Service is not running");
+
+  // 用户主动启动时清除 stopped 标记
+  if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
   // 启动 service 子进程，detached + unref 使其独立运行
   const servePath = join(__dirname, "serve.js");
@@ -75,7 +82,79 @@ function waitForMessage(
 }
 
 export async function startClient(claudeArgs: string[]): Promise<void> {
-  const socket = await ensureService();
+  let socket = await ensureService();
+  let sessionId: string | null = null;
+  let ptyManager: PtyManager | null = null;
+  let heartbeatInterval: NodeJS.Timeout | null = null;
+  let reconnecting = false;
+
+  function setupHeartbeat(): void {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(() => {
+      if (socket.writable && sessionId) {
+        socket.write(serializeIpc({ type: "heartbeat", sessionId }));
+      }
+    }, 10_000);
+  }
+
+  function setupSocketHandlers(): void {
+    createIpcReader(socket, (msg: IpcMessage) => {
+      if (msg.type === "pty_input" && msg.sessionId === sessionId) {
+        ptyManager?.write(msg.data);
+      }
+    });
+
+    socket.on("close", () => {
+      if (!reconnecting) {
+        reconnecting = true;
+        reconnectToServe();
+      }
+    });
+
+    socket.on("error", () => {
+      // close 事件会跟着触发，在那里处理重连
+    });
+  }
+
+  async function reconnectToServe(): Promise<void> {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+    const maxRetries = 60;
+    for (let i = 0; i < maxRetries; i++) {
+      await sleep(Math.min(1000 * (i + 1), 5000));
+      try {
+        // stopped 标记存在时只尝试连接，不自动拉起服务
+        const stopped = existsSync(STOPPED_PATH);
+        const newSocket = stopped
+          ? await tryConnect(SOCK_PATH)
+          : await ensureService();
+        if (!newSocket) continue;
+        socket = newSocket;
+        reconnecting = false;
+
+        setupSocketHandlers();
+
+        // 用原有 sessionId 重新注册，保持会话连续性
+        if (sessionId) {
+          socket.write(
+            serializeIpc({ type: "session_create_request", mode: "pty", sessionId }),
+          );
+          const resp = await waitForMessage(socket, "session_create_response");
+          if (resp.type === "session_create_response" && !resp.error) {
+            sessionId = resp.sessionId;
+            socket.write(serializeIpc({ type: "pty_register", sessionId }));
+          }
+        }
+
+        setupHeartbeat();
+        return;
+      } catch {
+        // 继续重试
+      }
+    }
+    // 重连失败不影响本地终端使用
+    reconnecting = false;
+  }
 
   // 请求创建 PTY 会话
   const responsePromise = waitForMessage(socket, "session_create_response");
@@ -90,25 +169,18 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   if (response.error) {
     throw new Error(`Failed to create session: ${response.error}`);
   }
-  const sessionId = response.sessionId;
+  sessionId = response.sessionId;
 
   // PTY 输出通过 IPC 转发给 service
   const tap: DataTap = (data: string) => {
-    if (socket.writable) {
+    if (socket.writable && sessionId) {
       socket.write(
         serializeIpc({ type: "pty_output", sessionId, data }),
       );
     }
   };
 
-  let ptyManager: PtyManager | null = null;
-
-  // 处理来自 service 的消息
-  createIpcReader(socket, (msg: IpcMessage) => {
-    if (msg.type === "pty_input" && msg.sessionId === sessionId) {
-      ptyManager?.write(msg.data);
-    }
-  });
+  setupSocketHandlers();
 
   ptyManager = new PtyManager({
     claudeArgs,
@@ -116,8 +188,8 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     stdin: process.stdin,
     stdout: process.stdout,
     onSessionExit: (code: number) => {
-      clearInterval(heartbeatInterval);
-      if (socket.writable) {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (socket.writable && sessionId) {
         socket.write(
           serializeIpc({ type: "pty_deregister", sessionId }),
         );
@@ -131,17 +203,12 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   // 注册 PTY 会话
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
 
-  // 心跳保活
-  const heartbeatInterval = setInterval(() => {
-    if (socket.writable) {
-      socket.write(serializeIpc({ type: "heartbeat", sessionId }));
-    }
-  }, 10_000);
+  setupHeartbeat();
 
   // SIGTERM 触发优雅退出，SIGINT 让 PTY 子进程处理
   process.on("SIGTERM", () => {
-    clearInterval(heartbeatInterval);
-    if (socket.writable) {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_deregister", sessionId }));
     }
     ptyManager?.cleanup(143);

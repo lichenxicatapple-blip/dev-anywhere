@@ -163,11 +163,11 @@ describe("SessionManager", () => {
   });
 
   describe("terminateSession", () => {
-    it("marks PTY session as terminated", () => {
+    it("removes PTY session from registry", () => {
       const s = manager.createSession("pty");
       const result = manager.terminateSession(s.id);
       expect(result.success).toBe(true);
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
+      expect(manager.getSession(s.id)).toBeUndefined();
     });
 
     it("returns pid for JSON sessions", () => {
@@ -306,7 +306,7 @@ describe("SessionManager", () => {
   });
 
   describe("reaper", () => {
-    it("detects dead JSON session processes and marks them terminated", () => {
+    it("removes dead JSON sessions from registry", () => {
       vi.useFakeTimers();
       const killSpy = vi.spyOn(process, "kill").mockImplementation((_pid, _signal?) => {
         throw new Error("ESRCH");
@@ -319,7 +319,7 @@ describe("SessionManager", () => {
       manager.startReaper(1000);
       vi.advanceTimersByTime(1100);
 
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
+      expect(manager.getSession(s.id)).toBeUndefined();
 
       killSpy.mockRestore();
       vi.useRealTimers();
@@ -344,7 +344,7 @@ describe("SessionManager", () => {
       vi.useRealTimers();
     });
 
-    it("marks stale PTY sessions as terminated during reap", () => {
+    it("removes stale PTY sessions from registry during reap", () => {
       vi.useFakeTimers({ now: Date.now() });
 
       const s = manager.createSession("pty");
@@ -357,7 +357,7 @@ describe("SessionManager", () => {
       manager.startReaper(1000);
       vi.advanceTimersByTime(1100);
 
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
+      expect(manager.getSession(s.id)).toBeUndefined();
 
       vi.useRealTimers();
     });

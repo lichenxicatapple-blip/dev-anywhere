@@ -18,6 +18,7 @@ export interface SessionManagerOptions {
   persistPath: string;
   reaperIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  onSessionRemoved?: (id: string) => void;
 }
 
 // 合法的状态转换表
@@ -51,17 +52,19 @@ export class SessionManager {
   private readonly persistPath: string;
   private readonly reaperIntervalMs: number;
   private readonly heartbeatTimeoutMs: number;
+  private readonly onSessionRemoved?: (id: string) => void;
 
   constructor(options: SessionManagerOptions) {
     this.persistPath = options.persistPath;
     this.reaperIntervalMs = options.reaperIntervalMs ?? 30000;
     this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 30000;
+    this.onSessionRemoved = options.onSessionRemoved;
     this.load();
   }
 
-  createSession(mode: "pty" | "json", name?: string): SessionInfo {
+  createSession(mode: "pty" | "json", name?: string, id?: string): SessionInfo {
     const info: SessionInfo = {
-      id: nanoid(),
+      id: id ?? nanoid(),
       mode,
       state: SessionState.IDLE,
       createdAt: Date.now(),
@@ -104,22 +107,25 @@ export class SessionManager {
     if (!session) {
       return { success: false };
     }
-    if (session.state === SessionState.TERMINATED) {
-      return { success: true, pid: session.pid };
-    }
-    this.updateState(id, SessionState.TERMINATED);
-    return { success: true, pid: session.pid };
+    const pid = session.pid;
+    this.sessions.delete(id);
+    this.save();
+    this.onSessionRemoved?.(id);
+    return { success: true, pid };
   }
 
   terminateAll(): number[] {
     const pids: number[] = [];
-    for (const session of this.sessions.values()) {
-      if (session.state === SessionState.TERMINATED) continue;
-      this.updateState(session.id, SessionState.TERMINATED);
+    const ids = Array.from(this.sessions.keys());
+    for (const id of ids) {
+      const session = this.sessions.get(id)!;
       if (session.mode === "json" && session.pid !== undefined) {
         pids.push(session.pid);
       }
+      this.sessions.delete(id);
+      this.onSessionRemoved?.(id);
     }
+    this.save();
     return pids;
   }
 
@@ -178,18 +184,19 @@ export class SessionManager {
   }
 
   private reap(): void {
+    const toRemove: string[] = [];
     // 检查 JSON 会话的子进程是否存活
     for (const session of this.sessions.values()) {
       if (session.mode === "json" && session.pid !== undefined && session.state !== SessionState.TERMINATED) {
         if (!this.isProcessAlive(session.pid)) {
-          this.updateState(session.id, SessionState.TERMINATED);
+          toRemove.push(session.id);
         }
       }
     }
     // 检查 PTY 会话心跳是否超时
-    const staleIds = this.getStaleSessionIds();
-    for (const id of staleIds) {
-      this.updateState(id, SessionState.TERMINATED);
+    toRemove.push(...this.getStaleSessionIds());
+    for (const id of toRemove) {
+      this.terminateSession(id);
     }
   }
 
@@ -231,8 +238,10 @@ export class SessionManager {
     }
     for (const item of parsed) {
       const info = item as SessionInfo;
-      // 过滤掉已终止的会话，重启后不需要保留
-      if (info.state === SessionState.TERMINATED) continue;
+      if (info.state === SessionState.TERMINATED) {
+        this.onSessionRemoved?.(info.id);
+        continue;
+      }
       this.sessions.set(info.id, info);
     }
   }
