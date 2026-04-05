@@ -62,8 +62,14 @@ export class PtyManager {
     });
 
     // PTY -> stdout + tap
+    // PTY 的 onlcr 会把 OSC 序列里的 \n 转成 \r\n，导致终端无法正确解析
+    // 还原 OSC 9 内部的 \r\n 为 \n
     child.onData((data: string) => {
-      this.stdout.write(data);
+      const fixed = data.replace(
+        /\x1b\]9;([\s\S]*?)\x07/g,
+        (match, content: string) => `\x1b]9;${content.replace(/\r\n/g, "\n")}\x07`,
+      );
+      this.stdout.write(fixed);
       this.tap(data);
     });
 
