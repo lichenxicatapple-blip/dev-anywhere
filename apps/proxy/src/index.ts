@@ -218,7 +218,7 @@ function restoreTerminalState(): void {
 function listSessions(): void {
   if (existsSync(DATA_DIR)) {
     const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory());
+      .filter((d) => d.isDirectory() && existsSync(`${DATA_DIR}/${d.name}/events.bin`));
     if (dirs.length === 0) {
       console.log("  (none)");
     } else {
@@ -252,9 +252,19 @@ serve
 
     const speed = Number(opts.speed);
     saveTerminalState();
+
+    let aborted = false;
+    const onSigint = () => {
+      aborted = true;
+      restoreTerminalState();
+      console.log("--- Replay interrupted ---");
+      process.exit(0);
+    };
+    process.on("SIGINT", onSigint);
+
     console.log(`Replaying ${events.length} events (speed: ${speed}x). Press Ctrl+C to stop.\n`);
     try {
-      for (let i = 0; i < events.length; i++) {
+      for (let i = 0; i < events.length && !aborted; i++) {
         const event = events[i];
         if (event.type === EventType.PTY_OUTPUT) {
           process.stdout.write(sanitizeReplayData(event.payload.toString()));
@@ -267,6 +277,7 @@ serve
         }
       }
     } finally {
+      process.removeListener("SIGINT", onSigint);
       restoreTerminalState();
     }
     console.log("--- Replay complete ---");
@@ -274,12 +285,13 @@ serve
 
 serve
   .command("snapshot [sessionId]")
-  .description("Display the latest terminal snapshot for a session")
-  .action((sessionId: string | undefined) => {
+  .description("Display terminal snapshot, optionally with post-snapshot events applied")
+  .option("--restore", "Apply post-snapshot events to show current state")
+  .action(async (sessionId: string | undefined, opts: { restore?: boolean }) => {
     if (!sessionId) {
       console.log("Available sessions:");
       listSessions();
-      console.log("\nUsage: serve snapshot <sessionId>");
+      console.log("\nUsage: serve snapshot <sessionId> [--restore]");
       return;
     }
 
@@ -290,9 +302,40 @@ serve
       return;
     }
 
-    console.log(`Snapshot (seq=${snapshot.seq}, ${new Date(snapshot.ts).toLocaleString()}):\n`);
-    process.stdout.write(snapshot.payload.toString());
-    console.log("\n\n--- Snapshot end ---");
+    const postEvents = store.readEvents(snapshot.seq);
+    const totalEvents = store.getSeq();
+    console.log(
+      `Snapshot after event #${snapshot.seq - 1} ` +
+      `(taken at ${new Date(snapshot.ts).toLocaleString()})` +
+      `${postEvents.length > 0 ? `, ${postEvents.length} events since then (latest: #${totalEvents})` : ", up to date"}`
+    );
+
+    if (opts.restore && postEvents.length > 0) {
+      // 用 xterm-headless 加载快照 + 回放后续事件，输出最终状态
+      const pkg = await import("@xterm/headless");
+      const serializePkg = await import("@xterm/addon-serialize");
+      const term = new pkg.default.Terminal({ cols: 120, rows: 40, allowProposedApi: true });
+      const ser = new serializePkg.default.SerializeAddon();
+      term.loadAddon(ser);
+
+      await new Promise<void>((r) => term.write(snapshot.payload.toString(), r));
+      for (const event of postEvents) {
+        if (event.type === EventType.PTY_OUTPUT) {
+          await new Promise<void>((r) => term.write(event.payload.toString(), r));
+        }
+      }
+
+      console.log("(restored with post-snapshot events)\n");
+      process.stdout.write(sanitizeReplayData(ser.serialize({ scrollback: 0 })));
+      term.dispose();
+    } else {
+      if (postEvents.length > 0 && !opts.restore) {
+        console.log("(showing snapshot only, use --restore to apply newer events)");
+      }
+      console.log();
+      process.stdout.write(sanitizeReplayData(snapshot.payload.toString()));
+    }
+    console.log("\n\n--- End ---");
   });
 
 // 路由：serve 开头走 Commander，其他全部透传给 claude

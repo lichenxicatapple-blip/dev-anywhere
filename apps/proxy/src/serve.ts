@@ -6,6 +6,7 @@ import {
   unlinkSync,
   writeFileSync,
   readFileSync,
+  statSync,
   existsSync,
   readdirSync,
   chmodSync,
@@ -14,14 +15,11 @@ import {
 import pino from "pino";
 import { SessionState } from "@cc-anywhere/shared";
 import { SessionManager } from "./session-manager.js";
-import { EventStore, EventType } from "./event-store.js";
-import { TerminalTracker } from "./terminal-tracker.js";
 import {
   SOCK_PATH,
   PID_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
-  LASTSEQ_PATH,
   LOG_PATH,
   DATA_DIR,
   ensureDirectories,
@@ -40,69 +38,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let logger: pino.Logger;
-
-// 每个会话的 EventStore 和 TerminalTracker 实例
-const eventStores = new Map<string, EventStore>();
-const trackers = new Map<string, TerminalTracker>();
-
-// serve 侧记录的每个会话最后处理的 seq
-const lastSeqMap = new Map<string, number>();
-
-// PTY 会话最后一次输出的时间戳
-const lastOutputTime = new Map<string, number>();
-
-// ---------- EventStore 管理 ----------
-
-function getOrCreateStore(sessionId: string): EventStore {
-  let store = eventStores.get(sessionId);
-  if (!store) {
-    store = new EventStore(sessionId);
-    eventStores.set(sessionId, store);
-  }
-  if (!trackers.has(sessionId)) {
-    trackers.set(sessionId, new TerminalTracker(store, sessionPaths(sessionId).snapshot));
-  }
-  return store;
-}
-
-function removeStore(sessionId: string): void {
-  const store = eventStores.get(sessionId);
-  if (store) {
-    store.cleanup();
-    eventStores.delete(sessionId);
-  }
-  const tracker = trackers.get(sessionId);
-  if (tracker) {
-    tracker.dispose();
-    trackers.delete(sessionId);
-  }
-  lastSeqMap.delete(sessionId);
-  lastOutputTime.delete(sessionId);
-  const paths = sessionPaths(sessionId);
-  try { rmSync(paths.dir, { recursive: true, force: true }); } catch {}
-}
-
-// ---------- lastSeq 持久化 ----------
-
-function saveLastSeqMap(): void {
-  const data: Record<string, number> = {};
-  for (const [id, seq] of lastSeqMap) {
-    data[id] = seq;
-  }
-  writeFileSync(LASTSEQ_PATH, JSON.stringify(data));
-}
-
-function loadLastSeqMap(): void {
-  if (!existsSync(LASTSEQ_PATH)) return;
-  try {
-    const data = JSON.parse(readFileSync(LASTSEQ_PATH, "utf-8"));
-    for (const [id, seq] of Object.entries(data)) {
-      if (typeof seq === "number") {
-        lastSeqMap.set(id, seq);
-      }
-    }
-  } catch {}
-}
 
 // ---------- 基础工具函数 ----------
 
@@ -151,6 +86,17 @@ async function cleanupStaleResources(): Promise<void> {
   }
 }
 
+// ---------- 文件 mtime 检测 idle/working ----------
+
+function getEventFileMtime(sessionId: string): number | null {
+  const paths = sessionPaths(sessionId);
+  try {
+    return statSync(paths.events).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- Worker 管理 ----------
 
 function connectToWorker(
@@ -159,7 +105,6 @@ function connectToWorker(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
   clientSockets: Map<string, Socket>,
-  replay: boolean,
 ): Promise<Socket | null> {
   return new Promise((resolve) => {
     const sock = connect(sockPath);
@@ -172,12 +117,7 @@ function connectToWorker(
             sessionManager.setPid(sessionId, msg.pid);
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
-          case "worker_event": {
-            const store = getOrCreateStore(sessionId);
-            const eventData = JSON.stringify(msg.event);
-            store.append(EventType.PTY_OUTPUT, eventData);
-            const seq = store.getSeq();
-            lastSeqMap.set(sessionId, seq);
+          case "worker_event":
             for (const [, clientSocket] of clientSockets) {
               if (clientSocket.writable) {
                 clientSocket.write(
@@ -189,9 +129,8 @@ function connectToWorker(
                 );
               }
             }
-            logger.debug({ sessionId, seq, eventType: msg.event.type }, "JSON session event");
+            logger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
             break;
-          }
           case "worker_replay_done":
             logger.info({ sessionId, replayedCount: msg.replayedCount }, "Worker event replay complete");
             break;
@@ -211,11 +150,6 @@ function connectToWorker(
             break;
         }
       });
-
-      if (replay) {
-        const lastSeq = lastSeqMap.get(sessionId) ?? 0;
-        sock.write(serializeWorkerMsg({ type: "worker_replay", lastSeq }));
-      }
 
       sock.on("close", () => { workerSockets.delete(sessionId); });
       sock.on("error", () => { workerSockets.delete(sessionId); });
@@ -254,7 +188,7 @@ async function reconnectWorkers(
     if (!existsSync(paths.workerSock)) continue;
 
     const sock = await connectToWorker(
-      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets, true,
+      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets,
     );
     if (sock) {
       if (!sessionManager.getSession(sessionId)) {
@@ -288,7 +222,6 @@ function handleClientConnection(
           if (existing) {
             try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
           }
-          getOrCreateStore(session.id);
           socket.write(
             serializeIpc({
               type: "session_create_response",
@@ -298,7 +231,6 @@ function handleClientConnection(
           logger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
         } else {
           const session = sessionManager.createSession("json", msg.name);
-          getOrCreateStore(session.id);
           spawnWorker(session.id);
 
           const paths = sessionPaths(session.id);
@@ -308,7 +240,7 @@ function handleClientConnection(
             attempt++;
             connectToWorker(
               session.id, paths.workerSock, sessionManager,
-              workerSockets, clientSockets, false,
+              workerSockets, clientSockets,
             ).then((sock) => {
               if (sock) {
                 socket.write(
@@ -389,27 +321,6 @@ function handleClientConnection(
         break;
       }
 
-      case "pty_output": {
-        const store = getOrCreateStore(msg.sessionId);
-        store.append(EventType.PTY_OUTPUT, msg.data);
-
-        // 喂数据给虚拟终端，检查是否需要事件阈值快照
-        const tracker = trackers.get(msg.sessionId);
-        if (tracker) {
-          tracker.feed(msg.data);
-          if (tracker.shouldSnapshot()) {
-            tracker.takeSnapshot();
-          }
-        }
-
-        lastOutputTime.set(msg.sessionId, Date.now());
-        const session = sessionManager.getSession(msg.sessionId);
-        if (session && session.state !== SessionState.WORKING) {
-          try { sessionManager.updateState(msg.sessionId, SessionState.WORKING); } catch {}
-        }
-        break;
-      }
-
       case "pty_input": {
         const targetSocket = clientSockets.get(msg.sessionId);
         if (targetSocket?.writable) {
@@ -479,12 +390,12 @@ export async function startService(): Promise<void> {
 
   await cleanupStaleResources();
   try { unlinkSync(STOPPED_PATH); } catch {}
-  loadLastSeqMap();
 
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
-      removeStore(id);
+      const paths = sessionPaths(id);
+      try { rmSync(paths.dir, { recursive: true, force: true }); } catch {}
     },
   });
   sessionManager.startReaper();
@@ -504,40 +415,28 @@ export async function startService(): Promise<void> {
     logger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
   });
 
-  const seqPersistInterval = setInterval(() => {
-    saveLastSeqMap();
-  }, 10_000);
-
+  // 通过事件文件 mtime 检测 PTY 会话的 idle/working 状态
   const IDLE_THRESHOLD_MS = 3000;
   const idleCheckInterval = setInterval(() => {
     const now = Date.now();
-    for (const [sessionId, lastTime] of lastOutputTime) {
-      if (now - lastTime > IDLE_THRESHOLD_MS) {
-        const session = sessionManager.getSession(sessionId);
-        if (session && session.state === SessionState.WORKING) {
-          try { sessionManager.updateState(sessionId, SessionState.IDLE); } catch {}
-          // working→idle 触发终端快照
-          const tracker = trackers.get(sessionId);
-          if (tracker) {
-            const store = eventStores.get(sessionId);
-            if (store) store.flush();
-            tracker.onStateChange("working", "idle");
-          }
+    for (const session of sessionManager.listSessions()) {
+      if (session.mode !== "pty") continue;
+      const mtime = getEventFileMtime(session.id);
+      if (mtime && now - mtime < IDLE_THRESHOLD_MS) {
+        if (session.state !== SessionState.WORKING) {
+          try { sessionManager.updateState(session.id, SessionState.WORKING); } catch {}
         }
-        lastOutputTime.delete(sessionId);
+      } else {
+        if (session.state === SessionState.WORKING) {
+          try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
+        }
       }
     }
   }, 3000);
 
   async function shutdown(): Promise<void> {
     logger.info("Shutting down service");
-    clearInterval(seqPersistInterval);
     clearInterval(idleCheckInterval);
-    // flush 所有 EventStore
-    for (const [, store] of eventStores) {
-      store.close();
-    }
-    saveLastSeqMap();
     sessionManager.stopReaper();
     for (const [, ws] of workerSockets) {
       ws.destroy();

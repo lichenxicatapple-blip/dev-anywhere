@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
-import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
+import { EventStore, EventType, encodeSizePayload } from "./event-store.js";
+import { TerminalTracker } from "./terminal-tracker.js";
+import { SOCK_PATH, STOPPED_PATH, LOG_PATH, sessionPaths, ensureDirectories } from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -27,17 +29,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// autoStart 为 true 时允许自动拉起服务，为 false 时只尝试连接
 async function ensureService(autoStart = true): Promise<Socket> {
   const existing = await tryConnect(SOCK_PATH);
   if (existing) return existing;
 
   if (!autoStart) throw new Error("Service is not running");
 
-  // 用户主动启动时清除 stopped 标记
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
-  // 启动 service 子进程，detached + unref 使其独立运行
   const servePath = join(__dirname, "serve.js");
   const child = spawn(process.execPath, [servePath], {
     detached: true,
@@ -45,7 +44,6 @@ async function ensureService(autoStart = true): Promise<Socket> {
   });
   child.unref();
 
-  // 轮询等待 service 就绪，指数退避上限 2s
   const maxRetries = 20;
   for (let i = 0; i < maxRetries; i++) {
     const delay = Math.min(100 * (i + 1), 2000);
@@ -59,7 +57,6 @@ async function ensureService(autoStart = true): Promise<Socket> {
   );
 }
 
-// 等待特定类型的 IPC 响应
 function waitForMessage(
   socket: Socket,
   messageType: string,
@@ -84,6 +81,10 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   let ptyManager: PtyManager | null = null;
   let heartbeatInterval: NodeJS.Timeout | null = null;
   let reconnecting = false;
+  let eventStore: EventStore | null = null;
+  let tracker: TerminalTracker | null = null;
+  let lastOutputTime = 0;
+  let idleCheckTimer: NodeJS.Timeout | null = null;
 
   function setupHeartbeat(): void {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -108,9 +109,21 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
       }
     });
 
-    socket.on("error", () => {
-      // close 事件会跟着触发，在那里处理重连
-    });
+    socket.on("error", () => {});
+  }
+
+  // idle/working 检测：3 秒无输出则触发快照
+  function setupIdleCheck(): void {
+    if (idleCheckTimer) clearInterval(idleCheckTimer);
+    idleCheckTimer = setInterval(() => {
+      if (lastOutputTime > 0 && Date.now() - lastOutputTime > 3000) {
+        if (tracker && eventStore) {
+          eventStore.flush();
+          tracker.onStateChange("working", "idle");
+        }
+        lastOutputTime = 0;
+      }
+    }, 3000);
   }
 
   async function reconnectToServe(): Promise<void> {
@@ -120,7 +133,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     for (let i = 0; i < maxRetries; i++) {
       await sleep(Math.min(1000 * (i + 1), 5000));
       try {
-        // stopped 标记存在时只尝试连接，不自动拉起服务
         const stopped = existsSync(STOPPED_PATH);
         const newSocket = stopped
           ? await tryConnect(SOCK_PATH)
@@ -131,7 +143,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
 
         setupSocketHandlers();
 
-        // 用原有 sessionId 重新注册，保持会话连续性
         if (sessionId) {
           socket.write(
             serializeIpc({ type: "session_create_request", mode: "pty", sessionId }),
@@ -149,7 +160,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
         // 继续重试
       }
     }
-    // 重连失败不影响本地终端使用
     reconnecting = false;
   }
 
@@ -168,14 +178,44 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   }
   sessionId = response.sessionId;
 
-  // PTY 输出通过 IPC 转发给 service
+  // 初始化本地事件存储和终端快照
+  ensureDirectories();
+  const paths = sessionPaths(sessionId);
+  const cols = process.stdout.columns ?? 80;
+  const rows = process.stdout.rows ?? 24;
+  eventStore = new EventStore(sessionId);
+  tracker = new TerminalTracker(eventStore, paths.snapshot, cols, rows);
+
+  // 写入初始尺寸事件
+  eventStore.append(EventType.SIZE, encodeSizePayload(cols, rows));
+  eventStore.flush(EventType.SIZE);
+
+  // DataTap：写入本地事件文件（不再通过 IPC 发给 serve）
   const tap: DataTap = (data: string) => {
-    if (socket.writable && sessionId) {
-      socket.write(
-        serializeIpc({ type: "pty_output", sessionId, data }),
-      );
+    if (eventStore && sessionId) {
+      eventStore.append(EventType.PTY_OUTPUT, data);
+      lastOutputTime = Date.now();
+    }
+    if (tracker) {
+      tracker.feed(data);
+      if (tracker.shouldSnapshot()) {
+        tracker.takeSnapshot();
+      }
     }
   };
+
+  // 终端 resize：写入本地 SIZE 事件 + 调整 TerminalTracker
+  process.stdout.on("resize", () => {
+    const newCols = process.stdout.columns ?? 80;
+    const newRows = process.stdout.rows ?? 24;
+    if (eventStore) {
+      eventStore.append(EventType.SIZE, encodeSizePayload(newCols, newRows));
+      eventStore.flush(EventType.SIZE);
+    }
+    if (tracker) {
+      tracker.resize(newCols, newRows);
+    }
+  });
 
   setupSocketHandlers();
 
@@ -186,6 +226,12 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     stdout: process.stdout,
     onSessionExit: (code: number) => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (idleCheckTimer) clearInterval(idleCheckTimer);
+      if (eventStore) {
+        eventStore.flush();
+        eventStore.close();
+      }
+      if (tracker) tracker.dispose();
       if (socket.writable && sessionId) {
         socket.write(
           serializeIpc({ type: "pty_deregister", sessionId }),
@@ -197,14 +243,19 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   });
   ptyManager.start();
 
-  // 注册 PTY 会话
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
 
   setupHeartbeat();
+  setupIdleCheck();
 
-  // SIGTERM 触发优雅退出，SIGINT 让 PTY 子进程处理
   process.on("SIGTERM", () => {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
+    if (idleCheckTimer) clearInterval(idleCheckTimer);
+    if (eventStore) {
+      eventStore.flush();
+      eventStore.close();
+    }
+    if (tracker) tracker.dispose();
     if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_deregister", sessionId }));
     }

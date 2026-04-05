@@ -198,16 +198,6 @@ describe("IPC Protocol", () => {
       expect(result.success).toBe(true);
     });
 
-    it("validates pty_output", async () => {
-      const { IpcMessageSchema } = await importIpc();
-      const result = IpcMessageSchema.safeParse({
-        type: "pty_output",
-        sessionId: "s1",
-        data: "hello world",
-      });
-      expect(result.success).toBe(true);
-    });
-
     it("validates pty_input", async () => {
       const { IpcMessageSchema } = await importIpc();
       const result = IpcMessageSchema.safeParse({

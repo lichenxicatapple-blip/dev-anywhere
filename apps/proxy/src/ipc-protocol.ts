@@ -65,14 +65,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
-  // PTY 输出，从客户端转发到服务端
-  z.object({
-    type: z.literal("pty_output"),
-    sessionId: z.string(),
-    data: z.string(),
-  }),
-
-  // 输入，从服务端转发到客户端的 PTY stdin
+  // 输入，从服务端转发到客户端的 PTY stdin（手机远程输入注入）
   z.object({
     type: z.literal("pty_input"),
     sessionId: z.string(),

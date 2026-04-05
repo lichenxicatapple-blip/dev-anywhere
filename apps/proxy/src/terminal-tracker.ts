@@ -2,7 +2,7 @@ import pkg from "@xterm/headless";
 const { Terminal } = pkg;
 import serializePkg from "@xterm/addon-serialize";
 const { SerializeAddon } = serializePkg;
-import { EventStore } from "./event-store.js";
+import { EventStore, encodeSizePayload } from "./event-store.js";
 import { writeFileSync } from "node:fs";
 
 const SNAPSHOT_EVENT_THRESHOLD = 100;
@@ -14,12 +14,12 @@ export class TerminalTracker {
   private readonly snapshotPath: string;
   private eventsSinceSnapshot: number = 0;
 
-  constructor(store: EventStore, snapshotPath: string) {
+  constructor(store: EventStore, snapshotPath: string, cols = 120, rows = 40) {
     this.store = store;
     this.snapshotPath = snapshotPath;
     this.terminal = new Terminal({
-      cols: 120,
-      rows: 40,
+      cols,
+      rows,
       scrollback: 1000,
       allowProposedApi: true,
     });
@@ -41,8 +41,13 @@ export class TerminalTracker {
   }
 
   takeSnapshot(): void {
+    const cols = this.terminal.cols;
+    const rows = this.terminal.rows;
     const serialized = this.serialize.serialize({ scrollback: 0 });
-    const payload = Buffer.from(serialized, "utf-8");
+    const content = Buffer.from(serialized, "utf-8");
+    // payload 格式：[4 字节 cols+rows][序列化内容]
+    const sizeHeader = encodeSizePayload(cols, rows);
+    const payload = Buffer.concat([sizeHeader, content]);
 
     this.store.writeSnapshot(payload);
     writeFileSync(this.snapshotPath, payload);

@@ -19,7 +19,19 @@ export const EventType = {
   PTY_OUTPUT: 1,
   SNAPSHOT: 2,
   PTY_INPUT: 3,
+  SIZE: 4,
 } as const;
+
+export function encodeSizePayload(cols: number, rows: number): Buffer {
+  const buf = Buffer.alloc(4);
+  buf.writeUInt16LE(cols, 0);
+  buf.writeUInt16LE(rows, 2);
+  return buf;
+}
+
+export function decodeSizePayload(buf: Buffer): { cols: number; rows: number } {
+  return { cols: buf.readUInt16LE(0), rows: buf.readUInt16LE(2) };
+}
 
 export type EventTypeValue = (typeof EventType)[keyof typeof EventType];
 
