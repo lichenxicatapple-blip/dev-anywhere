@@ -3,18 +3,30 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  mkdirSync,
   unlinkSync,
   writeFileSync,
   readFileSync,
-  appendFileSync,
   existsSync,
   readdirSync,
   chmodSync,
+  rmSync,
 } from "node:fs";
 import pino from "pino";
 import { SessionState } from "@cc-anywhere/shared";
 import { SessionManager } from "./session-manager.js";
+import { EventStore, EventType } from "./event-store.js";
+import { TerminalTracker } from "./terminal-tracker.js";
+import {
+  SOCK_PATH,
+  PID_PATH,
+  STOPPED_PATH,
+  SESSIONS_PATH,
+  LASTSEQ_PATH,
+  LOG_PATH,
+  DATA_DIR,
+  ensureDirectories,
+  sessionPaths,
+} from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -27,94 +39,47 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
-const SOCK_PATH = `${CC_DIR}/cc-anywhere.sock`;
-const PID_PATH = `${CC_DIR}/cc-anywhere.pid`;
-const PERSIST_PATH = `${CC_DIR}/sessions.json`;
-const LOG_PATH = `${CC_DIR}/service.log`;
-const WORKERS_DIR = `${CC_DIR}/sessions`;
-const EVENTS_DIR = `${CC_DIR}/events`;
-const LASTSEQ_PATH = `${CC_DIR}/lastseq.json`;
-const STOPPED_PATH = `${CC_DIR}/stopped`;
-
-// 模块级 logger，在 startService 中初始化
 let logger: pino.Logger;
 
-// 每个会话的事件序列号计数器
-const seqCounters = new Map<string, number>();
+// 每个会话的 EventStore 和 TerminalTracker 实例
+const eventStores = new Map<string, EventStore>();
+const trackers = new Map<string, TerminalTracker>();
 
-// serve 侧记录的每个会话最后处理的 seq，用于重连回放
+// serve 侧记录的每个会话最后处理的 seq
 const lastSeqMap = new Map<string, number>();
 
-// PTY 输出缓冲区，200ms 窗口内合并写入
-interface OutputBuffer {
-  chunks: string[];
-  timer: NodeJS.Timeout;
-}
-const outputBuffers = new Map<string, OutputBuffer>();
-
-function flushOutputBuffer(sessionId: string, sessionManager: SessionManager): void {
-  const buf = outputBuffers.get(sessionId);
-  if (!buf) return;
-  outputBuffers.delete(sessionId);
-
-  const data = buf.chunks.join("");
-  const eventSeq = appendEvent(sessionId, { type: "pty_output", data });
-  lastSeqMap.set(sessionId, eventSeq);
-}
-
-// PTY 会话最后一次输出的时间戳，用于 idle 检测
+// PTY 会话最后一次输出的时间戳
 const lastOutputTime = new Map<string, number>();
 
-// ---------- 事件日志 ----------
+// ---------- EventStore 管理 ----------
 
-function initSeqCounter(sessionId: string): void {
-  const eventsPath = `${EVENTS_DIR}/${sessionId}.jsonl`;
-  if (existsSync(eventsPath)) {
-    const content = readFileSync(eventsPath, "utf-8").trim();
-    if (content.length > 0) {
-      const lines = content.split("\n");
-      const lastLine = lines[lines.length - 1];
-      try {
-        const parsed = JSON.parse(lastLine);
-        if (typeof parsed.seq === "number") {
-          seqCounters.set(sessionId, parsed.seq);
-          return;
-        }
-      } catch {}
-    }
+function getOrCreateStore(sessionId: string): EventStore {
+  let store = eventStores.get(sessionId);
+  if (!store) {
+    store = new EventStore(sessionId);
+    eventStores.set(sessionId, store);
   }
-  seqCounters.set(sessionId, 0);
+  if (!trackers.has(sessionId)) {
+    trackers.set(sessionId, new TerminalTracker(store, sessionPaths(sessionId).snapshot));
+  }
+  return store;
 }
 
-function appendEvent(sessionId: string, event: Record<string, unknown>): number {
-  const current = seqCounters.get(sessionId) ?? 0;
-  const nextSeq = current + 1;
-  seqCounters.set(sessionId, nextSeq);
-
-  const entry = { seq: nextSeq, ts: Date.now(), sessionId, ...event };
-  appendFileSync(`${EVENTS_DIR}/${sessionId}.jsonl`, JSON.stringify(entry) + "\n");
-  return nextSeq;
-}
-
-function replayEvents(sessionId: string, afterSeq: number): Array<Record<string, unknown>> {
-  const eventsPath = `${EVENTS_DIR}/${sessionId}.jsonl`;
-  if (!existsSync(eventsPath)) return [];
-
-  const content = readFileSync(eventsPath, "utf-8").trim();
-  if (content.length === 0) return [];
-
-  const events: Array<Record<string, unknown>> = [];
-  for (const line of content.split("\n")) {
-    if (line.length === 0) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (typeof entry.seq === "number" && entry.seq > afterSeq) {
-        events.push(entry);
-      }
-    } catch {}
+function removeStore(sessionId: string): void {
+  const store = eventStores.get(sessionId);
+  if (store) {
+    store.cleanup();
+    eventStores.delete(sessionId);
   }
-  return events;
+  const tracker = trackers.get(sessionId);
+  if (tracker) {
+    tracker.dispose();
+    trackers.delete(sessionId);
+  }
+  lastSeqMap.delete(sessionId);
+  lastOutputTime.delete(sessionId);
+  const paths = sessionPaths(sessionId);
+  try { rmSync(paths.dir, { recursive: true, force: true }); } catch {}
 }
 
 // ---------- lastSeq 持久化 ----------
@@ -186,7 +151,7 @@ async function cleanupStaleResources(): Promise<void> {
   }
 }
 
-// ---------- Worker 管理（JSON 会话补充能力） ----------
+// ---------- Worker 管理 ----------
 
 function connectToWorker(
   sessionId: string,
@@ -208,10 +173,11 @@ function connectToWorker(
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
           case "worker_event": {
-            // worker 事件写入 serve 侧事件日志
-            const eventSeq = appendEvent(sessionId, msg.event);
-            lastSeqMap.set(sessionId, eventSeq);
-            // 广播给所有连接的客户端
+            const store = getOrCreateStore(sessionId);
+            const eventData = JSON.stringify(msg.event);
+            store.append(EventType.PTY_OUTPUT, eventData);
+            const seq = store.getSeq();
+            lastSeqMap.set(sessionId, seq);
             for (const [, clientSocket] of clientSockets) {
               if (clientSocket.writable) {
                 clientSocket.write(
@@ -223,7 +189,7 @@ function connectToWorker(
                 );
               }
             }
-            logger.debug({ sessionId, seq: eventSeq, eventType: msg.event.type }, "JSON session event");
+            logger.debug({ sessionId, seq, eventType: msg.event.type }, "JSON session event");
             break;
           }
           case "worker_replay_done":
@@ -262,9 +228,9 @@ function connectToWorker(
 
 function spawnWorker(sessionId: string): void {
   const workerPath = join(__dirname, "session-worker.js");
-  const workerSockPath = `${WORKERS_DIR}/${sessionId}.sock`;
+  const paths = sessionPaths(sessionId);
 
-  const child = spawn(process.execPath, [workerPath, sessionId, workerSockPath, "--"], {
+  const child = spawn(process.execPath, [workerPath, sessionId, paths.workerSock, "--"], {
     detached: true,
     stdio: "ignore",
   });
@@ -277,15 +243,18 @@ async function reconnectWorkers(
   workerSockets: Map<string, Socket>,
   clientSockets: Map<string, Socket>,
 ): Promise<void> {
-  if (!existsSync(WORKERS_DIR)) return;
+  if (!existsSync(DATA_DIR)) return;
 
-  const files = readdirSync(WORKERS_DIR).filter((f) => f.endsWith(".sock"));
-  for (const file of files) {
-    const sessionId = file.replace(".sock", "");
-    const sockPath = `${WORKERS_DIR}/${file}`;
-    initSeqCounter(sessionId);
+  const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory());
+
+  for (const dir of dirs) {
+    const sessionId = dir.name;
+    const paths = sessionPaths(sessionId);
+    if (!existsSync(paths.workerSock)) continue;
+
     const sock = await connectToWorker(
-      sessionId, sockPath, sessionManager, workerSockets, clientSockets, true,
+      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets, true,
     );
     if (sock) {
       if (!sessionManager.getSession(sessionId)) {
@@ -296,7 +265,7 @@ async function reconnectWorkers(
       } catch {}
       logger.info({ sessionId }, "Reconnected to existing worker");
     } else {
-      try { unlinkSync(sockPath); } catch {}
+      try { unlinkSync(paths.workerSock); } catch {}
       logger.info({ sessionId }, "Cleaned up stale worker socket");
     }
   }
@@ -314,14 +283,12 @@ function handleClientConnection(
     switch (msg.type) {
       case "session_create_request": {
         if (msg.mode === "pty") {
-          // 重连时复用已有 session，否则创建新的
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
           const session = existing ?? sessionManager.createSession("pty", msg.name, msg.sessionId);
           if (existing) {
-            // 重置状态为 IDLE（可能之前被标记为 terminated）
             try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
           }
-          initSeqCounter(session.id);
+          getOrCreateStore(session.id);
           socket.write(
             serializeIpc({
               type: "session_create_response",
@@ -331,16 +298,16 @@ function handleClientConnection(
           logger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
         } else {
           const session = sessionManager.createSession("json", msg.name);
-          initSeqCounter(session.id);
+          getOrCreateStore(session.id);
           spawnWorker(session.id);
 
-          const workerSockPath = `${WORKERS_DIR}/${session.id}.sock`;
+          const paths = sessionPaths(session.id);
           let attempt = 0;
           const maxRetries = 20;
           const tryConnectWorker = () => {
             attempt++;
             connectToWorker(
-              session.id, workerSockPath, sessionManager,
+              session.id, paths.workerSock, sessionManager,
               workerSockets, clientSockets, false,
             ).then((sock) => {
               if (sock) {
@@ -423,20 +390,18 @@ function handleClientConnection(
       }
 
       case "pty_output": {
-        // 缓冲合并 PTY 输出，200ms 窗口内的数据合成一条事件
-        const buf = outputBuffers.get(msg.sessionId);
-        if (buf) {
-          buf.chunks.push(msg.data);
-        } else {
-          outputBuffers.set(msg.sessionId, {
-            chunks: [msg.data],
-            timer: setTimeout(() => {
-              flushOutputBuffer(msg.sessionId, sessionManager);
-            }, 200),
-          });
+        const store = getOrCreateStore(msg.sessionId);
+        store.append(EventType.PTY_OUTPUT, msg.data);
+
+        // 喂数据给虚拟终端，检查是否需要事件阈值快照
+        const tracker = trackers.get(msg.sessionId);
+        if (tracker) {
+          tracker.feed(msg.data);
+          if (tracker.shouldSnapshot()) {
+            tracker.takeSnapshot();
+          }
         }
 
-        // 记录最后输出时间，状态检查器会据此判断 idle/working
         lastOutputTime.set(msg.sessionId, Date.now());
         const session = sessionManager.getSession(msg.sessionId);
         if (session && session.state !== SessionState.WORKING) {
@@ -505,8 +470,7 @@ function handleClientConnection(
 // ---------- 服务入口 ----------
 
 export async function startService(): Promise<void> {
-  mkdirSync(CC_DIR, { recursive: true });
-  mkdirSync(EVENTS_DIR, { recursive: true });
+  ensureDirectories();
 
   logger = pino(
     { level: "info" },
@@ -518,13 +482,9 @@ export async function startService(): Promise<void> {
   loadLastSeqMap();
 
   const sessionManager = new SessionManager({
-    persistPath: PERSIST_PATH,
+    persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
-      // 清理事件日志和 seq 状态
-      const eventsPath = `${EVENTS_DIR}/${id}.jsonl`;
-      try { unlinkSync(eventsPath); } catch {}
-      seqCounters.delete(id);
-      lastSeqMap.delete(id);
+      removeStore(id);
     },
   });
   sessionManager.startReaper();
@@ -544,12 +504,10 @@ export async function startService(): Promise<void> {
     logger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
   });
 
-  // 定期持久化 lastSeqMap
   const seqPersistInterval = setInterval(() => {
     saveLastSeqMap();
   }, 10_000);
 
-  // 定期检查 PTY 会话是否应该回到 idle（3 秒无输出）
   const IDLE_THRESHOLD_MS = 3000;
   const idleCheckInterval = setInterval(() => {
     const now = Date.now();
@@ -558,6 +516,13 @@ export async function startService(): Promise<void> {
         const session = sessionManager.getSession(sessionId);
         if (session && session.state === SessionState.WORKING) {
           try { sessionManager.updateState(sessionId, SessionState.IDLE); } catch {}
+          // working→idle 触发终端快照
+          const tracker = trackers.get(sessionId);
+          if (tracker) {
+            const store = eventStores.get(sessionId);
+            if (store) store.flush();
+            tracker.onStateChange("working", "idle");
+          }
         }
         lastOutputTime.delete(sessionId);
       }
@@ -568,9 +533,9 @@ export async function startService(): Promise<void> {
     logger.info("Shutting down service");
     clearInterval(seqPersistInterval);
     clearInterval(idleCheckInterval);
-    // flush 残留的输出缓冲区
-    for (const [sid] of outputBuffers) {
-      flushOutputBuffer(sid, sessionManager);
+    // flush 所有 EventStore
+    for (const [, store] of eventStores) {
+      store.close();
     }
     saveLastSeqMap();
     sessionManager.stopReaper();

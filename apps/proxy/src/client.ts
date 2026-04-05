@@ -5,15 +5,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
+import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
   type IpcMessage,
 } from "./ipc-protocol.js";
-
-const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
-const SOCK_PATH = `${CC_DIR}/cc-anywhere.sock`;
-const STOPPED_PATH = `${CC_DIR}/stopped`;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,7 +55,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
   }
 
   throw new Error(
-    `Failed to connect to cc-anywhere service after ${maxRetries} retries. Check ${CC_DIR}/service.log for details.`,
+    `Failed to connect to cc-anywhere service after ${maxRetries} retries. Check ${LOG_PATH} for details.`,
   );
 }
 

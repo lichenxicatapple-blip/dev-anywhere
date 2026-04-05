@@ -6,15 +6,18 @@ import { dirname, join } from "node:path";
 import { Command } from "commander";
 import { startClient } from "./client.js";
 import { startService } from "./serve.js";
+import { EventStore, EventType } from "./event-store.js";
+import {
+  PID_PATH,
+  SOCK_PATH,
+  STOPPED_PATH,
+  LOG_PATH,
+  DATA_DIR,
+} from "./paths.js";
 import { createIpcReader, serializeIpc } from "./ipc-protocol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
-const PID_PATH = `${CC_DIR}/cc-anywhere.pid`;
-const SOCK_PATH = `${CC_DIR}/cc-anywhere.sock`;
-const STOPPED_PATH = `${CC_DIR}/stopped`;
 
 function stopService(): boolean {
   if (!existsSync(PID_PATH)) {
@@ -59,7 +62,7 @@ function showStatus(): Promise<number> {
 
     log(`Service: running (PID ${pid})`);
     log(`Socket:  ${SOCK_PATH}`);
-    log(`Log:     ${CC_DIR}/service.log`);
+    log(`Log:     ${LOG_PATH}`);
 
     const sock = connect(SOCK_PATH);
     sock.on("error", () => {
@@ -87,7 +90,6 @@ function showStatus(): Promise<number> {
   });
 }
 
-// serve 子命令组，Commander 只管这部分
 async function startDaemon(): Promise<void> {
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
@@ -107,12 +109,13 @@ async function startDaemon(): Promise<void> {
   console.log(`Service started in background (PID ${child.pid})`);
 }
 
+// serve 子命令组
 const serve = new Command("serve")
   .description("Manage the cc-anywhere background service")
   .option("-d, --daemon", "Run in background")
   .action(async (opts) => {
     if (opts.daemon) {
-      startDaemon();
+      await startDaemon();
     } else {
       await startService();
     }
@@ -158,16 +161,16 @@ serve
   .description("Replay a session's event log to terminal")
   .option("-s, --speed <multiplier>", "Playback speed multiplier", "1")
   .action(async (sessionId: string | undefined, opts: { speed: string }) => {
-    const eventsDir = `${CC_DIR}/events`;
     if (!sessionId) {
       console.log("Available sessions:");
-      if (existsSync(eventsDir)) {
-        const files = readdirSync(eventsDir).filter(f => f.endsWith(".jsonl"));
-        if (files.length === 0) {
+      if (existsSync(DATA_DIR)) {
+        const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
+          .filter((d) => d.isDirectory());
+        if (dirs.length === 0) {
           console.log("  (none)");
         } else {
-          for (const f of files) {
-            console.log(`  ${f.replace(".jsonl", "")}`);
+          for (const d of dirs) {
+            console.log(`  ${d.name}`);
           }
         }
       } else {
@@ -176,28 +179,28 @@ serve
       console.log("\nUsage: serve replay <sessionId> [-s speed]");
       return;
     }
-    const eventsPath = `${eventsDir}/${sessionId}.jsonl`;
-    if (!existsSync(eventsPath)) {
-      console.error(`No event log found for session: ${sessionId}`);
+
+    const store = new EventStore(sessionId);
+    const events = store.readEvents();
+    if (events.length === 0) {
+      console.error(`No events found for session: ${sessionId}`);
       return;
     }
-    const content = readFileSync(eventsPath, "utf-8").trim();
-    const entries = content.split("\n").map(l => JSON.parse(l));
+
     const speed = Number(opts.speed);
-    console.log(`Replaying ${entries.length} events (speed: ${speed}x). Press Ctrl+C to stop.\n`);
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (entry.data) {
-        process.stdout.write(entry.data);
+    console.log(`Replaying ${events.length} events (speed: ${speed}x). Press Ctrl+C to stop.\n`);
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (event.type === EventType.PTY_OUTPUT) {
+        process.stdout.write(event.payload);
       }
-      if (i < entries.length - 1) {
-        const delay = (entries[i + 1].ts - entry.ts) / speed;
+      if (i < events.length - 1) {
+        const delay = (events[i + 1].ts - event.ts) / speed;
         if (delay > 0 && delay < 5000) {
           await new Promise(r => setTimeout(r, delay));
         }
       }
     }
-    // 重置终端状态：关闭 bracketed paste、应用模式、鼠标追踪等
     process.stdout.write("\x1b[?2004l\x1b[?1004l\x1b[?2031l\x1b[?25h\x1b[0m\x1bc");
     console.log("\n--- Replay complete ---");
   });
