@@ -1,9 +1,12 @@
 {
-  "appid": "spike-test",
+  "appid": "cli_a9590d0035b8dbb4",
   "projectname": "cc-anywhere-feishu",
   "setting": {
+    "urlCheck": false,
     "es6": true,
-    "minified": true
+    "postcss": true,
+    "minified": true,
+    "newFeature": true
   },
   "compileType": "miniprogram"
 }

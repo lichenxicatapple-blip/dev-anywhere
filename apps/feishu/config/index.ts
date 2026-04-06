@@ -1,6 +1,4 @@
-import { defineConfig } from "@tarojs/cli";
-
-export default defineConfig({
+const config = {
   projectName: "cc-anywhere-feishu",
   designWidth: 750,
   deviceRatio: {
@@ -21,4 +19,11 @@ export default defineConfig({
       },
     },
   },
-});
+};
+
+module.exports = function (merge) {
+  if (typeof merge === "function") {
+    return merge({}, config);
+  }
+  return config;
+};

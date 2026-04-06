@@ -10,36 +10,45 @@ type ConnectionStatus = "disconnected" | "connected" | "error";
  * 连接本地 echo server，发送 JSON，接收回显的 JSON。
  */
 export default function Index() {
+  console.log("[spike] Index page rendered");
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [inputValue, setInputValue] = useState("");
   const [messages, setMessages] = useState<string[]>([]);
 
+  const [socketTask, setSocketTask] = useState<Taro.SocketTask | null>(null);
+
   const handleConnect = useCallback(() => {
-    Taro.connectSocket({ url: "ws://localhost:9099" });
+    // 飞书小程序的 connectSocket 返回 Promise<SocketTask>
+    Taro.connectSocket({ url: "ws://localhost:9099" }).then((task) => {
+      task.onOpen(() => {
+        setStatus("connected");
+      });
 
-    Taro.onSocketOpen(() => {
-      setStatus("connected");
-    });
+      task.onMessage((res) => {
+        setMessages((prev) => [...prev, res.data as string]);
+      });
 
-    Taro.onSocketMessage((res) => {
-      setMessages((prev) => [...prev, res.data as string]);
-    });
+      task.onClose(() => {
+        setStatus("disconnected");
+        setSocketTask(null);
+      });
 
-    Taro.onSocketClose(() => {
-      setStatus("disconnected");
-    });
+      task.onError(() => {
+        setStatus("error");
+      });
 
-    Taro.onSocketError(() => {
+      setSocketTask(task);
+    }).catch(() => {
       setStatus("error");
     });
   }, []);
 
   const handleSend = useCallback(() => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || !socketTask) return;
     const payload = JSON.stringify({ text: inputValue, ts: Date.now() });
-    Taro.sendSocketMessage({ data: payload });
+    socketTask.send({ data: payload });
     setInputValue("");
-  }, [inputValue]);
+  }, [inputValue, socketTask]);
 
   return (
     <View className="container">
