@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-实现透明的 CLI 包装器，使 `cc-anywhere` 与直接运行 `claude` 在终端行为上完全不可区分。包括 PTY 分配、stdin/stdout/stderr 透传、ANSI 转义保真、信号转发、窗口大小同步、进程生命周期管理。不包含远程控制、Agent SDK 集成或多会话管理。
+实现透明的 CLI 包装器，使 `cc-anywhere` 与直接运行 `claude` 在终端行为上完全不可区分。包括 PTY 分配、stdin/stdout/stderr 透传、ANSI 转义保真、信号转发、窗口大小同步、进程生命周期管理。不包含远程控制、stream-json 集成或多会话管理。
 
 </domain>
 
@@ -77,7 +77,7 @@
 ### Integration Points
 - `apps/proxy/package.json` -- 需要添加 node-pty 依赖和 bin 入口
 - `apps/proxy/src/index.ts` -- 主入口，将承载 PTY spawn 和数据管道逻辑
-- Phase 3 将在此基础上添加 Agent SDK 并行通道和多会话管理
+- Phase 3 将在此基础上添加 stream-json 并行通道和多会话管理
 
 </code_context>
 
@@ -94,7 +94,7 @@
 ## Deferred Ideas
 
 - 多会话管理 -- Phase 3 (PROXY-03)
-- Agent SDK 结构化控制通道 -- Phase 3 (PROXY-02)
+- stream-json 结构化控制通道 -- Phase 3 (PROXY-02)
 - relay 连接和消息桥接 -- Phase 4 (RELAY-01)
 - 终端和手机双表面同步 -- Phase 7 (PROXY-04)
 

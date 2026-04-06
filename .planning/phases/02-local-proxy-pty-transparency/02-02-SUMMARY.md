@@ -85,7 +85,7 @@ None - no stubs or placeholders in the implementation.
 
 ## Next Phase Readiness
 - cc-anywhere CLI is fully wired and buildable
-- Phase 3 can add Agent SDK parallel channel and multi-session management
+- Phase 3 can add stream-json parallel channel and multi-session management
 - Phase 4 can replace createNoopTap with relay forwarding logic via the DataTap interface
 
 ## Self-Check: PASSED

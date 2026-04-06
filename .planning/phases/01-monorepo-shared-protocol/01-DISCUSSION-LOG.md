@@ -41,7 +41,7 @@
 | Claude decides | Balance performance and experience | |
 
 **User's initial choice:** Complete message
-**Clarification:** User initially chose "complete message" but after discussion about conflict with FEISHU-01 (real-time streaming output), refined to Agent SDK event-level granularity -- each SDKMessage event sent as a complete message. Not token-level (too much UI burden), not waiting for entire response (too slow). The user's reasoning: "event granularity should be enough."
+**Clarification:** User initially chose "complete message" but after discussion about conflict with FEISHU-01 (real-time streaming output), refined to Agent SDK event-level granularity -- each SDKMessage event sent as a complete message. Not token-level (too much UI burden), not waiting for entire response (too slow). The user's reasoning: "event granularity should be enough." [Note: Agent SDK was later replaced by `claude --stream-json` in Phase 3, event granularity now refers to stream-json JSON events]
 
 ## Message Protocol - Authentication
 

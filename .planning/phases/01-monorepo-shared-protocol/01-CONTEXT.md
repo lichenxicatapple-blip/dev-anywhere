@@ -20,7 +20,7 @@
   - session: session_create, session_list, session_switch, session_terminate, session_status
   - system: heartbeat, error, auth, sync_request, sync_response
 - **D-02:** MessageEnvelope 带元数据：seq（序列号）、sessionId、type、payload、timestamp、source（proxy/client）、version
-- **D-03:** 流式输出粒度为 Agent SDK 事件级，每个 SDKMessage 事件作为一条完整消息发送到小程序，不做 token 级流式
+- **D-03:** 流式输出粒度为 stream-json 事件级，每个 JSON event 作为一条完整消息发送到小程序，不做 token 级流式
 - **D-04:** 统一错误消息类型，所有错误通过 error 类型消息传递，包含错误码和描述
 - **D-05:** 认证采用配对码方案：首次连接时本地代理生成 6 位配对码（5 分钟有效），用户在飞书小程序输入后建立绑定，双方获得长期 token 用于后续自动认证，无需重复配对
 
@@ -48,7 +48,7 @@
 ## Specific Ideas
 
 - cc-connect 项目 (https://github.com/chenhg5/cc-connect) 可作为消息协议和会话管理的参考实现
-- Agent SDK 的 SDKMessage 类型是协议设计的核心参考，消息类型应与 SDK 事件模型对齐
+- `claude --stream-json` 的 JSON event 类型是协议设计的核心参考，消息类型应与 stream-json 事件模型对齐
 - 研究发现飞书小程序限制 1-2 个 WebSocket 并发连接，协议需支持单连接多会话复用
 
 </specifics>
@@ -58,8 +58,8 @@
 
 **Downstream agents MUST read these before planning or implementing.**
 
-### Agent SDK
-- `.planning/research/STACK.md` -- Agent SDK 版本、API 模式、SDKMessage 类型定义
+### stream-json
+- `.planning/research/STACK.md` -- stream-json 事件类型定义
 - `.planning/research/ARCHITECTURE.md` -- 三层架构设计、组件边界、数据流方向
 
 ### Protocol Design

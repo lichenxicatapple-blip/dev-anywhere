@@ -14,7 +14,7 @@ provides:
   - ErrorCode and SessionState constants
   - Barrel export with full type re-exports from packages/shared
   - Cross-package type propagation verified (proxy imports shared types)
-affects: [02-local-proxy-pty, 03-agent-sdk-remote, 04-relay-server, 05-reconnection-sync, 06-feishu-mini-program]
+affects: [02-local-proxy-pty, 03-service-multi-session, 04-relay-server, 05-reconnection-sync, 06-feishu-mini-program]
 
 tech-stack:
   added: []

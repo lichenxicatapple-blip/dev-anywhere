@@ -70,5 +70,5 @@
 ## Deferred Ideas
 
 - Multi-session management (Phase 3)
-- Agent SDK integration (Phase 3)
+- stream-json integration (Phase 3)
 - Relay connection (Phase 4)

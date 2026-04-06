@@ -1,5 +1,5 @@
 ---
-phase: 03-local-proxy-agent-sdk-multi-session
+phase: 03-local-proxy-service-multi-session
 verified: 2026-04-03T17:41:06Z
 status: passed
 score: 5/5 must-haves verified

@@ -1,5 +1,5 @@
 ---
-phase: 03-local-proxy-agent-sdk-multi-session
+phase: 03-local-proxy-service-multi-session
 plan: 03
 subsystem: proxy
 tags: [unix-socket, ipc, commander, pino, service-client, pty, cli]
@@ -113,5 +113,5 @@ None - no external service configuration required.
 All 6 created/modified files verified present. Both task commits (2ea238e, 81b7f73) verified in git log. dist/index.js and dist/serve.js both exist after build.
 
 ---
-*Phase: 03-local-proxy-agent-sdk-multi-session*
+*Phase: 03-local-proxy-service-multi-session*
 *Completed: 2026-04-03*

@@ -10,7 +10,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Local Proxy
 
 - [x] **PROXY-01**: 用户通过 cc_anywhere 启动 claude 进程，本地终端体验与直接使用 claude 完全一致（stdin/stdout/stderr 透传、ANSI 转义、交互提示）
-- [x] **PROXY-02**: 本地使用 PTY 透传终端 I/O，远程使用 Agent SDK 提供结构化控制，两条通道并行不干扰
+- [x] **PROXY-02**: 本地使用 PTY 透传终端 I/O，远程使用 claude --stream-json 提供结构化控制，两条通道并行不干扰
 - [x] **PROXY-03**: 支持同时管理多个 claude 子进程，每个会话独立，包含创建、状态监控、优雅终止和孤儿进程清理
 - [ ] **PROXY-04**: 本地终端和飞书小程序可同时操作同一会话，双方看到一致的状态和输出
 

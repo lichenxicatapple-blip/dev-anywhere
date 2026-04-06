@@ -1,5 +1,7 @@
 # Project Research Summary
 
+> **[SUPERSEDED]** 本文档中关于 Agent SDK (`@anthropic-ai/claude-agent-sdk`) 的推荐已过时。Phase 3 决定采用 `claude --stream-json` CLI 方案替代 Agent SDK，参见 `.planning/phases/03-local-proxy-service-multi-session/03-CONTEXT.md` D-05/D-06。
+
 **Project:** CC Anywhere
 **Domain:** CLI transparent proxy + WebSocket relay + Feishu mini program (remote Claude Code control)
 **Researched:** 2026-04-03
@@ -22,7 +24,7 @@ The monorepo has four packages: `shared` (zod protocol schemas and types), `prox
 The Agent SDK is the correct primary interface for Claude Code programmatic control. PTY spawning via `child_process.spawn()` has a documented bug where Claude Code hangs in Node.js — the SDK works around this internally. Socket.IO is overengineered for this use case since we control both ends of the WebSocket connection. Bun is not viable because node-pty is a native C++ addon with incomplete Bun support.
 
 **Core technologies:**
-- `@anthropic-ai/claude-agent-sdk` ^0.2.90: Programmatic Claude Code control — structured events, tool approval callbacks, session management; pin exact version, wrap behind adapter
+- ~~`@anthropic-ai/claude-agent-sdk` ^0.2.90~~ **[已替换]** 改用 `claude --stream-json` CLI 方案 — 通过 CLI 子进程获取结构化 JSON 流输出，避免 SDK 版本不稳定问题
 - `node-pty` ^1.1.0: Local terminal transparency — byte-for-byte PTY pass-through for the user sitting at the machine
 - `ws` ^8.20.0: WebSocket transport — lightweight, no unnecessary abstraction, we control both ends
 - `zod` ^3.24: Protocol schema validation — shared between proxy, relay, and mini program at build time

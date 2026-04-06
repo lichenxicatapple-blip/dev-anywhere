@@ -160,5 +160,5 @@ None — the only matching todo was folded into scope.
 
 ---
 
-*Phase: 03-local-proxy-agent-sdk-multi-session*
+*Phase: 03-local-proxy-service-multi-session*
 *Context gathered: 2026-04-04 (revised from 2026-04-03 auto-generated version)*

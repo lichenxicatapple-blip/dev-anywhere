@@ -19,18 +19,18 @@ CC Anywhere 是 Claude Code 的透明代理和远程控制系统。它在本地�
 <!-- GSD:stack-start source:research/STACK.md -->
 ## Technology Stack
 
-## Critical Architecture Decision: Agent SDK vs PTY Wrapping
-- Structured streaming output (text deltas, tool calls, status messages)
-- `canUseTool` callback for programmatic tool approval
-- Multi-turn conversation via `streamInput()` async iterable
-- Session management (list, resume, rename, tag)
-- AbortController support for cancellation
+## Architecture Decision: PTY + stream-json Dual Mode
+- PTY (node-pty) for transparent local terminal wrapping
+- `claude --output-format stream-json --input-format stream-json` for remote programmatic control
+- JSON event stream provides structured output (text deltas, tool calls, status)
+- `--permission-prompt-tool stdio` for programmatic tool approval
+- No third-party SDK dependency, only relies on Claude Code CLI itself
 ## Recommended Stack
 ### Core: Claude Code Interface
 | Technology | Version | Purpose | Why | Confidence |
 |------------|---------|---------|-----|------------|
-| `@anthropic-ai/claude-agent-sdk` | ^0.2.90 | Programmatic Claude Code control for remote sessions | First-party SDK. Provides structured streaming, tool approval callbacks, session management. Eliminates ANSI parsing. | MEDIUM |
 | `node-pty` | ^1.1.0 | Local transparent terminal wrapping | Microsoft-maintained. Used by VS Code terminal. Only library providing real PTY on Node.js. | HIGH |
+| Claude Code CLI (`claude --stream-json`) | latest | Remote programmatic control via JSON event stream | No SDK dependency. cc-connect validated approach. Immune to SDK API churn. | HIGH |
 ### Core: Runtime & Language
 | Technology | Version | Purpose | Why | Confidence |
 |------------|---------|---------|-----|------------|
@@ -75,8 +75,8 @@ CC Anywhere 是 Claude Code 的透明代理和远程控制系统。它在本地�
 ## Alternatives Considered
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| Claude Code interface | Agent SDK + node-pty (dual) | PTY-only with ANSI parsing | Fragile parsing of terminal UI. Breaks on Claude Code updates. |
-| Claude Code interface | Agent SDK + node-pty (dual) | Agent SDK-only | Loses transparent local terminal experience |
+| Claude Code interface | node-pty + stream-json (dual) | PTY-only with ANSI parsing | Fragile parsing of terminal UI. Breaks on Claude Code updates. |
+| Claude Code interface | node-pty + stream-json (dual) | Agent SDK | Unstable v0.2.x API, unnecessary dependency when CLI stream-json provides the same capability. |
 | WebSocket | ws | Socket.IO | Over-engineered. We control both ends. |
 | WebSocket | ws | uWebSockets.js | Premature optimization for personal-scale tool |
 | Mini program framework | Taro + React | Native Feishu TTML | Poor DX. No TypeScript-first support. Small ecosystem. |
@@ -92,7 +92,6 @@ CC Anywhere 是 Claude Code 的透明代理和远程控制系统。它在本地�
 | Node.js | 20 | LTS. node-pty requires Node 16+, but 20 gives us modern features. |
 | Feishu client | 7.39.0+ | Required for `tt.connectSocket` WebSocket API in mini programs |
 | Taro | 3.1+ | Required for `@tarojs/plugin-platform-lark` Feishu compilation support |
-| `@anthropic-ai/claude-agent-sdk` | 0.2.x | Breaking changes expected. Pin minor version. |
 ## Installation
 # Initialize monorepo
 # (create pnpm-workspace.yaml with packages/*)
@@ -105,18 +104,15 @@ CC Anywhere 是 Claude Code 的透明代理和远程控制系统。它在本地�
 | Project | Approach | Language | Notes |
 |---------|----------|----------|-------|
 | [cc-connect](https://github.com/chenhg5/cc-connect) | Multi-agent orchestrator with IM bridges | Go | Feishu via WebSocket long-connection. Supports 7 agents. More complex than needed. |
-| [Claude-to-IM](https://github.com/op7418/Claude-to-IM) | Bridge library with adapter pattern | TypeScript | Wraps Claude Code SDK's streaming. Has Feishu adapter. Host-agnostic DI design. |
+| [Claude-to-IM](https://github.com/op7418/Claude-to-IM) | Bridge library with adapter pattern | TypeScript | Has Feishu adapter. Host-agnostic DI design. |
 ## Risk Register
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Agent SDK API churn (v0.2.x) | HIGH | Pin version. Wrap SDK calls in an adapter layer. Monitor changelogs. |
 | Taro + Feishu gadget compatibility issues | MEDIUM | Prototype Feishu compilation in Phase 1. Have native fallback plan. |
 | node-pty build failures on user machines | MEDIUM | Provide prebuilt binaries. Document build prerequisites (Python, C++ compiler). |
 | Feishu mini program WebSocket limit (max 5) | LOW | Only need 1 WebSocket to relay. Use multiplexing over single connection. |
 | strip-ansi ESM-only (v7+) | LOW | Project uses TypeScript with ESM output. No CJS concerns. |
 ## Sources
-- [Claude Agent SDK TypeScript Reference](https://platform.claude.com/docs/en/agent-sdk/typescript) -- HIGH confidence
-- [Claude Agent SDK Streaming](https://platform.claude.com/docs/en/agent-sdk/streaming-output) -- HIGH confidence
 - [Claude Code CLI Reference](https://code.claude.com/docs/en/cli-reference) -- HIGH confidence
 - [Claude Code Headless Mode](https://code.claude.com/docs/en/headless) -- HIGH confidence
 - [node-pty GitHub](https://github.com/microsoft/node-pty) -- HIGH confidence

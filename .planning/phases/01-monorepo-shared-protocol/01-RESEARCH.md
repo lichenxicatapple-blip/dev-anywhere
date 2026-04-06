@@ -19,7 +19,7 @@ Key technical finding: Zod has released v4 (stable since July 2025, currently 4.
 ### Locked Decisions
 - **D-01:** 消息类型按功能分为四大类：chat (user_input, assistant_message, thinking), tool (tool_use_request, tool_approve, tool_deny, tool_result), session (session_create, session_list, session_switch, session_terminate, session_status), system (heartbeat, error, auth, sync_request, sync_response)
 - **D-02:** MessageEnvelope 带元数据：seq（序列号）、sessionId、type、payload、timestamp、source（proxy/client）、version
-- **D-03:** 流式输出粒度为 Agent SDK 事件级，每个 SDKMessage 事件作为一条完整消息发送到小程序，不做 token 级流式
+- **D-03:** 流式输出粒度为 stream-json 事件级，每个 JSON event 作为一条完整消息发送到小程序，不做 token 级流式
 - **D-04:** 统一错误消息类型，所有错误通过 error 类型消息传递，包含错误码和描述
 - **D-05:** 认证采用配对码方案：首次连接时本地代理生成 6 位配对码（5 分钟有效），用户在飞书小程序输入后建立绑定，双方获得长期 token 用于后续自动认证，无需重复配对
 - **D-06:** 采用 apps/ + packages/ 分离布局：apps/{proxy,relay,feishu} 为可部署应用，packages/shared 为共享库

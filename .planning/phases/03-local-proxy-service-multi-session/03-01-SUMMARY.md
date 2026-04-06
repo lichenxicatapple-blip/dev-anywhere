@@ -1,5 +1,5 @@
 ---
-phase: 03-local-proxy-agent-sdk-multi-session
+phase: 03-local-proxy-service-multi-session
 plan: 01
 subsystem: proxy
 tags: [node-streams, ndjson, zod, ipc, pty, multi-session]
@@ -120,5 +120,5 @@ None - no external service configuration required.
 All 8 files verified present. Both commit hashes (eb140d7, 6ea4261) verified in git log.
 
 ---
-*Phase: 03-local-proxy-agent-sdk-multi-session*
+*Phase: 03-local-proxy-service-multi-session*
 *Completed: 2026-04-03*

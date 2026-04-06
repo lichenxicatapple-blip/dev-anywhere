@@ -6,7 +6,7 @@
 
 ## Summary
 
-Phase 2 implements the transparent PTY wrapper that makes `cc-anywhere` indistinguishable from running `claude` directly. The scope is narrow and well-defined: spawn Claude Code CLI inside a pseudo-terminal created by node-pty, pipe stdin/stdout byte-for-byte, forward SIGWINCH for window resizing, handle Ctrl+C/Ctrl+D through raw mode stdin, propagate exit codes, and clean up child processes on exit. No remote control, no Agent SDK, no relay -- those are Phase 3+.
+Phase 2 implements the transparent PTY wrapper that makes `cc-anywhere` indistinguishable from running `claude` directly. The scope is narrow and well-defined: spawn Claude Code CLI inside a pseudo-terminal created by node-pty, pipe stdin/stdout byte-for-byte, forward SIGWINCH for window resizing, handle Ctrl+C/Ctrl+D through raw mode stdin, propagate exit codes, and clean up child processes on exit. No remote control, no stream-json integration, no relay -- those are Phase 3+.
 
 The core pattern is straightforward: set the parent terminal to raw mode, spawn `claude` in a node-pty PTY with matching dimensions, pipe `process.stdin` writes to `pty.write()`, pipe `pty.onData` output to `process.stdout.write()`, listen for `process.stdout` `resize` events to call `pty.resize()`, and exit with the child's exit code via `pty.onExit`. The key risks are: (1) UTF-8 multi-byte character corruption at chunk boundaries requires StringDecoder for any string processing path (but the raw byte passthrough for local terminal avoids this), (2) orphaned `claude` processes if the proxy crashes without cleanup, (3) raw mode disabling Ctrl+C at the Node.js level (by design -- it passes through to the PTY as `\x03`), and (4) node-pty requiring native compilation (C++ toolchain must be present).
 
@@ -36,7 +36,7 @@ The core pattern is straightforward: set the parent terminal to raw mode, spawn 
 
 ### Deferred Ideas (OUT OF SCOPE)
 - Multi-session management -- Phase 3 (PROXY-03)
-- Agent SDK structured control channel -- Phase 3 (PROXY-02)
+- stream-json 结构化控制通道 -- Phase 3 (PROXY-02)
 - Relay connection and message bridging -- Phase 4 (RELAY-01)
 - Terminal and mobile dual-surface sync -- Phase 7 (PROXY-04)
 

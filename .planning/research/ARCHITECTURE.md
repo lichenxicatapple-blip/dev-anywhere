@@ -1,5 +1,7 @@
 # Architecture Research
 
+> **[SUPERSEDED]** 本文档中关于 Agent SDK (`@anthropic-ai/claude-agent-sdk`) 的推荐已过时。Phase 3 决定采用 `claude --stream-json` CLI 方案替代 Agent SDK，参见 `.planning/phases/03-local-proxy-service-multi-session/03-CONTEXT.md` D-05/D-06。
+
 **Domain:** CLI proxy + relay server + mobile client (remote IDE control)
 **Researched:** 2026-04-03
 **Confidence:** HIGH

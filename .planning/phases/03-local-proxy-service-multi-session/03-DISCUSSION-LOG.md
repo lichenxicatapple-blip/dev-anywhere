@@ -4,7 +4,7 @@
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.
 
 **Date:** 2026-04-03 ~ 2026-04-04
-**Phase:** 03-local-proxy-agent-sdk-multi-session
+**Phase:** 03-local-proxy-service-multi-session
 **Areas discussed:** 整体架构、Agent SDK vs stream-json、多会话管理模型、PTY 归属、飞书可见性、会话模式
 **Mode:** Interactive (user-driven architecture redesign)
 

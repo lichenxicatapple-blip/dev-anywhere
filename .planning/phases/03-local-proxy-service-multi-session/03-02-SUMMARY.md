@@ -1,5 +1,5 @@
 ---
-phase: 03-local-proxy-agent-sdk-multi-session
+phase: 03-local-proxy-service-multi-session
 plan: 02
 subsystem: proxy
 tags: [session-manager, json-session, stream-json, nanoid, multi-session, tool-approval, process-management]
@@ -115,5 +115,5 @@ None - no external service configuration required.
 All 5 files verified present. All 4 commit hashes verified in git log. No stubs detected.
 
 ---
-*Phase: 03-local-proxy-agent-sdk-multi-session*
+*Phase: 03-local-proxy-service-multi-session*
 *Completed: 2026-04-03*
