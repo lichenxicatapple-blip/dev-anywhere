@@ -4,11 +4,32 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsx src/index.ts",
+    "build:lark": "taro build --type lark",
+    "dev:lark": "taro build --type lark --watch",
+    "echo-server": "tsx src/echo-server.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cc-anywhere/shared": "workspace:*"
+    "@tarojs/components": "^4.1.11",
+    "@tarojs/helper": "^4.1.11",
+    "@tarojs/plugin-framework-react": "^4.1.11",
+    "@tarojs/plugin-platform-lark": "^1.1.5",
+    "@tarojs/react": "^4.1.11",
+    "@tarojs/runtime": "^4.1.11",
+    "@tarojs/shared": "^4.1.11",
+    "@tarojs/taro": "^4.1.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@babel/runtime": "^7.27.6",
+    "@tarojs/cli": "^4.1.11",
+    "@types/react": "^18.3.23",
+    "babel-preset-taro": "^4.1.11",
+    "ws": "^8.20.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "vitest": "^4.1.2"
   }
 }
