@@ -66,6 +66,10 @@ export {
   resetSequenceCounter,
 } from "./builders/index.js";
 
+// relay control
+export { RelayControlSchema } from "./schemas/relay-control.js";
+export type { RelayControlMessage } from "./schemas/relay-control.js";
+
 // constants
 export { ErrorCode } from "./constants/errors.js";
 export { SessionState } from "./constants/session.js";
