@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-04-03T17:42:38.178Z"
-last_activity: 2026-04-03
+last_updated: "2026-04-06T08:48:52.708Z"
+last_activity: 2026-04-06
 progress:
   total_phases: 10
-  completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
-  percent: 0
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-03)
 
 **Core value:** 在任何地方（电脑或手机）都能与 Claude Code 实时交互，体验一致，不丢失上下文
-**Current focus:** Phase 03 — local-proxy-agent-sdk-multi-session
+**Current focus:** Phase 04 — relay-server-core-transport
 
 ## Current Position
 
-Phase: 4
+Phase: 5
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-03
+Status: Executing Phase 04
+Last activity: 2026-04-06
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 3
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -44,7 +44,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 04 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -67,7 +67,7 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Roadmap]: Dual-mode architecture (PTY + Agent SDK) confirmed as Phase 2-3 split -- PTY transparency first, Agent SDK second
+- [Roadmap]: Dual-mode architecture (PTY + stream-json) confirmed as Phase 2-3 split -- PTY transparency first, stream-json remote control second
 - [Roadmap]: Relay resilience split from core transport -- prove the bridge works before hardening it
 - [Roadmap]: Tool approval grouped with dual-surface sync -- both require bidirectional coordination between terminal and mobile
 - [Roadmap]: Output rendering runs parallel to Phase 7 (depends on Phase 6 only) -- can be worked on independently
@@ -97,7 +97,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- Agent SDK v0.2.x instability: pin exact version, wrap behind adapter interface (Phase 3)
 - Feishu "gadget" vs "mini program" terminology: must verify Taro plugin compilation target before Phase 6
 - Feishu app review timeline: unknown, could gate Phase 6 completion
 

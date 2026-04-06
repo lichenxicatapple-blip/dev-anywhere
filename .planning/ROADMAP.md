@@ -84,9 +84,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Taro spike: validate Feishu mini program WebSocket connectivity with echo server
-- [ ] 04-02-PLAN.md — Relay server core: control schemas, registry, router, handlers, health checks
-- [ ] 04-03-PLAN.md — Proxy relay integration and Docker deployment infrastructure
+- [x] 04-01-PLAN.md — Taro spike: validate Feishu mini program WebSocket connectivity with echo server
+- [x] 04-02-PLAN.md — Relay server core: control schemas, registry, router, handlers, health checks
+- [x] 04-03-PLAN.md — Proxy relay integration and Docker deployment infrastructure
 
 ### Phase 5: Relay Server - Resilience
 **Goal**: The relay handles real-world network instability without losing messages or breaking sessions
