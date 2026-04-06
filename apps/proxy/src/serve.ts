@@ -13,8 +13,9 @@ import {
   rmSync,
 } from "node:fs";
 import pino from "pino";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { SessionManager } from "./session-manager.js";
+import { RelayConnection } from "./relay-connection.js";
 import {
   SOCK_PATH,
   PID_PATH,
@@ -105,6 +106,7 @@ function connectToWorker(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
   clientSockets: Map<string, Socket>,
+  relayConnection: RelayConnection | null = null,
 ): Promise<Socket | null> {
   return new Promise((resolve) => {
     const sock = connect(sockPath);
@@ -127,6 +129,20 @@ function connectToWorker(
                     state: SessionState.WORKING,
                   }),
                 );
+              }
+            }
+            // 将 worker 事件转发到 relay
+            if (relayConnection) {
+              try {
+                const envelope = buildMessage(
+                  "assistant_message",
+                  sessionId,
+                  { text: JSON.stringify(msg.event), isPartial: true },
+                  "proxy",
+                );
+                relayConnection.send(envelope);
+              } catch (err) {
+                logger.debug({ sessionId, error: String(err) }, "Failed to forward event to relay");
               }
             }
             logger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
@@ -176,6 +192,7 @@ async function reconnectWorkers(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
   clientSockets: Map<string, Socket>,
+  relayConnection: RelayConnection | null = null,
 ): Promise<void> {
   if (!existsSync(DATA_DIR)) return;
 
@@ -188,7 +205,7 @@ async function reconnectWorkers(
     if (!existsSync(paths.workerSock)) continue;
 
     const sock = await connectToWorker(
-      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets,
+      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets, relayConnection,
     );
     if (sock) {
       if (!sessionManager.getSession(sessionId)) {
@@ -212,6 +229,7 @@ function handleClientConnection(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
   clientSockets: Map<string, Socket>,
+  relayConnection: RelayConnection | null = null,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
     switch (msg.type) {
@@ -240,7 +258,7 @@ function handleClientConnection(
             attempt++;
             connectToWorker(
               session.id, paths.workerSock, sessionManager,
-              workerSockets, clientSockets,
+              workerSockets, clientSockets, relayConnection,
             ).then((sock) => {
               if (sock) {
                 socket.write(
@@ -403,10 +421,43 @@ export async function startService(): Promise<void> {
   const workerSockets = new Map<string, Socket>();
   const clientSockets = new Map<string, Socket>();
 
-  await reconnectWorkers(sessionManager, workerSockets, clientSockets);
+  // 如果配置了 RELAY_URL 则连接到中转服务器
+  const relayUrl = process.env.RELAY_URL;
+  let relayConnection: RelayConnection | null = null;
+
+  if (relayUrl) {
+    relayConnection = new RelayConnection(relayUrl, logger);
+    relayConnection.connect();
+    logger.info({ relayUrl }, "Connecting to relay server");
+
+    // 处理来自 remote client 的消息
+    relayConnection.on("message", (data: string) => {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.type === "user_input" && parsed.sessionId) {
+          const ws = workerSockets.get(parsed.sessionId);
+          if (ws?.writable) {
+            ws.write(serializeWorkerMsg({
+              type: "worker_approval_response",
+              requestId: "",
+              behavior: "allow",
+              message: parsed.payload?.text ?? "",
+            }));
+          }
+          logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to worker");
+        }
+      } catch (err) {
+        logger.warn({ error: String(err) }, "Failed to parse relay message");
+      }
+    });
+  } else {
+    logger.info("No RELAY_URL configured, relay connection disabled");
+  }
+
+  await reconnectWorkers(sessionManager, workerSockets, clientSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleClientConnection(socket, sessionManager, workerSockets, clientSockets);
+    handleClientConnection(socket, sessionManager, workerSockets, clientSockets, relayConnection);
   });
 
   server.listen(SOCK_PATH, () => {
@@ -438,6 +489,9 @@ export async function startService(): Promise<void> {
     logger.info("Shutting down service");
     clearInterval(idleCheckInterval);
     sessionManager.stopReaper();
+    if (relayConnection) {
+      relayConnection.close();
+    }
     for (const [, ws] of workerSockets) {
       ws.destroy();
     }

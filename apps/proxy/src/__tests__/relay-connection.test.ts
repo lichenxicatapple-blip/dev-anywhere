@@ -51,7 +51,7 @@ describe("RelayConnection", () => {
     expect(proxyId.length).toBeGreaterThan(0);
 
     // 验证 proxy 已注册到 relay
-    const registered = relay.registry.getProxySocket(proxyId);
+    const registered = relay.registry.getProxy(proxyId);
     expect(registered).toBeTruthy();
   });
 
@@ -64,7 +64,7 @@ describe("RelayConnection", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const envelope = buildMessage("assistant_message", "test-session", { text: "hello" }, "proxy");
+    const envelope = buildMessage("assistant_message", "test-session", { text: "hello", isPartial: false }, "proxy");
 
     // send 不应抛异常
     expect(() => conn!.send(envelope)).not.toThrow();
@@ -86,7 +86,7 @@ describe("RelayConnection", () => {
 
     // 通过 relay 的 registry 直接向 proxy 发送消息来模拟 relay 转发
     const proxyId = conn.getProxyId();
-    const proxySocket = relay.registry.getProxySocket(proxyId);
+    const proxySocket = relay.registry.getProxy(proxyId);
     expect(proxySocket).toBeTruthy();
 
     const testMsg = JSON.stringify({ type: "test", data: "from-relay" });
@@ -108,14 +108,14 @@ describe("RelayConnection", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const proxyId = conn.getProxyId();
-    expect(relay.registry.getProxySocket(proxyId)).toBeTruthy();
+    expect(relay.registry.getProxy(proxyId)).toBeTruthy();
 
     conn.close();
 
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // 关闭后 proxy 应该从 registry 中移除
-    expect(relay.registry.getProxySocket(proxyId)).toBeUndefined();
+    expect(relay.registry.getProxy(proxyId)).toBeUndefined();
     conn = null;
   });
 
