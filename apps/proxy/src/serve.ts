@@ -432,7 +432,7 @@ export async function startService(): Promise<void> {
         }
       }
     }
-  }, 3000);
+  }, 1000);
 
   async function shutdown(): Promise<void> {
     logger.info("Shutting down service");

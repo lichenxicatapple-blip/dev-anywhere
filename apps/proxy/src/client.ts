@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
-import { EventStore, EventType, encodeSizePayload } from "./event-store.js";
+import { EventStore, EventType } from "./event-store.js";
 import { TerminalTracker } from "./terminal-tracker.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH, sessionPaths, ensureDirectories } from "./paths.js";
 import {
@@ -187,8 +187,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   tracker = new TerminalTracker(eventStore, paths.snapshot, cols, rows);
 
   // 写入初始尺寸事件
-  eventStore.append(EventType.SIZE, encodeSizePayload(cols, rows));
-  eventStore.flush(EventType.SIZE);
+  eventStore.writeSize(cols, rows);
 
   // DataTap：写入本地事件文件（不再通过 IPC 发给 serve）
   const tap: DataTap = (data: string) => {
@@ -204,13 +203,17 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     }
   };
 
-  // 终端 resize：写入本地 SIZE 事件 + 调整 TerminalTracker
+  // 终端 resize：尺寸实际变化时才写入 SIZE 事件
+  let lastCols = cols;
+  let lastRows = rows;
   process.stdout.on("resize", () => {
     const newCols = process.stdout.columns ?? 80;
     const newRows = process.stdout.rows ?? 24;
+    if (newCols === lastCols && newRows === lastRows) return;
+    lastCols = newCols;
+    lastRows = newRows;
     if (eventStore) {
-      eventStore.append(EventType.SIZE, encodeSizePayload(newCols, newRows));
-      eventStore.flush(EventType.SIZE);
+      eventStore.writeSize(newCols, newRows);
     }
     if (tracker) {
       tracker.resize(newCols, newRows);

@@ -146,9 +146,27 @@ export class EventStore {
     return this.seq;
   }
 
-  // 写入快照事件（不经过缓冲，直接写入）
-  writeSnapshot(payload: Buffer): number {
+  // 直接写入一条事件（不经过缓冲），先 flush 已有缓冲区
+  writeImmediate(type: EventTypeValue, payload: Buffer): number {
     this.flush();
+    this.seq++;
+    const ts = Date.now();
+
+    if (!existsSync(this.eventsPath)) {
+      writeFileSync(this.eventsPath, createFileHeader(this.sessionId));
+    }
+
+    const record = encodeEvent(this.seq, ts, type, payload);
+    appendFileSync(this.eventsPath, record);
+    return this.seq;
+  }
+
+  writeSnapshot(payload: Buffer): number {
+    return this.writeImmediate(EventType.SNAPSHOT, payload);
+  }
+
+  writeSize(cols: number, rows: number): number {
+    return this.writeImmediate(EventType.SIZE, encodeSizePayload(cols, rows));
     this.seq++;
     const ts = Date.now();
 
