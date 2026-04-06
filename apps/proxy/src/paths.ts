@@ -30,7 +30,6 @@ export function sessionPaths(sessionId: string) {
     dir,
     events: `${dir}/events.bin`,
     snapshot: `${dir}/snapshot.bin`,
-    archive: `${dir}/events.bin.gz`,
     workerSock: `${dir}/worker.sock`,
   };
 }

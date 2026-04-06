@@ -5,6 +5,8 @@ import {
   writeFileSync,
   existsSync,
   unlinkSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { sessionPaths } from "./paths.js";
@@ -83,27 +85,34 @@ function parseEvents(data: Buffer, afterSeq = 0): EventRecord[] {
   return events;
 }
 
+// TODO: 测试结束后改回 20 * 1024 * 1024 (20MB)
+const DEFAULT_ARCHIVE_THRESHOLD = 100 * 1024; // 100KB (testing)
+
 export class EventStore {
   private readonly sessionId: string;
   private readonly eventsPath: string;
-  private readonly archivePath: string;
   private readonly dir: string;
+  private readonly archiveThreshold: number;
   private seq: number = 0;
   private buffer: Buffer[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private readonly flushIntervalMs: number;
 
-  constructor(sessionId: string, flushIntervalMs = 200, baseDir?: string) {
+  constructor(
+    sessionId: string,
+    flushIntervalMs = 200,
+    baseDir?: string,
+    archiveThreshold = DEFAULT_ARCHIVE_THRESHOLD,
+  ) {
     this.sessionId = sessionId;
     this.flushIntervalMs = flushIntervalMs;
+    this.archiveThreshold = archiveThreshold;
     if (baseDir) {
       this.dir = `${baseDir}/${sessionId}`;
       this.eventsPath = `${this.dir}/events.bin`;
-      this.archivePath = `${this.dir}/events.bin.gz`;
     } else {
       const paths = sessionPaths(sessionId);
       this.eventsPath = paths.events;
-      this.archivePath = paths.archive;
       this.dir = paths.dir;
     }
     mkdirSync(this.dir, { recursive: true });
@@ -167,25 +176,28 @@ export class EventStore {
 
   writeSize(cols: number, rows: number): number {
     return this.writeImmediate(EventType.SIZE, encodeSizePayload(cols, rows));
-    this.seq++;
-    const ts = Date.now();
+  }
 
-    if (!existsSync(this.eventsPath)) {
-      writeFileSync(this.eventsPath, createFileHeader(this.sessionId));
-    }
-
-    const record = encodeEvent(this.seq, ts, EventType.SNAPSHOT, payload);
-    appendFileSync(this.eventsPath, record);
-    return this.seq;
+  // 按编号排序获取所有归档文件
+  private getArchiveFiles(): string[] {
+    if (!existsSync(this.dir)) return [];
+    return readdirSync(this.dir)
+      .filter((f) => /^events\.\d+\.bin\.gz$/.test(f))
+      .sort((a, b) => {
+        const na = parseInt(a.match(/^events\.(\d+)\.bin\.gz$/)![1], 10);
+        const nb = parseInt(b.match(/^events\.(\d+)\.bin\.gz$/)![1], 10);
+        return na - nb;
+      })
+      .map((f) => `${this.dir}/${f}`);
   }
 
   // 读取指定 seq 之后的事件
   readEvents(afterSeq = 0): EventRecord[] {
     const events: EventRecord[] = [];
 
-    // 先读归档
-    if (existsSync(this.archivePath)) {
-      const compressed = readFileSync(this.archivePath);
+    // 按编号顺序读取所有归档
+    for (const archivePath of this.getArchiveFiles()) {
+      const compressed = readFileSync(archivePath);
       const decompressed = gunzipSync(compressed);
       events.push(...parseEvents(decompressed, afterSeq));
     }
@@ -214,7 +226,16 @@ export class EventStore {
     return this.seq;
   }
 
-  // gzip 归档活跃文件
+  // 活跃文件是否超过归档阈值
+  shouldArchive(): boolean {
+    try {
+      return statSync(this.eventsPath).size >= this.archiveThreshold;
+    } catch {
+      return false;
+    }
+  }
+
+  // 将活跃文件 gzip 归档为编号文件
   archive(): void {
     this.flush();
     if (!existsSync(this.eventsPath)) return;
@@ -225,8 +246,18 @@ export class EventStore {
       return;
     }
 
+    // 确定下一个编号
+    const existing = this.getArchiveFiles();
+    let nextNum = 0;
+    if (existing.length > 0) {
+      const lastFile = existing[existing.length - 1];
+      const match = lastFile.match(/events\.(\d+)\.bin\.gz$/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+
+    const archivePath = `${this.dir}/events.${nextNum}.bin.gz`;
     const compressed = gzipSync(data);
-    writeFileSync(this.archivePath, compressed);
+    writeFileSync(archivePath, compressed);
     unlinkSync(this.eventsPath);
   }
 
@@ -234,7 +265,9 @@ export class EventStore {
   cleanup(): void {
     this.close();
     try { unlinkSync(this.eventsPath); } catch {}
-    try { unlinkSync(this.archivePath); } catch {}
+    for (const f of this.getArchiveFiles()) {
+      try { unlinkSync(f); } catch {}
+    }
     try { unlinkSync(`${this.dir}/snapshot.bin`); } catch {}
   }
 
@@ -256,9 +289,10 @@ export class EventStore {
         return;
       }
     }
-    // 从归档读取
-    if (existsSync(this.archivePath)) {
-      const compressed = readFileSync(this.archivePath);
+    // 从最新的归档读取
+    const archives = this.getArchiveFiles();
+    if (archives.length > 0) {
+      const compressed = readFileSync(archives[archives.length - 1]);
       const data = gunzipSync(compressed);
       const events = parseEvents(data);
       if (events.length > 0) {

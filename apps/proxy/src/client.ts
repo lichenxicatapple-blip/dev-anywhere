@@ -120,6 +120,9 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
         if (tracker && eventStore) {
           eventStore.flush();
           tracker.onStateChange("working", "idle");
+          if (eventStore.shouldArchive()) {
+            eventStore.archive();
+          }
         }
         lastOutputTime = 0;
       }

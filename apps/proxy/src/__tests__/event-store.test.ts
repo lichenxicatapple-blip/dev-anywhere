@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, existsSync, rmSync } from "node:fs";
+import { mkdirSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { EventStore, EventType } from "../event-store.js";
 
@@ -201,5 +201,168 @@ describe("EventStore", () => {
     expect(events[1].type).toBe(EventType.SNAPSHOT);
     expect(events[2].type).toBe(EventType.PTY_INPUT);
     store.close();
+  });
+
+  describe("archive", () => {
+    it("creates numbered archive file and removes active file", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.append(EventType.PTY_OUTPUT, "data1");
+      store.flush();
+      store.append(EventType.PTY_OUTPUT, "data2");
+      store.flush();
+
+      store.archive();
+
+      expect(existsSync(join(SESSION_DIR, "events.0.bin.gz"))).toBe(true);
+      expect(existsSync(join(SESSION_DIR, "events.bin"))).toBe(false);
+      store.close();
+    });
+
+    it("increments archive number on subsequent archives", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.append(EventType.PTY_OUTPUT, "batch1");
+      store.flush();
+      store.archive();
+
+      store.append(EventType.PTY_OUTPUT, "batch2");
+      store.flush();
+      store.archive();
+
+      store.append(EventType.PTY_OUTPUT, "batch3");
+      store.flush();
+      store.archive();
+
+      expect(existsSync(join(SESSION_DIR, "events.0.bin.gz"))).toBe(true);
+      expect(existsSync(join(SESSION_DIR, "events.1.bin.gz"))).toBe(true);
+      expect(existsSync(join(SESSION_DIR, "events.2.bin.gz"))).toBe(true);
+      store.close();
+    });
+
+    it("readEvents reads all archives plus active file in order", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+
+      // 第一批归档
+      store.append(EventType.PTY_OUTPUT, "a");
+      store.flush();
+      store.append(EventType.PTY_OUTPUT, "b");
+      store.flush();
+      store.archive();
+
+      // 第二批归档
+      store.append(EventType.PTY_OUTPUT, "c");
+      store.flush();
+      store.archive();
+
+      // 活跃文件
+      store.append(EventType.PTY_OUTPUT, "d");
+      store.flush();
+
+      const events = store.readEvents();
+      expect(events).toHaveLength(4);
+      expect(events[0].payload.toString()).toBe("a");
+      expect(events[1].payload.toString()).toBe("b");
+      expect(events[2].payload.toString()).toBe("c");
+      expect(events[3].payload.toString()).toBe("d");
+      expect(events[0].seq).toBe(1);
+      expect(events[3].seq).toBe(4);
+      store.close();
+    });
+
+    it("readEvents with afterSeq works across archives", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.append(EventType.PTY_OUTPUT, "a");
+      store.flush();
+      store.append(EventType.PTY_OUTPUT, "b");
+      store.flush();
+      store.archive();
+
+      store.append(EventType.PTY_OUTPUT, "c");
+      store.flush();
+
+      const events = store.readEvents(1);
+      expect(events).toHaveLength(2);
+      expect(events[0].payload.toString()).toBe("b");
+      expect(events[1].payload.toString()).toBe("c");
+      store.close();
+    });
+
+    it("restores seq from archive after active file is archived", () => {
+      const store1 = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store1.append(EventType.PTY_OUTPUT, "x");
+      store1.flush();
+      store1.append(EventType.PTY_OUTPUT, "y");
+      store1.flush();
+      store1.archive();
+      store1.close();
+
+      // 重新打开，seq 应从归档恢复
+      const store2 = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      expect(store2.getSeq()).toBe(2);
+      store2.append(EventType.PTY_OUTPUT, "z");
+      store2.flush();
+      expect(store2.getSeq()).toBe(3);
+      store2.close();
+    });
+
+    it("shouldArchive returns false when file is small", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.append(EventType.PTY_OUTPUT, "small");
+      store.flush();
+      expect(store.shouldArchive()).toBe(false);
+      store.close();
+    });
+
+    it("shouldArchive returns true when file exceeds threshold", () => {
+      // 传入 1KB 阈值
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR, 1024);
+      const data = "x".repeat(2000);
+      store.append(EventType.PTY_OUTPUT, data);
+      store.flush();
+      expect(store.shouldArchive()).toBe(true);
+      store.close();
+    });
+
+    it("cleanup removes all archive files", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.append(EventType.PTY_OUTPUT, "a");
+      store.flush();
+      store.archive();
+      store.append(EventType.PTY_OUTPUT, "b");
+      store.flush();
+      store.archive();
+      store.append(EventType.PTY_OUTPUT, "c");
+      store.flush();
+
+      store.cleanup();
+
+      const files = readdirSync(SESSION_DIR);
+      const eventFiles = files.filter((f) => f.startsWith("events."));
+      expect(eventFiles).toHaveLength(0);
+    });
+
+    it("getLatestSnapshot works across archives", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.writeSnapshot(Buffer.from("snap-old"));
+      store.append(EventType.PTY_OUTPUT, "data");
+      store.flush();
+      store.archive();
+
+      store.append(EventType.PTY_OUTPUT, "more");
+      store.flush();
+      store.writeSnapshot(Buffer.from("snap-new"));
+
+      const latest = store.getLatestSnapshot();
+      expect(latest).not.toBeNull();
+      expect(latest!.payload.toString()).toBe("snap-new");
+      store.close();
+    });
+
+    it("archive is a no-op when no active file exists", () => {
+      const store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+      store.archive();
+      const files = readdirSync(SESSION_DIR);
+      expect(files.filter((f) => f.endsWith(".gz"))).toHaveLength(0);
+      store.close();
+    });
   });
 });
