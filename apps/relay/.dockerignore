@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.planning
+.claude
+.playwright-mcp
+apps/feishu
+apps/proxy/src/__tests__
+apps/relay/src/__tests__
+*.test.ts
+*.md
