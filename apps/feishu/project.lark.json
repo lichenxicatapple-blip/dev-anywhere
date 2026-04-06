@@ -1,0 +1,9 @@
+{
+  "appid": "spike-test",
+  "projectname": "cc-anywhere-feishu",
+  "setting": {
+    "es6": true,
+    "minified": true
+  },
+  "compileType": "miniprogram"
+}
