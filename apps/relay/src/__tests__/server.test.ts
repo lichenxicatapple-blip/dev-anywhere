@@ -155,7 +155,7 @@ describe("Relay Server Integration", () => {
   it("GET /health returns 200 with status ok", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { status: string; uptime: number };
     expect(body.status).toBe("ok");
     expect(typeof body.uptime).toBe("number");
   });
@@ -168,7 +168,7 @@ describe("Relay Server Integration", () => {
 
     const res = await fetch(`http://127.0.0.1:${port}/status`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { proxyCount: number; clientCount: number; uptime: number };
     expect(body.proxyCount).toBe(1);
     expect(typeof body.clientCount).toBe("number");
     expect(typeof body.uptime).toBe("number");
