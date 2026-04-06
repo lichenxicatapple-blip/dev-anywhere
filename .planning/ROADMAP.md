@@ -81,11 +81,12 @@ Plans:
   2. Messages from proxy arrive at connected clients with correct ordering verified by sequence numbers
   3. A WebSocket test client can send a message through relay to proxy and receive Claude Code's response in real time
   4. Message loss is detected via sequence number gaps and reported (not silently dropped)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+- [ ] 04-01-PLAN.md — Taro spike: validate Feishu mini program WebSocket connectivity with echo server
+- [ ] 04-02-PLAN.md — Relay server core: control schemas, registry, router, handlers, health checks
+- [ ] 04-03-PLAN.md — Proxy relay integration and Docker deployment infrastructure
 
 ### Phase 5: Relay Server - Resilience
 **Goal**: The relay handles real-world network instability without losing messages or breaking sessions
@@ -193,7 +194,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 1. Monorepo & Shared Protocol | 0/2 | Planning complete | - |
 | 2. Local Proxy - PTY Transparency | 0/2 | Planning complete | - |
 | 3. Local Proxy - Service Architecture & Multi-Session | 0/3 | Planning complete | - |
-| 4. Relay Server - Core Transport | 0/2 | Not started | - |
+| 4. Relay Server - Core Transport | 0/3 | Planning complete | - |
 | 5. Relay Server - Resilience | 0/2 | Not started | - |
 | 6. Feishu Mini Program - Core Interaction | 0/3 | Not started | - |
 | 7. Tool Approval & Dual-Surface Sync | 0/2 | Not started | - |
