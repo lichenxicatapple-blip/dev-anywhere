@@ -97,11 +97,12 @@ Plans:
   2. Messages sent during a disconnection are queued and delivered after reconnection (no silent message loss)
   3. When Feishu mini program goes to background and its WebSocket drops, the relay buffers messages and replays them on reconnection
   4. After reconnection, both proxy and client receive only the messages they missed (no duplicates, no gaps)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md — Shared protocol extension and proxy-side auto-reconnect with message queuing
+- [ ] 05-02-PLAN.md — Relay per-session buffering with compression and proxy grace period lifecycle
+- [ ] 05-03-PLAN.md — Client reconnect protocol and seq gap detection/replay
 
 ### Phase 6: Feishu Mini Program - Core Interaction
 **Goal**: Users can send messages to Claude Code and see streaming responses from their phone
@@ -195,7 +196,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 2. Local Proxy - PTY Transparency | 0/2 | Planning complete | - |
 | 3. Local Proxy - Service Architecture & Multi-Session | 0/3 | Planning complete | - |
 | 4. Relay Server - Core Transport | 0/3 | Planning complete | - |
-| 5. Relay Server - Resilience | 0/2 | Not started | - |
+| 5. Relay Server - Resilience | 0/3 | Planning complete | - |
 | 6. Feishu Mini Program - Core Interaction | 0/3 | Not started | - |
 | 7. Tool Approval & Dual-Surface Sync | 0/2 | Not started | - |
 | 8. Output Rendering | 0/2 | Not started | - |
