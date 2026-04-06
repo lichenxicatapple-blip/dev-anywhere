@@ -85,8 +85,7 @@ function parseEvents(data: Buffer, afterSeq = 0): EventRecord[] {
   return events;
 }
 
-// TODO: 测试结束后改回 20 * 1024 * 1024 (20MB)
-const DEFAULT_ARCHIVE_THRESHOLD = 100 * 1024; // 100KB (testing)
+const DEFAULT_ARCHIVE_THRESHOLD = 20 * 1024 * 1024; // 20MB
 
 export class EventStore {
   private readonly sessionId: string;
