@@ -93,7 +93,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- 小程序消息缓存采用快照清理策略 (area: feishu) — Phase 6/8
 
 ### Blockers/Concerns
 
