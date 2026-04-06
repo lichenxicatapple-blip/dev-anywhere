@@ -545,22 +545,25 @@ CMD ["node", "apps/relay/dist/index.js"]
 | A4 | Node.js 22 Alpine Docker image is suitable for relay production | Code Examples | LOW -- Node 22 LTS is current, Alpine is standard for small images. |
 | A5 | Relay control messages should be a separate schema from MessageEnvelope | Shared Package Extensions | MEDIUM -- alternative is extending MessageEnvelope. Separate schema is cleaner but adds complexity. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Taro 4 + Lark plugin compatibility**
    - What we know: Plugin v1.1.5 dev deps show @tarojs/service ^3.3.0. Taro 4.1.11 is current.
    - What's unclear: Whether the plugin actually works with Taro 4 at runtime.
    - Recommendation: D-01 spike validates this. If it fails, pin Taro 3.6.x for mini program or use native TTML.
+   - **RESOLVED:** Plan 01 (Taro spike) validates this before any relay work begins. Fallback to Taro 3.6.x documented in plan.
 
 2. **Relay control messages: separate schema vs extend MessageEnvelope**
    - What we know: MessageEnvelope has 16 types with seq/sessionId/timestamp/source/version. Relay control messages don't need sessionId or seq.
    - What's unclear: Whether the complexity of two schemas is justified over adding optional fields.
    - Recommendation: Separate schema. Relay control messages are transport-level, not application-level. Cleaner separation of concerns.
+   - **RESOLVED:** Separate schema chosen. `RelayControlSchema` in `packages/shared/src/schemas/relay-control.ts` per Plan 02 Task 1.
 
 3. **SSL certificate management on CentOS**
    - What we know: D-13 requires Nginx with TLS. Certbot/Let's Encrypt is the standard free solution.
    - What's unclear: Whether the user's domain and DNS are configured for Let's Encrypt validation.
    - Recommendation: deploy.sh should include certbot setup with HTTP-01 challenge. Alternatively, user provides cert files.
+   - **RESOLVED:** `deploy.sh` (Plan 03 Task 2) handles certbot installation and HTTP-01 challenge. User provides domain as CLI argument.
 
 ## Environment Availability
 
