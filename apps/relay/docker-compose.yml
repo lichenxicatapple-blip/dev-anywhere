@@ -8,6 +8,10 @@ services:
     environment:
       - PORT=3100
       - LOG_LEVEL=info
+      - DATA_DIR=/data
+      - HEARTBEAT_INTERVAL=30000
+    volumes:
+      - relay-data:/data
     expose:
       - "3100"
     healthcheck:
@@ -28,3 +32,6 @@ services:
     depends_on:
       relay:
         condition: service_healthy
+
+volumes:
+  relay-data:

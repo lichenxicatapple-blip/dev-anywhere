@@ -27,6 +27,9 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const { heartbeatInterval = 30000, logger, dataDir } = options;
 
   const store = dataDir ? new BufferStore(dataDir) : null;
+  if (!store) {
+    logger.warn("DATA_DIR not set, buffer persistence disabled. Relay restart will lose all buffered messages.");
+  }
   const registry = new RelayRegistry(store);
   const app = express();
   app.use(healthRouter(registry));

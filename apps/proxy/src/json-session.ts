@@ -68,7 +68,8 @@ export class JsonSession {
       ),
     ) as NodeJS.ProcessEnv;
 
-    this.child = spawn("claude", args, {
+    const claudeBin = process.env.CLAUDE_BIN || "claude";
+    this.child = spawn(claudeBin, args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: filteredEnv,
