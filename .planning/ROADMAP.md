@@ -100,9 +100,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Shared protocol extension and proxy-side auto-reconnect with message queuing
-- [ ] 05-02-PLAN.md — Relay per-session buffering with compression and proxy grace period lifecycle
-- [ ] 05-03-PLAN.md — Client reconnect protocol and seq gap detection/replay
+- [x] 05-01-PLAN.md — Shared protocol extension and proxy-side auto-reconnect with message queuing
+- [x] 05-02-PLAN.md — Relay per-session buffering with compression and proxy grace period lifecycle
+- [x] 05-03-PLAN.md — Client reconnect protocol and seq gap detection/replay
 
 ### Phase 6: Feishu Mini Program - Core Interaction
 **Goal**: Users can send messages to Claude Code and see streaming responses from their phone
