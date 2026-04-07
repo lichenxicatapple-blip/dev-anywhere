@@ -76,12 +76,25 @@ export class RelayConnection extends EventEmitter {
         this.reconnectAttempt = 0;
         this.logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
         this.ws!.send(JSON.stringify({ type: "proxy_register", proxyId: this.proxyId }));
-        this.flushQueue();
-        this.emit("connected");
       });
 
       this.ws.on("message", (data) => {
         const raw = data.toString();
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.type === "proxy_register_response") {
+            const status: string = parsed.status;
+            const sessions: Record<string, number> | undefined = parsed.sessions;
+            this.logger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
+            // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
+            this.emit("sync", { status, sessions: sessions ?? {} });
+            this.flushQueue();
+            this.emit("connected");
+            return;
+          }
+        } catch {
+          // 非 JSON 消息，正常转发
+        }
         this.emit("message", raw);
       });
 
@@ -138,7 +151,7 @@ export class RelayConnection extends EventEmitter {
     }
   }
 
-  // 主动关闭连接，不触发重连
+  // 主动关闭连接，发送 proxy_disconnect 通知 relay 立即清理，不触发重连
   close(): void {
     this.closed = true;
     if (this.reconnectTimer) {
@@ -146,6 +159,9 @@ export class RelayConnection extends EventEmitter {
       this.reconnectTimer = null;
     }
     if (this.ws) {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: "proxy_disconnect", proxyId: this.proxyId }));
+      }
       this.ws.close();
       this.ws = null;
     }

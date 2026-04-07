@@ -174,7 +174,7 @@ describe("Relay Server Integration", () => {
     expect(typeof body.uptime).toBe("number");
   });
 
-  it("enters grace period when proxy disconnects", async () => {
+  it("marks proxy offline when proxy disconnects, state preserved", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
@@ -183,7 +183,7 @@ describe("Relay Server Integration", () => {
 
     proxy.close();
     await new Promise((r) => setTimeout(r, 100));
-    // proxy 断连后进入宽限期，仍在列表中但不在线
+    // proxy 断连后标记离线，状态永久保留等待重连
     expect(relay.registry.listProxies()).toContain("p1");
     expect(relay.registry.isProxyOnline("p1")).toBe(false);
   });
@@ -226,9 +226,9 @@ describe("Relay Server Heartbeat", () => {
       // 不回复 pong
     });
 
-    // 等待两个心跳周期让死连接被终止并进入宽限期
+    // 等待两个心跳周期让死连接被终止并标记离线
     await new Promise((r) => setTimeout(r, 350));
-    // 死连接被 terminate 后进入宽限期，proxyId 仍在列表但不在线
+    // 死连接被 terminate 后标记离线，proxyId 仍在列表但不在线
     expect(relay.registry.listProxies()).toContain("hb-test");
     expect(relay.registry.isProxyOnline("hb-test")).toBe(false);
 

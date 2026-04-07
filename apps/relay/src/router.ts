@@ -7,7 +7,7 @@ import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "./registry.js";
-import { compressOnSnapshot, compressOnResult } from "./buffer-compressor.js";
+import { compressOnSnapshot } from "./buffer-compressor.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
 export type ParseResult =
@@ -39,8 +39,6 @@ export function parseMessage(data: string): ParseResult {
 
 // PTY 快照压缩触发类型
 const SNAPSHOT_TYPE = "session_status";
-// JSON turn 结束信号
-const RESULT_TYPE = "tool_result";
 
 // 将 proxy 发来的 MessageEnvelope 缓冲到 per-session buffer 后转发给绑定的 client
 export function routeProxyMessage(
@@ -71,11 +69,9 @@ export function routeProxyMessage(
   const buffer = registry.getOrCreateSessionBuffer(sessionId);
   buffer.append({ raw, seq, type, source });
 
-  // 根据消息类型触发压缩
+  // PTY 快照到达时压缩缓冲区，丢弃快照之前的所有消息
   if (type === SNAPSHOT_TYPE) {
     compressOnSnapshot(buffer, seq);
-  } else if (type === RESULT_TYPE) {
-    compressOnResult(buffer, seq);
   }
 
   // 转发给所有绑定的客户端
@@ -138,7 +134,7 @@ export function handleReplayRequest(
 
   // 检查缓冲区是否覆盖了请求范围的起始部分
   const firstBufferedSeq = messages[0].seq;
-  if (firstBufferedSeq > fromSeq) {
+  if (firstBufferedSeq > fromSeq && clientWs.readyState === WebSocket.OPEN) {
     clientWs.send(JSON.stringify({
       type: "gap_unrecoverable",
       sessionId,

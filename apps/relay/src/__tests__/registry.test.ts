@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { RelayRegistry } from "../registry.js";
 import { WebSocket } from "ws";
 
@@ -16,13 +16,7 @@ describe("RelayRegistry", () => {
   let registry: RelayRegistry;
 
   beforeEach(() => {
-    vi.useFakeTimers();
     registry = new RelayRegistry();
-  });
-
-  afterEach(() => {
-    registry.clearAllTimers();
-    vi.useRealTimers();
   });
 
   describe("proxy registration", () => {
@@ -88,9 +82,9 @@ describe("RelayRegistry", () => {
       expect(registry.isProxyOnline("p1")).toBe(true);
     });
 
-    it("returns false when proxy is in grace period", () => {
+    it("returns false when proxy is offline", () => {
       registry.registerProxy("p1", createMockWs());
-      registry.startGracePeriod("p1");
+      registry.markProxyOffline("p1");
       expect(registry.isProxyOnline("p1")).toBe(false);
     });
 
@@ -99,50 +93,50 @@ describe("RelayRegistry", () => {
     });
   });
 
-  describe("grace period", () => {
-    it("startGracePeriod sets ws to null", () => {
-      registry.registerProxy("p1", createMockWs());
-      registry.startGracePeriod("p1");
-      expect(registry.getProxy("p1")).toBeUndefined();
-      expect(registry.hasProxy("p1")).toBe(true);
-    });
-
-    it("grace period expiry cleans up proxy state", () => {
+  describe("proxy offline and reconnect", () => {
+    it("markProxyOffline sets ws to null and preserves state", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.getOrCreateSessionBuffer("s1");
 
-      registry.startGracePeriod("p1", 100);
-      vi.advanceTimersByTime(100);
+      registry.markProxyOffline("p1");
 
-      expect(registry.hasProxy("p1")).toBe(false);
-      expect(registry.getSessionBuffer("s1")).toBeUndefined();
+      expect(registry.getProxy("p1")).toBeUndefined();
+      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.getSessionBuffer("s1")).toBeDefined();
     });
 
-    it("reconnect during grace period cancels timer and restores state", () => {
+    it("state persists indefinitely after markProxyOffline", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "s1");
+      registry.getOrCreateSessionBuffer("s1");
+
+      registry.markProxyOffline("p1");
+
+      // 没有定时器，状态永远保留
+      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.getSessionBuffer("s1")).toBeDefined();
+    });
+
+    it("reconnect after offline restores state", () => {
       const ws1 = createMockWs();
       registry.registerProxy("p1", ws1);
       registry.addSessionToProxy("p1", "s1");
       registry.getOrCreateSessionBuffer("s1");
 
-      registry.startGracePeriod("p1", 100);
+      registry.markProxyOffline("p1");
       expect(registry.getProxy("p1")).toBeUndefined();
 
-      // 在宽限期内重连
       const ws2 = createMockWs();
       const status = registry.registerProxy("p1", ws2);
       expect(status).toBe("reconnected");
       expect(registry.getProxy("p1")).toBe(ws2);
       expect(registry.isProxyOnline("p1")).toBe(true);
-
-      // 定时器到期不应清理
-      vi.advanceTimersByTime(200);
-      expect(registry.hasProxy("p1")).toBe(true);
       expect(registry.getSessionBuffer("s1")).toBeDefined();
     });
 
-    it("startGracePeriod does nothing for unknown proxy", () => {
-      expect(() => registry.startGracePeriod("unknown")).not.toThrow();
+    it("markProxyOffline does nothing for unknown proxy", () => {
+      expect(() => registry.markProxyOffline("unknown")).not.toThrow();
     });
   });
 
@@ -277,22 +271,6 @@ describe("RelayRegistry", () => {
       registry.bindClient(createMockWs(), "p1");
       registry.bindClientById("c1", "p1", createMockWs());
       expect(registry.countClients()).toBe(2);
-    });
-  });
-
-  describe("clearAllTimers", () => {
-    it("cancels all pending grace timers", () => {
-      registry.registerProxy("p1", createMockWs());
-      registry.registerProxy("p2", createMockWs());
-      registry.startGracePeriod("p1", 100);
-      registry.startGracePeriod("p2", 100);
-
-      registry.clearAllTimers();
-
-      // 定时器到期不应清理
-      vi.advanceTimersByTime(200);
-      expect(registry.hasProxy("p1")).toBe(true);
-      expect(registry.hasProxy("p2")).toBe(true);
     });
   });
 

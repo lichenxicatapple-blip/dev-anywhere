@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionBuffer, type BufferedMessage } from "../session-buffer.js";
-import { compressOnSnapshot, compressOnResult } from "../buffer-compressor.js";
+import { compressOnSnapshot } from "../buffer-compressor.js";
 import type { MessageType, MessageSource } from "@cc-anywhere/shared";
 
 // 构造测试用 BufferedMessage
@@ -80,26 +80,23 @@ describe("SessionBuffer", () => {
     expect(buffer.getAll()).toHaveLength(0);
   });
 
-  it("FIFO eviction at maxSize cap", () => {
-    const smallBuffer = new SessionBuffer(5);
-    for (let i = 1; i <= 7; i++) {
-      smallBuffer.append(makeMsg(i, "assistant_message"));
-    }
-    // 7 appended, cap is 5, oldest 2 should be evicted
-    expect(smallBuffer.size()).toBe(5);
-    const all = smallBuffer.getAll();
-    expect(all[0].seq).toBe(3);
-    expect(all[4].seq).toBe(7);
+  it("deduplicates by seq on append", () => {
+    buffer.append(makeMsg(1, "user_input"));
+    buffer.append(makeMsg(2, "assistant_message"));
+    buffer.append(makeMsg(3, "thinking"));
+    // 重发 seq 2 和 3 应被忽略
+    buffer.append(makeMsg(2, "assistant_message"));
+    buffer.append(makeMsg(3, "thinking"));
+    expect(buffer.size()).toBe(3);
+    expect(buffer.getAll().map((m) => m.seq)).toEqual([1, 2, 3]);
   });
 
-  it("FIFO eviction at default 1000 cap", () => {
-    for (let i = 1; i <= 1002; i++) {
-      buffer.append(makeMsg(i, "assistant_message"));
-    }
-    expect(buffer.size()).toBe(1000);
-    const all = buffer.getAll();
-    expect(all[0].seq).toBe(3);
-    expect(all[999].seq).toBe(1002);
+  it("allows append after dedup skip", () => {
+    buffer.append(makeMsg(1, "user_input"));
+    buffer.append(makeMsg(1, "user_input")); // dup, skip
+    buffer.append(makeMsg(2, "assistant_message")); // new, accept
+    expect(buffer.size()).toBe(2);
+    expect(buffer.getAll().map((m) => m.seq)).toEqual([1, 2]);
   });
 
   it("replaceMessages overwrites internal buffer", () => {
@@ -150,69 +147,3 @@ describe("compressOnSnapshot", () => {
   });
 });
 
-describe("compressOnResult", () => {
-  it("removes streaming deltas between user_input and result", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "thinking"));
-    buffer.append(makeMsg(3, "assistant_message"));
-    buffer.append(makeMsg(4, "thinking"));
-    buffer.append(makeMsg(5, "assistant_message"));
-    buffer.append(makeMsg(6, "tool_use_request"));
-    buffer.append(makeMsg(7, "tool_approve"));
-    buffer.append(makeMsg(8, "tool_result"));
-
-    compressOnResult(buffer, 8);
-
-    const all = buffer.getAll();
-    // user_input(1), tool_use_request(6), tool_approve(7), tool_result(8) should remain
-    // thinking(2,4) and assistant_message(3,5) should be removed
-    expect(all.map((m) => m.seq)).toEqual([1, 6, 7, 8]);
-  });
-
-  it("preserves messages before the turn and after result", () => {
-    const buffer = new SessionBuffer();
-    // 上一个 turn 的消息
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "assistant_message"));
-    buffer.append(makeMsg(3, "tool_result"));
-    // 当前 turn
-    buffer.append(makeMsg(4, "user_input"));
-    buffer.append(makeMsg(5, "thinking"));
-    buffer.append(makeMsg(6, "assistant_message"));
-    buffer.append(makeMsg(7, "tool_result"));
-    // 后续消息
-    buffer.append(makeMsg(8, "user_input"));
-
-    compressOnResult(buffer, 7);
-
-    const all = buffer.getAll();
-    // 1,2,3 不在 turn 范围内保留，4 保留（user_input），5,6 被删除，7 保留（result），8 保留
-    expect(all.map((m) => m.seq)).toEqual([1, 2, 3, 4, 7, 8]);
-  });
-
-  it("does nothing if result seq not found", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "thinking"));
-
-    compressOnResult(buffer, 99);
-    expect(buffer.size()).toBe(2);
-  });
-
-  it("preserves session control messages within turn", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "thinking"));
-    buffer.append(makeMsg(3, "session_status"));
-    buffer.append(makeMsg(4, "assistant_message"));
-    buffer.append(makeMsg(5, "tool_result"));
-
-    compressOnResult(buffer, 5);
-
-    const all = buffer.getAll();
-    // user_input(1), session_status(3), tool_result(5) remain
-    // thinking(2), assistant_message(4) removed
-    expect(all.map((m) => m.seq)).toEqual([1, 3, 5]);
-  });
-});

@@ -3,20 +3,17 @@ import { createServer, type Server } from "node:http";
 import { WebSocketServer } from "ws";
 import type { Logger } from "pino";
 import { RelayRegistry } from "./registry.js";
+import { BufferStore } from "./buffer-store.js";
 import { healthRouter } from "./health.js";
-import {
-  handleProxyConnection,
-  setupProxyHeartbeat,
-} from "./handlers/proxy.js";
-import {
-  handleClientConnection,
-  setupClientHeartbeat,
-} from "./handlers/client.js";
+import { handleProxyConnection } from "./handlers/proxy.js";
+import { handleClientConnection } from "./handlers/client.js";
+import { setupHeartbeat } from "./heartbeat.js";
 
 export interface RelayServerOptions {
   port?: number;
   heartbeatInterval?: number;
   logger: Logger;
+  dataDir?: string;
 }
 
 export interface RelayServer {
@@ -27,9 +24,10 @@ export interface RelayServer {
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
-  const { heartbeatInterval = 30000, logger } = options;
+  const { heartbeatInterval = 30000, logger, dataDir } = options;
 
-  const registry = new RelayRegistry();
+  const store = dataDir ? new BufferStore(dataDir) : null;
+  const registry = new RelayRegistry(store);
   const app = express();
   app.use(healthRouter(registry));
 
@@ -67,11 +65,10 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     handleClientConnection(ws, registry, logger);
   });
 
-  const proxyHeartbeat = setupProxyHeartbeat(proxyWss, heartbeatInterval);
-  const clientHeartbeat = setupClientHeartbeat(clientWss, heartbeatInterval);
+  const proxyHeartbeat = setupHeartbeat(proxyWss, heartbeatInterval);
+  const clientHeartbeat = setupHeartbeat(clientWss, heartbeatInterval);
 
   async function close(): Promise<void> {
-    registry.clearAllTimers();
     clearInterval(proxyHeartbeat);
     clearInterval(clientHeartbeat);
 

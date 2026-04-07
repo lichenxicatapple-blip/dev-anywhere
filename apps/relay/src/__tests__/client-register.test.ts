@@ -300,6 +300,87 @@ describe("client_register protocol", () => {
     expect(response.code).toBe("PROXY_OFFLINE");
   });
 
+  it("proxy_select rejects binding to offline proxy in grace period", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    // proxy 断线进入宽限期
+    proxy.close();
+    await settle(100);
+
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("relay_error");
+    expect(response.code).toBe("PROXY_NOT_FOUND");
+  });
+
+  it("proxy_select rejects binding to nonexistent proxy", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "nonexistent" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("relay_error");
+    expect(response.code).toBe("PROXY_NOT_FOUND");
+  });
+
+  it("client receives proxy_offline on proxy graceful disconnect", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await settle();
+
+    // proxy 主动退出
+    const msgPromise = waitForMessage(client);
+    proxy.send(JSON.stringify({ type: "proxy_disconnect", proxyId: "p1" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("proxy_offline");
+    expect(response.proxyId).toBe("p1");
+  });
+
+  it("client receives proxy_online when proxy reconnects after grace period", async () => {
+    const proxy1 = connectProxy();
+    await waitForOpen(proxy1);
+    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await settle();
+
+    // proxy 异常断线
+    const offlinePromise = waitForMessage(client);
+    proxy1.close();
+    const offlineMsg = JSON.parse(await offlinePromise);
+    expect(offlineMsg.type).toBe("proxy_offline");
+
+    // proxy 重连
+    const onlinePromise = waitForMessage(client);
+    const proxy2 = connectProxy();
+    await waitForOpen(proxy2);
+    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+
+    const onlineMsg = JSON.parse(await onlinePromise);
+    expect(onlineMsg.type).toBe("proxy_online");
+    expect(onlineMsg.proxyId).toBe("p1");
+  });
+
   it("proxy_select still works for clients without client_register", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
@@ -326,5 +407,58 @@ describe("client_register protocol", () => {
     const msg = JSON.parse(await msgPromise);
     expect(msg.type).toBe("assistant_message");
     expect(msg.payload.text).toBe("hello");
+  });
+
+  it("proxy receives proxy_register_response with status 'new' on first register", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+
+    const msgPromise = waitForMessage(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("proxy_register_response");
+    expect(response.status).toBe("new");
+    expect(response.sessions).toBeUndefined();
+  });
+
+  it("proxy receives proxy_register_response with status 'reconnected' and session seq map", async () => {
+    const proxy1 = connectProxy();
+    await waitForOpen(proxy1);
+    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await waitForMessage(proxy1); // consume register response
+    await settle();
+
+    // proxy 发送消息填充 buffer
+    proxy1.send(JSON.stringify({
+      seq: 1, sessionId: "s1", timestamp: Date.now(),
+      source: "proxy" as const, version: "1.0",
+      type: "assistant_message" as const,
+      payload: { text: "msg-1", isPartial: false },
+    }));
+    proxy1.send(JSON.stringify({
+      seq: 5, sessionId: "s1", timestamp: Date.now(),
+      source: "proxy" as const, version: "1.0",
+      type: "assistant_message" as const,
+      payload: { text: "msg-5", isPartial: false },
+    }));
+    await settle();
+
+    // proxy 断线
+    proxy1.close();
+    await settle(100);
+
+    // proxy 重连
+    const proxy2 = connectProxy();
+    await waitForOpen(proxy2);
+
+    const msgPromise = waitForMessage(proxy2);
+    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("proxy_register_response");
+    expect(response.status).toBe("reconnected");
+    expect(response.sessions).toBeDefined();
+    expect(response.sessions.s1).toBe(5);
   });
 });

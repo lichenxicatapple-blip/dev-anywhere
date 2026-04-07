@@ -3,6 +3,11 @@ import { z } from "zod";
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("proxy_register"), proxyId: z.string().min(1) }),
+  z.object({
+    type: z.literal("proxy_register_response"),
+    status: z.enum(["new", "reconnected"]),
+    sessions: z.record(z.string(), z.number()).optional(),
+  }),
   z.object({ type: z.literal("proxy_list_request") }),
   z.object({
     type: z.literal("proxy_list_response"),
@@ -52,6 +57,18 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("proxy_offline"),
     proxyId: z.string(),
+  }),
+
+  // Phase 5: Proxy 主动断开，relay 立即清理资源
+  z.object({
+    type: z.literal("proxy_disconnect"),
+    proxyId: z.string().min(1),
+  }),
+
+  // Phase 5: Proxy 重连后通知 client 恢复
+  z.object({
+    type: z.literal("proxy_online"),
+    proxyId: z.string().min(1),
   }),
 ]);
 

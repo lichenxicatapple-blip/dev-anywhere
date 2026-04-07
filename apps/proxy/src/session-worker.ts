@@ -1,6 +1,7 @@
 import { createServer, type Socket } from "node:net";
 import { mkdirSync, unlinkSync, existsSync, chmodSync } from "node:fs";
 import { JsonSession, type StreamJsonEvent } from "./json-session.js";
+import { EventStore, EventType } from "./event-store.js";
 import {
   createWorkerReader,
   serializeWorkerMsg,
@@ -19,6 +20,7 @@ if (!sessionId || !sockPath) {
 }
 
 let serveSocket: Socket | null = null;
+const eventStore = new EventStore(sessionId);
 
 const pendingApprovals = new Map<
   string,
@@ -46,14 +48,19 @@ const session = new JsonSession({
     });
   },
   onEvent: (event: StreamJsonEvent) => {
-    // 事件直接转发给 serve，由 serve 负责持久化和分发
+    // 写入 EventStore 获取 per-session seq，带给 serve 构建 MessageEnvelope
+    const seq = eventStore.writeImmediate(
+      EventType.PTY_OUTPUT,
+      Buffer.from(JSON.stringify(event), "utf-8"),
+    );
     sendToServe({
       type: "worker_event",
-      seq: 0,
+      seq,
       event: event as Record<string, unknown>,
     });
   },
   onExit: (code: number) => {
+    eventStore.close();
     sendToServe({ type: "worker_exit", code });
     cleanup();
     process.exit(0);

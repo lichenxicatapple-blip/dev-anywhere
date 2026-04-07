@@ -107,6 +107,14 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_select") {
+        if (!registry.isProxyOnline(msg.proxyId)) {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "PROXY_NOT_FOUND",
+            message: `Proxy not online: ${msg.proxyId}`,
+          }));
+          return;
+        }
         const bound = registry.bindClient(clientWs, msg.proxyId);
         if (!bound) {
           clientWs.send(JSON.stringify({
@@ -153,20 +161,3 @@ export function handleClientConnection(
   });
 }
 
-// 设置客户端心跳检测，返回定时器以便关闭时清理
-export function setupClientHeartbeat(
-  wss: WebSocketServer,
-  interval = 30000,
-): NodeJS.Timeout {
-  return setInterval(() => {
-    for (const ws of wss.clients) {
-      const clientWs = ws as ClientSocket;
-      if (!clientWs.isAlive) {
-        clientWs.terminate();
-        continue;
-      }
-      clientWs.isAlive = false;
-      clientWs.ping();
-    }
-  }, interval);
-}

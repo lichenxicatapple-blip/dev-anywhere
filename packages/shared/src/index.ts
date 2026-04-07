@@ -60,11 +60,7 @@ export type {
 export * from "./types/index.js";
 
 // builders
-export {
-  buildMessage,
-  createSequenceId,
-  resetSequenceCounter,
-} from "./builders/index.js";
+export { buildMessage } from "./builders/index.js";
 
 // relay control
 export { RelayControlSchema } from "./schemas/relay-control.js";

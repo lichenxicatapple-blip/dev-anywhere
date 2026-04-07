@@ -1,11 +1,11 @@
 import { WebSocket } from "ws";
 import { SessionBuffer } from "./session-buffer.js";
+import type { BufferStore } from "./buffer-store.js";
 
-// 代理连接状态，跟踪 ws、会话集合、宽限期定时器
+// 代理连接状态，跟踪 ws、会话集合、离线时间
 interface ProxyState {
   ws: WebSocket | null;
   sessions: Set<string>;
-  graceTimer: NodeJS.Timeout | null;
   disconnectedAt: number | null;
 }
 
@@ -27,18 +27,26 @@ export class RelayRegistry {
   private proxyStates = new Map<string, ProxyState>();
   private clientBindings = new Map<string, ClientBinding>();
   private sessionBuffers = new Map<string, SessionBuffer>();
+  private store: BufferStore | null;
 
   // 旧版兼容：WebSocket -> proxyId 的反向映射
   private legacyClientBindings = new Map<WebSocket, string>();
 
+  constructor(store: BufferStore | null = null) {
+    this.store = store;
+    if (store) {
+      const loaded = store.loadAll();
+      for (const [sessionId, msgs] of loaded) {
+        const buffer = new SessionBuffer(store, sessionId);
+        buffer.loadMessages(msgs);
+        this.sessionBuffers.set(sessionId, buffer);
+      }
+    }
+  }
+
   registerProxy(proxyId: string, ws: WebSocket): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
     if (existing) {
-      // 取消宽限期定时器
-      if (existing.graceTimer) {
-        clearTimeout(existing.graceTimer);
-        existing.graceTimer = null;
-      }
       // 如果旧连接还活着，先终止
       if (existing.ws && existing.ws.readyState === WebSocket.OPEN) {
         existing.ws.terminate();
@@ -51,44 +59,25 @@ export class RelayRegistry {
     this.proxyStates.set(proxyId, {
       ws,
       sessions: new Set(),
-      graceTimer: null,
       disconnectedAt: null,
     });
     return "new";
   }
 
-  // 启动宽限期，proxy 断连后保留状态等待重连
-  startGracePeriod(proxyId: string, timeoutMs = 1800000): void {
+  // 标记 proxy 离线，保留所有状态等待重连，不设超时
+  // 清理只在 proxy 主动退出（proxy_disconnect）或 relay 启动清理废弃数据时发生
+  markProxyOffline(proxyId: string): void {
     const state = this.proxyStates.get(proxyId);
     if (!state) return;
 
     state.ws = null;
     state.disconnectedAt = Date.now();
-
-    if (state.graceTimer) {
-      clearTimeout(state.graceTimer);
-    }
-
-    state.graceTimer = setTimeout(() => {
-      // 竞态保护：确认 ws 仍为 null（重连可能已恢复）
-      const current = this.proxyStates.get(proxyId);
-      if (current && current.ws === null) {
-        this.cleanupProxy(proxyId);
-      }
-    }, timeoutMs);
-
-    // 不阻止进程退出
-    state.graceTimer.unref();
   }
 
   // 彻底清理 proxy 状态、会话缓冲区、客户端绑定
   cleanupProxy(proxyId: string): void {
     const state = this.proxyStates.get(proxyId);
     if (!state) return;
-
-    if (state.graceTimer) {
-      clearTimeout(state.graceTimer);
-    }
 
     // 清理该 proxy 拥有的所有会话缓冲区
     for (const sessionId of state.sessions) {
@@ -152,7 +141,7 @@ export class RelayRegistry {
   getOrCreateSessionBuffer(sessionId: string): SessionBuffer {
     let buffer = this.sessionBuffers.get(sessionId);
     if (!buffer) {
-      buffer = new SessionBuffer();
+      buffer = new SessionBuffer(this.store, sessionId);
       this.sessionBuffers.set(sessionId, buffer);
     }
     return buffer;
@@ -160,6 +149,19 @@ export class RelayRegistry {
 
   getSessionBuffer(sessionId: string): SessionBuffer | undefined {
     return this.sessionBuffers.get(sessionId);
+  }
+
+  // 获取 proxy 所有 session 的最大 seq 映射，用于重连对账
+  getSessionSeqMap(proxyId: string): Record<string, number> {
+    const sessionIds = this.getSessionsForProxy(proxyId);
+    const map: Record<string, number> = {};
+    for (const sessionId of sessionIds) {
+      const buffer = this.sessionBuffers.get(sessionId);
+      if (buffer && buffer.size() > 0) {
+        map[sessionId] = buffer.getLastSeq();
+      }
+    }
+    return map;
   }
 
   // clientId 绑定方式
@@ -237,15 +239,6 @@ export class RelayRegistry {
     return count;
   }
 
-  // 取消所有宽限期定时器，服务器关闭时调用
-  clearAllTimers(): void {
-    for (const [, state] of this.proxyStates) {
-      if (state.graceTimer) {
-        clearTimeout(state.graceTimer);
-        state.graceTimer = null;
-      }
-    }
-  }
 
   getBufferStats(): BufferStats {
     let totalBuffered = 0;

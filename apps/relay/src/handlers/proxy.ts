@@ -31,6 +31,34 @@ export function handleProxyConnection(
       const status = registry.registerProxy(proxyId, proxyWs);
       proxyWs.proxyId = proxyId;
       logger.info({ proxyId, status }, "Proxy registered");
+
+      // 回传注册结果和 per-session 数据水位，proxy 据此决定是否需要 EventStore 回放
+      const sessions = status === "reconnected" ? registry.getSessionSeqMap(proxyId) : undefined;
+      proxyWs.send(JSON.stringify({
+        type: "proxy_register_response",
+        status,
+        sessions,
+      }));
+
+      if (status === "reconnected") {
+        const clients = registry.getClientsForProxy(proxyId);
+        for (const clientWs of clients) {
+          clientWs.send(JSON.stringify({ type: "proxy_online", proxyId }));
+        }
+      }
+      return;
+    }
+
+    if (result.kind === "control" && result.message.type === "proxy_disconnect") {
+      if (proxyWs.proxyId) {
+        const clients = registry.getClientsForProxy(proxyWs.proxyId);
+        for (const clientWs of clients) {
+          clientWs.send(JSON.stringify({ type: "proxy_offline", proxyId: proxyWs.proxyId }));
+        }
+        registry.unregisterProxy(proxyWs.proxyId);
+        logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, resources cleaned up");
+        proxyWs.proxyId = undefined;
+      }
       return;
     }
 
@@ -66,9 +94,9 @@ export function handleProxyConnection(
           proxyId: proxyWs.proxyId,
         }));
       }
-      // 启动宽限期而非立即清理，允许 proxy 在 30 分钟内重连
-      registry.startGracePeriod(proxyWs.proxyId);
-      logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, grace period started");
+      // 标记离线，保留所有状态等待重连
+      registry.markProxyOffline(proxyWs.proxyId);
+      logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, state preserved for reconnect");
     }
   });
 
@@ -77,20 +105,3 @@ export function handleProxyConnection(
   });
 }
 
-// 设置代理端心跳检测，返回定时器以便关闭时清理
-export function setupProxyHeartbeat(
-  wss: WebSocketServer,
-  interval = 30000,
-): NodeJS.Timeout {
-  return setInterval(() => {
-    for (const ws of wss.clients) {
-      const proxyWs = ws as ProxySocket;
-      if (!proxyWs.isAlive) {
-        proxyWs.terminate();
-        continue;
-      }
-      proxyWs.isAlive = false;
-      proxyWs.ping();
-    }
-  }, interval);
-}
