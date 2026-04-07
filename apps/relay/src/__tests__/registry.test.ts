@@ -195,11 +195,14 @@ describe("RelayRegistry", () => {
       expect(registry.bindClientById("c1", "unknown", ws)).toBe(false);
     });
 
-    it("unbindClientById removes binding", () => {
+    it("unbindClientById clears ws but preserves binding for reconnect", () => {
       registry.registerProxy("p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs());
       registry.unbindClientById("c1");
-      expect(registry.getClientBinding("c1")).toBeUndefined();
+      const binding = registry.getClientBinding("c1");
+      expect(binding).toBeDefined();
+      expect(binding!.proxyId).toBe("p1");
+      expect(binding!.ws).toBeNull();
     });
 
     it("updateClientSocket updates ws for existing binding", () => {

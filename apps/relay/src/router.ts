@@ -87,6 +87,69 @@ export function routeProxyMessage(
   }
 }
 
+// 处理 replay_request：从 per-session 缓冲区查找请求范围内的消息并逐条发送
+export function handleReplayRequest(
+  sessionId: string,
+  fromSeq: number,
+  toSeq: number,
+  clientWs: WebSocket,
+  registry: RelayRegistry,
+  logger: Logger,
+): void {
+  if (fromSeq > toSeq) {
+    clientWs.send(JSON.stringify({
+      type: "relay_error",
+      code: "INVALID_RANGE",
+      message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${toSeq}`,
+    }));
+    return;
+  }
+
+  const buffer = registry.getSessionBuffer(sessionId);
+  if (!buffer) {
+    clientWs.send(JSON.stringify({
+      type: "gap_unrecoverable",
+      sessionId,
+      fromSeq,
+      toSeq,
+    }));
+    logger.info({ sessionId, fromSeq, toSeq }, "Replay request: no buffer for session");
+    return;
+  }
+
+  const messages = buffer.getRange(fromSeq, toSeq);
+  if (messages.length === 0) {
+    clientWs.send(JSON.stringify({
+      type: "gap_unrecoverable",
+      sessionId,
+      fromSeq,
+      toSeq,
+    }));
+    logger.info({ sessionId, fromSeq, toSeq }, "Replay request: no messages in range");
+    return;
+  }
+
+  // 逐条发送匹配的消息
+  for (const msg of messages) {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(msg.raw);
+    }
+  }
+
+  // 检查缓冲区是否覆盖了请求范围的起始部分
+  const firstBufferedSeq = messages[0].seq;
+  if (firstBufferedSeq > fromSeq) {
+    clientWs.send(JSON.stringify({
+      type: "gap_unrecoverable",
+      sessionId,
+      fromSeq,
+      toSeq: firstBufferedSeq - 1,
+    }));
+  }
+
+  logger.info({ sessionId, fromSeq, toSeq, sent: messages.length }, "Replay request served");
+}
+
 // 将 client 发来的 MessageEnvelope 转发给该 client 绑定的 proxy
 export function routeClientMessage(
   raw: string,

@@ -143,6 +143,12 @@ export class RelayRegistry {
     }
   }
 
+  // 获取 proxy 关联的所有 sessionId
+  getSessionsForProxy(proxyId: string): string[] {
+    const state = this.proxyStates.get(proxyId);
+    return state ? Array.from(state.sessions) : [];
+  }
+
   getOrCreateSessionBuffer(sessionId: string): SessionBuffer {
     let buffer = this.sessionBuffers.get(sessionId);
     if (!buffer) {
@@ -172,8 +178,12 @@ export class RelayRegistry {
     }
   }
 
+  // 断开客户端 WebSocket 但保留绑定关系，重连时可恢复
   unbindClientById(clientId: string): void {
-    this.clientBindings.delete(clientId);
+    const binding = this.clientBindings.get(clientId);
+    if (binding) {
+      binding.ws = null;
+    }
   }
 
   getClientBinding(clientId: string): ClientBinding | undefined {
