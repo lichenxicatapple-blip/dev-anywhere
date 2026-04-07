@@ -99,6 +99,35 @@ function getEventFileMtime(sessionId: string): number | null {
   }
 }
 
+// ---------- PTY 快照发送 ----------
+
+// PTY session WORKING→IDLE 时，读取本地终端快照发送到 relay 触发缓冲区压缩
+export function sendPtySnapshot(
+  sessionId: string,
+  relayConnection: RelayConnection,
+  log: pino.Logger,
+): void {
+  const snapshotPath = sessionPaths(sessionId).snapshot;
+  try {
+    if (!existsSync(snapshotPath)) return;
+    const snapshotData = readFileSync(snapshotPath);
+    const store = new EventStore(sessionId);
+    const seq = store.getSeq() + 1;
+    store.close();
+    const envelope = buildMessage(
+      "pty_snapshot",
+      sessionId,
+      seq,
+      { data: snapshotData.toString("base64") },
+      "proxy",
+    );
+    relayConnection.send(envelope);
+    log.info({ sessionId, seq }, "PTY snapshot sent to relay");
+  } catch (err) {
+    log.warn({ sessionId, error: String(err) }, "Failed to send PTY snapshot to relay");
+  }
+}
+
 // ---------- Worker 管理 ----------
 
 function connectToWorker(
@@ -512,6 +541,9 @@ export async function startService(): Promise<void> {
       } else {
         if (session.state === SessionState.WORKING) {
           try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
+          if (relayConnection) {
+            sendPtySnapshot(session.id, relayConnection, logger);
+          }
         }
       }
     }

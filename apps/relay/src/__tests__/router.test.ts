@@ -81,8 +81,8 @@ describe("routeProxyMessage", () => {
     const client2 = createMockWs();
 
     registry.registerProxy("p1", proxyWs);
-    registry.bindClient(client1, "p1");
-    registry.bindClient(client2, "p1");
+    registry.bindClientById("c1", "p1", client1);
+    registry.bindClientById("c2", "p1", client2);
 
     const raw = JSON.stringify(validEnvelope);
     routeProxyMessage(raw, "p1", registry, logger);
@@ -96,7 +96,7 @@ describe("routeProxyMessage", () => {
     const client1 = createMockWs();
 
     registry.registerProxy("p1", proxyWs);
-    registry.bindClient(client1, "p1");
+    registry.bindClientById("c1", "p1", client1);
 
     routeProxyMessage("invalid json", "p1", registry, logger);
 
@@ -118,8 +118,8 @@ describe("routeProxyMessage", () => {
     const openClient = createMockWs();
 
     registry.registerProxy("p1", proxyWs);
-    registry.bindClient(closedClient, "p1");
-    registry.bindClient(openClient, "p1");
+    registry.bindClientById("c-closed", "p1", closedClient);
+    registry.bindClientById("c-open", "p1", openClient);
 
     const raw = JSON.stringify(validEnvelope);
     routeProxyMessage(raw, "p1", registry, logger);
@@ -143,24 +143,12 @@ describe("routeClientMessage", () => {
     const clientWs = createMockWs();
 
     registry.registerProxy("p1", proxyWs);
-    registry.bindClient(clientWs, "p1");
 
     const clientEnvelope = { ...validEnvelope, source: "client" as const };
     const raw = JSON.stringify(clientEnvelope);
-    routeClientMessage(raw, clientWs, registry, logger);
+    routeClientMessage(raw, "p1", clientWs, registry, logger);
 
     expect(proxyWs.send).toHaveBeenCalledWith(raw);
-  });
-
-  it("sends relay_error when client has no binding", () => {
-    const clientWs = createMockWs();
-    const raw = JSON.stringify({ ...validEnvelope, source: "client" as const });
-    routeClientMessage(raw, clientWs, registry, logger);
-
-    expect(clientWs.send).toHaveBeenCalled();
-    const sentData = JSON.parse((clientWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
-    expect(sentData.type).toBe("relay_error");
-    expect(sentData.code).toBe("NOT_BOUND");
   });
 
   it("sends relay_error when bound proxy is offline", () => {
@@ -168,10 +156,9 @@ describe("routeClientMessage", () => {
     const clientWs = createMockWs();
 
     registry.registerProxy("p1", proxyWs);
-    registry.bindClient(clientWs, "p1");
 
     const raw = JSON.stringify({ ...validEnvelope, source: "client" as const });
-    routeClientMessage(raw, clientWs, registry, logger);
+    routeClientMessage(raw, "p1", clientWs, registry, logger);
 
     expect(clientWs.send).toHaveBeenCalled();
     const sentData = JSON.parse((clientWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
@@ -181,7 +168,7 @@ describe("routeClientMessage", () => {
 
   it("logs warning for invalid data", () => {
     const clientWs = createMockWs();
-    routeClientMessage("bad data {{", clientWs, registry, logger);
+    routeClientMessage("bad data {{", "p1", clientWs, registry, logger);
 
     expect(logger.warn).toHaveBeenCalled();
     expect(clientWs.send).not.toHaveBeenCalled();

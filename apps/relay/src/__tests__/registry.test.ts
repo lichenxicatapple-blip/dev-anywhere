@@ -57,13 +57,13 @@ describe("RelayRegistry", () => {
       const client2 = createMockWs();
 
       registry.registerProxy("p1", proxyWs);
-      registry.bindClient(client1, "p1");
-      registry.bindClient(client2, "p1");
+      registry.bindClientById("c1", "p1", client1);
+      registry.bindClientById("c2", "p1", client2);
 
       registry.unregisterProxy("p1");
 
-      expect(registry.getBoundProxy(client1)).toBeUndefined();
-      expect(registry.getBoundProxy(client2)).toBeUndefined();
+      expect(registry.getClientBinding("c1")).toBeUndefined();
+      expect(registry.getClientBinding("c2")).toBeUndefined();
     });
 
     it("listProxies returns all registered proxyIds", () => {
@@ -220,56 +220,11 @@ describe("RelayRegistry", () => {
     });
   });
 
-  describe("legacy client binding", () => {
-    it("bindClient associates client with proxyId", () => {
-      const proxyWs = createMockWs();
-      const clientWs = createMockWs();
-      registry.registerProxy("p1", proxyWs);
-
-      const result = registry.bindClient(clientWs, "p1");
-      expect(result).toBe(true);
-      expect(registry.getBoundProxy(clientWs)).toBe("p1");
-    });
-
-    it("bindClient returns false if proxyId not registered", () => {
-      const clientWs = createMockWs();
-      const result = registry.bindClient(clientWs, "nonexistent");
-      expect(result).toBe(false);
-    });
-
-    it("unbindClient removes client binding", () => {
-      const proxyWs = createMockWs();
-      const clientWs = createMockWs();
-      registry.registerProxy("p1", proxyWs);
-      registry.bindClient(clientWs, "p1");
-
-      registry.unbindClient(clientWs);
-      expect(registry.getBoundProxy(clientWs)).toBeUndefined();
-    });
-
-    it("getClientsForProxy returns legacy-bound clients", () => {
-      const proxyWs = createMockWs();
-      const client1 = createMockWs();
-      const client2 = createMockWs();
-
-      registry.registerProxy("p1", proxyWs);
-      registry.bindClient(client1, "p1");
-      registry.bindClient(client2, "p1");
-
-      const clients = registry.getClientsForProxy("p1");
-      expect(clients).toContain(client1);
-      expect(clients).toContain(client2);
-    });
-
-    it("getBoundProxy returns undefined for unbound client", () => {
-      const clientWs = createMockWs();
-      expect(registry.getBoundProxy(clientWs)).toBeUndefined();
-    });
-
-    it("countClients returns total bound clients", () => {
+  describe("countClients", () => {
+    it("returns total bound clients", () => {
       registry.registerProxy("p1", createMockWs());
-      registry.bindClient(createMockWs(), "p1");
       registry.bindClientById("c1", "p1", createMockWs());
+      registry.bindClientById("c2", "p1", createMockWs());
       expect(registry.countClients()).toBe(2);
     });
   });

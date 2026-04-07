@@ -97,7 +97,7 @@ describe("client_register protocol", () => {
     client.send(JSON.stringify({
       type: "client_register",
       clientId: "fresh-client",
-      lastSeq: 0,
+      sessions: {},
     }));
 
     const response = JSON.parse(await msgPromise);
@@ -119,7 +119,7 @@ describe("client_register protocol", () => {
     client1.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 0,
+      sessions: {},
     }));
     // 收到 new 因为没有绑定
     const newResponse = JSON.parse(await waitForMessage(client1));
@@ -142,7 +142,7 @@ describe("client_register protocol", () => {
     client2.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 0,
+      sessions: {},
     }));
 
     const response = JSON.parse(await msgPromise);
@@ -164,7 +164,7 @@ describe("client_register protocol", () => {
     client1.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 0,
+      sessions: {},
     }));
     await waitForMessage(client1); // new response
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
@@ -192,7 +192,7 @@ describe("client_register protocol", () => {
     client1.close();
     await settle();
 
-    // 新客户端重连，lastSeq=1 表示需要 seq 2, 3
+    // 新客户端重连，s1 已收到到 seq 1，需要回放 seq 2, 3
     const client2 = connectClient();
     await waitForOpen(client2);
     connections.push(client2);
@@ -202,7 +202,7 @@ describe("client_register protocol", () => {
     client2.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 1,
+      sessions: { s1: 1 },
     }));
 
     const received = await allMessages;
@@ -236,7 +236,7 @@ describe("client_register protocol", () => {
     client1.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 0,
+      sessions: {},
     }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
@@ -257,7 +257,7 @@ describe("client_register protocol", () => {
     client2.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
-      lastSeq: 0,
+      sessions: {},
     }));
 
     const response = JSON.parse(await msgPromise);

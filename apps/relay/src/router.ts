@@ -37,8 +37,8 @@ export function parseMessage(data: string): ParseResult {
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };
 }
 
-// PTY 快照压缩触发类型
-const SNAPSHOT_TYPE = "session_status";
+// PTY 快照压缩触发类型，只有 pty_snapshot 消息才触发压缩
+const SNAPSHOT_TYPE = "pty_snapshot";
 
 // 将 proxy 发来的 MessageEnvelope 缓冲到 per-session buffer 后转发给绑定的 client
 export function routeProxyMessage(
@@ -87,41 +87,45 @@ export function routeProxyMessage(
 export function handleReplayRequest(
   sessionId: string,
   fromSeq: number,
-  toSeq: number,
+  toSeq: number | undefined,
   clientWs: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
 ): void {
-  if (fromSeq > toSeq) {
+  const buffer = registry.getSessionBuffer(sessionId);
+
+  // toSeq 未指定时同步到该 session 的最新消息
+  const effectiveToSeq = toSeq ?? (buffer ? buffer.getLastSeq() : 0);
+
+  if (fromSeq > effectiveToSeq) {
     clientWs.send(JSON.stringify({
       type: "relay_error",
       code: "INVALID_RANGE",
-      message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${toSeq}`,
+      message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${effectiveToSeq}`,
     }));
     return;
   }
 
-  const buffer = registry.getSessionBuffer(sessionId);
   if (!buffer) {
     clientWs.send(JSON.stringify({
       type: "gap_unrecoverable",
       sessionId,
       fromSeq,
-      toSeq,
+      toSeq: effectiveToSeq,
     }));
-    logger.info({ sessionId, fromSeq, toSeq }, "Replay request: no buffer for session");
+    logger.info({ sessionId, fromSeq, toSeq: effectiveToSeq }, "Replay request: no buffer for session");
     return;
   }
 
-  const messages = buffer.getRange(fromSeq, toSeq);
+  const messages = buffer.getRange(fromSeq, effectiveToSeq);
   if (messages.length === 0) {
     clientWs.send(JSON.stringify({
       type: "gap_unrecoverable",
       sessionId,
       fromSeq,
-      toSeq,
+      toSeq: effectiveToSeq,
     }));
-    logger.info({ sessionId, fromSeq, toSeq }, "Replay request: no messages in range");
+    logger.info({ sessionId, fromSeq, toSeq: effectiveToSeq }, "Replay request: no messages in range");
     return;
   }
 
@@ -143,12 +147,14 @@ export function handleReplayRequest(
     }));
   }
 
-  logger.info({ sessionId, fromSeq, toSeq, sent: messages.length }, "Replay request served");
+  logger.info({ sessionId, fromSeq, toSeq: effectiveToSeq, sent: messages.length }, "Replay request served");
 }
 
-// 将 client 发来的 MessageEnvelope 转发给该 client 绑定的 proxy
+// 将 client 发来的 MessageEnvelope 转发给绑定的 proxy
+// proxyId 由调用方从 clientId 绑定中解析后传入
 export function routeClientMessage(
   raw: string,
+  proxyId: string,
   clientWs: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
@@ -162,16 +168,6 @@ export function routeClientMessage(
 
   if (result.kind === "control") {
     logger.warn("Control message in routeClientMessage, should be handled by handler");
-    return;
-  }
-
-  const proxyId = registry.getBoundProxy(clientWs);
-  if (!proxyId) {
-    clientWs.send(JSON.stringify({
-      type: "relay_error",
-      code: "NOT_BOUND",
-      message: "Client is not bound to any proxy",
-    }));
     return;
   }
 

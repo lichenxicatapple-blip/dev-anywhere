@@ -115,7 +115,7 @@ describe("compressOnSnapshot", () => {
     const buffer = new SessionBuffer();
     buffer.append(makeMsg(1, "user_input"));
     buffer.append(makeMsg(2, "assistant_message"));
-    buffer.append(makeMsg(3, "session_status")); // snapshot
+    buffer.append(makeMsg(3, "pty_snapshot")); // snapshot
     buffer.append(makeMsg(4, "user_input"));
     buffer.append(makeMsg(5, "assistant_message"));
 
@@ -139,7 +139,7 @@ describe("compressOnSnapshot", () => {
 
   it("does nothing if snapshot is already first message", () => {
     const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "session_status")); // snapshot at index 0
+    buffer.append(makeMsg(1, "pty_snapshot")); // snapshot at index 0
     buffer.append(makeMsg(2, "user_input"));
 
     compressOnSnapshot(buffer, 1);

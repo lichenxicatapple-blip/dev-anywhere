@@ -16,6 +16,7 @@ import {
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
+  PtySnapshotPayloadSchema,
 } from "./session.js";
 import {
   HeartbeatPayloadSchema,
@@ -124,6 +125,12 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     ...BaseEnvelopeFields,
     type: z.literal("sync_response"),
     payload: SyncResponsePayloadSchema,
+  }),
+  // PTY 终端快照，relay 收到后触发缓冲区压缩
+  z.object({
+    ...BaseEnvelopeFields,
+    type: z.literal("pty_snapshot"),
+    payload: PtySnapshotPayloadSchema,
   }),
 ]);
 

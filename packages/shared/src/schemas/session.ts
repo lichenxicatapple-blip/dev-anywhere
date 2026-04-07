@@ -51,3 +51,11 @@ export const SessionStatusPayloadSchema = z.object({
 });
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
+
+// PTY 终端快照，base64 编码的二进制终端状态
+// relay 收到后触发缓冲区压缩，丢弃快照之前的所有消息
+export const PtySnapshotPayloadSchema = z.object({
+  data: z.string(),
+});
+
+export type PtySnapshotPayload = z.infer<typeof PtySnapshotPayloadSchema>;

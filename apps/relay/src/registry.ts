@@ -29,9 +29,6 @@ export class RelayRegistry {
   private sessionBuffers = new Map<string, SessionBuffer>();
   private store: BufferStore | null;
 
-  // 旧版兼容：WebSocket -> proxyId 的反向映射
-  private legacyClientBindings = new Map<WebSocket, string>();
-
   constructor(store: BufferStore | null = null) {
     this.store = store;
     if (store) {
@@ -79,8 +76,12 @@ export class RelayRegistry {
     const state = this.proxyStates.get(proxyId);
     if (!state) return;
 
-    // 清理该 proxy 拥有的所有会话缓冲区
+    // 清理该 proxy 拥有的所有会话缓冲区（含磁盘文件）
     for (const sessionId of state.sessions) {
+      const buffer = this.sessionBuffers.get(sessionId);
+      if (buffer) {
+        buffer.clear();
+      }
       this.sessionBuffers.delete(sessionId);
     }
 
@@ -88,13 +89,6 @@ export class RelayRegistry {
     for (const [clientId, binding] of this.clientBindings) {
       if (binding.proxyId === proxyId) {
         this.clientBindings.delete(clientId);
-      }
-    }
-
-    // 清理旧版客户端绑定
-    for (const [clientWs, boundProxyId] of this.legacyClientBindings) {
-      if (boundProxyId === proxyId) {
-        this.legacyClientBindings.delete(clientWs);
       }
     }
 
@@ -192,41 +186,14 @@ export class RelayRegistry {
     return this.clientBindings.get(clientId);
   }
 
-  // 旧版 WebSocket 引用绑定方式，保持向后兼容
-  bindClient(clientWs: WebSocket, proxyId: string): boolean {
-    if (!this.proxyStates.has(proxyId)) {
-      return false;
-    }
-    this.legacyClientBindings.set(clientWs, proxyId);
-    return true;
-  }
-
-  unbindClient(clientWs: WebSocket): void {
-    this.legacyClientBindings.delete(clientWs);
-  }
-
-  getBoundProxy(clientWs: WebSocket): string | undefined {
-    return this.legacyClientBindings.get(clientWs);
-  }
-
   // 获取绑定到指定 proxy 的所有活跃客户端 WebSocket
   getClientsForProxy(proxyId: string): WebSocket[] {
     const clients: WebSocket[] = [];
-
-    // clientId 绑定的客户端
     for (const [, binding] of this.clientBindings) {
       if (binding.proxyId === proxyId && binding.ws && binding.ws.readyState === WebSocket.OPEN) {
         clients.push(binding.ws);
       }
     }
-
-    // 旧版 WebSocket 绑定的客户端
-    for (const [clientWs, boundProxyId] of this.legacyClientBindings) {
-      if (boundProxyId === proxyId && clientWs.readyState === WebSocket.OPEN) {
-        clients.push(clientWs);
-      }
-    }
-
     return clients;
   }
 
@@ -235,7 +202,6 @@ export class RelayRegistry {
     for (const [, binding] of this.clientBindings) {
       if (binding.ws) count++;
     }
-    count += this.legacyClientBindings.size;
     return count;
   }
 

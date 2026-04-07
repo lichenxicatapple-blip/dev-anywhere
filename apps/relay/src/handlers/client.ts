@@ -1,6 +1,7 @@
 import { WebSocket } from "ws";
 import type { WebSocketServer } from "ws";
 import type { Logger } from "pino";
+import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
 
@@ -8,12 +9,14 @@ import { parseMessage, routeClientMessage, handleReplayRequest } from "../router
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
   clientId?: string;
+  boundProxyId?: string;
 }
 
 // 处理 client_register 消息：三种状态 restored / proxy_offline / new
+// sessions 是 per-session lastSeq map，未列出的 session 视为从未收到（回放全量）
 function handleClientRegister(
   clientId: string,
-  lastSeq: number,
+  sessions: Record<string, number> | undefined,
   clientWs: ClientSocket,
   registry: RelayRegistry,
   logger: Logger,
@@ -33,12 +36,16 @@ function handleClientRegister(
 
   const { proxyId } = binding;
   registry.updateClientSocket(clientId, clientWs);
+  clientWs.boundProxyId = proxyId;
+
+  const sessionSeqMap = registry.getSessionSeqMap(proxyId);
 
   if (!registry.isProxyOnline(proxyId)) {
     clientWs.send(JSON.stringify({
       type: "client_register_response",
       status: "proxy_offline",
       proxyId,
+      sessions: sessionSeqMap,
     }));
     logger.info({ clientId, proxyId, status: "proxy_offline" }, "Client registered");
     return;
@@ -49,13 +56,16 @@ function handleClientRegister(
     type: "client_register_response",
     status: "restored",
     proxyId,
+    sessions: sessionSeqMap,
   }));
 
-  // 遍历 proxy 关联的所有 session，发送 lastSeq 之后的消息
-  const sessionIds = registry.getSessionsForProxy(proxyId);
-  for (const sessionId of sessionIds) {
+  // 按 session 独立回放，每个 session 使用各自的 lastSeq
+  const proxySessionIds = registry.getSessionsForProxy(proxyId);
+  for (const sessionId of proxySessionIds) {
     const buffer = registry.getSessionBuffer(sessionId);
     if (!buffer) continue;
+    // 未列出的 session 用 -1，回放该 session 全量消息
+    const lastSeq = sessions?.[sessionId] ?? -1;
     const missed = buffer.getAfterSeq(lastSeq);
     for (const msg of missed) {
       if (clientWs.readyState === WebSocket.OPEN) {
@@ -64,7 +74,7 @@ function handleClientRegister(
     }
   }
 
-  logger.info({ clientId, proxyId, status: "restored", lastSeq }, "Client registered");
+  logger.info({ clientId, proxyId, status: "restored", sessions }, "Client registered");
 }
 
 // 处理远程客户端 WebSocket 连接生命周期
@@ -88,7 +98,7 @@ export function handleClientConnection(
       const msg = result.message;
 
       if (msg.type === "client_register") {
-        handleClientRegister(msg.clientId, msg.lastSeq, clientWs, registry, logger);
+        handleClientRegister(msg.clientId, msg.sessions, clientWs, registry, logger);
         return;
       }
 
@@ -115,7 +125,11 @@ export function handleClientConnection(
           }));
           return;
         }
-        const bound = registry.bindClient(clientWs, msg.proxyId);
+        // 没有 clientId 时自动分配，统一通过 clientId 绑定
+        if (!clientWs.clientId) {
+          clientWs.clientId = `anon-${nanoid(10)}`;
+        }
+        const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         if (!bound) {
           clientWs.send(JSON.stringify({
             type: "relay_error",
@@ -124,11 +138,8 @@ export function handleClientConnection(
           }));
           return;
         }
-        // 如果有 clientId，同步更新 clientId 绑定
-        if (clientWs.clientId) {
-          registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
-        }
-        logger.info({ proxyId: msg.proxyId }, "Client bound to proxy");
+        clientWs.boundProxyId = msg.proxyId;
+        logger.info({ proxyId: msg.proxyId, clientId: clientWs.clientId }, "Client bound to proxy");
         return;
       }
 
@@ -141,7 +152,15 @@ export function handleClientConnection(
     }
 
     if (result.kind === "envelope") {
-      routeClientMessage(raw, clientWs, registry, logger);
+      if (!clientWs.boundProxyId) {
+        clientWs.send(JSON.stringify({
+          type: "relay_error",
+          code: "NOT_BOUND",
+          message: "Client is not bound to any proxy",
+        }));
+        return;
+      }
+      routeClientMessage(raw, clientWs.boundProxyId, clientWs, registry, logger);
       return;
     }
 
@@ -152,8 +171,7 @@ export function handleClientConnection(
     if (clientWs.clientId) {
       registry.unbindClientById(clientWs.clientId);
     }
-    registry.unbindClient(clientWs);
-    logger.info("Client disconnected");
+    logger.info({ clientId: clientWs.clientId }, "Client disconnected");
   });
 
   clientWs.on("error", (err) => {

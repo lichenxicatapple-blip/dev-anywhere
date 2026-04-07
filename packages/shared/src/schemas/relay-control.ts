@@ -24,12 +24,17 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("client_register"),
     clientId: z.string().min(1),
-    lastSeq: z.number().int().nonnegative(),
+    // per-session lastSeq，与 proxy_register_response.sessions 对称
+    // key=sessionId, value=该 session 客户端已收到的最大 seq
+    // 未列出的 session 视为从未收到，回放全量
+    sessions: z.record(z.string(), z.number()).optional(),
   }),
   z.object({
     type: z.literal("client_register_response"),
     status: z.enum(["restored", "proxy_offline", "new"]),
     proxyId: z.string().optional(),
+    // per-session 最新 seq，client 可用于进度感知和自检
+    sessions: z.record(z.string(), z.number()).optional(),
   }),
 
   // Phase 5: 消息回放协议
@@ -37,7 +42,8 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     type: z.literal("replay_request"),
     sessionId: z.string().min(1),
     fromSeq: z.number().int().nonnegative(),
-    toSeq: z.number().int().nonnegative(),
+    // 不传则同步到该 session 的最新消息
+    toSeq: z.number().int().nonnegative().optional(),
   }),
   z.object({
     type: z.literal("replay_response"),

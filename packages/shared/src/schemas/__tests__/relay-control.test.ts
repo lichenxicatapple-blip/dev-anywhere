@@ -74,28 +74,33 @@ describe("RelayControlSchema", () => {
   });
 
   // Phase 5: client_register
-  it("parses client_register with clientId and lastSeq", () => {
+  it("parses client_register with clientId and sessions", () => {
     const result = RelayControlSchema.parse({
       type: "client_register",
       clientId: "client-001",
-      lastSeq: 42,
+      sessions: { s1: 42, s2: 10 },
     });
     expect(result).toEqual({
       type: "client_register",
       clientId: "client-001",
-      lastSeq: 42,
+      sessions: { s1: 42, s2: 10 },
+    });
+  });
+
+  it("parses client_register without sessions (new client)", () => {
+    const result = RelayControlSchema.parse({
+      type: "client_register",
+      clientId: "client-002",
+    });
+    expect(result).toEqual({
+      type: "client_register",
+      clientId: "client-002",
     });
   });
 
   it("rejects client_register with empty clientId", () => {
     expect(() =>
-      RelayControlSchema.parse({ type: "client_register", clientId: "", lastSeq: 0 }),
-    ).toThrow();
-  });
-
-  it("rejects client_register with negative lastSeq", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "client_register", clientId: "c1", lastSeq: -1 }),
+      RelayControlSchema.parse({ type: "client_register", clientId: "" }),
     ).toThrow();
   });
 
