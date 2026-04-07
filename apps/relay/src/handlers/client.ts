@@ -1,11 +1,70 @@
-import type { WebSocket, WebSocketServer } from "ws";
+import { WebSocket } from "ws";
+import type { WebSocketServer } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "../registry.js";
-import { parseMessage, routeClientMessage } from "../router.js";
+import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
+  clientId?: string;
+}
+
+// 处理 client_register 消息：三种状态 restored / proxy_offline / new
+function handleClientRegister(
+  clientId: string,
+  lastSeq: number,
+  clientWs: ClientSocket,
+  registry: RelayRegistry,
+  logger: Logger,
+): void {
+  clientWs.clientId = clientId;
+
+  const binding = registry.getClientBinding(clientId);
+
+  if (!binding) {
+    clientWs.send(JSON.stringify({
+      type: "client_register_response",
+      status: "new",
+    }));
+    logger.info({ clientId, status: "new" }, "Client registered");
+    return;
+  }
+
+  const { proxyId } = binding;
+  registry.updateClientSocket(clientId, clientWs);
+
+  if (!registry.isProxyOnline(proxyId)) {
+    clientWs.send(JSON.stringify({
+      type: "client_register_response",
+      status: "proxy_offline",
+      proxyId,
+    }));
+    logger.info({ clientId, proxyId, status: "proxy_offline" }, "Client registered");
+    return;
+  }
+
+  // proxy 在线，恢复绑定并发送增量回放
+  clientWs.send(JSON.stringify({
+    type: "client_register_response",
+    status: "restored",
+    proxyId,
+  }));
+
+  // 遍历 proxy 关联的所有 session，发送 lastSeq 之后的消息
+  const sessionIds = registry.getSessionsForProxy(proxyId);
+  for (const sessionId of sessionIds) {
+    const buffer = registry.getSessionBuffer(sessionId);
+    if (!buffer) continue;
+    const missed = buffer.getAfterSeq(lastSeq);
+    for (const msg of missed) {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(msg.raw);
+      }
+    }
+  }
+
+  logger.info({ clientId, proxyId, status: "restored", lastSeq }, "Client registered");
 }
 
 // 处理远程客户端 WebSocket 连接生命周期
@@ -28,6 +87,16 @@ export function handleClientConnection(
     if (result.kind === "control") {
       const msg = result.message;
 
+      if (msg.type === "client_register") {
+        handleClientRegister(msg.clientId, msg.lastSeq, clientWs, registry, logger);
+        return;
+      }
+
+      if (msg.type === "replay_request") {
+        handleReplayRequest(msg.sessionId, msg.fromSeq, msg.toSeq, clientWs, registry, logger);
+        return;
+      }
+
       if (msg.type === "proxy_list_request") {
         const proxies = registry.listProxies().map((id) => ({ proxyId: id }));
         clientWs.send(JSON.stringify({
@@ -46,6 +115,10 @@ export function handleClientConnection(
             message: `Proxy not online: ${msg.proxyId}`,
           }));
           return;
+        }
+        // 如果有 clientId，同步更新 clientId 绑定
+        if (clientWs.clientId) {
+          registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         }
         logger.info({ proxyId: msg.proxyId }, "Client bound to proxy");
         return;
@@ -68,6 +141,9 @@ export function handleClientConnection(
   });
 
   clientWs.on("close", () => {
+    if (clientWs.clientId) {
+      registry.unbindClientById(clientWs.clientId);
+    }
     registry.unbindClient(clientWs);
     logger.info("Client disconnected");
   });
