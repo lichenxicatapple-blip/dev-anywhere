@@ -28,9 +28,9 @@ export function handleProxyConnection(
 
     if (result.kind === "control" && result.message.type === "proxy_register") {
       const { proxyId } = result.message;
-      registry.registerProxy(proxyId, proxyWs);
+      const status = registry.registerProxy(proxyId, proxyWs);
       proxyWs.proxyId = proxyId;
-      logger.info({ proxyId }, "Proxy registered");
+      logger.info({ proxyId, status }, "Proxy registered");
       return;
     }
 
@@ -58,8 +58,17 @@ export function handleProxyConnection(
 
   proxyWs.on("close", () => {
     if (proxyWs.proxyId) {
-      registry.unregisterProxy(proxyWs.proxyId);
-      logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected");
+      // 通知所有绑定的客户端 proxy 已离线
+      const clients = registry.getClientsForProxy(proxyWs.proxyId);
+      for (const clientWs of clients) {
+        clientWs.send(JSON.stringify({
+          type: "proxy_offline",
+          proxyId: proxyWs.proxyId,
+        }));
+      }
+      // 启动宽限期而非立即清理，允许 proxy 在 30 分钟内重连
+      registry.startGracePeriod(proxyWs.proxyId);
+      logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, grace period started");
     }
   });
 

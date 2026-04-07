@@ -13,10 +13,12 @@ export function healthRouter(registry: RelayRegistry): Router {
   });
 
   router.get("/status", (_req, res) => {
+    const bufferStats = registry.getBufferStats();
     res.json({
       proxyCount: registry.listProxies().length,
       clientCount: registry.countClients(),
       uptime: process.uptime(),
+      buffers: bufferStats,
     });
   });
 

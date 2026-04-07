@@ -7,6 +7,7 @@ import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "./registry.js";
+import { compressOnSnapshot, compressOnResult } from "./buffer-compressor.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
 export type ParseResult =
@@ -36,7 +37,12 @@ export function parseMessage(data: string): ParseResult {
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };
 }
 
-// 将 proxy 发来的 MessageEnvelope 原样转发给绑定到该 proxyId 的所有 client
+// PTY 快照压缩触发类型
+const SNAPSHOT_TYPE = "session_status";
+// JSON turn 结束信号
+const RESULT_TYPE = "tool_result";
+
+// 将 proxy 发来的 MessageEnvelope 缓冲到 per-session buffer 后转发给绑定的 client
 export function routeProxyMessage(
   raw: string,
   proxyId: string,
@@ -55,6 +61,24 @@ export function routeProxyMessage(
     return;
   }
 
+  const { message } = result;
+  const { sessionId, type, seq, source } = message;
+
+  // 跟踪该 proxy 拥有的 session
+  registry.addSessionToProxy(proxyId, sessionId);
+
+  // 缓冲消息到 per-session buffer
+  const buffer = registry.getOrCreateSessionBuffer(sessionId);
+  buffer.append({ raw, seq, type, source });
+
+  // 根据消息类型触发压缩
+  if (type === SNAPSHOT_TYPE) {
+    compressOnSnapshot(buffer, seq);
+  } else if (type === RESULT_TYPE) {
+    compressOnResult(buffer, seq);
+  }
+
+  // 转发给所有绑定的客户端
   const clients = registry.getClientsForProxy(proxyId);
   for (const clientWs of clients) {
     if (clientWs.readyState === WebSocket.OPEN) {
@@ -63,7 +87,7 @@ export function routeProxyMessage(
   }
 }
 
-// 将 client 发来的 MessageEnvelope 原样转发给该 client 绑定的 proxy
+// 将 client 发来的 MessageEnvelope 转发给该 client 绑定的 proxy
 export function routeClientMessage(
   raw: string,
   clientWs: WebSocket,

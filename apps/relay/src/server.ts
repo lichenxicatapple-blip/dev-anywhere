@@ -71,6 +71,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const clientHeartbeat = setupClientHeartbeat(clientWss, heartbeatInterval);
 
   async function close(): Promise<void> {
+    registry.clearAllTimers();
     clearInterval(proxyHeartbeat);
     clearInterval(clientHeartbeat);
 
