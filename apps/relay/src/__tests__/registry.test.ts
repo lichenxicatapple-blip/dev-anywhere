@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { RelayRegistry } from "../registry.js";
-import type { WebSocket } from "ws";
+import { WebSocket } from "ws";
 
 // 创建模拟 WebSocket 对象用于测试
-function createMockWs(): WebSocket {
+function createMockWs(readyState = WebSocket.OPEN): WebSocket {
   return {
-    readyState: 1, // OPEN
-    close: () => {},
-    terminate: () => {},
-    send: () => {},
+    readyState,
+    close: vi.fn(),
+    terminate: vi.fn(),
+    send: vi.fn(),
   } as unknown as WebSocket;
 }
 
@@ -16,138 +16,306 @@ describe("RelayRegistry", () => {
   let registry: RelayRegistry;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     registry = new RelayRegistry();
   });
 
-  it("registerProxy adds proxy and getProxy returns it", () => {
-    const ws = createMockWs();
-    registry.registerProxy("p1", ws);
-    expect(registry.getProxy("p1")).toBe(ws);
+  afterEach(() => {
+    registry.clearAllTimers();
+    vi.useRealTimers();
   });
 
-  it("registerProxy replaces existing proxy with same id", () => {
-    const ws1 = createMockWs();
-    const ws2 = createMockWs();
-    let terminated = false;
-    ws1.terminate = () => {
-      terminated = true;
-    };
+  describe("proxy registration", () => {
+    it("registerProxy returns 'new' for first registration", () => {
+      const ws = createMockWs();
+      const status = registry.registerProxy("p1", ws);
+      expect(status).toBe("new");
+      expect(registry.getProxy("p1")).toBe(ws);
+    });
 
-    registry.registerProxy("p1", ws1);
-    registry.registerProxy("p1", ws2);
+    it("registerProxy returns 'reconnected' for re-registration", () => {
+      const ws1 = createMockWs();
+      const ws2 = createMockWs();
+      registry.registerProxy("p1", ws1);
+      const status = registry.registerProxy("p1", ws2);
+      expect(status).toBe("reconnected");
+      expect(registry.getProxy("p1")).toBe(ws2);
+    });
 
-    expect(registry.getProxy("p1")).toBe(ws2);
-    expect(terminated).toBe(true);
+    it("registerProxy terminates existing open connection on re-register", () => {
+      const ws1 = createMockWs();
+      const ws2 = createMockWs();
+      registry.registerProxy("p1", ws1);
+      registry.registerProxy("p1", ws2);
+      expect(ws1.terminate).toHaveBeenCalled();
+    });
+
+    it("unregisterProxy removes proxy and cleans up", () => {
+      const ws = createMockWs();
+      registry.registerProxy("p1", ws);
+      registry.unregisterProxy("p1");
+      expect(registry.getProxy("p1")).toBeUndefined();
+    });
+
+    it("unregisterProxy unbinds all clients bound to that proxy", () => {
+      const proxyWs = createMockWs();
+      const client1 = createMockWs();
+      const client2 = createMockWs();
+
+      registry.registerProxy("p1", proxyWs);
+      registry.bindClient(client1, "p1");
+      registry.bindClient(client2, "p1");
+
+      registry.unregisterProxy("p1");
+
+      expect(registry.getBoundProxy(client1)).toBeUndefined();
+      expect(registry.getBoundProxy(client2)).toBeUndefined();
+    });
+
+    it("listProxies returns all registered proxyIds", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.registerProxy("p2", createMockWs());
+      const list = registry.listProxies();
+      expect(list).toContain("p1");
+      expect(list).toContain("p2");
+      expect(list).toHaveLength(2);
+    });
   });
 
-  it("unregisterProxy removes proxy", () => {
-    const ws = createMockWs();
-    registry.registerProxy("p1", ws);
-    registry.unregisterProxy("p1");
-    expect(registry.getProxy("p1")).toBeUndefined();
+  describe("isProxyOnline", () => {
+    it("returns true when proxy ws is open", () => {
+      registry.registerProxy("p1", createMockWs(WebSocket.OPEN));
+      expect(registry.isProxyOnline("p1")).toBe(true);
+    });
+
+    it("returns false when proxy is in grace period", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.startGracePeriod("p1");
+      expect(registry.isProxyOnline("p1")).toBe(false);
+    });
+
+    it("returns false for unknown proxy", () => {
+      expect(registry.isProxyOnline("unknown")).toBe(false);
+    });
   });
 
-  it("unregisterProxy unbinds all clients bound to that proxy", () => {
-    const proxyWs = createMockWs();
-    const client1 = createMockWs();
-    const client2 = createMockWs();
+  describe("grace period", () => {
+    it("startGracePeriod sets ws to null", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.startGracePeriod("p1");
+      expect(registry.getProxy("p1")).toBeUndefined();
+      expect(registry.hasProxy("p1")).toBe(true);
+    });
 
-    registry.registerProxy("p1", proxyWs);
-    registry.bindClient(client1, "p1");
-    registry.bindClient(client2, "p1");
+    it("grace period expiry cleans up proxy state", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "s1");
+      registry.getOrCreateSessionBuffer("s1");
 
-    registry.unregisterProxy("p1");
+      registry.startGracePeriod("p1", 100);
+      vi.advanceTimersByTime(100);
 
-    expect(registry.getBoundProxy(client1)).toBeUndefined();
-    expect(registry.getBoundProxy(client2)).toBeUndefined();
+      expect(registry.hasProxy("p1")).toBe(false);
+      expect(registry.getSessionBuffer("s1")).toBeUndefined();
+    });
+
+    it("reconnect during grace period cancels timer and restores state", () => {
+      const ws1 = createMockWs();
+      registry.registerProxy("p1", ws1);
+      registry.addSessionToProxy("p1", "s1");
+      registry.getOrCreateSessionBuffer("s1");
+
+      registry.startGracePeriod("p1", 100);
+      expect(registry.getProxy("p1")).toBeUndefined();
+
+      // 在宽限期内重连
+      const ws2 = createMockWs();
+      const status = registry.registerProxy("p1", ws2);
+      expect(status).toBe("reconnected");
+      expect(registry.getProxy("p1")).toBe(ws2);
+      expect(registry.isProxyOnline("p1")).toBe(true);
+
+      // 定时器到期不应清理
+      vi.advanceTimersByTime(200);
+      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.getSessionBuffer("s1")).toBeDefined();
+    });
+
+    it("startGracePeriod does nothing for unknown proxy", () => {
+      expect(() => registry.startGracePeriod("unknown")).not.toThrow();
+    });
   });
 
-  it("listProxies returns all registered proxyIds", () => {
-    const ws1 = createMockWs();
-    const ws2 = createMockWs();
-    registry.registerProxy("p1", ws1);
-    registry.registerProxy("p2", ws2);
+  describe("session buffers", () => {
+    it("getOrCreateSessionBuffer creates buffer on first access", () => {
+      const buffer = registry.getOrCreateSessionBuffer("s1");
+      expect(buffer).toBeDefined();
+      expect(buffer.size()).toBe(0);
+    });
 
-    const list = registry.listProxies();
-    expect(list).toContain("p1");
-    expect(list).toContain("p2");
-    expect(list).toHaveLength(2);
+    it("getOrCreateSessionBuffer returns same buffer on second access", () => {
+      const buffer1 = registry.getOrCreateSessionBuffer("s1");
+      const buffer2 = registry.getOrCreateSessionBuffer("s1");
+      expect(buffer1).toBe(buffer2);
+    });
+
+    it("getSessionBuffer returns undefined for unknown session", () => {
+      expect(registry.getSessionBuffer("unknown")).toBeUndefined();
+    });
+
+    it("addSessionToProxy tracks sessionId in proxy session set", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "s1");
+      registry.addSessionToProxy("p1", "s2");
+      registry.getOrCreateSessionBuffer("s1");
+      registry.getOrCreateSessionBuffer("s2");
+
+      // 清理 proxy 时会话缓冲区也被清理
+      registry.unregisterProxy("p1");
+      expect(registry.getSessionBuffer("s1")).toBeUndefined();
+      expect(registry.getSessionBuffer("s2")).toBeUndefined();
+    });
   });
 
-  it("bindClient associates client with proxyId", () => {
-    const proxyWs = createMockWs();
-    const clientWs = createMockWs();
-    registry.registerProxy("p1", proxyWs);
+  describe("client binding by id", () => {
+    it("bindClientById and getClientBinding work correctly", () => {
+      const ws = createMockWs();
+      registry.registerProxy("p1", createMockWs());
+      const bound = registry.bindClientById("c1", "p1", ws);
+      expect(bound).toBe(true);
 
-    const result = registry.bindClient(clientWs, "p1");
-    expect(result).toBe(true);
-    expect(registry.getBoundProxy(clientWs)).toBe("p1");
+      const binding = registry.getClientBinding("c1");
+      expect(binding).toBeDefined();
+      expect(binding!.proxyId).toBe("p1");
+      expect(binding!.ws).toBe(ws);
+    });
+
+    it("bindClientById returns false for unknown proxy", () => {
+      const ws = createMockWs();
+      expect(registry.bindClientById("c1", "unknown", ws)).toBe(false);
+    });
+
+    it("unbindClientById removes binding", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", createMockWs());
+      registry.unbindClientById("c1");
+      expect(registry.getClientBinding("c1")).toBeUndefined();
+    });
+
+    it("updateClientSocket updates ws for existing binding", () => {
+      const ws1 = createMockWs();
+      const ws2 = createMockWs();
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", ws1);
+
+      registry.updateClientSocket("c1", ws2);
+      expect(registry.getClientBinding("c1")!.ws).toBe(ws2);
+    });
+
+    it("getClientsForProxy includes clientId-bound clients", () => {
+      const proxyWs = createMockWs();
+      const clientWs = createMockWs();
+      registry.registerProxy("p1", proxyWs);
+      registry.bindClientById("c1", "p1", clientWs);
+
+      const clients = registry.getClientsForProxy("p1");
+      expect(clients).toContain(clientWs);
+    });
   });
 
-  it("bindClient returns false if proxyId not registered", () => {
-    const clientWs = createMockWs();
-    const result = registry.bindClient(clientWs, "nonexistent");
-    expect(result).toBe(false);
+  describe("legacy client binding", () => {
+    it("bindClient associates client with proxyId", () => {
+      const proxyWs = createMockWs();
+      const clientWs = createMockWs();
+      registry.registerProxy("p1", proxyWs);
+
+      const result = registry.bindClient(clientWs, "p1");
+      expect(result).toBe(true);
+      expect(registry.getBoundProxy(clientWs)).toBe("p1");
+    });
+
+    it("bindClient returns false if proxyId not registered", () => {
+      const clientWs = createMockWs();
+      const result = registry.bindClient(clientWs, "nonexistent");
+      expect(result).toBe(false);
+    });
+
+    it("unbindClient removes client binding", () => {
+      const proxyWs = createMockWs();
+      const clientWs = createMockWs();
+      registry.registerProxy("p1", proxyWs);
+      registry.bindClient(clientWs, "p1");
+
+      registry.unbindClient(clientWs);
+      expect(registry.getBoundProxy(clientWs)).toBeUndefined();
+    });
+
+    it("getClientsForProxy returns legacy-bound clients", () => {
+      const proxyWs = createMockWs();
+      const client1 = createMockWs();
+      const client2 = createMockWs();
+
+      registry.registerProxy("p1", proxyWs);
+      registry.bindClient(client1, "p1");
+      registry.bindClient(client2, "p1");
+
+      const clients = registry.getClientsForProxy("p1");
+      expect(clients).toContain(client1);
+      expect(clients).toContain(client2);
+    });
+
+    it("getBoundProxy returns undefined for unbound client", () => {
+      const clientWs = createMockWs();
+      expect(registry.getBoundProxy(clientWs)).toBeUndefined();
+    });
+
+    it("countClients returns total bound clients", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClient(createMockWs(), "p1");
+      registry.bindClientById("c1", "p1", createMockWs());
+      expect(registry.countClients()).toBe(2);
+    });
   });
 
-  it("unbindClient removes client binding", () => {
-    const proxyWs = createMockWs();
-    const clientWs = createMockWs();
-    registry.registerProxy("p1", proxyWs);
-    registry.bindClient(clientWs, "p1");
+  describe("clearAllTimers", () => {
+    it("cancels all pending grace timers", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.registerProxy("p2", createMockWs());
+      registry.startGracePeriod("p1", 100);
+      registry.startGracePeriod("p2", 100);
 
-    registry.unbindClient(clientWs);
-    expect(registry.getBoundProxy(clientWs)).toBeUndefined();
+      registry.clearAllTimers();
+
+      // 定时器到期不应清理
+      vi.advanceTimersByTime(200);
+      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.hasProxy("p2")).toBe(true);
+    });
   });
 
-  it("unbindClient does nothing for unknown client", () => {
-    const clientWs = createMockWs();
-    expect(() => registry.unbindClient(clientWs)).not.toThrow();
-  });
+  describe("getBufferStats", () => {
+    it("returns accurate counts", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.registerProxy("p2", createMockWs());
 
-  it("getClientsForProxy returns all clients bound to a proxyId", () => {
-    const proxyWs = createMockWs();
-    const client1 = createMockWs();
-    const client2 = createMockWs();
-    const client3 = createMockWs();
+      const buf1 = registry.getOrCreateSessionBuffer("s1");
+      buf1.append({ raw: "{}", seq: 1, type: "user_input", source: "proxy" });
+      buf1.append({ raw: "{}", seq: 2, type: "assistant_message", source: "proxy" });
 
-    registry.registerProxy("p1", proxyWs);
-    registry.registerProxy("p2", createMockWs());
+      const buf2 = registry.getOrCreateSessionBuffer("s2");
+      buf2.append({ raw: "{}", seq: 1, type: "user_input", source: "proxy" });
 
-    registry.bindClient(client1, "p1");
-    registry.bindClient(client2, "p1");
-    registry.bindClient(client3, "p2");
+      const stats = registry.getBufferStats();
+      expect(stats.totalBuffered).toBe(3);
+      expect(stats.sessionCount).toBe(2);
+      expect(stats.proxyCount).toBe(2);
+    });
 
-    const clients = registry.getClientsForProxy("p1");
-    expect(clients).toContain(client1);
-    expect(clients).toContain(client2);
-    expect(clients).not.toContain(client3);
-    expect(clients).toHaveLength(2);
-  });
-
-  it("getBoundProxy returns the proxyId a client is bound to", () => {
-    const proxyWs = createMockWs();
-    const clientWs = createMockWs();
-    registry.registerProxy("p1", proxyWs);
-    registry.bindClient(clientWs, "p1");
-
-    expect(registry.getBoundProxy(clientWs)).toBe("p1");
-  });
-
-  it("getBoundProxy returns undefined for unbound client", () => {
-    const clientWs = createMockWs();
-    expect(registry.getBoundProxy(clientWs)).toBeUndefined();
-  });
-
-  it("countClients returns number of bound clients", () => {
-    const proxyWs = createMockWs();
-    const client1 = createMockWs();
-    const client2 = createMockWs();
-
-    registry.registerProxy("p1", proxyWs);
-    registry.bindClient(client1, "p1");
-    registry.bindClient(client2, "p1");
-
-    expect(registry.countClients()).toBe(2);
+    it("returns zeros when empty", () => {
+      const stats = registry.getBufferStats();
+      expect(stats.totalBuffered).toBe(0);
+      expect(stats.sessionCount).toBe(0);
+      expect(stats.proxyCount).toBe(0);
+    });
   });
 });

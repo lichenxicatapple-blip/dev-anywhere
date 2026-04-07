@@ -174,7 +174,7 @@ describe("Relay Server Integration", () => {
     expect(typeof body.uptime).toBe("number");
   });
 
-  it("cleans up when proxy disconnects", async () => {
+  it("enters grace period when proxy disconnects", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
@@ -183,7 +183,9 @@ describe("Relay Server Integration", () => {
 
     proxy.close();
     await new Promise((r) => setTimeout(r, 100));
-    expect(relay.registry.listProxies()).not.toContain("p1");
+    // proxy 断连后进入宽限期，仍在列表中但不在线
+    expect(relay.registry.listProxies()).toContain("p1");
+    expect(relay.registry.isProxyOnline("p1")).toBe(false);
   });
 
   it("rejects WebSocket upgrade on unknown path", async () => {
@@ -224,9 +226,11 @@ describe("Relay Server Heartbeat", () => {
       // 不回复 pong
     });
 
-    // 等待两个心跳周期让死连接被清理
+    // 等待两个心跳周期让死连接被终止并进入宽限期
     await new Promise((r) => setTimeout(r, 350));
-    expect(relay.registry.listProxies()).not.toContain("hb-test");
+    // 死连接被 terminate 后进入宽限期，proxyId 仍在列表但不在线
+    expect(relay.registry.listProxies()).toContain("hb-test");
+    expect(relay.registry.isProxyOnline("hb-test")).toBe(false);
 
     proxy.close();
     await relay.close();
