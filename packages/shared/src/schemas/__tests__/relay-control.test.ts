@@ -72,4 +72,170 @@ describe("RelayControlSchema", () => {
       RelayControlSchema.parse({ type: "proxy_select", proxyId: "" }),
     ).toThrow();
   });
+
+  // Phase 5: client_register
+  it("parses client_register with clientId and lastSeq", () => {
+    const result = RelayControlSchema.parse({
+      type: "client_register",
+      clientId: "client-001",
+      lastSeq: 42,
+    });
+    expect(result).toEqual({
+      type: "client_register",
+      clientId: "client-001",
+      lastSeq: 42,
+    });
+  });
+
+  it("rejects client_register with empty clientId", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "client_register", clientId: "", lastSeq: 0 }),
+    ).toThrow();
+  });
+
+  it("rejects client_register with negative lastSeq", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "client_register", clientId: "c1", lastSeq: -1 }),
+    ).toThrow();
+  });
+
+  // Phase 5: client_register_response
+  it("parses client_register_response with status restored", () => {
+    const result = RelayControlSchema.parse({
+      type: "client_register_response",
+      status: "restored",
+      proxyId: "proxy-abc",
+    });
+    expect(result).toEqual({
+      type: "client_register_response",
+      status: "restored",
+      proxyId: "proxy-abc",
+    });
+  });
+
+  it("parses client_register_response with status new and no proxyId", () => {
+    const result = RelayControlSchema.parse({
+      type: "client_register_response",
+      status: "new",
+    });
+    expect(result).toEqual({
+      type: "client_register_response",
+      status: "new",
+    });
+  });
+
+  it("parses client_register_response with status proxy_offline", () => {
+    const result = RelayControlSchema.parse({
+      type: "client_register_response",
+      status: "proxy_offline",
+    });
+    expect(result).toEqual({
+      type: "client_register_response",
+      status: "proxy_offline",
+    });
+  });
+
+  it("rejects client_register_response with unknown status", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "client_register_response", status: "invalid" }),
+    ).toThrow();
+  });
+
+  // Phase 5: replay_request
+  it("parses replay_request with sessionId, fromSeq, toSeq", () => {
+    const result = RelayControlSchema.parse({
+      type: "replay_request",
+      sessionId: "sess-1",
+      fromSeq: 0,
+      toSeq: 10,
+    });
+    expect(result).toEqual({
+      type: "replay_request",
+      sessionId: "sess-1",
+      fromSeq: 0,
+      toSeq: 10,
+    });
+  });
+
+  it("rejects replay_request with empty sessionId", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "replay_request", sessionId: "", fromSeq: 0, toSeq: 10 }),
+    ).toThrow();
+  });
+
+  // Phase 5: replay_response
+  it("parses replay_response with sessionId and messages array", () => {
+    const result = RelayControlSchema.parse({
+      type: "replay_response",
+      sessionId: "sess-1",
+      messages: [{ type: "text", content: "hello" }],
+    });
+    expect(result).toEqual({
+      type: "replay_response",
+      sessionId: "sess-1",
+      messages: [{ type: "text", content: "hello" }],
+    });
+  });
+
+  it("parses replay_response with empty messages", () => {
+    const result = RelayControlSchema.parse({
+      type: "replay_response",
+      sessionId: "sess-1",
+      messages: [],
+    });
+    expect(result).toEqual({
+      type: "replay_response",
+      sessionId: "sess-1",
+      messages: [],
+    });
+  });
+
+  // Phase 5: gap_unrecoverable
+  it("parses gap_unrecoverable with sessionId, fromSeq, toSeq", () => {
+    const result = RelayControlSchema.parse({
+      type: "gap_unrecoverable",
+      sessionId: "sess-1",
+      fromSeq: 5,
+      toSeq: 15,
+    });
+    expect(result).toEqual({
+      type: "gap_unrecoverable",
+      sessionId: "sess-1",
+      fromSeq: 5,
+      toSeq: 15,
+    });
+  });
+
+  it("rejects gap_unrecoverable with empty sessionId", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "gap_unrecoverable", sessionId: "", fromSeq: 0, toSeq: 10 }),
+    ).toThrow();
+  });
+
+  // Phase 5: proxy_offline
+  it("parses proxy_offline with proxyId", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_offline",
+      proxyId: "proxy-123",
+    });
+    expect(result).toEqual({
+      type: "proxy_offline",
+      proxyId: "proxy-123",
+    });
+  });
+
+  it("rejects proxy_offline with missing proxyId", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "proxy_offline" }),
+    ).toThrow();
+  });
+
+  // Regression: existing types still work
+  it("still parses all existing types after Phase 5 extension", () => {
+    expect(RelayControlSchema.parse({ type: "proxy_register", proxyId: "p1" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "proxy_list_request" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "proxy_list_response", proxies: [] })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "proxy_select", proxyId: "p1" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "relay_error", code: "E", message: "m" })).toBeTruthy();
+  });
 });
