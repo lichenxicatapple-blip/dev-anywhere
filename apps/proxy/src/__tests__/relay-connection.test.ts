@@ -9,6 +9,11 @@ import { RelayConnection } from "../relay-connection.js";
 
 const logger = pino({ level: "silent" });
 
+// 等待 relay 处理 proxy_register 消息的辅助函数
+function waitForRegistration(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 100));
+}
+
 let relay: RelayServer;
 let relayPort: number;
 
@@ -167,6 +172,7 @@ describe("RelayConnection", () => {
     conn.connect();
     await connected;
 
+    await waitForRegistration();
     expect(relay.registry.getProxy(conn.getProxyId())).toBeTruthy();
   });
 
@@ -181,6 +187,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
+    await waitForRegistration();
 
     const disconnected = new Promise<void>((resolve) => {
       conn!.on("disconnected", () => resolve());
@@ -205,6 +212,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
+    await waitForRegistration();
 
     // 断开连接
     const disconnected = new Promise<void>((resolve) => {
@@ -233,6 +241,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await firstConnected;
+    await waitForRegistration();
 
     const proxyId = conn.getProxyId();
 
@@ -245,6 +254,7 @@ describe("RelayConnection", () => {
       conn!.once("connected", () => resolve());
     });
     await reconnected;
+    await waitForRegistration();
 
     // 验证重连后 proxy 仍然使用同一个 proxyId 注册
     expect(relay.registry.getProxy(proxyId)).toBeTruthy();
@@ -262,6 +272,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
+    await waitForRegistration();
 
     let disconnectedEmitted = false;
     conn.on("disconnected", () => { disconnectedEmitted = true; });
@@ -287,6 +298,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await firstConnected;
+    await waitForRegistration();
 
     const proxyId = conn.getProxyId();
 
@@ -306,13 +318,10 @@ describe("RelayConnection", () => {
       conn!.once("connected", () => resolve());
     });
     await reconnected;
+    await waitForRegistration();
 
     // 重连后的 proxy socket 应该收到了 flush 的消息
-    // 通过给新的 proxy socket 监听消息来验证
     const newProxySocket = relay.registry.getProxy(proxyId);
     expect(newProxySocket).toBeTruthy();
-
-    // flush 已经在 connected 事件之前发生，验证重连成功即可
-    expect(relay.registry.getProxy(proxyId)).toBeTruthy();
   });
 });
