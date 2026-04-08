@@ -16,9 +16,9 @@ const FONT_SIZES = [8, 10, 12, 14, 16, 20];
 type PtyState = "working" | "idle" | "waiting_approval";
 
 const STATUS_CONFIG: Record<PtyState, { bg: string; color: string; text: string }> = {
-  working: { bg: "#E6F7FF", color: "#1890FF", text: "Working..." },
-  idle: { bg: "#F6FFED", color: "#52C41A", text: "Idle" },
-  waiting_approval: { bg: "#FFFBE6", color: "#FAAD14", text: "Waiting for approval" },
+  working: { bg: "#E6F7FF", color: "#1890FF", text: "工作中..." },
+  idle: { bg: "#F6FFED", color: "#52C41A", text: "空闲" },
+  waiting_approval: { bg: "#FFFBE6", color: "#FAAD14", text: "等待工具审批" },
 };
 
 function buildTerminalGrid(): TermLine[] {
@@ -100,7 +100,17 @@ export default function SpikeChatPty() {
   const [ptyState, setPtyState] = useState<PtyState>("waiting_approval");
   const [inputText, setInputText] = useState("");
   const [approvalResolved, setApprovalResolved] = useState<"allow" | "deny" | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsClosing, setSettingsClosing] = useState(false);
   const pinchRef = useRef({ startDistance: 0, startFontIdx: 2 });
+
+  const closeSettings = useCallback(() => {
+    setSettingsClosing(true);
+    setTimeout(() => {
+      setShowSettings(false);
+      setSettingsClosing(false);
+    }, 250);
+  }, []);
 
   const fontSize = FONT_SIZES[pinchFontIdx >= 0 ? pinchFontIdx : fontIdx];
   const terminalGrid = buildTerminalGrid();
@@ -207,7 +217,7 @@ export default function SpikeChatPty() {
       {ptyState === "waiting_approval" && approvalResolved === null && (
         <View className="approval-overlay">
           <View className="approval-card">
-            <Text className="approval-label">Tool Approval Required</Text>
+            <Text className="approval-label">需要工具审批</Text>
             <Text className="approval-tool">Edit</Text>
             <View className="approval-diff">
               <Text className="approval-file">apps/relay/src/handlers/client.ts</Text>
@@ -216,29 +226,18 @@ export default function SpikeChatPty() {
             </View>
             <View className="approval-buttons">
               <View className="approval-btn allow" onClick={() => { setApprovalResolved("allow"); setPtyState("working"); }}>
-                <Text className="approval-btn-text">Allow</Text>
+                <Text className="approval-btn-text">允许</Text>
               </View>
               <View className="approval-btn allow-all" onClick={() => { setApprovalResolved("allow"); setPtyState("working"); }}>
-                <Text className="approval-btn-text">Allow All</Text>
+                <Text className="approval-btn-text">全部允许</Text>
               </View>
               <View className="approval-btn deny" onClick={() => { setApprovalResolved("deny"); setPtyState("idle"); }}>
-                <Text className="approval-btn-text-deny">Deny</Text>
+                <Text className="approval-btn-text-deny">拒绝</Text>
               </View>
             </View>
           </View>
         </View>
       )}
-
-      {/* Font size controls */}
-      <View className="font-controls">
-        <View className="font-btn" onClick={() => setFontIdx((i) => Math.max(0, i - 1))}>
-          <Text className="font-btn-text">A-</Text>
-        </View>
-        <Text className="font-label">{fontSize}PX</Text>
-        <View className="font-btn" onClick={() => setFontIdx((i) => Math.min(FONT_SIZES.length - 1, i + 1))}>
-          <Text className="font-btn-text">A+</Text>
-        </View>
-      </View>
 
       {/* Input bar */}
       <View className="input-bar">
@@ -247,13 +246,41 @@ export default function SpikeChatPty() {
           value={inputText}
           onInput={(e) => setInputText(e.detail.value)}
           onConfirm={handleSend}
-          placeholder="Send to stdin..."
+          placeholder="输入消息..."
           confirmType="send"
         />
+        <View className="menu-btn" onClick={() => showSettings ? closeSettings() : setShowSettings(true)}>
+          <Text className="menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
+        </View>
         <View className="send-btn" onClick={handleSend}>
-          <Text className="send-btn-text">Send</Text>
+          <Text className="send-btn-icon">{"\u2191"}</Text>
         </View>
       </View>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <View className={`settings-mask ${settingsClosing ? "closing" : ""}`} onClick={closeSettings}>
+          <View className={`settings-panel ${settingsClosing ? "closing" : ""}`} onClick={(e) => e.stopPropagation()}>
+            <Text className="settings-title">设置</Text>
+            <View className="settings-section">
+              <Text className="settings-label">字号</Text>
+              <View className="settings-font-row">
+                <View className="font-icon-btn" onClick={() => setFontIdx((i) => Math.max(0, i - 1))}>
+                  <Text className="font-icon-label">A</Text>
+                  <Text className="font-icon-arrow">-</Text>
+                </View>
+                <View className="font-size-display">
+                  <Text className="font-size-number">{fontSize}</Text>
+                </View>
+                <View className="font-icon-btn" onClick={() => setFontIdx((i) => Math.min(FONT_SIZES.length - 1, i + 1))}>
+                  <Text className="font-icon-label-lg">A</Text>
+                  <Text className="font-icon-arrow">+</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

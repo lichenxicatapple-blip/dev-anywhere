@@ -4,6 +4,11 @@ import "./index.css";
 
 type MsgType = "user" | "assistant" | "tool_call" | "tool_approval";
 
+interface QuoteData {
+  fromType: "user" | "assistant";
+  text: string;
+}
+
 interface Message {
   id: number;
   type: MsgType;
@@ -15,6 +20,7 @@ interface Message {
   expanded?: boolean;
   time?: string;
   showTime?: boolean;
+  quote?: QuoteData;
 }
 
 let msgId = 0;
@@ -109,6 +115,20 @@ function ToolApprovalCard({
   );
 }
 
+// 气泡内嵌引用块
+function InlineQuoteBlock({ quote }: { quote: QuoteData }) {
+  const prefix = quote.fromType === "assistant" ? "Claude:" : "你:";
+  return (
+    <View className="inline-quote">
+      <View className="inline-quote-bar" />
+      <View className="inline-quote-content">
+        <Text className="inline-quote-from">{prefix}</Text>
+        <Text className="inline-quote-text">{quote.text}</Text>
+      </View>
+    </View>
+  );
+}
+
 function BackToBottomBtn({ visible, onClick }: { visible: boolean; onClick: () => void }) {
   if (!visible) return null;
   return (
@@ -126,6 +146,7 @@ export default function SpikeChatJson() {
   const [streamingText, setStreamingText] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [settingsClosing, setSettingsClosing] = useState(false);
+  const [pendingQuote, setPendingQuote] = useState<QuoteData | null>(null);
 
   const closeSettings = useCallback(() => {
     setSettingsClosing(true);
@@ -180,15 +201,24 @@ export default function SpikeChatJson() {
     }, 30);
   }, [scrollToBottom]);
 
+  const handleQuote = useCallback((msg: Message) => {
+    setPendingQuote({ fromType: msg.type as "user" | "assistant", text: msg.text });
+  }, []);
+
   const handleSend = useCallback(() => {
     const text = inputText.trim();
     if (!text || isWorking) return;
     setInputText("");
     msgId++;
-    setMessages((prev) => [...prev, { id: msgId, type: "user", text }]);
+    const quote = pendingQuote || undefined;
+    const fullText = quote
+      ? `<quote from="${quote.fromType}">${quote.text}</quote>\n${text}`
+      : text;
+    setMessages((prev) => [...prev, { id: msgId, type: "user", text: fullText, quote }]);
+    setPendingQuote(null);
     setTimeout(scrollToBottom, 50);
     setTimeout(simulateStream, 800);
-  }, [inputText, isWorking, scrollToBottom, simulateStream]);
+  }, [inputText, isWorking, pendingQuote, scrollToBottom, simulateStream]);
 
   const handleToggleTime = useCallback((id: number) => {
     setMessages((prev) =>
@@ -230,20 +260,31 @@ export default function SpikeChatJson() {
             {msg.type === "user" && (
               <View className="bubble-wrapper user" onClick={() => handleToggleTime(msg.id)}>
                 <View className="bubble user anim-in-user">
-                  <Text className="bubble-text-white">{msg.text}</Text>
+                  {msg.quote && <InlineQuoteBlock quote={msg.quote} />}
+                  <Text selectable className="bubble-text-white">{msg.quote ? msg.text.replace(/<quote[^>]*>[\s\S]*?<\/quote>\n?/, "") : msg.text}</Text>
                 </View>
-                {msg.showTime && <Text className="msg-time user">{msg.time}</Text>}
+                {msg.showTime && (
+                  <View className="msg-meta user">
+                    <Text className="msg-time">{msg.time}</Text>
+                    <Text className="msg-quote-btn" onClick={(e) => { e.stopPropagation(); handleQuote(msg); }}>引用</Text>
+                  </View>
+                )}
               </View>
             )}
             {msg.type === "assistant" && (
               <View className="bubble-wrapper assistant" onClick={() => handleToggleTime(msg.id)}>
                 <View className="bubble assistant anim-in-assistant">
-                  <Text className="bubble-text-dark">
+                  <Text selectable className="bubble-text-dark">
                     {msg.text}
                     {msg.isPartial && <Text className="streaming-cursor">|</Text>}
                   </Text>
                 </View>
-                {msg.showTime && <Text className="msg-time assistant">{msg.time}</Text>}
+                {msg.showTime && (
+                  <View className="msg-meta assistant">
+                    <Text className="msg-time">{msg.time}</Text>
+                    <Text className="msg-quote-btn" onClick={(e) => { e.stopPropagation(); handleQuote(msg); }}>引用</Text>
+                  </View>
+                )}
               </View>
             )}
             {msg.type === "tool_call" && (
@@ -260,23 +301,40 @@ export default function SpikeChatJson() {
 
       {/* Input bar */}
       <View className="input-bar">
-        <Input
-          className="input-field"
-          value={inputText}
-          onInput={(e) => setInputText(e.detail.value)}
-          onConfirm={handleSend}
-          placeholder="Type a message..."
-          confirmType="send"
-          disabled={false}
-        />
-        <View className="menu-btn" onClick={() => showSettings ? closeSettings() : setShowSettings(true)}>
-          <Text className="menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
-        </View>
-        <View
-          className={`send-btn ${inputText.trim() && !isWorking ? "active" : "disabled"}`}
-          onClick={handleSend}
-        >
-          <Text className="send-btn-icon">{"\u2191"}</Text>
+        {/* 引用预览（嵌入 input-bar 内部） */}
+        {pendingQuote && (
+          <View className="quote-preview">
+            <View className="quote-preview-bar" />
+            <View className="quote-preview-content">
+              <Text className="quote-preview-from">
+                {pendingQuote.fromType === "assistant" ? "Claude:" : "你:"}
+              </Text>
+              <Text className="quote-preview-text">{pendingQuote.text}</Text>
+            </View>
+            <View className="quote-preview-close" onClick={() => setPendingQuote(null)}>
+              <Text className="quote-preview-close-icon">x</Text>
+            </View>
+          </View>
+        )}
+        <View className="input-bar-row">
+          <Input
+            className="input-field"
+            value={inputText}
+            onInput={(e) => setInputText(e.detail.value)}
+            onConfirm={handleSend}
+            placeholder="输入消息..."
+            confirmType="send"
+            disabled={false}
+          />
+          <View className="menu-btn" onClick={() => showSettings ? closeSettings() : setShowSettings(true)}>
+            <Text className="menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
+          </View>
+          <View
+            className={`send-btn ${inputText.trim() && !isWorking ? "active" : "disabled"}`}
+            onClick={handleSend}
+          >
+            <Text className="send-btn-icon">{"\u2191"}</Text>
+          </View>
         </View>
       </View>
 

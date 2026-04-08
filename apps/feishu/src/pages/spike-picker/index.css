@@ -1,0 +1,284 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #fff;
+}
+
+/* ---- Page header ---- */
+.page-header {
+  padding: 32px 32px 16px;
+}
+
+.page-title {
+  font-size: 36px;
+  font-weight: 700;
+  color: #333;
+  display: block;
+}
+
+.page-subtitle {
+  font-size: 24px;
+  color: #999;
+  margin-top: 8px;
+  display: block;
+}
+
+/* ---- Message list ---- */
+.message-list {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 32px;
+}
+
+.sent-msg {
+  background: #1890FF;
+  border-radius: 24px 24px 8px 24px;
+  padding: 16px 24px;
+  margin-bottom: 16px;
+  align-self: flex-end;
+  max-width: 80%;
+  margin-left: auto;
+}
+
+.sent-msg-text {
+  font-size: 28px;
+  color: #fff;
+  word-break: break-all;
+}
+
+.hint-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+}
+
+.hint-text {
+  font-size: 28px;
+  color: #ccc;
+}
+
+/* ---- Argument hint bar ---- */
+.hint-bar {
+  padding: 8px 32px;
+  background: #FAFAFA;
+  border-top: 1px solid #F0F0F0;
+}
+
+.hint-bar-text {
+  font-size: 22px;
+  color: #999;
+  font-family: monospace, Menlo, Courier;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+/* ---- Input bar ---- */
+.input-bar {
+  display: flex;
+  align-items: center;
+  padding: 16px 32px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1px solid #E8E8E8;
+  gap: 16px;
+}
+
+.input-field {
+  flex: 1;
+  height: 72px;
+  background: #F5F5F5;
+  border-radius: 36px;
+  padding: 0 32px;
+  font-size: 28px;
+}
+
+.send-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.send-btn.active {
+  background: #1890FF;
+}
+
+.send-btn.disabled {
+  background: #ccc;
+}
+
+.send-btn-icon {
+  font-size: 36px;
+  color: #fff;
+  font-weight: bold;
+}
+
+/* ---- Picker panel (above input bar) ---- */
+.picker-panel {
+  max-height: 50vh;
+  background: #fff;
+  border-top: 1px solid #E8E8E8;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 200ms ease-out;
+}
+
+@keyframes slideUp {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 50vh; opacity: 1; }
+}
+
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  border-bottom: 1px solid #F0F0F0;
+}
+
+.picker-title {
+  font-size: 26px;
+  font-weight: 600;
+  color: #333;
+}
+
+.picker-count {
+  font-size: 22px;
+  color: #999;
+}
+
+.picker-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.picker-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.picker-empty-text {
+  font-size: 26px;
+  color: #ccc;
+}
+
+/* ---- Command item (double row) ---- */
+.cmd-item {
+  padding: 16px 32px;
+  border-bottom: 1px solid #F5F5F5;
+}
+
+.cmd-item:active {
+  background: #F0F7FF;
+}
+
+.cmd-row-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.cmd-name {
+  font-size: 28px;
+  font-weight: 600;
+  color: #333;
+  font-family: monospace, Menlo, Courier;
+}
+
+.cmd-source-tag {
+  font-size: 20px;
+  color: #999;
+  background: #F5F5F5;
+  border-radius: 6px;
+  padding: 2px 10px;
+}
+
+.cmd-desc {
+  font-size: 24px;
+  color: #999;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- File item ---- */
+.breadcrumb-scroll {
+  white-space: nowrap;
+  border-bottom: 1px solid #F0F0F0;
+}
+
+.breadcrumb-row {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 32px;
+}
+
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.breadcrumb-sep {
+  font-size: 24px;
+  color: #ccc;
+  margin: 0 6px;
+}
+
+.breadcrumb-text {
+  font-size: 24px;
+  color: #1890FF;
+}
+
+.breadcrumb-text.active {
+  color: #333;
+  font-weight: 600;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 20px 32px;
+  gap: 16px;
+  border-bottom: 1px solid #F5F5F5;
+}
+
+.file-item:active {
+  background: #F0F7FF;
+}
+
+.file-icon {
+  font-size: 24px;
+  color: #999;
+  width: 48px;
+  text-align: center;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 28px;
+}
+
+.file-name.dir {
+  color: #333;
+  font-weight: 500;
+}
+
+.file-name.file {
+  color: #666;
+}
+
+.file-arrow {
+  font-size: 24px;
+  color: #ccc;
+}

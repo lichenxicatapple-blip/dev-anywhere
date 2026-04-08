@@ -9,6 +9,7 @@ const SPIKES = [
   { name: "Chat - PTY Mode", path: "/pages/spike-chat-pty/index" },
   { name: "Bubble Animation", path: "/pages/spike-bubble-anim/index" },
   { name: "Terminal Render", path: "/pages/spike-render/index" },
+  { name: "Command & File Picker", path: "/pages/spike-picker/index" },
 ];
 
 export default function SpikeHub() {
