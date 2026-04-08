@@ -113,7 +113,7 @@ Plans:
   2. User sees a list of active sessions and can create a new session, switch between sessions, or terminate a session
   3. User can scroll back through conversation history within a session, including messages exchanged before the current connection
   4. Mini program reconnects automatically when returning from background, and missed messages appear without user action
-**Plans:** 9 plans
+**Plans:** 10 plans
 **UI hint**: yes
 
 Plans:
@@ -122,10 +122,11 @@ Plans:
 - [ ] 06-03-PLAN.md — Proxy tool approval forwarding, session resume, env filtering, fork-session
 - [ ] 06-04-PLAN.md — Proxy command discovery, file watcher, directory listing
 - [ ] 06-05-PLAN.md — Relay routing updates and proxy terminal frame push, control message handlers
-- [ ] 06-06-PLAN.md — Mini program infrastructure: WebSocket, relay client, types, stores, app config
-- [ ] 06-07-PLAN.md — Mini program proxy select and session list pages
+- [ ] 06-06-PLAN.md — Mini program services: WebSocket, relay client, message parser, types, utilities
+- [ ] 06-07-PLAN.md — Mini program proxy select and session list pages with directory picker
 - [ ] 06-08-PLAN.md — Mini program chat page: PTY terminal viewport, JSON chat bubbles, input bar
-- [ ] 06-09-PLAN.md — Mini program chat features: tool approval UI, slash/file pickers, quoting, settings
+- [ ] 06-09-PLAN.md — Mini program chat features: tool approval UI, tool cards, slash/file pickers, quoting, settings
+- [ ] 06-10-PLAN.md — Mini program state stores, StatusLine component, app lifecycle, app config, global styles
 
 ### Phase 7: Tool Approval & Dual-Surface Sync
 **Goal**: Users can approve or deny Claude Code tool calls from their phone, and terminal + mobile stay in sync during simultaneous use

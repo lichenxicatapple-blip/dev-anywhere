@@ -666,27 +666,23 @@ export function extractOscSignals(rawData: string): PtyStateEvent | null {
 | A4 | OSC 9 notifications from Claude Code contain "waiting for your input" and "needs your permission" strings | Code Examples | If wrong, PTY semantic state extraction fails. Need to verify by observing actual Claude Code OSC output. |
 | A5 | `~/.claude/projects/` directory structure is scannable for session history | D-37 implementation | If wrong, session history browsing feature won't work. Need to verify Claude Code's local storage format. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Authentication flow timing**
+1. **Authentication flow timing** (RESOLVED -- deferred)
    - What we know: CONTEXT.md mentions "authentication flow (pairing code + long-term token) -- before or within Phase 6"
-   - What's unclear: Whether Phase 6 should include authentication or defer to a separate phase
-   - Recommendation: Implement minimal auth (shared secret in config) in Phase 6, defer full pairing code flow to Phase 7 or a separate mini-phase
+   - Resolution: Explicitly deferred. Phase 6 does not implement authentication. CONTEXT.md lists it under "Deferred Ideas". A separate mini-phase or Phase 7 will handle auth. Phase 6 connects without auth (development mode).
 
-2. **PTY terminal frame push frequency**
+2. **PTY terminal frame push frequency** (RESOLVED -- Plan 05 Task 2)
    - What we know: D-08 needs real-time terminal frames, currently only WORKING->IDLE snapshots exist
-   - What's unclear: Exact throttle interval for acceptable latency vs bandwidth
-   - Recommendation: Start with 200ms throttle (5 fps), configurable. Only send frames when terminal content actually changed (compare hash of grid output).
+   - Resolution: Plan 05 implements 200ms throttle (5fps) with `hasGridChanged()` change detection. This is a Claude's Discretion item; 200ms chosen as balance between latency and bandwidth per RESEARCH recommendation.
 
-3. **Claude Code OSC sequence format verification**
+3. **Claude Code OSC sequence format verification** (RESOLVED -- Plan 02 Task 2)
    - What we know: D-38/D-39 specify OSC 0 and OSC 9 patterns
-   - What's unclear: Exact string format of Claude Code's OSC 9 notifications
-   - Recommendation: Add a debug log in PtyManager to capture all OSC sequences during development, verify against D-39 patterns
+   - Resolution: Plan 02 implements OSC extraction with the patterns from D-39. Debug logging added in osc-extractor.ts to verify against actual Claude Code output during integration testing. If patterns don't match, the regex is easily adjustable without architectural changes.
 
-4. **Session history file format**
+4. **Session history file format** (RESOLVED -- Plan 05 Task 2)
    - What we know: D-37 references `~/.claude/projects/` and cc-connect's `scanSessionMeta`
-   - What's unclear: Exact file structure and session metadata format in Claude Code's local storage
-   - Recommendation: Investigate `~/.claude/projects/` structure in a spike task before building the feature
+   - Resolution: Plan 05 implements `scanSessionHistory()` which discovers the format at runtime by scanning `~/.claude/projects/`. The function returns empty array if the structure is unexpected, with warning logs. cc-connect's `scanSessionMeta` from reference code guides the implementation.
 
 ## Environment Availability
 
