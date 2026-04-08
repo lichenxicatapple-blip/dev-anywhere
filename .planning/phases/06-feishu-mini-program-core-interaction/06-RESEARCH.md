@@ -796,3 +796,146 @@ export function extractOscSignals(rawData: string): PtyStateEvent | null {
 
 **Research date:** 2026-04-08
 **Valid until:** 2026-05-08 (stable -- Taro 3.6 and @xterm/headless 6.0 are mature releases)
+
+## Multi-Screen Support Research
+
+**Researched:** 2026-04-08
+**Confidence:** MEDIUM-HIGH (based on Feishu mini program docs and Taro framework docs)
+
+### Finding 1: pageOrientation Config for Landscape Support
+
+Each page that should support landscape orientation needs per-page config via `index.config.ts`:
+
+```typescript
+// apps/feishu/src/pages/chat/index.config.ts
+export default definePageConfig({
+  pageOrientation: "auto"  // enables landscape rotation
+})
+```
+
+Can also be set globally in `app.config.ts` under `window`:
+
+```typescript
+window: {
+  pageOrientation: "auto",
+}
+```
+
+Individual pages can override the global setting. Plan 10 sets `pageOrientation: "auto"` globally. All three production pages also set it in their per-page configs for explicitness.
+
+**Source:** [Feishu Mini Program Page Config](https://open.feishu.cn/document/tools-and-resources/development-tools/gadget/page-config)
+
+### Finding 2: navigationStyle "custom" for Fullscreen Terminal
+
+Setting `navigationStyle: "custom"` hides the default navigation bar, giving the page full screen real estate. Critical for the chat page PTY terminal in landscape mode.
+
+```typescript
+// apps/feishu/src/pages/chat/index.config.ts
+export default definePageConfig({
+  navigationStyle: "custom",
+  pageOrientation: "auto"
+})
+```
+
+When using `navigationStyle: "custom"`:
+- The status bar and notch intrude into page content
+- Must implement a custom header with safe area padding
+- `statusBarHeight` from `getSystemInfoSync()` provides the padding value
+- On PC, `statusBarHeight` is typically 0 (no status bar)
+
+Plan 08 uses this for the chat page. Plan 10 provides the `SafeAreaHeader` component.
+
+**Source:** [Feishu Mini Program Navigation Config](https://open.feishu.cn/document/tools-and-resources/development-tools/gadget/page-config)
+
+### Finding 3: Real-Time Resize Tracking via onWindowResize
+
+`Taro.getSystemInfoSync()` only reads the viewport size once at call time. To react to orientation changes and PC window resizes, must subscribe to `Taro.onWindowResize`:
+
+```typescript
+import Taro from "@tarojs/taro";
+import { useState, useEffect } from "react";
+
+export function useScreenSize() {
+  const info = Taro.getSystemInfoSync();
+  const [size, setSize] = useState({
+    width: info.windowWidth,
+    height: info.windowHeight,
+    deviceType: info.deviceType,
+    statusBarHeight: info.statusBarHeight,
+    safeArea: info.safeArea
+  });
+
+  useEffect(() => {
+    const handler = (res) => {
+      setSize(prev => ({
+        ...prev,
+        width: res.size.windowWidth,
+        height: res.size.windowHeight
+      }));
+    };
+    Taro.onWindowResize(handler);
+    return () => Taro.offWindowResize(handler);
+  }, []);
+
+  return size;
+}
+```
+
+The `useResize` hook from `@tarojs/taro` is a Taro-specific wrapper, but `Taro.onWindowResize` / `Taro.offWindowResize` is the more reliable cross-platform approach.
+
+**Source:** [Taro onWindowResize API](https://docs.taro.zone/en/docs/apis/ui/window/onWindowResize)
+
+### Finding 4: deviceType Discrimination
+
+`Taro.getSystemInfoSync().deviceType` returns `"phone"`, `"tablet"`, `"pc"`, `"other"`.
+
+Important scenarios:
+- PC with 350px width (sidebar mode): classified as "phone-portrait" by width, but IS a PC -- settings menu should show "Expand Window" button
+- Tablet with 768px: classified as "phone-landscape" by width, touch-oriented similar to phone
+- PC with 900px+ width (appCenter mode): classified as "desktop"
+
+The `deviceType` field is used for platform-specific features (like `tt.setWindowSize` toggle in settings), while `windowWidth` drives layout breakpoints.
+
+**Source:** [Feishu getSystemInfo API](https://open.feishu.cn/document/uYjL24iN/ucjMx4yNyEjL3ITM)
+
+### Finding 5: Safe Area Handling for Custom Navigation
+
+When `navigationStyle: "custom"` is set, the page content starts from the very top of the screen. On phones with notches, this means content renders under the status bar.
+
+Key fields from `getSystemInfoSync()`:
+- `statusBarHeight`: height of the status bar in px (0 on PC)
+- `safeArea`: `{ top, bottom, left, right, width, height }` -- the safe area rectangle
+
+The `SafeAreaHeader` component reads `statusBarHeight` and applies it as top padding to push content below the status bar. On PC where `statusBarHeight === 0`, no extra padding is added.
+
+**Source:** [Feishu getSystemInfo API](https://open.feishu.cn/document/uYjL24iN/ucjMx4yNyEjL3ITM)
+
+### Finding 6: PC Window Mode Configuration
+
+For the Feishu PC client to open the mini program in large window mode (workbench tab, 900px+) instead of the default 350px sidebar:
+
+```typescript
+// app.config.ts
+{
+  ext: {
+    defaultPages: {
+      PCMode: "appCenter"  // opens as large workbench tab
+    }
+  }
+}
+```
+
+Without this config, PC defaults to a 350px sidebar which is too narrow for terminal or chat experience. The `tt.setWindowSize` API can also be called at runtime to resize the window, but `appCenter` sets a good default.
+
+**Source:** [Feishu Mini Program ext Config](https://open.feishu.cn/document/tools-and-resources/development-tools/gadget/app-config)
+
+### Impact on Plans
+
+| Plan | Changes Applied |
+|------|----------------|
+| Plan 10 | Global `pageOrientation: "auto"`, `ext.defaultPages.PCMode: "appCenter"`, `useScreenSize` with `onWindowResize` subscription, `deviceType`/`statusBarHeight`/`safeArea` in hook return, new `SafeAreaHeader` component |
+| Plan 08 | Per-page `navigationStyle: "custom"` + `pageOrientation: "auto"`, uses `SafeAreaHeader` from Plan 10, page content accounts for header height |
+| Plan 07 | Per-page `pageOrientation: "auto"` for both pages, keep default navigation |
+| Plan 11 | Settings menu adds "Expand Window" / "Shrink Window" toggle visible only when `deviceType === "pc"`, calls `tt.setWindowSize` |
+| Plan 09 | No changes needed (tool approval and back-to-bottom inherit responsive infrastructure from parent plans) |
+
