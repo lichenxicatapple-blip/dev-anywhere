@@ -11,6 +11,7 @@ const sessionStateValues = [
 // 创建会话
 export const SessionCreatePayloadSchema = z.object({
   name: z.string().optional(),
+  cwd: z.string().optional(),
 });
 
 export type SessionCreatePayload = z.infer<typeof SessionCreatePayloadSchema>;
@@ -22,6 +23,7 @@ export const SessionListPayloadSchema = z.object({
       sessionId: z.string(),
       name: z.string().optional(),
       state: z.enum(sessionStateValues),
+      mode: z.enum(["pty", "json"]).optional(),
     }),
   ),
 });
@@ -51,6 +53,29 @@ export const SessionStatusPayloadSchema = z.object({
 });
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
+
+// 终端栅格帧，一个 span 表示一段同属性的文本
+export const TermSpanSchema = z.object({
+  text: z.string(),
+  fg: z.string().optional(),
+  bg: z.string().optional(),
+  bold: z.boolean().optional(),
+});
+export type TermSpan = z.infer<typeof TermSpanSchema>;
+
+// 终端栅格帧负载，每行由若干 span 组成
+export const TerminalFramePayloadSchema = z.object({
+  lines: z.array(z.array(TermSpanSchema)),
+});
+export type TerminalFramePayload = z.infer<typeof TerminalFramePayloadSchema>;
+
+// PTY 语义状态事件，描述当前 PTY 处于何种状态
+export const PtyStatePayloadSchema = z.object({
+  state: z.enum(["working", "turn_complete", "approval_wait"]),
+  title: z.string().optional(),
+  tool: z.string().optional(),
+});
+export type PtyStatePayload = z.infer<typeof PtyStatePayloadSchema>;
 
 // PTY 终端快照，base64 编码的二进制终端状态
 // relay 收到后触发缓冲区压缩，丢弃快照之前的所有消息
