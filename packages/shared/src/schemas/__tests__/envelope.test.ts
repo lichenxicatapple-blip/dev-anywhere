@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { MessageEnvelopeSchema } from "../envelope.js";
+import {
+  TerminalFramePayloadSchema,
+  PtyStatePayloadSchema,
+  SessionCreatePayloadSchema,
+  SessionListPayloadSchema,
+} from "../session.js";
 
 // 辅助函数：创建一个基础的 envelope 结构
 function makeEnvelope(
@@ -214,6 +220,90 @@ describe("MessageEnvelopeSchema", () => {
         makeEnvelope("heartbeat", {}, { source: "client" }),
       );
       expect(result.source).toBe("client");
+    });
+  });
+
+  describe("TerminalFramePayloadSchema", () => {
+    it("validates lines with full span attributes", () => {
+      const result = TerminalFramePayloadSchema.parse({
+        lines: [[{ text: "hello", fg: "#00FF00", bold: true }]],
+      });
+      expect(result.lines[0][0].text).toBe("hello");
+      expect(result.lines[0][0].fg).toBe("#00FF00");
+      expect(result.lines[0][0].bold).toBe(true);
+    });
+
+    it("validates minimal span without optional fields", () => {
+      const result = TerminalFramePayloadSchema.parse({
+        lines: [[{ text: " " }]],
+      });
+      expect(result.lines[0][0].text).toBe(" ");
+      expect(result.lines[0][0].fg).toBeUndefined();
+    });
+
+    it("rejects lines that is not an array", () => {
+      expect(() =>
+        TerminalFramePayloadSchema.parse({ lines: "not an array" }),
+      ).toThrow();
+    });
+  });
+
+  describe("PtyStatePayloadSchema", () => {
+    it("validates state working", () => {
+      const result = PtyStatePayloadSchema.parse({ state: "working" });
+      expect(result.state).toBe("working");
+    });
+
+    it("validates state approval_wait with tool", () => {
+      const result = PtyStatePayloadSchema.parse({
+        state: "approval_wait",
+        tool: "Bash",
+      });
+      expect(result.state).toBe("approval_wait");
+      expect(result.tool).toBe("Bash");
+    });
+
+    it("validates state turn_complete with title", () => {
+      const result = PtyStatePayloadSchema.parse({
+        state: "turn_complete",
+        title: "task done",
+      });
+      expect(result.state).toBe("turn_complete");
+      expect(result.title).toBe("task done");
+    });
+
+    it("rejects invalid state value", () => {
+      expect(() =>
+        PtyStatePayloadSchema.parse({ state: "invalid_state" }),
+      ).toThrow();
+    });
+  });
+
+  describe("SessionCreatePayloadSchema cwd extension", () => {
+    it("accepts name and cwd", () => {
+      const result = SessionCreatePayloadSchema.parse({
+        name: "test",
+        cwd: "/home/user/project",
+      });
+      expect(result.cwd).toBe("/home/user/project");
+    });
+
+    it("accepts name without cwd (optional)", () => {
+      const result = SessionCreatePayloadSchema.parse({ name: "test" });
+      expect(result.cwd).toBeUndefined();
+    });
+  });
+
+  describe("SessionListPayloadSchema mode extension", () => {
+    it("accepts session entries with mode field", () => {
+      const result = SessionListPayloadSchema.parse({
+        sessions: [
+          { sessionId: "s1", state: "idle", mode: "pty" },
+          { sessionId: "s2", state: "working", mode: "json" },
+        ],
+      });
+      expect(result.sessions[0].mode).toBe("pty");
+      expect(result.sessions[1].mode).toBe("json");
     });
   });
 
