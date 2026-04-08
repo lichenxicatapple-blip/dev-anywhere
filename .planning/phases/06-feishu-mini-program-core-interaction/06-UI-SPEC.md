@@ -34,17 +34,18 @@ Declared values (multiples of 4, in logical points):
 | Token | Value | Usage |
 |-------|-------|-------|
 | xs | 4px | Inline icon gaps, status dot margin |
-| sm | 8px | Compact element spacing, terminal content padding, input field internal padding |
-| md | 12px | Chat bubble internal padding, list item padding |
-| lg | 16px | Section padding, page horizontal margin, card spacing |
-| xl | 24px | Page vertical padding, major section gaps |
-| 2xl | 32px | Empty state illustration margin |
-| 3xl | 48px | Not used in Phase 6 |
+| sm | 8px | Compact element spacing, terminal content padding, input field internal padding, chat bubble internal padding |
+| md | 16px | Section padding, page horizontal margin, card spacing, list item padding |
+| lg | 24px | Page vertical padding, major section gaps |
+| xl | 32px | Empty state illustration margin |
+| 2xl | 48px | Not used in Phase 6 |
+| 3xl | 64px | Not used in Phase 6 |
 
 Exceptions:
 - Touch targets minimum 44px height (Apple HIG for mobile)
 - Input bar height: 48px (comfortable thumb target)
 - Session list item height: 64px (two-line content with status dot)
+- 12px vertical padding on SessionListItem and ToolApprovalCard: justified by compact mobile layout where 8px is too tight for multi-line card content and 16px wastes vertical space in list contexts
 
 ---
 
@@ -52,14 +53,16 @@ Exceptions:
 
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
-| Body | 14px | 400 (regular) | 1.5 (21px) | Chat bubble text, session list subtitle, general content |
-| Label | 12px | 400 (regular) | 1.4 (16.8px) | Timestamps, status labels, relative time, metadata |
+| Body | 14px | 400 (regular) | 1.5 (21px) | Chat bubble text, session list subtitle, general content, tool approval buttons |
+| Label | 12px | 400 (regular) | 1.4 (16.8px) | Timestamps, status labels, relative time, metadata, mode tags |
 | Heading | 16px | 600 (semibold) | 1.3 (20.8px) | Navigation bar title, session list item title, section headers |
 | Terminal | Variable (8/10/12/14/16/20 PX) | 400 (regular) | 1.4x font size | PTY terminal view, monospace only |
 
 **Terminal font sizes use uppercase PX** to bypass Taro pxtransform. The 6 tiers from D-11: 8PX, 10PX, 12PX, 14PX, 16PX, 20PX. Default tier: 12PX (index 2).
 
 Font weight constraint: only 400 and 600 used throughout.
+
+UI font sizes: exactly 3 (12px, 14px, 16px). Terminal sizes are excluded from the UI count as they are a separate monospace rendering system with uppercase PX bypass.
 
 ---
 
@@ -77,7 +80,7 @@ Font weight constraint: only 400 and 600 used throughout.
 
 | Role | Value | Usage |
 |------|-------|-------|
-| Primary / Accent (10%) | `#1890FF` | Send button (active), proxy selection highlight, "back to bottom" button, active tab indicator, new session "+" button |
+| Primary / Accent (10%) | `#1890FF` | Send button (active), proxy selection highlight, active tab indicator, new session "+" button |
 | Success | `#52C41A` | Session state "idle" dot, connected status, tool result success |
 | Warning | `#FAAD14` | Session state "waiting_approval" dot, tool approval card border |
 | Error / Destructive | `#FF4D4F` | Session state "error" dot, terminate button, error toast, tool deny button |
@@ -106,7 +109,7 @@ Font weight constraint: only 400 and 600 used throughout.
 
 State dot size: 8px diameter, `border-radius: 50%`.
 
-Accent reserved for: send button, "+" new session button, "back to bottom" floating button, active proxy selection, working state dot.
+Accent reserved for: send button, "+" new session button, active proxy selection, working state dot.
 
 ---
 
@@ -152,7 +155,7 @@ Three pages, linear push navigation (no TabBar):
 - Line 2: relative time (Label 12px, `#999999`)
 - Leading: state dot (8px, vertically centered)
 - Trailing: chevron right (`>`, `#CCCCCC`)
-- Mode tag: small rounded pill, "PTY" in `#666666` on `#F0F0F0` background or "JSON" in `#1890FF` on `#E6F7FF` background; font 10px, padding 2px 6px, border-radius 4px
+- Mode tag: small rounded pill, "PTY" in `#666666` on `#F0F0F0` background or "JSON" in `#1890FF` on `#E6F7FF` background; font 12px, padding 4px 8px, border-radius 4px
 - Height: 64px
 - Padding: 16px horizontal, 12px vertical
 - Swipe: JSON sessions reveal red "Terminate" button (D-06)
@@ -173,13 +176,13 @@ Three pages, linear push navigation (no TabBar):
 - Container: `ScrollView scrollY`, flex: 1
 - Background: `#FFFFFF`
 - Padding: 16px horizontal
-- Gap between messages: 12px
+- Gap between messages: 16px
 
 ### UserBubble
 - Alignment: right-aligned (flex-end)
 - Background: `#1890FF`
 - Text: `#FFFFFF`, 14px regular
-- Padding: 10px 12px
+- Padding: 8px 16px
 - Border radius: 12px (top-left, top-right, bottom-left), 4px (bottom-right)
 - Max width: 75% of screen width
 
@@ -187,7 +190,7 @@ Three pages, linear push navigation (no TabBar):
 - Alignment: left-aligned (flex-start)
 - Background: `#F0F0F0`
 - Text: `#333333`, 14px regular
-- Padding: 10px 12px
+- Padding: 8px 16px
 - Border radius: 4px (top-left), 12px (top-right, bottom-left, bottom-right)
 - Max width: 85% of screen width
 - Streaming indicator: blinking cursor `|` appended to text while `isPartial === true`, blink animation 0.8s
@@ -200,7 +203,7 @@ Three pages, linear push navigation (no TabBar):
   - Background: `#FAFAFA`
   - Border: `1px solid #E8E8E8`
   - Border radius: 8px
-  - Padding: 10px 12px
+  - Padding: 8px 16px
 - Expanded state:
   - Tool name header (semibold)
   - Parameters: pre-formatted JSON, 12px monospace, `#666666`, max-height 200px with scroll
@@ -221,7 +224,7 @@ Three pages, linear push navigation (no TabBar):
     - "Allow" -- `#52C41A` background, `#FFFFFF` text, flex: 1
     - "Allow All" -- `#1890FF` background, `#FFFFFF` text, flex: 1
     - "Deny" -- `#FFFFFF` background, `#FF4D4F` text, `1px solid #FF4D4F` border, flex: 1
-  - Button height: 36px, border-radius: 4px, font 13px semibold
+  - Button height: 36px, border-radius: 4px, font 14px semibold
   - Gap between buttons: 8px
 
 ### InputBar
@@ -277,7 +280,7 @@ Command list:
 - Directory list with folder icons
 - Current path display at top
 - "Select" button at bottom: full-width, 44px height, `#1890FF` background
-- "Cancel" button: full-width, 44px height, `#FFFFFF` background, `#666666` text
+- "Go Back" button: full-width, 44px height, `#FFFFFF` background, `#666666` text
 
 ### BackToBottomButton (D-18)
 - Floating button, positioned bottom-right of chat area, 16px from right edge, 60px above input bar
@@ -342,7 +345,7 @@ Command list:
 | Terminate button (swipe) | "Terminate" |
 | Directory picker title | "Select Working Directory" |
 | Directory picker confirm | "Select" |
-| Directory picker cancel | "Cancel" |
+| Directory picker dismiss | "Go Back" |
 | Back to bottom | Chevron down icon (no text) |
 | PTY status working | "Working..." |
 | PTY status idle | "Idle" |
