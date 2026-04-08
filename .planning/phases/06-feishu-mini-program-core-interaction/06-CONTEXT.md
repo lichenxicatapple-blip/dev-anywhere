@@ -62,8 +62,20 @@
 - **D-27:** Proxy 侧 session 级工具白名单：用户选择"允许同类工具"后，proxy 在当前 session 的 approvalStrategy 中缓存该 toolName，后续同名工具自动 allow，不再转发到小程序。会话结束白名单清除。
 
 ### 命令和文件补全
-- **D-28:** 斜杠命令补全：输入 `/` 触发命令列表下拉。命令列表（/compact, /status, /model 等）客户端写死。带选项的命令（如 /model）展示子选项供选择。
-- **D-29:** @file 路径补全：输入 `@` 触发文件浏览器，复用 D-21 的 `dir_list_request/response` 协议。支持逐级目录浏览和搜索。
+- **D-28:** 斜杠命令补全（spike 已验证，原方案客户端写死已废弃）：
+  - **命令发现**：proxy 侧动态扫描，来源包括：用户级/项目级 skills（`~/.claude/skills/*/SKILL.md`）、用户级/项目级 commands（`~/.claude/commands/*.md`）、插件 skills 和 commands（`~/.claude/plugins/cache/.../`）、REPL 内置命令（proxy 维护已知列表）
+  - **黑名单过滤**（proxy 侧）：`/login, /logout, /config, /plugin, /mcp, /install, /setup-token, /doctor, /update, /upgrade`
+  - **推送策略**：session 建立时推送完整命令列表 + 6 小时定时刷新
+  - **子选项**：不提供 picker，用户直接输入参数（如 `/model Haiku`）
+  - **argument-hint**：从 SKILL.md frontmatter 的 `argument-hint` 字段提取，选中命令后作为输入栏上方提示行展示
+- **D-29:** @file 路径补全（spike 已验证）：
+  - **初始推送**：session 建立时 proxy 推送工作目录前两层目录结构
+  - **文件监控**：proxy 用 `fs.watch` recursive 监控 session 工作目录全树，文件增删时主动推送变更目录列表到小程序
+  - **监控过滤**：硬编码黑名单（`node_modules, .git, dist, build, .next, .nuxt, __pycache__, .venv, .tox, target, .gradle`），不使用 `.gitignore`（避免误过滤日志等用户需要访问的文件）
+  - **节流**：同一目录变动 2s 内合并批量推送
+  - **客户端缓存**：小程序本地缓存所有已知目录，proxy 推送时更新，file picker 打开时直接读缓存零等待
+  - **深层目录**：首次访问未缓存的深层目录时请求 proxy，返回后缓存
+  - **异常恢复（D-41）**：重连 = 重新初始化。小程序断联重连 / proxy 断联重连 / session 切换 workDir 时，proxy 重新推送前两层 + 重新初始化 watch，小程序清空本地缓存。命令列表同理。relay 始终无状态透传
 - **D-30:** 参考 cc-connect 的实现（`reference/cc-connect/`），特别是 `agent/claudecode/` 的权限处理和 `core/interfaces.go` 的会话接口设计。
 
 ### cc-connect 关键借鉴（必须实现）
@@ -91,12 +103,7 @@
 ### Claude's Discretion
 - PTY 终端帧的推送频率和节流策略
 - PTY 终端帧的增量更新机制（全量 vs 只发变化行）
-- JSON 会话气泡的具体视觉样式（圆角、间距、配色）
-- "回到底部"按钮的出现/消失条件和位置
-- 会话列表的空状态展示
 - 聊天页和终端页的切换动画
-- 斜杠命令的完整列表和子选项
-- 目录浏览器的 UI 交互细节
 
 </decisions>
 
