@@ -69,7 +69,7 @@
 ### cc-connect 关键借鉴（必须实现）
 - **D-31:** JSON 会话启动时必须加 `--fork-session`，防止干扰用户电脑上正在使用的本地 Claude Code 终端会话。
 - **D-32:** 权限响应走独立路径，不被"会话忙"状态阻塞。relay 收到 permission_response 消息后立即转发到 proxy，不排队。
-- **D-33:** 消息不能 mid-turn inject——会话忙时新消息排队，等当前 turn 的 result 事件到了再发下一条。proxy 侧实现消息队列。
+- **D-33:** JSON 会话 working 状态下，小程序端禁用发送按钮（输入框可写但不能发送）。等 result 事件到达后恢复发送。避免 mid-turn inject，不需要 proxy 侧排队。PTY 会话不限制（Claude Code 自身处理排队）。
 - **D-34:** 启动 claude 子进程前过滤 `CLAUDECODE` 环境变量，防止检测到嵌套会话后改变行为。
 
 ### 会话恢复（Resume）
@@ -77,16 +77,16 @@
 - **D-36:** 仅 JSON 会话支持自动恢复。当 JSON 会话进程死亡（worker 崩溃、proxy 重启、电脑重启）后，用户在小程序点击该会话时，自动用 `--resume <claude-session-id> --fork-session` 恢复对话上下文。PTY 会话进程死亡后标记为"已结束"，用户可通过 D-37 的历史会话浏览以 JSON 模式恢复对话。Resume 失败时展示提示（如"会话已过期"），引导用户新建。
 - **D-37:** 支持浏览和恢复电脑上任意 Claude Code 历史会话（不限于 cc-anywhere 创建的）。Proxy 扫描 `~/.claude/projects/` 下的会话文件，参考 cc-connect 的 `scanSessionMeta` + `findProjectDir`。新增 relay 控制消息 `session_history_request/response`，小程序在会话列表页展示"历史会话"区域，选择后用 `--resume <id> --fork-session` 恢复。
 
-### PTY 语义信号提取
-- **D-38:** 从 PTY 原始字节流提取 OSC 序列（实验验证，1142 个事件中提取 51 条 OSC 0 + 8 条 OSC 9）。Claude Code 使用三种 OSC 信号：
-  - **OSC 0**（终端标题）：spinner 字符（`⠂`/`⠐`=working，`✳`=idle）+ 任务描述文本
-  - **OSC 9**（通知）：`"Claude is waiting for your input"` = 任务完成等待输入；`"Claude needs your permission to use {tool}"` = 等待工具审批（带工具名）
-  - OSC 8（超链接）：文件路径链接，暂不需要
-- **D-39:** 基于 OSC 9 通知信号判断终态类型，不依赖屏幕内容检测（纯协议层，无 UI 耦合）：
+### PTY 语义信号提取与转发
+- **D-38:** 完整链路（实验验证可行）：
+  1. **Proxy 提取**：PtyManager tap 环节从原始字节流用正则提取 OSC 0（标题/状态）和 OSC 9（通知）序列
+  2. **结构化事件**：转换为新消息类型 `pty_state`（shared schema 扩展），包含 state（working/turn_complete/approval_wait）、title（任务描述）、tool（审批工具名）
+  3. **Relay 转发**：作为 MessageEnvelope 发到 relay → 小程序，和终端帧一起走同一条通道
+  4. **小程序消费**：实时更新 UI 状态栏（working/idle）、触发审批卡片弹出。后续 phase 消费同一事件做推送通知和语音播报
+- **D-39:** 状态分类规则（基于 OSC 9，纯协议层无 UI 耦合）：
   - OSC 9 包含 `"waiting for your input"` → **TURN_COMPLETE**
   - OSC 9 包含 `"needs your permission"` → **APPROVAL_WAIT**（可提取工具名）
-  - 仅 OSC 0 idle 无 OSC 9 → **MID_PAUSE**（不通知）
-  Phase 6 做信号提取和状态分类，通知推送和语音播报由后续 phase 消费。
+  - 仅 OSC 0 spinner 变化无 OSC 9 → **MID_PAUSE**（不转发，不通知）
 
 ### Claude's Discretion
 - PTY 终端帧的推送频率和节流策略
