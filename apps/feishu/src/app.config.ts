@@ -1,5 +1,14 @@
 export default defineAppConfig({
-  pages: ["pages/index/index"],
+  pages: [
+    "pages/spike-hub/index",
+    "pages/spike-typewriter/index",
+    "pages/spike-session-list/index",
+    "pages/spike-chat-json/index",
+    "pages/spike-chat-pty/index",
+    "pages/spike-bubble-anim/index",
+    "pages/spike-render/index",
+    "pages/index/index",
+  ],
   window: {
     navigationBarTextStyle: "black",
     navigationBarTitleText: "CC Anywhere",

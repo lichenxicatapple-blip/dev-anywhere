@@ -1,0 +1,234 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #f5f5f5;
+}
+
+.list-scroll {
+  flex: 1;
+}
+
+/* ---- Section header ---- */
+.section-header {
+  font-size: 24px;
+  color: #999;
+  padding: 24px 32px 12px;
+  font-weight: 600;
+}
+
+/* ---- Session item ---- */
+.session-item-wrapper {
+  position: relative;
+  overflow: hidden;
+  margin: 0 32px 16px;
+  border-radius: 16px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  padding: 24px 32px;
+  position: relative;
+  z-index: 1;
+  transition: transform 0.25s ease-out;
+}
+
+.session-item.swiped {
+  transform: translateX(-160px);
+}
+
+.swipe-action {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 160px;
+  background: #FF4D4F;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 16px 16px 0;
+}
+
+.swipe-action-text {
+  color: #fff;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+/* ---- Session meta row ---- */
+.session-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.session-state-label {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.session-state-label.idle { color: #52C41A; }
+.session-state-label.working { color: #1890FF; }
+.session-state-label.waiting_approval { color: #FAAD14; }
+.session-state-label.error { color: #FF4D4F; }
+.session-state-label.terminated { color: #999; }
+
+.session-meta-sep {
+  font-size: 22px;
+  color: #ddd;
+}
+
+/* ---- State dot ---- */
+.state-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.state-dot.idle {
+  background: #52C41A;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.state-dot.working {
+  background: #1890FF;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.2); }
+}
+
+.state-dot.waiting_approval {
+  background: #FAAD14;
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.state-dot.error {
+  background: #FF4D4F;
+}
+
+.state-dot.terminated {
+  background: #999;
+}
+
+/* ---- Session info ---- */
+.session-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.session-title {
+  font-size: 32px;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.session-time {
+  font-size: 24px;
+  color: #999;
+}
+
+.session-chevron {
+  font-size: 28px;
+  color: #ccc;
+  margin-left: 16px;
+}
+
+/* ---- Mode tag ---- */
+.mode-tag {
+  padding: 4px 16px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.mode-tag.pty {
+  background: #F0F0F0;
+}
+
+.mode-tag.json {
+  background: #E6F7FF;
+}
+
+.mode-tag-text {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.mode-tag-text.pty {
+  color: #666;
+}
+
+.mode-tag-text.json {
+  color: #1890FF;
+}
+
+/* ---- Empty state ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 200px 32px;
+}
+
+.empty-title {
+  font-size: 32px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 16px;
+}
+
+.empty-body {
+  font-size: 28px;
+  color: #999;
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.empty-cta {
+  background: #1890FF;
+  padding: 20px 64px;
+  border-radius: 16px;
+}
+
+.empty-cta-text {
+  color: #fff;
+  font-size: 32px;
+  font-weight: 600;
+}
+
+/* ---- Spike toggle ---- */
+.spike-toggle {
+  padding: 16px;
+  background: rgba(0,0,0,0.05);
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.spike-toggle-text {
+  font-size: 24px;
+  color: #666;
+}
