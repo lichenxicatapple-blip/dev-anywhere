@@ -1,6 +1,11 @@
 import { createServer, type Socket } from "node:net";
 import { mkdirSync, unlinkSync, existsSync, chmodSync } from "node:fs";
-import { JsonSession, type StreamJsonEvent } from "./json-session.js";
+import {
+  JsonSession,
+  ToolWhitelist,
+  createRelayApprovalStrategy,
+  type StreamJsonEvent,
+} from "./json-session.js";
 import { EventStore, EventType } from "./event-store.js";
 import {
   createWorkerReader,
@@ -21,6 +26,7 @@ if (!sessionId || !sockPath) {
 
 let serveSocket: Socket | null = null;
 const eventStore = new EventStore(sessionId);
+const whitelist = new ToolWhitelist();
 
 const pendingApprovals = new Map<
   string,
@@ -33,21 +39,35 @@ function sendToServe(msg: WorkerMessage): void {
   }
 }
 
+// 转发审批请求到 serve 进程，由 serve 进程通过 relay 转发到小程序
+const forwardToRelay = async (
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<{ behavior: "allow" | "deny"; message?: string }> => {
+  return new Promise((resolve) => {
+    const requestId = `${sessionId}-${Date.now()}`;
+    pendingApprovals.set(requestId, { resolve });
+    sendToServe({
+      type: "worker_approval_request",
+      requestId,
+      toolName,
+      input,
+    });
+  });
+};
+
 const session = new JsonSession({
   claudeArgs,
-  approvalStrategy: async (toolName, input) => {
-    return new Promise((resolve) => {
-      const requestId = `${sessionId}-${Date.now()}`;
-      pendingApprovals.set(requestId, { resolve });
-      sendToServe({
-        type: "worker_approval_request",
-        requestId,
-        toolName,
-        input,
-      });
-    });
-  },
+  approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
   onEvent: (event: StreamJsonEvent) => {
+    // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
+    if (event.type === "system" && typeof event.session_id === "string") {
+      sendToServe({
+        type: "worker_claude_session_id",
+        sessionId: event.session_id,
+      });
+    }
+
     // 写入 EventStore 获取 per-session seq，带给 serve 构建 MessageEnvelope
     const seq = eventStore.writeImmediate(
       EventType.PTY_OUTPUT,
@@ -60,6 +80,7 @@ const session = new JsonSession({
     });
   },
   onExit: (code: number) => {
+    whitelist.clear();
     eventStore.close();
     sendToServe({ type: "worker_exit", code });
     cleanup();
@@ -95,6 +116,9 @@ function handleServeConnection(socket: Socket): void {
         }
         break;
       }
+      case "worker_whitelist_add":
+        whitelist.add(msg.toolName);
+        break;
     }
   });
 

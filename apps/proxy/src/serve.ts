@@ -128,6 +128,21 @@ export function sendPtySnapshot(
   }
 }
 
+// ---------- 工具审批 pending 回调管理 ----------
+
+// requestId -> resolve callback，serve 收到 relay 的 tool_approve/tool_deny 时 resolve
+const pendingToolApprovals = new Map<
+  string,
+  {
+    sessionId: string;
+    workerSocket: Socket;
+    resolve: (response: { behavior: "allow" | "deny"; message?: string }) => void;
+  }
+>();
+
+// sessionId -> Claude session ID，worker 捕获 system 事件后上报
+const claudeSessionIds = new Map<string, string>();
+
 // ---------- Worker 管理 ----------
 
 function connectToWorker(
@@ -187,13 +202,58 @@ function connectToWorker(
             logger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
             break;
           case "worker_approval_request":
-            logger.info({ sessionId, toolName: msg.toolName }, "Tool approval requested (auto-deny)");
-            sock.write(serializeWorkerMsg({
-              type: "worker_approval_response",
-              requestId: msg.requestId,
-              behavior: "deny",
-              message: "Remote approval not yet configured.",
-            }));
+            if (relayConnection) {
+              logger.info({ sessionId, toolName: msg.toolName, requestId: msg.requestId }, "Tool approval forwarding to relay");
+              try {
+                const store = new EventStore(sessionId);
+                const approvalSeq = store.getSeq() + 1;
+                store.close();
+                const envelope = buildMessage(
+                  "tool_use_request",
+                  sessionId,
+                  approvalSeq,
+                  {
+                    toolName: msg.toolName,
+                    toolId: msg.requestId,
+                    parameters: msg.input,
+                  },
+                  "proxy",
+                );
+                relayConnection.send(envelope);
+                pendingToolApprovals.set(msg.requestId, {
+                  sessionId,
+                  workerSocket: sock,
+                  resolve: (response) => {
+                    sock.write(serializeWorkerMsg({
+                      type: "worker_approval_response",
+                      requestId: msg.requestId,
+                      behavior: response.behavior,
+                      message: response.message,
+                    }));
+                  },
+                });
+              } catch (err) {
+                logger.warn({ sessionId, error: String(err) }, "Failed to forward tool approval to relay, denying");
+                sock.write(serializeWorkerMsg({
+                  type: "worker_approval_response",
+                  requestId: msg.requestId,
+                  behavior: "deny",
+                  message: "Failed to forward approval request to relay.",
+                }));
+              }
+            } else {
+              logger.info({ sessionId, toolName: msg.toolName }, "Tool approval denied (no relay connection)");
+              sock.write(serializeWorkerMsg({
+                type: "worker_approval_response",
+                requestId: msg.requestId,
+                behavior: "deny",
+                message: "No relay connection available for remote approval.",
+              }));
+            }
+            break;
+          case "worker_claude_session_id":
+            claudeSessionIds.set(sessionId, msg.sessionId);
+            logger.info({ sessionId, claudeSessionId: msg.sessionId }, "Claude session ID captured");
             break;
         }
       });
@@ -499,13 +559,32 @@ export async function startService(): Promise<void> {
           const ws = workerSockets.get(parsed.sessionId);
           if (ws?.writable) {
             ws.write(serializeWorkerMsg({
-              type: "worker_approval_response",
-              requestId: "",
-              behavior: "allow",
-              message: parsed.payload?.text ?? "",
+              type: "worker_input",
+              content: parsed.payload?.text ?? "",
             }));
           }
           logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to worker");
+        } else if (parsed.type === "tool_approve" && parsed.sessionId) {
+          const toolId = parsed.payload?.toolId as string | undefined;
+          if (toolId) {
+            const pending = pendingToolApprovals.get(toolId);
+            if (pending) {
+              pending.resolve({ behavior: "allow" });
+              pendingToolApprovals.delete(toolId);
+              logger.info({ sessionId: parsed.sessionId, toolId }, "Tool approved via relay");
+            }
+          }
+        } else if (parsed.type === "tool_deny" && parsed.sessionId) {
+          const toolId = parsed.payload?.toolId as string | undefined;
+          const reason = (parsed.payload?.reason as string) ?? "Denied by remote user";
+          if (toolId) {
+            const pending = pendingToolApprovals.get(toolId);
+            if (pending) {
+              pending.resolve({ behavior: "deny", message: reason });
+              pendingToolApprovals.delete(toolId);
+              logger.info({ sessionId: parsed.sessionId, toolId }, "Tool denied via relay");
+            }
+          }
         }
       } catch (err) {
         logger.warn({ error: String(err) }, "Failed to parse relay message");

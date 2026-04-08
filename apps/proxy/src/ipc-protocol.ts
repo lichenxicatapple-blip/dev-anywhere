@@ -157,6 +157,18 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("worker_replay_done"),
     replayedCount: z.number(),
   }),
+
+  // worker → serve: Claude 会话 ID，从 system 事件捕获用于后续 resume
+  z.object({
+    type: z.literal("worker_claude_session_id"),
+    sessionId: z.string(),
+  }),
+
+  // serve → worker: 将指定工具加入会话白名单，后续同名工具自动审批
+  z.object({
+    type: z.literal("worker_whitelist_add"),
+    toolName: z.string(),
+  }),
 ]);
 
 export type WorkerMessage = z.infer<typeof WorkerMessageSchema>;
