@@ -33,6 +33,9 @@ export {
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
+  TermSpanSchema,
+  TerminalFramePayloadSchema,
+  PtyStatePayloadSchema,
 } from "./schemas/session.js";
 export type {
   SessionCreatePayload,
@@ -40,6 +43,9 @@ export type {
   SessionSwitchPayload,
   SessionTerminatePayload,
   SessionStatusPayload,
+  TermSpan,
+  TerminalFramePayload,
+  PtyStatePayload,
 } from "./schemas/session.js";
 export {
   HeartbeatPayloadSchema,

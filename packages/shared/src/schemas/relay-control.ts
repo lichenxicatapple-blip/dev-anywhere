@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 export const RelayControlSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("proxy_register"), proxyId: z.string().min(1) }),
+  z.object({ type: z.literal("proxy_register"), proxyId: z.string().min(1), name: z.string().optional() }),
   z.object({
     type: z.literal("proxy_register_response"),
     status: z.enum(["new", "reconnected"]),
@@ -11,7 +11,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("proxy_list_request") }),
   z.object({
     type: z.literal("proxy_list_response"),
-    proxies: z.array(z.object({ proxyId: z.string() })),
+    proxies: z.array(z.object({ proxyId: z.string(), name: z.string().optional() })),
   }),
   z.object({ type: z.literal("proxy_select"), proxyId: z.string().min(1) }),
   z.object({
@@ -75,6 +75,44 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("proxy_online"),
     proxyId: z.string().min(1),
+  }),
+
+  // Phase 6: 目录列表请求与响应
+  z.object({ type: z.literal("dir_list_request"), proxyId: z.string().min(1), path: z.string() }),
+  z.object({
+    type: z.literal("dir_list_response"),
+    entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+    path: z.string(),
+  }),
+
+  // Phase 6: 命令列表推送，proxy 将可用命令列表推给 client
+  z.object({
+    type: z.literal("command_list_push"),
+    commands: z.array(z.object({
+      name: z.string(),
+      description: z.string(),
+      argumentHint: z.string().optional(),
+      source: z.string(),
+    })),
+  }),
+
+  // Phase 6: 文件树推送
+  z.object({
+    type: z.literal("file_tree_push"),
+    path: z.string(),
+    entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+  }),
+
+  // Phase 6: 会话历史浏览
+  z.object({ type: z.literal("session_history_request") }),
+  z.object({
+    type: z.literal("session_history_response"),
+    sessions: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      projectDir: z.string(),
+      updatedAt: z.number(),
+    })),
   }),
 ]);
 
