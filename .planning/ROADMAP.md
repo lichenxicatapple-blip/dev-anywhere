@@ -113,7 +113,7 @@ Plans:
   2. User sees a list of active sessions and can create a new session, switch between sessions, or terminate a session
   3. User can scroll back through conversation history within a session, including messages exchanged before the current connection
   4. Mini program reconnects automatically when returning from background, and missed messages appear without user action
-**Plans:** 10 plans
+**Plans:** 11 plans
 **UI hint**: yes
 
 Plans:
@@ -123,10 +123,11 @@ Plans:
 - [ ] 06-04-PLAN.md — Proxy command discovery, file watcher, directory listing
 - [ ] 06-05-PLAN.md — Relay routing updates and proxy terminal frame push, control message handlers
 - [ ] 06-06-PLAN.md — Mini program services: WebSocket, relay client, message parser, types, utilities
-- [ ] 06-07-PLAN.md — Mini program proxy select and session list pages with directory picker
-- [ ] 06-08-PLAN.md — Mini program chat page: PTY terminal viewport, JSON chat bubbles, input bar
-- [ ] 06-09-PLAN.md — Mini program chat features: tool approval UI, tool cards, slash/file pickers, quoting, settings
-- [ ] 06-10-PLAN.md — Mini program state stores, StatusLine component, app lifecycle, app config, global styles
+- [ ] 06-07-PLAN.md — Mini program proxy select and session list pages with responsive layout
+- [ ] 06-08-PLAN.md — Mini program chat page: PTY terminal viewport, JSON chat bubbles, input bar, responsive layout
+- [ ] 06-09-PLAN.md — Mini program tool approval UI, tool call cards, back-to-bottom button
+- [ ] 06-10-PLAN.md — Mini program state stores, StatusLine, useScreenSize hook, app lifecycle, responsive CSS infrastructure
+- [ ] 06-11-PLAN.md — Mini program pickers (slash/file/directory), message quoting, settings menu, responsive adaptations
 
 ### Phase 7: Tool Approval & Dual-Surface Sync
 **Goal**: Users can approve or deny Claude Code tool calls from their phone, and terminal + mobile stay in sync during simultaneous use
@@ -204,7 +205,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 3. Local Proxy - Service Architecture & Multi-Session | 0/3 | Planning complete | - |
 | 4. Relay Server - Core Transport | 0/3 | Planning complete | - |
 | 5. Relay Server - Resilience | 0/3 | Planning complete | - |
-| 6. Feishu Mini Program - Core Interaction | 0/9 | Planning complete | - |
+| 6. Feishu Mini Program - Core Interaction | 0/11 | Planning complete | - |
 | 7. Tool Approval & Dual-Surface Sync | 0/2 | Not started | - |
 | 8. Output Rendering | 0/2 | Not started | - |
 | 9. Voice Input | 0/1 | Not started | - |
