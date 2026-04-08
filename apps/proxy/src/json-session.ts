@@ -27,6 +27,8 @@ export interface JsonSessionOptions {
   approvalStrategy?: ApprovalStrategy;
   onEvent?: (event: StreamJsonEvent) => void;
   onExit?: (code: number) => void;
+  cwd?: string;
+  resumeSessionId?: string;
 }
 
 // 默认拒绝所有工具调用，远程审批未配置前的安全兜底
@@ -35,38 +37,104 @@ const denyAllStrategy: ApprovalStrategy = async () => ({
   message: "Tool use denied by default policy. Remote approval not yet configured.",
 });
 
+// 会话级别的工具白名单，用户点击"全部允许"后同名工具自动审批
+export class ToolWhitelist {
+  private allowed = new Set<string>();
+
+  has(toolName: string): boolean {
+    return this.allowed.has(toolName);
+  }
+
+  add(toolName: string): void {
+    this.allowed.add(toolName);
+  }
+
+  clear(): void {
+    this.allowed.clear();
+  }
+}
+
+// 创建中继转发审批策略，先检查白名单再转发到 relay
+export function createRelayApprovalStrategy(
+  whitelist: ToolWhitelist,
+  forwardToRelay: (toolName: string, input: Record<string, unknown>) => Promise<{ behavior: "allow" | "deny"; message?: string }>,
+): ApprovalStrategy {
+  return async (toolName, input) => {
+    if (whitelist.has(toolName)) {
+      return { behavior: "allow", message: "Auto-approved by session whitelist" };
+    }
+    return forwardToRelay(toolName, input);
+  };
+}
+
+// 过滤 CLAUDECODE 开头的环境变量，避免泄漏到 claude 子进程
+export function filterClaudeEnvVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const filtered: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith("CLAUDECODE")) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+}
+
+// 构建 claude CLI 参数，统一管理 stream-json、fork-session、resume 等标志
+export function buildClaudeArgs(options: {
+  outputFormat?: string;
+  inputFormat?: string;
+  permissionPromptTool?: string;
+  forkSession?: boolean;
+  resumeSessionId?: string;
+  verbose?: boolean;
+}): string[] {
+  const args: string[] = [];
+  if (options.outputFormat) args.push("--output-format", options.outputFormat);
+  if (options.inputFormat) args.push("--input-format", options.inputFormat);
+  args.push("--permission-prompt-tool", options.permissionPromptTool ?? "stdio");
+  if (options.verbose) args.push("--verbose");
+  if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
+  if (options.forkSession !== false) args.push("--fork-session");
+  return args;
+}
+
 export class JsonSession {
   private child: ChildProcess | null = null;
   private stderrChunks: string[] = [];
   private writeQueue: Promise<void> = Promise.resolve();
+  private claudeSessionId: string | null = null;
   private readonly workDir: string;
   private readonly claudeArgs: string[];
   private readonly approvalStrategy: ApprovalStrategy;
   private readonly onEvent?: (event: StreamJsonEvent) => void;
   private readonly onExitCb?: (code: number) => void;
+  private readonly resumeSessionId?: string;
 
   constructor(options: JsonSessionOptions = {}) {
-    this.workDir = options.workDir ?? process.cwd();
+    this.workDir = options.cwd ?? options.workDir ?? process.cwd();
     this.claudeArgs = options.claudeArgs ?? [];
     this.approvalStrategy = options.approvalStrategy ?? denyAllStrategy;
     this.onEvent = options.onEvent;
     this.onExitCb = options.onExit;
+    this.resumeSessionId = options.resumeSessionId;
+  }
+
+  getClaudeSessionId(): string | null {
+    return this.claudeSessionId;
   }
 
   start(): number {
-    const args = [
-      "--output-format", "stream-json",
-      "--input-format", "stream-json",
-      "--permission-prompt-tool", "stdio",
-      "--verbose",
-      ...this.claudeArgs,
-    ];
+    const baseArgs = buildClaudeArgs({
+      outputFormat: "stream-json",
+      inputFormat: "stream-json",
+      permissionPromptTool: "stdio",
+      verbose: true,
+      forkSession: true,
+      resumeSessionId: this.resumeSessionId,
+    });
 
-    const filteredEnv = Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([k]) => !k.startsWith("CLAUDECODE"),
-      ),
-    ) as NodeJS.ProcessEnv;
+    const args = [...baseArgs, ...this.claudeArgs];
+
+    const filteredEnv = filterClaudeEnvVars(process.env);
 
     const claudeBin = process.env.CLAUDE_BIN || "claude";
     this.child = spawn(claudeBin, args, {
@@ -134,6 +202,11 @@ export class JsonSession {
       } catch {
         // 非 JSON 行直接跳过，verbose 模式会输出调试日志
         return;
+      }
+
+      // 从 system 事件中捕获 Claude 会话 ID 用于后续 resume
+      if (event.type === "system" && typeof event.session_id === "string") {
+        this.claudeSessionId = event.session_id;
       }
 
       if (
