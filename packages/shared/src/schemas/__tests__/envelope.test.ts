@@ -307,6 +307,26 @@ describe("MessageEnvelopeSchema", () => {
     });
   });
 
+  describe("terminal frame and pty state envelopes", () => {
+    it("validates terminal_frame envelope", () => {
+      const result = MessageEnvelopeSchema.parse(
+        makeEnvelope("terminal_frame", {
+          lines: [[{ text: "x" }]],
+        }),
+      );
+      expect(result.type).toBe("terminal_frame");
+    });
+
+    it("validates pty_state envelope", () => {
+      const result = MessageEnvelopeSchema.parse(
+        makeEnvelope("pty_state", {
+          state: "working",
+        }),
+      );
+      expect(result.type).toBe("pty_state");
+    });
+  });
+
   describe("invalid messages", () => {
     it("rejects unknown message type", () => {
       expect(() =>

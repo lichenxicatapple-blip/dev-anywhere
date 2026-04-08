@@ -243,4 +243,123 @@ describe("RelayControlSchema", () => {
     expect(RelayControlSchema.parse({ type: "proxy_select", proxyId: "p1" })).toBeTruthy();
     expect(RelayControlSchema.parse({ type: "relay_error", code: "E", message: "m" })).toBeTruthy();
   });
+
+  // Phase 6: proxy_register name field
+  it("parses proxy_register with optional name", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_register",
+      proxyId: "p1",
+      name: "my-dev-machine",
+    });
+    expect(result).toEqual({
+      type: "proxy_register",
+      proxyId: "p1",
+      name: "my-dev-machine",
+    });
+  });
+
+  // Phase 6: proxy_list_response name field
+  it("parses proxy_list_response with optional name in proxies", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_list_response",
+      proxies: [{ proxyId: "p1", name: "laptop" }, { proxyId: "p2" }],
+    });
+    expect(result).toEqual({
+      type: "proxy_list_response",
+      proxies: [{ proxyId: "p1", name: "laptop" }, { proxyId: "p2" }],
+    });
+  });
+
+  // Phase 6: dir_list_request
+  it("parses dir_list_request", () => {
+    const result = RelayControlSchema.parse({
+      type: "dir_list_request",
+      proxyId: "p1",
+      path: "/home",
+    });
+    expect(result).toEqual({
+      type: "dir_list_request",
+      proxyId: "p1",
+      path: "/home",
+    });
+  });
+
+  // Phase 6: dir_list_response
+  it("parses dir_list_response", () => {
+    const result = RelayControlSchema.parse({
+      type: "dir_list_response",
+      entries: [{ name: "src", isDir: true }],
+      path: "/home",
+    });
+    expect(result).toEqual({
+      type: "dir_list_response",
+      entries: [{ name: "src", isDir: true }],
+      path: "/home",
+    });
+  });
+
+  // Phase 6: command_list_push
+  it("parses command_list_push", () => {
+    const result = RelayControlSchema.parse({
+      type: "command_list_push",
+      commands: [
+        { name: "/compact", description: "Compact conversation", source: "builtin" },
+      ],
+    });
+    expect(result).toEqual({
+      type: "command_list_push",
+      commands: [
+        { name: "/compact", description: "Compact conversation", source: "builtin" },
+      ],
+    });
+  });
+
+  // Phase 6: file_tree_push
+  it("parses file_tree_push", () => {
+    const result = RelayControlSchema.parse({
+      type: "file_tree_push",
+      path: "/home/src",
+      entries: [{ name: "index.ts", isDir: false }],
+    });
+    expect(result).toEqual({
+      type: "file_tree_push",
+      path: "/home/src",
+      entries: [{ name: "index.ts", isDir: false }],
+    });
+  });
+
+  // Phase 6: session_history_request
+  it("parses session_history_request", () => {
+    const result = RelayControlSchema.parse({
+      type: "session_history_request",
+    });
+    expect(result).toEqual({ type: "session_history_request" });
+  });
+
+  // Phase 6: session_history_response
+  it("parses session_history_response", () => {
+    const result = RelayControlSchema.parse({
+      type: "session_history_response",
+      sessions: [
+        { id: "abc", title: "test", projectDir: "/home", updatedAt: 123 },
+      ],
+    });
+    expect(result).toEqual({
+      type: "session_history_response",
+      sessions: [
+        { id: "abc", title: "test", projectDir: "/home", updatedAt: 123 },
+      ],
+    });
+  });
+
+  // Regression: all Phase 6 types work
+  it("still parses all existing types after Phase 6 extension", () => {
+    expect(RelayControlSchema.parse({ type: "proxy_register", proxyId: "p1" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "proxy_list_request" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "proxy_list_response", proxies: [] })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "client_register", clientId: "c1" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "replay_request", sessionId: "s1", fromSeq: 0 })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "dir_list_request", proxyId: "p1", path: "/" })).toBeTruthy();
+    expect(RelayControlSchema.parse({ type: "session_history_request" })).toBeTruthy();
+  });
 });
