@@ -20,6 +20,7 @@ describe("FileWatcher", () => {
     const watcher = new FileWatcher(TEST_DIR, (dirPath, _entries) => {
       updates.push({ dirPath });
     }, 100);
+    watcher.getInitialTree(1);
     watcher.start();
 
     // 在监控目录中创建文件触发更新事件
@@ -108,6 +109,81 @@ describe("FileWatcher", () => {
 
     // depth=2 以下的目录不应作为 key 出现
     expect(tree.has(join(TEST_DIR, "level1-dir", "level2-dir"))).toBe(false);
+  });
+
+  it("does not push changes for directories outside watchedDirs scope", async () => {
+    // 创建深层目录结构
+    const deepDir = join(TEST_DIR, "a", "b", "c");
+    mkdirSync(deepDir, { recursive: true });
+
+    const updates: string[] = [];
+    const watcher = new FileWatcher(TEST_DIR, (dirPath) => {
+      updates.push(dirPath);
+    }, 100);
+
+    // getInitialTree(1) 只把第 0 层加入 watchedDirs
+    watcher.getInitialTree(1);
+    watcher.start();
+
+    await new Promise((r) => setTimeout(r, 50));
+    // 在深层目录写入文件，该目录不在 watchedDirs 中
+    writeFileSync(join(deepDir, "deep-file.txt"), "deep");
+
+    await new Promise((r) => setTimeout(r, 300));
+    watcher.stop();
+
+    // 深层目录的变化不应触发回调
+    const deepUpdates = updates.filter((p) => p.includes(join("a", "b", "c")));
+    expect(deepUpdates).toHaveLength(0);
+  });
+
+  it("expandWatch() adds directory to push scope so changes are reported", async () => {
+    const subDir = join(TEST_DIR, "expanded");
+    mkdirSync(subDir, { recursive: true });
+
+    const updates: string[] = [];
+    const watcher = new FileWatcher(TEST_DIR, (dirPath) => {
+      updates.push(dirPath);
+    }, 100);
+
+    // 初始不包含 expanded 目录
+    watcher.getInitialTree(1);
+    watcher.start();
+
+    // 手动扩展 watch 范围
+    watcher.expandWatch(subDir);
+
+    await new Promise((r) => setTimeout(r, 50));
+    writeFileSync(join(subDir, "new.txt"), "hello");
+
+    await new Promise((r) => setTimeout(r, 300));
+    watcher.stop();
+
+    // expandWatch 后该目录的变化应触发回调
+    const expandedUpdates = updates.filter((p) => p.includes("expanded"));
+    expect(expandedUpdates.length).toBeGreaterThan(0);
+  });
+
+  it("getInitialTree registers traversed directories into watchedDirs", async () => {
+    mkdirSync(join(TEST_DIR, "level1"), { recursive: true });
+
+    const updates: string[] = [];
+    const watcher = new FileWatcher(TEST_DIR, (dirPath) => {
+      updates.push(dirPath);
+    }, 100);
+
+    // depth=2 应把 root 和 level1 都加入 watchedDirs
+    watcher.getInitialTree(2);
+    watcher.start();
+
+    await new Promise((r) => setTimeout(r, 50));
+    // root 目录内的变化应触发
+    writeFileSync(join(TEST_DIR, "root-file.txt"), "root");
+
+    await new Promise((r) => setTimeout(r, 300));
+    watcher.stop();
+
+    expect(updates.length).toBeGreaterThan(0);
   });
 
   it("stop() stops watching and clears timers", async () => {

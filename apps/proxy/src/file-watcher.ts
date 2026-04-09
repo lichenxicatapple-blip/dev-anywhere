@@ -3,16 +3,18 @@ import { join, dirname, sep } from "node:path";
 import { listDirectory, isBlacklistedPath, WATCH_BLACKLIST, type DirEntry } from "./dir-lister.js";
 
 /**
- * 文件系统监控器，使用 lazy expansion 策略
+ * 文件系统监控器，使用 lazy push 策略
  *
- * 初始只监控工作目录前 2 层，用户通过 file picker 浏览更深目录时
- * 才扩展监控范围。macOS 上使用 FSEvents，可靠性高无需 fallback。
+ * macOS 上用单个 recursive watcher（FSEvents）监听整棵树，但只对
+ * 客户端实际访问过的目录触发 onUpdate 回调。初始 push 范围为前 2 层，
+ * 客户端通过 file picker 浏览更深目录时调用 expandWatch 扩展推送范围。
  *
- * 变化事件按目录维度 throttle，避免高频 I/O 操作。
+ * 变化事件按目录维度 throttle，避免高频推送。
  */
 export class FileWatcher {
   private watchers = new Map<string, FSWatcher>();
   private throttleTimers = new Map<string, NodeJS.Timeout>();
+  private watchedDirs = new Set<string>();
   private readonly workDir: string;
   private readonly onUpdate: (dirPath: string, entries: DirEntry[]) => void;
   private readonly throttleMs: number;
@@ -68,11 +70,23 @@ export class FileWatcher {
   }
 
   /**
+   * 将目录加入推送范围
+   *
+   * 客户端通过 file picker 浏览到更深目录时调用，
+   * 之后该目录的文件变化才会触发 onUpdate 推送。
+   */
+  expandWatch(dirPath: string): void {
+    this.watchedDirs.add(dirPath);
+  }
+
+  /**
    * 按目录维度 throttle 更新事件
    *
-   * 同一目录在 throttleMs 内的多次变化只触发一次回调
+   * 只对 watchedDirs 中的目录触发回调，忽略客户端未访问过的深层目录。
+   * 同一目录在 throttleMs 内的多次变化只触发一次回调。
    */
   private scheduleUpdate(dirPath: string): void {
+    if (!this.watchedDirs.has(dirPath)) return;
     if (this.throttleTimers.has(dirPath)) return;
 
     const timer = setTimeout(() => {
@@ -92,6 +106,10 @@ export class FileWatcher {
   getInitialTree(depth = 2): Map<string, DirEntry[]> {
     const tree = new Map<string, DirEntry[]>();
     this.walkTree(this.workDir, 0, depth, tree);
+    // 初始推送范围：将遍历到的所有目录加入 watchedDirs
+    for (const dirPath of tree.keys()) {
+      this.watchedDirs.add(dirPath);
+    }
     return tree;
   }
 
@@ -129,5 +147,6 @@ export class FileWatcher {
       clearTimeout(timer);
     }
     this.throttleTimers.clear();
+    this.watchedDirs.clear();
   }
 }
