@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  TermSpanSchema,
+  TerminalFramePayloadSchema,
+  PtyStatePayloadSchema,
+} from "./session.js";
 
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 export const RelayControlSchema = z.discriminatedUnion("type", [
@@ -113,6 +118,38 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
       projectDir: z.string(),
       updatedAt: z.number(),
     })),
+  }),
+
+  // Phase 6 Plan 05.1: PTY 实时画面推送，从 Envelope 迁移到 Control 层
+  z.object({
+    type: z.literal("terminal_frame"),
+    sessionId: z.string(),
+    payload: TerminalFramePayloadSchema,
+  }),
+
+  // Phase 6 Plan 05.1: PTY 语义状态，从 Envelope 迁移到 Control 层
+  z.object({
+    type: z.literal("pty_state"),
+    sessionId: z.string(),
+    payload: PtyStatePayloadSchema,
+  }),
+
+  // Phase 6 Plan 05.1: 终端行按需拉取请求，client -> proxy
+  z.object({
+    type: z.literal("terminal_lines_request"),
+    sessionId: z.string(),
+    fromLineId: z.number().int(),
+    count: z.number().int().positive(),
+  }),
+
+  // Phase 6 Plan 05.1: 终端行响应，proxy -> client
+  z.object({
+    type: z.literal("terminal_lines_response"),
+    sessionId: z.string(),
+    fromLineId: z.number().int(),
+    oldestLineId: z.number().int(),
+    newestLineId: z.number().int(),
+    lines: z.array(z.array(TermSpanSchema)),
   }),
 ]);
 

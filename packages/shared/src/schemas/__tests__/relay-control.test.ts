@@ -362,4 +362,91 @@ describe("RelayControlSchema", () => {
     expect(RelayControlSchema.parse({ type: "dir_list_request", proxyId: "p1", path: "/" })).toBeTruthy();
     expect(RelayControlSchema.parse({ type: "session_history_request" })).toBeTruthy();
   });
+
+  // Phase 6 Plan 05.1: terminal_frame as Control message
+  it("parses terminal_frame control message with sessionId and payload", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_frame",
+      sessionId: "sess-1",
+      payload: { lines: [[{ text: "hello", fg: "#00FF00" }]] },
+    });
+    expect(result).toEqual({
+      type: "terminal_frame",
+      sessionId: "sess-1",
+      payload: { lines: [[{ text: "hello", fg: "#00FF00" }]] },
+    });
+  });
+
+  // Phase 6 Plan 05.1: pty_state as Control message
+  it("parses pty_state control message with sessionId and payload", () => {
+    const result = RelayControlSchema.parse({
+      type: "pty_state",
+      sessionId: "sess-1",
+      payload: { state: "approval_wait", tool: "Bash" },
+    });
+    expect(result).toEqual({
+      type: "pty_state",
+      sessionId: "sess-1",
+      payload: { state: "approval_wait", tool: "Bash" },
+    });
+  });
+
+  // Phase 6 Plan 05.1: terminal_lines_request
+  it("parses terminal_lines_request with sessionId, fromLineId, count", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_lines_request",
+      sessionId: "sess-1",
+      fromLineId: 100,
+      count: 50,
+    });
+    expect(result).toEqual({
+      type: "terminal_lines_request",
+      sessionId: "sess-1",
+      fromLineId: 100,
+      count: 50,
+    });
+  });
+
+  it("rejects terminal_lines_request with non-positive count", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "terminal_lines_request",
+        sessionId: "sess-1",
+        fromLineId: 0,
+        count: 0,
+      }),
+    ).toThrow();
+  });
+
+  // Phase 6 Plan 05.1: terminal_lines_response
+  it("parses terminal_lines_response with lineId fields and lines", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_lines_response",
+      sessionId: "sess-1",
+      fromLineId: 100,
+      oldestLineId: 50,
+      newestLineId: 200,
+      lines: [[{ text: "line data" }]],
+    });
+    expect(result).toEqual({
+      type: "terminal_lines_response",
+      sessionId: "sess-1",
+      fromLineId: 100,
+      oldestLineId: 50,
+      newestLineId: 200,
+      lines: [[{ text: "line data" }]],
+    });
+  });
+
+  it("parses terminal_lines_response with empty lines array", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_lines_response",
+      sessionId: "sess-1",
+      fromLineId: 100,
+      oldestLineId: 50,
+      newestLineId: 200,
+      lines: [],
+    });
+    expect(result.lines).toEqual([]);
+  });
 });

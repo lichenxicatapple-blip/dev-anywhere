@@ -16,9 +16,6 @@ import {
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
-  PtySnapshotPayloadSchema,
-  TerminalFramePayloadSchema,
-  PtyStatePayloadSchema,
 } from "./session.js";
 import {
   HeartbeatPayloadSchema,
@@ -37,7 +34,8 @@ const BaseEnvelopeFields = {
   version: z.string(),
 };
 
-// 18 种消息类型的 discriminatedUnion，按 type 字段区分
+// 15 种消息类型的 discriminatedUnion，按 type 字段区分
+// terminal_frame/pty_state/pty_snapshot 已迁移或删除，不在 Envelope 层
 export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
   // chat (3)
   z.object({
@@ -127,32 +125,6 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     ...BaseEnvelopeFields,
     type: z.literal("sync_response"),
     payload: SyncResponsePayloadSchema,
-  }),
-  // PTY 终端快照，relay 收到后触发缓冲区压缩
-  z.object({
-    ...BaseEnvelopeFields,
-    type: z.literal("pty_snapshot"),
-    payload: PtySnapshotPayloadSchema,
-  }),
-  // Phase 6: 终端栅格帧，proxy 向 client 推送渲染好的终端画面
-  z.object({
-    seq: z.number().int().nonnegative(),
-    sessionId: z.string(),
-    timestamp: z.number(),
-    source: z.enum(["proxy", "client", "relay"]),
-    version: z.string(),
-    type: z.literal("terminal_frame"),
-    payload: TerminalFramePayloadSchema,
-  }),
-  // Phase 6: PTY 语义状态事件，描述 PTY 当前处于何种工作状态
-  z.object({
-    seq: z.number().int().nonnegative(),
-    sessionId: z.string(),
-    timestamp: z.number(),
-    source: z.enum(["proxy", "client", "relay"]),
-    version: z.string(),
-    type: z.literal("pty_state"),
-    payload: PtyStatePayloadSchema,
   }),
 ]);
 

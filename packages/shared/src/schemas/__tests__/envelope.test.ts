@@ -307,23 +307,29 @@ describe("MessageEnvelopeSchema", () => {
     });
   });
 
-  describe("terminal frame and pty state envelopes", () => {
-    it("validates terminal_frame envelope", () => {
-      const result = MessageEnvelopeSchema.parse(
-        makeEnvelope("terminal_frame", {
-          lines: [[{ text: "x" }]],
-        }),
-      );
-      expect(result.type).toBe("terminal_frame");
+  describe("removed envelope types", () => {
+    it("rejects pty_snapshot (removed from envelope)", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeEnvelope("pty_snapshot", { data: "base64data" }),
+        ),
+      ).toThrow();
     });
 
-    it("validates pty_state envelope", () => {
-      const result = MessageEnvelopeSchema.parse(
-        makeEnvelope("pty_state", {
-          state: "working",
-        }),
-      );
-      expect(result.type).toBe("pty_state");
+    it("rejects terminal_frame (moved to Control)", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeEnvelope("terminal_frame", { lines: [[{ text: "x" }]] }),
+        ),
+      ).toThrow();
+    });
+
+    it("rejects pty_state (moved to Control)", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeEnvelope("pty_state", { state: "working" }),
+        ),
+      ).toThrow();
     });
   });
 
