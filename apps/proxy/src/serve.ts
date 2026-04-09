@@ -2,6 +2,7 @@ import { createServer, connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { hostname } from "node:os";
 import {
   unlinkSync,
   writeFileSync,
@@ -35,6 +36,9 @@ import {
   type IpcMessage,
   type WorkerMessage,
 } from "./ipc-protocol.js";
+import { createTerminalPushHandler } from "./handlers/terminal-push.js";
+import { createControlMessageHandlers } from "./handlers/control-messages.js";
+import { extractOscSignals } from "./osc-extractor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -402,6 +406,9 @@ function handleClientConnection(
           ws.write(serializeWorkerMsg({ type: "worker_stop" }));
         }
         workerSockets.delete(msg.sessionId);
+        // 清理 handler 模块资源
+        terminalPush.stop(msg.sessionId);
+        controlHandlers.cleanup(msg.sessionId);
         socket.write(
           serializeIpc({
             type: "session_terminate_response",
@@ -426,6 +433,8 @@ function handleClientConnection(
       case "pty_deregister": {
         sessionManager.terminateSession(msg.sessionId);
         clientSockets.delete(msg.sessionId);
+        terminalPush.stop(msg.sessionId);
+        controlHandlers.cleanup(msg.sessionId);
         logger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
         break;
       }
@@ -512,14 +521,30 @@ export async function startService(): Promise<void> {
   const workerSockets = new Map<string, Socket>();
   const clientSockets = new Map<string, Socket>();
 
+  // D-23: proxy 名称，优先使用环境变量，否则使用主机名
+  const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || hostname();
+
+  // 创建 handler 模块实例（在 relay 连接建立前创建，send 函数延迟绑定）
+  let relaySend: ((data: string) => void) | null = null;
+  const terminalPush = createTerminalPushHandler(
+    (data) => { if (relaySend) relaySend(data); },
+    logger,
+  );
+  const controlHandlers = createControlMessageHandlers(
+    (data) => { if (relaySend) relaySend(data); },
+    sessionManager,
+    logger,
+  );
+
   // 如果配置了 RELAY_URL 则连接到中转服务器
   const relayUrl = process.env.RELAY_URL;
   let relayConnection: RelayConnection | null = null;
 
   if (relayUrl) {
-    relayConnection = new RelayConnection(relayUrl, logger);
+    relayConnection = new RelayConnection(relayUrl, logger, { name: proxyName });
+    relaySend = (data) => relayConnection!.sendRaw(data);
     relayConnection.connect();
-    logger.info({ relayUrl }, "Connecting to relay server");
+    logger.info({ relayUrl, proxyName }, "Connecting to relay server");
 
     // 重连对账：从 EventStore 回放 relay 缺失的消息
     relayConnection.on("sync", (info: { status: string; sessions: Record<string, number> }) => {
@@ -551,10 +576,12 @@ export async function startService(): Promise<void> {
       }
     });
 
-    // 处理来自 remote client 的消息
+    // 处理来自 remote client 的消息（信封消息和控制消息）
     relayConnection.on("message", (data: string) => {
       try {
         const parsed = JSON.parse(data);
+
+        // 信封消息：user_input, tool_approve, tool_deny
         if (parsed.type === "user_input" && parsed.sessionId) {
           const ws = workerSockets.get(parsed.sessionId);
           if (ws?.writable) {
@@ -566,12 +593,24 @@ export async function startService(): Promise<void> {
           logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to worker");
         } else if (parsed.type === "tool_approve" && parsed.sessionId) {
           const toolId = parsed.payload?.toolId as string | undefined;
+          const whitelistTool = parsed.payload?.whitelistTool as boolean | undefined;
           if (toolId) {
             const pending = pendingToolApprovals.get(toolId);
             if (pending) {
               pending.resolve({ behavior: "allow" });
               pendingToolApprovals.delete(toolId);
-              logger.info({ sessionId: parsed.sessionId, toolId }, "Tool approved via relay");
+              // D-25/D-27: whitelistTool 为 true 时将工具加入会话级白名单
+              if (whitelistTool) {
+                const toolName = (parsed.payload?.toolName as string) ?? "";
+                if (toolName && pending.workerSocket.writable) {
+                  pending.workerSocket.write(serializeWorkerMsg({
+                    type: "worker_whitelist_add",
+                    toolName,
+                  }));
+                  logger.info({ sessionId: pending.sessionId, toolName }, "Tool added to session whitelist via relay");
+                }
+              }
+              logger.info({ sessionId: parsed.sessionId, toolId, whitelistTool }, "Tool approved via relay");
             }
           }
         } else if (parsed.type === "tool_deny" && parsed.sessionId) {
@@ -586,9 +625,20 @@ export async function startService(): Promise<void> {
             }
           }
         }
+        // 控制消息：dir_list_request, session_history_request
+        else if (parsed.type === "dir_list_request") {
+          controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
+        } else if (parsed.type === "session_history_request") {
+          controlHandlers.handleSessionHistoryRequest();
+        }
       } catch (err) {
         logger.warn({ error: String(err) }, "Failed to parse relay message");
       }
+    });
+
+    // D-41: relay 重连时重新推送控制数据
+    relayConnection.on("connected", () => {
+      controlHandlers.reinitializeOnReconnect();
     });
   } else {
     logger.info("No RELAY_URL configured, relay connection disabled");
@@ -631,6 +681,7 @@ export async function startService(): Promise<void> {
   async function shutdown(): Promise<void> {
     logger.info("Shutting down service");
     clearInterval(idleCheckInterval);
+    terminalPush.stopAll();
     sessionManager.stopReaper();
     if (relayConnection) {
       relayConnection.close();
