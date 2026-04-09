@@ -11,9 +11,10 @@ export type ToolUseRequestPayload = z.infer<
   typeof ToolUseRequestPayloadSchema
 >;
 
-// 工具调用批准
+// 工具调用批准，whitelistTool 为 true 时将该工具加入会话级白名单自动审批
 export const ToolApprovePayloadSchema = z.object({
   toolId: z.string(),
+  whitelistTool: z.boolean().optional(),
 });
 
 export type ToolApprovePayload = z.infer<typeof ToolApprovePayloadSchema>;

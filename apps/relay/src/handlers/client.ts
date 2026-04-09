@@ -1,5 +1,4 @@
 import { WebSocket } from "ws";
-import type { WebSocketServer } from "ws";
 import type { Logger } from "pino";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
@@ -108,11 +107,48 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_list_request") {
-        const proxies = registry.listProxies().map((id) => ({ proxyId: id }));
+        const proxies = registry.listProxiesWithName();
         clientWs.send(JSON.stringify({
           type: "proxy_list_response",
           proxies,
         }));
+        return;
+      }
+
+      // client-to-proxy 透传控制消息：relay 不处理，直接转发给绑定的 proxy
+      if (msg.type === "dir_list_request") {
+        const proxyWs = registry.getProxy(msg.proxyId);
+        if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
+          proxyWs.send(raw);
+        } else {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "PROXY_OFFLINE",
+            message: `Proxy ${msg.proxyId} is not available`,
+          }));
+        }
+        return;
+      }
+
+      if (msg.type === "session_history_request") {
+        if (!clientWs.boundProxyId) {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "NOT_BOUND",
+            message: "Client is not bound to any proxy",
+          }));
+          return;
+        }
+        const proxyWs = registry.getProxy(clientWs.boundProxyId);
+        if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
+          proxyWs.send(raw);
+        } else {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "PROXY_OFFLINE",
+            message: `Proxy ${clientWs.boundProxyId} is not available`,
+          }));
+        }
         return;
       }
 

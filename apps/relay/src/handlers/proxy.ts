@@ -1,4 +1,5 @@
-import type { WebSocket, WebSocketServer } from "ws";
+import { WebSocket } from "ws";
+import type { WebSocketServer } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
@@ -27,8 +28,8 @@ export function handleProxyConnection(
     const result = parseMessage(raw);
 
     if (result.kind === "control" && result.message.type === "proxy_register") {
-      const { proxyId } = result.message;
-      const status = registry.registerProxy(proxyId, proxyWs);
+      const { proxyId, name } = result.message;
+      const status = registry.registerProxy(proxyId, proxyWs, name);
       proxyWs.proxyId = proxyId;
       logger.info({ proxyId, status }, "Proxy registered");
 
@@ -62,6 +63,37 @@ export function handleProxyConnection(
       return;
     }
 
+    // proxy 发给 client 的控制消息：直接转发给绑定的客户端
+    if (result.kind === "control") {
+      const PROXY_TO_CLIENT_TYPES = new Set([
+        "dir_list_response",
+        "command_list_push",
+        "file_tree_push",
+        "session_history_response",
+      ]);
+      if (PROXY_TO_CLIENT_TYPES.has(result.message.type)) {
+        if (!proxyWs.proxyId) {
+          proxyWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "NOT_REGISTERED",
+            message: "Proxy must register before sending messages",
+          }));
+          return;
+        }
+        const clients = registry.getClientsForProxy(proxyWs.proxyId);
+        for (const clientWs of clients) {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            clientWs.send(raw);
+          }
+        }
+        logger.debug({ proxyId: proxyWs.proxyId, type: result.message.type }, "Forwarded control message from proxy to clients");
+        return;
+      }
+      // 其他控制消息代理端不应发送
+      logger.warn({ type: result.message.type }, "Unexpected control message from proxy");
+      return;
+    }
+
     if (result.kind === "envelope") {
       if (!proxyWs.proxyId) {
         proxyWs.send(JSON.stringify({
@@ -79,9 +111,6 @@ export function handleProxyConnection(
       logger.warn({ error: result.error }, "Invalid message from proxy");
       return;
     }
-
-    // 其他控制消息代理端不应发送
-    logger.warn({ type: result.kind === "control" ? result.message.type : "unknown" }, "Unexpected control message from proxy");
   });
 
   proxyWs.on("close", () => {
