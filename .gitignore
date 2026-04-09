@@ -6,3 +6,4 @@ dist/
 reference/
 .claude/
 .playwright-mcp/
+coverage/
