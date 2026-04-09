@@ -117,6 +117,9 @@ importers:
 
   apps/proxy:
     dependencies:
+      '@cc-anywhere/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@cc-anywhere/shared':
         specifier: workspace:*
         version: link:../../packages/shared

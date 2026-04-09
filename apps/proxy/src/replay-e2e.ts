@@ -47,7 +47,7 @@ function sleep(ms: number): Promise<void> {
 
 export async function runReplayE2E(fixturePath: string): Promise<void> {
   // === 1. 启动本地 relay ===
-  const { createRelayServer } = await import("../../relay/src/server.js");
+  const { createRelayServer } = await import("@cc-anywhere/relay/server");
   const relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
   await new Promise<void>((resolve) => relay.httpServer.listen(0, resolve));
   const addr = relay.httpServer.address();

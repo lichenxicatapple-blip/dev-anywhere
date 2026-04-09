@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 import pino from "pino";
-import { createRelayServer, type RelayServer } from "../../../../relay/src/server.js";
+import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
 import { TerminalTracker, type TermLine, type TermSpan } from "#src/terminal-tracker.js";
 import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
 import {

@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +14,11 @@ const include =
       : ["src/**/*.test.ts"];
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@cc-anywhere/relay/server": resolve(__dirname, "../relay/src/server.ts"),
+    },
+  },
   test: {
     name: "proxy",
     root: __dirname,
