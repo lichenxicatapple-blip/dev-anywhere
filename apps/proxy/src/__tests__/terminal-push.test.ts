@@ -44,7 +44,7 @@ describe("TerminalPushHandler", () => {
     vi.useRealTimers();
   });
 
-  it("first push sends full grid with mode: full", () => {
+  it("first push sends full grid with mode: full in Control format", () => {
     const grid: TermLine[] = [
       [{ text: "hello world" }],
       [{ text: "line 2", fg: "#ff0000", bold: true }],
@@ -55,12 +55,16 @@ describe("TerminalPushHandler", () => {
     vi.advanceTimersByTime(FRAME_PUSH_INTERVAL_MS);
 
     expect(send).toHaveBeenCalledTimes(1);
-    const envelope = JSON.parse(send.mock.calls[0][0]);
-    expect(envelope.type).toBe("terminal_frame");
-    expect(envelope.sessionId).toBe("sess-1");
-    expect(envelope.source).toBe("proxy");
-    expect(envelope.payload.mode).toBe("full");
-    expect(envelope.payload.lines).toEqual(grid);
+    const msg = JSON.parse(send.mock.calls[0][0]);
+    expect(msg.type).toBe("terminal_frame");
+    expect(msg.sessionId).toBe("sess-1");
+    // Control 格式没有 seq、source、version、timestamp 字段
+    expect(msg.seq).toBeUndefined();
+    expect(msg.source).toBeUndefined();
+    expect(msg.version).toBeUndefined();
+    expect(msg.timestamp).toBeUndefined();
+    expect(msg.payload.mode).toBe("full");
+    expect(msg.payload.lines).toEqual(grid);
   });
 
   it("subsequent push sends only changed lines with mode: delta", () => {

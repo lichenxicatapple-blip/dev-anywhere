@@ -2,11 +2,14 @@ import { readdir, stat } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { Logger } from "pino";
 import type { SessionManager } from "../session-manager.js";
+import type { TerminalTracker } from "../terminal-tracker.js";
 import { scanSessionHistory } from "../session-history.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;
   handleSessionHistoryRequest(): Promise<void>;
+  handleTerminalLinesRequest(msg: { sessionId: string; fromLineId: number; count: number }): void;
+  registerTracker(sessionId: string, tracker: TerminalTracker): void;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
   reinitializeOnReconnect(): Promise<void>;
@@ -98,6 +101,7 @@ export function createControlMessageHandlers(
   logger: Logger,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
+  const trackers = new Map<string, TerminalTracker>();
 
   function getResources(sessionId: string): SessionResources {
     let res = sessionResources.get(sessionId);
@@ -109,6 +113,34 @@ export function createControlMessageHandlers(
   }
 
   return {
+    registerTracker(sessionId: string, tracker: TerminalTracker): void {
+      trackers.set(sessionId, tracker);
+    },
+
+    handleTerminalLinesRequest(msg: { sessionId: string; fromLineId: number; count: number }): void {
+      const tracker = trackers.get(msg.sessionId);
+      if (!tracker) {
+        logger.warn({ sessionId: msg.sessionId }, "terminal_lines_request: no tracker for session");
+        send(JSON.stringify({
+          type: "relay_error",
+          code: "SESSION_NOT_FOUND",
+          message: `No terminal tracker for session ${msg.sessionId}`,
+        }));
+        return;
+      }
+
+      const lines = tracker.extractLines(msg.fromLineId, msg.count);
+      send(JSON.stringify({
+        type: "terminal_lines_response",
+        sessionId: msg.sessionId,
+        fromLineId: msg.fromLineId,
+        oldestLineId: tracker.getOldestLineId(),
+        newestLineId: tracker.getNewestLineId(),
+        lines,
+      }));
+      logger.debug({ sessionId: msg.sessionId, fromLineId: msg.fromLineId, count: msg.count, returned: lines.length }, "Terminal lines response sent");
+    },
+
     async handleDirListRequest(msg: { path: string }): Promise<void> {
       // T-06-13: 路径遍历防御
       if (!isPathSafe(msg.path)) {
@@ -244,6 +276,7 @@ export function createControlMessageHandlers(
         }
         sessionResources.delete(sessionId);
       }
+      trackers.delete(sessionId);
     },
   };
 }

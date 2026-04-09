@@ -21,7 +21,6 @@ interface SessionPushState {
   tracker: TerminalTracker;
   lastGrid: TermLine[] | null;
   interval: NodeJS.Timeout;
-  seq: number;
 }
 
 // 比较两行是否相同
@@ -55,23 +54,18 @@ export function createTerminalPushHandler(
     const currentGrid = state.tracker.extractGrid();
 
     if (state.lastGrid === null) {
-      // 首帧发送全量
-      state.seq++;
-      const envelope = {
-        seq: state.seq,
-        sessionId,
-        timestamp: Date.now(),
-        source: "proxy",
-        version: "1.0",
+      // 首帧发送全量，Control 格式无 seq
+      const msg = {
         type: "terminal_frame",
+        sessionId,
         payload: {
           mode: "full",
           lines: currentGrid,
         },
       };
-      send(JSON.stringify(envelope));
+      send(JSON.stringify(msg));
       state.lastGrid = cloneGrid(currentGrid);
-      logger.debug({ sessionId, seq: state.seq, mode: "full", lineCount: currentGrid.length }, "Terminal frame pushed (full)");
+      logger.debug({ sessionId, mode: "full", lineCount: currentGrid.length }, "Terminal frame pushed (full)");
       return;
     }
 
@@ -90,22 +84,17 @@ export function createTerminalPushHandler(
 
     if (changedLines.length === 0) return;
 
-    state.seq++;
-    const envelope = {
-      seq: state.seq,
-      sessionId,
-      timestamp: Date.now(),
-      source: "proxy",
-      version: "1.0",
+    const msg = {
       type: "terminal_frame",
+      sessionId,
       payload: {
         mode: "delta",
         lines: changedLines,
       },
     };
-    send(JSON.stringify(envelope));
+    send(JSON.stringify(msg));
     state.lastGrid = cloneGrid(currentGrid);
-    logger.debug({ sessionId, seq: state.seq, mode: "delta", changedLines: changedLines.length }, "Terminal frame pushed (delta)");
+    logger.debug({ sessionId, mode: "delta", changedLines: changedLines.length }, "Terminal frame pushed (delta)");
   }
 
   return {
@@ -120,7 +109,6 @@ export function createTerminalPushHandler(
         tracker,
         lastGrid: null,
         interval: null as unknown as NodeJS.Timeout,
-        seq: 0,
       };
 
       state.interval = setInterval(() => pushFrame(sessionId, state), FRAME_PUSH_INTERVAL_MS);

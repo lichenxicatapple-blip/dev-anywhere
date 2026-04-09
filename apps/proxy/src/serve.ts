@@ -103,35 +103,6 @@ function getEventFileMtime(sessionId: string): number | null {
   }
 }
 
-// ---------- PTY 快照发送 ----------
-
-// PTY session WORKING→IDLE 时，读取本地终端快照发送到 relay 触发缓冲区压缩
-export function sendPtySnapshot(
-  sessionId: string,
-  relayConnection: RelayConnection,
-  log: pino.Logger,
-): void {
-  const snapshotPath = sessionPaths(sessionId).snapshot;
-  try {
-    if (!existsSync(snapshotPath)) return;
-    const snapshotData = readFileSync(snapshotPath);
-    const store = new EventStore(sessionId);
-    const seq = store.getSeq() + 1;
-    store.close();
-    const envelope = buildMessage(
-      "pty_snapshot",
-      sessionId,
-      seq,
-      { data: snapshotData.toString("base64") },
-      "proxy",
-    );
-    relayConnection.send(envelope);
-    log.info({ sessionId, seq }, "PTY snapshot sent to relay");
-  } catch (err) {
-    log.warn({ sessionId, error: String(err) }, "Failed to send PTY snapshot to relay");
-  }
-}
-
 // ---------- 工具审批 pending 回调管理 ----------
 
 // requestId -> resolve callback，serve 收到 relay 的 tool_approve/tool_deny 时 resolve
@@ -625,11 +596,17 @@ export async function startService(): Promise<void> {
             }
           }
         }
-        // 控制消息：dir_list_request, session_history_request
+        // 控制消息：dir_list_request, session_history_request, terminal_lines_request
         else if (parsed.type === "dir_list_request") {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
+        } else if (parsed.type === "terminal_lines_request") {
+          controlHandlers.handleTerminalLinesRequest({
+            sessionId: parsed.sessionId,
+            fromLineId: parsed.fromLineId,
+            count: parsed.count,
+          });
         }
       } catch (err) {
         logger.warn({ error: String(err) }, "Failed to parse relay message");
@@ -670,9 +647,6 @@ export async function startService(): Promise<void> {
       } else {
         if (session.state === SessionState.WORKING) {
           try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
-          if (relayConnection) {
-            sendPtySnapshot(session.id, relayConnection, logger);
-          }
         }
       }
     }
