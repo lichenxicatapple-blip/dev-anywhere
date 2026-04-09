@@ -85,6 +85,7 @@ export class TerminalTracker {
   private readonly snapshotPath: string;
   private eventsSinceSnapshot: number = 0;
   private lastGridHash: string = "";
+  private nextLineId: number;
 
   constructor(store: EventStore, snapshotPath: string, cols = 120, rows = 40) {
     this.store = store;
@@ -97,6 +98,10 @@ export class TerminalTracker {
     });
     this.serialize = new SerializeAddon();
     this.terminal.loadAddon(this.serialize);
+    this.nextLineId = this.terminal.buffer.active.length;
+    this.terminal.onLineFeed(() => {
+      this.nextLineId++;
+    });
   }
 
   feed(data: string): Promise<void> {
@@ -212,6 +217,75 @@ export class TerminalTracker {
       return true;
     }
     return false;
+  }
+
+  getOldestLineId(): number {
+    return this.nextLineId - this.terminal.buffer.active.length;
+  }
+
+  getNewestLineId(): number {
+    return this.nextLineId - 1;
+  }
+
+  // 从 buffer 中按 lineId 提取指定范围的行
+  extractLines(fromLineId: number, count: number): TermLine[] {
+    const buf = this.terminal.buffer.active;
+    const oldestId = this.getOldestLineId();
+    const newestId = this.getNewestLineId();
+
+    if (fromLineId > newestId || fromLineId + count <= oldestId) {
+      return [];
+    }
+
+    const startId = Math.max(fromLineId, oldestId);
+    const endId = Math.min(fromLineId + count, newestId + 1);
+
+    const lines: TermLine[] = [];
+    for (let id = startId; id < endId; id++) {
+      const bufIdx = id - oldestId;
+      const line = buf.getLine(bufIdx);
+      if (line) {
+        lines.push(this.lineToSpans(line));
+      }
+    }
+    return lines;
+  }
+
+  // 将单行 buffer line 转换为 TermSpan 数组，复用 extractGrid 的 span 合并逻辑
+  private lineToSpans(bufferLine: ReturnType<typeof this.terminal.buffer.active.getLine>): TermLine {
+    if (!bufferLine) return [];
+
+    const spans: TermSpan[] = [];
+    let currentSpan: TermSpan | null = null;
+
+    for (let x = 0; x < bufferLine.length; x++) {
+      const cell = bufferLine.getCell(x);
+      if (!cell || cell.getWidth() === 0) continue;
+
+      const chars = cell.getChars() || " ";
+      const fg = cellColorToHex(cell, true);
+      const bg = cellColorToHex(cell, false);
+      const bold = !!cell.isBold() || undefined;
+
+      if (
+        currentSpan &&
+        currentSpan.fg === fg &&
+        currentSpan.bg === bg &&
+        currentSpan.bold === bold
+      ) {
+        currentSpan.text += chars;
+      } else {
+        if (currentSpan) spans.push(currentSpan);
+        currentSpan = {
+          text: chars,
+          ...(fg && { fg }),
+          ...(bg && { bg }),
+          ...(bold && { bold }),
+        };
+      }
+    }
+    if (currentSpan) spans.push(currentSpan);
+    return spans;
   }
 
   dispose(): void {

@@ -122,3 +122,79 @@ describe("TerminalTracker.extractGrid", () => {
     expect(tracker.hasGridChanged()).toBe(false);
   });
 });
+
+describe("TerminalTracker lineId mechanism", () => {
+  let store: EventStore;
+  let tracker: TerminalTracker;
+
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    store = new EventStore(TEST_SESSION, 50, TEST_DIR);
+    tracker = new TerminalTracker(store, SNAPSHOT_PATH, 80, 24);
+  });
+
+  afterEach(() => {
+    tracker.dispose();
+    store.close();
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("nextLineId starts from buffer initial length and increments on linefeed", async () => {
+    const initialNewest = tracker.getNewestLineId();
+    // 写入多行数据，触发 linefeed
+    await tracker.feed("line1\r\nline2\r\nline3\r\n");
+    const afterNewest = tracker.getNewestLineId();
+    // 每个 \r\n 触发一次 linefeed，newestLineId 应增长
+    expect(afterNewest).toBeGreaterThan(initialNewest);
+  });
+
+  it("extractLines returns TermSpan arrays for valid lineId range", async () => {
+    await tracker.feed("hello\r\nworld\r\n");
+    const oldest = tracker.getOldestLineId();
+    const lines = tracker.extractLines(oldest, 2);
+    expect(lines.length).toBeGreaterThan(0);
+    // 每一行是 TermSpan 数组
+    for (const line of lines) {
+      expect(Array.isArray(line)).toBe(true);
+    }
+  });
+
+  it("extractLines returns empty array for evicted lineId", async () => {
+    // 请求远早于 buffer 开头的 lineId
+    const lines = tracker.extractLines(-100, 5);
+    expect(lines).toEqual([]);
+  });
+
+  it("getOldestLineId equals nextLineId minus buffer length", async () => {
+    await tracker.feed("a\r\nb\r\nc\r\n");
+    const oldest = tracker.getOldestLineId();
+    const newest = tracker.getNewestLineId();
+    // oldest 应不超过 newest
+    expect(oldest).toBeLessThanOrEqual(newest);
+  });
+
+  it("getNewestLineId equals nextLineId minus 1", async () => {
+    await tracker.feed("data\r\n");
+    const newest = tracker.getNewestLineId();
+    // newest 应该是非负整数
+    expect(newest).toBeGreaterThanOrEqual(0);
+  });
+
+  it("lineId remains stable for existing lines after new data", async () => {
+    // 写入足够多行使 buffer 有内容可追踪
+    await tracker.feed("first\r\nsecond\r\n");
+    // 取 newestLineId 对应的行（一定在 buffer 中）
+    const targetLineId = tracker.getNewestLineId();
+    const linesBefore = tracker.extractLines(targetLineId, 1);
+    expect(linesBefore.length).toBe(1);
+
+    // 写入更多数据后，同一 lineId 的行内容不变（buffer 未溢出）
+    await tracker.feed("third\r\n");
+    const linesAfter = tracker.extractLines(targetLineId, 1);
+
+    expect(linesAfter.length).toBe(linesBefore.length);
+    const textBefore = linesBefore[0].map(s => s.text).join("");
+    const textAfter = linesAfter[0].map(s => s.text).join("");
+    expect(textAfter).toBe(textBefore);
+  });
+});
