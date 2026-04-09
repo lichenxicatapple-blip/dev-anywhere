@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
-import { EventStore, EventType } from "./event-store.js";
 import { TerminalTracker } from "./terminal-tracker.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH, sessionPaths, ensureDirectories } from "./paths.js";
 import {
@@ -81,7 +80,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   let ptyManager: PtyManager | null = null;
   let heartbeatInterval: NodeJS.Timeout | null = null;
   let reconnecting = false;
-  let eventStore: EventStore | null = null;
   let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
@@ -117,13 +115,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     idleCheckTimer = setInterval(() => {
       if (lastOutputTime > 0 && Date.now() - lastOutputTime > 3000) {
-        if (tracker && eventStore) {
-          eventStore.flush();
-          tracker.onStateChange("working", "idle");
-          if (eventStore.shouldArchive()) {
-            eventStore.archive();
-          }
-        }
         lastOutputTime = 0;
       }
     }, 3000);
@@ -186,27 +177,15 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   const paths = sessionPaths(sessionId);
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  eventStore = new EventStore(sessionId);
-  tracker = new TerminalTracker(eventStore, paths.snapshot, cols, rows);
+  tracker = new TerminalTracker(cols, rows);
 
-  // 写入初始尺寸事件
-  eventStore.writeSize(cols, rows);
-
-  // DataTap：写入本地事件文件（不再通过 IPC 发给 serve）
   const tap: DataTap = (data: string) => {
-    if (eventStore && sessionId) {
-      eventStore.append(EventType.PTY_OUTPUT, data);
-      lastOutputTime = Date.now();
-    }
+    lastOutputTime = Date.now();
     if (tracker) {
       tracker.feed(data);
-      if (tracker.shouldSnapshot()) {
-        tracker.takeSnapshot();
-      }
     }
   };
 
-  // 终端 resize：尺寸实际变化时才写入 SIZE 事件
   let lastCols = cols;
   let lastRows = rows;
   process.stdout.on("resize", () => {
@@ -215,9 +194,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     if (newCols === lastCols && newRows === lastRows) return;
     lastCols = newCols;
     lastRows = newRows;
-    if (eventStore) {
-      eventStore.writeSize(newCols, newRows);
-    }
     if (tracker) {
       tracker.resize(newCols, newRows);
     }
@@ -233,10 +209,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     onSessionExit: (code: number) => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (idleCheckTimer) clearInterval(idleCheckTimer);
-      if (eventStore) {
-        eventStore.flush();
-        eventStore.close();
-      }
       if (tracker) tracker.dispose();
       if (socket.writable && sessionId) {
         socket.write(
@@ -257,10 +229,6 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   process.on("SIGTERM", () => {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (idleCheckTimer) clearInterval(idleCheckTimer);
-    if (eventStore) {
-      eventStore.flush();
-      eventStore.close();
-    }
     if (tracker) tracker.dispose();
     if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_deregister", sessionId }));

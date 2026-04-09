@@ -6,7 +6,7 @@ import {
   createRelayApprovalStrategy,
   type StreamJsonEvent,
 } from "./json-session.js";
-import { EventStore, EventType } from "./event-store.js";
+import { SeqCounter } from "./seq-counter.js";
 import {
   createWorkerReader,
   serializeWorkerMsg,
@@ -25,7 +25,7 @@ if (!sessionId || !sockPath) {
 }
 
 let serveSocket: Socket | null = null;
-const eventStore = new EventStore(sessionId);
+const seqCounter = new SeqCounter(sessionId);
 const whitelist = new ToolWhitelist();
 
 const pendingApprovals = new Map<
@@ -68,11 +68,7 @@ const session = new JsonSession({
       });
     }
 
-    // 写入 EventStore 获取 per-session seq，带给 serve 构建 MessageEnvelope
-    const seq = eventStore.writeImmediate(
-      EventType.PTY_OUTPUT,
-      Buffer.from(JSON.stringify(event), "utf-8"),
-    );
+    const seq = seqCounter.next();
     sendToServe({
       type: "worker_event",
       seq,
@@ -81,7 +77,6 @@ const session = new JsonSession({
   },
   onExit: (code: number) => {
     whitelist.clear();
-    eventStore.close();
     sendToServe({ type: "worker_exit", code });
     cleanup();
     process.exit(0);

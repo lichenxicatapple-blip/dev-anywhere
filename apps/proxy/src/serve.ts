@@ -17,7 +17,7 @@ import pino from "pino";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { SessionManager } from "./session-manager.js";
 import { RelayConnection } from "./relay-connection.js";
-import { EventStore } from "./event-store.js";
+import { SeqCounter } from "./seq-counter.js";
 import {
   SOCK_PATH,
   PID_PATH,
@@ -180,9 +180,8 @@ function connectToWorker(
             if (relayConnection) {
               logger.info({ sessionId, toolName: msg.toolName, requestId: msg.requestId }, "Tool approval forwarding to relay");
               try {
-                const store = new EventStore(sessionId);
-                const approvalSeq = store.getSeq() + 1;
-                store.close();
+                const seqCounter = new SeqCounter(sessionId);
+                const approvalSeq = seqCounter.next();
                 const envelope = buildMessage(
                   "tool_use_request",
                   sessionId,
@@ -517,35 +516,7 @@ export async function startService(): Promise<void> {
     relayConnection.connect();
     logger.info({ relayUrl, proxyName }, "Connecting to relay server");
 
-    // 重连对账：从 EventStore 回放 relay 缺失的消息
-    relayConnection.on("sync", (info: { status: string; sessions: Record<string, number> }) => {
-      const activeSessions = sessionManager.listSessions()
-        .filter((s) => s.mode === "json" && s.state !== SessionState.TERMINATED);
-
-      for (const session of activeSessions) {
-        const relayLastSeq = info.sessions[session.id] ?? -1;
-        try {
-          const store = new EventStore(session.id);
-          const events = store.readEvents(relayLastSeq);
-          for (const event of events) {
-            const envelope = buildMessage(
-              "assistant_message",
-              session.id,
-              event.seq,
-              { text: event.payload.toString("utf-8"), isPartial: true },
-              "proxy",
-            );
-            relayConnection!.send(envelope);
-          }
-          store.close();
-          if (events.length > 0) {
-            logger.info({ sessionId: session.id, replayed: events.length, fromSeq: relayLastSeq }, "EventStore replay complete");
-          }
-        } catch (err) {
-          logger.warn({ sessionId: session.id, error: String(err) }, "EventStore replay failed");
-        }
-      }
-    });
+    // 重连时 RelayConnection 自动 flush 离线队列，不需要本地回放
 
     // 处理来自 remote client 的消息（信封消息和控制消息）
     relayConnection.on("message", (data: string) => {

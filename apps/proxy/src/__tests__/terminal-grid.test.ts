@@ -1,29 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { EventStore } from "../event-store.js";
 import { TerminalTracker } from "../terminal-tracker.js";
 import type { TermLine } from "../terminal-tracker.js";
 
-const TEST_DIR = join(process.cwd(), ".test-terminal-grid");
-const TEST_SESSION = "test-grid-001";
-const SESSION_DIR = join(TEST_DIR, TEST_SESSION);
-const SNAPSHOT_PATH = join(SESSION_DIR, "snapshot.bin");
-
 describe("TerminalTracker.extractGrid", () => {
-  let store: EventStore;
   let tracker: TerminalTracker;
 
   beforeEach(() => {
-    mkdirSync(TEST_DIR, { recursive: true });
-    store = new EventStore(TEST_SESSION, 50, TEST_DIR);
-    tracker = new TerminalTracker(store, SNAPSHOT_PATH, 80, 24);
+    tracker = new TerminalTracker(80, 24);
   });
 
   afterEach(() => {
     tracker.dispose();
-    store.close();
-    rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
   it("returns array of TermLine after feeding plain text", async () => {
@@ -124,19 +111,14 @@ describe("TerminalTracker.extractGrid", () => {
 });
 
 describe("TerminalTracker lineId mechanism", () => {
-  let store: EventStore;
   let tracker: TerminalTracker;
 
   beforeEach(() => {
-    mkdirSync(TEST_DIR, { recursive: true });
-    store = new EventStore(TEST_SESSION, 50, TEST_DIR);
-    tracker = new TerminalTracker(store, SNAPSHOT_PATH, 80, 24);
+    tracker = new TerminalTracker(80, 24);
   });
 
   afterEach(() => {
     tracker.dispose();
-    store.close();
-    rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
   it("nextLineId starts from buffer initial length and increments on linefeed", async () => {
