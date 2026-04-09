@@ -63,9 +63,12 @@ export function handleProxyConnection(
       return;
     }
 
-    // proxy 发给 client 的控制消息：直接转发给绑定的客户端
+    // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
       const PROXY_TO_CLIENT_TYPES = new Set([
+        "terminal_frame",
+        "pty_state",
+        "terminal_lines_response",
         "dir_list_response",
         "command_list_push",
         "file_tree_push",

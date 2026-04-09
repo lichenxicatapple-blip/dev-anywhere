@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionBuffer, type BufferedMessage } from "../session-buffer.js";
-import { compressOnSnapshot } from "../buffer-compressor.js";
 import type { MessageType, MessageSource } from "@cc-anywhere/shared";
 
 // 构造测试用 BufferedMessage
@@ -110,40 +109,4 @@ describe("SessionBuffer", () => {
   });
 });
 
-describe("compressOnSnapshot", () => {
-  it("removes all messages before snapshot message", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "assistant_message"));
-    buffer.append(makeMsg(3, "pty_snapshot")); // snapshot
-    buffer.append(makeMsg(4, "user_input"));
-    buffer.append(makeMsg(5, "assistant_message"));
-
-    compressOnSnapshot(buffer, 3);
-
-    const all = buffer.getAll();
-    expect(all).toHaveLength(3);
-    expect(all[0].seq).toBe(3);
-    expect(all[1].seq).toBe(4);
-    expect(all[2].seq).toBe(5);
-  });
-
-  it("does nothing if snapshot seq not found", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "user_input"));
-    buffer.append(makeMsg(2, "assistant_message"));
-
-    compressOnSnapshot(buffer, 99);
-    expect(buffer.size()).toBe(2);
-  });
-
-  it("does nothing if snapshot is already first message", () => {
-    const buffer = new SessionBuffer();
-    buffer.append(makeMsg(1, "pty_snapshot")); // snapshot at index 0
-    buffer.append(makeMsg(2, "user_input"));
-
-    compressOnSnapshot(buffer, 1);
-    expect(buffer.size()).toBe(2);
-  });
-});
 

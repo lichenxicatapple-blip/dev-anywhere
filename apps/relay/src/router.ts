@@ -7,7 +7,6 @@ import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "./registry.js";
-import { compressOnSnapshot } from "./buffer-compressor.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
 export type ParseResult =
@@ -37,10 +36,8 @@ export function parseMessage(data: string): ParseResult {
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };
 }
 
-// 触发缓冲区压缩的消息类型：pty_snapshot 和 terminal_frame
-const SNAPSHOT_TYPES = new Set(["pty_snapshot", "terminal_frame"]);
-
 // 将 proxy 发来的 MessageEnvelope 缓冲到 per-session buffer 后转发给绑定的 client
+// 只处理 Envelope 消息，Control 消息由 handler 层处理
 export function routeProxyMessage(
   raw: string,
   proxyId: string,
@@ -65,14 +62,9 @@ export function routeProxyMessage(
   // 跟踪该 proxy 拥有的 session
   registry.addSessionToProxy(proxyId, sessionId);
 
-  // 缓冲消息到 per-session buffer
+  // 缓冲消息到 per-session buffer，纯追加不做压缩
   const buffer = registry.getOrCreateSessionBuffer(sessionId);
   buffer.append({ raw, seq, type, source });
-
-  // PTY 快照或终端帧到达时压缩缓冲区，丢弃快照之前的所有消息
-  if (SNAPSHOT_TYPES.has(type)) {
-    compressOnSnapshot(buffer, seq);
-  }
 
   // 转发给所有绑定的客户端
   const clients = registry.getClientsForProxy(proxyId);

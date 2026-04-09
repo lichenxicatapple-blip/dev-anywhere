@@ -130,6 +130,29 @@ export function handleClientConnection(
         return;
       }
 
+      // terminal_lines_request: 转发给绑定的 proxy
+      if (msg.type === "terminal_lines_request") {
+        if (!clientWs.boundProxyId) {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "NOT_BOUND",
+            message: "Client is not bound to any proxy",
+          }));
+          return;
+        }
+        const proxyWs = registry.getProxy(clientWs.boundProxyId);
+        if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
+          proxyWs.send(raw);
+        } else {
+          clientWs.send(JSON.stringify({
+            type: "relay_error",
+            code: "PROXY_OFFLINE",
+            message: `Proxy ${clientWs.boundProxyId} is not available`,
+          }));
+        }
+        return;
+      }
+
       if (msg.type === "session_history_request") {
         if (!clientWs.boundProxyId) {
           clientWs.send(JSON.stringify({

@@ -136,7 +136,6 @@ const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 function makeEnvelope(seq: number, sessionId = "s1", type = "assistant_message" as const, source = "proxy" as const) {
   const payloads: Record<string, unknown> = {
     assistant_message: { text: `msg-${seq}`, isPartial: false },
-    pty_snapshot: { data: Buffer.from(`snapshot-${seq}`).toString("base64") },
     user_input: { text: `input-${seq}` },
   };
   return {
@@ -766,7 +765,7 @@ describe("message buffering and replay", () => {
     expect(afterStatus.buffers.totalBuffered).toBe(beforeStatus.buffers.totalBuffered + 3);
   }, E2E_TIMEOUT);
 
-  it("PTY 快照压缩 → buffer 缩小", async () => {
+  it("buffer 纯追加不压缩 → 所有消息保留", async () => {
     const proxyId = uid();
     const sid = `s-pty-${n}`;
     const proxy = ws.proxy(port);
@@ -780,18 +779,12 @@ describe("message buffering and replay", () => {
     proxy.send(JSON.stringify(makeEnvelope(1, sid)));
     proxy.send(JSON.stringify(makeEnvelope(2, sid)));
     proxy.send(JSON.stringify(makeEnvelope(3, sid)));
-    await settle();
-
-    const midStatus = await fetchJson(port, "/status") as { buffers: { totalBuffered: number } };
-    expect(midStatus.buffers.totalBuffered).toBe(beforeStatus.buffers.totalBuffered + 3);
-
-    // pty_snapshot 触发 compressOnSnapshot
-    proxy.send(JSON.stringify(makeEnvelope(4, sid, "pty_snapshot")));
+    proxy.send(JSON.stringify(makeEnvelope(4, sid)));
     await settle();
 
     const afterStatus = await fetchJson(port, "/status") as { buffers: { totalBuffered: number } };
-    // 3 条被压缩掉，只剩 snapshot 自身：净增 1 而非 4
-    expect(afterStatus.buffers.totalBuffered).toBe(beforeStatus.buffers.totalBuffered + 1);
+    // 所有 4 条消息都保留在 buffer 中，不做压缩
+    expect(afterStatus.buffers.totalBuffered).toBe(beforeStatus.buffers.totalBuffered + 4);
   }, E2E_TIMEOUT);
 
   it("JSON 模式不压缩 → 所有消息完整保留", async () => {
@@ -1064,7 +1057,7 @@ describe("disk persistence and relay restart", () => {
     expect(JSON.parse(lines[1]).seq).toBe(2);
   }, E2E_TIMEOUT);
 
-  it("PTY 压缩后磁盘同步 → NDJSON 被重写", async () => {
+  it("磁盘 NDJSON 纯追加 → 所有消息持久化", async () => {
     const port = await findFreePort();
     const dataDir = mkdtempSync(join(tmpdir(), "relay-e2e-"));
     const relay = spawnRelay({ port, dataDir });
@@ -1081,17 +1074,15 @@ describe("disk persistence and relay restart", () => {
     proxy.send(JSON.stringify(makeEnvelope(1, sid)));
     proxy.send(JSON.stringify(makeEnvelope(2, sid)));
     proxy.send(JSON.stringify(makeEnvelope(3, sid)));
+    proxy.send(JSON.stringify(makeEnvelope(4, sid)));
     await settle();
 
     const path = join(dataDir, `${sid}.ndjson`);
-    expect(readFileSync(path, "utf-8").trim().split("\n").length).toBe(3);
-
-    proxy.send(JSON.stringify(makeEnvelope(4, sid, "pty_snapshot")));
-    await settle();
-
     const afterLines = readFileSync(path, "utf-8").trim().split("\n");
-    expect(afterLines.length).toBe(1);
-    expect(JSON.parse(afterLines[0]).seq).toBe(4);
+    // 所有 4 条消息都持久化，不做压缩
+    expect(afterLines.length).toBe(4);
+    expect(JSON.parse(afterLines[0]).seq).toBe(1);
+    expect(JSON.parse(afterLines[3]).seq).toBe(4);
   }, E2E_TIMEOUT);
 
   it("Proxy 主动退出 → NDJSON 文件被删除", async () => {
