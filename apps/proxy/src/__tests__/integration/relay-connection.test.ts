@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { createRelayServer, type RelayServer } from "../../../../apps/relay/src/server.js";
+import { createRelayServer, type RelayServer } from "../../../../relay/src/server.js";
 import { buildMessage } from "@cc-anywhere/shared";
-import { RelayConnection } from "../relay-connection.js";
+import { RelayConnection } from "#src/relay-connection.js";
 
 const logger = pino({ level: "silent" });
 

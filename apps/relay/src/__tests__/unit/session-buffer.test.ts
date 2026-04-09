@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { SessionBuffer, type BufferedMessage } from "../session-buffer.js";
+import { SessionBuffer, type BufferedMessage } from "#src/session-buffer.js";
 import type { MessageType, MessageSource } from "@cc-anywhere/shared";
 
 // 构造测试用 BufferedMessage

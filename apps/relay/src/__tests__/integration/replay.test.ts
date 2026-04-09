@@ -1,55 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { createRelayServer, type RelayServer } from "../server.js";
+import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import pino from "pino";
+import { waitForOpen, waitForMessage, collectMessages, getPort, settle, makeEnvelope } from "../helpers.js";
 
 const logger = pino({ level: "silent" });
-
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
-}
-
-function waitForMessage(ws: WebSocket): Promise<string> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => resolve(data.toString()));
-  });
-}
-
-// 收集指定数量的消息
-function collectMessages(ws: WebSocket, count: number, timeoutMs = 2000): Promise<string[]> {
-  return new Promise((resolve) => {
-    const messages: string[] = [];
-    const timer = setTimeout(() => {
-      ws.removeListener("message", onMessage);
-      resolve(messages);
-    }, timeoutMs);
-
-    function onMessage(data: { toString(): string }) {
-      messages.push(data.toString());
-      if (messages.length >= count) {
-        clearTimeout(timer);
-        ws.removeListener("message", onMessage);
-        resolve(messages);
-      }
-    }
-    ws.on("message", onMessage);
-  });
-}
-
-function getPort(server: RelayServer): number {
-  const addr = server.httpServer.address();
-  if (typeof addr === "object" && addr !== null) {
-    return addr.port;
-  }
-  throw new Error("Server not listening");
-}
 
 describe("replay_request protocol", () => {
   let relay: RelayServer;
@@ -85,18 +40,6 @@ describe("replay_request protocol", () => {
     connections.push(ws);
     return ws;
   }
-
-  const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
-
-  const makeEnvelope = (seq: number, sessionId = "s1") => ({
-    seq,
-    sessionId,
-    timestamp: Date.now(),
-    source: "proxy" as const,
-    version: "1.0",
-    type: "assistant_message" as const,
-    payload: { text: `msg-${seq}`, isPartial: false },
-  });
 
   it("replays messages in requested seq range", async () => {
     const proxy = connectProxy();

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { RelayRegistry } from "../registry.js";
+import { RelayRegistry } from "#src/registry.js";
 import { WebSocket } from "ws";
 
 // 创建模拟 WebSocket 对象用于测试

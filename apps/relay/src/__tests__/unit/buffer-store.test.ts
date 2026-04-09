@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { BufferStore } from "../buffer-store.js";
-import { SessionBuffer, type BufferedMessage } from "../session-buffer.js";
+import { BufferStore } from "#src/buffer-store.js";
+import { SessionBuffer, type BufferedMessage } from "#src/session-buffer.js";
 import type { MessageType, MessageSource } from "@cc-anywhere/shared";
 
 function makeMsg(seq: number, type: MessageType = "assistant_message", source: MessageSource = "proxy"): BufferedMessage {

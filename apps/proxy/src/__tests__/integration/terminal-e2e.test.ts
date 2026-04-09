@@ -3,16 +3,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
 import pino from "pino";
-import { createRelayServer, type RelayServer } from "../../../../apps/relay/src/server.js";
-import { TerminalTracker, type TermLine, type TermSpan } from "../terminal-tracker.js";
-import { createControlMessageHandlers } from "../handlers/control-messages.js";
+import { createRelayServer, type RelayServer } from "../../../../relay/src/server.js";
+import { TerminalTracker, type TermLine, type TermSpan } from "#src/terminal-tracker.js";
+import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
 import {
   TerminalFrameRenderer,
   type TerminalFrame,
-} from "../terminal-frame-renderer.js";
+} from "#src/terminal-frame-renderer.js";
 
 const logger = pino({ level: "silent" });
-const FIXTURES_DIR = join(import.meta.dirname, "fixtures");
+const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 
 /**
  * 从 NDJSON fixture 文件加载录制的 PTY chunk

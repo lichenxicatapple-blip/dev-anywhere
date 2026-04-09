@@ -1,55 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { createRelayServer, type RelayServer } from "../server.js";
+import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import pino from "pino";
+import { waitForOpen, waitForMessage, collectMessages, getPort, settle } from "../helpers.js";
 
 const logger = pino({ level: "silent" });
-
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
-}
-
-function waitForMessage(ws: WebSocket): Promise<string> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => resolve(data.toString()));
-  });
-}
-
-// 收集指定数量的消息
-function collectMessages(ws: WebSocket, count: number, timeoutMs = 2000): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const messages: string[] = [];
-    const timer = setTimeout(() => {
-      ws.removeListener("message", onMessage);
-      resolve(messages);
-    }, timeoutMs);
-
-    function onMessage(data: { toString(): string }) {
-      messages.push(data.toString());
-      if (messages.length >= count) {
-        clearTimeout(timer);
-        ws.removeListener("message", onMessage);
-        resolve(messages);
-      }
-    }
-    ws.on("message", onMessage);
-  });
-}
-
-function getPort(server: RelayServer): number {
-  const addr = server.httpServer.address();
-  if (typeof addr === "object" && addr !== null) {
-    return addr.port;
-  }
-  throw new Error("Server not listening");
-}
 
 describe("client_register protocol", () => {
   let relay: RelayServer;
@@ -85,9 +40,6 @@ describe("client_register protocol", () => {
     connections.push(ws);
     return ws;
   }
-
-  // 等待处理完成
-  const settle = (ms = 50) => new Promise((r) => setTimeout(r, ms));
 
   it("returns status 'new' for unknown clientId", async () => {
     const client = connectClient();

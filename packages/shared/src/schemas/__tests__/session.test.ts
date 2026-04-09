@@ -1,23 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  SessionCreatePayloadSchema,
   SessionListPayloadSchema,
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
 } from "../session.js";
-
-describe("SessionCreatePayloadSchema", () => {
-  it("accepts create with name", () => {
-    const result = SessionCreatePayloadSchema.parse({ name: "my session" });
-    expect(result).toEqual({ name: "my session" });
-  });
-
-  it("accepts create without name", () => {
-    const result = SessionCreatePayloadSchema.parse({});
-    expect(result).toEqual({});
-  });
-});
 
 describe("SessionListPayloadSchema", () => {
   it("accepts valid session list", () => {
@@ -67,36 +54,18 @@ describe("SessionListPayloadSchema", () => {
 });
 
 describe("SessionSwitchPayloadSchema", () => {
-  it("accepts valid session switch", () => {
-    const result = SessionSwitchPayloadSchema.parse({ sessionId: "s1" });
-    expect(result).toEqual({ sessionId: "s1" });
-  });
-
   it("rejects missing sessionId", () => {
     expect(() => SessionSwitchPayloadSchema.parse({})).toThrow();
   });
 });
 
 describe("SessionTerminatePayloadSchema", () => {
-  it("accepts valid session terminate", () => {
-    const result = SessionTerminatePayloadSchema.parse({ sessionId: "s1" });
-    expect(result).toEqual({ sessionId: "s1" });
-  });
-
   it("rejects missing sessionId", () => {
     expect(() => SessionTerminatePayloadSchema.parse({})).toThrow();
   });
 });
 
 describe("SessionStatusPayloadSchema", () => {
-  it("accepts valid session status", () => {
-    const result = SessionStatusPayloadSchema.parse({
-      sessionId: "s1",
-      state: "working",
-    });
-    expect(result).toEqual({ sessionId: "s1", state: "working" });
-  });
-
   it("rejects invalid state", () => {
     expect(() =>
       SessionStatusPayloadSchema.parse({

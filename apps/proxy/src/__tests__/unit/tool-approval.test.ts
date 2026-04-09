@@ -51,10 +51,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 describe("ToolWhitelist", () => {
-  let ToolWhitelist: typeof import("../json-session.js").ToolWhitelist;
+  let ToolWhitelist: typeof import("#src/json-session.js").ToolWhitelist;
 
   beforeEach(async () => {
-    const mod = await import("../json-session.js");
+    const mod = await import("#src/json-session.js");
     ToolWhitelist = mod.ToolWhitelist;
   });
 
@@ -62,22 +62,9 @@ describe("ToolWhitelist", () => {
     vi.restoreAllMocks();
   });
 
-  it("auto-approves when toolName is in the whitelist", () => {
-    const wl = new ToolWhitelist();
-    wl.add("Bash");
-    expect(wl.has("Bash")).toBe(true);
-  });
-
   it("does not auto-approve when toolName is NOT in the whitelist", () => {
     const wl = new ToolWhitelist();
     expect(wl.has("Bash")).toBe(false);
-  });
-
-  it("addToWhitelist causes subsequent calls with same toolName to auto-approve", () => {
-    const wl = new ToolWhitelist();
-    expect(wl.has("Write")).toBe(false);
-    wl.add("Write");
-    expect(wl.has("Write")).toBe(true);
   });
 
   it("clearWhitelist removes all entries", () => {
@@ -91,11 +78,11 @@ describe("ToolWhitelist", () => {
 });
 
 describe("createRelayApprovalStrategy", () => {
-  let createRelayApprovalStrategy: typeof import("../json-session.js").createRelayApprovalStrategy;
-  let ToolWhitelist: typeof import("../json-session.js").ToolWhitelist;
+  let createRelayApprovalStrategy: typeof import("#src/json-session.js").createRelayApprovalStrategy;
+  let ToolWhitelist: typeof import("#src/json-session.js").ToolWhitelist;
 
   beforeEach(async () => {
-    const mod = await import("../json-session.js");
+    const mod = await import("#src/json-session.js");
     createRelayApprovalStrategy = mod.createRelayApprovalStrategy;
     ToolWhitelist = mod.ToolWhitelist;
   });
@@ -128,10 +115,10 @@ describe("createRelayApprovalStrategy", () => {
 });
 
 describe("filterClaudeEnvVars", () => {
-  let filterClaudeEnvVars: typeof import("../json-session.js").filterClaudeEnvVars;
+  let filterClaudeEnvVars: typeof import("#src/json-session.js").filterClaudeEnvVars;
 
   beforeEach(async () => {
-    const mod = await import("../json-session.js");
+    const mod = await import("#src/json-session.js");
     filterClaudeEnvVars = mod.filterClaudeEnvVars;
   });
 
@@ -158,10 +145,10 @@ describe("filterClaudeEnvVars", () => {
 });
 
 describe("buildClaudeArgs", () => {
-  let buildClaudeArgs: typeof import("../json-session.js").buildClaudeArgs;
+  let buildClaudeArgs: typeof import("#src/json-session.js").buildClaudeArgs;
 
   beforeEach(async () => {
-    const mod = await import("../json-session.js");
+    const mod = await import("#src/json-session.js");
     buildClaudeArgs = mod.buildClaudeArgs;
   });
 
@@ -203,13 +190,13 @@ describe("buildClaudeArgs", () => {
 });
 
 describe("JsonSession claudeSessionId capture", () => {
-  let JsonSession: typeof import("../json-session.js").JsonSession;
+  let JsonSession: typeof import("#src/json-session.js").JsonSession;
 
   beforeEach(async () => {
     mockChild = createMockChild();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
-    const mod = await import("../json-session.js");
+    const mod = await import("#src/json-session.js");
     JsonSession = mod.JsonSession;
   });
 

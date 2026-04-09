@@ -1,58 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { createRelayServer, type RelayServer } from "../server.js";
+import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import pino from "pino";
+import { waitForOpen, waitForMessage, collectMessages, getPort, settle } from "../helpers.js";
 
 const logger = pino({ level: "silent" });
-
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
-}
-
-function waitForMessage(ws: WebSocket, timeoutMs = 3000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("waitForMessage timeout")), timeoutMs);
-    ws.once("message", (data) => {
-      clearTimeout(timer);
-      resolve(data.toString());
-    });
-  });
-}
-
-function collectMessages(ws: WebSocket, count: number, timeoutMs = 3000): Promise<string[]> {
-  return new Promise((resolve) => {
-    const messages: string[] = [];
-    const timer = setTimeout(() => {
-      ws.removeListener("message", onMessage);
-      resolve(messages);
-    }, timeoutMs);
-
-    function onMessage(data: { toString(): string }) {
-      messages.push(data.toString());
-      if (messages.length >= count) {
-        clearTimeout(timer);
-        ws.removeListener("message", onMessage);
-        resolve(messages);
-      }
-    }
-    ws.on("message", onMessage);
-  });
-}
-
-function getPort(server: RelayServer): number {
-  const addr = server.httpServer.address();
-  if (typeof addr === "object" && addr !== null) return addr.port;
-  throw new Error("Server not listening");
-}
-
-const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Phase 6 Plan 05.1 集成测试

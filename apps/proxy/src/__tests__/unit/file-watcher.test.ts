@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { FileWatcher } from "../file-watcher.js";
-import { listDirectory, isBlacklistedPath } from "../dir-lister.js";
+import { FileWatcher } from "#src/file-watcher.js";
+import { listDirectory, isBlacklistedPath } from "#src/dir-lister.js";
 
 const TEST_DIR = join(process.cwd(), ".test-file-watcher");
 

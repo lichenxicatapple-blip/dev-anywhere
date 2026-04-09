@@ -1,37 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { createRelayServer, type RelayServer } from "../server.js";
+import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import pino from "pino";
+import { waitForOpen, waitForMessage, getPort } from "../helpers.js";
 
 const logger = pino({ level: "silent" });
-
-// 等待 WebSocket 打开连接
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
-}
-
-// 等待收到一条 WebSocket 消息
-function waitForMessage(ws: WebSocket): Promise<string> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => resolve(data.toString()));
-  });
-}
-
-// 获取已监听服务器的端口
-function getPort(server: RelayServer): number {
-  const addr = server.httpServer.address();
-  if (typeof addr === "object" && addr !== null) {
-    return addr.port;
-  }
-  throw new Error("Server not listening");
-}
 
 describe("Relay Server Integration", () => {
   let relay: RelayServer;

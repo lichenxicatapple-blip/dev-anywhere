@@ -19,9 +19,10 @@ import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 import { WebSocket } from "ws";
+import { waitForOpen, waitForMessage, collectMessages, settle, makeEnvelope } from "../helpers.js";
 
 const E2E_TIMEOUT = 30_000;
-const RELAY_ENTRY = pathResolve(import.meta.dirname, "..", "index.ts");
+const RELAY_ENTRY = pathResolve(import.meta.dirname, "../..", "index.ts");
 
 // ── 工具函数 ─────────────────────────────────────────────
 
@@ -91,57 +92,11 @@ function waitForExit(proc: ChildProcess, timeoutMs = 5000): Promise<number | nul
   });
 }
 
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) { resolve(); return; }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
-}
-
 function waitForClose(ws: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     if (ws.readyState === WebSocket.CLOSED) { resolve(); return; }
     ws.on("close", () => resolve());
   });
-}
-
-function waitForMessage(ws: WebSocket): Promise<string> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => resolve(data.toString()));
-  });
-}
-
-function collectMessages(ws: WebSocket, count: number, timeoutMs = 3000): Promise<string[]> {
-  return new Promise((resolve) => {
-    const messages: string[] = [];
-    const timer = setTimeout(() => {
-      ws.removeListener("message", onMessage);
-      resolve(messages);
-    }, timeoutMs);
-    function onMessage(data: { toString(): string }) {
-      messages.push(data.toString());
-      if (messages.length >= count) {
-        clearTimeout(timer);
-        ws.removeListener("message", onMessage);
-        resolve(messages);
-      }
-    }
-    ws.on("message", onMessage);
-  });
-}
-
-const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
-
-function makeEnvelope(seq: number, sessionId = "s1", type = "assistant_message" as const, source = "proxy" as const) {
-  const payloads: Record<string, unknown> = {
-    assistant_message: { text: `msg-${seq}`, isPartial: false },
-    user_input: { text: `input-${seq}` },
-  };
-  return {
-    seq, sessionId, timestamp: Date.now(), source, version: "1.0", type,
-    payload: payloads[type] ?? { text: `msg-${seq}`, isPartial: false },
-  };
 }
 
 async function fetchJson(port: number, path: string): Promise<Record<string, unknown>> {

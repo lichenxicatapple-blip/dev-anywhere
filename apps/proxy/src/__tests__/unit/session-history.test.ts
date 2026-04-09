@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { scanSessionHistory } from "../session-history.js";
+import { scanSessionHistory } from "#src/session-history.js";
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 需要 mock homedir 让 scanSessionHistory 扫描测试目录

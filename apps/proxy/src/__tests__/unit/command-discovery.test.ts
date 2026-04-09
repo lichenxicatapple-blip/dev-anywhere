@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { discoverCommands, parseSkillFrontmatter } from "../command-discovery.js";
+import { discoverCommands, parseSkillFrontmatter } from "#src/command-discovery.js";
 
 const TEST_DIR = join(process.cwd(), ".test-command-discovery");
 

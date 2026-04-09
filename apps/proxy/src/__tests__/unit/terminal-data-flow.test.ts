@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { TerminalTracker } from "../terminal-tracker.js";
+import { TerminalTracker } from "#src/terminal-tracker.js";
 
 /**
  * 终端数据流端到端验证
@@ -266,9 +266,44 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
   });
 });
 
+describe("Terminal data flow: extractGrid edge cases", () => {
+  let tracker: TerminalTracker;
+
+  beforeEach(() => {
+    tracker = new TerminalTracker(80, 24);
+  });
+
+  afterEach(() => {
+    tracker.dispose();
+  });
+
+  it("merges adjacent cells with identical style into one span", async () => {
+    await tracker.feed("AABBCC");
+    const grid = tracker.extractGrid();
+    const firstLine = grid[0];
+    const textSpans = firstLine.filter((s) => s.text.trim().length > 0);
+    expect(textSpans.length).toBeLessThanOrEqual(1);
+    const fullText = firstLine.map((s) => s.text).join("");
+    expect(fullText).toContain("AABBCC");
+  });
+
+  it("handles wide characters (CJK) skipping continuation cells", async () => {
+    await tracker.feed("AB\u4e2d\u6587CD");
+    const grid = tracker.extractGrid();
+    const firstLine = grid[0];
+    const fullText = firstLine.map((s) => s.text).join("");
+    expect(fullText).toContain("AB");
+    expect(fullText).toContain("\u4e2d");
+    expect(fullText).toContain("\u6587");
+    expect(fullText).toContain("CD");
+    const chineseCount = (fullText.match(/\u4e2d/g) || []).length;
+    expect(chineseCount).toBe(1);
+  });
+});
+
 describe("SeqCounter integration smoke test", () => {
   it("SeqCounter can be imported and used", async () => {
-    const { SeqCounter } = await import("../seq-counter.js");
+    const { SeqCounter } = await import("#src/seq-counter.js");
     const { mkdirSync, rmSync } = await import("node:fs");
     const { join } = await import("node:path");
 

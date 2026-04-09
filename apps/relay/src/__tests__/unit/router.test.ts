@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { parseMessage, routeProxyMessage, routeClientMessage } from "../router.js";
-import { RelayRegistry } from "../registry.js";
+import { parseMessage, routeProxyMessage, routeClientMessage } from "#src/router.js";
+import { RelayRegistry } from "#src/registry.js";
 import { WebSocket } from "ws";
 import type { Logger } from "pino";
 

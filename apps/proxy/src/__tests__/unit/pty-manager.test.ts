@@ -77,7 +77,7 @@ describe("PtyManager", () => {
       onSessionExit?: (code: number) => void;
     } = {},
   ) {
-    const { PtyManager } = await import("../pty-manager.js");
+    const { PtyManager } = await import("#src/pty-manager.js");
     const pty = await import("node-pty");
 
     const stdin = createMockStdin(overrides.isTTY ?? true);
