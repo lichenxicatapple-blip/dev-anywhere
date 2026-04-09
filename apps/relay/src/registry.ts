@@ -2,11 +2,12 @@ import { WebSocket } from "ws";
 import { SessionBuffer } from "./session-buffer.js";
 import type { BufferStore } from "./buffer-store.js";
 
-// 代理连接状态，跟踪 ws、会话集合、离线时间
+// 代理连接状态，跟踪 ws、会话集合、离线时间、显示名称
 interface ProxyState {
   ws: WebSocket | null;
   sessions: Set<string>;
   disconnectedAt: number | null;
+  name?: string;
 }
 
 // 客户端绑定状态，通过 clientId 而非 WebSocket 引用标识
@@ -41,7 +42,7 @@ export class RelayRegistry {
     }
   }
 
-  registerProxy(proxyId: string, ws: WebSocket): "new" | "reconnected" {
+  registerProxy(proxyId: string, ws: WebSocket, name?: string): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
     if (existing) {
       // 如果旧连接还活着，先终止
@@ -50,6 +51,7 @@ export class RelayRegistry {
       }
       existing.ws = ws;
       existing.disconnectedAt = null;
+      if (name !== undefined) existing.name = name;
       return "reconnected";
     }
 
@@ -57,6 +59,7 @@ export class RelayRegistry {
       ws,
       sessions: new Set(),
       disconnectedAt: null,
+      name,
     });
     return "new";
   }
@@ -116,6 +119,18 @@ export class RelayRegistry {
 
   listProxies(): string[] {
     return Array.from(this.proxyStates.keys());
+  }
+
+  // 返回 proxyId 和 name 的列表，用于 proxy_list_response
+  listProxiesWithName(): Array<{ proxyId: string; name?: string }> {
+    return Array.from(this.proxyStates.entries()).map(([proxyId, state]) => ({
+      proxyId,
+      ...(state.name !== undefined ? { name: state.name } : {}),
+    }));
+  }
+
+  getProxyName(proxyId: string): string | undefined {
+    return this.proxyStates.get(proxyId)?.name;
   }
 
   // 将 sessionId 关联到 proxy

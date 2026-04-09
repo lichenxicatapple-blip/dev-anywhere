@@ -37,8 +37,8 @@ export function parseMessage(data: string): ParseResult {
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };
 }
 
-// PTY 快照压缩触发类型，只有 pty_snapshot 消息才触发压缩
-const SNAPSHOT_TYPE = "pty_snapshot";
+// 触发缓冲区压缩的消息类型：pty_snapshot 和 terminal_frame
+const SNAPSHOT_TYPES = new Set(["pty_snapshot", "terminal_frame"]);
 
 // 将 proxy 发来的 MessageEnvelope 缓冲到 per-session buffer 后转发给绑定的 client
 export function routeProxyMessage(
@@ -69,8 +69,8 @@ export function routeProxyMessage(
   const buffer = registry.getOrCreateSessionBuffer(sessionId);
   buffer.append({ raw, seq, type, source });
 
-  // PTY 快照到达时压缩缓冲区，丢弃快照之前的所有消息
-  if (type === SNAPSHOT_TYPE) {
+  // PTY 快照或终端帧到达时压缩缓冲区，丢弃快照之前的所有消息
+  if (SNAPSHOT_TYPES.has(type)) {
     compressOnSnapshot(buffer, seq);
   }
 
@@ -152,6 +152,7 @@ export function handleReplayRequest(
 
 // 将 client 发来的 MessageEnvelope 转发给绑定的 proxy
 // proxyId 由调用方从 clientId 绑定中解析后传入
+// D-32: tool_approve/tool_deny 等信封消息直接发送到 proxy WS，不经过任何队列或缓冲
 export function routeClientMessage(
   raw: string,
   proxyId: string,

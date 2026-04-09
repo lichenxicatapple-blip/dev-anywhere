@@ -22,6 +22,8 @@ const BASE_BACKOFF_MS = 1000;
 export interface RelayConnectionOptions {
   // 自定义 proxyId 文件路径，测试时使用临时目录
   proxyIdPath?: string;
+  // D-23: proxy 显示名称，注册时发送给 relay
+  name?: string;
 }
 
 // 管理代理到中转服务器的出站 WebSocket 连接，支持自动重连和消息队列
@@ -34,12 +36,14 @@ export class RelayConnection extends EventEmitter {
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private closed: boolean = false;
+  private name?: string;
 
   constructor(relayUrl: string, logger: Logger, options?: RelayConnectionOptions) {
     super();
     this.relayUrl = relayUrl;
     this.logger = logger;
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
+    this.name = options?.name;
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -75,7 +79,11 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("open", () => {
         this.reconnectAttempt = 0;
         this.logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
-        this.ws!.send(JSON.stringify({ type: "proxy_register", proxyId: this.proxyId }));
+        this.ws!.send(JSON.stringify({
+          type: "proxy_register",
+          proxyId: this.proxyId,
+          ...(this.name ? { name: this.name } : {}),
+        }));
       });
 
       this.ws.on("message", (data) => {
@@ -143,6 +151,12 @@ export class RelayConnection extends EventEmitter {
   // 发送 MessageEnvelope 到 relay，离线时自动入队
   send(envelope: MessageEnvelope): void {
     const raw = JSON.stringify(envelope);
+    this.sendRaw(raw);
+  }
+
+  // 发送原始 JSON 字符串到 relay，离线时自动入队
+  // 用于 handler 模块直接发送已序列化的 relay control 消息
+  sendRaw(raw: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
     } else {
