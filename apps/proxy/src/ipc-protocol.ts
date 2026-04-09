@@ -96,6 +96,28 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     message: z.string(),
     code: z.string().optional(),
   }),
+
+  // client → serve：PTY 终端帧推送，frame 是 JSON.stringify 后的 terminal_frame Control 消息
+  z.object({
+    type: z.literal("pty_terminal_frame"),
+    sessionId: z.string(),
+    frame: z.string(),
+  }),
+
+  // serve → client：转发来自 relay 的终端行拉取请求
+  z.object({
+    type: z.literal("pty_lines_request"),
+    sessionId: z.string(),
+    fromLineId: z.number(),
+    count: z.number(),
+  }),
+
+  // client → serve：终端行拉取响应，response 是 JSON.stringify 后的 terminal_lines_response Control 消息
+  z.object({
+    type: z.literal("pty_lines_response"),
+    sessionId: z.string(),
+    response: z.string(),
+  }),
 ]);
 
 // serve 与 session-worker 之间的通信协议

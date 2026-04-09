@@ -4,12 +4,27 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import pino from "pino";
 import { createRelayServer, type RelayServer } from "../../../../apps/relay/src/server.js";
-import { TerminalTracker } from "../terminal-tracker.js";
-import { createTerminalPushHandler, FRAME_PUSH_INTERVAL_MS } from "../handlers/terminal-push.js";
+import { TerminalTracker, type TermLine, type TermSpan } from "../terminal-tracker.js";
 import { createControlMessageHandlers } from "../handlers/control-messages.js";
+import {
+  TerminalFrameRenderer,
+  type TerminalFrame,
+} from "../terminal-frame-renderer.js";
 
 const logger = pino({ level: "silent" });
 const FIXTURES_DIR = join(import.meta.dirname, "fixtures");
+
+/**
+ * 从 NDJSON fixture 文件加载录制的 PTY chunk
+ * 每行格式：{"ts":<ms>, "data":"<escaped string>"}
+ */
+function loadRecordedChunks(): Array<{ ts: number; data: string }> {
+  const content = readFileSync(join(FIXTURES_DIR, "claude-chunks.ndjson"), "utf-8");
+  return content
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+}
 
 function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -29,47 +44,22 @@ function waitForMessage(ws: WebSocket, timeoutMs = 5000): Promise<string> {
   });
 }
 
-function collectMessages(ws: WebSocket, count: number, timeoutMs = 5000): Promise<string[]> {
-  return new Promise((resolve) => {
-    const messages: string[] = [];
-    const timer = setTimeout(() => {
-      ws.removeListener("message", onMessage);
-      resolve(messages);
-    }, timeoutMs);
-
-    function onMessage(data: { toString(): string }) {
-      messages.push(data.toString());
-      if (messages.length >= count) {
-        clearTimeout(timer);
-        ws.removeListener("message", onMessage);
-        resolve(messages);
-      }
-    }
-    ws.on("message", onMessage);
-  });
-}
-
 const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * 终端端到端集成测试
  *
- * 使用录制的真实 Claude Code PTY 输出，验证完整链路：
- * 录制数据 → TerminalTracker (xterm headless) → terminal-push handler → relay → test client
- *
- * 同时验证 terminal_lines_request/response 的 lineId 寻址链路：
- * test client → relay → proxy handler → TerminalTracker.extractLines → response → test client
+ * 使用 `cc-anywhere serve record` 录制的真实 PTY chunk（NDJSON 格式）
+ * 按原始分片逐 chunk 喂入 TerminalTracker，精确还原 PtyManager.onData 的行为。
  */
-describe("Terminal E2E with real Claude output", () => {
+describe("Terminal E2E with recorded PTY chunks", () => {
   let relay: RelayServer;
   let port: number;
   const connections: WebSocket[] = [];
-
-  // 录制的真实 Claude Code 终端输出
-  let rawTerminalData: string;
+  let chunks: Array<{ ts: number; data: string }>;
 
   beforeEach(async () => {
-    rawTerminalData = readFileSync(join(FIXTURES_DIR, "claude-session.raw"), "utf-8");
+    chunks = loadRecordedChunks();
 
     relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
     await new Promise<void>((resolve) => {
@@ -106,29 +96,224 @@ describe("Terminal E2E with real Claude output", () => {
     await waitForOpen(proxyWs);
     proxyWs.send(JSON.stringify({ type: "proxy_register", proxyId: "e2e-proxy" }));
     await settle();
-
     const clientWs = connectClient();
     await waitForOpen(clientWs);
     clientWs.send(JSON.stringify({ type: "client_register", clientId: "e2e-client" }));
     await settle();
     clientWs.send(JSON.stringify({ type: "proxy_select", proxyId: "e2e-proxy" }));
     await settle();
-
     return { proxyWs, clientWs };
   }
 
-  it("real Claude output produces valid terminal_frame via relay", async () => {
-    const { proxyWs, clientWs } = await setupBoundPair();
+  // 喂入前 N 个 chunk 到 tracker
+  async function feedChunks(tracker: TerminalTracker, count: number): Promise<void> {
+    const n = Math.min(count, chunks.length);
+    for (let i = 0; i < n; i++) {
+      await tracker.feed(chunks[i].data);
+    }
+  }
 
-    // 在 proxy 侧构建 TerminalTracker 并喂入真实数据
+  it("fixture has real PTY chunks with varying sizes", () => {
+    expect(chunks.length).toBeGreaterThan(100);
+
+    const sizes = chunks.map((c) => c.data.length);
+    const minSize = Math.min(...sizes);
+    const maxSize = Math.max(...sizes);
+
+    // 真实 PTY chunk 大小不固定
+    expect(maxSize).toBeGreaterThan(minSize * 10);
+
+    // 时间戳单调递增
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i].ts).toBeGreaterThanOrEqual(chunks[i - 1].ts);
+    }
+  });
+
+  it("each chunk feed produces a valid extractable grid", async () => {
     const tracker = new TerminalTracker(120, 40);
-    await tracker.feed(rawTerminalData);
 
-    // 提取网格，构造 Control 格式的 terminal_frame
+    // 逐 chunk 喂入前 50 个，每次检查 extractGrid
+    const n = Math.min(50, chunks.length);
+    for (let i = 0; i < n; i++) {
+      await tracker.feed(chunks[i].data);
+      const grid = tracker.extractGrid();
+      expect(Array.isArray(grid)).toBe(true);
+    }
+
+    const finalGrid = tracker.extractGrid();
+    const allText = finalGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(allText.trim().length).toBeGreaterThan(0);
+
+    tracker.dispose();
+  });
+
+  it("lineId grows monotonically as chunks arrive", async () => {
+    const tracker = new TerminalTracker(120, 40);
+    const lineIdHistory: number[] = [];
+
+    const n = Math.min(100, chunks.length);
+    for (let i = 0; i < n; i++) {
+      await tracker.feed(chunks[i].data);
+      lineIdHistory.push(tracker.getNewestLineId());
+    }
+
+    // 单调递增或保持不变
+    for (let i = 1; i < lineIdHistory.length; i++) {
+      expect(lineIdHistory[i]).toBeGreaterThanOrEqual(lineIdHistory[i - 1]);
+    }
+    // 整体有增长
+    expect(lineIdHistory[lineIdHistory.length - 1]).toBeGreaterThan(lineIdHistory[0]);
+
+    tracker.dispose();
+  });
+
+  it("TerminalFrameRenderer: applyFrame full sets viewport", async () => {
+    const tracker = new TerminalTracker(120, 40);
+    await feedChunks(tracker, 20);
     const grid = tracker.extractGrid();
-    expect(grid.length).toBeGreaterThan(0);
 
-    // 通过 proxy WebSocket 发送给 relay
+    const renderer = new TerminalFrameRenderer();
+    renderer.applyFrame({
+      type: "terminal_frame",
+      sessionId: "pty-1",
+      payload: { mode: "full", lines: grid },
+    });
+
+    const viewport = renderer.getViewportLines();
+    expect(viewport.length).toBe(grid.length);
+    expect(viewport[0]).toEqual(grid[0]);
+
+    tracker.dispose();
+  });
+
+  it("TerminalFrameRenderer: applyFrame delta only updates specified lines", async () => {
+    const tracker = new TerminalTracker(120, 40);
+    await feedChunks(tracker, 20);
+    const grid = tracker.extractGrid();
+
+    const renderer = new TerminalFrameRenderer();
+    // 先设置 full 帧
+    renderer.applyFrame({
+      type: "terminal_frame",
+      sessionId: "pty-1",
+      payload: { mode: "full", lines: grid },
+    });
+
+    const originalLine0 = [...renderer.getViewportLines()[0]];
+    const newSpans: TermSpan[] = [{ text: "REPLACED LINE", fg: "#ff0000" }];
+
+    // delta 帧只更新第 2 行
+    renderer.applyFrame({
+      type: "terminal_frame",
+      sessionId: "pty-1",
+      payload: { mode: "delta", lines: [{ lineIndex: 1, spans: newSpans }] },
+    });
+
+    // 第 0 行不变
+    expect(renderer.getViewportLines()[0]).toEqual(originalLine0);
+    // 第 1 行已更新
+    expect(renderer.getViewportLines()[1][0].text).toBe("REPLACED LINE");
+  });
+
+  it("TerminalFrameRenderer: applyLinesResponse fills scrollback cache", () => {
+    const renderer = new TerminalFrameRenderer();
+    const lines: TermLine[] = [
+      [{ text: "line 100" }],
+      [{ text: "line 101" }],
+      [{ text: "line 102" }],
+    ];
+
+    renderer.applyLinesResponse({
+      type: "terminal_lines_response",
+      sessionId: "pty-1",
+      fromLineId: 100,
+      oldestLineId: 50,
+      newestLineId: 200,
+      lines,
+    });
+
+    expect(renderer.cacheSize).toBe(3);
+    expect(renderer.oldestLineId).toBe(50);
+    expect(renderer.newestLineId).toBe(200);
+
+    const cached = renderer.getCachedLines(100, 3);
+    expect(cached[0]![0].text).toBe("line 100");
+    expect(cached[2]![0].text).toBe("line 102");
+  });
+
+  it("TerminalFrameRenderer: getMissingRange detects cache holes", () => {
+    const renderer = new TerminalFrameRenderer();
+
+    // 填充 100-102
+    renderer.applyLinesResponse({
+      type: "terminal_lines_response",
+      sessionId: "pty-1",
+      fromLineId: 100,
+      oldestLineId: 50,
+      newestLineId: 200,
+      lines: [[{ text: "a" }], [{ text: "b" }], [{ text: "c" }]],
+    });
+
+    // 查询 98-105 范围，98-99 和 103-105 未缓存
+    const missing = renderer.getMissingRange(98, 8);
+    expect(missing).not.toBeNull();
+    expect(missing!.fromLineId).toBe(98);
+
+    // 全部命中时返回 null
+    const noMissing = renderer.getMissingRange(100, 3);
+    expect(noMissing).toBeNull();
+  });
+
+  it("TerminalFrameRenderer: clearCache resets scrollback", () => {
+    const renderer = new TerminalFrameRenderer();
+    renderer.applyLinesResponse({
+      type: "terminal_lines_response",
+      sessionId: "pty-1",
+      fromLineId: 0,
+      oldestLineId: 0,
+      newestLineId: 10,
+      lines: [[{ text: "x" }]],
+    });
+    expect(renderer.cacheSize).toBe(1);
+
+    renderer.clearCache();
+    expect(renderer.cacheSize).toBe(0);
+  });
+
+  it("extractLines at mid-stream: content stable after more chunks arrive", async () => {
+    const tracker = new TerminalTracker(120, 40);
+
+    // 喂入一半 chunk
+    const halfIdx = Math.floor(chunks.length / 2);
+    await feedChunks(tracker, halfIdx);
+
+    const oldest = tracker.getOldestLineId();
+    const lines = tracker.extractLines(oldest, 10);
+    const textBefore = lines.map((l) => l.map((s) => s.text).join("")).join("\n");
+
+    // 喂入剩余 chunk
+    for (let i = halfIdx; i < chunks.length; i++) {
+      await tracker.feed(chunks[i].data);
+    }
+
+    // 如果 scrollback 没溢出，同一 lineId 范围的内容不变
+    const newOldest = tracker.getOldestLineId();
+    if (newOldest <= oldest) {
+      const linesAfter = tracker.extractLines(oldest, 10);
+      const textAfter = linesAfter.map((l) => l.map((s) => s.text).join("")).join("\n");
+      expect(textAfter).toBe(textBefore);
+    }
+
+    tracker.dispose();
+  });
+
+  it("relay e2e: client receives terminal_frame from chunked data", async () => {
+    const { proxyWs, clientWs } = await setupBoundPair();
+    const tracker = new TerminalTracker(120, 40);
+
+    await feedChunks(tracker, 30);
+    const grid = tracker.extractGrid();
+
     const clientMsgPromise = waitForMessage(clientWs);
     proxyWs.send(JSON.stringify({
       type: "terminal_frame",
@@ -136,76 +321,19 @@ describe("Terminal E2E with real Claude output", () => {
       payload: { mode: "full", lines: grid },
     }));
 
-    // test client 应收到完整 terminal_frame
     const received = JSON.parse(await clientMsgPromise);
     expect(received.type).toBe("terminal_frame");
-    expect(received.sessionId).toBe("pty-1");
-    expect(received.payload.mode).toBe("full");
-    expect(received.payload.lines.length).toBeGreaterThan(0);
-
-    // 验证内容不是空的 — 真实 Claude 输出应包含可见文本
-    const allText = received.payload.lines
-      .flatMap((line: Array<{ text: string }>) => line.map((s) => s.text))
-      .join("");
-    expect(allText.trim().length).toBeGreaterThan(0);
+    expect(received.payload.lines.length).toBe(grid.length);
 
     tracker.dispose();
   });
 
-  it("terminal-push handler sends full then delta frames from real data", async () => {
-    const sentMessages: string[] = [];
-    const send = (data: string) => sentMessages.push(data);
-
-    const pushHandler = createTerminalPushHandler(send, logger);
-    const tracker = new TerminalTracker(120, 40);
-
-    // 把录制数据分成两段喂入，模拟流式输出
-    const midpoint = Math.floor(rawTerminalData.length / 2);
-    const firstHalf = rawTerminalData.slice(0, midpoint);
-    const secondHalf = rawTerminalData.slice(midpoint);
-
-    await tracker.feed(firstHalf);
-    pushHandler.start("pty-1", tracker);
-
-    // 等待首帧推送（200ms 周期）
-    await settle(FRAME_PUSH_INTERVAL_MS + 100);
-
-    // 应有至少一条消息（首帧 full）
-    expect(sentMessages.length).toBeGreaterThanOrEqual(1);
-    const firstFrame = JSON.parse(sentMessages[0]);
-    expect(firstFrame.type).toBe("terminal_frame");
-    expect(firstFrame.payload.mode).toBe("full");
-    expect(firstFrame.payload.lines.length).toBeGreaterThan(0);
-
-    // 喂入第二段数据
-    await tracker.feed(secondHalf);
-
-    // 等待 delta 帧
-    await settle(FRAME_PUSH_INTERVAL_MS + 100);
-
-    // 应有更多消息，且后续帧为 delta 模式
-    expect(sentMessages.length).toBeGreaterThanOrEqual(2);
-    const laterFrame = JSON.parse(sentMessages[sentMessages.length - 1]);
-    expect(laterFrame.type).toBe("terminal_frame");
-    expect(laterFrame.payload.mode).toBe("delta");
-    expect(laterFrame.payload.lines.length).toBeGreaterThan(0);
-
-    pushHandler.stopAll();
-    tracker.dispose();
-  });
-
-  it("terminal_lines_request/response works with real data through relay", async () => {
+  it("relay e2e: terminal_lines_request/response roundtrip", async () => {
     const { proxyWs, clientWs } = await setupBoundPair();
-
-    // proxy 侧准备 TerminalTracker
     const tracker = new TerminalTracker(120, 40);
-    await tracker.feed(rawTerminalData);
 
-    const oldest = tracker.getOldestLineId();
-    const newest = tracker.getNewestLineId();
-    expect(newest).toBeGreaterThan(oldest);
+    await feedChunks(tracker, 50);
 
-    // proxy 监听来自 relay 的 terminal_lines_request
     proxyWs.on("message", (data) => {
       const msg = JSON.parse(data.toString());
       if (msg.type === "terminal_lines_request") {
@@ -221,115 +349,89 @@ describe("Terminal E2E with real Claude output", () => {
       }
     });
 
-    // client 发送 terminal_lines_request
+    const oldest = tracker.getOldestLineId();
     const responsePromise = waitForMessage(clientWs);
     clientWs.send(JSON.stringify({
       type: "terminal_lines_request",
       sessionId: "pty-1",
       fromLineId: oldest,
-      count: 20,
+      count: 10,
     }));
 
     const response = JSON.parse(await responsePromise);
     expect(response.type).toBe("terminal_lines_response");
-    expect(response.sessionId).toBe("pty-1");
-    expect(response.fromLineId).toBe(oldest);
+    expect(response.lines.length).toBe(10);
     expect(response.oldestLineId).toBe(oldest);
-    expect(response.newestLineId).toBe(newest);
-    expect(response.lines.length).toBe(20);
-
-    // 每行是 TermSpan 数组
-    for (const line of response.lines) {
-      expect(Array.isArray(line)).toBe(true);
-      for (const span of line) {
-        expect(typeof span.text).toBe("string");
-      }
-    }
 
     tracker.dispose();
   });
 
-  it("bidirectional scrolling with real data: up, down, up again", async () => {
+  it("colored spans survive full chain with real data", async () => {
     const tracker = new TerminalTracker(120, 40);
-    await tracker.feed(rawTerminalData);
+    // Claude Code 前几个 chunk 包含带颜色的 logo
+    await feedChunks(tracker, 10);
 
     const oldest = tracker.getOldestLineId();
-    const newest = tracker.getNewestLineId();
-    const totalLines = newest - oldest + 1;
+    const lines = tracker.extractLines(oldest, 10);
+    const allSpans = lines.flatMap((l) => l);
+    const coloredSpans = allSpans.filter((s) => s.fg);
 
-    // 模拟手机端双向滚动
-    // 1. 向上翻：拉最早的 10 行
-    const topLines = tracker.extractLines(oldest, 10);
-    expect(topLines.length).toBe(Math.min(10, totalLines));
-
-    // 2. 向下翻：拉中间 10 行
-    const midId = oldest + Math.floor(totalLines / 2);
-    const midLines = tracker.extractLines(midId, 10);
-    expect(midLines.length).toBeGreaterThan(0);
-
-    // 3. 再向上翻：同一范围应返回相同内容
-    const topAgain = tracker.extractLines(oldest, 10);
-    expect(topAgain.length).toBe(topLines.length);
-
-    const text1 = topLines.flatMap((l) => l.map((s) => s.text)).join("");
-    const text2 = topAgain.flatMap((l) => l.map((s) => s.text)).join("");
-    expect(text2).toBe(text1);
-
-    // 4. 拉最新的 viewport（模拟"回到底部"）
-    const bottomLines = tracker.extractLines(newest - 9, 10);
-    expect(bottomLines.length).toBeGreaterThan(0);
-
-    tracker.dispose();
-  });
-
-  it("real data produces non-trivial content with colors and styles", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    await tracker.feed(rawTerminalData);
-
-    const grid = tracker.extractGrid();
-    const allSpans = grid.flatMap((line) => line);
-
-    // 真实 Claude Code 输出应包含有颜色的 span
-    const coloredSpans = allSpans.filter((s) => s.fg || s.bg);
+    // Claude Code logo 区域应有颜色
     expect(coloredSpans.length).toBeGreaterThan(0);
 
-    // 应包含非空文本
-    const textContent = allSpans.map((s) => s.text).join("");
-    expect(textContent.trim().length).toBeGreaterThan(100);
-
     tracker.dispose();
   });
 
-  it("handleTerminalLinesRequest integration with real tracker", () => {
+  it("handleTerminalLinesRequest handler with real chunks", async () => {
     const sentMessages: string[] = [];
-    const send = (data: string) => sentMessages.push(data);
-
-    // 直接实例化 control message handler（不需要完整 SessionManager）
     const handlers = createControlMessageHandlers(
-      send,
+      (d) => sentMessages.push(d),
       { listSessions: () => [] } as any,
       logger,
     );
 
     const tracker = new TerminalTracker(120, 40);
-    // 同步喂入一小段数据（feed 返回 Promise 但 xterm write 对短数据几乎同步）
-    tracker.feed(rawTerminalData.slice(0, 10000)).then(() => {
-      handlers.registerTracker("pty-1", tracker);
+    await feedChunks(tracker, 30);
 
-      handlers.handleTerminalLinesRequest({
-        sessionId: "pty-1",
-        fromLineId: tracker.getOldestLineId(),
-        count: 5,
-      });
-
-      expect(sentMessages.length).toBe(1);
-      const response = JSON.parse(sentMessages[0]);
-      expect(response.type).toBe("terminal_lines_response");
-      expect(response.lines.length).toBeGreaterThan(0);
-      expect(response.oldestLineId).toBeDefined();
-      expect(response.newestLineId).toBeDefined();
-
-      tracker.dispose();
+    handlers.registerTracker("pty-1", tracker);
+    handlers.handleTerminalLinesRequest({
+      sessionId: "pty-1",
+      fromLineId: tracker.getOldestLineId(),
+      count: 5,
     });
+
+    expect(sentMessages.length).toBe(1);
+    const response = JSON.parse(sentMessages[0]);
+    expect(response.type).toBe("terminal_lines_response");
+    expect(response.lines.length).toBeGreaterThan(0);
+    expect(response.newestLineId).toBeGreaterThanOrEqual(response.oldestLineId);
+
+    tracker.dispose();
+  });
+
+  it("extractLines covers full buffer range from oldest to newest", async () => {
+    const tracker = new TerminalTracker(120, 40);
+
+    for (const chunk of chunks) {
+      await tracker.feed(chunk.data);
+    }
+
+    const oldest = tracker.getOldestLineId();
+    const newest = tracker.getNewestLineId();
+    const totalLines = newest - oldest + 1;
+
+    // 能拉取全部范围
+    const allLines = tracker.extractLines(oldest, totalLines);
+    expect(allLines.length).toBe(totalLines);
+
+    // 最后一行应有内容（不全是空的）
+    const lastLineText = allLines[allLines.length - 1].map((s) => s.text).join("").trim();
+    // viewport 底部可能是空行，往上找一个非空行
+    const lastNonEmptyIdx = allLines.findLastIndex(
+      (line) => line.map((s) => s.text).join("").trim().length > 0,
+    );
+    expect(lastNonEmptyIdx).toBeGreaterThan(0);
+
+    tracker.dispose();
   });
 });

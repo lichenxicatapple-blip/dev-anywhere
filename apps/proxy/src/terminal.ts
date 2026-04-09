@@ -12,6 +12,7 @@ import {
   serializeIpc,
   type IpcMessage,
 } from "./ipc-protocol.js";
+import { createFramePusher, type FramePusher } from "./frame-pusher.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,7 +75,7 @@ function waitForMessage(
   });
 }
 
-export async function startClient(claudeArgs: string[]): Promise<void> {
+export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
@@ -83,6 +84,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
+  let framePusher: FramePusher | null = null;
 
   function setupHeartbeat(): void {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -93,10 +95,52 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     }, 10_000);
   }
 
+  function startFramePush(): void {
+    if (framePusher) framePusher.stop();
+    if (!tracker || !sessionId) return;
+    framePusher = createFramePusher({
+      tracker,
+      sessionId,
+      sendFrame: (frameJson) => {
+        if (socket.writable && sessionId) {
+          socket.write(serializeIpc({
+            type: "pty_terminal_frame",
+            sessionId,
+            frame: frameJson,
+          }));
+        }
+      },
+    });
+    framePusher.start();
+  }
+
+  function stopFramePush(): void {
+    if (framePusher) {
+      framePusher.stop();
+      framePusher = null;
+    }
+  }
+
   function setupSocketHandlers(): void {
     createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
         ptyManager?.write(msg.data);
+      }
+      if (msg.type === "pty_lines_request" && msg.sessionId === sessionId && tracker) {
+        const lines = tracker.extractLines(msg.fromLineId, msg.count);
+        const response = {
+          type: "terminal_lines_response",
+          sessionId: msg.sessionId,
+          fromLineId: msg.fromLineId,
+          oldestLineId: tracker.getOldestLineId(),
+          newestLineId: tracker.getNewestLineId(),
+          lines,
+        };
+        socket.write(serializeIpc({
+          type: "pty_lines_response",
+          sessionId: msg.sessionId,
+          response: JSON.stringify(response),
+        }));
       }
     });
 
@@ -145,6 +189,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
           if (resp.type === "session_create_response" && !resp.error) {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId }));
+            startFramePush();
           }
         }
 
@@ -209,6 +254,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
     onSessionExit: (code: number) => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (idleCheckTimer) clearInterval(idleCheckTimer);
+      stopFramePush();
       if (tracker) tracker.dispose();
       if (socket.writable && sessionId) {
         socket.write(
@@ -222,6 +268,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   ptyManager.start();
 
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
+  startFramePush();
 
   setupHeartbeat();
   setupIdleCheck();
@@ -229,6 +276,7 @@ export async function startClient(claudeArgs: string[]): Promise<void> {
   process.on("SIGTERM", () => {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (idleCheckTimer) clearInterval(idleCheckTimer);
+    stopFramePush();
     if (tracker) tracker.dispose();
     if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_deregister", sessionId }));

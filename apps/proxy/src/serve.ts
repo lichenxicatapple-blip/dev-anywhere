@@ -36,7 +36,6 @@ import {
   type IpcMessage,
   type WorkerMessage,
 } from "./ipc-protocol.js";
-import { createTerminalPushHandler } from "./handlers/terminal-push.js";
 import { createControlMessageHandlers } from "./handlers/control-messages.js";
 import { extractOscSignals } from "./osc-extractor.js";
 
@@ -125,7 +124,7 @@ function connectToWorker(
   sockPath: string,
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
-  clientSockets: Map<string, Socket>,
+  terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
 ): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -140,9 +139,9 @@ function connectToWorker(
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
           case "worker_event":
-            for (const [, clientSocket] of clientSockets) {
-              if (clientSocket.writable) {
-                clientSocket.write(
+            for (const [, terminalSocket] of terminalSockets) {
+              if (terminalSocket.writable) {
+                terminalSocket.write(
                   serializeIpc({
                     type: "session_status_update",
                     sessionId,
@@ -256,7 +255,7 @@ function spawnWorker(sessionId: string): void {
 async function reconnectWorkers(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
-  clientSockets: Map<string, Socket>,
+  terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
 ): Promise<void> {
   if (!existsSync(DATA_DIR)) return;
@@ -270,7 +269,7 @@ async function reconnectWorkers(
     if (!existsSync(paths.workerSock)) continue;
 
     const sock = await connectToWorker(
-      sessionId, paths.workerSock, sessionManager, workerSockets, clientSockets, relayConnection,
+      sessionId, paths.workerSock, sessionManager, workerSockets, terminalSockets, relayConnection,
     );
     if (sock) {
       if (!sessionManager.getSession(sessionId)) {
@@ -289,11 +288,11 @@ async function reconnectWorkers(
 
 // ---------- 客户端 IPC 消息处理 ----------
 
-function handleClientConnection(
+function handleTerminalConnection(
   socket: Socket,
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
-  clientSockets: Map<string, Socket>,
+  terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
@@ -323,7 +322,7 @@ function handleClientConnection(
             attempt++;
             connectToWorker(
               session.id, paths.workerSock, sessionManager,
-              workerSockets, clientSockets, relayConnection,
+              workerSockets, terminalSockets, relayConnection,
             ).then((sock) => {
               if (sock) {
                 socket.write(
@@ -369,6 +368,22 @@ function handleClientConnection(
         break;
       }
 
+      case "pty_terminal_frame": {
+        // client → serve → relay：直接转发终端帧
+        if (relayConnection) {
+          relayConnection.sendRaw(msg.frame);
+        }
+        break;
+      }
+
+      case "pty_lines_response": {
+        // client → serve → relay：直接转发终端行拉取响应
+        if (relayConnection) {
+          relayConnection.sendRaw(msg.response);
+        }
+        break;
+      }
+
       case "session_terminate_request": {
         const result = sessionManager.terminateSession(msg.sessionId);
         const ws = workerSockets.get(msg.sessionId);
@@ -376,8 +391,6 @@ function handleClientConnection(
           ws.write(serializeWorkerMsg({ type: "worker_stop" }));
         }
         workerSockets.delete(msg.sessionId);
-        // 清理 handler 模块资源
-        terminalPush.stop(msg.sessionId);
         controlHandlers.cleanup(msg.sessionId);
         socket.write(
           serializeIpc({
@@ -395,22 +408,21 @@ function handleClientConnection(
           sessionManager.updateState(msg.sessionId, SessionState.IDLE);
         } catch {}
         sessionManager.recordHeartbeat(msg.sessionId);
-        clientSockets.set(msg.sessionId, socket);
+        terminalSockets.set(msg.sessionId, socket);
         logger.info({ sessionId: msg.sessionId }, "PTY session registered");
         break;
       }
 
       case "pty_deregister": {
         sessionManager.terminateSession(msg.sessionId);
-        clientSockets.delete(msg.sessionId);
-        terminalPush.stop(msg.sessionId);
+        terminalSockets.delete(msg.sessionId);
         controlHandlers.cleanup(msg.sessionId);
         logger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
         break;
       }
 
       case "pty_input": {
-        const targetSocket = clientSockets.get(msg.sessionId);
+        const targetSocket = terminalSockets.get(msg.sessionId);
         if (targetSocket?.writable) {
           targetSocket.write(
             serializeIpc({
@@ -449,14 +461,14 @@ function handleClientConnection(
   });
 
   socket.on("close", () => {
-    for (const [sessionId, clientSocket] of clientSockets) {
-      if (clientSocket === socket) {
+    for (const [sessionId, terminalSocket] of terminalSockets) {
+      if (terminalSocket === socket) {
         const session = sessionManager.getSession(sessionId);
         if (session && session.mode === "pty" && session.state !== SessionState.TERMINATED) {
           sessionManager.terminateSession(sessionId);
           logger.info({ sessionId }, "PTY session terminated on client disconnect");
         }
-        clientSockets.delete(sessionId);
+        terminalSockets.delete(sessionId);
       }
     }
   });
@@ -489,17 +501,13 @@ export async function startService(): Promise<void> {
   sessionManager.startReaper();
 
   const workerSockets = new Map<string, Socket>();
-  const clientSockets = new Map<string, Socket>();
+  const terminalSockets = new Map<string, Socket>();
 
   // D-23: proxy 名称，优先使用环境变量，否则使用主机名
   const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || hostname();
 
   // 创建 handler 模块实例（在 relay 连接建立前创建，send 函数延迟绑定）
   let relaySend: ((data: string) => void) | null = null;
-  const terminalPush = createTerminalPushHandler(
-    (data) => { if (relaySend) relaySend(data); },
-    logger,
-  );
   const controlHandlers = createControlMessageHandlers(
     (data) => { if (relaySend) relaySend(data); },
     sessionManager,
@@ -572,12 +580,19 @@ export async function startService(): Promise<void> {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
-        } else if (parsed.type === "terminal_lines_request") {
-          controlHandlers.handleTerminalLinesRequest({
-            sessionId: parsed.sessionId,
-            fromLineId: parsed.fromLineId,
-            count: parsed.count,
-          });
+        } else if (parsed.type === "terminal_lines_request" && parsed.sessionId) {
+          // relay → serve → client IPC：转发终端行拉取请求到持有 tracker 的 client
+          const targetSocket = terminalSockets.get(parsed.sessionId);
+          if (targetSocket?.writable) {
+            targetSocket.write(serializeIpc({
+              type: "pty_lines_request",
+              sessionId: parsed.sessionId,
+              fromLineId: parsed.fromLineId,
+              count: parsed.count,
+            }));
+          } else {
+            logger.warn({ sessionId: parsed.sessionId }, "terminal_lines_request: no client socket for session");
+          }
         }
       } catch (err) {
         logger.warn({ error: String(err) }, "Failed to parse relay message");
@@ -592,10 +607,10 @@ export async function startService(): Promise<void> {
     logger.info("No RELAY_URL configured, relay connection disabled");
   }
 
-  await reconnectWorkers(sessionManager, workerSockets, clientSockets, relayConnection);
+  await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleClientConnection(socket, sessionManager, workerSockets, clientSockets, relayConnection);
+    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection);
   });
 
   server.listen(SOCK_PATH, () => {
@@ -626,7 +641,6 @@ export async function startService(): Promise<void> {
   async function shutdown(): Promise<void> {
     logger.info("Shutting down service");
     clearInterval(idleCheckInterval);
-    terminalPush.stopAll();
     sessionManager.stopReaper();
     if (relayConnection) {
       relayConnection.close();

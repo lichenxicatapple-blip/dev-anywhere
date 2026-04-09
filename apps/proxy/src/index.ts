@@ -4,7 +4,7 @@ import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
-import { startClient } from "./client.js";
+import { startTerminal } from "./terminal.js";
 import { startService } from "./serve.js";
 import {
   PID_PATH,
@@ -155,9 +155,55 @@ serve
     await startDaemon();
   });
 
+// ---------- record ----------
+
+serve
+  .command("record <outputPath>")
+  .description("Record PTY data chunks to NDJSON file for test fixtures")
+  .action(async (outputPath: string) => {
+    const { resolve } = await import("node:path");
+    const { createRecordingTap } = await import("./tap.js");
+    const { PtyManager } = await import("./pty-manager.js");
+    const { TerminalTracker } = await import("./terminal-tracker.js");
+
+    const absPath = resolve(outputPath);
+    const { tap: recordTap, stop: stopRecording } = createRecordingTap(absPath);
+    const tracker = new TerminalTracker(
+      process.stdout.columns ?? 120,
+      process.stdout.rows ?? 40,
+    );
+
+    const ptyManager = new PtyManager({
+      claudeArgs: [],
+      tap: (data: string) => {
+        recordTap(data);
+        tracker.feed(data);
+      },
+      stdin: process.stdin,
+      stdout: process.stdout,
+      onSessionExit: (code: number) => {
+        stopRecording();
+        tracker.dispose();
+        console.error(`\nRecording saved to ${absPath}`);
+        process.exit(code);
+      },
+    });
+
+    ptyManager.start();
+  });
+
+serve
+  .command("replay-e2e <fixturePath>")
+  .description("Full-chain terminal frame replay for E2E verification")
+  .action(async (fixturePath: string) => {
+    const { resolve } = await import("node:path");
+    const { runReplayE2E } = await import("./replay-e2e.js");
+    await runReplayE2E(resolve(fixturePath));
+  });
+
 // 路由：serve 开头走 Commander，其他全部透传给 claude
 if (process.argv[2] === "serve") {
   serve.parse(process.argv.slice(3), { from: "user" });
 } else {
-  await startClient(process.argv.slice(2));
+  await startTerminal(process.argv.slice(2));
 }

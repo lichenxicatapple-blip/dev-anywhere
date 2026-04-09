@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import type { DataTap } from "./tap.js";
@@ -64,16 +65,7 @@ export class PtyManager {
     });
 
     // PTY -> stdout + tap
-    // PTY 的 onlcr 会把 OSC 序列里的 \n 转成 \r\n，导致终端无法正确解析
-    // 还原 OSC 9 内部的 \r\n 为 \n
-    child.onData((data: string) => {
-      const fixed = data.replace(
-        /\x1b\]9;([\s\S]*?)\x07/g,
-        (match, content: string) => `\x1b]9;${content.replace(/\r\n/g, "\n")}\x07`,
-      );
-      this.stdout.write(fixed);
-      this.tap(data);
-    });
+    child.onData((data: string) => this.handleData(data));
 
     // resize 防抖，50ms 窗口合并快速连续的尺寸变化
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +93,46 @@ export class PtyManager {
     this.stdin.on("end", () => {
       child.write("\x04");
     });
+  }
+
+  /**
+   * PTY 数据到达时的统一处理：OSC 9 修复 + 输出到终端 + 传给 tap
+   *
+   * start() 和 startFromFixture() 共用此方法，确保下游路径一致。
+   */
+  private handleData(data: string): void {
+    // PTY 的 onlcr 会把 OSC 序列里的 \n 转成 \r\n，还原为 \n
+    const fixed = data.replace(
+      /\x1b\]9;([\s\S]*?)\x07/g,
+      (_, content: string) => `\x1b]9;${content.replace(/\r\n/g, "\n")}\x07`,
+    );
+    this.stdout.write(fixed);
+    this.tap(data);
+  }
+
+  /**
+   * 从 NDJSON fixture 文件回放 PTY 数据，替代 start() 的 pty.spawn
+   *
+   * 按录制时间戳逐 chunk 触发 handleData()，下游路径和真实 PTY 完全一致。
+   */
+  async startFromFixture(fixturePath: string): Promise<void> {
+    const content = readFileSync(fixturePath, "utf-8");
+    const chunks: Array<{ ts: number; data: string }> = content
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    const startTime = Date.now();
+    for (const chunk of chunks) {
+      const targetTime = startTime + chunk.ts;
+      const waitMs = targetTime - Date.now();
+      if (waitMs > 0) {
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+      this.handleData(chunk.data);
+    }
+
+    this.onSessionExit?.(0);
   }
 
   // 向 PTY 子进程写入数据，用于远程输入注入
