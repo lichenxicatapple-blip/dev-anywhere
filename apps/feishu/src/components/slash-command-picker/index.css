@@ -1,0 +1,98 @@
+.slash-picker-panel {
+  max-height: 50vh;
+  max-width: var(--picker-max-width, 100%);
+  margin: 0 auto;
+  background: #FFFFFF;
+  border-top: 1px solid #E8E8E8;
+  display: flex;
+  flex-direction: column;
+  animation: slashPickerSlideUp 200ms ease-out;
+}
+
+@keyframes slashPickerSlideUp {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 50vh;
+    opacity: 1;
+  }
+}
+
+.slash-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid #F0F0F0;
+  flex-shrink: 0;
+}
+
+.slash-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.slash-picker-count {
+  font-size: 11px;
+  color: #999999;
+}
+
+.slash-picker-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.slash-picker-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.slash-picker-empty-text {
+  font-size: 13px;
+  color: #CCCCCC;
+}
+
+.slash-picker-item {
+  padding: 8px 16px;
+  border-bottom: 1px solid #F5F5F5;
+}
+
+.slash-picker-item:active {
+  background: #F0F7FF;
+}
+
+.slash-picker-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.slash-picker-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333333;
+  font-family: monospace, Menlo, Courier;
+}
+
+.slash-picker-item-source {
+  font-size: 10px;
+  color: #999999;
+  background: #F5F5F5;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.slash-picker-item-desc {
+  font-size: 12px;
+  color: #999999;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
