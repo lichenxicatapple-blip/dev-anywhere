@@ -46,9 +46,10 @@ function spawnRelay(opts: SpawnRelayOptions): ChildProcess {
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PORT: String(opts.port),
-    LOG_LEVEL: process.env.RELAY_DEBUG ? "debug" : "silent",
+    LOG_LEVEL: "silent",
   };
-  if (opts.dataDir) env.DATA_DIR = opts.dataDir;
+  // 显式设置 DATA_DIR：传了 dataDir 用指定路径，没传则禁用持久化防止加载残留数据
+  env.DATA_DIR = opts.dataDir || "";
   if (opts.heartbeatInterval) env.HEARTBEAT_INTERVAL = String(opts.heartbeatInterval);
   // detached: true 创建新进程组，方便 killRelay 一次杀掉整个进程树
   const proc = spawn("npx", ["tsx", RELAY_ENTRY], { env, stdio: "pipe", detached: true });
@@ -690,9 +691,6 @@ describe("message buffering and replay", () => {
   beforeAll(async () => {
     port = await findFreePort();
     relay = spawnRelay({ port });
-    // 临时开启 relay 日志用于调试
-    relay.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
-    relay.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     await waitForReady(port);
   }, E2E_TIMEOUT);
 

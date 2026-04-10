@@ -3,7 +3,8 @@ import { createRelayServer } from "./server.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
 const DEFAULT_DATA_DIR = `${process.env.HOME}/.cc-anywhere/relay-data`;
-const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
+// ?? 而不是 ||：空字符串表示显式禁用持久化，undefined 表示使用默认路径
+const DATA_DIR = (process.env.DATA_DIR ?? DEFAULT_DATA_DIR) || undefined;
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL ?? "30000", 10);
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
