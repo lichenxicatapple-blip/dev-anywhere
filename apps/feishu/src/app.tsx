@@ -26,14 +26,11 @@ function App({ children }: PropsWithChildren) {
     const ws = new WebSocketManager();
     wsRef.current = ws;
 
-    ws.onStatusChange((connected) => {
-      dispatch({ type: "SET_CONNECTED", connected });
-    });
-
     const relay = new RelayClient(ws, state.clientId);
     setRelayClient(relay);
 
     ws.onStatusChange((connected) => {
+      dispatch({ type: "SET_CONNECTED", connected });
       if (connected) {
         relay.register();
       }

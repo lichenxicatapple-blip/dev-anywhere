@@ -21,7 +21,7 @@ export function routeStreamEvent(event: StreamJsonEvent): ChatAction | null {
     case "assistant":
       return {
         type: "APPEND_ASSISTANT_TEXT",
-        text: (event.text as string) ?? "",
+        text: typeof event.text === "string" ? event.text : "",
       };
     case "result":
       return { type: "MARK_TURN_COMPLETE" };

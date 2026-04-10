@@ -15,6 +15,16 @@ export class WebSocketManager {
   private statusHandlers = new Set<(connected: boolean) => void>();
 
   connect(url: string): void {
+    // 关闭已有连接，防止前台恢复时创建重复 WebSocket
+    if (this.task) {
+      this.task.close({});
+      this.task = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connected = false;
     this.url = url;
     this.closed = false;
     this.doConnect();
@@ -56,8 +66,13 @@ export class WebSocketManager {
     }, backoff);
   }
 
-  send(data: string): void {
-    this.task?.send({ data });
+  send(data: string): boolean {
+    if (!this.task || !this.connected) {
+      console.warn("WebSocket send dropped: not connected");
+      return false;
+    }
+    this.task.send({ data });
+    return true;
   }
 
   close(): void {
