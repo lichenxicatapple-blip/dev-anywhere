@@ -25,7 +25,6 @@ export function DirectoryPicker({
   initialPath = "/",
 }: DirectoryPickerProps) {
   const [currentPath, setCurrentPath] = useState(initialPath);
-  const breadcrumbScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (visible) {

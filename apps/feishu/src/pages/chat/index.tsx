@@ -25,7 +25,7 @@ import {
   FONT_SIZES,
 } from "@/stores/terminal-store";
 import { useCommandState } from "@/stores/command-store";
-import { useFileState, useFileDispatch } from "@/stores/file-store";
+import { useFileState } from "@/stores/file-store";
 import { useRelayClient } from "@/stores/relay-store";
 import "./index.css";
 
@@ -58,7 +58,8 @@ export default function Chat() {
   const [terminalState, terminalDispatch] = useReducer(terminalReducer, initialTerminalState);
   const commandState = useCommandState();
   const fileState = useFileState();
-  const fileDispatch = useFileDispatch();
+
+
 
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [pickerMode, setPickerMode] = useState<PickerMode>("none");

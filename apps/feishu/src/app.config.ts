@@ -9,7 +9,7 @@ export default defineAppConfig({
     "pages/spike-chat-json/index",
     "pages/spike-chat-pty/index",
     "pages/spike-bubble-anim/index",
-    "pages/spike-render/index",
+
     "pages/spike-picker/index",
     "pages/index/index",
   ],

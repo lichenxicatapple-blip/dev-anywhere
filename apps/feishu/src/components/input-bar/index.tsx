@@ -57,11 +57,6 @@ export function InputBar({
   const [inputFocus, setInputFocus] = useState(false);
   const prevTextRef = useRef("");
 
-  const refocus = useCallback(() => {
-    setInputFocus(false);
-    setTimeout(() => setInputFocus(true), 50);
-  }, []);
-
   const detectPickerMode = useCallback(
     (val: string): PickerMode => {
       if (!val) return "none";
@@ -140,40 +135,6 @@ export function InputBar({
     onCancelQuote,
   ]);
 
-  // 命令选择后填充输入
-  const fillCommand = useCallback(
-    (commandName: string, hint?: string) => {
-      const token = "/" + commandName;
-      const val = token + " ";
-      setInputText(val);
-      prevTextRef.current = val;
-      setInsertedTokens((prev) => [...prev, token]);
-      onPickerModeChange?.("none");
-      onFilterChange?.(val);
-      refocus();
-    },
-    [onPickerModeChange, onFilterChange, refocus],
-  );
-
-  // 文件路径选择后填充输入
-  const fillFilePath = useCallback(
-    (filePath: string) => {
-      const token = "@" + filePath;
-      setInputText((prev) => {
-        const idx = prev.lastIndexOf("@");
-        const before = idx > 0 ? prev.slice(0, idx) : "";
-        const val = before + token + " ";
-        prevTextRef.current = val;
-        return val;
-      });
-      setInsertedTokens((prev) => [...prev, token]);
-      onPickerModeChange?.("none");
-      onFilterChange?.("");
-      refocus();
-    },
-    [onPickerModeChange, onFilterChange, refocus],
-  );
-
   const canSend = inputText.trim().length > 0 && !(disabled && mode === "json");
 
   return (
@@ -213,9 +174,3 @@ export function InputBar({
     </View>
   );
 }
-
-// 暴露 fillCommand 和 fillFilePath 的引用类型供外部使用
-export type InputBarRef = {
-  fillCommand: (commandName: string, hint?: string) => void;
-  fillFilePath: (filePath: string) => void;
-};
