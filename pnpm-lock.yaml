@@ -84,6 +84,9 @@ importers:
       '@babel/runtime':
         specifier: ^7.29.2
         version: 7.29.2
+      '@cc-anywhere/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@tarojs/cli':
         specifier: ~3.6.39
         version: 3.6.39(@tarojs/taro@3.6.39(@tarojs/helper@3.6.39)(@tarojs/runtime@3.6.39(@tarojs/shared@3.6.39))(@types/react@18.3.28)(postcss@8.5.8))(@types/node@25.5.2)

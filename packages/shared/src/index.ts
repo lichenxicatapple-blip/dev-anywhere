@@ -28,23 +28,30 @@ export type {
   ToolResultPayload,
 } from "./schemas/tool.js";
 export {
+  SessionInfoSchema,
   SessionCreatePayloadSchema,
   SessionListPayloadSchema,
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
   TermSpanSchema,
+  CursorSchema,
   TerminalFramePayloadSchema,
   PtyStatePayloadSchema,
 } from "./schemas/session.js";
 export type {
+  SessionInfo,
   SessionCreatePayload,
   SessionListPayload,
   SessionSwitchPayload,
   SessionTerminatePayload,
   SessionStatusPayload,
   TermSpan,
+  TermLine,
+  Cursor,
   TerminalFramePayload,
+  TerminalFrameFull,
+  TerminalFrameDelta,
   PtyStatePayload,
 } from "./schemas/session.js";
 export {
@@ -69,8 +76,20 @@ export * from "./types/index.js";
 export { buildMessage } from "./builders/index.js";
 
 // relay control
-export { RelayControlSchema } from "./schemas/relay-control.js";
-export type { RelayControlMessage } from "./schemas/relay-control.js";
+export {
+  ProxyInfoSchema,
+  DirEntrySchema,
+  CommandEntrySchema,
+  HistorySessionSchema,
+  RelayControlSchema,
+} from "./schemas/relay-control.js";
+export type {
+  ProxyInfo,
+  DirEntry,
+  CommandEntry,
+  HistorySession,
+  RelayControlMessage,
+} from "./schemas/relay-control.js";
 
 // constants
 export { ErrorCode } from "./constants/errors.js";

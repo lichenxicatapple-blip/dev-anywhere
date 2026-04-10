@@ -8,6 +8,15 @@ const sessionStateValues = [
   "terminated",
 ] as const;
 
+// 会话信息，用于会话列表展示
+export const SessionInfoSchema = z.object({
+  sessionId: z.string(),
+  name: z.string().optional(),
+  state: z.enum(sessionStateValues),
+  mode: z.enum(["pty", "json"]).optional(),
+});
+export type SessionInfo = z.infer<typeof SessionInfoSchema>;
+
 // 创建会话
 export const SessionCreatePayloadSchema = z.object({
   name: z.string().optional(),
@@ -18,14 +27,7 @@ export type SessionCreatePayload = z.infer<typeof SessionCreatePayloadSchema>;
 
 // 会话列表
 export const SessionListPayloadSchema = z.object({
-  sessions: z.array(
-    z.object({
-      sessionId: z.string(),
-      name: z.string().optional(),
-      state: z.enum(sessionStateValues),
-      mode: z.enum(["pty", "json"]).optional(),
-    }),
-  ),
+  sessions: z.array(SessionInfoSchema),
 });
 
 export type SessionListPayload = z.infer<typeof SessionListPayloadSchema>;
@@ -67,12 +69,16 @@ export const TermSpanSchema = z.object({
 });
 export type TermSpan = z.infer<typeof TermSpanSchema>;
 
+export type TermLine = TermSpan[];
+
 // 终端栅格帧负载：full 模式为完整画面，delta 模式只包含变化行
 // 光标位置，相对于 viewport 左上角
-const CursorSchema = z.object({
+export const CursorSchema = z.object({
   x: z.number().int(),
   y: z.number().int(),
 }).optional();
+
+export type Cursor = z.infer<typeof CursorSchema>;
 
 const TerminalFrameFullSchema = z.object({
   mode: z.literal("full"),
@@ -94,6 +100,8 @@ export const TerminalFramePayloadSchema = z.discriminatedUnion("mode", [
   TerminalFrameDeltaSchema,
 ]);
 export type TerminalFramePayload = z.infer<typeof TerminalFramePayloadSchema>;
+export type TerminalFrameFull = z.infer<typeof TerminalFrameFullSchema>;
+export type TerminalFrameDelta = z.infer<typeof TerminalFrameDeltaSchema>;
 
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({

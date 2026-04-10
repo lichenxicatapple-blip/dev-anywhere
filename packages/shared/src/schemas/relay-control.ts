@@ -5,6 +5,29 @@ import {
   PtyStatePayloadSchema,
 } from "./session.js";
 
+// 控制消息中复用的子类型
+export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional() });
+export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
+
+export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
+export type DirEntry = z.infer<typeof DirEntrySchema>;
+
+export const CommandEntrySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  argumentHint: z.string().optional(),
+  source: z.string(),
+});
+export type CommandEntry = z.infer<typeof CommandEntrySchema>;
+
+export const HistorySessionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  projectDir: z.string(),
+  updatedAt: z.number(),
+});
+export type HistorySession = z.infer<typeof HistorySessionSchema>;
+
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("proxy_register"), proxyId: z.string().min(1), name: z.string().optional() }),
@@ -16,7 +39,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("proxy_list_request") }),
   z.object({
     type: z.literal("proxy_list_response"),
-    proxies: z.array(z.object({ proxyId: z.string(), name: z.string().optional() })),
+    proxies: z.array(ProxyInfoSchema),
   }),
   z.object({ type: z.literal("proxy_select"), proxyId: z.string().min(1) }),
   z.object({
@@ -86,38 +109,28 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("dir_list_request"), proxyId: z.string().min(1), path: z.string() }),
   z.object({
     type: z.literal("dir_list_response"),
-    entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+    entries: z.array(DirEntrySchema),
     path: z.string(),
   }),
 
   // Phase 6: 命令列表推送，proxy 将可用命令列表推给 client
   z.object({
     type: z.literal("command_list_push"),
-    commands: z.array(z.object({
-      name: z.string(),
-      description: z.string(),
-      argumentHint: z.string().optional(),
-      source: z.string(),
-    })),
+    commands: z.array(CommandEntrySchema),
   }),
 
   // Phase 6: 文件树推送
   z.object({
     type: z.literal("file_tree_push"),
     path: z.string(),
-    entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+    entries: z.array(DirEntrySchema),
   }),
 
   // Phase 6: 会话历史浏览
   z.object({ type: z.literal("session_history_request") }),
   z.object({
     type: z.literal("session_history_response"),
-    sessions: z.array(z.object({
-      id: z.string(),
-      title: z.string(),
-      projectDir: z.string(),
-      updatedAt: z.number(),
-    })),
+    sessions: z.array(HistorySessionSchema),
   }),
 
   // Phase 6 Plan 05.1: PTY 实时画面推送，从 Envelope 迁移到 Control 层

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseAssistantMessage, routeStreamEvent } from "../services/message-parser.js";
+import { describe, it, expect, vi } from "vitest";
+import { parseAssistantMessage, routeStreamEvent } from "@/services/message-parser";
 
 describe("parseAssistantMessage", () => {
   it("parses valid StreamJsonEvent JSON", () => {
@@ -37,8 +37,11 @@ describe("routeStreamEvent", () => {
     expect(result).toEqual({ type: "SET_CLAUDE_SESSION_ID", id: "abc-123" });
   });
 
-  it("returns null for unknown event types", () => {
-    const result = routeStreamEvent({ type: "stream_event" as "system" });
+  it("returns null and warns for unhandled event types", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = routeStreamEvent({ type: "control_request" });
     expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith('routeStreamEvent: unhandled event type "control_request"');
+    warnSpy.mockRestore();
   });
 });

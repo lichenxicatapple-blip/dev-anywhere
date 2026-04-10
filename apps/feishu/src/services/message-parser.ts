@@ -1,5 +1,5 @@
 // 消息解析器，从 assistant_message.text 中提取 StreamJsonEvent 并路由到对应的 store action
-import type { StreamJsonEvent } from "../types/stream-json.js";
+import type { StreamJsonEvent } from "@/types/stream-json";
 
 // 尝试将 JSON 字符串解析为 StreamJsonEvent，失败返回 null
 export function parseAssistantMessage(text: string): StreamJsonEvent | null {
@@ -31,6 +31,7 @@ export function routeStreamEvent(event: StreamJsonEvent): ChatAction | null {
       }
       return null;
     default:
+      console.warn(`routeStreamEvent: unhandled event type "${event.type}"`);
       return null;
   }
 }

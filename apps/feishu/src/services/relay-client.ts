@@ -1,7 +1,6 @@
 // Relay 协议客户端，处理注册、代理选择、消息发送和控制消息路由
-import type { WebSocketManager } from "./websocket.js";
-import type { MessageEnvelope } from "../types/envelope.js";
-import type { RelayControlMessage } from "../types/relay-control.js";
+import type { WebSocketManager } from "@/services/websocket";
+import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
 
 export class RelayClient {
   private ws: WebSocketManager;

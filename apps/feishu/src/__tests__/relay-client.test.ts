@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { RelayClient } from "../services/relay-client.js";
-import type { WebSocketManager } from "../services/websocket.js";
+import { RelayClient } from "@/services/relay-client";
+import type { WebSocketManager } from "@/services/websocket";
 
 function createMockWs(): WebSocketManager {
   return {
@@ -62,6 +62,45 @@ describe("RelayClient", () => {
         type: "proxy_list_request",
       }),
     );
+  });
+
+  it("onMessage parses valid JSON and dispatches to handler", () => {
+    let capturedHandler: ((raw: string) => void) | null = null;
+    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+
+    const messageHandler = vi.fn();
+    client.onMessage(messageHandler);
+
+    capturedHandler!('{"type":"proxy_list_response","proxies":[]}');
+    expect(messageHandler).toHaveBeenCalledWith({ type: "proxy_list_response", proxies: [] });
+  });
+
+  it("onMessage drops invalid JSON without crashing", () => {
+    let capturedHandler: ((raw: string) => void) | null = null;
+    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
+      capturedHandler = handler;
+      return () => {};
+    });
+
+    const messageHandler = vi.fn();
+    client.onMessage(messageHandler);
+
+    capturedHandler!("not valid json {{{");
+    expect(messageHandler).not.toHaveBeenCalled();
+  });
+
+  it("onMessage unsubscribe stops receiving messages", () => {
+    const innerUnsub = vi.fn();
+    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation(() => innerUnsub);
+
+    const messageHandler = vi.fn();
+    const unsub = client.onMessage(messageHandler);
+
+    unsub();
+    expect(innerUnsub).toHaveBeenCalled();
   });
 
   it("sendEnvelope sends JSON-stringified envelope", () => {

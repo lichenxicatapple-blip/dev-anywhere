@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { formatRelativeTime } from "../utils/relative-time.js";
-import { truncateText, generateSessionTitle } from "../utils/text-truncate.js";
+import { formatRelativeTime } from "@/utils/relative-time";
+import { truncateText, generateSessionTitle } from "@/utils/text-truncate";
 
 describe("formatRelativeTime", () => {
   afterEach(() => {
