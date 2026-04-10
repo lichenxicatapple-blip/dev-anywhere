@@ -117,11 +117,11 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 06-01-PLAN.md — Shared schema extensions: terminal_frame, pty_state, new relay control messages, SessionCreate cwd
-- [ ] 06-02-PLAN.md — Proxy terminal grid extraction and OSC semantic signal extractor
-- [ ] 06-03-PLAN.md — Proxy tool approval forwarding, session resume, env filtering, fork-session
-- [ ] 06-04-PLAN.md — Proxy command discovery, file watcher, directory listing
-- [ ] 06-05-PLAN.md — Relay routing updates and proxy terminal frame push, control message handlers
+- [x] 06-01-PLAN.md — Shared schema extensions: terminal_frame, pty_state, new relay control messages, SessionCreate cwd
+- [x] 06-02-PLAN.md — Proxy terminal grid extraction and OSC semantic signal extractor
+- [x] 06-03-PLAN.md — Proxy tool approval forwarding, session resume, env filtering, fork-session
+- [x] 06-04-PLAN.md — Proxy command discovery, file watcher, directory listing
+- [x] 06-05-PLAN.md — Relay routing updates and proxy terminal frame push, control message handlers
 - [ ] 06-06-PLAN.md — Mini program services: WebSocket, relay client, message parser, types, utilities
 - [ ] 06-07-PLAN.md — Mini program proxy select and session list pages with responsive layout
 - [ ] 06-08-PLAN.md — Mini program chat page: PTY terminal viewport, JSON chat bubbles, input bar, responsive layout

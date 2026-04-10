@@ -219,19 +219,23 @@ serve
   .command("replay-e2e <fixturePath>")
   .description("Full-chain terminal frame replay for E2E verification")
   .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
-  .action(async (fixturePath: string, opts: { speed: string }) => {
+  .option("--remote", "Render via frame pipeline (simulates remote client view)")
+  .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
     const { resolve } = await import("node:path");
     const absPath = resolve(fixturePath);
-    openInNewWindow(["__replay-e2e", absPath, "-s", opts.speed]);
+    const args = ["__replay-e2e", absPath, "-s", opts.speed];
+    if (opts.remote) args.push("--remote");
+    openInNewWindow(args);
   });
 
 // 新窗口中实际执行的回放逻辑（hidden command）
 serve
   .command("__replay-e2e <fixturePath>", { hidden: true })
   .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
-  .action(async (fixturePath: string, opts: { speed: string }) => {
+  .option("--remote", "Render via frame pipeline")
+  .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
     const { runReplayE2E } = await import("./replay-e2e.js");
-    await runReplayE2E(fixturePath, Number(opts.speed));
+    await runReplayE2E(fixturePath, { speed: Number(opts.speed), remote: opts.remote });
   });
 
 // 路由：serve 开头走 Commander，其他全部透传给 claude

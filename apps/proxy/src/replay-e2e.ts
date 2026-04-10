@@ -59,22 +59,26 @@ function stripTerminalRequests(data: string): string {
     .replace(/\x1b\[>[0-9]*c/g, "")    // Secondary DA
     .replace(/\x1b\[=c/g, "")          // Tertiary DA
     .replace(/\x1b\[>[0-9]*q/g, "")    // XTVERSION
-    .replace(/\x1b\[[0-9]*n/g, "")     // DSR (cursor position etc.)
-    .replace(/\x1b\[>[0-9;]*m/g, "")   // Key modifier options
-    .replace(/\x1b\[>[0-9;]*u/g, "")   // Key encoding mode
-    .replace(/\x1b\[\?[0-9;]*\$/g, "") // DECRQM (mode query)
+    .replace(/\x1b\[[0-9]*n/g, "")     // DSR
+    .replace(/\x1b\[\?[0-9;]*\$/g, "") // DECRQM
     .replace(/\x1b\[\?1004[hl]/g, "")  // Focus reporting
     .replace(/\x1b\[\?2004[hl]/g, "")  // Bracketed paste
-    .replace(/\x1b\[\?2031[hl]/g, "")  // Key reporting
-    .replace(/\x1b\[\?1049[hl]/g, "")  // Alternate screen buffer
-    .replace(/\x1b\[\?25[hl]/g, "");   // Cursor show/hide
+    .replace(/\x1b\[\?1049[hl]/g, ""); // Alternate screen buffer
 }
 
-// 等待按键后退出
-async function waitForKeyAndExit(): Promise<never> {
-  const rows = process.stdout.rows!;
-  process.stdout.write("\x1b[?25h");
-  process.stdout.write(`\x1b[${rows};1H\x1b[7m Press any key to close \x1b[27m\x1b[K`);
+// 更新窗口标题显示完成信息，等待按键后退出
+async function waitForKeyAndExit(frameCount: number): Promise<never> {
+  process.stdout.write(`\x1b]0;Replay done | ${frameCount} frames | Press any key to close\x07`);
+  // 回放结束后内容不再变化，在底部显示提示
+  const rows = process.stdout.rows ?? 24;
+  const text = ` Replay done | ${frameCount} frames | Press any key to close `;
+  const col = (process.stdout.columns ?? 80) - text.length + 1;
+  process.stdout.write(
+    `\x1b[${rows};1H\x1b[2K` +
+    `\x1b[${rows};${col}H` +
+    `\x1b[7m${text}\x1b[27m` +
+    `\x1b[?25h`,
+  );
   await new Promise<void>((resolve) => {
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -83,9 +87,14 @@ async function waitForKeyAndExit(): Promise<never> {
   process.exit(0);
 }
 
-export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promise<void> {
-  // 设置窗口标题
-  process.stdout.write(`\x1b]0;CC Anywhere Replay - ${fixturePath.split("/").pop()}\x07`);
+export interface ReplayOptions {
+  speed?: number;
+  remote?: boolean;
+}
+
+export async function runReplayE2E(fixturePath: string, options: ReplayOptions = {}): Promise<void> {
+  const { speed: initialSpeed = 1, remote = false } = options;
+  const fileName = fixturePath.split("/").pop() ?? fixturePath;
 
   // === 1. 启动本地 relay ===
   const { createRelayServer } = await import("@cc-anywhere/relay/server");
@@ -204,7 +213,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
 
   renderer.onUpdate(() => {
     frameCount++;
-    renderViewportToTerminal(renderer);
+    if (remote) renderViewportToTerminal(renderer);
     drawStatusBar();
   });
 
@@ -222,8 +231,6 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   // === 6. 回放控制 ===
   let speed = initialSpeed;
   let paused = false;
-  let currentRows = rows;
-
   const speedSteps = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
 
   function nextSpeed(): void {
@@ -237,14 +244,10 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   }
 
   function drawStatusBar(): void {
-    const pauseLabel = paused ? " PAUSED " : "";
+    const pauseLabel = paused ? " | PAUSED" : "";
     const speedLabel = speed === 0 ? "instant" : `${speed}x`;
-    process.stdout.write(
-      `\x1b7` + // 保存光标位置
-      `\x1b[${currentRows};1H` +
-      `\x1b[7m Frame #${frameCount} | ${speedLabel}${pauseLabel} | [space]=pause [+/-]=speed [q]=quit \x1b[27m\x1b[K` +
-      `\x1b8`, // 恢复光标位置
-    );
+    const mode = remote ? "remote" : "local";
+    process.stdout.write(`\x1b]0;${fileName} | ${speedLabel}${pauseLabel} | ${mode} | [spc]=pause [+/-]=speed [q]=quit | #${frameCount}\x07`);
   }
 
   if (process.stdin.isTTY) {
@@ -274,26 +277,33 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
     tracker.feed(data);
   };
 
-  // stdout 输出经过 stripTerminalRequests 过滤，防止干扰回放窗口
-  const filteredStdout = new Proxy(process.stdout, {
-    get(target, prop) {
-      if (prop === "write") {
-        return (data: string | Buffer, ...args: unknown[]) => {
-          const str = typeof data === "string" ? data : data.toString();
-          return target.write(stripTerminalRequests(str), ...args as []);
-        };
-      }
-      return (target as Record<string | symbol, unknown>)[prop];
-    },
-  }) as unknown as NodeJS.WriteStream;
+  // 默认：直接路径渲染终端（自然滚动）
+  // --remote：静默直接路径，帧管线渲染（模拟远端 client 视角）
+  const replayStdout = remote
+    ? new Proxy(process.stdout, {
+        get(target, prop) {
+          if (prop === "write") return () => true;
+          return (target as Record<string | symbol, unknown>)[prop];
+        },
+      }) as NodeJS.WriteStream
+    : new Proxy(process.stdout, {
+        get(target, prop) {
+          if (prop === "write") {
+            return (data: string | Buffer, ...args: unknown[]) => {
+              const str = typeof data === "string" ? data : data.toString();
+              return target.write(stripTerminalRequests(str), ...args as []);
+            };
+          }
+          return (target as Record<string | symbol, unknown>)[prop];
+        },
+      }) as NodeJS.WriteStream;
 
   const ptyManager = new PtyManager({
     claudeArgs: [],
     tap,
     stdin: process.stdin,
-    stdout: filteredStdout,
+    stdout: replayStdout,
     onResize: (newCols, newRows) => {
-      currentRows = newRows;
       resizeTerminalWindow(newCols, newRows);
       process.stdout.write("\x1b[2J\x1b[H");
       tracker.resize(newCols, newRows);
@@ -309,8 +319,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
       clientWs.close();
       await relay.close();
 
-      console.error(`Replay complete: ${frameCount} frames received by client`);
-      await waitForKeyAndExit();
+      await waitForKeyAndExit(frameCount);
     },
   });
 

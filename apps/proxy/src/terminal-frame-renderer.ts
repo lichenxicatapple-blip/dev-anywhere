@@ -208,8 +208,10 @@ export function renderLineToAnsi(line: TermLine): string {
 export function renderViewportToTerminal(renderer: TerminalFrameRenderer): void {
   const lines = renderer.getViewportLines();
   process.stdout.write("\x1b[H"); // 光标到左上角
-  for (const line of lines) {
-    process.stdout.write(renderLineToAnsi(line) + "\x1b[K\r\n");
+  for (let i = 0; i < lines.length; i++) {
+    process.stdout.write(renderLineToAnsi(lines[i]) + "\x1b[K");
+    if (i < lines.length - 1) process.stdout.write("\r\n");
   }
-  process.stdout.write("\x1b[J"); // 清除剩余行
+  // 用绝对定位到 viewport 下方清除剩余行，避免最后一行 \r\n 引起滚动
+  process.stdout.write(`\x1b[${lines.length + 1};1H\x1b[J`);
 }

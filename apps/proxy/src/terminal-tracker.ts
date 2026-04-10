@@ -100,13 +100,14 @@ export class TerminalTracker {
     this.terminal.resize(cols, rows);
   }
 
-  // 从 xterm headless buffer 中提取带样式的文本网格
+  // 从 xterm headless buffer 中提取当前 viewport 的文本网格（不含 scrollback）
   extractGrid(): TermLine[] {
     const buffer = this.terminal.buffer.active;
     const lines: TermLine[] = [];
-    const totalRows = buffer.length;
+    const baseY = buffer.baseY;
+    const totalRows = this.terminal.rows;
 
-    for (let y = 0; y < totalRows; y++) {
+    for (let y = baseY; y < baseY + totalRows; y++) {
       const bufferLine = buffer.getLine(y);
       if (!bufferLine) {
         lines.push([]);
@@ -144,23 +145,6 @@ export class TerminalTracker {
       }
       if (currentSpan) spans.push(currentSpan);
       lines.push(spans);
-    }
-
-    // 裁剪尾部空行（全部为默认样式的空格）
-    while (lines.length > 0) {
-      const last = lines[lines.length - 1];
-      const isEmpty =
-        last.length === 0 ||
-        (last.length === 1 &&
-          !last[0].fg &&
-          !last[0].bg &&
-          !last[0].bold &&
-          last[0].text.trim() === "");
-      if (isEmpty) {
-        lines.pop();
-      } else {
-        break;
-      }
     }
 
     return lines;
