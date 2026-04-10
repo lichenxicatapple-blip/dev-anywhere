@@ -17,8 +17,8 @@
 .session-section-header {
   font-size: 24px;
   color: rgba(255, 255, 255, 0.45);
-  padding: 24px var(--page-padding-h) 12px;
-  font-weight: 600;
+  padding: 24px var(--page-padding-h) 24px;
+  font-weight: 400;
 }
 
 /* New session button in nav bar area */
