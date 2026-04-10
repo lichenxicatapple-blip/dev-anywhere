@@ -67,7 +67,8 @@ function stripTerminalRequests(data: string): string {
 }
 
 // 等待按键后退出
-async function waitForKeyAndExit(rows: number): Promise<never> {
+async function waitForKeyAndExit(): Promise<never> {
+  const rows = process.stdout.rows!;
   process.stdout.write("\x1b[?25h");
   process.stdout.write(`\x1b[${rows};1H\x1b[7m Press any key to close \x1b[27m\x1b[K`);
   await new Promise<void>((resolve) => {
@@ -132,8 +133,8 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   console.error(`PTY session registered: ${actualSessionId}`);
 
   // === 4. 设置 tracker + 推帧 ===
-  const cols = process.stdout.columns ?? 120;
-  const rows = process.stdout.rows ?? 40;
+  const cols = process.stdout.columns!;
+  const rows = process.stdout.rows!;
   const tracker = new TerminalTracker(cols, rows);
 
   const pusher = createFramePusher({
@@ -231,7 +232,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   }
 
   function drawStatusBar(): void {
-    const termRows = process.stdout.rows ?? 40;
+    const termRows = process.stdout.rows!;
     const pauseLabel = paused ? " PAUSED " : "";
     const speedLabel = speed === 0 ? "instant" : `${speed}x`;
     process.stdout.write(`\x1b[${termRows};1H`);
@@ -261,7 +262,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   }
 
   // === 7. 回放 ===
-  const termRows = process.stdout.rows ?? 40;
+  const termRows = process.stdout.rows!;
   process.stdout.write(`\x1b[2J\x1b[H\x1b[?25l\x1b[1;${termRows - 1}r`);
 
   const tap: DataTap = (data: string) => {
@@ -290,8 +291,8 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
       // resize 回放窗口到录制尺寸，清屏防止旧内容残留，更新 tracker 和滚动区域
       process.stdout.write(`\x1b[8;${newRows};${newCols}t\x1b[2J\x1b[H`);
       tracker.resize(newCols, newRows);
-      const scrollRows = newRows - 1;
-      process.stdout.write(`\x1b[1;${scrollRows}r`);
+      process.stdout.write(`\x1b[1;${newRows - 1}r`);
+      drawStatusBar();
     },
     onSessionExit: async () => {
       await sleep(500);
@@ -304,7 +305,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
       await relay.close();
 
       console.error(`Replay complete: ${frameCount} frames received by client`);
-      await waitForKeyAndExit(termRows);
+      await waitForKeyAndExit();
     },
   });
 
