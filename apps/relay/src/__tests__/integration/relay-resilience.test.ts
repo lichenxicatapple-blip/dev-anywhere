@@ -46,7 +46,7 @@ function spawnRelay(opts: SpawnRelayOptions): ChildProcess {
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PORT: String(opts.port),
-    LOG_LEVEL: "silent",
+    LOG_LEVEL: process.env.RELAY_DEBUG ? "debug" : "silent",
   };
   if (opts.dataDir) env.DATA_DIR = opts.dataDir;
   if (opts.heartbeatInterval) env.HEARTBEAT_INTERVAL = String(opts.heartbeatInterval);
@@ -690,6 +690,9 @@ describe("message buffering and replay", () => {
   beforeAll(async () => {
     port = await findFreePort();
     relay = spawnRelay({ port });
+    // 临时开启 relay 日志用于调试
+    relay.stderr?.on("data", (d: Buffer) => process.stderr.write(d));
+    relay.stdout?.on("data", (d: Buffer) => process.stdout.write(d));
     await waitForReady(port);
   }, E2E_TIMEOUT);
 
@@ -703,6 +706,8 @@ describe("message buffering and replay", () => {
 
   it("消息缓冲到 per-session buffer + /status totalBuffered", async () => {
     const proxyId = uid();
+    const sidA = `buf-${proxyId}-a`;
+    const sidB = `buf-${proxyId}-b`;
     const proxy = ws.proxy(port);
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
@@ -711,9 +716,9 @@ describe("message buffering and replay", () => {
 
     const beforeStatus = await fetchJson(port, "/status") as { buffers: { totalBuffered: number } };
 
-    proxy.send(JSON.stringify(makeEnvelope(1, "s3a")));
-    proxy.send(JSON.stringify(makeEnvelope(2, "s3a")));
-    proxy.send(JSON.stringify(makeEnvelope(1, "s3b")));
+    proxy.send(JSON.stringify(makeEnvelope(1, sidA)));
+    proxy.send(JSON.stringify(makeEnvelope(2, sidA)));
+    proxy.send(JSON.stringify(makeEnvelope(1, sidB)));
     await settle();
 
     const afterStatus = await fetchJson(port, "/status") as { buffers: { totalBuffered: number } };
@@ -722,7 +727,7 @@ describe("message buffering and replay", () => {
 
   it("buffer 纯追加不压缩 → 所有消息保留", async () => {
     const proxyId = uid();
-    const sid = `s-pty-${n}`;
+    const sid = `nocompress-${proxyId}`;
     const proxy = ws.proxy(port);
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
