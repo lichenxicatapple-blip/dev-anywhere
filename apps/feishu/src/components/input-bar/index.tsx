@@ -17,7 +17,7 @@ export function computeSendDisabled(
 }
 
 // @ 在句首或前面有空格时才算有效触发，@ 后面有空格说明文件引用已完成
-function hasValidAt(val: string): boolean {
+export function hasValidAt(val: string): boolean {
   const idx = val.lastIndexOf("@");
   if (idx < 0) return false;
   if (idx > 0 && val[idx - 1] !== " ") return false;
@@ -26,6 +26,39 @@ function hasValidAt(val: string): boolean {
 }
 
 export type PickerMode = "none" | "slash" | "file";
+
+export function detectPickerMode(val: string): PickerMode {
+  if (!val) return "none";
+  if (hasValidAt(val)) return "file";
+  if (val.startsWith("/") && !val.slice(1).includes(" ")) return "slash";
+  return "none";
+}
+
+// 退格删除已插入 token 时，清理残留片段并返回清理后的文本
+export function cleanupDeletedToken(
+  val: string,
+  prev: string,
+  insertedTokens: string[],
+): { cleaned: string; removedToken: string | null } {
+  if (val.length >= prev.length || insertedTokens.length === 0) {
+    return { cleaned: val, removedToken: null };
+  }
+  for (const token of insertedTokens) {
+    if (prev.includes(token) && !val.includes(token)) {
+      let cleaned = val;
+      for (let len = token.length - 1; len > 0; len--) {
+        const fragment = token.slice(0, len);
+        if (cleaned.endsWith(fragment)) {
+          cleaned = cleaned.slice(0, -fragment.length);
+          if (cleaned.endsWith(" ")) cleaned = cleaned.slice(0, -1);
+          break;
+        }
+      }
+      return { cleaned, removedToken: token };
+    }
+  }
+  return { cleaned: val, removedToken: null };
+}
 
 interface InputBarProps {
   onSend: (text: string, quote?: QuotedMessage) => void;
@@ -57,54 +90,27 @@ export function InputBar({
   const [inputFocus, setInputFocus] = useState(false);
   const prevTextRef = useRef("");
 
-  const detectPickerMode = useCallback(
-    (val: string): PickerMode => {
-      if (!val) return "none";
-      if (hasValidAt(val)) return "file";
-      if (val.startsWith("/") && !val.slice(1).includes(" ")) return "slash";
-      return "none";
-    },
-    [],
-  );
-
   const handleInput = useCallback(
     (e: { detail: { value: string } }) => {
       const val: string = e.detail.value;
       const prev = prevTextRef.current;
 
-      // 检测退格：文本变短且某个已知 token 被部分删除，整体移除该 token
-      if (val.length < prev.length && insertedTokens.length > 0) {
-        for (const token of insertedTokens) {
-          if (prev.includes(token) && !val.includes(token)) {
-            let cleaned = val;
-            for (let len = token.length - 1; len > 0; len--) {
-              const fragment = token.slice(0, len);
-              if (cleaned.endsWith(fragment)) {
-                cleaned = cleaned.slice(0, -fragment.length);
-                if (cleaned.endsWith(" ")) cleaned = cleaned.slice(0, -1);
-                break;
-              }
-            }
-            setInsertedTokens((tokens) => tokens.filter((x) => x !== token));
-            setInputText(cleaned);
-            prevTextRef.current = cleaned;
-
-            const newMode = detectPickerMode(cleaned);
-            onPickerModeChange?.(newMode);
-            onFilterChange?.(cleaned);
-            return;
-          }
-        }
+      const { cleaned, removedToken } = cleanupDeletedToken(val, prev, insertedTokens);
+      if (removedToken) {
+        setInsertedTokens((tokens) => tokens.filter((x) => x !== removedToken));
+        setInputText(cleaned);
+        prevTextRef.current = cleaned;
+        onPickerModeChange?.(detectPickerMode(cleaned));
+        onFilterChange?.(cleaned);
+        return;
       }
 
       setInputText(val);
       prevTextRef.current = val;
-
-      const newMode = detectPickerMode(val);
-      onPickerModeChange?.(newMode);
+      onPickerModeChange?.(detectPickerMode(val));
       onFilterChange?.(val);
     },
-    [insertedTokens, detectPickerMode, onPickerModeChange, onFilterChange],
+    [insertedTokens, onPickerModeChange, onFilterChange],
   );
 
   const handleSend = useCallback(() => {
