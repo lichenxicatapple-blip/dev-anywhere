@@ -166,7 +166,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_event"),
     seq: z.number(),
-    event: z.record(z.unknown()),
+    event: z.record(z.string(), z.unknown()),
   }),
 
   // worker → serve: claude 进程退出
@@ -180,7 +180,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("worker_approval_request"),
     requestId: z.string(),
     toolName: z.string(),
-    input: z.record(z.unknown()),
+    input: z.record(z.string(), z.unknown()),
   }),
 
   // worker → serve: worker 就绪，claude 已启动
