@@ -1,0 +1,85 @@
+.session-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.session-scroll {
+  flex: 1;
+}
+
+.session-list-container {
+  padding-bottom: 32px;
+}
+
+/* Section header */
+.session-section-header {
+  font-size: 24px;
+  color: #999999;
+  padding: 24px var(--page-padding-h) 12px;
+  font-weight: 600;
+}
+
+/* New session button in nav bar area */
+.session-nav-btn {
+  position: fixed;
+  right: 32px;
+  top: 16px;
+  width: 56px;
+  height: 56px;
+  background: #1890ff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.session-nav-btn-text {
+  color: #ffffff;
+  font-size: 40px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+/* Floating new session button at bottom */
+.session-fab {
+  position: fixed;
+  right: 32px;
+  bottom: 64px;
+  width: 96px;
+  height: 96px;
+  background: #1890ff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(24, 144, 255, 0.4);
+  z-index: 10;
+}
+
+.session-fab-text {
+  color: #ffffff;
+  font-size: 48px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+/* Desktop responsive */
+.screen-desktop .session-list-container {
+  max-width: 700px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.screen-desktop .session-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 0 var(--page-padding-h);
+}
+
+.screen-desktop .session-history-grid .sli-wrapper {
+  margin: 0;
+}
