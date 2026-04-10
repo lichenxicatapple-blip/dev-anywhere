@@ -18,6 +18,9 @@ const config = {
   alias: {
     "@": path.resolve(__dirname, "..", "src"),
   },
+  defineConstants: {
+    RELAY_URL: JSON.stringify(process.env.RELAY_URL || "ws://localhost:3000/client"),
+  },
   mini: {
     postcss: {
       pxtransform: {

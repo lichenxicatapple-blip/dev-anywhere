@@ -12,7 +12,8 @@ import {
 import { RelayClientProvider } from "@/stores/relay-store";
 import "./app.css";
 
-const DEFAULT_RELAY_URL = "ws://localhost:3000/client";
+declare const RELAY_URL: string;
+const DEFAULT_RELAY_URL = RELAY_URL;
 
 function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);

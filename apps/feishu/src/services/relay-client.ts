@@ -12,6 +12,16 @@ export class RelayClient {
   constructor(ws: WebSocketManager, clientId: string) {
     this.ws = ws;
     this.clientId = clientId;
+
+    // 只注册一次 ws listener，收到消息后分发给所有 handler
+    this.ws.onMessage((raw) => {
+      try {
+        const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
+        this.messageHandlers.forEach((h) => h(parsed));
+      } catch {
+        console.warn("RelayClient: failed to parse incoming message");
+      }
+    });
   }
 
   // 发送 client_register，携带 clientId 和各 session 已收到的最大 seq
@@ -55,23 +65,11 @@ export class RelayClient {
     return this.boundProxyId;
   }
 
-  // 注册收到消息的回调，解析 JSON 并分发
+  // 注册收到消息的回调，返回取消注册函数
   onMessage(handler: (msg: MessageEnvelope | RelayControlMessage) => void): () => void {
     this.messageHandlers.add(handler);
-
-    const unsub = this.ws.onMessage((raw) => {
-      try {
-        const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
-        handler(parsed);
-      } catch {
-        // invalid JSON, log and drop per T-06-18 mitigation
-        console.warn("RelayClient: failed to parse incoming message");
-      }
-    });
-
     return () => {
       this.messageHandlers.delete(handler);
-      unsub();
     };
   }
 }

@@ -2,12 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RelayClient } from "@/services/relay-client";
 import type { WebSocketManager } from "@/services/websocket";
 
+// ws.onMessage 在 RelayClient 构造函数中调用，需要在创建 mock 时就捕获 handler
+let wsRawHandler: ((raw: string) => void) | null = null;
+
 function createMockWs(): WebSocketManager {
   return {
     send: vi.fn(),
     close: vi.fn(),
     connect: vi.fn(),
-    onMessage: vi.fn(() => () => {}),
+    onMessage: vi.fn((handler: (raw: string) => void) => {
+      wsRawHandler = handler;
+      return () => { wsRawHandler = null; };
+    }),
     onStatusChange: vi.fn(() => () => {}),
     isConnected: vi.fn(() => true),
   } as unknown as WebSocketManager;
@@ -18,6 +24,7 @@ describe("RelayClient", () => {
   let client: RelayClient;
 
   beforeEach(() => {
+    wsRawHandler = null;
     ws = createMockWs();
     client = new RelayClient(ws, "test-client-id");
   });
@@ -66,50 +73,31 @@ describe("RelayClient", () => {
   });
 
   it("onMessage parses valid JSON and dispatches to handler", () => {
-    let capturedHandler: ((raw: string) => void) | null = null;
-    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
-      capturedHandler = handler;
-      return () => {};
-    });
-
     const messageHandler = vi.fn();
     client.onMessage(messageHandler);
 
-    capturedHandler!('{"type":"proxy_list_response","proxies":[]}');
+    wsRawHandler!('{"type":"proxy_list_response","proxies":[]}');
     expect(messageHandler).toHaveBeenCalledWith({ type: "proxy_list_response", proxies: [] });
   });
 
   it("onMessage drops invalid JSON without crashing", () => {
-    let capturedHandler: ((raw: string) => void) | null = null;
-    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
-      capturedHandler = handler;
-      return () => {};
-    });
-
     const messageHandler = vi.fn();
     client.onMessage(messageHandler);
 
-    capturedHandler!("not valid json {{{");
+    wsRawHandler!("not valid json {{{");
     expect(messageHandler).not.toHaveBeenCalled();
   });
 
   it("onMessage unsubscribe stops receiving messages", () => {
-    let capturedHandler: ((raw: string) => void) | null = null;
-    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
-      capturedHandler = handler;
-      return () => { capturedHandler = null; };
-    });
-
     const messageHandler = vi.fn();
     const unsub = client.onMessage(messageHandler);
 
-    capturedHandler!('{"type":"test"}');
+    wsRawHandler!('{"type":"test"}');
     expect(messageHandler).toHaveBeenCalledTimes(1);
 
     unsub();
 
-    // unsub 后即使底层 ws 仍在派发消息，handler 也不应再被调用
-    if (capturedHandler) capturedHandler('{"type":"test2"}');
+    wsRawHandler!('{"type":"test2"}');
     expect(messageHandler).toHaveBeenCalledTimes(1);
   });
 
