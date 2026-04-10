@@ -29,6 +29,7 @@ import {
 import { useCommandState } from "@/stores/command-store";
 import { useFileState } from "@/stores/file-store";
 import { useRelayClient } from "@/stores/relay-store";
+import { useAppState } from "@/stores/app-store";
 import "./index.css";
 
 type SessionMode = "pty" | "json";
@@ -55,6 +56,16 @@ export default function Chat() {
   const sessionId = router.params.sessionId || "";
   const screen = useScreenSize();
   const relay = useRelayClient();
+  const appState = useAppState();
+
+  // 发送前检查连接状态，未连接时提示用户
+  const checkConnected = useCallback((): boolean => {
+    if (!appState.connected) {
+      Taro.showToast({ title: "Not connected to relay server", icon: "none", duration: 1500 });
+      return false;
+    }
+    return true;
+  }, [appState.connected]);
 
   const [chatState, chatDispatch] = useReducer(chatReducer, initialChatState);
   const [terminalState, terminalDispatch] = useReducer(terminalReducer, initialTerminalState);
@@ -211,7 +222,7 @@ export default function Chat() {
       chatDispatch({ type: "SET_WORKING", isWorking: true });
       chatDispatch({ type: "CLEAR_QUOTE" });
       setArgumentHint("");
-      if (relay && sessionId) {
+      if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "user_input",
           sessionId,
@@ -223,7 +234,7 @@ export default function Chat() {
         } as MessageEnvelope);
       }
     },
-    [chatDispatch, relay, sessionId],
+    [chatDispatch, relay, sessionId, checkConnected],
   );
 
   const handleScrollThreshold = useCallback((nearBottom: boolean) => {
@@ -248,7 +259,7 @@ export default function Chat() {
   const handleToolAllow = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
-      if (relay && sessionId) {
+      if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "tool_approve",
           sessionId,
@@ -260,13 +271,13 @@ export default function Chat() {
         } as MessageEnvelope);
       }
     },
-    [chatDispatch, relay, sessionId],
+    [chatDispatch, relay, sessionId, checkConnected],
   );
 
   const handleToolAllowAll = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
-      if (relay && sessionId) {
+      if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "tool_approve",
           sessionId,
@@ -278,13 +289,13 @@ export default function Chat() {
         } as MessageEnvelope);
       }
     },
-    [chatDispatch, relay, sessionId],
+    [chatDispatch, relay, sessionId, checkConnected],
   );
 
   const handleToolDeny = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "denied" });
-      if (relay && sessionId) {
+      if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "tool_deny",
           sessionId,
@@ -296,7 +307,7 @@ export default function Chat() {
         } as MessageEnvelope);
       }
     },
-    [chatDispatch, relay, sessionId],
+    [chatDispatch, relay, sessionId, checkConnected],
   );
 
   const handleToggleToolCollapse = useCallback(
@@ -336,11 +347,11 @@ export default function Chat() {
   const handleFileNavigate = useCallback(
     (path: string) => {
       setFilePickerPath(path);
-      if (!fileState.tree.has(path) && relay) {
+      if (!fileState.tree.has(path) && relay && checkConnected()) {
         relay.sendControl({ type: "dir_list_request", path });
       }
     },
-    [fileState.tree, relay],
+    [fileState.tree, relay, checkConnected],
   );
 
   // 引用
@@ -367,11 +378,11 @@ export default function Chat() {
   const handlePermissionChange = useCallback(
     (newMode: "default" | "auto_accept" | "plan") => {
       setPermissionMode(newMode);
-      if (relay) {
+      if (relay && checkConnected()) {
         relay.sendControl({ type: "permission_mode_change", mode: newMode });
       }
     },
-    [relay],
+    [relay, checkConnected],
   );
 
   const handleFontSizeChange = useCallback(
