@@ -11,7 +11,7 @@ import { ProxyListItem } from "@/components/proxy-list-item";
 import { EmptyState } from "@/components/empty-state";
 import "./index.css";
 
-const BRAND_TEXTS = ["CC Anywhere", "/untethered @anytime"];
+const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
 
 export default function ProxySelect() {
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
