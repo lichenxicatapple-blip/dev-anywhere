@@ -52,7 +52,7 @@ export default function ProxySelect() {
         const savedProxyId = Taro.getStorageSync("cc_proxyId") as string;
         const savedSessionId = Taro.getStorageSync("cc_sessionId") as string;
         if (savedProxyId && savedSessionId) {
-          const onlineProxy = ctrl.proxies.find((p) => p.proxyId === savedProxyId);
+          const onlineProxy = ctrl.proxies.find((p) => p.proxyId === savedProxyId && p.online);
           if (onlineProxy) {
             appDispatch({
               type: "SET_PROXY",
@@ -130,7 +130,7 @@ export default function ProxySelect() {
             <ProxyListItem
               key={proxy.proxyId}
               proxy={proxy}
-              online={true}
+              online={proxy.online}
               onSelect={() => handleSelect(proxy)}
             />
           ))}
