@@ -12,7 +12,7 @@ const config = {
   },
   sourceRoot: "src",
   outputRoot: "dist",
-  plugins: ["@tarojs/plugin-platform-lark"],
+  plugins: ["@tarojs/plugin-platform-lark", "@tarojs/plugin-platform-h5"],
   framework: "react",
   compiler: "webpack5",
   alias: {
@@ -24,6 +24,19 @@ const config = {
   mini: {
     postcss: {
       pxtransform: {
+        enable: true,
+      },
+    },
+  },
+  h5: {
+    publicPath: "/",
+    staticDirectory: "static",
+    htmlPluginOption: {
+      template: path.resolve(__dirname, "../src/index.html"),
+      filename: "index.html",
+    },
+    postcss: {
+      autoprefixer: {
         enable: true,
       },
     },

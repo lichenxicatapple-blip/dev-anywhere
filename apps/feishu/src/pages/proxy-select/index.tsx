@@ -48,10 +48,10 @@ export default function ProxySelect() {
         setProxies(ctrl.proxies);
         setLoaded(true);
 
-        // D-02: 冷启动自动导航
+        // 冷启动自动导航：如果上次选过 proxy 且仍在线，恢复上次的位置
         const savedProxyId = Taro.getStorageSync("cc_proxyId") as string;
         const savedSessionId = Taro.getStorageSync("cc_sessionId") as string;
-        if (savedProxyId && savedSessionId) {
+        if (savedProxyId) {
           const onlineProxy = ctrl.proxies.find((p) => p.proxyId === savedProxyId && p.online);
           if (onlineProxy) {
             appDispatch({
@@ -61,7 +61,11 @@ export default function ProxySelect() {
             });
             appDispatch({ type: "SET_PROXY_ONLINE", online: true });
             relay.selectProxy(savedProxyId);
-            Taro.navigateTo({ url: "/pages/chat/index" });
+            if (savedSessionId) {
+              Taro.navigateTo({ url: `/pages/chat/index?sessionId=${savedSessionId}` });
+            } else {
+              Taro.navigateTo({ url: "/pages/session-list/index" });
+            }
             return;
           }
         }

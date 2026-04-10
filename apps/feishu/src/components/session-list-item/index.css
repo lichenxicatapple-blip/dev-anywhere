@@ -9,8 +9,9 @@
 .sli-item {
   display: flex;
   align-items: center;
-  background: #232340;
-  padding: 16px 32px;
+  background: #21213a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 32px;
   box-sizing: border-box;
   position: relative;
   z-index: 1;

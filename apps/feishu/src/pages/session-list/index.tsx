@@ -26,6 +26,11 @@ export default function SessionList() {
   const [showDirPicker, setShowDirPicker] = useState(false);
   const [dirEntries, setDirEntries] = useState<Map<string, DirEntry[]>>(new Map());
 
+  // 用户返回 proxy-select 时清除 proxyId，避免下次冷启动跳过首页
+  Taro.useDidHide(() => {
+    Taro.removeStorageSync("cc_proxyId");
+  });
+
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
     if (appState.selectedProxyName) {
