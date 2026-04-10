@@ -1,0 +1,205 @@
+.tool-approval-card {
+  background: #FFFBE6;
+  border: 1px solid #FAAD14;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 8px 0;
+}
+
+.tool-approval-resolved {
+  background: #FAFAFA;
+  border-color: #E8E8E8;
+  padding: 8px 16px;
+}
+
+.tool-approval-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333333;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.tool-approval-tool-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #333333;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* 参数预览区域 */
+.tool-approval-preview {
+  max-height: 120px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  border-radius: 4px;
+}
+
+/* Edit 预览：diff 风格 */
+.tool-preview-edit {
+  font-size: 12px;
+  font-family: "Menlo", "Consolas", monospace;
+  line-height: 1.4;
+}
+
+.tool-preview-edit-remove {
+  display: block;
+  background: #FFF1F0;
+  color: #FF4D4F;
+  padding: 2px 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-preview-edit-add {
+  display: block;
+  background: #F6FFED;
+  color: #52C41A;
+  padding: 2px 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Bash 预览：终端风格 */
+.tool-preview-bash {
+  background: #1E1E1E;
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.tool-preview-bash-prompt {
+  color: #52C41A;
+  font-size: 12px;
+  font-family: "Menlo", "Consolas", monospace;
+  flex-shrink: 0;
+}
+
+.tool-preview-bash-cmd {
+  color: #FFFFFF;
+  font-size: 12px;
+  font-family: "Menlo", "Consolas", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Write 预览 */
+.tool-preview-write {
+  font-size: 12px;
+  font-family: "Menlo", "Consolas", monospace;
+}
+
+.tool-preview-write-path {
+  display: block;
+  color: #1890FF;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tool-preview-write-content {
+  display: block;
+  color: #666666;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Generic 预览 */
+.tool-preview-generic {
+  font-size: 12px;
+  font-family: "Menlo", "Consolas", monospace;
+}
+
+.tool-preview-generic-text {
+  color: #666666;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 按钮行 */
+.tool-approval-buttons {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.tool-approval-btn {
+  flex: 1;
+  height: 36px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-approval-btn-allow {
+  background: #52C41A;
+}
+
+.tool-approval-btn-allow-all {
+  background: #1890FF;
+}
+
+.tool-approval-btn-deny {
+  background: #FFFFFF;
+  border: 1px solid #FF4D4F;
+}
+
+.tool-approval-btn-text-light {
+  color: #FFFFFF;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tool-approval-btn-text-deny {
+  color: #FF4D4F;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tool-approval-btn-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Denied 标记 */
+.tool-approval-denied-marker {
+  display: flex;
+  align-items: center;
+}
+
+.tool-approval-denied-text {
+  color: #FF4D4F;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Approved 折叠行 */
+.tool-approval-approved-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-approval-approved-icon {
+  font-size: 14px;
+  color: #999999;
+}
+
+.tool-approval-approved-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.tool-approval-approved-summary {
+  font-size: 12px;
+  color: #999999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
