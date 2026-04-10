@@ -2,7 +2,8 @@ import pino from "pino";
 import { createRelayServer } from "./server.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
-const DATA_DIR = process.env.DATA_DIR || undefined;
+const DEFAULT_DATA_DIR = `${process.env.HOME}/.cc-anywhere/relay-data`;
+const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL ?? "30000", 10);
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
