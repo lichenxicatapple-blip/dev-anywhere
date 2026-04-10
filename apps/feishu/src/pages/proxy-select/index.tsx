@@ -98,8 +98,8 @@ export default function ProxySelect() {
         <View className="proxy-list">
           {!appState.connected && (
             <EmptyState
-              title="Connecting to Relay..."
-              subtitle="Waiting for WebSocket connection to relay server"
+              title="Connecting to Relay Server..."
+              subtitle="Waiting for WebSocket connection"
             />
           )}
           {appState.connected && loaded && !hasOnlineProxy && (
