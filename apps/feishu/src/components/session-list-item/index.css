@@ -111,6 +111,25 @@
   color: rgba(255, 255, 255, 0.45);
 }
 
+/* Meta row: spike 风格 — dot + state label */
+.sli-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sli-state-label {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.sli-state-label-idle { color: #52c41a; }
+.sli-state-label-working { color: #1890ff; }
+.sli-state-label-waiting_approval { color: #faad14; }
+.sli-state-label-error { color: #ff4d4f; }
+.sli-state-label-terminated { color: rgba(255, 255, 255, 0.35); }
+
 /* Mode tag pill */
 .sli-mode-tag {
   padding: 4px 16px;

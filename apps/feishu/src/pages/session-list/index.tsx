@@ -10,7 +10,6 @@ import {
   useSessionDispatch,
 } from "@/stores/session-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
-import { StatusLine } from "@/components/status-line";
 import { SessionListItem, HistoryListItem } from "@/components/session-list-item";
 import { EmptyState } from "@/components/empty-state";
 import { DirectoryPicker } from "@/components/directory-picker";
@@ -178,22 +177,12 @@ export default function SessionList() {
     setShowDirPicker(false);
   }, []);
 
-  // 推导当前整体状态用于 StatusLine
-  const overallState = sessionState.sessions.some((s) => s.state === "working")
-    ? "working"
-    : sessionState.sessions.some((s) => s.state === "waiting_approval")
-      ? "waiting_approval"
-      : sessionState.sessions.some((s) => s.state === "idle")
-        ? "idle"
-        : "terminated";
-
   const hasActiveSessions = sessionState.sessions.length > 0;
   const hasHistory = historySessions.length > 0;
   const isEmpty = !hasActiveSessions && !hasHistory;
 
   return (
     <View className={`session-page ${screen.className}`}>
-      <StatusLine state={overallState} />
       <ScrollView className="session-scroll" scrollY>
         {isEmpty ? (
           <EmptyState

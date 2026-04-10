@@ -96,16 +96,16 @@ export function SessionListItem({
         onTouchEnd={handleTouchEnd}
         onClick={swipeOpen ? undefined : onSelect}
       >
-        <StateDot state={session.state} />
         <View className="sli-info">
-          <View className="sli-title-row">
-            <Text className="sli-title" numberOfLines={1}>
-              {session.name || "New Session"}
-            </Text>
-            {session.mode && <ModeTag mode={session.mode} />}
+          <Text className="sli-title" numberOfLines={1}>
+            {session.name || "New Session"}
+          </Text>
+          <View className="sli-meta-row">
+            <StateDot state={session.state} />
+            <Text className={`sli-state-label sli-state-label-${session.state}`}>{stateLabel}</Text>
           </View>
-          <Text className="sli-subtitle">{stateLabel}</Text>
         </View>
+        {session.mode && <ModeTag mode={session.mode} />}
         <Text className="sli-chevron">{">"}</Text>
       </View>
       <View className="sli-action" onClick={handleTerminate}>
