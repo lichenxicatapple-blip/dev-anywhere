@@ -1,4 +1,23 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("@tarojs/taro", () => ({
+  default: {
+    getSystemInfoSync: () => ({
+      windowWidth: 375,
+      windowHeight: 667,
+      statusBarHeight: 20,
+      safeArea: { top: 20, bottom: 667, left: 0, right: 375, width: 375, height: 647 },
+    }),
+    onWindowResize: vi.fn(),
+    offWindowResize: vi.fn(),
+  },
+}));
+
+vi.mock("react", () => ({
+  useState: (init: unknown) => [init, vi.fn()],
+  useEffect: vi.fn(),
+}));
+
 import { classifyScreen, getResponsiveClass } from "@/hooks/use-screen-size";
 
 describe("classifyScreen", () => {

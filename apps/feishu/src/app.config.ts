@@ -1,5 +1,8 @@
 export default defineAppConfig({
   pages: [
+    "pages/proxy-select/index",
+    "pages/session-list/index",
+    "pages/chat/index",
     "pages/spike-hub/index",
     "pages/spike-typewriter/index",
     "pages/spike-session-list/index",
@@ -15,5 +18,11 @@ export default defineAppConfig({
     navigationBarTitleText: "CC Anywhere",
     navigationBarBackgroundColor: "#F8F8F8",
     backgroundColor: "#F8F8F8",
+    pageOrientation: "auto",
+  },
+  ext: {
+    defaultPages: {
+      PCMode: "appCenter",
+    },
   },
 });

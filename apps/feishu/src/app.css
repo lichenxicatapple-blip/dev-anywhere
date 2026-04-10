@@ -1,0 +1,95 @@
+:root {
+  --color-primary: #1890FF;
+  --color-success: #52C41A;
+  --color-warning: #FAAD14;
+  --color-error: #FF4D4F;
+  --color-working: #1890FF;
+  --color-terminated: #999999;
+  --color-surface: #FFFFFF;
+  --color-surface-secondary: #F5F5F5;
+  --color-terminal-bg: #1E1E1E;
+  --color-text-primary: #333333;
+  --color-text-secondary: #999999;
+  --color-border: #E8E8E8;
+  --color-border-light: #F0F0F0;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  --bubble-max-width-user: 75%;
+  --bubble-max-width-assistant: 85%;
+  --page-padding-h: 16px;
+  --session-card-height: 64px;
+  --input-bar-padding-h: 16px;
+  --picker-max-width: 100%;
+}
+
+/* Phone landscape */
+.screen-landscape {
+  --bubble-max-width-user: 60%;
+  --bubble-max-width-assistant: 70%;
+  --page-padding-h: 24px;
+  --input-bar-padding-h: 24px;
+}
+
+/* Feishu PC desktop */
+.screen-desktop {
+  --bubble-max-width-user: 50%;
+  --bubble-max-width-assistant: 60%;
+  --page-padding-h: 32px;
+  --session-card-height: 72px;
+  --input-bar-padding-h: 32px;
+  --picker-max-width: 480px;
+}
+
+/* Global animations */
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes breathing {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes sweepRight {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes bubbleEntranceLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes bubbleEntranceRight {
+  0% {
+    opacity: 0;
+    transform: translateX(12px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
