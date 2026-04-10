@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #f5f5f5;
+  background: #1a1a2e;
 }
 
 .session-scroll {
@@ -16,7 +16,7 @@
 /* Section header */
 .session-section-header {
   font-size: 24px;
-  color: #999999;
+  color: rgba(255, 255, 255, 0.45);
   padding: 24px var(--page-padding-h) 12px;
   font-weight: 600;
 }
@@ -55,7 +55,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 16px rgba(24, 144, 255, 0.4);
+  box-shadow: 0 4px 16px rgba(24, 144, 255, 0.3);
   z-index: 10;
 }
 
@@ -82,4 +82,22 @@
 
 .screen-desktop .session-history-grid .sli-wrapper {
   margin: 0;
+}
+
+/* 深色背景下的 EmptyState 和 CTA 按钮 */
+.session-page .empty-state-title {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.session-page .empty-state-subtitle {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.session-page .empty-state-cta {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.session-page .empty-state-cta-text {
+  color: rgba(255, 255, 255, 0.85);
 }

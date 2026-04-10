@@ -110,6 +110,7 @@ export default function ProxySelect() {
           <Typewriter texts={BRAND_TEXTS} />
         </View>
 
+        <Text className="proxy-section-title">Proxies</Text>
         <View className="proxy-list">
           {!appState.connected && (
             <View className="connecting-state">

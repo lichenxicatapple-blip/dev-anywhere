@@ -9,7 +9,7 @@
 .sli-item {
   display: flex;
   align-items: center;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
   padding: 24px 32px;
   height: var(--session-card-height);
   box-sizing: border-box;
@@ -99,7 +99,7 @@
 .sli-title {
   font-size: 32px;
   font-weight: 600;
-  color: #333333;
+  color: rgba(255, 255, 255, 0.85);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -108,7 +108,7 @@
 
 .sli-subtitle {
   font-size: 24px;
-  color: #999999;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 /* Mode tag pill */
@@ -119,11 +119,11 @@
 }
 
 .sli-mode-pty {
-  background: #f0f0f0;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .sli-mode-json {
-  background: #e6f7ff;
+  background: rgba(24, 144, 255, 0.15);
 }
 
 .sli-mode-text {
@@ -132,7 +132,7 @@
 }
 
 .sli-mode-text-pty {
-  color: #666666;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .sli-mode-text-json {
@@ -142,7 +142,7 @@
 /* Chevron */
 .sli-chevron {
   font-size: 28px;
-  color: #cccccc;
+  color: rgba(255, 255, 255, 0.3);
   margin-left: 16px;
   flex-shrink: 0;
 }
@@ -150,7 +150,7 @@
 /* Resume tag for history items */
 .sli-resume-tag {
   font-size: 22px;
-  color: #1890ff;
+  color: #4dabff;
   margin-left: 8px;
   flex-shrink: 0;
 }

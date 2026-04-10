@@ -6,10 +6,10 @@ export default defineAppConfig({
     "pages/index/index",
   ],
   window: {
-    navigationBarTextStyle: "black",
+    navigationBarTextStyle: "white",
     navigationBarTitleText: "CC Anywhere",
-    navigationBarBackgroundColor: "#F8F8F8",
-    backgroundColor: "#F8F8F8",
+    navigationBarBackgroundColor: "#1A1A2E",
+    backgroundColor: "#1A1A2E",
     pageOrientation: "auto",
   },
   // @ts-expect-error ext 是飞书小程序特有配置，Taro AppConfig 类型未收录

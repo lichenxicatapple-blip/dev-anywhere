@@ -624,6 +624,29 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
+        } else if (parsed.type === "session_list") {
+          const sessions = sessionManager.listSessions();
+          relaySend!(JSON.stringify({
+            type: "session_list",
+            sessionId: "",
+            seq: 0,
+            timestamp: Date.now(),
+            source: "proxy",
+            version: "1",
+            payload: {
+              sessions: sessions.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                sessionId: s.id,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+              })),
+            },
+          }));
+          logger.info("Session list sent via relay");
+        } else if (parsed.type === "permission_mode_change") {
+          logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
         } else if (parsed.type === "terminal_lines_request" && parsed.sessionId) {
           // relay → serve → client IPC：转发终端行拉取请求到持有 tracker 的 client
           const targetSocket = terminalSockets.get(parsed.sessionId);

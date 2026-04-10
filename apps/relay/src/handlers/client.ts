@@ -4,6 +4,15 @@ import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
 
+// client → proxy 透传的控制消息类型，relay 不处理内容，直接转发
+const CLIENT_TO_PROXY_TYPES = new Set([
+  "dir_list_request",
+  "terminal_lines_request",
+  "session_list",
+  "session_history_request",
+  "permission_mode_change",
+]);
+
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
@@ -115,11 +124,11 @@ export function handleClientConnection(
         return;
       }
 
-      // client-to-proxy 透传控制消息：relay 不处理，直接转发给绑定的 proxy
-      if (msg.type === "dir_list_request") {
-        const targetProxyId = msg.proxyId || clientWs.boundProxyId;
+      // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy
+      if (CLIENT_TO_PROXY_TYPES.has(msg.type)) {
+        const targetProxyId = ("proxyId" in msg ? msg.proxyId as string : undefined) || clientWs.boundProxyId;
         if (!targetProxyId) {
-          clientWs.send(JSON.stringify({ type: "relay_error", code: "NO_PROXY", message: "No proxy bound" }));
+          clientWs.send(JSON.stringify({ type: "relay_error", code: "NOT_BOUND", message: "Client is not bound to any proxy" }));
           return;
         }
         const proxyWs = registry.getProxy(targetProxyId);
@@ -130,51 +139,6 @@ export function handleClientConnection(
             type: "relay_error",
             code: "PROXY_OFFLINE",
             message: `Proxy ${targetProxyId} is not available`,
-          }));
-        }
-        return;
-      }
-
-      // terminal_lines_request: 转发给绑定的 proxy
-      if (msg.type === "terminal_lines_request") {
-        if (!clientWs.boundProxyId) {
-          clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "NOT_BOUND",
-            message: "Client is not bound to any proxy",
-          }));
-          return;
-        }
-        const proxyWs = registry.getProxy(clientWs.boundProxyId);
-        if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
-          proxyWs.send(raw);
-        } else {
-          clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "PROXY_OFFLINE",
-            message: `Proxy ${clientWs.boundProxyId} is not available`,
-          }));
-        }
-        return;
-      }
-
-      if (msg.type === "session_history_request") {
-        if (!clientWs.boundProxyId) {
-          clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "NOT_BOUND",
-            message: "Client is not bound to any proxy",
-          }));
-          return;
-        }
-        const proxyWs = registry.getProxy(clientWs.boundProxyId);
-        if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
-          proxyWs.send(raw);
-        } else {
-          clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "PROXY_OFFLINE",
-            message: `Proxy ${clientWs.boundProxyId} is not available`,
           }));
         }
         return;

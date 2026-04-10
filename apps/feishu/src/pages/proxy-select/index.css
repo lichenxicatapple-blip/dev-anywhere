@@ -17,6 +17,12 @@
   min-height: 160px;
 }
 
+.proxy-section-title {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 24px;
+  margin-bottom: 16px;
+}
+
 .proxy-list {
   flex: 1;
 }
