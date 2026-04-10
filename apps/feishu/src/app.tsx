@@ -1,5 +1,5 @@
 // App 入口：初始化 WebSocket 连接和 RelayClient，管理应用生命周期
-import { PropsWithChildren, useEffect, useReducer, useRef } from "react";
+import { PropsWithChildren, useEffect, useReducer, useRef, useState } from "react";
 import Taro from "@tarojs/taro";
 import { WebSocketManager } from "@/services/websocket";
 import { RelayClient } from "@/services/relay-client";
@@ -9,6 +9,7 @@ import {
   appReducer,
   initialAppState,
 } from "@/stores/app-store";
+import { RelayClientProvider } from "@/stores/relay-store";
 import "./app.css";
 
 const DEFAULT_RELAY_URL = "ws://localhost:3000/client";
@@ -16,7 +17,7 @@ const DEFAULT_RELAY_URL = "ws://localhost:3000/client";
 function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const wsRef = useRef<WebSocketManager | null>(null);
-  const relayRef = useRef<RelayClient | null>(null);
+  const [relayClient, setRelayClient] = useState<RelayClient | null>(null);
 
   useEffect(() => {
     const relayUrl = Taro.getStorageSync("cc_relayUrl") as string || DEFAULT_RELAY_URL;
@@ -30,7 +31,7 @@ function App({ children }: PropsWithChildren) {
     });
 
     const relay = new RelayClient(ws, state.clientId);
-    relayRef.current = relay;
+    setRelayClient(relay);
 
     ws.onStatusChange((connected) => {
       if (connected) {
@@ -55,11 +56,13 @@ function App({ children }: PropsWithChildren) {
   });
 
   return (
-    <AppProvider value={state}>
-      <AppDispatchProvider value={dispatch}>
-        {children}
-      </AppDispatchProvider>
-    </AppProvider>
+    <RelayClientProvider value={relayClient}>
+      <AppProvider value={state}>
+        <AppDispatchProvider value={dispatch}>
+          {children}
+        </AppDispatchProvider>
+      </AppProvider>
+    </RelayClientProvider>
   );
 }
 

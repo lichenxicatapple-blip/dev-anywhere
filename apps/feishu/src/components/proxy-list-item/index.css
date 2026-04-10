@@ -1,0 +1,34 @@
+.proxy-item {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 32px;
+  height: 104px;
+  border-radius: 16px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.proxy-name {
+  flex: 1;
+  font-family: monospace, Menlo, Courier;
+  font-size: 32px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.proxy-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.proxy-dot.online {
+  background: #52c41a;
+  box-shadow: 0 0 12px rgba(82, 196, 26, 0.5);
+}
+
+.proxy-dot.offline {
+  background: #999999;
+}
