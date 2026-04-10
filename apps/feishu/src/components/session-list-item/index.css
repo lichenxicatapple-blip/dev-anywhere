@@ -9,9 +9,8 @@
 .sli-item {
   display: flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.08);
+  background: #232340;
   padding: 24px 32px;
-  height: var(--session-card-height);
   box-sizing: border-box;
   position: relative;
   z-index: 1;
