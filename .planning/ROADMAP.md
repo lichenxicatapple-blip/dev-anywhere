@@ -113,7 +113,7 @@ Plans:
   2. User sees a list of active sessions and can create a new session, switch between sessions, or terminate a session
   3. User can scroll back through conversation history within a session, including messages exchanged before the current connection
   4. Mini program reconnects automatically when returning from background, and missed messages appear without user action
-**Plans:** 11 plans
+**Plans:** 13 plans
 **UI hint**: yes
 
 Plans:
@@ -128,6 +128,8 @@ Plans:
 - [x] 06-09-PLAN.md — Mini program tool approval UI, tool call cards, back-to-bottom button
 - [x] 06-10-PLAN.md — Mini program state stores, StatusLine, useScreenSize hook, app lifecycle, responsive CSS infrastructure
 - [x] 06-11-PLAN.md — Mini program pickers (slash/file/directory), message quoting, settings menu, responsive adaptations
+- [ ] 06-12-PLAN.md — Gap closure: fix WebSocket duplicate connections, chat-store toolIndex matching, spike-picker compile error, message-parser type safety
+- [ ] 06-13-PLAN.md — Gap closure: wire chat page relay send/receive, session-list response handling, tool approval relay dispatch
 
 ### Phase 7: Tool Approval & Dual-Surface Sync
 **Goal**: Users can approve or deny Claude Code tool calls from their phone, and terminal + mobile stay in sync during simultaneous use
@@ -205,7 +207,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 3. Local Proxy - Service Architecture & Multi-Session | 0/3 | Planning complete | - |
 | 4. Relay Server - Core Transport | 0/3 | Planning complete | - |
 | 5. Relay Server - Resilience | 0/3 | Planning complete | - |
-| 6. Feishu Mini Program - Core Interaction | 0/11 | Planning complete | - |
+| 6. Feishu Mini Program - Core Interaction | 11/13 | Gap closure | - |
 | 7. Tool Approval & Dual-Surface Sync | 0/2 | Not started | - |
 | 8. Output Rendering | 0/2 | Not started | - |
 | 9. Voice Input | 0/1 | Not started | - |
