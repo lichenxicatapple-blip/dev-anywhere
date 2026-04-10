@@ -107,8 +107,8 @@ export default function ProxySelect() {
           )}
           {appState.connected && loaded && !hasOnlineProxy && (
             <EmptyState
-              title="No Proxy Connected"
-              subtitle="Start cc-anywhere on your computer, then pull to refresh"
+              title="No Proxy Online"
+              subtitle="Run cc-anywhere on your computer to connect"
             />
           )}
           {proxies.map((proxy) => (
