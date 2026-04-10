@@ -78,6 +78,18 @@ export default function SessionList() {
     return unsub;
   }, [relay, appState.connected, sessionDispatch]);
 
+  const checkConnected = useCallback((): boolean => {
+    if (!appState.connected) {
+      Taro.showToast({ title: "Not connected to relay server", icon: "none", duration: 1500 });
+      return false;
+    }
+    if (!appState.proxyOnline) {
+      Taro.showToast({ title: "Proxy is offline", icon: "none", duration: 1500 });
+      return false;
+    }
+    return true;
+  }, [appState.connected, appState.proxyOnline]);
+
   // 左滑切换
   const handleSwipeToggle = useCallback((id: string) => {
     setSwipeOpenId((prev) => (prev === id ? "" : id));
@@ -100,6 +112,7 @@ export default function SessionList() {
   // 终止 JSON 会话
   const handleTerminate = useCallback(
     (sessionId: string) => {
+      if (!checkConnected()) return;
       if (relay) {
         relay.sendEnvelope({
           type: "session_terminate",
@@ -109,12 +122,13 @@ export default function SessionList() {
       }
       sessionDispatch({ type: "REMOVE_SESSION", sessionId });
     },
-    [relay, sessionDispatch],
+    [relay, sessionDispatch, checkConnected],
   );
 
   // 恢复历史会话
   const handleResumeHistory = useCallback(
     (historySession: HistorySession) => {
+      if (!checkConnected()) return;
       if (relay) {
         relay.sendEnvelope({
           type: "session_create",
@@ -124,7 +138,7 @@ export default function SessionList() {
       }
       Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay],
+    [relay, checkConnected],
   );
 
   // 点击新建按钮时弹出目录选择器
@@ -135,17 +149,19 @@ export default function SessionList() {
   // 请求目录列表
   const handleRequestDir = useCallback(
     (path: string) => {
+      if (!checkConnected()) return;
       if (relay) {
         relay.sendControl({ type: "dir_list_request", path });
       }
     },
-    [relay],
+    [relay, checkConnected],
   );
 
   // 选择目录后创建会话
   const handleDirSelect = useCallback(
     (cwd: string) => {
       setShowDirPicker(false);
+      if (!checkConnected()) return;
       if (relay) {
         relay.sendEnvelope({
           type: "session_create",
@@ -155,7 +171,7 @@ export default function SessionList() {
       }
       Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay],
+    [relay, checkConnected],
   );
 
   const handleDirPickerCancel = useCallback(() => {
