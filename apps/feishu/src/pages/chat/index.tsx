@@ -1,5 +1,5 @@
 // Chat 页面：PTY 终端视图和 JSON 聊天气泡双模式，集成工具审批、picker、引用、设置菜单
-import { useState, useCallback, useReducer } from "react";
+import { useState, useCallback, useReducer, useEffect } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { useRouter } from "@tarojs/taro";
 import { SafeAreaHeader } from "@/components/safe-area-header";
@@ -13,12 +13,14 @@ import { ToolApprovalCard } from "@/components/tool-approval-card";
 import { SlashCommandPicker } from "@/components/slash-command-picker";
 import { FilePathPicker } from "@/components/file-path-picker";
 import { QuotePreviewBar } from "@/components/quote-preview-bar";
+import type { MessageEnvelope, RelayControlMessage, TerminalFramePayload } from "@cc-anywhere/shared";
+import { parseAssistantMessage, routeStreamEvent } from "@/services/message-parser";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import {
   chatReducer,
   initialChatState,
 } from "@/stores/chat-store";
-import type { QuotedMessage } from "@/stores/chat-store";
+import type { ChatAction, QuotedMessage } from "@/stores/chat-store";
 import {
   terminalReducer,
   initialTerminalState,
@@ -59,7 +61,112 @@ export default function Chat() {
   const commandState = useCommandState();
   const fileState = useFileState();
 
+  // relay 消息订阅：路由 envelope 和 control 消息到对应的 store
+  useEffect(() => {
+    if (!relay || !sessionId) return;
 
+    const unsub = relay.onMessage((msg) => {
+      // MessageEnvelope 类型：有 seq/payload/sessionId 字段
+      if ("seq" in msg && "payload" in msg) {
+        const envelope = msg as MessageEnvelope;
+
+        switch (envelope.type) {
+          case "assistant_message": {
+            const parsed = parseAssistantMessage(envelope.payload.text);
+            if (parsed) {
+              const action = routeStreamEvent(parsed);
+              if (action) {
+                chatDispatch(action as ChatAction);
+              }
+            }
+            relay.updateSeq(envelope.sessionId, envelope.seq);
+            break;
+          }
+          case "tool_use_request": {
+            chatDispatch({
+              type: "ADD_APPROVAL_REQUEST",
+              request: {
+                requestId: envelope.payload.toolId,
+                toolName: envelope.payload.toolName,
+                input: envelope.payload.parameters,
+                status: "pending",
+              },
+            });
+            relay.updateSeq(envelope.sessionId, envelope.seq);
+            break;
+          }
+          case "tool_result": {
+            const msgs = chatState.messages;
+            for (let i = msgs.length - 1; i >= 0; i--) {
+              if (msgs[i].role === "assistant" && msgs[i].toolCalls.length > 0) {
+                const idx = msgs[i].toolCalls.findIndex((tc) => !tc.output);
+                if (idx >= 0) {
+                  chatDispatch({
+                    type: "UPDATE_TOOL_RESULT",
+                    messageId: msgs[i].id,
+                    toolIndex: idx,
+                    output: String(envelope.payload.result),
+                  });
+                }
+                break;
+              }
+            }
+            relay.updateSeq(envelope.sessionId, envelope.seq);
+            break;
+          }
+          case "session_status": {
+            if (envelope.payload.sessionId === sessionId) {
+              chatDispatch({
+                type: "SET_WORKING",
+                isWorking: envelope.payload.state === "working",
+              });
+            }
+            break;
+          }
+          default:
+            break;
+        }
+        return;
+      }
+
+      // RelayControlMessage 类型
+      const ctrl = msg as RelayControlMessage;
+
+      switch (ctrl.type) {
+        case "terminal_frame": {
+          if (ctrl.sessionId !== sessionId) break;
+          const frame = ctrl.payload as TerminalFramePayload;
+          if (frame.mode === "full") {
+            terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
+          } else {
+            // delta 模式：合并变化行到当前 lines
+            const merged = [...terminalState.lines];
+            for (const delta of frame.lines) {
+              merged[delta.lineIndex] = delta.spans;
+            }
+            terminalDispatch({ type: "SET_TERMINAL_LINES", lines: merged });
+          }
+          break;
+        }
+        case "pty_state": {
+          if (ctrl.sessionId !== sessionId) break;
+          terminalDispatch({
+            type: "SET_PTY_STATE",
+            state: ctrl.payload.state,
+            title: ctrl.payload.title,
+          });
+          if (ctrl.payload.state === "approval_wait" && ctrl.payload.tool) {
+            terminalDispatch({ type: "SET_APPROVAL_TOOL", tool: ctrl.payload.tool });
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    });
+
+    return unsub;
+  }, [relay, sessionId, chatState.messages, chatDispatch, terminalDispatch, terminalState.lines]);
 
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [pickerMode, setPickerMode] = useState<PickerMode>("none");
@@ -104,9 +211,19 @@ export default function Chat() {
       chatDispatch({ type: "SET_WORKING", isWorking: true });
       chatDispatch({ type: "CLEAR_QUOTE" });
       setArgumentHint("");
-      // TODO: relay client sendEnvelope with user_input
+      if (relay && sessionId) {
+        relay.sendEnvelope({
+          type: "user_input",
+          sessionId,
+          payload: { text },
+          seq: 0,
+          timestamp: Date.now(),
+          source: "client",
+          version: "1",
+        } as MessageEnvelope);
+      }
     },
-    [chatDispatch],
+    [chatDispatch, relay, sessionId],
   );
 
   const handleScrollThreshold = useCallback((nearBottom: boolean) => {
@@ -131,22 +248,55 @@ export default function Chat() {
   const handleToolAllow = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
+      if (relay && sessionId) {
+        relay.sendEnvelope({
+          type: "tool_approve",
+          sessionId,
+          payload: { toolId: requestId },
+          seq: 0,
+          timestamp: Date.now(),
+          source: "client",
+          version: "1",
+        } as MessageEnvelope);
+      }
     },
-    [chatDispatch],
+    [chatDispatch, relay, sessionId],
   );
 
   const handleToolAllowAll = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
+      if (relay && sessionId) {
+        relay.sendEnvelope({
+          type: "tool_approve",
+          sessionId,
+          payload: { toolId: requestId, whitelistTool: true },
+          seq: 0,
+          timestamp: Date.now(),
+          source: "client",
+          version: "1",
+        } as MessageEnvelope);
+      }
     },
-    [chatDispatch],
+    [chatDispatch, relay, sessionId],
   );
 
   const handleToolDeny = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "denied" });
+      if (relay && sessionId) {
+        relay.sendEnvelope({
+          type: "tool_deny",
+          sessionId,
+          payload: { toolId: requestId },
+          seq: 0,
+          timestamp: Date.now(),
+          source: "client",
+          version: "1",
+        } as MessageEnvelope);
+      }
     },
-    [chatDispatch],
+    [chatDispatch, relay, sessionId],
   );
 
   const handleToggleToolCollapse = useCallback(
