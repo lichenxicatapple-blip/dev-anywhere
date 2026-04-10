@@ -19,7 +19,7 @@ const config = {
     "@": path.resolve(__dirname, "..", "src"),
   },
   defineConstants: {
-    RELAY_URL: JSON.stringify(process.env.RELAY_URL || "ws://localhost:3000/client"),
+    RELAY_URL: JSON.stringify(process.env.RELAY_URL || "ws://localhost:3100/client"),
   },
   mini: {
     postcss: {
