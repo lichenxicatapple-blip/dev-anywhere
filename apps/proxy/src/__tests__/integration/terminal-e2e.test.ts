@@ -16,14 +16,17 @@ const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 
 /**
  * 从 NDJSON fixture 文件加载录制的 PTY chunk
- * 每行格式：{"ts":<ms>, "data":"<escaped string>"}
+ * 数据行格式：{"ts":<ms>, "data":"<escaped string>"}
+ * resize 行格式：{"ts":<ms>, "resize":{"cols":<n>, "rows":<n>}}
+ * 只返回 data 行，过滤掉 resize 行
  */
 function loadRecordedChunks(): Array<{ ts: number; data: string }> {
   const content = readFileSync(join(FIXTURES_DIR, "claude-chunks.ndjson"), "utf-8");
   return content
     .trim()
     .split("\n")
-    .map((line) => JSON.parse(line));
+    .map((line) => JSON.parse(line))
+    .filter((record: { data?: string }) => record.data !== undefined);
 }
 
 function waitForOpen(ws: WebSocket): Promise<void> {

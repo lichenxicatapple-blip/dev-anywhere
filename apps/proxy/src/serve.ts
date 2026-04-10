@@ -36,7 +36,7 @@ import {
   type IpcMessage,
   type WorkerMessage,
 } from "./ipc-protocol.js";
-import { createControlMessageHandlers } from "./handlers/control-messages.js";
+import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
 import { extractOscSignals } from "./osc-extractor.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -294,6 +294,7 @@ function handleTerminalConnection(
   workerSockets: Map<string, Socket>,
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
+  controlHandlers?: ControlMessageHandlers,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
     switch (msg.type) {
@@ -404,7 +405,7 @@ function handleTerminalConnection(
           ws.write(serializeWorkerMsg({ type: "worker_stop" }));
         }
         workerSockets.delete(msg.sessionId);
-        controlHandlers.cleanup(msg.sessionId);
+        controlHandlers?.cleanup(msg.sessionId);
         socket.write(
           serializeIpc({
             type: "session_terminate_response",
@@ -429,7 +430,7 @@ function handleTerminalConnection(
       case "pty_deregister": {
         sessionManager.terminateSession(msg.sessionId);
         terminalSockets.delete(msg.sessionId);
-        controlHandlers.cleanup(msg.sessionId);
+        controlHandlers?.cleanup(msg.sessionId);
         logger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
         break;
       }
@@ -623,7 +624,7 @@ export async function startService(): Promise<void> {
   await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection);
+    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers);
   });
 
   server.listen(SOCK_PATH, () => {

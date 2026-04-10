@@ -287,8 +287,8 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
     stdin: process.stdin,
     stdout: filteredStdout,
     onResize: (newCols, newRows) => {
-      // resize 回放窗口到录制尺寸，更新 tracker 和滚动区域
-      process.stdout.write(`\x1b[8;${newRows};${newCols}t`);
+      // resize 回放窗口到录制尺寸，清屏防止旧内容残留，更新 tracker 和滚动区域
+      process.stdout.write(`\x1b[8;${newRows};${newCols}t\x1b[2J\x1b[H`);
       tracker.resize(newCols, newRows);
       const scrollRows = newRows - 1;
       process.stdout.write(`\x1b[1;${scrollRows}r`);
