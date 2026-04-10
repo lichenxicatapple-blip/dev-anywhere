@@ -20,6 +20,7 @@ export interface PtyManagerOptions {
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   onSessionExit?: (code: number) => void;
+  onResize?: (cols: number, rows: number) => void;
 }
 
 export class PtyManager {
@@ -29,6 +30,7 @@ export class PtyManager {
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
   private readonly onSessionExit?: (code: number) => void;
+  private readonly onResize?: (cols: number, rows: number) => void;
 
   constructor(options: PtyManagerOptions) {
     this.claudeArgs = options.claudeArgs;
@@ -36,6 +38,7 @@ export class PtyManager {
     this.stdin = options.stdin;
     this.stdout = options.stdout;
     this.onSessionExit = options.onSessionExit;
+    this.onResize = options.onResize;
   }
 
   start(): void {
@@ -72,7 +75,10 @@ export class PtyManager {
     this.stdout.on("resize", () => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        child.resize(this.stdout.columns ?? 80, this.stdout.rows ?? 24);
+        const newCols = this.stdout.columns ?? 80;
+        const newRows = this.stdout.rows ?? 24;
+        child.resize(newCols, newRows);
+        this.onResize?.(newCols, newRows);
       }, 50);
     });
 
@@ -115,21 +121,38 @@ export class PtyManager {
    *
    * 按录制时间戳逐 chunk 触发 handleData()，下游路径和真实 PTY 完全一致。
    */
-  async startFromFixture(fixturePath: string): Promise<void> {
+  async startFromFixture(
+    fixturePath: string,
+    options?: { speed?: number; isPaused?: () => boolean; getSpeed?: () => number },
+  ): Promise<void> {
     const content = readFileSync(fixturePath, "utf-8");
-    const chunks: Array<{ ts: number; data: string }> = content
+    const records: Array<{ ts: number; data?: string; resize?: { cols: number; rows: number } }> = content
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
 
-    const startTime = Date.now();
-    for (const chunk of chunks) {
-      const targetTime = startTime + chunk.ts;
-      const waitMs = targetTime - Date.now();
+    const getSpeed = options?.getSpeed ?? (() => options?.speed ?? 1);
+    const isPaused = options?.isPaused ?? (() => false);
+
+    let elapsed = 0;
+
+    for (const record of records) {
+      while (isPaused()) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      const speed = getSpeed();
+      const waitMs = speed === 0 ? 0 : (record.ts - elapsed) / speed;
       if (waitMs > 0) {
         await new Promise((r) => setTimeout(r, waitMs));
       }
-      this.handleData(chunk.data);
+      elapsed = record.ts;
+
+      if (record.resize) {
+        this.onResize?.(record.resize.cols, record.resize.rows);
+      } else if (record.data) {
+        this.handleData(record.data);
+      }
     }
 
     this.onSessionExit?.(0);

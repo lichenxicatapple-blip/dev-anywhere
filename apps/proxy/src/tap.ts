@@ -8,12 +8,16 @@ export function createNoopTap(): DataTap {
 }
 
 /**
- * 录制 tap：将每次 onData 回调的 chunk 记录为 NDJSON
+ * 录制 tap：将 PTY 数据和 resize 事件记录为 NDJSON
  *
- * 每行格式：{"ts":<ms>,"data":"<escaped string>"}
- * 用于生成测试 fixture，精确还原真实的数据到达节奏和分片。
+ * 数据行格式：{"ts":<ms>,"data":"<escaped string>"}
+ * resize 行格式：{"ts":<ms>,"resize":{"cols":<n>,"rows":<n>}}
  */
-export function createRecordingTap(outputPath: string): { tap: DataTap; stop: () => void } {
+export function createRecordingTap(outputPath: string): {
+  tap: DataTap;
+  writeResize: (cols: number, rows: number) => void;
+  stop: () => void;
+} {
   const stream: WriteStream = createWriteStream(outputPath, { flags: "w" });
   const startTime = Date.now();
 
@@ -22,9 +26,14 @@ export function createRecordingTap(outputPath: string): { tap: DataTap; stop: ()
     stream.write(record + "\n");
   };
 
+  const writeResize = (cols: number, rows: number) => {
+    const record = JSON.stringify({ ts: Date.now() - startTime, resize: { cols, rows } });
+    stream.write(record + "\n");
+  };
+
   const stop = () => {
     stream.end();
   };
 
-  return { tap, stop };
+  return { tap, writeResize, stop };
 }

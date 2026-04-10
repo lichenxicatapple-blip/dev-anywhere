@@ -7,13 +7,16 @@
  * relay server → WebSocket client → TerminalFrameRenderer → 终端 ANSI 渲染
  *
  * 用法：
- *   cc-anywhere serve replay-e2e <fixture-path>
+ *   cc-anywhere serve replay-e2e <fixture-path> [-s speed]
  *
  * 说明：
+ * - 在独立终端窗口中运行，和工作终端完全隔离
  * - 自动启动本地 relay server 和真实 serve.ts
- * - client 端通过 IPC 连接 serve，使用 createFramePusher（和 terminal.ts 共用）
+ * - terminal 端通过 IPC 连接 serve，使用 createFramePusher（和 terminal.ts 共用）
  * - test client 通过 WebSocket 从 relay 接收帧，用 TerminalFrameRenderer 渲染
  * - 唯一替换的是数据源：fixture 文件代替 PTY 进程
+ *
+ * 回放控制：[space]=暂停/恢复  [+/-]=加减速  [q]=退出
  */
 
 import { connect, type Socket } from "node:net";
@@ -45,7 +48,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function runReplayE2E(fixturePath: string): Promise<void> {
+// 过滤会触发终端响应或干扰回放的转义序列
+function stripTerminalRequests(data: string): string {
+  return data
+    .replace(/\x1b\[c/g, "")           // Primary DA
+    .replace(/\x1b\[>[0-9]*c/g, "")    // Secondary DA
+    .replace(/\x1b\[=c/g, "")          // Tertiary DA
+    .replace(/\x1b\[>[0-9]*q/g, "")    // XTVERSION
+    .replace(/\x1b\[[0-9]*n/g, "")     // DSR (cursor position etc.)
+    .replace(/\x1b\[>[0-9;]*m/g, "")   // Key modifier options
+    .replace(/\x1b\[>[0-9;]*u/g, "")   // Key encoding mode
+    .replace(/\x1b\[\?[0-9;]*\$/g, "") // DECRQM (mode query)
+    .replace(/\x1b\[\?1004[hl]/g, "")  // Focus reporting
+    .replace(/\x1b\[\?2004[hl]/g, "")  // Bracketed paste
+    .replace(/\x1b\[\?2031[hl]/g, "")  // Key reporting
+    .replace(/\x1b\[\?1049[hl]/g, "")  // Alternate screen buffer
+    .replace(/\x1b\[\?25[hl]/g, "");   // Cursor show/hide
+}
+
+// 等待按键后退出
+async function waitForKeyAndExit(rows: number): Promise<never> {
+  process.stdout.write("\x1b[?25h");
+  process.stdout.write(`\x1b[${rows};1H\x1b[7m Press any key to close \x1b[27m\x1b[K`);
+  await new Promise<void>((resolve) => {
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.once("data", () => resolve());
+  });
+  process.exit(0);
+}
+
+export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promise<void> {
+  // 设置窗口标题
+  process.stdout.write(`\x1b]0;CC Anywhere Replay - ${fixturePath.split("/").pop()}\x07`);
+
   // === 1. 启动本地 relay ===
   const { createRelayServer } = await import("@cc-anywhere/relay/server");
   const relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
@@ -71,7 +107,7 @@ export async function runReplayE2E(fixturePath: string): Promise<void> {
   }
   console.error("Connected to serve via IPC");
 
-  // === 3. Client 端：通过 IPC 注册 PTY 会话 ===
+  // === 3. 通过 IPC 注册 PTY 会话 ===
   const sessionId = `replay-${Date.now()}`;
   const socket = ipcSocket;
 
@@ -95,7 +131,7 @@ export async function runReplayE2E(fixturePath: string): Promise<void> {
   socket.write(serializeIpc({ type: "pty_register", sessionId: actualSessionId }));
   console.error(`PTY session registered: ${actualSessionId}`);
 
-  // === 4. 设置 tracker + 推帧（使用和 terminal.ts 共用的 createFramePusher）===
+  // === 4. 设置 tracker + 推帧 ===
   const cols = process.stdout.columns ?? 120;
   const rows = process.stdout.rows ?? 40;
   const tracker = new TerminalTracker(cols, rows);
@@ -133,7 +169,7 @@ export async function runReplayE2E(fixturePath: string): Promise<void> {
     }
   });
 
-  // === 5. Test client：WebSocket 连接 relay 接收帧 ===
+  // === 5. WebSocket 连接 relay 接收帧 ===
   const clientWs = new WebSocket(`${relayUrl}/client`);
   await new Promise<void>((resolve, reject) => {
     clientWs.on("open", resolve);
@@ -164,12 +200,7 @@ export async function runReplayE2E(fixturePath: string): Promise<void> {
   renderer.onUpdate(() => {
     frameCount++;
     renderViewportToTerminal(renderer);
-
-    const termRows = process.stdout.rows ?? 40;
-    process.stdout.write(`\x1b[${termRows};1H`);
-    process.stdout.write(
-      `\x1b[7m Frame #${frameCount} | viewport: ${renderer.getViewportLines().length} lines | cache: ${renderer.cacheSize} \x1b[27m\x1b[K`,
-    );
+    drawStatusBar();
   });
 
   clientWs.on("message", (data) => {
@@ -179,38 +210,106 @@ export async function runReplayE2E(fixturePath: string): Promise<void> {
         renderer.applyFrame(msg as TerminalFrame);
       }
     } catch {
-      // 忽略非 JSON
+      // ignore non-JSON
     }
   });
 
-  // === 6. 回放 fixture ===
-  console.error("Starting replay...");
-  process.stdout.write("\x1b[2J\x1b[H\x1b[?25l");
+  // === 6. 回放控制 ===
+  let speed = initialSpeed;
+  let paused = false;
+
+  const speedSteps = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
+
+  function nextSpeed(): void {
+    const idx = speedSteps.indexOf(speed);
+    if (idx < speedSteps.length - 1) speed = speedSteps[idx + 1];
+  }
+
+  function prevSpeed(): void {
+    const idx = speedSteps.indexOf(speed);
+    if (idx > 0) speed = speedSteps[idx - 1];
+  }
+
+  function drawStatusBar(): void {
+    const termRows = process.stdout.rows ?? 40;
+    const pauseLabel = paused ? " PAUSED " : "";
+    const speedLabel = speed === 0 ? "instant" : `${speed}x`;
+    process.stdout.write(`\x1b[${termRows};1H`);
+    process.stdout.write(
+      `\x1b[7m Frame #${frameCount} | ${speedLabel}${pauseLabel} | [space]=pause [+/-]=speed [q]=quit \x1b[27m\x1b[K`,
+    );
+  }
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", (key: Buffer) => {
+      const ch = key.toString();
+      if (ch === " ") {
+        paused = !paused;
+        drawStatusBar();
+      } else if (ch === "+" || ch === "=") {
+        nextSpeed();
+        drawStatusBar();
+      } else if (ch === "-" || ch === "_") {
+        prevSpeed();
+        drawStatusBar();
+      } else if (ch === "q" || ch === "\x03") {
+        process.exit(0);
+      }
+    });
+  }
+
+  // === 7. 回放 ===
+  const termRows = process.stdout.rows ?? 40;
+  process.stdout.write(`\x1b[2J\x1b[H\x1b[?25l\x1b[1;${termRows - 1}r`);
 
   const tap: DataTap = (data: string) => {
     tracker.feed(data);
   };
 
+  // stdout 输出经过 stripTerminalRequests 过滤，防止干扰回放窗口
+  const filteredStdout = new Proxy(process.stdout, {
+    get(target, prop) {
+      if (prop === "write") {
+        return (data: string | Buffer, ...args: unknown[]) => {
+          const str = typeof data === "string" ? data : data.toString();
+          return target.write(stripTerminalRequests(str), ...args as []);
+        };
+      }
+      return (target as Record<string | symbol, unknown>)[prop];
+    },
+  }) as unknown as NodeJS.WriteStream;
+
   const ptyManager = new PtyManager({
     claudeArgs: [],
     tap,
     stdin: process.stdin,
-    stdout: process.stdout,
+    stdout: filteredStdout,
+    onResize: (newCols, newRows) => {
+      // resize 回放窗口到录制尺寸，更新 tracker 和滚动区域
+      process.stdout.write(`\x1b[8;${newRows};${newCols}t`);
+      tracker.resize(newCols, newRows);
+      const scrollRows = newRows - 1;
+      process.stdout.write(`\x1b[1;${scrollRows}r`);
+    },
     onSessionExit: async () => {
       await sleep(500);
       pusher.stop();
-
-      process.stdout.write("\x1b[?25h\r\n\r\n");
-      console.error(`Replay complete: ${frameCount} frames received by client`);
 
       tracker.dispose();
       socket.write(serializeIpc({ type: "pty_deregister", sessionId: actualSessionId }));
       socket.end();
       clientWs.close();
       await relay.close();
-      process.exit(0);
+
+      console.error(`Replay complete: ${frameCount} frames received by client`);
+      await waitForKeyAndExit(termRows);
     },
   });
 
-  await ptyManager.startFromFixture(fixturePath);
+  await ptyManager.startFromFixture(fixturePath, {
+    isPaused: () => paused,
+    getSpeed: () => speed,
+  });
 }

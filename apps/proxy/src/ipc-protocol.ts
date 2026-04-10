@@ -118,6 +118,14 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     response: z.string(),
   }),
+
+  // terminal → serve：终端尺寸变化
+  z.object({
+    type: z.literal("pty_resize"),
+    sessionId: z.string(),
+    cols: z.number(),
+    rows: z.number(),
+  }),
 ]);
 
 // serve 与 session-worker 之间的通信协议

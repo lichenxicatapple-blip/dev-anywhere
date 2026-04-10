@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -167,11 +167,13 @@ serve
     const { TerminalTracker } = await import("./terminal-tracker.js");
 
     const absPath = resolve(outputPath);
-    const { tap: recordTap, stop: stopRecording } = createRecordingTap(absPath);
-    const tracker = new TerminalTracker(
-      process.stdout.columns ?? 120,
-      process.stdout.rows ?? 40,
-    );
+    const { tap: recordTap, writeResize, stop: stopRecording } = createRecordingTap(absPath);
+    const cols = process.stdout.columns ?? 120;
+    const rows = process.stdout.rows ?? 40;
+    const tracker = new TerminalTracker(cols, rows);
+
+    // 录制初始终端尺寸
+    writeResize(cols, rows);
 
     const ptyManager = new PtyManager({
       claudeArgs: [],
@@ -181,6 +183,10 @@ serve
       },
       stdin: process.stdin,
       stdout: process.stdout,
+      onResize: (newCols, newRows) => {
+        writeResize(newCols, newRows);
+        tracker.resize(newCols, newRows);
+      },
       onSessionExit: (code: number) => {
         stopRecording();
         tracker.dispose();
@@ -192,13 +198,40 @@ serve
     ptyManager.start();
   });
 
+// 在新终端窗口中执行命令，和当前工作终端完全隔离
+function openInNewWindow(args: string[]): void {
+  const scriptPath = join(__dirname, "index.js");
+  const cmd = `${process.execPath} ${scriptPath} serve ${args.join(" ")}`;
+  const termProgram = process.env.TERM_PROGRAM;
+
+  if (termProgram === "iTerm.app") {
+    execSync(`osascript -e 'tell application "iTerm2" to create window with default profile command "${cmd}"'`);
+  } else if (termProgram === "Apple_Terminal") {
+    execSync(`osascript -e 'tell application "Terminal" to do script "${cmd}"'`);
+  } else {
+    console.error(`Unsupported terminal: ${termProgram ?? "unknown"}. Requires iTerm2 or Terminal.app on macOS.`);
+    process.exit(1);
+  }
+  console.log("Replay opened in new window.");
+}
+
 serve
   .command("replay-e2e <fixturePath>")
   .description("Full-chain terminal frame replay for E2E verification")
-  .action(async (fixturePath: string) => {
+  .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
+  .action(async (fixturePath: string, opts: { speed: string }) => {
     const { resolve } = await import("node:path");
+    const absPath = resolve(fixturePath);
+    openInNewWindow(["__replay-e2e", absPath, "-s", opts.speed]);
+  });
+
+// 新窗口中实际执行的回放逻辑（hidden command）
+serve
+  .command("__replay-e2e <fixturePath>", { hidden: true })
+  .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
+  .action(async (fixturePath: string, opts: { speed: string }) => {
     const { runReplayE2E } = await import("./replay-e2e.js");
-    await runReplayE2E(resolve(fixturePath));
+    await runReplayE2E(fixturePath, Number(opts.speed));
   });
 
 // 路由：serve 开头走 Commander，其他全部透传给 claude

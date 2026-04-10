@@ -231,19 +231,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     }
   };
 
-  let lastCols = cols;
-  let lastRows = rows;
-  process.stdout.on("resize", () => {
-    const newCols = process.stdout.columns ?? 80;
-    const newRows = process.stdout.rows ?? 24;
-    if (newCols === lastCols && newRows === lastRows) return;
-    lastCols = newCols;
-    lastRows = newRows;
-    if (tracker) {
-      tracker.resize(newCols, newRows);
-    }
-  });
-
   setupSocketHandlers();
 
   ptyManager = new PtyManager({
@@ -251,6 +238,12 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     tap,
     stdin: process.stdin,
     stdout: process.stdout,
+    onResize: (newCols, newRows) => {
+      if (tracker) tracker.resize(newCols, newRows);
+      if (socket.writable && sessionId) {
+        socket.write(serializeIpc({ type: "pty_resize", sessionId, cols: newCols, rows: newRows }));
+      }
+    },
     onSessionExit: (code: number) => {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (idleCheckTimer) clearInterval(idleCheckTimer);

@@ -377,9 +377,22 @@ function handleTerminalConnection(
       }
 
       case "pty_lines_response": {
-        // client → serve → relay：直接转发终端行拉取响应
+        // terminal → serve → relay：直接转发终端行拉取响应
         if (relayConnection) {
           relayConnection.sendRaw(msg.response);
+        }
+        break;
+      }
+
+      case "pty_resize": {
+        // terminal → serve → relay：转发终端尺寸变化
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "terminal_resize",
+            sessionId: msg.sessionId,
+            cols: msg.cols,
+            rows: msg.rows,
+          }));
         }
         break;
       }
