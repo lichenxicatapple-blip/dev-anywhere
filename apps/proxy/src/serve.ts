@@ -297,7 +297,6 @@ function handleTerminalConnection(
   controlHandlers?: ControlMessageHandlers,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
-    console.error(`[serve] IPC received: ${msg.type}`);
     switch (msg.type) {
       case "session_create_request": {
         if (msg.mode === "pty") {

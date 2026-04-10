@@ -111,7 +111,12 @@ export function handleProxyConnection(
     }
 
     if (result.kind === "invalid") {
-      logger.warn({ error: result.error }, "Invalid message from proxy");
+      logger.error({ error: result.error, raw: raw.slice(0, 200) }, "Invalid message from proxy");
+      proxyWs.send(JSON.stringify({
+        type: "relay_error",
+        code: "INVALID_MESSAGE",
+        message: result.error,
+      }));
       return;
     }
   });

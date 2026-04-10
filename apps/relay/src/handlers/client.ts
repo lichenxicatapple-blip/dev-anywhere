@@ -223,7 +223,12 @@ export function handleClientConnection(
       return;
     }
 
-    logger.warn({ error: result.error }, "Invalid message from client");
+    logger.error({ error: result.error, raw: raw.slice(0, 200) }, "Invalid message from client");
+    clientWs.send(JSON.stringify({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+      message: result.error,
+    }));
   });
 
   clientWs.on("close", () => {

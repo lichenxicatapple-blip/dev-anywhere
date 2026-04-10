@@ -1,3 +1,4 @@
+import type { TerminalFramePayload, RelayControlMessage } from "@cc-anywhere/shared";
 import type { TerminalTracker, TermLine, TermSpan } from "./terminal-tracker.js";
 
 // 5fps 推帧频率
@@ -47,11 +48,9 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
     const currentGrid = tracker.extractGrid();
 
     if (lastGrid === null) {
-      sendFrame(JSON.stringify({
-        type: "terminal_frame",
-        sessionId,
-        payload: { mode: "full", lines: currentGrid },
-      }));
+      const payload: TerminalFramePayload = { mode: "full", lines: currentGrid };
+      const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
+      sendFrame(JSON.stringify(msg));
       lastGrid = cloneGrid(currentGrid);
       return;
     }
@@ -69,11 +68,9 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
 
     if (changedLines.length === 0) return;
 
-    sendFrame(JSON.stringify({
-      type: "terminal_frame",
-      sessionId,
-      payload: { mode: "delta", lines: changedLines },
-    }));
+    const payload: TerminalFramePayload = { mode: "delta", lines: changedLines };
+    const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
+    sendFrame(JSON.stringify(msg));
     lastGrid = cloneGrid(currentGrid);
   }
 

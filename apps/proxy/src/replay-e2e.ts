@@ -141,13 +141,10 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   const rows = process.stdout.rows!;
   const tracker = new TerminalTracker(cols, rows);
 
-  let pushCount = 0;
   const pusher = createFramePusher({
     tracker,
     sessionId: actualSessionId,
     sendFrame: (frameJson) => {
-      pushCount++;
-      console.error(`[debug] frame pushed #${pushCount}, len=${frameJson.length}`);
       socket.write(serializeIpc({
         type: "pty_terminal_frame",
         sessionId: actualSessionId,
@@ -214,7 +211,6 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   clientWs.on("message", (data) => {
     try {
       const msg = JSON.parse(data.toString());
-      console.error(`[debug] ws received: type=${msg.type}`);
       if (msg.type === "terminal_frame") {
         renderer.applyFrame(msg as TerminalFrame);
       }
