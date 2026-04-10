@@ -18,8 +18,8 @@ export class RelayClient {
       try {
         const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
         this.messageHandlers.forEach((h) => h(parsed));
-      } catch {
-        console.warn("RelayClient: failed to parse incoming message");
+      } catch (e) {
+        console.warn("RelayClient: failed to parse incoming message:", raw.slice(0, 200), e);
       }
     });
   }

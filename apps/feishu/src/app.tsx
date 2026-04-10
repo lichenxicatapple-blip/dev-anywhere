@@ -11,6 +11,12 @@ import {
   initialAppState,
 } from "@/stores/app-store";
 import { RelayClientProvider } from "@/stores/relay-store";
+import {
+  SessionProvider,
+  SessionDispatchProvider,
+  sessionReducer,
+  initialSessionState,
+} from "@/stores/session-store";
 import "./app.css";
 
 declare const RELAY_URL: string;
@@ -18,6 +24,7 @@ const DEFAULT_RELAY_URL = RELAY_URL;
 
 function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
+  const [sessionState, sessionDispatch] = useReducer(sessionReducer, initialSessionState);
   const wsRef = useRef<WebSocketManager | null>(null);
   const [relayClient, setRelayClient] = useState<RelayClient | null>(null);
 
@@ -83,7 +90,11 @@ function App({ children }: PropsWithChildren) {
     <RelayClientProvider value={relayClient}>
       <AppProvider value={state}>
         <AppDispatchProvider value={dispatch}>
-          {children}
+          <SessionProvider value={sessionState}>
+            <SessionDispatchProvider value={sessionDispatch}>
+              {children}
+            </SessionDispatchProvider>
+          </SessionProvider>
         </AppDispatchProvider>
       </AppProvider>
     </RelayClientProvider>
