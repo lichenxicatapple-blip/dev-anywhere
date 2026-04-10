@@ -151,6 +151,21 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     payload: PtyStatePayloadSchema,
   }),
 
+  // 终端标题变化，proxy -> client
+  z.object({
+    type: z.literal("terminal_title"),
+    sessionId: z.string(),
+    title: z.string(),
+  }),
+
+  // 终端尺寸变化，proxy -> client
+  z.object({
+    type: z.literal("terminal_resize"),
+    sessionId: z.string(),
+    cols: z.number().int().positive(),
+    rows: z.number().int().positive(),
+  }),
+
   // 终端行按需拉取请求，client -> proxy
   z.object({
     type: z.literal("terminal_lines_request"),
