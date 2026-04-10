@@ -4,6 +4,19 @@ import type { Logger } from "pino";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 
+// proxy → client 透传的控制消息类型，relay 不处理内容，直接转发
+export const PROXY_TO_CLIENT_TYPES = new Set([
+  "terminal_frame",
+  "terminal_title",
+  "terminal_resize",
+  "pty_state",
+  "terminal_lines_response",
+  "dir_list_response",
+  "command_list_push",
+  "file_tree_push",
+  "session_history_response",
+]);
+
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
   isAlive: boolean;
@@ -65,15 +78,6 @@ export function handleProxyConnection(
 
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
-      const PROXY_TO_CLIENT_TYPES = new Set([
-        "terminal_frame",
-        "pty_state",
-        "terminal_lines_response",
-        "dir_list_response",
-        "command_list_push",
-        "file_tree_push",
-        "session_history_response",
-      ]);
       if (PROXY_TO_CLIENT_TYPES.has(result.message.type)) {
         if (!proxyWs.proxyId) {
           proxyWs.send(JSON.stringify({

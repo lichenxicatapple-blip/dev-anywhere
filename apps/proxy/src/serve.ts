@@ -387,6 +387,18 @@ function handleTerminalConnection(
         break;
       }
 
+      case "pty_title_change": {
+        // terminal → serve → relay：转发终端标题变化
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "terminal_title",
+            sessionId: msg.sessionId,
+            title: msg.title,
+          }));
+        }
+        break;
+      }
+
       case "pty_resize": {
         // terminal → serve → relay：转发终端尺寸变化
         if (relayConnection) {

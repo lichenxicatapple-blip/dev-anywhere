@@ -223,6 +223,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
   tracker = new TerminalTracker(cols, rows);
+  tracker.onTitleChange = (title) => {
+    if (socket.writable && sessionId) {
+      socket.write(serializeIpc({ type: "pty_title_change", sessionId, title }));
+    }
+  };
 
   const tap: DataTap = (data: string) => {
     lastOutputTime = Date.now();

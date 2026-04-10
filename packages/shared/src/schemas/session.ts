@@ -60,13 +60,24 @@ export const TermSpanSchema = z.object({
   fg: z.string().optional(),
   bg: z.string().optional(),
   bold: z.boolean().optional(),
+  dim: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  strikethrough: z.boolean().optional(),
 });
 export type TermSpan = z.infer<typeof TermSpanSchema>;
 
 // 终端栅格帧负载：full 模式为完整画面，delta 模式只包含变化行
+// 光标位置，相对于 viewport 左上角
+const CursorSchema = z.object({
+  x: z.number().int(),
+  y: z.number().int(),
+}).optional();
+
 const TerminalFrameFullSchema = z.object({
   mode: z.literal("full"),
   lines: z.array(z.array(TermSpanSchema)),
+  cursor: CursorSchema,
 });
 
 const TerminalFrameDeltaSchema = z.object({
@@ -75,6 +86,7 @@ const TerminalFrameDeltaSchema = z.object({
     lineIndex: z.number(),
     spans: z.array(TermSpanSchema),
   })),
+  cursor: CursorSchema,
 });
 
 export const TerminalFramePayloadSchema = z.discriminatedUnion("mode", [

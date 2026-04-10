@@ -301,6 +301,81 @@ describe("Terminal data flow: extractGrid edge cases", () => {
   });
 });
 
+describe("Terminal data flow: title change via OSC 0", () => {
+  let tracker: TerminalTracker;
+
+  beforeEach(() => {
+    tracker = new TerminalTracker(80, 24);
+  });
+
+  afterEach(() => {
+    tracker.dispose();
+  });
+
+  it("captures OSC 0 title change", async () => {
+    await tracker.feed("\x1b]0;My Title\x07");
+    expect(tracker.title).toBe("My Title");
+  });
+
+  it("fires onTitleChange callback", async () => {
+    const titles: string[] = [];
+    tracker.onTitleChange = (t) => titles.push(t);
+
+    await tracker.feed("\x1b]0;First\x07");
+    await tracker.feed("\x1b]0;Second\x07");
+
+    expect(titles).toEqual(["First", "Second"]);
+  });
+
+  it("captures title embedded in mixed ANSI output", async () => {
+    const titles: string[] = [];
+    tracker.onTitleChange = (t) => titles.push(t);
+
+    await tracker.feed("hello\r\n\x1b]0;Claude Code\x07world\r\n");
+
+    expect(titles).toEqual(["Claude Code"]);
+    expect(tracker.title).toBe("Claude Code");
+
+    const grid = tracker.extractGrid();
+    const text = grid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(text).toContain("hello");
+    expect(text).toContain("world");
+  });
+});
+
+describe("Terminal data flow: extractGrid viewport-only", () => {
+  let tracker: TerminalTracker;
+
+  beforeEach(() => {
+    tracker = new TerminalTracker(80, 10);
+  });
+
+  afterEach(() => {
+    tracker.dispose();
+  });
+
+  it("returns exactly terminal.rows lines", async () => {
+    await tracker.feed("short\r\n");
+    const grid = tracker.extractGrid();
+    expect(grid.length).toBe(10);
+  });
+
+  it("returns only viewport when scrollback exists", async () => {
+    // 写入 30 行到 10 行的终端，产生 scrollback
+    for (let i = 0; i < 30; i++) {
+      await tracker.feed(`line-${i}\r\n`);
+    }
+
+    const grid = tracker.extractGrid();
+    expect(grid.length).toBe(10);
+
+    // viewport 应包含最后写入的内容，不包含最早的行
+    const text = grid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(text).not.toContain("line-0");
+    expect(text).toContain("line-29");
+  });
+});
+
 describe("SeqCounter integration smoke test", () => {
   it("SeqCounter can be imported and used", async () => {
     const { SeqCounter } = await import("#src/seq-counter.js");

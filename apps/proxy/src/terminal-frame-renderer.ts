@@ -15,6 +15,10 @@ export interface TermSpan {
   fg?: string;
   bg?: string;
   bold?: boolean;
+  dim?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
 }
 
 export type TermLine = TermSpan[];
@@ -24,14 +28,21 @@ interface DeltaEntry {
   spans: TermSpan[];
 }
 
+interface CursorPosition {
+  x: number;
+  y: number;
+}
+
 interface FullFramePayload {
   mode: "full";
   lines: TermLine[];
+  cursor?: CursorPosition;
 }
 
 interface DeltaFramePayload {
   mode: "delta";
   lines: DeltaEntry[];
+  cursor?: CursorPosition;
 }
 
 export interface TerminalFrame {
@@ -63,6 +74,7 @@ export class TerminalFrameRenderer {
   private _oldestLineId = 0;
   private _newestLineId = 0;
   private _scrollPosition: number | null = null;
+  private _cursor: CursorPosition | null = null;
   private onChange: (() => void) | null = null;
 
   /**
@@ -86,7 +98,12 @@ export class TerminalFrameRenderer {
         this.viewportLines[delta.lineIndex] = [...delta.spans];
       }
     }
+    this._cursor = frame.payload.cursor ?? null;
     this.onChange?.();
+  }
+
+  get cursor(): CursorPosition | null {
+    return this._cursor;
   }
 
   /**
@@ -181,7 +198,12 @@ export class TerminalFrameRenderer {
 export function renderLineToAnsi(line: TermLine): string {
   return line.map((span) => {
     let result = "";
+    const hasStyle = span.bold || span.dim || span.italic || span.underline || span.strikethrough || span.fg || span.bg;
     if (span.bold) result += "\x1b[1m";
+    if (span.dim) result += "\x1b[2m";
+    if (span.italic) result += "\x1b[3m";
+    if (span.underline) result += "\x1b[4m";
+    if (span.strikethrough) result += "\x1b[9m";
     if (span.fg) {
       const hex = span.fg.replace("#", "");
       const r = parseInt(hex.slice(0, 2), 16);
@@ -197,7 +219,7 @@ export function renderLineToAnsi(line: TermLine): string {
       result += `\x1b[48;2;${r};${g};${b}m`;
     }
     result += span.text;
-    if (span.fg || span.bg || span.bold) result += "\x1b[0m";
+    if (hasStyle) result += "\x1b[0m";
     return result;
   }).join("");
 }
@@ -207,11 +229,19 @@ export function renderLineToAnsi(line: TermLine): string {
  */
 export function renderViewportToTerminal(renderer: TerminalFrameRenderer): void {
   const lines = renderer.getViewportLines();
+  const termRows = process.stdout.rows ?? 24;
   process.stdout.write("\x1b[H"); // 光标到左上角
   for (let i = 0; i < lines.length; i++) {
     process.stdout.write(renderLineToAnsi(lines[i]) + "\x1b[K");
     if (i < lines.length - 1) process.stdout.write("\r\n");
   }
-  // 用绝对定位到 viewport 下方清除剩余行，避免最后一行 \r\n 引起滚动
-  process.stdout.write(`\x1b[${lines.length + 1};1H\x1b[J`);
+  // viewport 未填满终端时，清除下方剩余行
+  if (lines.length < termRows) {
+    process.stdout.write(`\x1b[${lines.length + 1};1H\x1b[J`);
+  }
+  // 定位光标到 xterm 报告的位置
+  const cursor = renderer.cursor;
+  if (cursor) {
+    process.stdout.write(`\x1b[${cursor.y + 1};${cursor.x + 1}H\x1b[?25h`);
+  }
 }

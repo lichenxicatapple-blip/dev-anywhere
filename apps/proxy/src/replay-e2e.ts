@@ -149,6 +149,17 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
   const cols = process.stdout.columns!;
   const rows = process.stdout.rows!;
   const tracker = new TerminalTracker(cols, rows);
+  let claudeTitle = "";
+  tracker.onTitleChange = (title) => {
+    claudeTitle = title;
+    drawStatusBar();
+    // 通过 IPC 推送标题变化到 relay
+    socket.write(serializeIpc({
+      type: "pty_title_change",
+      sessionId: actualSessionId,
+      title,
+    }));
+  };
 
   const pusher = createFramePusher({
     tracker,
@@ -247,7 +258,8 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
     const pauseLabel = paused ? " | PAUSED" : "";
     const speedLabel = speed === 0 ? "instant" : `${speed}x`;
     const mode = remote ? "remote" : "local";
-    process.stdout.write(`\x1b]0;${fileName} | ${speedLabel}${pauseLabel} | ${mode} | [spc]=pause [+/-]=speed [q]=quit | #${frameCount}\x07`);
+    const titleSuffix = claudeTitle ? ` | ${claudeTitle}` : "";
+    process.stdout.write(`\x1b]0;${fileName} | ${speedLabel}${pauseLabel} | ${mode} | [spc]=pause [+/-]=speed [q]=quit | #${frameCount}${titleSuffix}\x07`);
   }
 
   if (process.stdin.isTTY) {
@@ -311,6 +323,7 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
     },
     onSessionExit: async () => {
       await sleep(500);
+      pusher.flush();
       pusher.stop();
 
       tracker.dispose();

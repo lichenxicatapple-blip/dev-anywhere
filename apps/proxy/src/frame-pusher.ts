@@ -29,6 +29,7 @@ export interface FramePusherOptions {
 export interface FramePusher {
   start(): void;
   stop(): void;
+  flush(): void;
 }
 
 /**
@@ -46,9 +47,10 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
     if (!tracker.hasGridChanged()) return;
 
     const currentGrid = tracker.extractGrid();
+    const cursor = tracker.getCursor();
 
     if (lastGrid === null) {
-      const payload: TerminalFramePayload = { mode: "full", lines: currentGrid };
+      const payload: TerminalFramePayload = { mode: "full", lines: currentGrid, cursor };
       const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
       sendFrame(JSON.stringify(msg));
       lastGrid = cloneGrid(currentGrid);
@@ -68,7 +70,7 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
 
     if (changedLines.length === 0) return;
 
-    const payload: TerminalFramePayload = { mode: "delta", lines: changedLines };
+    const payload: TerminalFramePayload = { mode: "delta", lines: changedLines, cursor };
     const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
     sendFrame(JSON.stringify(msg));
     lastGrid = cloneGrid(currentGrid);
@@ -85,6 +87,9 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
         clearInterval(interval);
         interval = null;
       }
+    },
+    flush(): void {
+      push();
     },
   };
 }

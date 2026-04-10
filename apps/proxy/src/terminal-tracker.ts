@@ -88,6 +88,17 @@ export class TerminalTracker {
     this.terminal.onLineFeed(() => {
       this.nextLineId++;
     });
+    this.terminal.onTitleChange((title) => {
+      this._title = title;
+      this.onTitleChange?.(title);
+    });
+  }
+
+  private _title = "";
+  onTitleChange?: (title: string) => void;
+
+  get title(): string {
+    return this._title;
   }
 
   feed(data: string): Promise<void> {
@@ -125,12 +136,20 @@ export class TerminalTracker {
         const fg = cellColorToHex(cell, true);
         const bg = cellColorToHex(cell, false);
         const bold = !!cell.isBold() || undefined;
+        const dim = !!cell.isDim() || undefined;
+        const italic = !!cell.isItalic() || undefined;
+        const underline = (cell.isUnderline() !== 0) || undefined;
+        const strikethrough = !!cell.isStrikethrough() || undefined;
 
         if (
           currentSpan &&
           currentSpan.fg === fg &&
           currentSpan.bg === bg &&
-          currentSpan.bold === bold
+          currentSpan.bold === bold &&
+          currentSpan.dim === dim &&
+          currentSpan.italic === italic &&
+          currentSpan.underline === underline &&
+          currentSpan.strikethrough === strikethrough
         ) {
           currentSpan.text += chars;
         } else {
@@ -140,6 +159,10 @@ export class TerminalTracker {
             ...(fg && { fg }),
             ...(bg && { bg }),
             ...(bold && { bold }),
+            ...(dim && { dim }),
+            ...(italic && { italic }),
+            ...(underline && { underline }),
+            ...(strikethrough && { strikethrough }),
           };
         }
       }
@@ -148,6 +171,15 @@ export class TerminalTracker {
     }
 
     return lines;
+  }
+
+  // 获取光标相对于 viewport 的位置
+  getCursor(): { x: number; y: number } {
+    const buffer = this.terminal.buffer.active;
+    return {
+      x: buffer.cursorX,
+      y: buffer.cursorY,
+    };
   }
 
   // 检测终端网格内容是否自上次调用以来发生变化
@@ -208,12 +240,20 @@ export class TerminalTracker {
       const fg = cellColorToHex(cell, true);
       const bg = cellColorToHex(cell, false);
       const bold = !!cell.isBold() || undefined;
+      const dim = !!cell.isDim() || undefined;
+      const italic = !!cell.isItalic() || undefined;
+      const underline = (cell.isUnderline() !== 0) || undefined;
+      const strikethrough = !!cell.isStrikethrough() || undefined;
 
       if (
         currentSpan &&
         currentSpan.fg === fg &&
         currentSpan.bg === bg &&
-        currentSpan.bold === bold
+        currentSpan.bold === bold &&
+        currentSpan.dim === dim &&
+        currentSpan.italic === italic &&
+        currentSpan.underline === underline &&
+        currentSpan.strikethrough === strikethrough
       ) {
         currentSpan.text += chars;
       } else {
@@ -223,6 +263,10 @@ export class TerminalTracker {
           ...(fg && { fg }),
           ...(bg && { bg }),
           ...(bold && { bold }),
+          ...(dim && { dim }),
+          ...(italic && { italic }),
+          ...(underline && { underline }),
+          ...(strikethrough && { strikethrough }),
         };
       }
     }

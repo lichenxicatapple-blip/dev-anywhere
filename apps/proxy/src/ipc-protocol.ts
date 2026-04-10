@@ -119,6 +119,13 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     response: z.string(),
   }),
 
+  // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
+  z.object({
+    type: z.literal("pty_title_change"),
+    sessionId: z.string(),
+    title: z.string(),
+  }),
+
   // terminal → serve：终端尺寸变化
   z.object({
     type: z.literal("pty_resize"),
