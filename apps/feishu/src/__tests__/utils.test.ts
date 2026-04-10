@@ -14,12 +14,12 @@ describe("formatRelativeTime", () => {
 
   it("returns 'N min ago' for < 60min", () => {
     vi.spyOn(Date, "now").mockReturnValue(1000 * 60 * 5 + 1000);
-    expect(formatRelativeTime(1000)).toBe("5 min ago");
+    expect(formatRelativeTime(1000)).toBe("5 mins ago");
   });
 
-  it("returns 'N hr ago' for < 24hr", () => {
+  it("returns 'N hrs ago' for < 24hr", () => {
     vi.spyOn(Date, "now").mockReturnValue(1000 * 3600 * 3 + 1000);
-    expect(formatRelativeTime(1000)).toBe("3 hr ago");
+    expect(formatRelativeTime(1000)).toBe("3 hrs ago");
   });
 
   it("returns 'N days ago' for >= 24hr", () => {
