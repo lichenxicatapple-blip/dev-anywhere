@@ -128,8 +128,8 @@ Plans:
 - [x] 06-09-PLAN.md — Mini program tool approval UI, tool call cards, back-to-bottom button
 - [x] 06-10-PLAN.md — Mini program state stores, StatusLine, useScreenSize hook, app lifecycle, responsive CSS infrastructure
 - [x] 06-11-PLAN.md — Mini program pickers (slash/file/directory), message quoting, settings menu, responsive adaptations
-- [ ] 06-12-PLAN.md — Gap closure: fix WebSocket duplicate connections, chat-store toolIndex matching, spike-picker compile error, message-parser type safety
-- [ ] 06-13-PLAN.md — Gap closure: wire chat page relay send/receive, session-list response handling, tool approval relay dispatch
+- [x] 06-12-PLAN.md — Gap closure: fix WebSocket duplicate connections, chat-store toolIndex matching, spike-picker compile error, message-parser type safety
+- [x] 06-13-PLAN.md — Gap closure: wire chat page relay send/receive, session-list response handling, tool approval relay dispatch
 
 ### Phase 7: Tool Approval & Dual-Surface Sync
 **Goal**: Users can approve or deny Claude Code tool calls from their phone, and terminal + mobile stay in sync during simultaneous use
