@@ -297,6 +297,7 @@ function handleTerminalConnection(
   controlHandlers?: ControlMessageHandlers,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
+    console.error(`[serve] IPC received: ${msg.type}`);
     switch (msg.type) {
       case "session_create_request": {
         if (msg.mode === "pty") {
@@ -370,9 +371,11 @@ function handleTerminalConnection(
       }
 
       case "pty_terminal_frame": {
-        // client → serve → relay：直接转发终端帧
+        // terminal → serve → relay：直接转发终端帧
         if (relayConnection) {
           relayConnection.sendRaw(msg.frame);
+        } else {
+          console.error("[serve] pty_terminal_frame dropped: relayConnection is null");
         }
         break;
       }

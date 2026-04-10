@@ -82,6 +82,7 @@ describe("MessageEnvelopeSchema", () => {
   describe("TerminalFramePayloadSchema", () => {
     it("validates lines with full span attributes", () => {
       const result = TerminalFramePayloadSchema.parse({
+        mode: "full",
         lines: [[{ text: "hello", fg: "#00FF00", bold: true }]],
       });
       expect(result.lines[0][0].text).toBe("hello");
@@ -91,6 +92,7 @@ describe("MessageEnvelopeSchema", () => {
 
     it("validates minimal span without optional fields", () => {
       const result = TerminalFramePayloadSchema.parse({
+        mode: "full",
         lines: [[{ text: " " }]],
       });
       expect(result.lines[0][0].text).toBe(" ");

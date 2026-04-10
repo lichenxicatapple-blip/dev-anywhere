@@ -48,6 +48,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function resizeTerminalWindow(cols: number, rows: number): void {
+  process.stdout.write(`\x1b[8;${rows};${cols}t`);
+}
+
 // 过滤会触发终端响应或干扰回放的转义序列
 function stripTerminalRequests(data: string): string {
   return data
@@ -137,10 +141,13 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   const rows = process.stdout.rows!;
   const tracker = new TerminalTracker(cols, rows);
 
+  let pushCount = 0;
   const pusher = createFramePusher({
     tracker,
     sessionId: actualSessionId,
     sendFrame: (frameJson) => {
+      pushCount++;
+      console.error(`[debug] frame pushed #${pushCount}, len=${frameJson.length}`);
       socket.write(serializeIpc({
         type: "pty_terminal_frame",
         sessionId: actualSessionId,
@@ -207,6 +214,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   clientWs.on("message", (data) => {
     try {
       const msg = JSON.parse(data.toString());
+      console.error(`[debug] ws received: type=${msg.type}`);
       if (msg.type === "terminal_frame") {
         renderer.applyFrame(msg as TerminalFrame);
       }
@@ -218,6 +226,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   // === 6. 回放控制 ===
   let speed = initialSpeed;
   let paused = false;
+  let currentRows = rows;
 
   const speedSteps = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
 
@@ -232,12 +241,13 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   }
 
   function drawStatusBar(): void {
-    const termRows = process.stdout.rows!;
     const pauseLabel = paused ? " PAUSED " : "";
     const speedLabel = speed === 0 ? "instant" : `${speed}x`;
-    process.stdout.write(`\x1b[${termRows};1H`);
     process.stdout.write(
-      `\x1b[7m Frame #${frameCount} | ${speedLabel}${pauseLabel} | [space]=pause [+/-]=speed [q]=quit \x1b[27m\x1b[K`,
+      `\x1b7` + // 保存光标位置
+      `\x1b[${currentRows};1H` +
+      `\x1b[7m Frame #${frameCount} | ${speedLabel}${pauseLabel} | [space]=pause [+/-]=speed [q]=quit \x1b[27m\x1b[K` +
+      `\x1b8`, // 恢复光标位置
     );
   }
 
@@ -262,8 +272,7 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
   }
 
   // === 7. 回放 ===
-  const termRows = process.stdout.rows!;
-  process.stdout.write(`\x1b[2J\x1b[H\x1b[?25l\x1b[1;${termRows - 1}r`);
+  process.stdout.write("\x1b[2J\x1b[H\x1b[?25l");
 
   const tap: DataTap = (data: string) => {
     tracker.feed(data);
@@ -288,10 +297,10 @@ export async function runReplayE2E(fixturePath: string, initialSpeed = 1): Promi
     stdin: process.stdin,
     stdout: filteredStdout,
     onResize: (newCols, newRows) => {
-      // resize 回放窗口到录制尺寸，清屏防止旧内容残留，更新 tracker 和滚动区域
-      process.stdout.write(`\x1b[8;${newRows};${newCols}t\x1b[2J\x1b[H`);
+      currentRows = newRows;
+      resizeTerminalWindow(newCols, newRows);
+      process.stdout.write("\x1b[2J\x1b[H");
       tracker.resize(newCols, newRows);
-      process.stdout.write(`\x1b[1;${newRows - 1}r`);
       drawStatusBar();
     },
     onSessionExit: async () => {

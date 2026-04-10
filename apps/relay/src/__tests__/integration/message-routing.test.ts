@@ -109,7 +109,7 @@ describe("Phase 6 Integration: Message Routing", () => {
     proxy.send(JSON.stringify({
       type: "terminal_frame",
       sessionId: "s1",
-      payload: { lines: [[{ text: "$ hello", fg: "#00ff00" }]] },
+      payload: { mode: "full", lines: [[{ text: "$ hello", fg: "#00ff00" }]] },
     }));
 
     const received = JSON.parse(await msgPromise);
@@ -286,7 +286,7 @@ describe("Phase 6 Integration: Message Routing", () => {
     proxy.send(JSON.stringify({
       type: "terminal_frame",
       sessionId: "s1",
-      payload: { lines: [[{ text: "frame" }]] },
+      payload: { mode: "full", lines: [[{ text: "frame" }]] },
     }));
     await clientMsgPromise;
     await settle();
@@ -376,7 +376,7 @@ describe("Phase 6 Integration: Message Routing", () => {
 
     proxy.send(JSON.stringify({
       type: "terminal_frame", sessionId: "s1",
-      payload: { lines: [[{ text: "$ npm test" }]] },
+      payload: { mode: "full", lines: [[{ text: "$ npm test" }]] },
     }));
     proxy.send(JSON.stringify({
       type: "pty_state", sessionId: "s1",
@@ -384,7 +384,7 @@ describe("Phase 6 Integration: Message Routing", () => {
     }));
     proxy.send(JSON.stringify({
       type: "terminal_frame", sessionId: "s1",
-      payload: { lines: [[{ text: "$ npm test" }], [{ text: "PASS", fg: "#00ff00" }]] },
+      payload: { mode: "full", lines: [[{ text: "$ npm test" }], [{ text: "PASS", fg: "#00ff00" }]] },
     }));
 
     const received = (await messagesPromise).map((m) => JSON.parse(m));

@@ -63,10 +63,24 @@ export const TermSpanSchema = z.object({
 });
 export type TermSpan = z.infer<typeof TermSpanSchema>;
 
-// 终端栅格帧负载，每行由若干 span 组成
-export const TerminalFramePayloadSchema = z.object({
+// 终端栅格帧负载：full 模式为完整画面，delta 模式只包含变化行
+const TerminalFrameFullSchema = z.object({
+  mode: z.literal("full"),
   lines: z.array(z.array(TermSpanSchema)),
 });
+
+const TerminalFrameDeltaSchema = z.object({
+  mode: z.literal("delta"),
+  lines: z.array(z.object({
+    lineIndex: z.number(),
+    spans: z.array(TermSpanSchema),
+  })),
+});
+
+export const TerminalFramePayloadSchema = z.discriminatedUnion("mode", [
+  TerminalFrameFullSchema,
+  TerminalFrameDeltaSchema,
+]);
 export type TerminalFramePayload = z.infer<typeof TerminalFramePayloadSchema>;
 
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
