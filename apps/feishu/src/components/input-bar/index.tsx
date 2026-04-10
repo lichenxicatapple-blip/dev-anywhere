@@ -1,6 +1,7 @@
-// 统一输入栏组件，PTY 和 JSON 模式共用
-import { useState, useCallback } from "react";
+// 统一输入栏组件，PTY 和 JSON 模式共用，集成 picker 触发和引用预览
+import { useState, useCallback, useRef } from "react";
 import { View, Text, Input } from "@tarojs/components";
+import type { QuotedMessage } from "@/stores/chat-store";
 import "./index.css";
 
 export function computeSendDisabled(
@@ -15,12 +16,28 @@ export function computeSendDisabled(
   return { disabled: false };
 }
 
+// @ 在句首或前面有空格时才算有效触发，@ 后面有空格说明文件引用已完成
+function hasValidAt(val: string): boolean {
+  const idx = val.lastIndexOf("@");
+  if (idx < 0) return false;
+  if (idx > 0 && val[idx - 1] !== " ") return false;
+  const afterAt = val.slice(idx + 1);
+  return !afterAt.includes(" ");
+}
+
+export type PickerMode = "none" | "slash" | "file";
+
 interface InputBarProps {
-  onSend: (text: string) => void;
+  onSend: (text: string, quote?: QuotedMessage) => void;
   disabled: boolean;
   disabledReason?: string;
   mode: "pty" | "json";
   onMenuPress: () => void;
+  onPickerModeChange?: (mode: PickerMode) => void;
+  onFilterChange?: (filter: string) => void;
+  quotedMessage?: QuotedMessage | null;
+  onCancelQuote?: () => void;
+  argumentHint?: string;
 }
 
 export function InputBar({
@@ -29,16 +46,133 @@ export function InputBar({
   disabledReason,
   mode,
   onMenuPress,
+  onPickerModeChange,
+  onFilterChange,
+  quotedMessage,
+  onCancelQuote,
+  argumentHint,
 }: InputBarProps) {
   const [inputText, setInputText] = useState("");
+  const [insertedTokens, setInsertedTokens] = useState<string[]>([]);
+  const [inputFocus, setInputFocus] = useState(false);
+  const prevTextRef = useRef("");
+
+  const refocus = useCallback(() => {
+    setInputFocus(false);
+    setTimeout(() => setInputFocus(true), 50);
+  }, []);
+
+  const detectPickerMode = useCallback(
+    (val: string): PickerMode => {
+      if (!val) return "none";
+      if (hasValidAt(val)) return "file";
+      if (val.startsWith("/") && !val.slice(1).includes(" ")) return "slash";
+      return "none";
+    },
+    [],
+  );
+
+  const handleInput = useCallback(
+    (e: { detail: { value: string } }) => {
+      const val: string = e.detail.value;
+      const prev = prevTextRef.current;
+
+      // 检测退格：文本变短且某个已知 token 被部分删除，整体移除该 token
+      if (val.length < prev.length && insertedTokens.length > 0) {
+        for (const token of insertedTokens) {
+          if (prev.includes(token) && !val.includes(token)) {
+            let cleaned = val;
+            for (let len = token.length - 1; len > 0; len--) {
+              const fragment = token.slice(0, len);
+              if (cleaned.endsWith(fragment)) {
+                cleaned = cleaned.slice(0, -fragment.length);
+                if (cleaned.endsWith(" ")) cleaned = cleaned.slice(0, -1);
+                break;
+              }
+            }
+            setInsertedTokens((tokens) => tokens.filter((x) => x !== token));
+            setInputText(cleaned);
+            prevTextRef.current = cleaned;
+
+            const newMode = detectPickerMode(cleaned);
+            onPickerModeChange?.(newMode);
+            onFilterChange?.(cleaned);
+            return;
+          }
+        }
+      }
+
+      setInputText(val);
+      prevTextRef.current = val;
+
+      const newMode = detectPickerMode(val);
+      onPickerModeChange?.(newMode);
+      onFilterChange?.(val);
+    },
+    [insertedTokens, detectPickerMode, onPickerModeChange, onFilterChange],
+  );
 
   const handleSend = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
     if (disabled && mode === "json") return;
+
+    let finalText = text;
+    if (quotedMessage) {
+      finalText = `<quote from="${quotedMessage.from}">${quotedMessage.text}</quote>\n${text}`;
+    }
+
     setInputText("");
-    onSend(text);
-  }, [inputText, disabled, mode, onSend]);
+    setInsertedTokens([]);
+    prevTextRef.current = "";
+    onPickerModeChange?.("none");
+    onFilterChange?.("");
+    onCancelQuote?.();
+    onSend(finalText, quotedMessage ?? undefined);
+  }, [
+    inputText,
+    disabled,
+    mode,
+    quotedMessage,
+    onSend,
+    onPickerModeChange,
+    onFilterChange,
+    onCancelQuote,
+  ]);
+
+  // 命令选择后填充输入
+  const fillCommand = useCallback(
+    (commandName: string, hint?: string) => {
+      const token = "/" + commandName;
+      const val = token + " ";
+      setInputText(val);
+      prevTextRef.current = val;
+      setInsertedTokens((prev) => [...prev, token]);
+      onPickerModeChange?.("none");
+      onFilterChange?.(val);
+      refocus();
+    },
+    [onPickerModeChange, onFilterChange, refocus],
+  );
+
+  // 文件路径选择后填充输入
+  const fillFilePath = useCallback(
+    (filePath: string) => {
+      const token = "@" + filePath;
+      setInputText((prev) => {
+        const idx = prev.lastIndexOf("@");
+        const before = idx > 0 ? prev.slice(0, idx) : "";
+        const val = before + token + " ";
+        prevTextRef.current = val;
+        return val;
+      });
+      setInsertedTokens((prev) => [...prev, token]);
+      onPickerModeChange?.("none");
+      onFilterChange?.("");
+      refocus();
+    },
+    [onPickerModeChange, onFilterChange, refocus],
+  );
 
   const canSend = inputText.trim().length > 0 && !(disabled && mode === "json");
 
@@ -49,6 +183,11 @@ export function InputBar({
           <Text className="input-bar-reason-text">{disabledReason}</Text>
         </View>
       )}
+      {argumentHint && (
+        <View className="input-bar-hint">
+          <Text className="input-bar-hint-text">{argumentHint}</Text>
+        </View>
+      )}
       <View className="input-bar-row">
         <View className="input-bar-menu-btn" onClick={onMenuPress}>
           <Text className="input-bar-menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
@@ -56,9 +195,11 @@ export function InputBar({
         <Input
           className="input-bar-field"
           value={inputText}
-          onInput={(e) => setInputText(e.detail.value)}
+          focus={inputFocus}
+          onInput={handleInput}
           onConfirm={handleSend}
-          placeholder="Input message..."
+          onBlur={() => setInputFocus(false)}
+          placeholder={argumentHint || "Input message..."}
           confirmType="send"
           adjustPosition
         />
@@ -72,3 +213,9 @@ export function InputBar({
     </View>
   );
 }
+
+// 暴露 fillCommand 和 fillFilePath 的引用类型供外部使用
+export type InputBarRef = {
+  fillCommand: (commandName: string, hint?: string) => void;
+  fillFilePath: (filePath: string) => void;
+};

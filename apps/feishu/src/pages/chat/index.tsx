@@ -1,28 +1,32 @@
-// Chat 页面：PTY 终端视图和 JSON 聊天气泡双模式，集成工具审批、工具卡片、回到底部
+// Chat 页面：PTY 终端视图和 JSON 聊天气泡双模式，集成工具审批、picker、引用、设置菜单
 import { useState, useCallback, useReducer } from "react";
-import { View } from "@tarojs/components";
+import { View, Text } from "@tarojs/components";
 import Taro, { useRouter } from "@tarojs/taro";
 import { SafeAreaHeader } from "@/components/safe-area-header";
 import { TerminalViewport } from "@/components/terminal-viewport";
 import { ChatBubbleList } from "@/components/chat-bubble-list";
 import { InputBar, computeSendDisabled } from "@/components/input-bar";
+import type { PickerMode } from "@/components/input-bar";
 import { StatusLine } from "@/components/status-line";
 import { BackToBottomButton } from "@/components/back-to-bottom";
 import { ToolApprovalCard } from "@/components/tool-approval-card";
+import { SlashCommandPicker } from "@/components/slash-command-picker";
+import { FilePathPicker } from "@/components/file-path-picker";
+import { QuotePreviewBar } from "@/components/quote-preview-bar";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import {
   chatReducer,
   initialChatState,
-  useChatState,
-  useChatDispatch,
 } from "@/stores/chat-store";
+import type { QuotedMessage } from "@/stores/chat-store";
 import {
   terminalReducer,
   initialTerminalState,
-  useTerminalState,
-  useTerminalDispatch,
   FONT_SIZES,
 } from "@/stores/terminal-store";
+import { useCommandState } from "@/stores/command-store";
+import { useFileState, useFileDispatch } from "@/stores/file-store";
+import { useRelayClient } from "@/stores/relay-store";
 import "./index.css";
 
 type SessionMode = "pty" | "json";
@@ -48,12 +52,21 @@ export default function Chat() {
   const mode = (router.params.mode as SessionMode) || "json";
   const sessionId = router.params.sessionId || "";
   const screen = useScreenSize();
+  const relay = useRelayClient();
 
-  // 使用局部 reducer 来避免 context 依赖缺失
   const [chatState, chatDispatch] = useReducer(chatReducer, initialChatState);
   const [terminalState, terminalDispatch] = useReducer(terminalReducer, initialTerminalState);
+  const commandState = useCommandState();
+  const fileState = useFileState();
+  const fileDispatch = useFileDispatch();
 
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [pickerMode, setPickerMode] = useState<PickerMode>("none");
+  const [filterText, setFilterText] = useState("");
+  const [filePickerPath, setFilePickerPath] = useState("/");
+  const [argumentHint, setArgumentHint] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [permissionMode, setPermissionMode] = useState<"default" | "auto_accept" | "plan">("default");
 
   const isPty = mode === "pty";
   const isDark = isPty;
@@ -74,7 +87,7 @@ export default function Chat() {
   const pendingApprovals = chatState.pendingApprovals.filter((a) => a.status === "pending");
 
   const handleSend = useCallback(
-    (text: string) => {
+    (text: string, quote?: QuotedMessage) => {
       chatDispatch({
         type: "ADD_USER_MESSAGE",
         message: {
@@ -84,9 +97,12 @@ export default function Chat() {
           isPartial: false,
           timestamp: Date.now(),
           toolCalls: [],
+          quotedMessage: quote,
         },
       });
       chatDispatch({ type: "SET_WORKING", isWorking: true });
+      chatDispatch({ type: "CLEAR_QUOTE" });
+      setArgumentHint("");
       // TODO: relay client sendEnvelope with user_input
     },
     [chatDispatch],
@@ -98,9 +114,6 @@ export default function Chat() {
 
   const handleBackToBottom = useCallback(() => {
     setIsNearBottom(true);
-    // ChatBubbleList 内部 bottomAnchorRef.scrollIntoView 依赖 messages 变化触发
-    // 这里通过强制触发一次 APPEND 空文本来让 effect 重跑
-    // 更稳妥的方式是 ChatBubbleList 提供一个 scrollToBottom 回调
   }, []);
 
   const handlePinchZoom = useCallback(
@@ -117,7 +130,6 @@ export default function Chat() {
   const handleToolAllow = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
-      // TODO: relayClient.sendEnvelope({ type: "tool_approve", ... })
     },
     [chatDispatch],
   );
@@ -125,7 +137,6 @@ export default function Chat() {
   const handleToolAllowAll = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
-      // TODO: relayClient.sendEnvelope({ type: "tool_approve", ... }) + whitelist flag
     },
     [chatDispatch],
   );
@@ -133,7 +144,6 @@ export default function Chat() {
   const handleToolDeny = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "denied" });
-      // TODO: relayClient.sendEnvelope({ type: "tool_deny", ... })
     },
     [chatDispatch],
   );
@@ -145,9 +155,92 @@ export default function Chat() {
     [chatDispatch],
   );
 
-  const handleMenuPress = useCallback(() => {
-    // TODO: slash command picker
+  // Picker 相关
+  const handlePickerModeChange = useCallback((newMode: PickerMode) => {
+    setPickerMode(newMode);
+    if (newMode === "file") {
+      setFilePickerPath("/");
+    }
   }, []);
+
+  const handleFilterChange = useCallback((text: string) => {
+    setFilterText(text);
+  }, []);
+
+  const handleSelectCommand = useCallback(
+    (cmd: { name: string; argumentHint?: string }) => {
+      setPickerMode("none");
+      setArgumentHint(cmd.argumentHint || "");
+    },
+    [],
+  );
+
+  const handleSelectFile = useCallback(
+    (_path: string) => {
+      setPickerMode("none");
+    },
+    [],
+  );
+
+  const handleFileNavigate = useCallback(
+    (path: string) => {
+      setFilePickerPath(path);
+      if (!fileState.tree.has(path) && relay) {
+        relay.sendControl({ type: "dir_list_request", path });
+      }
+    },
+    [fileState.tree, relay],
+  );
+
+  // 引用
+  const handleQuote = useCallback(
+    (quote: QuotedMessage) => {
+      chatDispatch({ type: "SET_QUOTE", quote });
+    },
+    [chatDispatch],
+  );
+
+  const handleCancelQuote = useCallback(() => {
+    chatDispatch({ type: "CLEAR_QUOTE" });
+  }, [chatDispatch]);
+
+  // 设置菜单
+  const handleMenuPress = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setShowSettings(false);
+  }, []);
+
+  const handlePermissionChange = useCallback(
+    (newMode: "default" | "auto_accept" | "plan") => {
+      setPermissionMode(newMode);
+      if (relay) {
+        relay.sendControl({ type: "permission_mode_change", mode: newMode });
+      }
+    },
+    [relay],
+  );
+
+  const handleFontSizeChange = useCallback(
+    (direction: "increase" | "decrease") => {
+      const newIdx =
+        direction === "increase"
+          ? Math.min(terminalState.fontSizeIndex + 1, FONT_SIZES.length - 1)
+          : Math.max(terminalState.fontSizeIndex - 1, 0);
+      terminalDispatch({ type: "SET_FONT_SIZE_INDEX", index: newIdx });
+    },
+    [terminalState.fontSizeIndex, terminalDispatch],
+  );
+
+  const handleWindowToggle = useCallback(() => {
+    if (screen.windowWidth >= 860) {
+      Taro.getApp().tt?.setWindowSize?.({ width: 350, height: 600 });
+    } else {
+      Taro.getApp().tt?.setWindowSize?.({ width: 900, height: 700 });
+    }
+  }, [screen.windowWidth]);
 
   return (
     <View className={`chat-page ${isDark ? "chat-page-dark" : ""} ${screen.className}`}>
@@ -172,6 +265,7 @@ export default function Chat() {
                 isWorking={chatState.isWorking}
                 onScrollThresholdChange={handleScrollThreshold}
                 onToggleToolCollapse={handleToggleToolCollapse}
+                onQuote={handleQuote}
               />
               {pendingApprovals.map((approval) => (
                 <ToolApprovalCard
@@ -186,6 +280,31 @@ export default function Chat() {
             </>
           )}
         </View>
+
+        {/* Picker panels above input bar */}
+        <SlashCommandPicker
+          commands={commandState.commands}
+          filter={filterText}
+          onSelect={handleSelectCommand}
+          visible={pickerMode === "slash"}
+        />
+        <FilePathPicker
+          tree={fileState.tree}
+          currentPath={filePickerPath}
+          filter={filterText}
+          onSelect={handleSelectFile}
+          onNavigate={handleFileNavigate}
+          visible={pickerMode === "file"}
+        />
+
+        {/* Quote preview bar */}
+        {chatState.quotedMessage && (
+          <QuotePreviewBar
+            quote={chatState.quotedMessage}
+            onCancel={handleCancelQuote}
+          />
+        )}
+
         <View className="input-bar-wrapper">
           <InputBar
             onSend={handleSend}
@@ -193,6 +312,11 @@ export default function Chat() {
             disabledReason={sendDisabled.reason}
             mode={mode}
             onMenuPress={handleMenuPress}
+            onPickerModeChange={handlePickerModeChange}
+            onFilterChange={handleFilterChange}
+            quotedMessage={chatState.quotedMessage}
+            onCancelQuote={handleCancelQuote}
+            argumentHint={argumentHint}
           />
         </View>
       </View>
@@ -211,6 +335,71 @@ export default function Chat() {
               onDeny={() => handleToolDeny(pendingApprovals[0].requestId)}
               sessionMode="pty"
             />
+          </View>
+        </View>
+      )}
+
+      {/* Settings menu overlay */}
+      {showSettings && (
+        <View className="settings-overlay" onClick={handleCloseSettings}>
+          <View
+            className="settings-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <View className="settings-header">
+              <Text className="settings-title">Settings</Text>
+            </View>
+
+            {/* Permission mode */}
+            <View className="settings-section">
+              <Text className="settings-section-label">Permission Mode</Text>
+              <View className="settings-chips">
+                {(["default", "auto_accept", "plan"] as const).map((m) => (
+                  <View
+                    key={m}
+                    className={`settings-chip ${permissionMode === m ? "active" : ""}`}
+                    onClick={() => handlePermissionChange(m)}
+                  >
+                    <Text className={`settings-chip-text ${permissionMode === m ? "active" : ""}`}>
+                      {m === "default" ? "Default" : m === "auto_accept" ? "Auto Accept" : "Plan"}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Font size */}
+            <View className="settings-section">
+              <Text className="settings-section-label">Font Size</Text>
+              <View className="settings-font-controls">
+                <View
+                  className="settings-font-btn"
+                  onClick={() => handleFontSizeChange("decrease")}
+                >
+                  <Text className="settings-font-btn-text">A-</Text>
+                </View>
+                <Text className="settings-font-size-display">
+                  {FONT_SIZES[terminalState.fontSizeIndex]}px
+                </Text>
+                <View
+                  className="settings-font-btn"
+                  onClick={() => handleFontSizeChange("increase")}
+                >
+                  <Text className="settings-font-btn-text">A+</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* PC window toggle -- only visible on PC */}
+            {screen.deviceType === "pc" && (
+              <View className="settings-section">
+                <View className="settings-window-btn" onClick={handleWindowToggle}>
+                  <Text className="settings-window-btn-text">
+                    {screen.windowWidth >= 860 ? "Shrink Window" : "Expand Window"}
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       )}

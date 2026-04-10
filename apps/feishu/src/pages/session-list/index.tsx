@@ -1,8 +1,8 @@
-// 会话列表页：活跃/历史分区，左滑终止，状态圆点，模式标记，新建会话 FAB
+// 会话列表页：活跃/历史分区，左滑终止，状态圆点，模式标记，新建会话带目录选择
 import { useState, useEffect, useCallback } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import type { RelayControlMessage, HistorySession } from "@cc-anywhere/shared";
+import type { RelayControlMessage, HistorySession, DirEntry } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState } from "@/stores/app-store";
 import {
@@ -13,6 +13,7 @@ import { useScreenSize } from "@/hooks/use-screen-size";
 import { StatusLine } from "@/components/status-line";
 import { SessionListItem, HistoryListItem } from "@/components/session-list-item";
 import { EmptyState } from "@/components/empty-state";
+import { DirectoryPicker } from "@/components/directory-picker";
 import "./index.css";
 
 export default function SessionList() {
@@ -23,6 +24,8 @@ export default function SessionList() {
   const screen = useScreenSize();
   const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [swipeOpenId, setSwipeOpenId] = useState("");
+  const [showDirPicker, setShowDirPicker] = useState(false);
+  const [dirEntries, setDirEntries] = useState<Map<string, DirEntry[]>>(new Map());
 
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
@@ -39,6 +42,15 @@ export default function SessionList() {
       const ctrl = msg as RelayControlMessage;
       if (ctrl.type === "session_history_response") {
         setHistorySessions(ctrl.sessions);
+      }
+      // 目录列表响应
+      if (ctrl.type === "dir_list_response") {
+        const { path, entries } = ctrl as RelayControlMessage & { path: string; entries: DirEntry[] };
+        setDirEntries((prev) => {
+          const next = new Map(prev);
+          next.set(path, entries);
+          return next;
+        });
       }
     });
 
@@ -98,17 +110,40 @@ export default function SessionList() {
     [relay],
   );
 
-  // 新建会话
-  const handleNewSession = useCallback(() => {
-    if (relay) {
-      relay.sendEnvelope({
-        type: "session_create",
-        sessionId: "",
-        payload: {},
-      } as never);
-    }
-    Taro.navigateTo({ url: "/pages/chat/index" });
-  }, [relay]);
+  // 点击新建按钮时弹出目录选择器
+  const handleNewSessionPress = useCallback(() => {
+    setShowDirPicker(true);
+  }, []);
+
+  // 请求目录列表
+  const handleRequestDir = useCallback(
+    (path: string) => {
+      if (relay) {
+        relay.sendControl({ type: "dir_list_request", path });
+      }
+    },
+    [relay],
+  );
+
+  // 选择目录后创建会话
+  const handleDirSelect = useCallback(
+    (cwd: string) => {
+      setShowDirPicker(false);
+      if (relay) {
+        relay.sendEnvelope({
+          type: "session_create",
+          sessionId: "",
+          payload: { cwd },
+        } as never);
+      }
+      Taro.navigateTo({ url: "/pages/chat/index" });
+    },
+    [relay],
+  );
+
+  const handleDirPickerCancel = useCallback(() => {
+    setShowDirPicker(false);
+  }, []);
 
   // 推导当前整体状态用于 StatusLine
   const overallState = sessionState.sessions.some((s) => s.state === "working")
@@ -132,7 +167,7 @@ export default function SessionList() {
             title="No Active Sessions"
             subtitle="Create a new session or connect from your computer"
             ctaText="New Session"
-            onCta={handleNewSession}
+            onCta={handleNewSessionPress}
           />
         ) : (
           <View className="session-list-container">
@@ -173,9 +208,18 @@ export default function SessionList() {
       </ScrollView>
 
       {/* Floating action button for new session */}
-      <View className="session-fab" onClick={handleNewSession}>
+      <View className="session-fab" onClick={handleNewSessionPress}>
         <Text className="session-fab-text">+</Text>
       </View>
+
+      {/* Directory picker modal for new session cwd selection */}
+      <DirectoryPicker
+        visible={showDirPicker}
+        onSelect={handleDirSelect}
+        onCancel={handleDirPickerCancel}
+        onRequestDir={handleRequestDir}
+        dirEntries={dirEntries}
+      />
     </View>
   );
 }

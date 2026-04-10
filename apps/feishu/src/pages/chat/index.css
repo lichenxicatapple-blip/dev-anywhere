@@ -68,3 +68,147 @@
   width: 90%;
   max-width: 400px;
 }
+
+/* Settings menu overlay */
+.settings-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: settingsOverlayIn 200ms ease-out;
+}
+
+@keyframes settingsOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.settings-panel {
+  width: 100%;
+  max-width: var(--picker-max-width, 100%);
+  background: #FFFFFF;
+  border-radius: 16px 16px 0 0;
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  animation: settingsPanelIn 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes settingsPanelIn {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.settings-header {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.settings-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.settings-section {
+  margin-bottom: 16px;
+}
+
+.settings-section-label {
+  font-size: 13px;
+  color: #999999;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.settings-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-chip {
+  flex: 1;
+  height: 36px;
+  border-radius: 18px;
+  background: #F5F5F5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-chip.active {
+  background: #E6F4FF;
+  border: 1px solid #1890FF;
+}
+
+.settings-chip-text {
+  font-size: 13px;
+  color: #666666;
+}
+
+.settings-chip-text.active {
+  color: #1890FF;
+  font-weight: 500;
+}
+
+.settings-font-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.settings-font-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #F5F5F5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-font-btn:active {
+  background: #E8E8E8;
+}
+
+.settings-font-btn-text {
+  font-size: 14px;
+  color: #333333;
+  font-weight: 600;
+}
+
+.settings-font-size-display {
+  font-size: 14px;
+  color: #333333;
+  min-width: 40px;
+  text-align: center;
+}
+
+.settings-window-btn {
+  height: 44px;
+  background: #F5F5F5;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-window-btn:active {
+  background: #E8E8E8;
+}
+
+.settings-window-btn-text {
+  font-size: 14px;
+  color: #1890FF;
+  font-weight: 500;
+}

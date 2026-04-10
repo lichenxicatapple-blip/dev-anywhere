@@ -1,0 +1,53 @@
+.quote-preview-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background: #FFFFFF;
+  border-top: 1px solid #E8E8E8;
+  gap: 8px;
+}
+
+.quote-preview-indicator {
+  width: 4px;
+  min-height: 24px;
+  background: #1890FF;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.quote-preview-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quote-preview-source {
+  font-size: 12px;
+  font-weight: 600;
+  color: #333333;
+  flex-shrink: 0;
+}
+
+.quote-preview-text {
+  font-size: 12px;
+  color: #999999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-preview-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.quote-preview-close-icon {
+  font-size: 12px;
+  color: #999999;
+}

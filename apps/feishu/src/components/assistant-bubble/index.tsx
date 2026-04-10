@@ -1,6 +1,7 @@
-// 助手消息气泡，左对齐灰色背景，支持流式游标，工具调用使用 ToolCallCard
+// 助手消息气泡，左对齐灰色背景，支持流式游标，工具调用使用 ToolCallCard，支持长按引用
+import { useState, useCallback, useRef } from "react";
 import { View, Text } from "@tarojs/components";
-import type { ToolCallInfo } from "@/stores/chat-store";
+import type { ToolCallInfo, QuotedMessage } from "@/stores/chat-store";
 import { ToolCallCard } from "@/components/tool-call-card";
 import "./index.css";
 
@@ -12,6 +13,7 @@ interface AssistantBubbleProps {
   showTimestamp: boolean;
   onToggleTimestamp: () => void;
   onToggleToolCollapse?: (toolIndex: number) => void;
+  onQuote?: (quote: QuotedMessage) => void;
 }
 
 export function AssistantBubble({
@@ -22,9 +24,41 @@ export function AssistantBubble({
   showTimestamp,
   onToggleTimestamp,
   onToggleToolCollapse,
+  onQuote,
 }: AssistantBubbleProps) {
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTouchStart = useCallback(() => {
+    longPressTimer.current = setTimeout(() => {
+      setShowContextMenu(true);
+    }, 500);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  const handleQuote = useCallback(() => {
+    setShowContextMenu(false);
+    onQuote?.({ from: "assistant", text });
+  }, [onQuote, text]);
+
+  const handleDismissMenu = useCallback(() => {
+    setShowContextMenu(false);
+  }, []);
+
   return (
-    <View className="assistant-bubble-wrapper" onClick={onToggleTimestamp}>
+    <View
+      className="assistant-bubble-wrapper"
+      onClick={onToggleTimestamp}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
       <View className="assistant-bubble bubble-enter-assistant">
         <Text selectable className="assistant-bubble-text">
           {text}
@@ -43,6 +77,19 @@ export function AssistantBubble({
           <Text className="assistant-bubble-time">
             {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
+        </View>
+      )}
+
+      {showContextMenu && (
+        <View className="assistant-bubble-context-overlay" onClick={handleDismissMenu}>
+          <View
+            className="assistant-bubble-context-menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <View className="assistant-bubble-context-item" onClick={handleQuote}>
+              <Text className="assistant-bubble-context-item-text">Quote</Text>
+            </View>
+          </View>
         </View>
       )}
     </View>

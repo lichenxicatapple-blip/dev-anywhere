@@ -1,7 +1,7 @@
 // JSON 模式聊天气泡列表，使用 View overflow 而非 ScrollView
 import { useRef, useEffect, useCallback, useState } from "react";
 import { View } from "@tarojs/components";
-import type { ChatMessage } from "@/stores/chat-store";
+import type { ChatMessage, QuotedMessage } from "@/stores/chat-store";
 import { UserBubble } from "@/components/user-bubble";
 import { AssistantBubble } from "@/components/assistant-bubble";
 import "./index.css";
@@ -11,6 +11,7 @@ interface ChatBubbleListProps {
   isWorking: boolean;
   onScrollThresholdChange: (isNearBottom: boolean) => void;
   onToggleToolCollapse?: (messageId: string, toolIndex: number) => void;
+  onQuote?: (quote: QuotedMessage) => void;
 }
 
 export function ChatBubbleList({
@@ -18,6 +19,7 @@ export function ChatBubbleList({
   isWorking: _isWorking,
   onScrollThresholdChange,
   onToggleToolCollapse,
+  onQuote,
 }: ChatBubbleListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
@@ -70,6 +72,8 @@ export function ChatBubbleList({
               timestamp={msg.timestamp}
               showTimestamp={visibleTimestamps.has(msg.id)}
               onToggleTimestamp={() => handleToggleTimestamp(msg.id)}
+              quotedMessage={msg.quotedMessage}
+              onQuote={onQuote}
             />
           ) : (
             <AssistantBubble
@@ -80,6 +84,7 @@ export function ChatBubbleList({
               showTimestamp={visibleTimestamps.has(msg.id)}
               onToggleTimestamp={() => handleToggleTimestamp(msg.id)}
               onToggleToolCollapse={(toolIndex) => onToggleToolCollapse?.(msg.id, toolIndex)}
+              onQuote={onQuote}
             />
           )}
         </View>
