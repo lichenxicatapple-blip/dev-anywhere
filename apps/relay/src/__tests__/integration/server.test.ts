@@ -66,7 +66,7 @@ describe("Relay Server Integration", () => {
     const response = JSON.parse(await msgPromise);
 
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1" }]);
+    expect(response.proxies).toEqual([{ proxyId: "p1", online: true }]);
   });
 
   it("client selects proxy and messages route bidirectionally", async () => {

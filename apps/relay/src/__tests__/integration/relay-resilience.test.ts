@@ -19,7 +19,7 @@ import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 import { WebSocket } from "ws";
-import { waitForOpen, waitForMessage, collectMessages, settle, makeEnvelope } from "../helpers.js";
+import { waitForOpen, waitForMessage, waitForMessageType, collectMessages, settle, makeEnvelope } from "../helpers.js";
 
 const E2E_TIMEOUT = 30_000;
 const RELAY_ENTRY = pathResolve(import.meta.dirname, "../..", "index.ts");
@@ -527,8 +527,8 @@ describe("client lifecycle", () => {
     const resp = JSON.parse(await msgP);
     expect(resp.status).toBe("proxy_offline");
 
-    // proxy 重连 → client 收到 proxy_online
-    const onlineP = waitForMessage(client2);
+    // proxy 重连 → client 收到 proxy_online（跳过 broadcast 的 proxy_list_response）
+    const onlineP = waitForMessageType(client2, "proxy_online");
     const proxy2 = ws.proxy(port);
     await waitForOpen(proxy2);
     proxy2.send(JSON.stringify({ type: "proxy_register", proxyId }));
@@ -1302,7 +1302,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     proxy1.pong = () => {};
     proxy1.on("ping", () => {});
 
-    const offlineMsg = JSON.parse(await waitForMessage(client));
+    const offlineMsg = JSON.parse(await waitForMessageType(client, "proxy_offline"));
     expect(offlineMsg.type).toBe("proxy_offline");
 
     // -- 阶段 3: 状态保留 --
@@ -1312,7 +1312,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     expect(status.buffers.totalBuffered).toBeGreaterThanOrEqual(3);
 
     // -- 阶段 4: proxy 重连 --
-    const onlinePromise = waitForMessage(client);
+    const onlinePromise = waitForMessageType(client, "proxy_online");
     const proxy2 = ws.proxy(port);
     await waitForOpen(proxy2);
 
@@ -1327,7 +1327,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     expect(onlineMsg.type).toBe("proxy_online");
 
     // -- 阶段 5: 恢复后消息路由正常 --
-    const newMsgP = waitForMessage(client);
+    const newMsgP = waitForMessageType(client, "assistant_message");
     proxy2.send(JSON.stringify(makeEnvelope(4, "cable-s")));
     const newMsg = JSON.parse(await newMsgP);
     expect(newMsg.seq).toBe(4);

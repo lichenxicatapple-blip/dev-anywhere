@@ -22,6 +22,16 @@ interface ProxySocket extends WebSocket {
   proxyId?: string;
 }
 
+// proxy 上线或下线时，将最新的 proxy 列表推送给所有已连接的 client。
+// 复用 proxy_list_response 消息类型，client 端已有对应处理逻辑，无需额外适配。
+function broadcastProxyList(registry: RelayRegistry): void {
+  const proxies = registry.listProxiesWithName();
+  const msg = JSON.stringify({ type: "proxy_list_response", proxies });
+  for (const clientWs of registry.getAllClientWs()) {
+    clientWs.send(msg);
+  }
+}
+
 // 处理代理端 WebSocket 连接生命周期
 export function handleProxyConnection(
   ws: WebSocket,
@@ -59,6 +69,8 @@ export function handleProxyConnection(
           clientWs.send(JSON.stringify({ type: "proxy_online", proxyId }));
         }
       }
+
+      broadcastProxyList(registry);
       return;
     }
 
@@ -71,6 +83,7 @@ export function handleProxyConnection(
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, resources cleaned up");
         proxyWs.proxyId = undefined;
+        broadcastProxyList(registry);
       }
       return;
     }
@@ -137,6 +150,7 @@ export function handleProxyConnection(
       // 标记离线，保留所有状态等待重连
       registry.markProxyOffline(proxyWs.proxyId);
       logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, state preserved for reconnect");
+      broadcastProxyList(registry);
     }
   });
 

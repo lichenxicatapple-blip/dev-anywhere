@@ -31,8 +31,42 @@
 /* Empty state on dark background needs inverted colors */
 .proxy-page .empty-state-title {
   color: rgba(255, 255, 255, 0.85);
+  font-size: 36px;
 }
 
 .proxy-page .empty-state-subtitle {
   color: rgba(255, 255, 255, 0.45);
+}
+
+/* 连接中状态 */
+.connecting-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 200px 32px;
+}
+
+.connecting-title-row {
+  display: flex;
+  flex-direction: row;
+}
+
+.connecting-title {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 36px;
+  font-weight: 600;
+}
+
+.connecting-dots {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 36px;
+  font-weight: 600;
+  width: 48px;
+  text-align: left;
+}
+
+.connecting-subtitle {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 28px;
+  margin-top: 16px;
 }

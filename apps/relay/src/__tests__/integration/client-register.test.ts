@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import pino from "pino";
-import { waitForOpen, waitForMessage, collectMessages, getPort, settle } from "../helpers.js";
+import { waitForOpen, waitForMessage, waitForMessageType, collectMessages, getPort, settle } from "../helpers.js";
 
 const logger = pino({ level: "silent" });
 
@@ -316,14 +316,14 @@ describe("client_register protocol", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await settle();
 
-    // proxy 异常断线
-    const offlinePromise = waitForMessage(client);
+    // proxy 异常断线（跳过 broadcast 的 proxy_list_response）
+    const offlinePromise = waitForMessageType(client, "proxy_offline");
     proxy1.close();
     const offlineMsg = JSON.parse(await offlinePromise);
     expect(offlineMsg.type).toBe("proxy_offline");
 
-    // proxy 重连
-    const onlinePromise = waitForMessage(client);
+    // proxy 重连（跳过 broadcast 的 proxy_list_response）
+    const onlinePromise = waitForMessageType(client, "proxy_online");
     const proxy2 = connectProxy();
     await waitForOpen(proxy2);
     proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));

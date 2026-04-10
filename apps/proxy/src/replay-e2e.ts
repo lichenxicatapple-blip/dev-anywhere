@@ -108,9 +108,8 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
   console.error(`Relay started on localhost:${relayPort}`);
 
   // === 2. 启动真实 serve.ts ===
-  process.env.RELAY_URL = relayUrl;
   const { startService } = await import("./serve.js");
-  startService();
+  startService({ relayUrl });
   let ipcSocket: Socket | null = null;
   for (let i = 0; i < 30; i++) {
     await sleep(200);
@@ -264,6 +263,15 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
     process.stdout.write(`\x1b]0;${fileName} | ${speedLabel}${pauseLabel} | ${mode} | [spc]=pause [+/-]=speed [q]=quit | #${frameCount}${titleSuffix}\x07`);
   }
 
+  function cleanup(): void {
+    pusher.stop();
+    tracker.dispose();
+    socket.write(serializeIpc({ type: "pty_deregister", sessionId: actualSessionId }));
+    socket.end();
+    if (clientWs) clientWs.close();
+    if (relay) relay.close();
+  }
+
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -279,6 +287,7 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
         prevSpeed();
         drawStatusBar();
       } else if (ch === "q" || ch === "\x03") {
+        cleanup();
         process.exit(0);
       }
     });
@@ -326,14 +335,7 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
     onSessionExit: async () => {
       await sleep(500);
       pusher.flush();
-      pusher.stop();
-
-      tracker.dispose();
-      socket.write(serializeIpc({ type: "pty_deregister", sessionId: actualSessionId }));
-      socket.end();
-      clientWs.close();
-      await relay.close();
-
+      cleanup();
       await waitForKeyAndExit(frameCount);
     },
   });

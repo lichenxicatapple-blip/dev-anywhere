@@ -50,7 +50,7 @@ export class PtyManager {
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
-      cwd: process.cwd(),
+      cwd: process.env.INIT_CWD || process.cwd(),
       env: process.env as Record<string, string>,
     });
     this.child = child;

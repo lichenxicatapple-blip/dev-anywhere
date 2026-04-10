@@ -6,7 +6,7 @@ import {
 } from "./session.js";
 
 // 控制消息中复用的子类型
-export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional() });
+export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional(), online: z.boolean() });
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });

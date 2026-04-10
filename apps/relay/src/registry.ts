@@ -121,11 +121,12 @@ export class RelayRegistry {
     return Array.from(this.proxyStates.keys());
   }
 
-  // 返回 proxyId 和 name 的列表，用于 proxy_list_response
-  listProxiesWithName(): Array<{ proxyId: string; name?: string }> {
+  // 返回 proxyId、name、online 的列表，用于 proxy_list_response
+  listProxiesWithName(): Array<{ proxyId: string; name?: string; online: boolean }> {
     return Array.from(this.proxyStates.entries()).map(([proxyId, state]) => ({
       proxyId,
       ...(state.name !== undefined ? { name: state.name } : {}),
+      online: state.ws !== null && state.ws !== undefined && state.ws.readyState === WebSocket.OPEN,
     }));
   }
 
@@ -218,6 +219,16 @@ export class RelayRegistry {
       if (binding.ws) count++;
     }
     return count;
+  }
+
+  getAllClientWs(): WebSocket[] {
+    const clients: WebSocket[] = [];
+    for (const [, binding] of this.clientBindings) {
+      if (binding.ws && binding.ws.readyState === WebSocket.OPEN) {
+        clients.push(binding.ws);
+      }
+    }
+    return clients;
   }
 
 

@@ -30,6 +30,32 @@ export function waitForMessage(ws: WebSocket, timeoutMs = 3000): Promise<string>
 }
 
 /**
+ * 等待收到指定 type 字段的消息，跳过不匹配的消息
+ */
+export function waitForMessageType(ws: WebSocket, type: string, timeoutMs = 3000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.removeListener("message", onMessage);
+      reject(new Error(`waitForMessageType(${type}) timeout`));
+    }, timeoutMs);
+    function onMessage(data: { toString(): string }) {
+      const raw = data.toString();
+      try {
+        const parsed = JSON.parse(raw) as { type?: string };
+        if (parsed.type === type) {
+          clearTimeout(timer);
+          ws.removeListener("message", onMessage);
+          resolve(raw);
+        }
+      } catch {
+        // 非 JSON 消息，跳过
+      }
+    }
+    ws.on("message", onMessage);
+  });
+}
+
+/**
  * 收集指定数量的消息，超时后返回已收集的部分
  */
 export function collectMessages(ws: WebSocket, count: number, timeoutMs = 2000): Promise<string[]> {

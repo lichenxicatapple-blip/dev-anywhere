@@ -1,6 +1,6 @@
 // Proxy 选择页：深色终端主题，品牌打字机 header，proxy 列表，D-02 冷启动自动导航
 import { useState, useEffect, useCallback } from "react";
-import { View } from "@tarojs/components";
+import { View, Text } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
 import type { ProxyInfo, RelayControlMessage } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
@@ -16,10 +16,20 @@ const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
 export default function ProxySelect() {
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [dots, setDots] = useState("");
   const relay = useRelayClient();
   const appState = useAppState();
   const appDispatch = useAppDispatch();
   const screen = useScreenSize();
+
+  // 连接中省略号动画
+  useEffect(() => {
+    if (appState.connected) return;
+    const timer = setInterval(() => {
+      setDots((prev) => (prev.length >= 3 ? "" : prev + "."));
+    }, 500);
+    return () => clearInterval(timer);
+  }, [appState.connected]);
 
   // 请求 proxy 列表
   const fetchProxies = useCallback(() => {
@@ -49,6 +59,7 @@ export default function ProxySelect() {
               proxyId: savedProxyId,
               proxyName: onlineProxy.name || null,
             });
+            appDispatch({ type: "SET_PROXY_ONLINE", online: true });
             relay.selectProxy(savedProxyId);
             Taro.navigateTo({ url: "/pages/chat/index" });
             return;
@@ -81,6 +92,7 @@ export default function ProxySelect() {
         proxyId: proxy.proxyId,
         proxyName: proxy.name || null,
       });
+      appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (relay) {
         relay.selectProxy(proxy.proxyId);
       }
@@ -100,10 +112,12 @@ export default function ProxySelect() {
 
         <View className="proxy-list">
           {!appState.connected && (
-            <EmptyState
-              title="Connecting to Relay Server..."
-              subtitle="Waiting for WebSocket connection"
-            />
+            <View className="connecting-state">
+              <View className="connecting-title-row">
+                <Text className="connecting-title">Connecting to Relay Server</Text>
+                <Text className="connecting-dots">{dots}</Text>
+              </View>
+            </View>
           )}
           {appState.connected && loaded && !hasOnlineProxy && (
             <EmptyState

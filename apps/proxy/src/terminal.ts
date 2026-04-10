@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
 import { TerminalTracker } from "./terminal-tracker.js";
-import { SOCK_PATH, STOPPED_PATH, LOG_PATH, ensureDirectories } from "./paths.js";
+import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -37,8 +37,9 @@ async function ensureService(autoStart = true): Promise<Socket> {
 
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
-  const servePath = join(__dirname, "serve.js");
-  const child = spawn(process.execPath, [servePath], {
+  const isDev = __filename.endsWith(".ts");
+  const servePath = join(__dirname, isDev ? "serve.ts" : "serve.js");
+  const child = spawn(isDev ? "tsx" : process.execPath, [servePath], {
     detached: true,
     stdio: "ignore",
   });
@@ -217,8 +218,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   }
   sessionId = response.sessionId;
 
-  // 初始化本地事件存储和终端快照
-  ensureDirectories();
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
   tracker = new TerminalTracker(cols, rows);

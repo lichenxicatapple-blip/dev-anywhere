@@ -58,10 +58,14 @@ export default function Chat() {
   const relay = useRelayClient();
   const appState = useAppState();
 
-  // 发送前检查连接状态，未连接时提示用户
+  // 发送前检查连接状态和 proxy 在线状态，未就绪时提示用户
   const checkConnected = useCallback((): boolean => {
     if (!appState.connected) {
       Taro.showToast({ title: "Not connected to relay server", icon: "none", duration: 1500 });
+      return false;
+    }
+    if (!appState.proxyOnline) {
+      Taro.showToast({ title: "Proxy is offline", icon: "none", duration: 1500 });
       return false;
     }
     return true;

@@ -1,7 +1,8 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 // 所有 cc-anywhere 文件路径的集中定义
 const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
+export const CONFIG_PATH = `${CC_DIR}/config.json`;
 
 // 运行时文件
 export const RUN_DIR = `${CC_DIR}/run`;
@@ -31,6 +32,24 @@ export function sessionPaths(sessionId: string) {
     events: `${dir}/events.bin`,
     workerSock: `${dir}/worker.sock`,
   };
+}
+
+export function isInitialized(): boolean {
+  return existsSync(CONFIG_PATH);
+}
+
+const DEFAULT_CONFIG = `{
+  "relayUrl": "ws://localhost:3100"
+}
+`;
+
+export function initWorkspace(): void {
+  mkdirSync(RUN_DIR, { recursive: true });
+  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(DATA_DIR, { recursive: true });
+  if (!existsSync(CONFIG_PATH)) {
+    writeFileSync(CONFIG_PATH, DEFAULT_CONFIG);
+  }
 }
 
 export function ensureDirectories(): void {

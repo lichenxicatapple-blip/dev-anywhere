@@ -25,7 +25,6 @@ import {
   SESSIONS_PATH,
   LOG_PATH,
   DATA_DIR,
-  ensureDirectories,
   sessionPaths,
 } from "./paths.js";
 import {
@@ -517,8 +516,11 @@ function handleTerminalConnection(
 
 // ---------- 服务入口 ----------
 
-export async function startService(): Promise<void> {
-  ensureDirectories();
+export interface ServiceOptions {
+  relayUrl?: string;
+}
+
+export async function startService(options?: ServiceOptions): Promise<void> {
 
   logger = pino(
     { level: "info" },
@@ -555,8 +557,9 @@ export async function startService(): Promise<void> {
     logger,
   );
 
-  // 如果配置了 RELAY_URL 则连接到中转服务器
-  const relayUrl = process.env.RELAY_URL;
+  // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
+  const { loadConfig } = await import("./config.js");
+  const relayUrl = options?.relayUrl ?? loadConfig().relayUrl;
   let relayConnection: RelayConnection | null = null;
 
   if (relayUrl) {

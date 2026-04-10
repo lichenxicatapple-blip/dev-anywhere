@@ -11,11 +11,15 @@ import {
   SOCK_PATH,
   STOPPED_PATH,
   LOG_PATH,
+  CONFIG_PATH,
+  isInitialized,
+  initWorkspace,
 } from "./paths.js";
 import { createIpcReader, serializeIpc } from "./ipc-protocol.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string };
 
 function stopService(): boolean {
   if (!existsSync(PID_PATH)) {
@@ -102,8 +106,9 @@ async function startDaemon(): Promise<void> {
     }
   }
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
-  const servePath = join(__dirname, "serve.js");
-  const child = spawn(process.execPath, [servePath], {
+  const isDev = __filename.endsWith(".ts");
+  const servePath = join(__dirname, isDev ? "serve.ts" : "serve.js");
+  const child = spawn(isDev ? "tsx" : process.execPath, [servePath], {
     detached: true,
     stdio: "ignore",
   });
@@ -111,11 +116,28 @@ async function startDaemon(): Promise<void> {
   console.log(`Service started in background (PID ${child.pid})`);
 }
 
+const program = new Command("cc-anywhere")
+  .description("CC Anywhere - transparent Claude Code proxy with remote control")
+  .version(pkg.version)
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(async () => {
+    if (!isInitialized()) {
+      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      process.exit(1);
+    }
+    await startTerminal(cliArgs);
+  });
+
 // serve 子命令组
 const serve = new Command("serve")
   .description("Manage the cc-anywhere background service")
   .option("-d, --daemon", "Run in background")
   .action(async (opts) => {
+    if (!isInitialized()) {
+      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      process.exit(1);
+    }
     if (opts.daemon) {
       await startDaemon();
     } else {
@@ -241,9 +263,22 @@ serve
     await runReplayE2E(fixturePath, { speed: Number(opts.speed), remote: opts.remote });
   });
 
-// 路由：serve 开头走 Commander，其他全部透传给 claude
-if (process.argv[2] === "serve") {
-  serve.parse(process.argv.slice(3), { from: "user" });
-} else {
-  await startTerminal(process.argv.slice(2));
-}
+program.addCommand(serve);
+
+program
+  .command("init")
+  .description("Initialize cc-anywhere workspace (~/.cc-anywhere)")
+  .action(() => {
+    if (isInitialized()) {
+      console.log(`Already initialized. Config at ${CONFIG_PATH}`);
+      return;
+    }
+    initWorkspace();
+    console.log("Initialized ~/.cc-anywhere/");
+    console.log(`Edit ${CONFIG_PATH} to configure relay server URL.`);
+  });
+
+// pnpm run dev -- args 会在参数前插入 "--"，过滤掉前导分隔符再交给 Commander
+const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === "--") cliArgs.shift();
+program.parse(cliArgs, { from: "user" });

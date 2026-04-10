@@ -4,6 +4,7 @@ import Taro from "@tarojs/taro";
 
 export interface AppState {
   connected: boolean;
+  proxyOnline: boolean;
   selectedProxyId: string | null;
   selectedProxyName: string | null;
   clientId: string;
@@ -13,6 +14,7 @@ export interface AppState {
 export type AppAction =
   | { type: "SET_CONNECTED"; connected: boolean }
   | { type: "SET_PROXY"; proxyId: string | null; proxyName: string | null }
+  | { type: "SET_PROXY_ONLINE"; online: boolean }
   | { type: "SET_RELAY_URL"; url: string };
 
 function loadClientId(): string {
@@ -25,6 +27,7 @@ function loadClientId(): string {
 
 export const initialAppState: AppState = {
   connected: false,
+  proxyOnline: false,
   selectedProxyId: null,
   selectedProxyName: null,
   clientId: loadClientId(),
@@ -37,6 +40,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, connected: action.connected };
     case "SET_PROXY":
       return { ...state, selectedProxyId: action.proxyId, selectedProxyName: action.proxyName };
+    case "SET_PROXY_ONLINE":
+      return { ...state, proxyOnline: action.online };
     case "SET_RELAY_URL":
       return { ...state, relayUrl: action.url };
     default:

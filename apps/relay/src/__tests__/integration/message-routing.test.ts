@@ -258,7 +258,7 @@ describe("Phase 6 Integration: Message Routing", () => {
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1", name: "My MacBook" }]);
+    expect(response.proxies).toEqual([{ proxyId: "p1", name: "My MacBook", online: true }]);
   });
 
   // ==========================================================

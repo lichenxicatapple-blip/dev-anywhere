@@ -65,15 +65,15 @@ describe("RelayControlSchema", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_list_response",
       proxies: [
-        { proxyId: "p1", name: "my-laptop" },
-        { proxyId: "p2" },
+        { proxyId: "p1", name: "my-laptop", online: true },
+        { proxyId: "p2", online: false },
       ],
     });
     expect(result.type).toBe("proxy_list_response");
     if (result.type === "proxy_list_response") {
       expect(result.proxies).toHaveLength(2);
-      expect(result.proxies[0]).toEqual({ proxyId: "p1", name: "my-laptop" });
-      expect(result.proxies[1]).toEqual({ proxyId: "p2" });
+      expect(result.proxies[0]).toEqual({ proxyId: "p1", name: "my-laptop", online: true });
+      expect(result.proxies[1]).toEqual({ proxyId: "p2", online: false });
     }
   });
 

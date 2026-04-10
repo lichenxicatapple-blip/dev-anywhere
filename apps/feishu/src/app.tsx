@@ -1,6 +1,7 @@
 // App 入口：初始化 WebSocket 连接和 RelayClient，管理应用生命周期
 import { PropsWithChildren, useEffect, useReducer, useRef, useState } from "react";
 import Taro from "@tarojs/taro";
+import type { ProxyInfo } from "@cc-anywhere/shared";
 import { WebSocketManager } from "@/services/websocket";
 import { RelayClient } from "@/services/relay-client";
 import {
@@ -34,12 +35,37 @@ function App({ children }: PropsWithChildren) {
       dispatch({ type: "SET_CONNECTED", connected });
       if (connected) {
         relay.register();
+        // 重连后主动请求 proxy 列表，通过 proxy_list_response 恢复 proxyOnline 状态
+        relay.listProxies();
+      } else {
+        // relay 断开后 proxy 状态未知，重置为离线，重连后通过 proxy_list_response 恢复
+        dispatch({ type: "SET_PROXY_ONLINE", online: false });
       }
     });
 
     ws.connect(relayUrl);
 
+    // 全局监听 proxy 上下线状态，主动通知用户
+    const unsub = relay.onMessage((msg) => {
+      const ctrl = msg as Record<string, unknown>;
+      if (ctrl.type === "proxy_offline" && ctrl.proxyId === state.selectedProxyId) {
+        dispatch({ type: "SET_PROXY_ONLINE", online: false });
+        Taro.showToast({ title: "Proxy disconnected", icon: "none", duration: 2000 });
+      }
+      if (ctrl.type === "proxy_online" && ctrl.proxyId === state.selectedProxyId) {
+        dispatch({ type: "SET_PROXY_ONLINE", online: true });
+        Taro.showToast({ title: "Proxy reconnected", icon: "none", duration: 2000 });
+      }
+      // 收到 proxy 列表时，检查当前选中的 proxy 是否在线
+      if (ctrl.type === "proxy_list_response" && state.selectedProxyId) {
+        const proxies = ctrl.proxies as ProxyInfo[];
+        const selected = proxies.find((p) => p.proxyId === state.selectedProxyId);
+        dispatch({ type: "SET_PROXY_ONLINE", online: selected?.online ?? false });
+      }
+    });
+
     return () => {
+      unsub();
       ws.close();
     };
   }, []);
