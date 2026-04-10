@@ -94,14 +94,23 @@ describe("RelayClient", () => {
   });
 
   it("onMessage unsubscribe stops receiving messages", () => {
-    const innerUnsub = vi.fn();
-    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation(() => innerUnsub);
+    let capturedHandler: ((raw: string) => void) | null = null;
+    (ws.onMessage as ReturnType<typeof vi.fn>).mockImplementation((handler: (raw: string) => void) => {
+      capturedHandler = handler;
+      return () => { capturedHandler = null; };
+    });
 
     const messageHandler = vi.fn();
     const unsub = client.onMessage(messageHandler);
 
+    capturedHandler!('{"type":"test"}');
+    expect(messageHandler).toHaveBeenCalledTimes(1);
+
     unsub();
-    expect(innerUnsub).toHaveBeenCalled();
+
+    // unsub 后即使底层 ws 仍在派发消息，handler 也不应再被调用
+    if (capturedHandler) capturedHandler('{"type":"test2"}');
+    expect(messageHandler).toHaveBeenCalledTimes(1);
   });
 
   it("sendControl sends JSON-stringified control message", () => {

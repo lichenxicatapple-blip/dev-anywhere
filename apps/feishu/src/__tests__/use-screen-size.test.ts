@@ -52,7 +52,23 @@ describe("classifyScreen", () => {
   });
 
   it("returns phone-landscape for width 768", () => {
-    expect(classifyScreen(768, 1024, "_")).toBe("phone-landscape");
+    expect(classifyScreen(768, 400, "_")).toBe("phone-landscape");
+  });
+
+  it("returns phone-landscape at exact boundary width 500", () => {
+    expect(classifyScreen(500, 400, "_")).toBe("phone-landscape");
+  });
+
+  it("returns phone-portrait just below boundary width 499", () => {
+    expect(classifyScreen(499, 400, "_")).toBe("phone-portrait");
+  });
+
+  it("returns desktop at exact boundary width 860", () => {
+    expect(classifyScreen(860, 600, "_")).toBe("desktop");
+  });
+
+  it("returns phone-landscape just below boundary width 859", () => {
+    expect(classifyScreen(859, 600, "_")).toBe("phone-landscape");
   });
 });
 

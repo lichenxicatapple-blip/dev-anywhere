@@ -40,7 +40,7 @@ describe("summarizeToolInput", () => {
 
   it("does not match tool names that merely contain 'edit' as substring", () => {
     const result = summarizeToolInput("credit_check", { score: 750 });
-    expect(result.type).toBe("edit");
+    expect(result.type).toBe("generic");
   });
 
   it("returns generic type for unknown tools with exact JSON summary", () => {

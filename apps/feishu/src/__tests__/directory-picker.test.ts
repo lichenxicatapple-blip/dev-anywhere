@@ -19,10 +19,6 @@ describe("buildBreadcrumbSegments", () => {
     expect(result[3]).toEqual({ label: "project", path: "/home/user/project" });
   });
 
-  it("last segment path equals original path", () => {
-    const result = buildBreadcrumbSegments("/home/user/project");
-    expect(result[result.length - 1].path).toBe("/home/user/project");
-  });
 });
 
 describe("buildParentPath", () => {
@@ -32,6 +28,10 @@ describe("buildParentPath", () => {
 
   it("returns / for /", () => {
     expect(buildParentPath("/")).toBe("/");
+  });
+
+  it("returns / for single-level path /home", () => {
+    expect(buildParentPath("/home")).toBe("/");
   });
 });
 

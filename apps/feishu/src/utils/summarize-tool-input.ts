@@ -18,7 +18,7 @@ export function summarizeToolInput(
 ): ToolSummary {
   const name = toolName.toLowerCase();
 
-  if (name === "edit" || name === "edit_file" || name.includes("edit")) {
+  if (name === "edit" || name === "edit_file") {
     return {
       type: "edit",
       summary: (input.file_path as string) || "unknown file",
@@ -26,7 +26,7 @@ export function summarizeToolInput(
     };
   }
 
-  if (name === "bash" || name === "execute" || name.includes("bash")) {
+  if (name === "bash" || name === "execute") {
     const cmd = String(input.command || "");
     return {
       type: "bash",
@@ -35,7 +35,7 @@ export function summarizeToolInput(
     };
   }
 
-  if (name === "write" || name === "write_file" || name.includes("write")) {
+  if (name === "write" || name === "write_file") {
     return {
       type: "write",
       summary: (input.file_path as string) || "unknown file",
