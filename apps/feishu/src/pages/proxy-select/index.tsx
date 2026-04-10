@@ -57,9 +57,12 @@ export default function ProxySelect() {
       }
     });
 
-    fetchProxies();
+    // 连接建立后才发请求，避免在 WebSocket 未就绪时发送被丢弃
+    if (appState.connected) {
+      fetchProxies();
+    }
     return unsub;
-  }, [relay, appDispatch, fetchProxies]);
+  }, [relay, appState.connected, appDispatch, fetchProxies]);
 
   // 下拉刷新
   usePullDownRefresh(() => {
