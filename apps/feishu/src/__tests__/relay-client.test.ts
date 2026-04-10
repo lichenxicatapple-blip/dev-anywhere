@@ -102,7 +102,7 @@ describe("RelayClient", () => {
   });
 
   it("sendControl sends JSON-stringified control message", () => {
-    const msg = { type: "interrupt", sessionId: "s1" };
+    const msg = { type: "session_list" as const };
     client.sendControl(msg);
     expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
   });

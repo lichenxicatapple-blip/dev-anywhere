@@ -48,7 +48,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     message: z.string(),
   }),
 
-  // Phase 5: 客户端注册协议
+  // 客户端注册协议
   z.object({
     type: z.literal("client_register"),
     clientId: z.string().min(1),
@@ -65,7 +65,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     sessions: z.record(z.string(), z.number()).optional(),
   }),
 
-  // Phase 5: 消息回放协议
+  // 消息回放协议
   z.object({
     type: z.literal("replay_request"),
     sessionId: z.string().min(1),
@@ -79,7 +79,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     messages: z.array(z.record(z.string(), z.unknown())),
   }),
 
-  // Phase 5: Gap 检测响应
+  // Gap 检测响应
   z.object({
     type: z.literal("gap_unrecoverable"),
     sessionId: z.string().min(1),
@@ -87,67 +87,71 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     toSeq: z.number().int().nonnegative(),
   }),
 
-  // Phase 5: Proxy 离线通知
+  // Proxy 离线通知
   z.object({
     type: z.literal("proxy_offline"),
     proxyId: z.string(),
   }),
 
-  // Phase 5: Proxy 主动断开，relay 立即清理资源
+  // Proxy 主动断开，relay 立即清理资源
   z.object({
     type: z.literal("proxy_disconnect"),
     proxyId: z.string().min(1),
   }),
 
-  // Phase 5: Proxy 重连后通知 client 恢复
+  // Proxy 重连后通知 client 恢复
   z.object({
     type: z.literal("proxy_online"),
     proxyId: z.string().min(1),
   }),
 
-  // Phase 6: 目录列表请求与响应
-  z.object({ type: z.literal("dir_list_request"), proxyId: z.string().min(1), path: z.string() }),
+  // 目录列表请求与响应
+  z.object({ type: z.literal("dir_list_request"), proxyId: z.string().min(1).optional(), path: z.string() }),
   z.object({
     type: z.literal("dir_list_response"),
     entries: z.array(DirEntrySchema),
     path: z.string(),
   }),
 
-  // Phase 6: 命令列表推送，proxy 将可用命令列表推给 client
+  // 命令列表推送，proxy 将可用命令列表推给 client
   z.object({
     type: z.literal("command_list_push"),
     commands: z.array(CommandEntrySchema),
   }),
 
-  // Phase 6: 文件树推送
+  // 文件树推送
   z.object({
     type: z.literal("file_tree_push"),
     path: z.string(),
     entries: z.array(DirEntrySchema),
   }),
 
-  // Phase 6: 会话历史浏览
+  // 会话列表请求与权限模式变更
+  z.object({ type: z.literal("session_list") }),
+  z.object({ type: z.literal("permission_mode_change"), mode: z.enum(["default", "auto_accept", "plan"]) }),
+
+  // 会话历史浏览
   z.object({ type: z.literal("session_history_request") }),
   z.object({
     type: z.literal("session_history_response"),
     sessions: z.array(HistorySessionSchema),
   }),
 
-  // Phase 6 Plan 05.1: PTY 实时画面推送，从 Envelope 迁移到 Control 层
+  // PTY 实时画面推送，从 Envelope 迁移到 Control 层
   z.object({
     type: z.literal("terminal_frame"),
     sessionId: z.string(),
     payload: TerminalFramePayloadSchema,
   }),
 
-  // Phase 6 Plan 05.1: PTY 语义状态，从 Envelope 迁移到 Control 层
+  // PTY 语义状态，从 Envelope 迁移到 Control 层
   z.object({
     type: z.literal("pty_state"),
     sessionId: z.string(),
     payload: PtyStatePayloadSchema,
   }),
 
-  // Phase 6 Plan 05.1: 终端行按需拉取请求，client -> proxy
+  // 终端行按需拉取请求，client -> proxy
   z.object({
     type: z.literal("terminal_lines_request"),
     sessionId: z.string(),
@@ -155,7 +159,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     count: z.number().int().positive(),
   }),
 
-  // Phase 6 Plan 05.1: 终端行响应，proxy -> client
+  // 终端行响应，proxy -> client
   z.object({
     type: z.literal("terminal_lines_response"),
     sessionId: z.string(),

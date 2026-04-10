@@ -52,7 +52,7 @@ export class RelayClient {
   }
 
   // 发送控制消息
-  sendControl(msg: Record<string, unknown>): void {
+  sendControl(msg: RelayControlMessage): void {
     this.ws.send(JSON.stringify(msg));
   }
 
