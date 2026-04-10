@@ -14,6 +14,7 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "command_list_push",
   "file_tree_push",
   "session_history_response",
+  "session_list",
 ]);
 
 // 扩展 WebSocket 实例存储代理元数据
