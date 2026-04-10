@@ -284,7 +284,11 @@ export class JsonSession {
           return;
         }
         this.child.stdin.write(data + "\n", (err) => {
-          err ? reject(err) : resolve();
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
         });
       });
     });

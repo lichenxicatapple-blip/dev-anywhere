@@ -1,6 +1,7 @@
 // OSC 0: 窗口标题 -- ESC ] 0 ; <title> BEL/ST
 // OSC 9: 通知 -- ESC ] 9 ; <text> BEL/ST
 // 每次调用创建新的 regex 实例避免 g flag 导致的 lastIndex 状态泄漏
+// eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
 export type PtySemanticState =

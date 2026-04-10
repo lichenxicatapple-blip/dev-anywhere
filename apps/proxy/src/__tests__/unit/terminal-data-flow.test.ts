@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { TerminalTracker } from "#src/terminal-tracker.js";
 
 /**
@@ -200,7 +200,6 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     }
 
     const oldest = tracker.getOldestLineId();
-    const newest = tracker.getNewestLineId();
 
     // 向上翻：拉取最早的 20 行
     const olderLines = tracker.extractLines(oldest, 20);

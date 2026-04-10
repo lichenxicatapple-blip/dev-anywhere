@@ -15,12 +15,6 @@ const FONT_SIZES = [8, 10, 12, 14, 16, 20];
 
 type PtyState = "working" | "idle" | "waiting_approval";
 
-const STATUS_CONFIG: Record<PtyState, { bg: string; color: string; text: string }> = {
-  working: { bg: "#E6F7FF", color: "#1890FF", text: "工作中..." },
-  idle: { bg: "#F6FFED", color: "#52C41A", text: "空闲" },
-  waiting_approval: { bg: "#FFFBE6", color: "#FAAD14", text: "等待工具审批" },
-};
-
 function buildTerminalGrid(): TermLine[] {
   return [
     [
@@ -114,8 +108,6 @@ export default function SpikeChatPty() {
 
   const fontSize = FONT_SIZES[pinchFontIdx >= 0 ? pinchFontIdx : fontIdx];
   const terminalGrid = buildTerminalGrid();
-  const statusCfg = STATUS_CONFIG[ptyState];
-
   const handleTouchStart = useCallback(
     (e) => {
       if (e.touches.length === 2) {

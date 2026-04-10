@@ -134,7 +134,9 @@ const server = createServer((socket) => {
 
 function cleanup(): void {
   server.close();
-  try { unlinkSync(sockPath); } catch {}
+  try { unlinkSync(sockPath); } catch {
+    // socket 文件可能已被删除
+  }
 }
 
 process.on("SIGTERM", () => {

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
 import { TerminalTracker } from "./terminal-tracker.js";
-import { SOCK_PATH, STOPPED_PATH, LOG_PATH, sessionPaths, ensureDirectories } from "./paths.js";
+import { SOCK_PATH, STOPPED_PATH, LOG_PATH, ensureDirectories } from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -219,7 +219,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   // 初始化本地事件存储和终端快照
   ensureDirectories();
-  const paths = sessionPaths(sessionId);
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
   tracker = new TerminalTracker(cols, rows);

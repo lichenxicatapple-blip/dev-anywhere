@@ -23,7 +23,9 @@ describe("scanSessionHistory", () => {
     process.env.HOME = originalHome;
     try {
       rmSync(testDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // rmSync 在目录不存在时会抛错，测试清理阶段可安全忽略
+    }
   });
 
   it("returns empty array when ~/.claude/projects/ does not exist", async () => {

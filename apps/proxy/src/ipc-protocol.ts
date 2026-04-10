@@ -228,7 +228,9 @@ export function createWorkerReader(
       if (result.success) {
         onMessage(result.data);
       }
-    } catch {}
+    } catch {
+      // JSON 解析失败的行直接丢弃，不中断流处理
+    }
   });
   (stream as NodeJS.ReadableStream).pipe(lineBuffer);
 }

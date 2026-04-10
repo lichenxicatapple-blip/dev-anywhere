@@ -37,7 +37,6 @@ function ModeTag({ mode }: { mode: Session["mode"] }) {
 
 function SessionItem({
   session,
-  isHistory,
   onSwipeToggle,
 }: {
   session: Session;

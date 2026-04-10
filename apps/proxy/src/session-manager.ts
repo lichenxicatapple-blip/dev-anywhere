@@ -228,7 +228,8 @@ export class SessionManager {
       parsed = JSON.parse(raw);
     } catch (err) {
       throw new Error(
-        `Failed to parse session persistence file at ${this.persistPath}: ${err}`,
+        `Failed to parse session persistence file at ${this.persistPath}`,
+        { cause: err },
       );
     }
     if (!Array.isArray(parsed)) {

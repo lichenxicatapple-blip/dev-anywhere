@@ -52,6 +52,7 @@ function resizeTerminalWindow(cols: number, rows: number): void {
   process.stdout.write(`\x1b[8;${rows};${cols}t`);
 }
 
+/* eslint-disable no-control-regex */
 // 过滤会触发终端响应或干扰回放的转义序列
 function stripTerminalRequests(data: string): string {
   return data
@@ -65,6 +66,7 @@ function stripTerminalRequests(data: string): string {
     .replace(/\x1b\[\?2004[hl]/g, "")  // Bracketed paste
     .replace(/\x1b\[\?1049[hl]/g, ""); // Alternate screen buffer
 }
+/* eslint-enable no-control-regex */
 
 // 更新窗口标题显示完成信息，等待按键后退出
 async function waitForKeyAndExit(frameCount: number): Promise<never> {

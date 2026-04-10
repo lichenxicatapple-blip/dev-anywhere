@@ -109,6 +109,7 @@ export class PtyManager {
   private handleData(data: string): void {
     // PTY 的 onlcr 会把 OSC 序列里的 \n 转成 \r\n，还原为 \n
     const fixed = data.replace(
+      // eslint-disable-next-line no-control-regex
       /\x1b\]9;([\s\S]*?)\x07/g,
       (_, content: string) => `\x1b]9;${content.replace(/\r\n/g, "\n")}\x07`,
     );

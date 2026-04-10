@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execSync, spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,6 @@ import {
   SOCK_PATH,
   STOPPED_PATH,
   LOG_PATH,
-  DATA_DIR,
 } from "./paths.js";
 import { createIpcReader, serializeIpc } from "./ipc-protocol.js";
 
@@ -51,7 +50,9 @@ function showStatus(): Promise<number> {
     try {
       process.kill(pid, 0);
       alive = true;
-    } catch {}
+    } catch {
+      // process.kill(pid, 0) 抛错表示进程不存在
+    }
 
     if (!alive) {
       log("Service: dead (stale PID file)");
@@ -96,7 +97,9 @@ async function startDaemon(): Promise<void> {
       process.kill(pid, 0);
       console.error(`Service is already running (PID ${pid})`);
       return;
-    } catch {}
+    } catch {
+      // process.kill(pid, 0) 抛错表示进程不存在，继续启动
+    }
   }
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
   const servePath = join(__dirname, "serve.js");

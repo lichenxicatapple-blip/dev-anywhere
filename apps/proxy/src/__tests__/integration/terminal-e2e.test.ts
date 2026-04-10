@@ -8,7 +8,6 @@ import { TerminalTracker, type TermLine, type TermSpan } from "#src/terminal-tra
 import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
 import {
   TerminalFrameRenderer,
-  type TerminalFrame,
 } from "#src/terminal-frame-renderer.js";
 
 const logger = pino({ level: "silent" });
@@ -389,7 +388,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     const sentMessages: string[] = [];
     const handlers = createControlMessageHandlers(
       (d) => sentMessages.push(d),
-      { listSessions: () => [] } as any,
+      { listSessions: () => [] } as unknown as Parameters<typeof createControlMessageHandlers>[1],
       logger,
     );
 
@@ -428,7 +427,6 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     expect(allLines.length).toBe(totalLines);
 
     // 最后一行应有内容（不全是空的）
-    const lastLineText = allLines[allLines.length - 1].map((s) => s.text).join("").trim();
     // viewport 底部可能是空行，往上找一个非空行
     const lastNonEmptyIdx = allLines.findLastIndex(
       (line) => line.map((s) => s.text).join("").trim().length > 0,

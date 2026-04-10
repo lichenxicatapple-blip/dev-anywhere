@@ -1,5 +1,4 @@
 import { WebSocket } from "ws";
-import type { WebSocketServer } from "ws";
 import type { Logger } from "pino";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";

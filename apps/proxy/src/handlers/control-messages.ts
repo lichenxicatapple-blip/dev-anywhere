@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { Logger } from "pino";
 import type { SessionManager } from "../session-manager.js";

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { View, Text, ScrollView, Input } from "@tarojs/components";
 import "./index.css";
 
@@ -142,8 +142,8 @@ export default function SpikeChatJson() {
   const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
   const [inputText, setInputText] = useState("");
   const [isWorking, setIsWorking] = useState(false);
-  const [showBackToBottom, setShowBackToBottom] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
+  const [showBackToBottom] = useState(false);
+  const [, setStreamingText] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [settingsClosing, setSettingsClosing] = useState(false);
   const [pendingQuote, setPendingQuote] = useState<QuoteData | null>(null);
@@ -238,13 +238,6 @@ export default function SpikeChatJson() {
         m.id === id ? { ...m, approved: action === "deny" ? "deny" : "allow" } : m,
       ),
     );
-  }, []);
-
-  const handleScroll = useCallback((e) => {
-    const { scrollTop, scrollHeight } = e.detail;
-    const viewHeight = 600;
-    const distFromBottom = scrollHeight - scrollTop - viewHeight;
-    setShowBackToBottom(distFromBottom > 200);
   }, []);
 
   return (

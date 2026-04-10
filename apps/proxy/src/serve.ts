@@ -37,7 +37,6 @@ import {
   type WorkerMessage,
 } from "./ipc-protocol.js";
 import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
-import { extractOscSignals } from "./osc-extractor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -277,10 +276,14 @@ async function reconnectWorkers(
       }
       try {
         sessionManager.updateState(sessionId, SessionState.IDLE);
-      } catch {}
+      } catch {
+        // 会话状态更新失败不影响重连流程
+      }
       logger.info({ sessionId }, "Reconnected to existing worker");
     } else {
-      try { unlinkSync(paths.workerSock); } catch {}
+      try { unlinkSync(paths.workerSock); } catch {
+        // socket 文件可能已被删除
+      }
       logger.info({ sessionId }, "Cleaned up stale worker socket");
     }
   }
@@ -303,7 +306,9 @@ function handleTerminalConnection(
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
           const session = existing ?? sessionManager.createSession("pty", msg.name, msg.sessionId);
           if (existing) {
-            try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
+            try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {
+              // 已存在的 PTY 会话状态更新失败不阻断创建流程
+            }
           }
           socket.write(
             serializeIpc({
@@ -434,7 +439,9 @@ function handleTerminalConnection(
       case "pty_register": {
         try {
           sessionManager.updateState(msg.sessionId, SessionState.IDLE);
-        } catch {}
+        } catch {
+          // 会话可能尚未注册，状态更新失败可忽略
+        }
         sessionManager.recordHeartbeat(msg.sessionId);
         terminalSockets.set(msg.sessionId, socket);
         logger.info({ sessionId: msg.sessionId }, "PTY session registered");
@@ -467,7 +474,9 @@ function handleTerminalConnection(
         if (msg.sessionId) {
           try {
             sessionManager.recordHeartbeat(msg.sessionId);
-          } catch {}
+          } catch {
+            // 心跳记录失败不影响服务正常运行
+          }
         }
         socket.write(serializeIpc({ type: "heartbeat_ack" }));
         break;
@@ -517,13 +526,17 @@ export async function startService(): Promise<void> {
   );
 
   await cleanupStaleResources();
-  try { unlinkSync(STOPPED_PATH); } catch {}
+  try { unlinkSync(STOPPED_PATH); } catch {
+    // STOPPED 文件不存在时忽略
+  }
 
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
       const paths = sessionPaths(id);
-      try { rmSync(paths.dir, { recursive: true, force: true }); } catch {}
+      try { rmSync(paths.dir, { recursive: true, force: true }); } catch {
+        // 会话目录清理失败不影响主流程
+      }
     },
   });
   sessionManager.startReaper();
@@ -656,11 +669,15 @@ export async function startService(): Promise<void> {
       const mtime = getEventFileMtime(session.id);
       if (mtime && now - mtime < IDLE_THRESHOLD_MS) {
         if (session.state !== SessionState.WORKING) {
-          try { sessionManager.updateState(session.id, SessionState.WORKING); } catch {}
+          try { sessionManager.updateState(session.id, SessionState.WORKING); } catch {
+            // 状态更新失败不阻断 idle 检测循环
+          }
         }
       } else {
         if (session.state === SessionState.WORKING) {
-          try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {}
+          try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {
+            // 状态更新失败不阻断 idle 检测循环
+          }
         }
       }
     }
@@ -678,8 +695,12 @@ export async function startService(): Promise<void> {
     }
     workerSockets.clear();
     server.close();
-    try { unlinkSync(SOCK_PATH); } catch {}
-    try { unlinkSync(PID_PATH); } catch {}
+    try { unlinkSync(SOCK_PATH); } catch {
+      // 关闭时 socket 文件可能已被删除
+    }
+    try { unlinkSync(PID_PATH); } catch {
+      // 关闭时 PID 文件可能已被删除
+    }
     process.exit(0);
   }
 

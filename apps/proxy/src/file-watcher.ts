@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import { join, dirname, sep } from "node:path";
+import { join, dirname } from "node:path";
 import { listDirectory, isBlacklistedPath, WATCH_BLACKLIST, type DirEntry } from "./dir-lister.js";
 
 /**
