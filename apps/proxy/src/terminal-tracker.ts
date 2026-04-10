@@ -2,17 +2,9 @@ import pkg from "@xterm/headless";
 const { Terminal } = pkg;
 import type { IBufferCell } from "@xterm/headless";
 import { createHash } from "node:crypto";
+import type { TermSpan, TermLine } from "@cc-anywhere/shared";
 
-// 终端文本 span，包含文本内容和可选样式属性
-export interface TermSpan {
-  text: string;
-  fg?: string;
-  bg?: string;
-  bold?: boolean;
-}
-
-// 终端行由多个连续 span 组成
-export type TermLine = TermSpan[];
+export type { TermSpan, TermLine };
 
 // ANSI 256 色调色板，索引 0-255 对应标准终端颜色
 // 0-7: 标准色, 8-15: 亮色, 16-231: 6x6x6 RGB 立方, 232-255: 灰阶
@@ -73,7 +65,7 @@ function cellColorToHex(cell: IBufferCell, isFg: boolean): string | undefined {
 }
 
 export class TerminalTracker {
-  private readonly terminal: Terminal;
+  private readonly terminal: InstanceType<typeof Terminal>;
   private lastGridHash: string = "";
   private nextLineId: number;
 
@@ -88,7 +80,7 @@ export class TerminalTracker {
     this.terminal.onLineFeed(() => {
       this.nextLineId++;
     });
-    this.terminal.onTitleChange((title) => {
+    this.terminal.onTitleChange((title: string) => {
       this._title = title;
       this.onTitleChange?.(title);
     });

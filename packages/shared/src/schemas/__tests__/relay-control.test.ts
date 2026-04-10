@@ -145,6 +145,8 @@ describe("RelayControlSchema", () => {
       newestLineId: 200,
       lines: [],
     });
-    expect(result.lines).toEqual([]);
+    if (result.type === "terminal_lines_response") {
+      expect(result.lines).toEqual([]);
+    }
   });
 });

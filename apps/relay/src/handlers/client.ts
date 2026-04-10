@@ -117,14 +117,19 @@ export function handleClientConnection(
 
       // client-to-proxy 透传控制消息：relay 不处理，直接转发给绑定的 proxy
       if (msg.type === "dir_list_request") {
-        const proxyWs = registry.getProxy(msg.proxyId);
+        const targetProxyId = msg.proxyId || clientWs.boundProxyId;
+        if (!targetProxyId) {
+          clientWs.send(JSON.stringify({ type: "relay_error", code: "NO_PROXY", message: "No proxy bound" }));
+          return;
+        }
+        const proxyWs = registry.getProxy(targetProxyId);
         if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
           proxyWs.send(raw);
         } else {
           clientWs.send(JSON.stringify({
             type: "relay_error",
             code: "PROXY_OFFLINE",
-            message: `Proxy ${msg.proxyId} is not available`,
+            message: `Proxy ${targetProxyId} is not available`,
           }));
         }
         return;

@@ -1,4 +1,5 @@
 import { WebSocket } from "ws";
+import type { MessageType, MessageSource } from "@cc-anywhere/shared";
 import type { RelayServer } from "#src/server.js";
 
 /**
@@ -73,8 +74,8 @@ export const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 export function makeEnvelope(
   seq: number,
   sessionId = "s1",
-  type = "assistant_message" as const,
-  source = "proxy" as const,
+  type: MessageType = "assistant_message",
+  source: MessageSource = "proxy",
 ) {
   const payloads: Record<string, unknown> = {
     assistant_message: { text: `msg-${seq}`, isPartial: false },

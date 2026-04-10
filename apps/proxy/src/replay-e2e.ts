@@ -297,7 +297,7 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
     ? new Proxy(process.stdout, {
         get(target, prop) {
           if (prop === "write") return () => true;
-          return (target as Record<string | symbol, unknown>)[prop];
+          return (target as unknown as Record<string | symbol, unknown>)[prop];
         },
       }) as NodeJS.WriteStream
     : new Proxy(process.stdout, {
@@ -308,7 +308,7 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
               return target.write(stripTerminalRequests(str), ...args as []);
             };
           }
-          return (target as Record<string | symbol, unknown>)[prop];
+          return (target as unknown as Record<string | symbol, unknown>)[prop];
         },
       }) as NodeJS.WriteStream;
 

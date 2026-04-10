@@ -85,9 +85,10 @@ describe("MessageEnvelopeSchema", () => {
         mode: "full",
         lines: [[{ text: "hello", fg: "#00FF00", bold: true }]],
       });
-      expect(result.lines[0][0].text).toBe("hello");
-      expect(result.lines[0][0].fg).toBe("#00FF00");
-      expect(result.lines[0][0].bold).toBe(true);
+      const lines = result.lines as Array<Array<{ text: string; fg?: string; bold?: boolean }>>;
+      expect(lines[0][0].text).toBe("hello");
+      expect(lines[0][0].fg).toBe("#00FF00");
+      expect(lines[0][0].bold).toBe(true);
     });
 
     it("validates minimal span without optional fields", () => {
@@ -95,8 +96,9 @@ describe("MessageEnvelopeSchema", () => {
         mode: "full",
         lines: [[{ text: " " }]],
       });
-      expect(result.lines[0][0].text).toBe(" ");
-      expect(result.lines[0][0].fg).toBeUndefined();
+      const lines = result.lines as Array<Array<{ text: string; fg?: string }>>;
+      expect(lines[0][0].text).toBe(" ");
+      expect(lines[0][0].fg).toBeUndefined();
     });
 
     it("rejects lines that is not an array", () => {

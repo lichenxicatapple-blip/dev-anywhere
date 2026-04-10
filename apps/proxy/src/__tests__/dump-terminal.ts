@@ -66,7 +66,7 @@ function run() {
         const chars = cell.getChars() || " ";
         const fgDef = cell.isFgDefault();
         const fg = fgDef ? null : "#" + cell.getFgColor().toString(16).padStart(6, "0");
-        const bold = cell.isBold() || false;
+        const bold = Boolean(cell.isBold());
 
         if (cur && cur.fg === fg && cur.bold === bold) {
           cur.text += chars;

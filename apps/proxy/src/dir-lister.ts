@@ -27,9 +27,9 @@ export function isBlacklistedPath(filePath: string): boolean {
  * 路径不存在或无权限时返回空数组
  */
 export function listDirectory(dirPath: string): DirEntry[] {
-  let dirents: ReturnType<typeof readdirSync>;
+  let dirents: import("node:fs").Dirent[];
   try {
-    dirents = readdirSync(dirPath, { withFileTypes: true });
+    dirents = readdirSync(dirPath, { withFileTypes: true, encoding: "utf-8" });
   } catch {
     return [];
   }

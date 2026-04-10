@@ -428,10 +428,11 @@ describe("Terminal E2E with recorded PTY chunks", () => {
 
     // 最后一行应有内容（不全是空的）
     // viewport 底部可能是空行，往上找一个非空行
-    const lastNonEmptyIdx = allLines.findLastIndex(
-      (line) => line.map((s) => s.text).join("").trim().length > 0,
+    const lastNonEmptyIdx = [...allLines].reverse().findIndex(
+      (line: Array<{ text: string }>) => line.map((s) => s.text).join("").trim().length > 0,
     );
-    expect(lastNonEmptyIdx).toBeGreaterThan(0);
+    const actualIdx = lastNonEmptyIdx >= 0 ? allLines.length - 1 - lastNonEmptyIdx : -1;
+    expect(actualIdx).toBeGreaterThan(0);
 
     tracker.dispose();
   });
