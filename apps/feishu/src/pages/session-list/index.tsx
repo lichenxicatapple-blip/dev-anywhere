@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import type { RelayControlMessage, HistorySession, DirEntry } from "@cc-anywhere/shared";
+import type { MessageEnvelope, RelayControlMessage, HistorySession, DirEntry, SessionInfo } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState } from "@/stores/app-store";
 import {
@@ -39,6 +39,21 @@ export default function SessionList() {
     if (!relay) return;
 
     const unsub = relay.onMessage((msg) => {
+      // session_list 是 MessageEnvelope 类型
+      if (msg.type === "session_list" && "payload" in msg) {
+        const env = msg as MessageEnvelope & { payload: { sessions: SessionInfo[] } };
+        sessionDispatch({ type: "SET_SESSIONS", sessions: env.payload.sessions });
+      }
+      // session_status 是 MessageEnvelope 类型，实时更新单个会话状态
+      if (msg.type === "session_status" && "payload" in msg) {
+        const env = msg as MessageEnvelope & { payload: { sessionId: string; state: string } };
+        sessionDispatch({
+          type: "UPDATE_SESSION_STATE",
+          sessionId: env.payload.sessionId,
+          state: env.payload.state as SessionInfo["state"],
+        });
+      }
+
       const ctrl = msg as RelayControlMessage;
       if (ctrl.type === "session_history_response") {
         setHistorySessions(ctrl.sessions);
@@ -59,7 +74,7 @@ export default function SessionList() {
     relay.sendControl({ type: "session_history_request" });
 
     return unsub;
-  }, [relay]);
+  }, [relay, sessionDispatch]);
 
   // 左滑切换
   const handleSwipeToggle = useCallback((id: string) => {
@@ -75,7 +90,7 @@ export default function SessionList() {
         sessionId,
         mode: mode || "json",
       });
-      Taro.navigateTo({ url: "/pages/chat/index" });
+      Taro.navigateTo({ url: `/pages/chat/index?sessionId=${sessionId}&mode=${mode || "json"}` });
     },
     [sessionDispatch],
   );
