@@ -69,12 +69,14 @@ export default function SessionList() {
       }
     });
 
-    // 发送请求获取会话列表和历史
-    relay.sendControl({ type: "session_list" });
-    relay.sendControl({ type: "session_history_request" });
+    // 连接建立后才发请求，避免在 WebSocket 未就绪时发送被丢弃
+    if (appState.connected) {
+      relay.sendControl({ type: "session_list" });
+      relay.sendControl({ type: "session_history_request" });
+    }
 
     return unsub;
-  }, [relay, sessionDispatch]);
+  }, [relay, appState.connected, sessionDispatch]);
 
   // 左滑切换
   const handleSwipeToggle = useCallback((id: string) => {
