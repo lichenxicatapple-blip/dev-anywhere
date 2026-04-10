@@ -1,0 +1,51 @@
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #FFFFFF;
+  overflow: hidden;
+}
+
+.chat-page-dark {
+  background: #1E1E1E;
+}
+
+/* PTY 模式下 SafeAreaHeader 文字需要白色 */
+.chat-page-dark .safe-area-header-back-icon {
+  color: #FFFFFF;
+}
+
+.chat-page-dark .safe-area-header-title {
+  color: #FFFFFF;
+}
+
+.chat-page-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.input-bar-wrapper {
+  flex-shrink: 0;
+}
+
+/* Desktop: centered content */
+.screen-desktop .chat-content {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.screen-desktop .input-bar-wrapper {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
