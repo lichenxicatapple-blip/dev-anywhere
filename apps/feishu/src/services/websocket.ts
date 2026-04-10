@@ -47,7 +47,14 @@ export class WebSocketManager {
       });
 
       task.onMessage((res) => {
-        const data = typeof res.data === "string" ? res.data : "";
+        let data: string;
+        if (typeof res.data === "string") {
+          data = res.data;
+        } else if (res.data instanceof ArrayBuffer) {
+          data = new TextDecoder().decode(res.data);
+        } else {
+          return;
+        }
         this.messageHandlers.forEach((h) => h(data));
       });
 
