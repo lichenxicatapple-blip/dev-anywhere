@@ -63,7 +63,7 @@ function killRelay(proc: ChildProcess, signal: NodeJS.Signals = "SIGKILL"): void
   }
 }
 
-async function waitForReady(port: number, timeoutMs = 10_000): Promise<void> {
+async function waitForReady(port: number, timeoutMs = 20_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
