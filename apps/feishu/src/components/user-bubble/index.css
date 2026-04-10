@@ -1,0 +1,44 @@
+.user-bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.user-bubble {
+  background: #1890FF;
+  padding: 8px 16px;
+  border-radius: 12px 12px 4px 12px;
+  max-width: var(--bubble-max-width-user, 75%);
+  word-wrap: break-word;
+  word-break: break-all;
+}
+
+.user-bubble-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #FFFFFF;
+}
+
+.user-bubble-time-row {
+  margin-top: 4px;
+}
+
+.user-bubble-time {
+  font-size: 12px;
+  color: #999999;
+}
+
+@keyframes userEnter {
+  from {
+    transform: translateY(16px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.bubble-enter-user {
+  animation: userEnter 250ms ease-out both;
+}

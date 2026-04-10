@@ -1,0 +1,82 @@
+.input-bar {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #fff;
+  border-top: 1px solid #E8E8E8;
+}
+
+.input-bar-reason {
+  padding: 4px var(--input-bar-padding-h, 16px);
+  text-align: center;
+}
+
+.input-bar-reason-text {
+  font-size: 12px;
+  color: #999999;
+}
+
+.input-bar-row {
+  display: flex;
+  align-items: center;
+  padding: 8px var(--input-bar-padding-h, 16px);
+  gap: 8px;
+}
+
+.input-bar-menu-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #F5F5F5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.input-bar-menu-btn-text {
+  font-size: 14px;
+  color: #666;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.input-bar-field {
+  flex: 1;
+  height: 36px;
+  background: #F5F5F5;
+  border-radius: 18px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.input-bar-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.input-bar-send-btn.active {
+  background: #1890FF;
+}
+
+.input-bar-send-btn.disabled {
+  background: #CCCCCC;
+}
+
+.input-bar-send-icon {
+  font-size: 18px;
+  color: #fff;
+  font-weight: bold;
+}
+
+/* Desktop responsive */
+.screen-desktop .input-bar {
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}

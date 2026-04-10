@@ -1,0 +1,71 @@
+.assistant-bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.assistant-bubble {
+  background: #F0F0F0;
+  padding: 8px 16px;
+  border-radius: 4px 12px 12px 12px;
+  max-width: var(--bubble-max-width-assistant, 85%);
+  word-wrap: break-word;
+}
+
+.assistant-bubble-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.assistant-streaming-cursor {
+  color: #1890FF;
+  font-weight: bold;
+  animation: blink 0.8s infinite;
+}
+
+.assistant-tool-line {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+}
+
+.assistant-tool-text {
+  font-size: 12px;
+  color: #999999;
+  font-family: monospace, Menlo, Courier;
+}
+
+.assistant-bubble-time-row {
+  margin-top: 4px;
+}
+
+.assistant-bubble-time {
+  font-size: 12px;
+  color: #999999;
+}
+
+@keyframes assistantEnter {
+  from {
+    transform: translateY(20px) scale(0.92);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(-4px) scale(1.02);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.bubble-enter-assistant {
+  animation: assistantEnter 350ms ease-out both;
+}

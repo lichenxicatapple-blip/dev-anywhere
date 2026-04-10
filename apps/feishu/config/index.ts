@@ -1,3 +1,5 @@
+const path = require("path");
+
 const config = {
   projectName: "cc-anywhere-feishu",
   designWidth: 750,
@@ -12,6 +14,9 @@ const config = {
   plugins: ["@tarojs/plugin-platform-lark"],
   framework: "react",
   compiler: "webpack5",
+  alias: {
+    "@": path.resolve(__dirname, "..", "src"),
+  },
   mini: {
     postcss: {
       pxtransform: {

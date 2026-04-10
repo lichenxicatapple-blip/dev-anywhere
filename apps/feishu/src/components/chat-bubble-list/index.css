@@ -1,0 +1,24 @@
+.chat-bubble-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #FFFFFF;
+  padding: 16px var(--page-padding-h, 16px);
+}
+
+.chat-bubble-row {
+  margin-bottom: 16px;
+  display: flex;
+}
+
+.chat-bubble-row.user {
+  justify-content: flex-end;
+}
+
+.chat-bubble-row.assistant {
+  justify-content: flex-start;
+}
+
+.chat-bubble-bottom-anchor {
+  height: 1px;
+}

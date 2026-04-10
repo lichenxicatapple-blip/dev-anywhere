@@ -1,0 +1,19 @@
+.terminal-viewport {
+  flex: 1;
+  background: #1E1E1E;
+  border-radius: 8px 8px 0 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.terminal-content {
+  padding: 8px;
+  display: inline-block;
+  min-width: 100%;
+  min-height: 100%;
+  background: #1E1E1E;
+}
+
+.terminal-line {
+  font-family: monospace, Menlo, Courier;
+  white-space: pre;
+}
