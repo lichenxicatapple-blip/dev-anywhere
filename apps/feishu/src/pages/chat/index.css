@@ -49,3 +49,22 @@
   margin: 0 auto;
   width: 100%;
 }
+
+/* PTY 模式工具审批全屏遮罩 */
+.pty-approval-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pty-approval-card-wrapper {
+  width: 90%;
+  max-width: 400px;
+}

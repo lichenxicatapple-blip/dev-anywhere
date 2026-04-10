@@ -1,6 +1,7 @@
-// 助手消息气泡，左对齐灰色背景，支持流式游标
+// 助手消息气泡，左对齐灰色背景，支持流式游标，工具调用使用 ToolCallCard
 import { View, Text } from "@tarojs/components";
 import type { ToolCallInfo } from "@/stores/chat-store";
+import { ToolCallCard } from "@/components/tool-call-card";
 import "./index.css";
 
 interface AssistantBubbleProps {
@@ -10,6 +11,7 @@ interface AssistantBubbleProps {
   timestamp?: number;
   showTimestamp: boolean;
   onToggleTimestamp: () => void;
+  onToggleToolCollapse?: (toolIndex: number) => void;
 }
 
 export function AssistantBubble({
@@ -19,6 +21,7 @@ export function AssistantBubble({
   timestamp,
   showTimestamp,
   onToggleTimestamp,
+  onToggleToolCollapse,
 }: AssistantBubbleProps) {
   return (
     <View className="assistant-bubble-wrapper" onClick={onToggleTimestamp}>
@@ -28,11 +31,11 @@ export function AssistantBubble({
           {isPartial && <Text className="assistant-streaming-cursor">|</Text>}
         </Text>
         {toolCalls.map((tc, i) => (
-          <View key={i} className="assistant-tool-line">
-            <Text className="assistant-tool-text">
-              [Tool: {tc.toolName}]{tc.collapsed ? "" : ` ${tc.output ?? ""}`}
-            </Text>
-          </View>
+          <ToolCallCard
+            key={i}
+            toolCall={tc}
+            onToggleCollapse={() => onToggleToolCollapse?.(i)}
+          />
         ))}
       </View>
       {showTimestamp && timestamp && (

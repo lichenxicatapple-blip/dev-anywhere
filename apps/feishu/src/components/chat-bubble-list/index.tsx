@@ -10,12 +10,14 @@ interface ChatBubbleListProps {
   messages: ChatMessage[];
   isWorking: boolean;
   onScrollThresholdChange: (isNearBottom: boolean) => void;
+  onToggleToolCollapse?: (messageId: string, toolIndex: number) => void;
 }
 
 export function ChatBubbleList({
   messages,
   isWorking: _isWorking,
   onScrollThresholdChange,
+  onToggleToolCollapse,
 }: ChatBubbleListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,7 @@ export function ChatBubbleList({
               timestamp={msg.timestamp}
               showTimestamp={visibleTimestamps.has(msg.id)}
               onToggleTimestamp={() => handleToggleTimestamp(msg.id)}
+              onToggleToolCollapse={(toolIndex) => onToggleToolCollapse?.(msg.id, toolIndex)}
             />
           )}
         </View>
