@@ -62,6 +62,7 @@ export function ChatBubbleList({
     <View
       className="chat-bubble-list"
       ref={containerRef}
+      // @ts-expect-error Taro View 类型未声明 onScroll，但飞书运行时支持
       onScroll={handleScroll}
     >
       {messages.map((msg) => (

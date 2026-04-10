@@ -26,6 +26,21 @@ describe("formatRelativeTime", () => {
     vi.spyOn(Date, "now").mockReturnValue(1000 * 86400 * 2 + 1000);
     expect(formatRelativeTime(1000)).toBe("2 days ago");
   });
+
+  it("returns '1 min ago' for exactly 1 minute", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000 * 60 + 1000);
+    expect(formatRelativeTime(1000)).toBe("1 min ago");
+  });
+
+  it("returns '1 hr ago' for exactly 1 hour", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000 * 3600 + 1000);
+    expect(formatRelativeTime(1000)).toBe("1 hr ago");
+  });
+
+  it("returns '1 day ago' for exactly 1 day", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000 * 86400 + 1000);
+    expect(formatRelativeTime(1000)).toBe("1 day ago");
+  });
 });
 
 describe("truncateText", () => {

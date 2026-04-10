@@ -1,8 +1,13 @@
 // PTY 终端栅格渲染组件，支持双向滚动和捏合缩放
 import { useRef, useCallback, useEffect } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
+import type { CommonEventFunction } from "@tarojs/components";
 import type { TermLine } from "@cc-anywhere/shared";
 import "./index.css";
+
+// Taro View/ScrollView 的 onTouch* 声明为 CommonEventFunction，但运行时事件包含 touch 字段
+interface TouchPoint { clientX: number; clientY: number }
+interface TouchEventLike { touches: TouchPoint[]; changedTouches: TouchPoint[] }
 
 interface TerminalViewportProps {
   lines: TermLine[];
@@ -29,18 +34,20 @@ export function TerminalViewport({ lines, fontSize, onPinchZoom }: TerminalViewp
     prevLinesLenRef.current = lines.length;
   }, [lines.length]);
 
-  const handleTouchStart = useCallback((e) => {
-    if (e.touches.length === 2) {
-      const touches = e.touches.map((t: Touch) => ({ clientX: t.clientX, clientY: t.clientY }));
+  const handleTouchStart: CommonEventFunction = useCallback((e) => {
+    const te = e as unknown as TouchEventLike;
+    if (te.touches.length === 2) {
+      const touches = te.touches.map((t) => ({ clientX: t.clientX, clientY: t.clientY }));
       pinchRef.current.startDistance = getDistance(touches);
       pinchRef.current.triggered = false;
     }
   }, []);
 
-  const handleTouchMove = useCallback(
+  const handleTouchMove: CommonEventFunction = useCallback(
     (e) => {
-      if (e.touches.length === 2 && !pinchRef.current.triggered) {
-        const touches = e.touches.map((t: Touch) => ({ clientX: t.clientX, clientY: t.clientY }));
+      const te = e as unknown as TouchEventLike;
+      if (te.touches.length === 2 && !pinchRef.current.triggered) {
+        const touches = te.touches.map((t) => ({ clientX: t.clientX, clientY: t.clientY }));
         const currentDistance = getDistance(touches);
         const ratio = currentDistance / pinchRef.current.startDistance;
         if (ratio > 1.3) {

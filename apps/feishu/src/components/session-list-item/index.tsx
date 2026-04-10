@@ -1,10 +1,14 @@
 // 会话列表项：双行布局，状态圆点，模式标记，左滑终止
 import { useCallback, useRef } from "react";
 import { View, Text } from "@tarojs/components";
+import type { CommonEventFunction } from "@tarojs/components";
 import Taro from "@tarojs/taro";
 import type { SessionInfo } from "@cc-anywhere/shared";
 import { formatRelativeTime } from "@/utils/relative-time";
 import "./index.css";
+
+interface TouchPoint { clientX: number; clientY: number }
+interface TouchEventLike { touches: TouchPoint[]; changedTouches: TouchPoint[] }
 
 interface SessionListItemProps {
   session: SessionInfo;
@@ -35,14 +39,16 @@ export function SessionListItem({
 }: SessionListItemProps) {
   const touchStart = useRef({ x: 0, y: 0 });
 
-  const handleTouchStart = useCallback((e: { touches: Array<{ clientX: number; clientY: number }> }) => {
-    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  const handleTouchStart: CommonEventFunction = useCallback((e) => {
+    const te = e as unknown as TouchEventLike;
+    touchStart.current = { x: te.touches[0].clientX, y: te.touches[0].clientY };
   }, []);
 
-  const handleTouchEnd = useCallback(
-    (e: { changedTouches: Array<{ clientX: number; clientY: number }> }) => {
-      const dx = e.changedTouches[0].clientX - touchStart.current.x;
-      const dy = e.changedTouches[0].clientY - touchStart.current.y;
+  const handleTouchEnd: CommonEventFunction = useCallback(
+    (e) => {
+      const te = e as unknown as TouchEventLike;
+      const dx = te.changedTouches[0].clientX - touchStart.current.x;
+      const dy = te.changedTouches[0].clientY - touchStart.current.y;
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
         if (dx < 0) {
           onSwipeToggle(session.sessionId);

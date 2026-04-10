@@ -45,7 +45,7 @@ describe("RelayClient", () => {
     );
   });
 
-  it("selectProxy sends proxy_select with proxyId", () => {
+  it("selectProxy sends proxy_select with proxyId and updates boundProxyId", () => {
     client.selectProxy("proxy-abc");
     expect(ws.send).toHaveBeenCalledWith(
       JSON.stringify({
@@ -53,6 +53,7 @@ describe("RelayClient", () => {
         proxyId: "proxy-abc",
       }),
     );
+    expect(client.getBoundProxyId()).toBe("proxy-abc");
   });
 
   it("listProxies sends proxy_list_request", () => {
@@ -101,6 +102,12 @@ describe("RelayClient", () => {
 
     unsub();
     expect(innerUnsub).toHaveBeenCalled();
+  });
+
+  it("sendControl sends JSON-stringified control message", () => {
+    const msg = { type: "interrupt", sessionId: "s1" };
+    client.sendControl(msg);
+    expect(ws.send).toHaveBeenCalledWith(JSON.stringify(msg));
   });
 
   it("sendEnvelope sends JSON-stringified envelope", () => {

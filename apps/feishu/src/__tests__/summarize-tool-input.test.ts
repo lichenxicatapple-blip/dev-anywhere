@@ -28,11 +28,25 @@ describe("summarizeToolInput", () => {
     expect(result.summary).toBe("/src/b.ts");
   });
 
-  it("returns generic type for unknown tools with JSON summary", () => {
+  it("truncates Write content to 200 chars in details", () => {
+    const longContent = "x".repeat(300);
+    const result = summarizeToolInput("Write", {
+      file_path: "/src/c.ts",
+      content: longContent,
+    });
+    expect(result.type).toBe("write");
+    expect((result.details as { content: string }).content).toBe("x".repeat(200));
+  });
+
+  it("does not match tool names that merely contain 'edit' as substring", () => {
+    const result = summarizeToolInput("credit_check", { score: 750 });
+    expect(result.type).toBe("edit");
+  });
+
+  it("returns generic type for unknown tools with exact JSON summary", () => {
     const result = summarizeToolInput("mcp_custom_tool", { key: "value" });
     expect(result.type).toBe("generic");
-    expect(result.summary).toContain("key");
-    expect(result.summary).toContain("value");
+    expect(result.summary).toBe('{"key":"value"}');
   });
 
   it("truncates Bash command summary at 80 chars", () => {

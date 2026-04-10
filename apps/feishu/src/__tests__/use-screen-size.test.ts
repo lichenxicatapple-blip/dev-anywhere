@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
+// classifyScreen 和 getResponsiveClass 是纯函数，不依赖 Taro 和 React，
+// 但模块顶层 import 了 Taro 和 React，必须 mock 才能加载模块
 vi.mock("@tarojs/taro", () => ({
   default: {
     getSystemInfoSync: () => ({
@@ -21,36 +23,36 @@ vi.mock("react", () => ({
 import { classifyScreen, getResponsiveClass } from "@/hooks/use-screen-size";
 
 describe("classifyScreen", () => {
-  it("returns phone-portrait for 375x667 phone", () => {
-    expect(classifyScreen(375, 667, "phone")).toBe("phone-portrait");
+  it("returns phone-portrait for width 375", () => {
+    expect(classifyScreen(375, 667, "_")).toBe("phone-portrait");
   });
 
-  it("returns phone-portrait for 430x740 phone", () => {
-    expect(classifyScreen(430, 740, "phone")).toBe("phone-portrait");
+  it("returns phone-portrait for width 430", () => {
+    expect(classifyScreen(430, 740, "_")).toBe("phone-portrait");
   });
 
-  it("returns phone-landscape for 700x375 phone", () => {
-    expect(classifyScreen(700, 375, "phone")).toBe("phone-landscape");
+  it("returns phone-landscape for width 700", () => {
+    expect(classifyScreen(700, 375, "_")).toBe("phone-landscape");
   });
 
-  it("returns phone-landscape for 850x400 phone", () => {
-    expect(classifyScreen(850, 400, "phone")).toBe("phone-landscape");
+  it("returns phone-landscape for width 850", () => {
+    expect(classifyScreen(850, 400, "_")).toBe("phone-landscape");
   });
 
-  it("returns desktop for 900x600 pc", () => {
-    expect(classifyScreen(900, 600, "pc")).toBe("desktop");
+  it("returns desktop for width 900", () => {
+    expect(classifyScreen(900, 600, "_")).toBe("desktop");
   });
 
-  it("returns desktop for 1200x800 pc", () => {
-    expect(classifyScreen(1200, 800, "pc")).toBe("desktop");
+  it("returns desktop for width 1200", () => {
+    expect(classifyScreen(1200, 800, "_")).toBe("desktop");
   });
 
-  it("returns phone-portrait for 350x600 pc (narrow sidebar)", () => {
-    expect(classifyScreen(350, 600, "pc")).toBe("phone-portrait");
+  it("returns phone-portrait for width 350 (narrow sidebar)", () => {
+    expect(classifyScreen(350, 600, "_")).toBe("phone-portrait");
   });
 
-  it("returns phone-landscape for 768x1024 tablet", () => {
-    expect(classifyScreen(768, 1024, "tablet")).toBe("phone-landscape");
+  it("returns phone-landscape for width 768", () => {
+    expect(classifyScreen(768, 1024, "_")).toBe("phone-landscape");
   });
 });
 

@@ -53,7 +53,7 @@ export function useScreenSize(): ScreenInfo {
   const [size, setSize] = useState({
     windowWidth: info.windowWidth,
     windowHeight: info.windowHeight,
-    deviceType: (info as Record<string, unknown>).deviceType as string || "phone",
+    deviceType: (info as unknown as Record<string, unknown>).deviceType as string || "phone",
     statusBarHeight: info.statusBarHeight || 0,
     safeArea: info.safeArea || {
       top: 0,
@@ -66,7 +66,7 @@ export function useScreenSize(): ScreenInfo {
   });
 
   useEffect(() => {
-    const handler = (res: { size: { windowWidth: number; windowHeight: number } }) => {
+    const handler: Taro.onWindowResize.Callback = (res) => {
       setSize((prev) => ({
         ...prev,
         windowWidth: res.size.windowWidth,
@@ -74,6 +74,7 @@ export function useScreenSize(): ScreenInfo {
       }));
     };
     Taro.onWindowResize(handler);
+    // @ts-expect-error offWindowResize 接受的 Callback 参数类型比 onWindowResize 宽泛，传入同一引用会报类型不兼容
     return () => Taro.offWindowResize(handler);
   }, []);
 

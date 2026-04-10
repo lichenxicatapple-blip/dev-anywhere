@@ -12,13 +12,28 @@ describe("parseAssistantMessage", () => {
     const result = parseAssistantMessage("not json");
     expect(result).toBeNull();
   });
+
+  it("returns null for null input", () => {
+    const result = parseAssistantMessage(null as unknown as string);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    const result = parseAssistantMessage(undefined as unknown as string);
+    expect(result).toBeNull();
+  });
+
+  it("returns parsed object even if type field is unexpected", () => {
+    const input = JSON.stringify({ type: "unknown_type", data: 42 });
+    const result = parseAssistantMessage(input);
+    expect(result).toEqual({ type: "unknown_type", data: 42 });
+  });
 });
 
 describe("routeStreamEvent", () => {
-  it("returns APPEND_ASSISTANT_TEXT for assistant event with subtype content_block_delta", () => {
+  it("returns APPEND_ASSISTANT_TEXT for assistant event", () => {
     const result = routeStreamEvent({
       type: "assistant",
-      subtype: "content_block_delta",
       text: "hello world",
     });
     expect(result).toEqual({ type: "APPEND_ASSISTANT_TEXT", text: "hello world" });
@@ -35,6 +50,11 @@ describe("routeStreamEvent", () => {
       session_id: "abc-123",
     });
     expect(result).toEqual({ type: "SET_CLAUDE_SESSION_ID", id: "abc-123" });
+  });
+
+  it("returns null for system event without session_id", () => {
+    const result = routeStreamEvent({ type: "system" });
+    expect(result).toBeNull();
   });
 
   it("returns null and warns for unhandled event types", () => {

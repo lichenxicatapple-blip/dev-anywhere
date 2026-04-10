@@ -31,28 +31,36 @@ export class WebSocketManager {
   }
 
   private doConnect(): void {
-    this.task = Taro.connectSocket({ url: this.url });
+    // 飞书 tt.connectSocket 返回 Promise<SocketTask>，必须 await
+    const result = Taro.connectSocket({ url: this.url });
+    Promise.resolve(result).then((task) => {
+      if (this.closed) {
+        task.close({});
+        return;
+      }
+      this.task = task;
 
-    this.task.onOpen(() => {
-      this.reconnectAttempt = 0;
-      this.connected = true;
-      this.statusHandlers.forEach((h) => h(true));
-    });
+      task.onOpen(() => {
+        this.reconnectAttempt = 0;
+        this.connected = true;
+        this.statusHandlers.forEach((h) => h(true));
+      });
 
-    this.task.onMessage((res) => {
-      const data = typeof res.data === "string" ? res.data : "";
-      this.messageHandlers.forEach((h) => h(data));
-    });
+      task.onMessage((res) => {
+        const data = typeof res.data === "string" ? res.data : "";
+        this.messageHandlers.forEach((h) => h(data));
+      });
 
-    this.task.onClose(() => {
-      this.task = null;
-      this.connected = false;
-      this.statusHandlers.forEach((h) => h(false));
-      if (!this.closed) this.scheduleReconnect();
-    });
+      task.onClose(() => {
+        this.task = null;
+        this.connected = false;
+        this.statusHandlers.forEach((h) => h(false));
+        if (!this.closed) this.scheduleReconnect();
+      });
 
-    this.task.onError(() => {
-      // onError 通常后跟 onClose，不需要额外处理
+      task.onError(() => {
+        // onError 通常后跟 onClose，不需要额外处理
+      });
     });
   }
 

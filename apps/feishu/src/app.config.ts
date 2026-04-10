@@ -3,14 +3,6 @@ export default defineAppConfig({
     "pages/proxy-select/index",
     "pages/session-list/index",
     "pages/chat/index",
-    "pages/spike-hub/index",
-    "pages/spike-typewriter/index",
-    "pages/spike-session-list/index",
-    "pages/spike-chat-json/index",
-    "pages/spike-chat-pty/index",
-    "pages/spike-bubble-anim/index",
-
-    "pages/spike-picker/index",
     "pages/index/index",
   ],
   window: {
@@ -20,6 +12,7 @@ export default defineAppConfig({
     backgroundColor: "#F8F8F8",
     pageOrientation: "auto",
   },
+  // @ts-expect-error ext 是飞书小程序特有配置，Taro AppConfig 类型未收录
   ext: {
     defaultPages: {
       PCMode: "appCenter",

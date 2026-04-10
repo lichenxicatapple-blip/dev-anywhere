@@ -27,7 +27,7 @@ const config = {
   },
 };
 
-module.exports = function (merge) {
+module.exports = function (merge: unknown) {
   if (typeof merge === "function") {
     return merge({}, config);
   }
