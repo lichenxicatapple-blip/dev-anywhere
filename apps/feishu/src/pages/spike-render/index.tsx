@@ -1,10 +1,10 @@
-// Stub: spike-render page, build placeholder for worktree
+// Spike render 占位
 import { View, Text } from "@tarojs/components";
 
 export default function SpikeRender() {
   return (
     <View>
-      <Text>Spike Render (placeholder)</Text>
+      <Text>Spike render placeholder</Text>
     </View>
   );
 }
