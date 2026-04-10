@@ -42,7 +42,7 @@ export type ChatAction =
   | { type: "ADD_USER_MESSAGE"; message: ChatMessage }
   | { type: "MARK_TURN_COMPLETE" }
   | { type: "ADD_TOOL_CALL"; messageId: string; toolCall: ToolCallInfo }
-  | { type: "UPDATE_TOOL_RESULT"; messageId: string; toolName: string; output: string }
+  | { type: "UPDATE_TOOL_RESULT"; messageId: string; toolIndex: number; output: string }
   | { type: "TOGGLE_TOOL_COLLAPSE"; messageId: string; toolIndex: number }
   | { type: "ADD_APPROVAL_REQUEST"; request: ToolApprovalRequest }
   | { type: "UPDATE_APPROVAL_STATUS"; requestId: string; status: "approved" | "denied" }
@@ -105,8 +105,8 @@ export function chatReducer(state: ChatStoreState, action: ChatAction): ChatStor
           m.id === action.messageId
             ? {
                 ...m,
-                toolCalls: m.toolCalls.map((tc) =>
-                  tc.toolName === action.toolName ? { ...tc, output: action.output } : tc,
+                toolCalls: m.toolCalls.map((tc, i) =>
+                  i === action.toolIndex ? { ...tc, output: action.output } : tc,
                 ),
               }
             : m,

@@ -332,7 +332,7 @@ export default function SpikePicker() {
       prevTextRef.current = val;
       return val;
     });
-    setInsertedPaths((prev) => [...prev, token]);
+    setInsertedTokens((prev) => [...prev, token]);
     setPickerMode("none");
     setArgumentHint("");
     refocus();
@@ -343,7 +343,7 @@ export default function SpikePicker() {
     if (!text) return;
     setSentMessages((prev) => [...prev, text]);
     setInputText("");
-    setInsertedPaths([]);
+    setInsertedTokens([]);
     prevTextRef.current = "";
     setArgumentHint("");
     setPickerMode("none");
