@@ -4,7 +4,7 @@ import { View } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
 import type { ProxyInfo, RelayControlMessage } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
-import { useAppDispatch } from "@/stores/app-store";
+import { useAppState, useAppDispatch } from "@/stores/app-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import { Typewriter } from "@/components/typewriter";
 import { ProxyListItem } from "@/components/proxy-list-item";
@@ -17,6 +17,7 @@ export default function ProxySelect() {
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const relay = useRelayClient();
+  const appState = useAppState();
   const appDispatch = useAppDispatch();
   const screen = useScreenSize();
 
@@ -95,7 +96,13 @@ export default function ProxySelect() {
         </View>
 
         <View className="proxy-list">
-          {loaded && !hasOnlineProxy && (
+          {!appState.connected && (
+            <EmptyState
+              title="Connecting to Relay..."
+              subtitle="Waiting for WebSocket connection to relay server"
+            />
+          )}
+          {appState.connected && loaded && !hasOnlineProxy && (
             <EmptyState
               title="No Proxy Connected"
               subtitle="Start cc-anywhere on your computer, then pull to refresh"
