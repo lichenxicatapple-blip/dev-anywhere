@@ -2,13 +2,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
 import Taro from "@tarojs/taro";
-import type { MessageEnvelope, RelayControlMessage, HistorySession, DirEntry, SessionInfo } from "@cc-anywhere/shared";
+import type { MessageEnvelope, RelayControlMessage, DirEntry, SessionInfo } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState } from "@/stores/app-store";
 import {
   useSessionState,
   useSessionDispatch,
 } from "@/stores/session-store";
+import type { HistorySession } from "@/stores/session-store";
+import { useFileState, useFileDispatch } from "@/stores/file-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import { SessionListItem, HistoryListItem } from "@/components/session-list-item";
 import { EmptyState } from "@/components/empty-state";
@@ -20,11 +22,11 @@ export default function SessionList() {
   const appState = useAppState();
   const sessionState = useSessionState();
   const sessionDispatch = useSessionDispatch();
+  const fileState = useFileState();
+  const fileDispatch = useFileDispatch();
   const screen = useScreenSize();
-  const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [swipeOpenId, setSwipeOpenId] = useState("");
   const [showDirPicker, setShowDirPicker] = useState(false);
-  const [dirEntries, setDirEntries] = useState<Map<string, DirEntry[]>>(new Map());
 
   // 页面销毁时清除 proxyId（仅 navigateBack 会销毁页面，navigateTo 不会）
   useEffect(() => {
@@ -66,16 +68,12 @@ export default function SessionList() {
 
       const ctrl = msg as RelayControlMessage;
       if (ctrl.type === "session_history_response") {
-        setHistorySessions(ctrl.sessions);
+        sessionDispatch({ type: "SET_HISTORY_SESSIONS", sessions: ctrl.sessions });
       }
       // 目录列表响应
       if (ctrl.type === "dir_list_response") {
         const { path, entries } = ctrl as RelayControlMessage & { path: string; entries: DirEntry[] };
-        setDirEntries((prev) => {
-          const next = new Map(prev);
-          next.set(path, entries);
-          return next;
-        });
+        fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
       }
     });
 
@@ -86,7 +84,7 @@ export default function SessionList() {
     }
 
     return unsub;
-  }, [relay, appState.connected, sessionDispatch]);
+  }, [relay, appState.connected, sessionDispatch, fileDispatch]);
 
   const checkConnected = useCallback((): boolean => {
     if (!appState.connected) {
@@ -189,7 +187,7 @@ export default function SessionList() {
   }, []);
 
   const hasActiveSessions = sessionState.sessions.length > 0;
-  const hasHistory = historySessions.length > 0;
+  const hasHistory = sessionState.historySessions.length > 0;
   const isEmpty = !hasActiveSessions && !hasHistory;
 
   return (
@@ -224,7 +222,7 @@ export default function SessionList() {
               <View>
                 <Text className="session-section-header">History Sessions</Text>
                 <View className="session-history-grid">
-                  {historySessions.map((h) => (
+                  {sessionState.historySessions.map((h) => (
                     <HistoryListItem
                       key={h.id}
                       id={h.id}
@@ -251,7 +249,7 @@ export default function SessionList() {
         onSelect={handleDirSelect}
         onCancel={handleDirPickerCancel}
         onRequestDir={handleRequestDir}
-        dirEntries={dirEntries}
+        dirEntries={fileState.tree}
       />
     </View>
   );
