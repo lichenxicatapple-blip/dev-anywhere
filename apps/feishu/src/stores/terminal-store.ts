@@ -49,7 +49,6 @@ export function terminalReducer(
       return { ...state, lines: action.lines };
     case "SET_FONT_SIZE_INDEX": {
       const idx = Math.max(0, Math.min(action.index, FONT_SIZES.length - 1));
-      Taro.setStorageSync("cc_fontSizeIndex", idx);
       return { ...state, fontSizeIndex: idx, fontSize: FONT_SIZES[idx] };
     }
     case "SET_PTY_STATE":

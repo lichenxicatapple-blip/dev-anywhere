@@ -1,5 +1,5 @@
 // Chat 页面：PTY 终端视图和 JSON 聊天气泡双模式，集成工具审批、picker、引用、设置菜单
-import { useState, useCallback, useReducer, useEffect } from "react";
+import { useState, useCallback, useReducer, useEffect, useRef } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { useRouter } from "@tarojs/taro";
 import { SafeAreaHeader } from "@/components/safe-area-header";
@@ -78,6 +78,16 @@ export default function Chat() {
 
   const [chatState, chatDispatch] = useReducer(chatReducer, initialChatState);
   const [terminalState, terminalDispatch] = useReducer(terminalReducer, initialTerminalState);
+  const chatStateRef = useRef(chatState);
+  chatStateRef.current = chatState;
+  const terminalStateRef = useRef(terminalState);
+  terminalStateRef.current = terminalState;
+
+  // 字体大小变化时持久化到 Storage
+  useEffect(() => {
+    Taro.setStorageSync("cc_fontSizeIndex", terminalState.fontSizeIndex);
+  }, [terminalState.fontSizeIndex]);
+
   const commandState = useCommandState();
   const fileState = useFileState();
 
@@ -116,7 +126,7 @@ export default function Chat() {
             break;
           }
           case "tool_result": {
-            const msgs = chatState.messages;
+            const msgs = chatStateRef.current.messages;
             for (let i = msgs.length - 1; i >= 0; i--) {
               if (msgs[i].role === "assistant" && msgs[i].toolCalls.length > 0) {
                 const idx = msgs[i].toolCalls.findIndex((tc) => !tc.output);
@@ -160,7 +170,7 @@ export default function Chat() {
             terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
           } else {
             // delta 模式：合并变化行到当前 lines
-            const merged = [...terminalState.lines];
+            const merged = [...terminalStateRef.current.lines];
             for (const delta of frame.lines) {
               merged[delta.lineIndex] = delta.spans;
             }
@@ -186,7 +196,7 @@ export default function Chat() {
     });
 
     return unsub;
-  }, [relay, sessionId, chatState.messages, chatDispatch, terminalDispatch, terminalState.lines]);
+  }, [relay, sessionId, chatDispatch, terminalDispatch]);
 
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [pickerMode, setPickerMode] = useState<PickerMode>("none");
