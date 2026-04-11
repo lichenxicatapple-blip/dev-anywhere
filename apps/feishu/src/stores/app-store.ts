@@ -1,8 +1,18 @@
-// 应用级状态管理：连接状态、选中代理、客户端标识
+// 应用级状态管理：连接状态、选中代理、客户端标识、AppPhase 状态机
 import { createContext, useContext } from "react";
 import Taro from "@tarojs/taro";
 
+export type AppPhase =
+  | "connecting"
+  | "reconnecting"
+  | "proxy_selecting"
+  | "session_browsing"
+  | "chatting"
+  | "proxy_lost";
+
 export interface AppState {
+  phase: AppPhase;
+  phaseBeforeDisconnect: AppPhase | null;
   connected: boolean;
   proxyOnline: boolean;
   selectedProxyId: string | null;
@@ -15,7 +25,8 @@ export type AppAction =
   | { type: "SET_CONNECTED"; connected: boolean }
   | { type: "SET_PROXY"; proxyId: string | null; proxyName: string | null }
   | { type: "SET_PROXY_ONLINE"; online: boolean }
-  | { type: "SET_RELAY_URL"; url: string };
+  | { type: "SET_RELAY_URL"; url: string }
+  | { type: "SET_PHASE"; phase: AppPhase };
 
 function loadClientId(): string {
   const stored = Taro.getStorageSync("cc_clientId") as string;
@@ -26,6 +37,8 @@ function loadClientId(): string {
 }
 
 export const initialAppState: AppState = {
+  phase: "connecting",
+  phaseBeforeDisconnect: null,
   connected: false,
   proxyOnline: false,
   selectedProxyId: null,
@@ -44,9 +57,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, proxyOnline: action.online };
     case "SET_RELAY_URL":
       return { ...state, relayUrl: action.url };
+    case "SET_PHASE": {
+      const next = action.phase;
+      const phaseBeforeDisconnect =
+        (next === "reconnecting" || next === "proxy_lost") ? state.phase : state.phaseBeforeDisconnect;
+      return { ...state, phase: next, phaseBeforeDisconnect };
+    }
     default:
       return state;
   }
+}
+
+export function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
+  if (next === "proxy_selecting") {
+    Taro.removeStorageSync("cc_proxyId");
+    Taro.removeStorageSync("cc_sessionId");
+  }
+  if (next === "session_browsing" && (prev === "chatting" || prev === "proxy_lost")) {
+    Taro.removeStorageSync("cc_sessionId");
+  }
+}
+
+export function transitionToPhase(
+  prev: AppPhase,
+  next: AppPhase,
+  dispatch: React.Dispatch<AppAction>,
+): void {
+  cleanStorageForPhaseTransition(prev, next);
+  dispatch({ type: "SET_PHASE", phase: next });
 }
 
 const AppStateContext = createContext<AppState>(initialAppState);
