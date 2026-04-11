@@ -24,19 +24,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 16px 32px;
   border-bottom: 1px solid #F0F0F0;
   flex-shrink: 0;
 }
 
 .slash-picker-title {
-  font-size: 13px;
+  font-size: 26px;
   font-weight: 600;
   color: #333333;
 }
 
 .slash-picker-count {
-  font-size: 11px;
+  font-size: 22px;
   color: #999999;
 }
 
@@ -49,16 +49,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
+  padding: 48px 0;
 }
 
 .slash-picker-empty-text {
-  font-size: 13px;
+  font-size: 26px;
   color: #CCCCCC;
 }
 
 .slash-picker-item {
-  padding: 8px 16px;
+  padding: 16px 32px;
   border-bottom: 1px solid #F5F5F5;
 }
 
@@ -69,27 +69,27 @@
 .slash-picker-item-top {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .slash-picker-item-name {
-  font-size: 14px;
+  font-size: 28px;
   font-weight: 600;
   color: #333333;
   font-family: monospace, Menlo, Courier;
 }
 
 .slash-picker-item-source {
-  font-size: 10px;
+  font-size: 20px;
   color: #999999;
   background: #F5F5F5;
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: 6px;
+  padding: 2px 10px;
 }
 
 .slash-picker-item-desc {
-  font-size: 12px;
+  font-size: 24px;
   color: #999999;
   display: block;
   overflow: hidden;

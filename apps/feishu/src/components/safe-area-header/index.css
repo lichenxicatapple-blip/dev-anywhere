@@ -12,29 +12,29 @@
 }
 
 .safe-area-header-bar {
-  height: 44px;
+  height: 88px;
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 16px;
 }
 
 .safe-area-header-back {
-  width: 44px;
-  height: 44px;
+  width: 88px;
+  height: 88px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .safe-area-header-back-icon {
-  font-size: 18px;
+  font-size: 36px;
   color: var(--color-text-primary, #333333);
 }
 
 .safe-area-header-title {
   flex: 1;
   text-align: center;
-  font-size: 16px;
+  font-size: 32px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,7 +43,7 @@
 }
 
 .safe-area-header-right {
-  min-width: 44px;
+  min-width: 88px;
   display: flex;
   align-items: center;
   justify-content: flex-end;

@@ -3,11 +3,11 @@
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: #FFFFFF;
-  padding: 16px var(--page-padding-h, 16px);
+  padding: 24px var(--page-padding-h, 32px);
 }
 
 .chat-bubble-row {
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   display: flex;
 }
 

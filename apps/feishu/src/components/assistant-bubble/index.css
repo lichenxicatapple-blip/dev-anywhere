@@ -6,14 +6,14 @@
 
 .assistant-bubble {
   background: #F0F0F0;
-  padding: 8px 16px;
-  border-radius: 4px 12px 12px 12px;
+  padding: 16px 32px;
+  border-radius: 8px 24px 24px 24px;
   max-width: var(--bubble-max-width-assistant, 85%);
   word-wrap: break-word;
 }
 
 .assistant-bubble-text {
-  font-size: 14px;
+  font-size: 28px;
   line-height: 1.5;
   color: #333333;
 }
@@ -30,24 +30,24 @@
 }
 
 .assistant-tool-line {
-  margin-top: 4px;
-  padding: 4px 8px;
+  margin-top: 8px;
+  padding: 8px 16px;
   background: rgba(0, 0, 0, 0.04);
   border-radius: 4px;
 }
 
 .assistant-tool-text {
-  font-size: 12px;
+  font-size: 24px;
   color: #999999;
   font-family: monospace, Menlo, Courier;
 }
 
 .assistant-bubble-time-row {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .assistant-bubble-time {
-  font-size: 12px;
+  font-size: 20px;
   color: #999999;
 }
 
@@ -82,17 +82,17 @@
 
 .assistant-bubble-context-menu {
   position: absolute;
-  left: 16px;
+  left: 32px;
   bottom: 100%;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   background: #333333;
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 80px;
+  border-radius: 16px;
+  padding: 8px 0;
+  min-width: 160px;
 }
 
 .assistant-bubble-context-item {
-  padding: 8px 16px;
+  padding: 16px 32px;
 }
 
 .assistant-bubble-context-item:active {
@@ -100,6 +100,6 @@
 }
 
 .assistant-bubble-context-item-text {
-  font-size: 14px;
+  font-size: 28px;
   color: #FFFFFF;
 }

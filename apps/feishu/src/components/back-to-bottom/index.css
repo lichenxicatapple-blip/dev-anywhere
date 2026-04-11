@@ -1,13 +1,13 @@
 .back-to-bottom {
   position: fixed;
-  right: 16px;
-  bottom: 76px;
-  width: 36px;
-  height: 36px;
+  right: 32px;
+  bottom: 200px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: #FFFFFF;
   border: 1px solid #E8E8E8;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -23,12 +23,12 @@
 
 .back-to-bottom-hidden {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(16px);
   pointer-events: none;
 }
 
 .back-to-bottom-arrow {
-  font-size: 18px;
+  font-size: 32px;
   color: #666666;
   line-height: 1;
 }

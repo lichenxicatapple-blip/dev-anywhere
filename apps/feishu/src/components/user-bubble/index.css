@@ -6,25 +6,25 @@
 
 .user-bubble {
   background: #1890FF;
-  padding: 8px 16px;
-  border-radius: 12px 12px 4px 12px;
+  padding: 16px 32px;
+  border-radius: 24px 24px 8px 24px;
   max-width: var(--bubble-max-width-user, 75%);
   word-wrap: break-word;
   word-break: break-all;
 }
 
 .user-bubble-text {
-  font-size: 14px;
+  font-size: 28px;
   line-height: 1.5;
   color: #FFFFFF;
 }
 
 .user-bubble-time-row {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .user-bubble-time {
-  font-size: 12px;
+  font-size: 20px;
   color: #999999;
 }
 
@@ -47,14 +47,14 @@
 .user-bubble-quoted-block {
   display: flex;
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  padding: 6px 8px;
-  margin-bottom: 8px;
-  gap: 6px;
+  border-radius: 16px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  gap: 12px;
 }
 
 .user-bubble-quoted-line {
-  width: 3px;
+  width: 6px;
   background: rgba(255, 255, 255, 0.6);
   border-radius: 2px;
   flex-shrink: 0;
@@ -66,14 +66,14 @@
 }
 
 .user-bubble-quoted-source {
-  font-size: 11px;
+  font-size: 22px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.8);
   display: block;
 }
 
 .user-bubble-quoted-text {
-  font-size: 12px;
+  font-size: 24px;
   color: rgba(255, 255, 255, 0.7);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -93,17 +93,17 @@
 
 .user-bubble-context-menu {
   position: absolute;
-  right: 16px;
+  right: 32px;
   bottom: 100%;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   background: #333333;
-  border-radius: 8px;
-  padding: 4px 0;
-  min-width: 80px;
+  border-radius: 16px;
+  padding: 8px 0;
+  min-width: 160px;
 }
 
 .user-bubble-context-item {
-  padding: 8px 16px;
+  padding: 16px 32px;
 }
 
 .user-bubble-context-item:active {
@@ -111,6 +111,6 @@
 }
 
 .user-bubble-context-item-text {
-  font-size: 14px;
+  font-size: 28px;
   color: #FFFFFF;
 }

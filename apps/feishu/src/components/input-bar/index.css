@@ -7,25 +7,25 @@
 }
 
 .input-bar-reason {
-  padding: 4px var(--input-bar-padding-h, 16px);
+  padding: 8px var(--input-bar-padding-h, 32px);
   text-align: center;
 }
 
 .input-bar-reason-text {
-  font-size: 12px;
+  font-size: 24px;
   color: #999999;
 }
 
 .input-bar-row {
   display: flex;
   align-items: center;
-  padding: 8px var(--input-bar-padding-h, 16px);
-  gap: 8px;
+  padding: 16px var(--input-bar-padding-h, 32px);
+  gap: 16px;
 }
 
 .input-bar-menu-btn {
-  width: 36px;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: #F5F5F5;
   display: flex;
@@ -35,24 +35,24 @@
 }
 
 .input-bar-menu-btn-text {
-  font-size: 14px;
+  font-size: 28px;
   color: #666;
   font-weight: bold;
-  letter-spacing: 2px;
+  letter-spacing: 4px;
 }
 
 .input-bar-field {
   flex: 1;
-  height: 36px;
+  height: 72px;
   background: #F5F5F5;
-  border-radius: 18px;
-  padding: 0 16px;
-  font-size: 14px;
+  border-radius: 36px;
+  padding: 0 32px;
+  font-size: 28px;
 }
 
 .input-bar-send-btn {
-  width: 36px;
-  height: 36px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -69,19 +69,19 @@
 }
 
 .input-bar-send-icon {
-  font-size: 18px;
+  font-size: 36px;
   color: #fff;
   font-weight: bold;
 }
 
 .input-bar-hint {
-  padding: 4px var(--input-bar-padding-h, 16px);
+  padding: 8px var(--input-bar-padding-h, 32px);
   background: #FAFAFA;
   border-top: 1px solid #F0F0F0;
 }
 
 .input-bar-hint-text {
-  font-size: 12px;
+  font-size: 22px;
   color: #999999;
   font-family: monospace, Menlo, Courier;
   white-space: nowrap;

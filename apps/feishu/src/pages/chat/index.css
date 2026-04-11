@@ -93,9 +93,9 @@
   width: 100%;
   max-width: var(--picker-max-width, 100%);
   background: #FFFFFF;
-  border-radius: 16px 16px 0 0;
-  padding: 16px;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
+  padding: 32px 32px;
+  padding-bottom: calc(32px + env(safe-area-inset-bottom));
   animation: settingsPanelIn 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -110,35 +110,35 @@
 
 .settings-header {
   text-align: center;
-  margin-bottom: 16px;
+  margin-bottom: 32px;
 }
 
 .settings-title {
-  font-size: 16px;
+  font-size: 32px;
   font-weight: 600;
   color: #333333;
 }
 
 .settings-section {
-  margin-bottom: 16px;
+  margin-bottom: 32px;
 }
 
 .settings-section-label {
-  font-size: 13px;
+  font-size: 24px;
   color: #999999;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
   display: block;
 }
 
 .settings-chips {
   display: flex;
-  gap: 8px;
+  gap: 12px;
 }
 
 .settings-chip {
   flex: 1;
-  height: 36px;
-  border-radius: 18px;
+  height: 64px;
+  border-radius: 12px;
   background: #F5F5F5;
   display: flex;
   align-items: center;
@@ -151,7 +151,7 @@
 }
 
 .settings-chip-text {
-  font-size: 13px;
+  font-size: 24px;
   color: #666666;
 }
 
@@ -164,13 +164,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 32px;
 }
 
 .settings-font-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
   background: #F5F5F5;
   display: flex;
   align-items: center;
@@ -182,22 +182,22 @@
 }
 
 .settings-font-btn-text {
-  font-size: 14px;
+  font-size: 24px;
   color: #333333;
   font-weight: 600;
 }
 
 .settings-font-size-display {
-  font-size: 14px;
+  font-size: 32px;
   color: #333333;
-  min-width: 40px;
+  min-width: 96px;
   text-align: center;
 }
 
 .settings-window-btn {
-  height: 44px;
+  height: 64px;
   background: #F5F5F5;
-  border-radius: 8px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -208,7 +208,7 @@
 }
 
 .settings-window-btn-text {
-  font-size: 14px;
+  font-size: 24px;
   color: #1890FF;
   font-weight: 500;
 }

@@ -23,13 +23,13 @@
 .file-picker-header {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
+  padding: 16px 32px;
   border-bottom: 1px solid #F0F0F0;
   flex-shrink: 0;
 }
 
 .file-picker-title {
-  font-size: 13px;
+  font-size: 26px;
   font-weight: 600;
   color: #333333;
 }
@@ -43,7 +43,7 @@
 .file-picker-breadcrumb-row {
   display: inline-flex;
   align-items: center;
-  padding: 6px 16px;
+  padding: 12px 32px;
 }
 
 .file-picker-breadcrumb-item {
@@ -52,13 +52,13 @@
 }
 
 .file-picker-breadcrumb-sep {
-  font-size: 12px;
+  font-size: 24px;
   color: #CCCCCC;
-  margin: 0 4px;
+  margin: 0 6px;
 }
 
 .file-picker-breadcrumb-text {
-  font-size: 13px;
+  font-size: 24px;
   color: #1890FF;
 }
 
@@ -75,8 +75,8 @@
 .file-picker-item {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  gap: 8px;
+  padding: 20px 32px;
+  gap: 16px;
   border-bottom: 1px solid #F5F5F5;
 }
 
@@ -85,15 +85,15 @@
 }
 
 .file-picker-item-icon {
-  font-size: 12px;
+  font-size: 24px;
   color: #999999;
-  width: 24px;
+  width: 48px;
   text-align: center;
 }
 
 .file-picker-item-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 28px;
 }
 
 .file-picker-item-name.dir {
@@ -106,7 +106,7 @@
 }
 
 .file-picker-item-arrow {
-  font-size: 12px;
+  font-size: 24px;
   color: #CCCCCC;
 }
 
@@ -114,10 +114,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
+  padding: 48px 0;
 }
 
 .file-picker-empty-text {
-  font-size: 13px;
+  font-size: 26px;
   color: #CCCCCC;
 }

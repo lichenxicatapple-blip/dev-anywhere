@@ -16,17 +16,17 @@
   max-width: var(--picker-max-width, 100%);
   max-height: 70vh;
   background: #FFFFFF;
-  border-radius: 12px;
+  border-radius: 24px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .dir-picker-title {
-  font-size: 16px;
+  font-size: 32px;
   font-weight: 600;
   color: #333333;
-  padding: 16px;
+  padding: 32px;
   text-align: center;
   border-bottom: 1px solid #F0F0F0;
 }
@@ -40,7 +40,7 @@
 .dir-picker-breadcrumb-row {
   display: inline-flex;
   align-items: center;
-  padding: 8px 16px;
+  padding: 12px 32px;
 }
 
 .dir-picker-breadcrumb-item {
@@ -49,13 +49,13 @@
 }
 
 .dir-picker-breadcrumb-sep {
-  font-size: 12px;
+  font-size: 24px;
   color: #CCCCCC;
-  margin: 0 4px;
+  margin: 0 6px;
 }
 
 .dir-picker-breadcrumb-text {
-  font-size: 13px;
+  font-size: 24px;
   color: #1890FF;
 }
 
@@ -73,8 +73,8 @@
 .dir-picker-item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  gap: 8px;
+  padding: 20px 32px;
+  gap: 16px;
   border-bottom: 1px solid #F5F5F5;
 }
 
@@ -83,21 +83,21 @@
 }
 
 .dir-picker-item-icon {
-  font-size: 12px;
+  font-size: 24px;
   color: #999999;
-  width: 24px;
+  width: 48px;
   text-align: center;
 }
 
 .dir-picker-item-name {
   flex: 1;
-  font-size: 14px;
+  font-size: 28px;
   color: #333333;
   font-weight: 500;
 }
 
 .dir-picker-item-arrow {
-  font-size: 12px;
+  font-size: 24px;
   color: #CCCCCC;
 }
 
@@ -105,48 +105,48 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
+  padding: 48px 0;
 }
 
 .dir-picker-empty-text {
-  font-size: 13px;
+  font-size: 26px;
   color: #CCCCCC;
 }
 
 .dir-picker-actions {
-  padding: 12px 16px;
+  padding: 24px 32px;
   border-top: 1px solid #F0F0F0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 
 .dir-picker-select-btn {
-  height: 44px;
+  height: 88px;
   background: #1890FF;
-  border-radius: 8px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .dir-picker-select-btn-text {
-  font-size: 15px;
+  font-size: 30px;
   color: #FFFFFF;
   font-weight: 500;
 }
 
 .dir-picker-cancel-btn {
-  height: 44px;
+  height: 88px;
   background: #FFFFFF;
   border: 1px solid #E8E8E8;
-  border-radius: 8px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .dir-picker-cancel-btn-text {
-  font-size: 15px;
+  font-size: 30px;
   color: #666666;
 }
