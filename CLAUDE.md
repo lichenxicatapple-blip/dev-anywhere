@@ -161,16 +161,21 @@ pnpm --filter feishu run build:h5
 # Watch 模式（自动重新构建）
 pnpm --filter feishu run dev:h5
 
-# 启动静态服务器
-npx serve apps/feishu/dist -p 5173 -s
+# 启动静态服务器（H5 输出到 dist-h5，lark 输出到 dist，互不干扰）
+pnpm --filter feishu run serve:h5
+
+# E2E 测试（需要 relay + proxy 在线）
+pnpm --filter feishu exec playwright test
 ```
 
-浏览器访问 `http://localhost:5173/`，通过 hash 路由访问各页面：
+浏览器访问 `http://localhost:5175/`，通过 hash 路由访问各页面：
 - `/#/pages/proxy-select/index` — Proxy 选择页
 - `/#/pages/session-list/index` — 会话列表页
 - `/#/pages/chat/index` — 聊天页
 
-H5 模式下 Taro 的 pxtransform 会将 750 设计稿的 px 转换为 rem，布局比例与小程序一致。WebSocket 等运行时功能可能不可用，但 CSS 布局调试完全可行。
+模拟手机分辨率：Chrome DevTools 中按 `Cmd+Shift+M` 打开设备工具栏，设置 390x844（接近飞书小程序视口）。
+
+H5 模式下 Taro 的 pxtransform 会将 750 设计稿的 px 转换为 rem，布局比例与小程序一致。WebSocket 连接 relay 后可看到真实数据，CSS 布局调试完全可行。
 
 <!-- GSD:workflow-start source:GSD defaults -->
 ## GSD Workflow Enforcement

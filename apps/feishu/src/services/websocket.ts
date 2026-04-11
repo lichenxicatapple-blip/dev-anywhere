@@ -13,6 +13,7 @@ export class WebSocketManager {
   private connected = false;
   private messageHandlers = new Set<(data: string) => void>();
   private statusHandlers = new Set<(connected: boolean) => void>();
+  private pendingQueue: string[] = [];
 
   connect(url: string): void {
     // 关闭已有连接，防止前台恢复时创建重复 WebSocket
@@ -43,6 +44,7 @@ export class WebSocketManager {
       task.onOpen(() => {
         this.reconnectAttempt = 0;
         this.connected = true;
+        this.flushPendingQueue();
         this.statusHandlers.forEach((h) => h(true));
       });
 
@@ -76,12 +78,31 @@ export class WebSocketManager {
   }
 
   send(data: string): boolean {
-    if (!this.task || !this.connected) {
-      console.warn("WebSocket send dropped: not connected");
+    if (!this.task) {
+      console.warn("WebSocket send dropped: no socket");
       return false;
     }
-    this.task.send({ data });
+    if (!this.connected) {
+      this.pendingQueue.push(data);
+      return false;
+    }
+    this.doSend(data);
     return true;
+  }
+
+  private doSend(data: string): void {
+    if (!this.task) return;
+    // Taro 类型声明 send 返回 void，但 H5 实际返回 Promise，用 Promise.resolve 统一处理
+    Promise.resolve(this.task.send({ data })).catch(() => {
+      this.pendingQueue.push(data);
+    });
+  }
+
+  private flushPendingQueue(): void {
+    const queue = this.pendingQueue.splice(0);
+    for (const data of queue) {
+      this.doSend(data);
+    }
   }
 
   close(): void {

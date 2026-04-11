@@ -58,10 +58,10 @@ export default function Chat() {
   const relay = useRelayClient();
   const appState = useAppState();
 
-  // 用户返回上一页时清除 sessionId，避免下次冷启动被拉回同一个 chat
-  Taro.useDidHide(() => {
-    Taro.removeStorageSync("cc_sessionId");
-  });
+  // 页面销毁时清除 sessionId（仅 navigateBack 会销毁页面，navigateTo 不会）
+  useEffect(() => {
+    return () => { Taro.removeStorageSync("cc_sessionId"); };
+  }, []);
 
   // 发送前检查连接状态和 proxy 在线状态，未就绪时提示用户
   const checkConnected = useCallback((): boolean => {

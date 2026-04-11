@@ -7,6 +7,8 @@ export default tseslint.config(
   {
     ignores: [
       "**/dist/**",
+      "**/dist-h5/**",
+      "**/test-results/**",
       "**/node_modules/**",
       "**/*.config.ts",
       "**/*.config.js",

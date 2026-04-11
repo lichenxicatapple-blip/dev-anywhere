@@ -57,7 +57,11 @@ function App({ children }: PropsWithChildren) {
       const ctrl = msg as Record<string, unknown>;
       if (ctrl.type === "proxy_offline" && ctrl.proxyId === state.selectedProxyId) {
         dispatch({ type: "SET_PROXY_ONLINE", online: false });
-        Taro.showToast({ title: "Proxy disconnected", icon: "none", duration: 2000 });
+        Taro.showToast({ title: "Proxy disconnected", icon: "none", duration: 1500 });
+        // 退回 proxy-select 首页
+        setTimeout(() => {
+          Taro.reLaunch({ url: "/pages/proxy-select/index" });
+        }, 1500);
       }
       if (ctrl.type === "proxy_online" && ctrl.proxyId === state.selectedProxyId) {
         dispatch({ type: "SET_PROXY_ONLINE", online: true });

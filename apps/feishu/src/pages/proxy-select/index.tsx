@@ -9,6 +9,7 @@ import { useScreenSize } from "@/hooks/use-screen-size";
 import { Typewriter } from "@/components/typewriter";
 import { ProxyListItem } from "@/components/proxy-list-item";
 import { EmptyState } from "@/components/empty-state";
+import { resolveColdStart } from "./cold-start";
 import "./index.css";
 
 const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
@@ -49,25 +50,21 @@ export default function ProxySelect() {
         setLoaded(true);
 
         // 冷启动自动导航：如果上次选过 proxy 且仍在线，恢复上次的位置
-        const savedProxyId = Taro.getStorageSync("cc_proxyId") as string;
-        const savedSessionId = Taro.getStorageSync("cc_sessionId") as string;
-        if (savedProxyId) {
-          const onlineProxy = ctrl.proxies.find((p) => p.proxyId === savedProxyId && p.online);
-          if (onlineProxy) {
-            appDispatch({
-              type: "SET_PROXY",
-              proxyId: savedProxyId,
-              proxyName: onlineProxy.name || null,
-            });
-            appDispatch({ type: "SET_PROXY_ONLINE", online: true });
-            relay.selectProxy(savedProxyId);
-            if (savedSessionId) {
-              Taro.navigateTo({ url: `/pages/chat/index?sessionId=${savedSessionId}` });
-            } else {
-              Taro.navigateTo({ url: "/pages/session-list/index" });
-            }
-            return;
-          }
+        const coldStart = resolveColdStart(
+          Taro.getStorageSync("cc_proxyId") as string,
+          Taro.getStorageSync("cc_sessionId") as string,
+          ctrl.proxies,
+        );
+        if (coldStart) {
+          appDispatch({
+            type: "SET_PROXY",
+            proxyId: coldStart.proxy.proxyId,
+            proxyName: coldStart.proxy.name || null,
+          });
+          appDispatch({ type: "SET_PROXY_ONLINE", online: true });
+          relay.selectProxy(coldStart.proxy.proxyId);
+          Taro.navigateTo({ url: coldStart.url });
+          return;
         }
       }
     });

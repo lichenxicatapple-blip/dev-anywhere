@@ -26,10 +26,10 @@ export default function SessionList() {
   const [showDirPicker, setShowDirPicker] = useState(false);
   const [dirEntries, setDirEntries] = useState<Map<string, DirEntry[]>>(new Map());
 
-  // 用户返回 proxy-select 时清除 proxyId，避免下次冷启动跳过首页
-  Taro.useDidHide(() => {
-    Taro.removeStorageSync("cc_proxyId");
-  });
+  // 页面销毁时清除 proxyId（仅 navigateBack 会销毁页面，navigateTo 不会）
+  useEffect(() => {
+    return () => { Taro.removeStorageSync("cc_proxyId"); };
+  }, []);
 
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
@@ -56,6 +56,12 @@ export default function SessionList() {
           sessionId: env.payload.sessionId,
           state: env.payload.state as SessionInfo["state"],
         });
+      }
+
+      // 终端标题变化，更新会话名称
+      if (msg.type === "terminal_title" && "sessionId" in msg && "title" in msg) {
+        const { sessionId, title } = msg as { sessionId: string; title: string };
+        sessionDispatch({ type: "UPDATE_SESSION_NAME", sessionId, name: title });
       }
 
       const ctrl = msg as RelayControlMessage;

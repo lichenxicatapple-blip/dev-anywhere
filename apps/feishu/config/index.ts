@@ -11,7 +11,7 @@ const config = {
     828: 1.81 / 2,
   },
   sourceRoot: "src",
-  outputRoot: "dist",
+  outputRoot: process.env.TARO_APP_H5 ? "dist-h5" : "dist",
   plugins: ["@tarojs/plugin-platform-lark", "@tarojs/plugin-platform-h5"],
   framework: "react",
   compiler: "webpack5",

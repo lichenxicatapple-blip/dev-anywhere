@@ -17,6 +17,7 @@ export type SessionAction =
   | { type: "ADD_SESSION"; session: SessionInfo }
   | { type: "REMOVE_SESSION"; sessionId: string }
   | { type: "UPDATE_SESSION_STATE"; sessionId: string; state: SessionInfo["state"] }
+  | { type: "UPDATE_SESSION_NAME"; sessionId: string; name: string }
   | { type: "SET_HISTORY_SESSIONS"; sessions: HistorySession[] };
 
 export const initialSessionState: SessionStoreState = {
@@ -48,6 +49,13 @@ export function sessionReducer(state: SessionStoreState, action: SessionAction):
         ...state,
         sessions: state.sessions.map((s) =>
           s.sessionId === action.sessionId ? { ...s, state: action.state } : s,
+        ),
+      };
+    case "UPDATE_SESSION_NAME":
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.sessionId === action.sessionId ? { ...s, name: action.name } : s,
         ),
       };
     case "SET_HISTORY_SESSIONS":

@@ -6,8 +6,9 @@
   "scripts": {
     "build:lark": "taro build --type lark",
     "dev:lark": "taro build --type lark --watch",
-    "build:h5": "taro build --type h5",
-    "dev:h5": "taro build --type h5 --watch",
+    "build:h5": "TARO_APP_H5=1 taro build --type h5",
+    "dev:h5": "TARO_APP_H5=1 taro build --type h5 --watch",
+    "serve:h5": "npx serve dist-h5 -p 5175 -s",
     "echo-server": "tsx src/echo-server.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -30,6 +31,7 @@
     "@babel/preset-react": "^7.28.5",
     "@babel/runtime": "^7.29.2",
     "@cc-anywhere/shared": "workspace:*",
+    "@playwright/test": "^1.52.0",
     "@tarojs/cli": "~3.6.39",
     "@tarojs/webpack5-runner": "~3.6.39",
     "@types/react": "^18.3.28",
