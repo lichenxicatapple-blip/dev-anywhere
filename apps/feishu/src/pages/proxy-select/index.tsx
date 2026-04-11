@@ -38,7 +38,7 @@ export default function ProxySelect() {
     }
   }, [relay]);
 
-  // 监听 proxy_list_response
+  // 监听 proxy 列表变化：app.tsx 在连接时已请求列表，这里只负责接收响应
   useEffect(() => {
     if (!relay) return;
 
@@ -48,14 +48,13 @@ export default function ProxySelect() {
         setProxies(ctrl.proxies);
         setLoaded(true);
       }
+      if (ctrl.type === "proxy_online" || ctrl.type === "proxy_offline") {
+        fetchProxies();
+      }
     });
 
-    // 连接建立后才发请求，避免在 WebSocket 未就绪时发送被丢弃
-    if (appState.connected) {
-      fetchProxies();
-    }
     return unsub;
-  }, [relay, appState.connected, fetchProxies]);
+  }, [relay, fetchProxies]);
 
   // 下拉刷新
   usePullDownRefresh(() => {

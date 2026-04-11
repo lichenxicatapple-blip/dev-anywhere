@@ -28,6 +28,7 @@ export class RelayRegistry {
   private proxyStates = new Map<string, ProxyState>();
   private clientBindings = new Map<string, ClientBinding>();
   private sessionBuffers = new Map<string, SessionBuffer>();
+  private connectedClients = new Set<WebSocket>();
   private store: BufferStore | null;
 
   constructor(store: BufferStore | null = null) {
@@ -221,11 +222,19 @@ export class RelayRegistry {
     return count;
   }
 
+  addClientWs(ws: WebSocket): void {
+    this.connectedClients.add(ws);
+  }
+
+  removeClientWs(ws: WebSocket): void {
+    this.connectedClients.delete(ws);
+  }
+
   getAllClientWs(): WebSocket[] {
     const clients: WebSocket[] = [];
-    for (const [, binding] of this.clientBindings) {
-      if (binding.ws && binding.ws.readyState === WebSocket.OPEN) {
-        clients.push(binding.ws);
+    for (const ws of this.connectedClients) {
+      if (ws.readyState === WebSocket.OPEN) {
+        clients.push(ws);
       }
     }
     return clients;

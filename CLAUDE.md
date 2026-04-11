@@ -155,11 +155,11 @@ Architecture not yet mapped. Follow existing patterns found in the codebase.
 飞书小程序支持 H5 模式构建，可在浏览器中直接预览和调试 UI，无需依赖飞书开发者工具。
 
 ```bash
-# 单次构建
-pnpm --filter feishu run build:h5
-
-# Watch 模式（自动重新构建）
+# 开发构建（不压缩，有 sourcemap，方便调试）
 pnpm --filter feishu run dev:h5
+
+# 生产构建（压缩混淆，用于发布）
+pnpm --filter feishu run build:h5
 
 # 启动静态服务器（H5 输出到 dist-h5，lark 输出到 dist，互不干扰）
 pnpm --filter feishu run serve:h5
@@ -167,6 +167,8 @@ pnpm --filter feishu run serve:h5
 # E2E 测试（需要 relay + proxy 在线）
 pnpm --filter feishu exec playwright test
 ```
+
+**开发/生产构建区别：** `dev:h5` 使用 watch 模式（NODE_ENV=development），不压缩代码，启用 sourcemap，浏览器报错堆栈可读。`build:h5` 使用 production 模式，代码压缩混淆。日常调试始终使用 `dev:h5`。
 
 浏览器访问 `http://localhost:5175/`，通过 hash 路由访问各页面：
 - `/#/pages/proxy-select/index` — Proxy 选择页

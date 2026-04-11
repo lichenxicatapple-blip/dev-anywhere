@@ -20,6 +20,7 @@ describe("PROXY_TO_CLIENT_TYPES completeness", () => {
     "file_tree_push",
     "session_history_response",
     "pty_state",
+    "session_list",
   ];
 
   it.each(EXPECTED_TYPES)("includes '%s'", (type) => {

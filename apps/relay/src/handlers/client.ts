@@ -93,6 +93,7 @@ export function handleClientConnection(
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
+  registry.addClientWs(clientWs);
 
   clientWs.on("pong", () => {
     clientWs.isAlive = true;
@@ -201,6 +202,7 @@ export function handleClientConnection(
   });
 
   clientWs.on("close", () => {
+    registry.removeClientWs(clientWs);
     if (clientWs.clientId) {
       registry.unbindClientById(clientWs.clientId);
     }

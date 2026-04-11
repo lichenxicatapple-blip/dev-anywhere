@@ -11,12 +11,13 @@ export class WebSocketManager {
   private closed = false;
   private url = "";
   private connected = false;
+  private connecting = false;
   private messageHandlers = new Set<(data: string) => void>();
   private statusHandlers = new Set<(connected: boolean) => void>();
   private pendingQueue: string[] = [];
 
   connect(url: string): void {
-    // 关闭已有连接，防止前台恢复时创建重复 WebSocket
+    if (this.connecting && this.url === url) return;
     if (this.task) {
       this.task.close({});
       this.task = null;
@@ -32,16 +33,18 @@ export class WebSocketManager {
   }
 
   private doConnect(): void {
-    // 飞书 tt.connectSocket 返回 Promise<SocketTask>，必须 await
+    this.connecting = true;
     const result = Taro.connectSocket({ url: this.url });
     Promise.resolve(result).then((task) => {
       if (this.closed) {
+        this.connecting = false;
         task.close({});
         return;
       }
       this.task = task;
 
       task.onOpen(() => {
+        this.connecting = false;
         this.reconnectAttempt = 0;
         this.connected = true;
         this.flushPendingQueue();
@@ -55,6 +58,7 @@ export class WebSocketManager {
       });
 
       task.onClose(() => {
+        this.connecting = false;
         this.task = null;
         this.connected = false;
         this.statusHandlers.forEach((h) => h(false));
@@ -92,9 +96,8 @@ export class WebSocketManager {
 
   private doSend(data: string): void {
     if (!this.task) return;
-    // Taro 类型声明 send 返回 void，但 H5 实际返回 Promise，用 Promise.resolve 统一处理
-    Promise.resolve(this.task.send({ data })).catch(() => {
-      this.pendingQueue.push(data);
+    Promise.resolve(this.task.send({ data })).catch((err) => {
+      console.error("WebSocket doSend failed:", err);
     });
   }
 

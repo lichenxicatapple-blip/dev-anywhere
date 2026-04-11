@@ -35,6 +35,16 @@ const config = {
       template: path.resolve(__dirname, "../src/index.html"),
       filename: "index.html",
     },
+    enableSourceMap: process.env.NODE_ENV !== "production",
+    webpackChain(chain: {
+      performance: { hints: (v: boolean) => void };
+      optimization: { minimize: (v: boolean) => void };
+    }) {
+      chain.performance.hints(false);
+      if (process.env.NODE_ENV !== "production") {
+        chain.optimization.minimize(false);
+      }
+    },
     postcss: {
       autoprefixer: {
         enable: true,

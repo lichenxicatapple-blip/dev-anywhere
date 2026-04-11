@@ -49,19 +49,21 @@ export interface ScreenInfo {
 
 // React hook，订阅 Taro.onWindowResize 实现实时跟踪
 export function useScreenSize(): ScreenInfo {
-  const info = Taro.getSystemInfoSync();
+  const info = Taro.getSystemInfoSync() || {};
+  const w = info.windowWidth || window?.innerWidth || 390;
+  const h = info.windowHeight || window?.innerHeight || 844;
   const [size, setSize] = useState({
-    windowWidth: info.windowWidth,
-    windowHeight: info.windowHeight,
+    windowWidth: w,
+    windowHeight: h,
     deviceType: (info as unknown as Record<string, unknown>).deviceType as string || "phone",
     statusBarHeight: info.statusBarHeight || 0,
     safeArea: info.safeArea || {
       top: 0,
-      bottom: info.windowHeight,
+      bottom: h,
       left: 0,
-      right: info.windowWidth,
-      width: info.windowWidth,
-      height: info.windowHeight,
+      right: w,
+      width: w,
+      height: h,
     },
   });
 
