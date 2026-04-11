@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { hostname } from "node:os";
+import { execSync } from "node:child_process";
 import {
   unlinkSync,
   writeFileSync,
@@ -546,8 +547,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
 
-  // D-23: proxy 名称，优先使用环境变量，否则使用主机名
-  const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || hostname();
+  // D-23: proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
+  const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
+
+  function getComputerName(): string | null {
+    try {
+      return execSync("scutil --get ComputerName", { stdio: ["pipe", "pipe", "ignore"] }).toString().trim() || null;
+    } catch {
+      return null;
+    }
+  }
 
   // 创建 handler 模块实例（在 relay 连接建立前创建，send 函数延迟绑定）
   let relaySend: ((data: string) => void) | null = null;
