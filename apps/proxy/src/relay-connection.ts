@@ -22,7 +22,7 @@ const BASE_BACKOFF_MS = 1000;
 export interface RelayConnectionOptions {
   // 自定义 proxyId 文件路径，测试时使用临时目录
   proxyIdPath?: string;
-  // D-23: proxy 显示名称，注册时发送给 relay
+  // proxy 显示名称，注册时发送给 relay
   name?: string;
 }
 

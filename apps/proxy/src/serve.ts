@@ -547,7 +547,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
 
-  // D-23: proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
+  // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
   function getComputerName(): string | null {
@@ -602,7 +602,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             if (pending) {
               pending.resolve({ behavior: "allow" });
               pendingToolApprovals.delete(toolId);
-              // D-25/D-27: whitelistTool 为 true 时将工具加入会话级白名单
+              // whitelistTool 为 true 时将工具加入会话级白名单
               if (whitelistTool) {
                 const toolName = (parsed.payload?.toolName as string) ?? "";
                 if (toolName && pending.workerSocket.writable) {
@@ -675,7 +675,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       }
     });
 
-    // D-41: relay 重连时重新推送控制数据
+    // relay 重连时重新推送控制数据
     relayConnection.on("connected", () => {
       controlHandlers.reinitializeOnReconnect();
     });

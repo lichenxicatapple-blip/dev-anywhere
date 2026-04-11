@@ -204,7 +204,7 @@ export function createControlMessageHandlers(
         logger.warn({ sessionId, error: String(err) }, "Command discovery failed");
       }
 
-      // D-28: 6 小时定时刷新
+      // 6 小时定时刷新
       if (resources.commandRefreshTimer) {
         clearInterval(resources.commandRefreshTimer);
       }
@@ -239,7 +239,7 @@ export function createControlMessageHandlers(
       }
     },
 
-    // D-41: relay 重连时重新推送所有活跃 session 的 command list 和 file tree
+    // relay 重连时重新推送所有活跃 session 的 command list 和 file tree
     async reinitializeOnReconnect(): Promise<void> {
       const activeSessions = sessionManager.listSessions()
         .filter((s) => s.state !== "terminated");
