@@ -29,11 +29,6 @@ export default function SessionList() {
   const [swipeOpenId, setSwipeOpenId] = useState("");
   const [showDirPicker, setShowDirPicker] = useState(false);
 
-  // 页面销毁时清除 proxyId（仅 navigateBack 会销毁页面，navigateTo 不会）
-  useEffect(() => {
-    return () => { Taro.removeStorageSync("cc_proxyId"); };
-  }, []);
-
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
     if (appState.selectedProxyName) {

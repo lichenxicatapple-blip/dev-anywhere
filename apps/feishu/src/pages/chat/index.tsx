@@ -58,11 +58,6 @@ export default function Chat() {
   const relay = useRelayClient();
   const appState = useAppState();
 
-  // 页面销毁时清除 sessionId（仅 navigateBack 会销毁页面，navigateTo 不会）
-  useEffect(() => {
-    return () => { Taro.removeStorageSync("cc_sessionId"); };
-  }, []);
-
   // 发送前检查连接状态和 proxy 在线状态，未就绪时提示用户
   const checkConnected = useCallback((): boolean => {
     if (!appState.connected) {
