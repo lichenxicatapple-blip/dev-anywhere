@@ -5,6 +5,7 @@ import type { CommonEventFunction } from "@tarojs/components";
 import Taro from "@tarojs/taro";
 import type { SessionInfo } from "@cc-anywhere/shared";
 import { formatRelativeTime } from "@/utils/relative-time";
+import { formatSessionName } from "@/utils/format-session-name";
 import "./index.css";
 
 interface TouchPoint { clientX: number; clientY: number }
@@ -98,7 +99,7 @@ export function SessionListItem({
       >
         <View className="sli-info">
           <Text className="sli-title" numberOfLines={1}>
-            {session.name || "New Session"}
+            {formatSessionName(session.name)}
           </Text>
           <View className="sli-meta-row">
             <StateDot state={session.state} />
