@@ -4,12 +4,11 @@ import { View, Text } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
 import type { ProxyInfo, RelayControlMessage } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
-import { useAppState, useAppDispatch } from "@/stores/app-store";
+import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import { Typewriter } from "@/components/typewriter";
 import { ProxyListItem } from "@/components/proxy-list-item";
 import { EmptyState } from "@/components/empty-state";
-import { resolveColdStart } from "./cold-start";
 import "./index.css";
 
 const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
@@ -48,24 +47,6 @@ export default function ProxySelect() {
       if (ctrl.type === "proxy_list_response") {
         setProxies(ctrl.proxies);
         setLoaded(true);
-
-        // 冷启动自动导航：如果上次选过 proxy 且仍在线，恢复上次的位置
-        const coldStart = resolveColdStart(
-          Taro.getStorageSync("cc_proxyId") as string,
-          Taro.getStorageSync("cc_sessionId") as string,
-          ctrl.proxies,
-        );
-        if (coldStart) {
-          appDispatch({
-            type: "SET_PROXY",
-            proxyId: coldStart.proxy.proxyId,
-            proxyName: coldStart.proxy.name || null,
-          });
-          appDispatch({ type: "SET_PROXY_ONLINE", online: true });
-          relay.selectProxy(coldStart.proxy.proxyId);
-          Taro.navigateTo({ url: coldStart.url });
-          return;
-        }
       }
     });
 
@@ -74,7 +55,7 @@ export default function ProxySelect() {
       fetchProxies();
     }
     return unsub;
-  }, [relay, appState.connected, appDispatch, fetchProxies]);
+  }, [relay, appState.connected, fetchProxies]);
 
   // 下拉刷新
   usePullDownRefresh(() => {
@@ -97,10 +78,19 @@ export default function ProxySelect() {
       if (relay) {
         relay.selectProxy(proxy.proxyId);
       }
+      transitionToPhase(appState.phase, "session_browsing", appDispatch);
       Taro.navigateTo({ url: "/pages/session-list/index" });
     },
-    [relay, appDispatch],
+    [relay, appDispatch, appState.phase],
   );
+
+  // 物理返回键或滑动手势回到此页面时，校正 phase
+  Taro.useDidShow(() => {
+    const s = appState;
+    if (s.phase !== "proxy_selecting" && s.phase !== "connecting" && s.phase !== "reconnecting") {
+      appDispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
+    }
+  });
 
   const hasOnlineProxy = proxies.length > 0;
 

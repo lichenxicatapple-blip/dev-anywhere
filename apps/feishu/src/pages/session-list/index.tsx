@@ -4,7 +4,7 @@ import { View, Text, ScrollView } from "@tarojs/components";
 import Taro from "@tarojs/taro";
 import type { MessageEnvelope, RelayControlMessage, DirEntry, SessionInfo } from "@cc-anywhere/shared";
 import { useRelayClient } from "@/stores/relay-store";
-import { useAppState } from "@/stores/app-store";
+import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
 import {
   useSessionState,
   useSessionDispatch,
@@ -20,6 +20,7 @@ import "./index.css";
 export default function SessionList() {
   const relay = useRelayClient();
   const appState = useAppState();
+  const appDispatch = useAppDispatch();
   const sessionState = useSessionState();
   const sessionDispatch = useSessionDispatch();
   const fileState = useFileState();
@@ -112,9 +113,10 @@ export default function SessionList() {
         sessionId,
         mode: mode || "json",
       });
+      transitionToPhase(appState.phase, "chatting", appDispatch);
       Taro.navigateTo({ url: `/pages/chat/index?sessionId=${sessionId}&mode=${mode || "json"}` });
     },
-    [sessionDispatch],
+    [sessionDispatch, appState.phase, appDispatch],
   );
 
   // 终止 JSON 会话
@@ -144,9 +146,10 @@ export default function SessionList() {
           payload: { resumeSessionId: historySession.id },
         } as never);
       }
+      transitionToPhase(appState.phase, "chatting", appDispatch);
       Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay, checkConnected],
+    [relay, checkConnected, appState.phase, appDispatch],
   );
 
   // 点击新建按钮时弹出目录选择器
@@ -177,14 +180,22 @@ export default function SessionList() {
           payload: { cwd },
         } as never);
       }
+      transitionToPhase(appState.phase, "chatting", appDispatch);
       Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay, checkConnected],
+    [relay, checkConnected, appState.phase, appDispatch],
   );
 
   const handleDirPickerCancel = useCallback(() => {
     setShowDirPicker(false);
   }, []);
+
+  // 物理返回键或滑动手势回到此页面时，校正 phase
+  Taro.useDidShow(() => {
+    if (appState.phase !== "session_browsing") {
+      appDispatch({ type: "SET_PHASE", phase: "session_browsing" });
+    }
+  });
 
   const hasActiveSessions = sessionState.sessions.length > 0;
   const hasHistory = sessionState.historySessions.length > 0;
