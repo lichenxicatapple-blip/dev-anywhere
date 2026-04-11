@@ -184,7 +184,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
         if (sessionId) {
           socket.write(
-            serializeIpc({ type: "session_create_request", mode: "pty", name: process.cwd().replace(process.env.HOME || "", "~"), sessionId }),
+            serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~"), sessionId }),
           );
           const resp = await waitForMessage(socket, "session_create_response");
           if (resp.type === "session_create_response" && !resp.error) {
@@ -206,7 +206,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   // 请求创建 PTY 会话
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
-    serializeIpc({ type: "session_create_request", mode: "pty", name: process.cwd().replace(process.env.HOME || "", "~") }),
+    serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~") }),
   );
 
   const response = await responsePromise;
