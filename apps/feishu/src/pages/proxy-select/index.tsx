@@ -15,7 +15,6 @@ const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
 
 export default function ProxySelect() {
   const [proxies, setProxies] = useState<ProxyInfo[]>([]);
-  const [loaded, setLoaded] = useState(false);
   const [dots, setDots] = useState("");
   const relay = useRelayClient();
   const appState = useAppState();
@@ -46,7 +45,6 @@ export default function ProxySelect() {
       const ctrl = msg as RelayControlMessage;
       if (ctrl.type === "proxy_list_response") {
         setProxies(ctrl.proxies);
-        setLoaded(true);
       }
       if (ctrl.type === "proxy_online" || ctrl.type === "proxy_offline") {
         fetchProxies();
@@ -110,7 +108,7 @@ export default function ProxySelect() {
               </View>
             </View>
           )}
-          {appState.connected && loaded && !hasOnlineProxy && (
+          {appState.connected && !hasOnlineProxy && (
             <EmptyState
               title="No Proxy Online"
               subtitle="Run cc-anywhere on your computer to connect"
