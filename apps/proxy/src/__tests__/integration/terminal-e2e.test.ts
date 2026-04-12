@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import pino from "pino";
 import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
-import { TerminalTracker, type TermLine, type TermSpan } from "#src/terminal-tracker.js";
+import { TerminalTracker, type TermSpan } from "#src/terminal-tracker.js";
 import {
   TerminalFrameRenderer,
 } from "#src/terminal-frame-renderer.js";
@@ -214,71 +214,6 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     expect(renderer.getViewportLines()[0]).toEqual(originalLine0);
     // 第 1 行已更新
     expect(renderer.getViewportLines()[1][0].text).toBe("REPLACED LINE");
-  });
-
-  it("TerminalFrameRenderer: applyLinesResponse fills scrollback cache", () => {
-    const renderer = new TerminalFrameRenderer();
-    const lines: TermLine[] = [
-      [{ text: "line 100" }],
-      [{ text: "line 101" }],
-      [{ text: "line 102" }],
-    ];
-
-    renderer.applyLinesResponse({
-      type: "terminal_lines_response",
-      sessionId: "pty-1",
-      fromLineId: 100,
-      oldestLineId: 50,
-      newestLineId: 200,
-      lines,
-    });
-
-    expect(renderer.cacheSize).toBe(3);
-    expect(renderer.oldestLineId).toBe(50);
-    expect(renderer.newestLineId).toBe(200);
-
-    const cached = renderer.getCachedLines(100, 3);
-    expect(cached[0]![0].text).toBe("line 100");
-    expect(cached[2]![0].text).toBe("line 102");
-  });
-
-  it("TerminalFrameRenderer: getMissingRange detects cache holes", () => {
-    const renderer = new TerminalFrameRenderer();
-
-    // 填充 100-102
-    renderer.applyLinesResponse({
-      type: "terminal_lines_response",
-      sessionId: "pty-1",
-      fromLineId: 100,
-      oldestLineId: 50,
-      newestLineId: 200,
-      lines: [[{ text: "a" }], [{ text: "b" }], [{ text: "c" }]],
-    });
-
-    // 查询 98-105 范围，98-99 和 103-105 未缓存
-    const missing = renderer.getMissingRange(98, 8);
-    expect(missing).not.toBeNull();
-    expect(missing!.fromLineId).toBe(98);
-
-    // 全部命中时返回 null
-    const noMissing = renderer.getMissingRange(100, 3);
-    expect(noMissing).toBeNull();
-  });
-
-  it("TerminalFrameRenderer: clearCache resets scrollback", () => {
-    const renderer = new TerminalFrameRenderer();
-    renderer.applyLinesResponse({
-      type: "terminal_lines_response",
-      sessionId: "pty-1",
-      fromLineId: 0,
-      oldestLineId: 0,
-      newestLineId: 10,
-      lines: [[{ text: "x" }]],
-    });
-    expect(renderer.cacheSize).toBe(1);
-
-    renderer.clearCache();
-    expect(renderer.cacheSize).toBe(0);
   });
 
   it("extractLines at mid-stream: content stable after more chunks arrive", async () => {

@@ -51,34 +51,20 @@ export interface TerminalFrame {
   payload: FullFramePayload | DeltaFramePayload;
 }
 
-interface TerminalLinesResponse {
-  type: "terminal_lines_response";
-  sessionId: string;
-  fromLineId: number;
-  oldestLineId: number;
-  newestLineId: number;
-  lines: TermLine[];
-}
-
 /**
  * 终端帧渲染器
  *
  * 状态管理：
  * - viewportLines: 当前 viewport 行数组，由 terminal_frame 驱动更新
- * - scrollbackCache: lineId → TermLine 映射，由 terminal_lines_response 填充
- * - scrollPosition: 用户当前浏览位置（null = 跟随最新 viewport）
+ * - server-side scrolling 架构下 client 只接收 frame，不维护 scrollback cache
  */
 export class TerminalFrameRenderer {
   private viewportLines: TermLine[] = [];
-  private scrollbackCache = new Map<number, TermLine>();
-  private _oldestLineId = 0;
-  private _newestLineId = 0;
-  private _scrollPosition: number | null = null;
   private _cursor: CursorPosition | null = null;
   private onChange: (() => void) | null = null;
 
   /**
-   * 注册变化回调，每次 viewport 或 scrollback 更新时触发
+   * 注册变化回调，每次 viewport 更新时触发
    */
   onUpdate(callback: () => void): void {
     this.onChange = callback;
@@ -107,86 +93,10 @@ export class TerminalFrameRenderer {
   }
 
   /**
-   * 处理收到的 terminal_lines_response 消息
-   */
-  applyLinesResponse(response: TerminalLinesResponse): void {
-    this._oldestLineId = response.oldestLineId;
-    this._newestLineId = response.newestLineId;
-
-    for (let i = 0; i < response.lines.length; i++) {
-      const lineId = response.fromLineId + i;
-      this.scrollbackCache.set(lineId, response.lines[i]);
-    }
-    this.onChange?.();
-  }
-
-  /**
    * 获取当前 viewport 行（最新画面）
    */
   getViewportLines(): TermLine[] {
     return this.viewportLines;
-  }
-
-  /**
-   * 获取指定 lineId 范围的行（从 scrollback 缓存读取）
-   * 返回 null 的位置表示该行未缓存，需要发 terminal_lines_request
-   */
-  getCachedLines(fromLineId: number, count: number): Array<TermLine | null> {
-    const result: Array<TermLine | null> = [];
-    for (let i = 0; i < count; i++) {
-      result.push(this.scrollbackCache.get(fromLineId + i) ?? null);
-    }
-    return result;
-  }
-
-  /**
-   * 找出指定范围中未缓存的 lineId 区间，用于决定 terminal_lines_request 的参数
-   */
-  getMissingRange(fromLineId: number, count: number): { fromLineId: number; count: number } | null {
-    let missingStart = -1;
-    let missingEnd = -1;
-
-    for (let i = 0; i < count; i++) {
-      const id = fromLineId + i;
-      if (!this.scrollbackCache.has(id)) {
-        if (missingStart === -1) missingStart = id;
-        missingEnd = id;
-      }
-    }
-
-    if (missingStart === -1) return null;
-    return { fromLineId: missingStart, count: missingEnd - missingStart + 1 };
-  }
-
-  /**
-   * 设置滚动位置（lineId），null 表示跟随最新 viewport
-   */
-  setScrollPosition(lineId: number | null): void {
-    this._scrollPosition = lineId;
-  }
-
-  get scrollPosition(): number | null {
-    return this._scrollPosition;
-  }
-
-  get oldestLineId(): number {
-    return this._oldestLineId;
-  }
-
-  get newestLineId(): number {
-    return this._newestLineId;
-  }
-
-  /**
-   * 清空 scrollback 缓存（断线重连、会话切换时调用）
-   */
-  clearCache(): void {
-    this.scrollbackCache.clear();
-    this._scrollPosition = null;
-  }
-
-  get cacheSize(): number {
-    return this.scrollbackCache.size;
   }
 }
 

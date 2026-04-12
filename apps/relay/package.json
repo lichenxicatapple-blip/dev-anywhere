@@ -13,7 +13,7 @@
     "#src/*": "./src/*"
   },
   "scripts": {
-    "build": "tsup && rm -f dist/.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "tsup && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
