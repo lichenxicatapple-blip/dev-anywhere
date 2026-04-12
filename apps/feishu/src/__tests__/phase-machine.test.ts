@@ -201,7 +201,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.getState().phase).toBe("chatting");
     expect(env.getState().selectedProxyId).toBe("p1");
     expect(env.relay.selectProxy).toHaveBeenCalledWith("p1");
-    expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/chat/index?sessionId=s1");
+    expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/chat/index?sessionId=s1&mode=json");
   });
 
   it("cold start with proxy only: navigates to session-list", () => {

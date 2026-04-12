@@ -30,6 +30,7 @@ export type TerminalAction =
   | { type: "SET_APPROVAL_TOOL"; tool: string | null }
   | { type: "APPLY_LINES_RESPONSE"; response: { fromLineId: number; oldestLineId: number; newestLineId: number; lines: TermLine[] } }
   | { type: "REQUEST_SCROLLBACK" }
+  | { type: "SCROLLBACK_ERROR" }
   | { type: "SET_USER_SCROLLED_UP"; value: boolean };
 
 function loadFontSizeIndex(): number {
@@ -92,6 +93,8 @@ export function terminalReducer(
     }
     case "REQUEST_SCROLLBACK":
       return { ...state, isLoadingScrollback: true };
+    case "SCROLLBACK_ERROR":
+      return { ...state, isLoadingScrollback: false };
     case "SET_USER_SCROLLED_UP":
       return { ...state, userScrolledUp: action.value };
     default:

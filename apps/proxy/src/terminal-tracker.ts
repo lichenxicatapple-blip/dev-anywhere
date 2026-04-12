@@ -194,17 +194,19 @@ export class TerminalTracker {
   }
 
   // 从 buffer 中按 lineId 提取指定范围的行
-  extractLines(fromLineId: number, count: number): TermLine[] {
+  // 返回 { startLineId, lines }，startLineId 是实际返回数据的起始行
+  // 当请求范围在 buffer 之前时，自动从 buffer 最早行开始返回
+  extractLines(fromLineId: number, count: number): { startLineId: number; lines: TermLine[] } {
     const buf = this.terminal.buffer.active;
     const oldestId = this.getOldestLineId();
     const newestId = this.getNewestLineId();
 
-    if (fromLineId > newestId || fromLineId + count <= oldestId) {
-      return [];
+    if (fromLineId > newestId) {
+      return { startLineId: fromLineId, lines: [] };
     }
 
     const startId = Math.max(fromLineId, oldestId);
-    const endId = Math.min(fromLineId + count, newestId + 1);
+    const endId = Math.min(startId + count, newestId + 1);
 
     const lines: TermLine[] = [];
     for (let id = startId; id < endId; id++) {
@@ -214,7 +216,7 @@ export class TerminalTracker {
         lines.push(this.lineToSpans(line));
       }
     }
-    return lines;
+    return { startLineId: startId, lines };
   }
 
   // 将单行 buffer line 转换为 TermSpan 数组，复用 extractGrid 的 span 合并逻辑

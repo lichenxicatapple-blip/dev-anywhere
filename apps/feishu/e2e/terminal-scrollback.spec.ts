@@ -21,7 +21,9 @@ test("scroll to top loads history lines", async ({ page }) => {
     localStorage.removeItem("cc_sessionId");
     localStorage.removeItem("cc_sessionMode");
   });
-  await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
+  // reload 而非 goto：Taro H5 SPA 的 goto 同 URL 只切 hash 路由，
+  // 不重新挂载 App 组件，WebSocket 不会重新连接
+  await page.reload();
 
   // 等 proxy 列表出现
   const hasProxy = await waitForSelector(page, ".proxy-item");
@@ -33,7 +35,7 @@ test("scroll to top loads history lines", async ({ page }) => {
   test.skip(!hasSession, "No session available");
 
   // 找 PTY session
-  const ptySession = await page.$('.sli-wrapper:has(.sli-badge-pty)');
+  const ptySession = await page.$('.sli-wrapper:has(.sli-mode-pty)');
   test.skip(!ptySession, "No PTY session available");
   await ptySession!.click();
 
@@ -45,17 +47,28 @@ test("scroll to top loads history lines", async ({ page }) => {
   expect(initialLineCount).toBeGreaterThan(0);
 
   // 滚动到顶部触发 scrollback
+  // terminal-viewport 用 addEventListener 绑定原生 scroll 事件，
+  // 设置 scrollTop 并 dispatch scroll 事件即可触发
   await page.evaluate(() => {
     const vp = document.querySelector(".terminal-viewport");
-    if (vp) vp.scrollTop = 0;
+    if (vp) {
+      vp.scrollTop = vp.scrollHeight;
+    }
   });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const vp = document.querySelector(".terminal-viewport");
+    if (vp) {
+      vp.scrollTop = 0;
+      vp.dispatchEvent(new Event("scroll", { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(5000);
 
-  // 验证 scrollback 被触发：出现 loading、oldest 标记、或行数增加
-  const hasLoading = await page.$(".scrollback-loading");
+  // 验证 scrollback 被触发：出现 oldest 标记或行数增加
   const hasOldest = await page.$(".scrollback-oldest");
   const newLineCount = await page.$$eval(".terminal-line", (els) => els.length);
 
-  const scrollbackTriggered = hasLoading !== null || hasOldest !== null || newLineCount > initialLineCount;
+  const scrollbackTriggered = hasOldest !== null || newLineCount > initialLineCount;
   expect(scrollbackTriggered).toBe(true);
 });

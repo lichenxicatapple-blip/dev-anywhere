@@ -38,6 +38,11 @@ export function handleWsStatusChange(
   if (connected) {
     relay.register();
     relay.listProxies();
+    // 重连后恢复 proxy 绑定，否则 relay 端 boundProxyId 丢失，
+    // 后续 terminal_lines_request 等控制消息会被拒绝（NOT_BOUND）
+    if (s.selectedProxyId) {
+      relay.selectProxy(s.selectedProxyId);
+    }
     if (s.phase === "connecting") {
       dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
     }

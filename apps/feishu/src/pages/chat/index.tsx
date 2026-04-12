@@ -198,6 +198,12 @@ export default function Chat() {
           });
           break;
         }
+        case "relay_error": {
+          console.error("[chat] relay error:", (ctrl as Record<string, unknown>).code, (ctrl as Record<string, unknown>).message);
+          // relay 错误时重置 loading 状态，防止 isLoadingScrollback 卡死
+          terminalDispatch({ type: "SCROLLBACK_ERROR" });
+          break;
+        }
         default:
           break;
       }

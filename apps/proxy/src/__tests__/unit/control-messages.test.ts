@@ -19,7 +19,7 @@ function createMockSessionManager(sessions: Array<{ id: string; state: string }>
 
 function createMockTracker(overrides: Partial<TerminalTracker> = {}): TerminalTracker {
   return {
-    extractLines: vi.fn().mockReturnValue([[{ text: "line content" }]]),
+    extractLines: vi.fn().mockReturnValue({ startLineId: 0, lines: [[{ text: "line content" }]] }),
     getOldestLineId: vi.fn().mockReturnValue(0),
     getNewestLineId: vi.fn().mockReturnValue(10),
     ...overrides,
@@ -112,7 +112,7 @@ describe("control-messages: terminal lines request", () => {
     const sent: string[] = [];
 
     const tracker = createMockTracker({
-      extractLines: vi.fn().mockReturnValue([[{ text: "hello" }], [{ text: "world" }]]),
+      extractLines: vi.fn().mockReturnValue({ startLineId: 5, lines: [[{ text: "hello" }], [{ text: "world" }]] }),
       getOldestLineId: vi.fn().mockReturnValue(0),
       getNewestLineId: vi.fn().mockReturnValue(50),
     });

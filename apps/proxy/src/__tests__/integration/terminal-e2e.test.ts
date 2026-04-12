@@ -290,7 +290,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     await feedChunks(tracker, halfIdx);
 
     const oldest = tracker.getOldestLineId();
-    const lines = tracker.extractLines(oldest, 10);
+    const { lines } = tracker.extractLines(oldest, 10);
     const textBefore = lines.map((l) => l.map((s) => s.text).join("")).join("\n");
 
     // 喂入剩余 chunk
@@ -301,7 +301,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     // 如果 scrollback 没溢出，同一 lineId 范围的内容不变
     const newOldest = tracker.getOldestLineId();
     if (newOldest <= oldest) {
-      const linesAfter = tracker.extractLines(oldest, 10);
+      const { lines: linesAfter } = tracker.extractLines(oldest, 10);
       const textAfter = linesAfter.map((l) => l.map((s) => s.text).join("")).join("\n");
       expect(textAfter).toBe(textBefore);
     }
@@ -339,11 +339,11 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     proxyWs.on("message", (data) => {
       const msg = JSON.parse(data.toString());
       if (msg.type === "terminal_lines_request") {
-        const lines = tracker.extractLines(msg.fromLineId, msg.count);
+        const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
         proxyWs.send(JSON.stringify({
           type: "terminal_lines_response",
           sessionId: msg.sessionId,
-          fromLineId: msg.fromLineId,
+          fromLineId: startLineId,
           oldestLineId: tracker.getOldestLineId(),
           newestLineId: tracker.getNewestLineId(),
           lines,
@@ -374,7 +374,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     await feedChunks(tracker, 10);
 
     const oldest = tracker.getOldestLineId();
-    const lines = tracker.extractLines(oldest, 10);
+    const { lines } = tracker.extractLines(oldest, 10);
     const allSpans = lines.flatMap((l) => l);
     const coloredSpans = allSpans.filter((s) => s.fg);
 
@@ -422,7 +422,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     const totalLines = newest - oldest + 1;
 
     // 能拉取全部范围
-    const allLines = tracker.extractLines(oldest, totalLines);
+    const { lines: allLines } = tracker.extractLines(oldest, totalLines);
     expect(allLines.length).toBe(totalLines);
 
     // 最后一行应有内容（不全是空的）

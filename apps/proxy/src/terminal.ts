@@ -121,11 +121,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         framePusher.forceFull();
       }
       if (msg.type === "pty_lines_request" && msg.sessionId === sessionId && tracker) {
-        const lines = tracker.extractLines(msg.fromLineId, msg.count);
+        const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
         const response = {
           type: "terminal_lines_response",
           sessionId: msg.sessionId,
-          fromLineId: msg.fromLineId,
+          fromLineId: startLineId,
           oldestLineId: tracker.getOldestLineId(),
           newestLineId: tracker.getNewestLineId(),
           lines,

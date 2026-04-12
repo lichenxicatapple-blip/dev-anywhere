@@ -150,7 +150,7 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     await tracker.feed("line 0\r\nline 1\r\nline 2\r\nline 3\r\n");
 
     const oldest = tracker.getOldestLineId();
-    const lines = tracker.extractLines(oldest, 4);
+    const { lines } = tracker.extractLines(oldest, 4);
 
     expect(lines.length).toBeGreaterThanOrEqual(2);
     const allText = lines.flatMap((l) => l.map((s) => s.text)).join("");
@@ -162,13 +162,13 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
 
     const oldest = tracker.getOldestLineId();
     const newest = tracker.getNewestLineId();
-    const lines = tracker.extractLines(oldest, 10);
+    const { startLineId, lines } = tracker.extractLines(oldest, 10);
 
     // 模拟 control-messages.ts 构造的响应格式
     const response = {
       type: "terminal_lines_response" as const,
       sessionId: "test-session",
-      fromLineId: oldest,
+      fromLineId: startLineId,
       oldestLineId: oldest,
       newestLineId: newest,
       lines,
@@ -182,12 +182,12 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
   it("lineId is stable across new writes (no buffer overflow)", async () => {
     await tracker.feed("first line\r\nsecond line\r\n");
     const targetId = tracker.getNewestLineId();
-    const before = tracker.extractLines(targetId, 1);
+    const { lines: before } = tracker.extractLines(targetId, 1);
     const textBefore = before[0]?.map((s) => s.text).join("") ?? "";
 
     // 写入更多数据，但不溢出 scrollback
     await tracker.feed("third\r\nfourth\r\n");
-    const after = tracker.extractLines(targetId, 1);
+    const { lines: after } = tracker.extractLines(targetId, 1);
     const textAfter = after[0]?.map((s) => s.text).join("") ?? "";
 
     expect(textAfter).toBe(textBefore);
@@ -202,16 +202,16 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     const oldest = tracker.getOldestLineId();
 
     // 向上翻：拉取最早的 20 行
-    const olderLines = tracker.extractLines(oldest, 20);
+    const { lines: olderLines } = tracker.extractLines(oldest, 20);
     expect(olderLines.length).toBe(20);
 
     // 向下翻：拉取中间的 20 行
     const midId = oldest + 50;
-    const midLines = tracker.extractLines(midId, 20);
+    const { lines: midLines } = tracker.extractLines(midId, 20);
     expect(midLines.length).toBe(20);
 
     // 再向上翻：拉取已经拉过的范围
-    const olderAgain = tracker.extractLines(oldest, 20);
+    const { lines: olderAgain } = tracker.extractLines(oldest, 20);
     expect(olderAgain.length).toBe(olderLines.length);
 
     // 内容一致
@@ -225,14 +225,16 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     const newest = tracker.getNewestLineId();
 
     // 请求从 newest-1 开始的 100 行，实际只有 2 行可返回
-    const lines = tracker.extractLines(newest - 1, 100);
+    const { lines } = tracker.extractLines(newest - 1, 100);
     expect(lines.length).toBeLessThanOrEqual(100);
     expect(lines.length).toBeGreaterThan(0);
   });
 
-  it("requesting evicted lineId returns empty", async () => {
-    const lines = tracker.extractLines(-999, 10);
-    expect(lines).toEqual([]);
+  it("requesting evicted lineId auto-adjusts to oldest available", async () => {
+    const { startLineId, lines } = tracker.extractLines(-999, 10);
+    // 请求范围在 buffer 之前时，自动从 oldestLineId 开始返回
+    expect(startLineId).toBe(tracker.getOldestLineId());
+    expect(lines.length).toBeGreaterThan(0);
   });
 
   it("scrollback survives 1000+ lines without losing early content", async () => {
@@ -242,7 +244,7 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     }
 
     const oldest = tracker.getOldestLineId();
-    const earliest = tracker.extractLines(oldest, 5);
+    const { lines: earliest } = tracker.extractLines(oldest, 5);
     const earlyText = earliest.flatMap((l) => l.map((s) => s.text)).join("");
     expect(earlyText).toContain("row-");
 
@@ -259,7 +261,7 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     const newest = tracker.getNewestLineId();
 
     // 拉取全部范围
-    const allLines = tracker.extractLines(oldest, newest - oldest + 1);
+    const { lines: allLines } = tracker.extractLines(oldest, newest - oldest + 1);
     // 应该能拉到全部（没有溢出）
     expect(allLines.length).toBe(newest - oldest + 1);
   });

@@ -177,11 +177,11 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
   // 监听 serve 转发的 terminal_lines_request
   createIpcReader(socket, (msg: IpcMessage) => {
     if (msg.type === "pty_lines_request" && msg.sessionId === actualSessionId) {
-      const lines = tracker.extractLines(msg.fromLineId, msg.count);
+      const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
       const response = {
         type: "terminal_lines_response",
         sessionId: actualSessionId,
-        fromLineId: msg.fromLineId,
+        fromLineId: startLineId,
         oldestLineId: tracker.getOldestLineId(),
         newestLineId: tracker.getNewestLineId(),
         lines,

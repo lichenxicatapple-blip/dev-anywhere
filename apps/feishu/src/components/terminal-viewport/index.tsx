@@ -102,21 +102,44 @@ export function TerminalViewport({
     [onScrollToTop, onScrollPositionChange, isLoadingScrollback, isAtOldest],
   );
 
-  // H5 环境下通过 DOM 获取 viewport 高度，供 scroll 判断 nearBottom 使用
+  // H5 环境下通过 DOM 获取 viewport 高度，并绑定原生 scroll 事件
+  // Taro ScrollView 的 onScroll prop 在 H5 Web Component 下不触发，
+  // 必须直接 addEventListener 绕过
   useEffect(() => {
     if (typeof document === "undefined") return;
     const el = document.querySelector(".terminal-viewport");
-    if (el) {
-      viewportHeightRef.current = el.clientHeight;
-      const observer = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          viewportHeightRef.current = entry.contentRect.height;
-        }
-      });
-      observer.observe(el);
-      return () => observer.disconnect();
-    }
-  }, []);
+    if (!el) return;
+
+    viewportHeightRef.current = el.clientHeight;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        viewportHeightRef.current = entry.contentRect.height;
+      }
+    });
+    observer.observe(el);
+
+    const nativeScrollHandler = () => {
+      const scrollTop = el.scrollTop;
+      const scrollHeight = el.scrollHeight;
+      const clientHeight = viewportHeightRef.current;
+
+      const nearBottom = clientHeight > 0 && scrollTop + clientHeight >= scrollHeight - 50;
+      const nearTop = scrollTop < 100;
+
+      userScrolledUpRef.current = !nearBottom;
+      onScrollPositionChange(nearBottom);
+
+      if (nearTop && !isLoadingScrollback && !isAtOldest) {
+        onScrollToTop();
+      }
+    };
+    el.addEventListener("scroll", nativeScrollHandler);
+
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", nativeScrollHandler);
+    };
+  }, [onScrollToTop, onScrollPositionChange, isLoadingScrollback, isAtOldest]);
 
   const allLines = [...scrollbackLines, ...lines];
   const lineStyle = (fs: number) => ({
