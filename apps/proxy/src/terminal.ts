@@ -120,20 +120,27 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && framePusher) {
         framePusher.forceFull();
       }
-      if (msg.type === "pty_lines_request" && msg.sessionId === sessionId && tracker) {
-        const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
-        const response = {
-          type: "terminal_lines_response",
+      if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
+        if (msg.direction === "up") {
+          tracker.scrollUp(msg.delta);
+        } else {
+          tracker.scrollDown(msg.delta);
+        }
+        const grid = tracker.extractGridAtOffset();
+        const framePayload = {
+          type: "terminal_frame" as const,
           sessionId: msg.sessionId,
-          fromLineId: startLineId,
-          oldestLineId: tracker.getOldestLineId(),
-          newestLineId: tracker.getNewestLineId(),
-          lines,
+          payload: {
+            mode: "full" as const,
+            lines: grid,
+            cursor: tracker.getViewportOffset() === 0 ? tracker.getCursor() : undefined,
+            isScrolled: true,
+          },
         };
         socket.write(serializeIpc({
-          type: "pty_lines_response",
+          type: "pty_terminal_frame",
           sessionId: msg.sessionId,
-          response: JSON.stringify(response),
+          frame: JSON.stringify(framePayload),
         }));
       }
     });
@@ -222,6 +229,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     lastOutputTime = Date.now();
     if (tracker) {
       tracker.feed(data);
+      tracker.resetScroll();
     }
   };
 

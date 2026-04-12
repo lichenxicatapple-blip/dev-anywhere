@@ -374,11 +374,13 @@ function handleTerminalConnection(
       }
 
       case "pty_terminal_frame": {
-        // terminal → serve → relay：转发终端帧，同时 merge 到帧缓存维护完整 grid 状态
+        // terminal → serve → relay：转发终端帧，scrolled 帧不更新缓存（缓存只跟踪实时画面）
         if (frameCache) {
           try {
             const parsed = JSON.parse(msg.frame);
-            frameCache.apply(msg.sessionId, parsed.payload);
+            if (!parsed.payload?.isScrolled) {
+              frameCache.apply(msg.sessionId, parsed.payload);
+            }
           } catch {
             // parse 失败不影响转发
           }
@@ -387,14 +389,6 @@ function handleTerminalConnection(
           relayConnection.sendRaw(msg.frame);
         } else {
           console.error("[serve] pty_terminal_frame dropped: relayConnection is null");
-        }
-        break;
-      }
-
-      case "pty_lines_response": {
-        // terminal → serve → relay：直接转发终端行拉取响应
-        if (relayConnection) {
-          relayConnection.sendRaw(msg.response);
         }
         break;
       }
@@ -636,7 +630,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             }
           }
         }
-        // 控制消息：dir_list_request, session_history_request, terminal_lines_request
+        // 控制消息：dir_list_request, session_history_request, terminal_scroll_request
         else if (parsed.type === "dir_list_request") {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "session_history_request") {
@@ -673,18 +667,18 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           } else {
             logger.warn({ sessionId: parsed.sessionId, hasCached: !!fullFrame }, "terminal_frame_request: no cached frame");
           }
-        } else if (parsed.type === "terminal_lines_request" && parsed.sessionId) {
-          // relay → serve → client IPC：转发终端行拉取请求到持有 tracker 的 client
+        } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
+          // relay → serve → terminal IPC：转发滚动请求到持有 tracker 的 terminal
           const targetSocket = terminalSockets.get(parsed.sessionId);
           if (targetSocket?.writable) {
             targetSocket.write(serializeIpc({
-              type: "pty_lines_request",
+              type: "pty_scroll_request",
               sessionId: parsed.sessionId,
-              fromLineId: parsed.fromLineId,
-              count: parsed.count,
+              direction: parsed.direction,
+              delta: parsed.delta,
             }));
           } else {
-            logger.warn({ sessionId: parsed.sessionId }, "terminal_lines_request: no client socket for session");
+            logger.warn({ sessionId: parsed.sessionId }, "terminal_scroll_request: no terminal socket for session");
           }
         }
       } catch (err) {

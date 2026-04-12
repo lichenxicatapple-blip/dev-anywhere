@@ -9,7 +9,6 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "terminal_title",
   "terminal_resize",
   "pty_state",
-  "terminal_lines_response",
   "dir_list_response",
   "command_list_push",
   "file_tree_push",

@@ -174,22 +174,29 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
   });
   pusher.start();
 
-  // 监听 serve 转发的 terminal_lines_request
+  // 监听 serve 转发的 pty_scroll_request
   createIpcReader(socket, (msg: IpcMessage) => {
-    if (msg.type === "pty_lines_request" && msg.sessionId === actualSessionId) {
-      const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
-      const response = {
-        type: "terminal_lines_response",
+    if (msg.type === "pty_scroll_request" && msg.sessionId === actualSessionId) {
+      if (msg.direction === "up") {
+        tracker.scrollUp(msg.delta);
+      } else {
+        tracker.scrollDown(msg.delta);
+      }
+      const grid = tracker.extractGridAtOffset();
+      const framePayload = {
+        type: "terminal_frame" as const,
         sessionId: actualSessionId,
-        fromLineId: startLineId,
-        oldestLineId: tracker.getOldestLineId(),
-        newestLineId: tracker.getNewestLineId(),
-        lines,
+        payload: {
+          mode: "full" as const,
+          lines: grid,
+          cursor: tracker.getViewportOffset() === 0 ? tracker.getCursor() : undefined,
+          isScrolled: true,
+        },
       };
       socket.write(serializeIpc({
-        type: "pty_lines_response",
+        type: "pty_terminal_frame",
         sessionId: actualSessionId,
-        response: JSON.stringify(response),
+        frame: JSON.stringify(framePayload),
       }));
     }
   });

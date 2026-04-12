@@ -50,15 +50,29 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
-  it("rejects terminal_lines_request with non-positive count", () => {
+  it("rejects terminal_scroll_request with non-positive delta", () => {
     expect(() =>
       RelayControlSchema.parse({
-        type: "terminal_lines_request",
+        type: "terminal_scroll_request",
         sessionId: "sess-1",
-        fromLineId: 0,
-        count: 0,
+        direction: "up",
+        delta: 0,
       }),
     ).toThrow();
+  });
+
+  it("parses valid terminal_scroll_request", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_scroll_request",
+      sessionId: "sess-1",
+      direction: "up",
+      delta: 5,
+    });
+    expect(result.type).toBe("terminal_scroll_request");
+    if (result.type === "terminal_scroll_request") {
+      expect(result.direction).toBe("up");
+      expect(result.delta).toBe(5);
+    }
   });
 
   it("parses proxy_list_response with proxies array", () => {
@@ -136,17 +150,14 @@ describe("RelayControlSchema", () => {
     }
   });
 
-  it("parses terminal_lines_response with empty lines array", () => {
-    const result = RelayControlSchema.parse({
-      type: "terminal_lines_response",
-      sessionId: "sess-1",
-      fromLineId: 100,
-      oldestLineId: 50,
-      newestLineId: 200,
-      lines: [],
-    });
-    if (result.type === "terminal_lines_response") {
-      expect(result.lines).toEqual([]);
-    }
+  it("rejects terminal_scroll_request with invalid direction", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "terminal_scroll_request",
+        sessionId: "sess-1",
+        direction: "left",
+        delta: 5,
+      }),
+    ).toThrow();
   });
 });

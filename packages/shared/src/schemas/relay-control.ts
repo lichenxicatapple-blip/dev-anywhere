@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  TermSpanSchema,
   TerminalFramePayloadSchema,
   PtyStatePayloadSchema,
 } from "./session.js";
@@ -172,22 +171,12 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
-  // 终端行按需拉取请求，client -> proxy
+  // 终端滚动请求，client -> proxy，服务端维护偏移量并推回 terminal_frame
   z.object({
-    type: z.literal("terminal_lines_request"),
+    type: z.literal("terminal_scroll_request"),
     sessionId: z.string(),
-    fromLineId: z.number().int(),
-    count: z.number().int().positive(),
-  }),
-
-  // 终端行响应，proxy -> client
-  z.object({
-    type: z.literal("terminal_lines_response"),
-    sessionId: z.string(),
-    fromLineId: z.number().int(),
-    oldestLineId: z.number().int(),
-    newestLineId: z.number().int(),
-    lines: z.array(z.array(TermSpanSchema)),
+    direction: z.enum(["up", "down"]),
+    delta: z.number().int().positive(),
   }),
 ]);
 

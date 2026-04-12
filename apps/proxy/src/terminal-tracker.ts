@@ -68,6 +68,7 @@ export class TerminalTracker {
   private readonly terminal: InstanceType<typeof Terminal>;
   private lastGridHash: string = "";
   private nextLineId: number;
+  private viewportOffset: number = 0;
 
   constructor(cols = 120, rows = 40) {
     this.terminal = new Terminal({
@@ -266,6 +267,41 @@ export class TerminalTracker {
     }
     if (currentSpan) spans.push(currentSpan);
     return spans;
+  }
+
+  scrollUp(delta: number): void {
+    const maxOffset = Math.max(0, this.getNewestLineId() - this.getOldestLineId() + 1 - this.terminal.rows);
+    this.viewportOffset = Math.min(this.viewportOffset + delta, maxOffset);
+  }
+
+  scrollDown(delta: number): void {
+    this.viewportOffset = Math.max(0, this.viewportOffset - delta);
+  }
+
+  resetScroll(): void {
+    this.viewportOffset = 0;
+  }
+
+  getViewportOffset(): number {
+    return this.viewportOffset;
+  }
+
+  // 按 viewportOffset 提取 viewport 栅格，offset=0 时等同于 extractGrid（实时画面）
+  extractGridAtOffset(): TermLine[] {
+    if (this.viewportOffset === 0) {
+      return this.extractGrid();
+    }
+
+    const newestId = this.getNewestLineId();
+    const endLineId = newestId - this.viewportOffset;
+    const startLineId = endLineId - this.terminal.rows + 1;
+    const { lines } = this.extractLines(startLineId, this.terminal.rows);
+
+    // 不足 terminal.rows 行时用空行填充
+    while (lines.length < this.terminal.rows) {
+      lines.push([]);
+    }
+    return lines;
   }
 
   dispose(): void {

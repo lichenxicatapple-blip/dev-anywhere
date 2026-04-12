@@ -185,23 +185,8 @@ export default function Chat() {
           }
           break;
         }
-        case "terminal_lines_response": {
-          if (ctrl.sessionId !== sessionId) break;
-          terminalDispatch({
-            type: "APPLY_LINES_RESPONSE",
-            response: {
-              fromLineId: ctrl.fromLineId,
-              oldestLineId: ctrl.oldestLineId,
-              newestLineId: ctrl.newestLineId,
-              lines: ctrl.lines,
-            },
-          });
-          break;
-        }
         case "relay_error": {
           console.error("[chat] relay error:", (ctrl as Record<string, unknown>).code, (ctrl as Record<string, unknown>).message);
-          // relay 错误时重置 loading 状态，防止 isLoadingScrollback 卡死
-          terminalDispatch({ type: "SCROLLBACK_ERROR" });
           break;
         }
         default:
@@ -284,28 +269,18 @@ export default function Chat() {
     setIsNearBottom(true);
   }, []);
 
-  const handleScrollToTop = useCallback(() => {
-    if (!relay || !sessionId || !checkConnected()) return;
-    const cache = terminalStateRef.current.scrollbackCache;
-    const fromLineId = cache.oldestLineId > 0
-      ? Math.max(0, cache.oldestLineId - 50)
-      : 0;
-    const count = cache.oldestLineId > 0
-      ? cache.oldestLineId - fromLineId
-      : 50;
-    if (count <= 0) return;
-    terminalDispatch({ type: "REQUEST_SCROLLBACK" });
-    relay.sendControl({
-      type: "terminal_lines_request",
-      sessionId,
-      fromLineId,
-      count,
-    });
-  }, [relay, sessionId, checkConnected, terminalDispatch]);
-
-  const handleTerminalScrollChange = useCallback((nearBottom: boolean) => {
-    terminalDispatch({ type: "SET_USER_SCROLLED_UP", value: !nearBottom });
-  }, [terminalDispatch]);
+  const handleTerminalScroll = useCallback(
+    (direction: "up" | "down", delta: number) => {
+      if (!relay || !sessionId || !checkConnected()) return;
+      relay.sendControl({
+        type: "terminal_scroll_request",
+        sessionId,
+        direction,
+        delta,
+      });
+    },
+    [relay, sessionId, checkConnected],
+  );
 
   const handlePinchZoom = useCallback(
     (direction: "in" | "out") => {
@@ -479,13 +454,9 @@ export default function Chat() {
           {isPty ? (
             <TerminalViewport
               lines={terminalState.lines}
-              scrollbackLines={terminalState.scrollbackLines}
               fontSize={terminalState.fontSize}
               onPinchZoom={handlePinchZoom}
-              onScrollToTop={handleScrollToTop}
-              onScrollPositionChange={handleTerminalScrollChange}
-              isLoadingScrollback={terminalState.isLoadingScrollback}
-              isAtOldest={terminalState.isAtOldest}
+              onScroll={handleTerminalScroll}
             />
           ) : (
             <>

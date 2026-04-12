@@ -8,7 +8,7 @@ import { parseMessage, routeClientMessage, handleReplayRequest } from "../router
 const CLIENT_TO_PROXY_TYPES = new Set([
   "dir_list_request",
   "terminal_frame_request",
-  "terminal_lines_request",
+  "terminal_scroll_request",
   "session_list",
   "session_history_request",
   "permission_mode_change",

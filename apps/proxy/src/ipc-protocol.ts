@@ -99,19 +99,12 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
-  // serve → client：转发来自 relay 的终端行拉取请求
+  // serve → terminal: relay 转发的 scroll 请求
   z.object({
-    type: z.literal("pty_lines_request"),
+    type: z.literal("pty_scroll_request"),
     sessionId: z.string(),
-    fromLineId: z.number(),
-    count: z.number(),
-  }),
-
-  // client → serve：终端行拉取响应，response 是 JSON.stringify 后的 terminal_lines_response Control 消息
-  z.object({
-    type: z.literal("pty_lines_response"),
-    sessionId: z.string(),
-    response: z.string(),
+    direction: z.enum(["up", "down"]),
+    delta: z.number(),
   }),
 
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
