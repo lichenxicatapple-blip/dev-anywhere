@@ -107,42 +107,6 @@ describe("control-messages: path traversal defense", () => {
   });
 });
 
-describe("control-messages: terminal lines request", () => {
-  it("forwards to tracker and returns response", () => {
-    const sent: string[] = [];
-
-    const tracker = createMockTracker({
-      extractLines: vi.fn().mockReturnValue({ startLineId: 5, lines: [[{ text: "hello" }], [{ text: "world" }]] }),
-      getOldestLineId: vi.fn().mockReturnValue(0),
-      getNewestLineId: vi.fn().mockReturnValue(50),
-    });
-
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    handlers.registerTracker("sess-1", tracker);
-    handlers.handleTerminalLinesRequest({ sessionId: "sess-1", fromLineId: 5, count: 10 });
-
-    expect(tracker.extractLines).toHaveBeenCalledWith(5, 10);
-    const response = JSON.parse(sent[0]);
-    expect(response.type).toBe("terminal_lines_response");
-    expect(response.sessionId).toBe("sess-1");
-    expect(response.fromLineId).toBe(5);
-    expect(response.oldestLineId).toBe(0);
-    expect(response.newestLineId).toBe(50);
-    expect(response.lines).toHaveLength(2);
-  });
-
-  it("returns error when no tracker registered for session", () => {
-    const sent: string[] = [];
-
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-
-    handlers.handleTerminalLinesRequest({ sessionId: "unknown", fromLineId: 0, count: 10 });
-
-    const response = JSON.parse(sent[0]);
-    expect(response.type).toBe("relay_error");
-    expect(response.code).toBe("SESSION_NOT_FOUND");
-  });
-});
 
 describe("control-messages: command list push", () => {
   it("sends command_list_push with static commands", async () => {
@@ -211,7 +175,7 @@ describe("control-messages: file tree push", () => {
 });
 
 describe("control-messages: cleanup", () => {
-  it("removes tracker and clears refresh timer on cleanup", async () => {
+  it("clears refresh timer on cleanup without error", async () => {
     const sent: string[] = [];
 
     const tracker = createMockTracker();
@@ -220,15 +184,8 @@ describe("control-messages: cleanup", () => {
     handlers.registerTracker("sess-1", tracker);
     await handlers.pushCommandList("sess-1", "/tmp");
 
-    // cleanup 后 tracker 不再可用
+    // cleanup 应正常完成，不抛异常
     handlers.cleanup("sess-1");
-
-    sent.length = 0;
-    handlers.handleTerminalLinesRequest({ sessionId: "sess-1", fromLineId: 0, count: 10 });
-
-    const response = JSON.parse(sent[0]);
-    expect(response.type).toBe("relay_error");
-    expect(response.code).toBe("SESSION_NOT_FOUND");
   });
 });
 

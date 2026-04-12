@@ -5,7 +5,6 @@ import { WebSocket } from "ws";
 import pino from "pino";
 import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
 import { TerminalTracker, type TermLine, type TermSpan } from "#src/terminal-tracker.js";
-import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
 import {
   TerminalFrameRenderer,
 } from "#src/terminal-frame-renderer.js";
@@ -330,42 +329,21 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     tracker.dispose();
   });
 
-  it("relay e2e: terminal_lines_request/response roundtrip", async () => {
+  it("relay e2e: terminal_scroll_request routed to proxy", async () => {
     const { proxyWs, clientWs } = await setupBoundPair();
-    const tracker = new TerminalTracker(120, 40);
 
-    await feedChunks(tracker, 50);
-
-    proxyWs.on("message", (data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === "terminal_lines_request") {
-        const { startLineId, lines } = tracker.extractLines(msg.fromLineId, msg.count);
-        proxyWs.send(JSON.stringify({
-          type: "terminal_lines_response",
-          sessionId: msg.sessionId,
-          fromLineId: startLineId,
-          oldestLineId: tracker.getOldestLineId(),
-          newestLineId: tracker.getNewestLineId(),
-          lines,
-        }));
-      }
-    });
-
-    const oldest = tracker.getOldestLineId();
-    const responsePromise = waitForMessage(clientWs);
+    const proxyMsgPromise = waitForMessage(proxyWs);
     clientWs.send(JSON.stringify({
-      type: "terminal_lines_request",
+      type: "terminal_scroll_request",
       sessionId: "pty-1",
-      fromLineId: oldest,
-      count: 10,
+      direction: "up",
+      delta: 5,
     }));
 
-    const response = JSON.parse(await responsePromise);
-    expect(response.type).toBe("terminal_lines_response");
-    expect(response.lines.length).toBe(10);
-    expect(response.oldestLineId).toBe(oldest);
-
-    tracker.dispose();
+    const received = JSON.parse(await proxyMsgPromise);
+    expect(received.type).toBe("terminal_scroll_request");
+    expect(received.direction).toBe("up");
+    expect(received.delta).toBe(5);
   });
 
   it("colored spans survive full chain with real data", async () => {
@@ -384,28 +362,24 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     tracker.dispose();
   });
 
-  it("handleTerminalLinesRequest handler with real chunks", async () => {
-    const sentMessages: string[] = [];
-    const handlers = createControlMessageHandlers(
-      (d) => sentMessages.push(d),
-      { listSessions: () => [] } as unknown as Parameters<typeof createControlMessageHandlers>[1],
-    );
-
+  it("server-side scroll: extractGridAtOffset returns scrolled content", async () => {
     const tracker = new TerminalTracker(120, 40);
-    await feedChunks(tracker, 30);
+    await feedChunks(tracker, chunks.length);
 
-    handlers.registerTracker("pty-1", tracker);
-    handlers.handleTerminalLinesRequest({
-      sessionId: "pty-1",
-      fromLineId: tracker.getOldestLineId(),
-      count: 5,
-    });
+    const liveGrid = tracker.extractGrid();
+    tracker.scrollUp(5);
+    const scrolledGrid = tracker.extractGridAtOffset();
 
-    expect(sentMessages.length).toBe(1);
-    const response = JSON.parse(sentMessages[0]);
-    expect(response.type).toBe("terminal_lines_response");
-    expect(response.lines.length).toBeGreaterThan(0);
-    expect(response.newestLineId).toBeGreaterThanOrEqual(response.oldestLineId);
+    // 滚动后的 grid 应和 live grid 不同
+    const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    const scrolledText = scrolledGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(scrolledText).not.toBe(liveText);
+
+    // scrollDown 回来应和 live 一致
+    tracker.scrollDown(5);
+    const backGrid = tracker.extractGridAtOffset();
+    const backText = backGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(backText).toBe(liveText);
 
     tracker.dispose();
   });

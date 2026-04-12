@@ -39,7 +39,7 @@ export function handleWsStatusChange(
     relay.register();
     relay.listProxies();
     // 重连后恢复 proxy 绑定，否则 relay 端 boundProxyId 丢失，
-    // 后续 terminal_lines_request 等控制消息会被拒绝（NOT_BOUND）
+    // 后续控制消息会被拒绝（NOT_BOUND）
     if (s.selectedProxyId) {
       relay.selectProxy(s.selectedProxyId);
     }
