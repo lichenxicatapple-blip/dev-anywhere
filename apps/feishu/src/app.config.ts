@@ -3,7 +3,6 @@ export default defineAppConfig({
     "pages/proxy-select/index",
     "pages/session-list/index",
     "pages/chat/index",
-    "pages/index/index",
   ],
   window: {
     navigationBarTextStyle: "white",
