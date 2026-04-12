@@ -156,9 +156,6 @@ export function InputBar({
         </View>
       )}
       <View className="input-bar-row">
-        <View className="input-bar-menu-btn" onClick={onMenuPress}>
-          <Text className="input-bar-menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
-        </View>
         <Input
           className="input-bar-field"
           value={inputText}
@@ -170,6 +167,9 @@ export function InputBar({
           confirmType="send"
           adjustPosition
         />
+        <View className="input-bar-menu-btn" onClick={onMenuPress}>
+          <Text className="input-bar-menu-btn-text">{"\u00B7\u00B7\u00B7"}</Text>
+        </View>
         <View
           className={`input-bar-send-btn ${canSend ? "active" : "disabled"}`}
           onClick={handleSend}

@@ -20,8 +20,10 @@ interface TaskLike {
   close(opts: Record<string, unknown>): void;
 }
 
-// H5 模式下用原生 WebSocket 构造一个与 Taro SocketTask 接口兼容的适配对象。
-// 关键区别：先注册事件处理器，再由调用方触发连接（事件处理器在 WebSocket 构造后同步设置）。
+// H5 模式下绕过 Taro 的 connectSocket polyfill，直接用浏览器原生 WebSocket。
+// Taro polyfill 在 new WebSocket 和回调注册之间插入了一个异步间隙（Promise resolve），
+// 连 localhost 时连接瞬间建立，open 事件在回调注册前就触发，导致永远收不到 onOpen。
+// 直接用原生 WebSocket 可以在构造后同步注册 addEventListener，不会错过事件。
 function createNativeTask(url: string): TaskLike {
   const ws = new WebSocket(url);
   return {
@@ -108,7 +110,7 @@ export class WebSocketManager {
       });
   }
 
-  // H5: 使用原生 WebSocket，先注册事件再让浏览器异步触发
+  // H5: 绕过 Taro polyfill，避免连接建立与回调注册之间的异步时序问题
   private setupNativeTask(): void {
     try {
       const task = createNativeTask(this.url);

@@ -1,7 +1,7 @@
 .input-bar {
   display: flex;
   flex-direction: column;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #E8E8E8;
 }
@@ -48,6 +48,8 @@
   border-radius: 36px;
   padding: 0 32px;
   font-size: 28px;
+  display: flex;
+  align-items: center;
 }
 
 .input-bar-send-btn {
@@ -88,6 +90,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
+}
+
+/* PTY 深色模式 */
+.chat-page-dark .input-bar {
+  background: #1E1E1E;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-page-dark .input-bar-field {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+}
+
+.chat-page-dark .input-bar-menu-btn {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chat-page-dark .input-bar-menu-btn-text {
+  color: #e0e0e0;
 }
 
 /* Desktop responsive */
