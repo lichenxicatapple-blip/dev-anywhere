@@ -6,7 +6,7 @@ import { TerminalTracker } from "#src/terminal-tracker.js";
  *
  * 验证从 xterm 写入到 terminal_frame / terminal_lines 的完整链路：
  * xterm.write() → extractGrid() → Control 格式 terminal_frame
- * xterm.write() → extractLines(lineId) → terminal_lines_response
+ * xterm.write() → extractLines(lineId) → extractGridAtOffset
  * lineId 稳定性、scrollback 拉取、边界情况
  */
 describe("Terminal data flow: xterm → extractGrid → terminal_frame", () => {
@@ -135,7 +135,7 @@ describe("Terminal data flow: xterm → extractGrid → terminal_frame", () => {
   });
 });
 
-describe("Terminal data flow: xterm → extractLines → terminal_lines_response", () => {
+describe("Terminal data flow: xterm → extractLines → scrollback data", () => {
   let tracker: TerminalTracker;
 
   beforeEach(() => {
@@ -157,26 +157,16 @@ describe("Terminal data flow: xterm → extractLines → terminal_lines_response
     expect(allText).toContain("line 0");
   });
 
-  it("terminal_lines_response format includes lineId metadata", async () => {
+  it("extractLines result includes valid lineId metadata", async () => {
     await tracker.feed("data\r\n".repeat(50));
 
     const oldest = tracker.getOldestLineId();
     const newest = tracker.getNewestLineId();
     const { startLineId, lines } = tracker.extractLines(oldest, 10);
 
-    // 模拟 control-messages.ts 构造的响应格式
-    const response = {
-      type: "terminal_lines_response" as const,
-      sessionId: "test-session",
-      fromLineId: startLineId,
-      oldestLineId: oldest,
-      newestLineId: newest,
-      lines,
-    };
-
-    expect(response.oldestLineId).toBeLessThanOrEqual(response.fromLineId);
-    expect(response.newestLineId).toBeGreaterThanOrEqual(response.fromLineId);
-    expect(Array.isArray(response.lines)).toBe(true);
+    expect(oldest).toBeLessThanOrEqual(startLineId);
+    expect(newest).toBeGreaterThanOrEqual(startLineId);
+    expect(Array.isArray(lines)).toBe(true);
   });
 
   it("lineId is stable across new writes (no buffer overflow)", async () => {
@@ -374,6 +364,99 @@ describe("Terminal data flow: extractGrid viewport-only", () => {
     const text = grid.flatMap((l) => l.map((s) => s.text)).join("");
     expect(text).not.toContain("line-0");
     expect(text).toContain("line-29");
+  });
+});
+
+describe("Terminal data flow: server-side scrolling", () => {
+  let tracker: TerminalTracker;
+
+  beforeEach(() => {
+    tracker = new TerminalTracker(80, 10);
+  });
+
+  afterEach(() => {
+    tracker.dispose();
+  });
+
+  it("scrollUp increases viewportOffset, extractGridAtOffset returns older lines", async () => {
+    for (let i = 0; i < 50; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    const liveGrid = tracker.extractGrid();
+    const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
+
+    tracker.scrollUp(5);
+    expect(tracker.getViewportOffset()).toBe(5);
+
+    const scrolledGrid = tracker.extractGridAtOffset();
+    const scrolledText = scrolledGrid.flatMap((l) => l.map((s) => s.text)).join("");
+
+    expect(scrolledText).not.toBe(liveText);
+  });
+
+  it("scrollDown decreases viewportOffset back to live", async () => {
+    for (let i = 0; i < 50; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(10);
+    expect(tracker.getViewportOffset()).toBe(10);
+
+    tracker.scrollDown(10);
+    expect(tracker.getViewportOffset()).toBe(0);
+
+    const liveGrid = tracker.extractGrid();
+    const atOffsetGrid = tracker.extractGridAtOffset();
+    const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    const atOffsetText = atOffsetGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(atOffsetText).toBe(liveText);
+  });
+
+  it("scrollUp clamps to max available scrollback", async () => {
+    for (let i = 0; i < 20; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(9999);
+    const offset = tracker.getViewportOffset();
+    const maxOffset = tracker.getNewestLineId() - tracker.getOldestLineId() + 1 - 10;
+    expect(offset).toBe(Math.max(0, maxOffset));
+
+    // extractGridAtOffset 应返回最早可用的行
+    const grid = tracker.extractGridAtOffset();
+    expect(grid.length).toBe(10);
+  });
+
+  it("scrollDown clamps to 0", () => {
+    tracker.scrollDown(100);
+    expect(tracker.getViewportOffset()).toBe(0);
+  });
+
+  it("resetScroll sets viewportOffset to 0", async () => {
+    for (let i = 0; i < 30; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(10);
+    expect(tracker.getViewportOffset()).toBe(10);
+
+    tracker.resetScroll();
+    expect(tracker.getViewportOffset()).toBe(0);
+  });
+
+  it("new data after scrollUp resets to live via resetScroll", async () => {
+    for (let i = 0; i < 30; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(5);
+    expect(tracker.getViewportOffset()).toBe(5);
+
+    // 模拟 terminal.ts 在 feed 后调用 resetScroll
+    await tracker.feed("new output\r\n");
+    tracker.resetScroll();
+    expect(tracker.getViewportOffset()).toBe(0);
   });
 });
 
