@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 Phase: 7
 Plan: Not started
 Status: Executing Phase 04
-Last activity: 2026-04-12 - Completed quick task 260412-sbg: Terminal scrollback: client-side PTY history scrolling
+Last activity: 2026-04-13 - Completed quick task 260413-414: Server-side scrolling
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -109,6 +109,7 @@ Recent decisions affecting current work:
 | 260411-nwj | Client state machine refactor per plan | 2026-04-11 | 7162f68 | | [260411-nwj-client-state-machine-refactor-per-plan](./quick/260411-nwj-client-state-machine-refactor-per-plan/) |
 | 260411-w2m | Fix chat UI style consistency and relay/proxy connectivity | 2026-04-11 | 9b5cafc | | [260411-w2m-fix-chat-ui-style-consistency-and-relay-](./quick/260411-w2m-fix-chat-ui-style-consistency-and-relay-/) |
 | 260412-sbg | Terminal scrollback: client-side PTY history scrolling | 2026-04-12 | f8f2e34 | Needs Review | [260412-sbg-terminal-scrollback-client-side-pty-hist](./quick/260412-sbg-terminal-scrollback-client-side-pty-hist/) |
+| 260413-414 | Server-side scrolling: client sends scroll commands, server pushes viewport frame | 2026-04-13 | 9412649 | | [260413-414-server-side-scrolling-client-sends-scrol](./quick/260413-414-server-side-scrolling-client-sends-scrol/) |
 
 ## Session Continuity
 
