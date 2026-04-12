@@ -166,6 +166,12 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     rows: z.number().int().positive(),
   }),
 
+  // 客户端请求当前终端全量帧，client -> proxy
+  z.object({
+    type: z.literal("terminal_frame_request"),
+    sessionId: z.string(),
+  }),
+
   // 终端行按需拉取请求，client -> proxy
   z.object({
     type: z.literal("terminal_lines_request"),

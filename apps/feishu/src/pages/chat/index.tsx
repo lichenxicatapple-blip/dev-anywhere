@@ -204,6 +204,12 @@ export default function Chat() {
   const isPty = mode === "pty";
   const isDark = isPty;
 
+  // PTY 模式：挂载后请求当前终端全量帧，避免因初始帧在客户端连接前发送而丢失
+  useEffect(() => {
+    if (!relay || !sessionId || !isPty) return;
+    relay.sendControl({ type: "terminal_frame_request", sessionId });
+  }, [relay, sessionId, isPty]);
+
   const sendDisabled = computeSendDisabled(
     mode,
     chatState.isWorking,

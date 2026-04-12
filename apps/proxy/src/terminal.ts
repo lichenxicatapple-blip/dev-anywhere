@@ -127,6 +127,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
         ptyManager?.write(msg.data);
       }
+      if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && framePusher) {
+        framePusher.forceFull();
+      }
       if (msg.type === "pty_lines_request" && msg.sessionId === sessionId && tracker) {
         const lines = tracker.extractLines(msg.fromLineId, msg.count);
         const response = {

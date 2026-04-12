@@ -104,6 +104,12 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     frame: z.string(),
   }),
 
+  // serve → client：客户端请求当前终端全量帧
+  z.object({
+    type: z.literal("pty_frame_request"),
+    sessionId: z.string(),
+  }),
+
   // serve → client：转发来自 relay 的终端行拉取请求
   z.object({
     type: z.literal("pty_lines_request"),
