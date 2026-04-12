@@ -14,8 +14,8 @@ import {
   chmodSync,
   rmSync,
 } from "node:fs";
-import pino from "pino";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
+import { logger } from "./logger.js";
 import { SessionManager } from "./session-manager.js";
 import { RelayConnection } from "./relay-connection.js";
 import { SeqCounter } from "./seq-counter.js";
@@ -24,7 +24,6 @@ import {
   PID_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
-  LOG_PATH,
   DATA_DIR,
   sessionPaths,
 } from "./paths.js";
@@ -41,8 +40,6 @@ import { createFrameCache, type FrameCache } from "./frame-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-let logger: pino.Logger;
 
 // ---------- 基础工具函数 ----------
 
@@ -452,7 +449,6 @@ function handleTerminalConnection(
         } catch {
           // 会话可能尚未注册，状态更新失败可忽略
         }
-        sessionManager.recordHeartbeat(msg.sessionId);
         terminalSockets.set(msg.sessionId, socket);
         logger.info({ sessionId: msg.sessionId }, "PTY session registered");
         break;
@@ -477,18 +473,6 @@ function handleTerminalConnection(
             }),
           );
         }
-        break;
-      }
-
-      case "heartbeat": {
-        if (msg.sessionId) {
-          try {
-            sessionManager.recordHeartbeat(msg.sessionId);
-          } catch {
-            // 心跳记录失败不影响服务正常运行
-          }
-        }
-        socket.write(serializeIpc({ type: "heartbeat_ack" }));
         break;
       }
 
@@ -532,12 +516,6 @@ export interface ServiceOptions {
 }
 
 export async function startService(options?: ServiceOptions): Promise<void> {
-
-  logger = pino(
-    { level: "info" },
-    pino.destination(LOG_PATH),
-  );
-
   await cleanupStaleResources();
   try { unlinkSync(STOPPED_PATH); } catch {
     // STOPPED 文件不存在时忽略
@@ -575,7 +553,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const controlHandlers = createControlMessageHandlers(
     (data) => { if (relaySend) relaySend(data); },
     sessionManager,
-    logger,
   );
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
@@ -584,7 +561,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   let relayConnection: RelayConnection | null = null;
 
   if (relayUrl) {
-    relayConnection = new RelayConnection(relayUrl, logger, { name: proxyName });
+    relayConnection = new RelayConnection(relayUrl, { name: proxyName });
     relaySend = (data) => relayConnection!.sendRaw(data);
     relayConnection.connect();
     logger.info({ relayUrl, proxyName }, "Connecting to relay server");

@@ -10,7 +10,7 @@ import {
   TerminalFrameRenderer,
 } from "#src/terminal-frame-renderer.js";
 
-const logger = pino({ level: "silent" });
+const relayLogger = pino({ level: "silent" });
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 
 /**
@@ -63,7 +63,7 @@ describe("Terminal E2E with recorded PTY chunks", () => {
   beforeEach(async () => {
     chunks = loadRecordedChunks();
 
-    relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
+    relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger: relayLogger });
     await new Promise<void>((resolve) => {
       relay.httpServer.listen(0, resolve);
     });
@@ -389,7 +389,6 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     const handlers = createControlMessageHandlers(
       (d) => sentMessages.push(d),
       { listSessions: () => [] } as unknown as Parameters<typeof createControlMessageHandlers>[1],
-      logger,
     );
 
     const tracker = new TerminalTracker(120, 40);

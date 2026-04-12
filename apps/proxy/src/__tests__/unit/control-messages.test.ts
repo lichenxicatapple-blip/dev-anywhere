@@ -2,19 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Logger } from "pino";
 import type { TerminalTracker } from "#src/terminal-tracker.js";
 import type { SessionManager } from "#src/session-manager.js";
 import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
-
-function createMockLogger(): Logger {
-  return {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  } as unknown as Logger;
-}
 
 function createMockSessionManager(sessions: Array<{ id: string; state: string }> = []): SessionManager {
   return {
@@ -38,15 +28,13 @@ function createMockTracker(overrides: Partial<TerminalTracker> = {}): TerminalTr
 
 describe("control-messages: path traversal defense", () => {
   let sent: string[];
-  let logger: Logger;
 
   beforeEach(() => {
     sent = [];
-    logger = createMockLogger();
   });
 
   it("rejects relative path", async () => {
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     await handlers.handleDirListRequest({ path: "relative/path" });
 
     const response = JSON.parse(sent[0]);
@@ -56,7 +44,7 @@ describe("control-messages: path traversal defense", () => {
   });
 
   it("rejects relative path with .. traversal", async () => {
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     await handlers.handleDirListRequest({ path: "../../../etc/passwd" });
 
     const response = JSON.parse(sent[0]);
@@ -64,7 +52,7 @@ describe("control-messages: path traversal defense", () => {
   });
 
   it("normalizes absolute path with .. but still allows it (resolved to valid path)", async () => {
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     // normalize resolves this to /etc/passwd which is a valid absolute path
     await handlers.handleDirListRequest({ path: "/home/user/../../../etc" });
 
@@ -79,7 +67,7 @@ describe("control-messages: path traversal defense", () => {
     await writeFile(join(tmpDir, "file.txt"), "content");
     await mkdir(join(tmpDir, "subdir"));
 
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     await handlers.handleDirListRequest({ path: tmpDir });
 
     const response = JSON.parse(sent[0]);
@@ -95,7 +83,7 @@ describe("control-messages: path traversal defense", () => {
   });
 
   it("returns error for nonexistent path", async () => {
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     await handlers.handleDirListRequest({ path: "/nonexistent/path/xyz" });
 
     const response = JSON.parse(sent[0]);
@@ -108,7 +96,7 @@ describe("control-messages: path traversal defense", () => {
     await writeFile(join(tmpDir, ".hidden"), "secret");
     await writeFile(join(tmpDir, "visible.txt"), "content");
 
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     await handlers.handleDirListRequest({ path: tmpDir });
 
     const response = JSON.parse(sent[0]);
@@ -122,14 +110,14 @@ describe("control-messages: path traversal defense", () => {
 describe("control-messages: terminal lines request", () => {
   it("forwards to tracker and returns response", () => {
     const sent: string[] = [];
-    const logger = createMockLogger();
+
     const tracker = createMockTracker({
       extractLines: vi.fn().mockReturnValue([[{ text: "hello" }], [{ text: "world" }]]),
       getOldestLineId: vi.fn().mockReturnValue(0),
       getNewestLineId: vi.fn().mockReturnValue(50),
     });
 
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     handlers.registerTracker("sess-1", tracker);
     handlers.handleTerminalLinesRequest({ sessionId: "sess-1", fromLineId: 5, count: 10 });
 
@@ -145,8 +133,8 @@ describe("control-messages: terminal lines request", () => {
 
   it("returns error when no tracker registered for session", () => {
     const sent: string[] = [];
-    const logger = createMockLogger();
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
     handlers.handleTerminalLinesRequest({ sessionId: "unknown", fromLineId: 0, count: 10 });
 
@@ -159,8 +147,8 @@ describe("control-messages: terminal lines request", () => {
 describe("control-messages: command list push", () => {
   it("sends command_list_push with static commands", async () => {
     const sent: string[] = [];
-    const logger = createMockLogger();
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
     await handlers.pushCommandList("sess-1", "/tmp");
 
@@ -182,8 +170,8 @@ describe("control-messages: file tree push", () => {
     await writeFile(join(tmpDir, "package.json"), "{}");
 
     const sent: string[] = [];
-    const logger = createMockLogger();
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
     await handlers.pushFileTree("sess-1", tmpDir);
 
@@ -207,8 +195,8 @@ describe("control-messages: file tree push", () => {
     await writeFile(join(tmpDir, "visible.ts"), "");
 
     const sent: string[] = [];
-    const logger = createMockLogger();
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
     await handlers.pushFileTree("sess-1", tmpDir);
 
@@ -225,9 +213,9 @@ describe("control-messages: file tree push", () => {
 describe("control-messages: cleanup", () => {
   it("removes tracker and clears refresh timer on cleanup", async () => {
     const sent: string[] = [];
-    const logger = createMockLogger();
+
     const tracker = createMockTracker();
-    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager(), logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
     handlers.registerTracker("sess-1", tracker);
     await handlers.pushCommandList("sess-1", "/tmp");
@@ -250,13 +238,13 @@ describe("control-messages: reinitializeOnReconnect", () => {
     await writeFile(join(tmpDir, "app.ts"), "");
 
     const sent: string[] = [];
-    const logger = createMockLogger();
+
     const sessionManager = createMockSessionManager([
       { id: "active-1", state: "running" },
       { id: "terminated-1", state: "terminated" },
     ]);
 
-    const handlers = createControlMessageHandlers((d) => sent.push(d), sessionManager, logger);
+    const handlers = createControlMessageHandlers((d) => sent.push(d), sessionManager);
 
     // 先推送一次建立 fileTreeWorkDir
     await handlers.pushFileTree("active-1", tmpDir);

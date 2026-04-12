@@ -3,8 +3,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import type { Logger } from "pino";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
+import { logger } from "./logger.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
@@ -30,7 +30,6 @@ export interface RelayConnectionOptions {
 export class RelayConnection extends EventEmitter {
   private ws: WebSocket | null = null;
   private proxyId: string;
-  private logger: Logger;
   private relayUrl: string;
   private queue: MemoryMessageQueue = new MemoryMessageQueue();
   private reconnectAttempt: number = 0;
@@ -38,10 +37,9 @@ export class RelayConnection extends EventEmitter {
   private closed: boolean = false;
   private name?: string;
 
-  constructor(relayUrl: string, logger: Logger, options?: RelayConnectionOptions) {
+  constructor(relayUrl: string, options?: RelayConnectionOptions) {
     super();
     this.relayUrl = relayUrl;
-    this.logger = logger;
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
   }
@@ -78,7 +76,7 @@ export class RelayConnection extends EventEmitter {
 
       this.ws.on("open", () => {
         this.reconnectAttempt = 0;
-        this.logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
+        logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
         this.ws!.send(JSON.stringify({
           type: "proxy_register",
           proxyId: this.proxyId,
@@ -93,7 +91,7 @@ export class RelayConnection extends EventEmitter {
           if (parsed.type === "proxy_register_response") {
             const status: string = parsed.status;
             const sessions: Record<string, number> | undefined = parsed.sessions;
-            this.logger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
+            logger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
             // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
             this.emit("sync", { status, sessions: sessions ?? {} });
             this.flushQueue();
@@ -109,19 +107,19 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("close", () => {
         this.ws = null;
         if (!this.closed) {
-          this.logger.info("Relay connection closed unexpectedly");
+          logger.info("Relay connection closed unexpectedly");
           this.emit("disconnected");
           this.scheduleReconnect();
         } else {
-          this.logger.info("Relay connection closed");
+          logger.info("Relay connection closed");
         }
       });
 
       this.ws.on("error", (err) => {
-        this.logger.error({ error: String(err) }, "Relay connection error");
+        logger.error({ error: String(err) }, "Relay connection error");
       });
     } catch (err) {
-      this.logger.error({ error: String(err) }, "Failed to create relay connection");
+      logger.error({ error: String(err) }, "Failed to create relay connection");
       if (!this.closed) {
         this.scheduleReconnect();
       }
@@ -138,7 +136,7 @@ export class RelayConnection extends EventEmitter {
   // 计算全抖动指数退避延迟并调度重连
   private scheduleReconnect(): void {
     const backoff = Math.random() * Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempt));
-    this.logger.info(
+    logger.info(
       { attempt: this.reconnectAttempt + 1, backoffMs: Math.round(backoff) },
       "Scheduling reconnect",
     );
@@ -161,7 +159,7 @@ export class RelayConnection extends EventEmitter {
       this.ws.send(raw);
     } else {
       this.queue.enqueue(raw);
-      this.logger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
+      logger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
     }
   }
 

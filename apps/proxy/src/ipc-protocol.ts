@@ -72,17 +72,6 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     data: z.string(),
   }),
 
-  // 心跳
-  z.object({
-    type: z.literal("heartbeat"),
-    sessionId: z.string().optional(),
-  }),
-
-  // 心跳确认
-  z.object({
-    type: z.literal("heartbeat_ack"),
-  }),
-
   // 服务端广播会话状态变更
   z.object({
     type: z.literal("session_status_update"),

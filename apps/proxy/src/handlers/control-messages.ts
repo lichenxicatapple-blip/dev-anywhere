@@ -1,9 +1,9 @@
 import { readdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
-import type { Logger } from "pino";
 import type { SessionManager } from "../session-manager.js";
 import type { TerminalTracker } from "../terminal-tracker.js";
 import { scanSessionHistory } from "../session-history.js";
+import { logger } from "../logger.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;
@@ -98,7 +98,6 @@ async function discoverCommands(_workDir: string): Promise<Array<{
 export function createControlMessageHandlers(
   send: (data: string) => void,
   sessionManager: SessionManager,
-  logger: Logger,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
   const trackers = new Map<string, TerminalTracker>();

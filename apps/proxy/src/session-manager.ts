@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { SessionState } from "@cc-anywhere/shared";
+import { logger } from "./logger.js";
 
 export interface SessionInfo {
   id: string;
@@ -11,13 +12,11 @@ export interface SessionInfo {
   name?: string;
   claudeSessionId?: string;
   pid?: number;
-  lastHeartbeat?: number;
 }
 
 export interface SessionManagerOptions {
   persistPath: string;
   reaperIntervalMs?: number;
-  heartbeatTimeoutMs?: number;
   onSessionRemoved?: (id: string) => void;
 }
 
@@ -51,13 +50,11 @@ export class SessionManager {
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
   private readonly reaperIntervalMs: number;
-  private readonly heartbeatTimeoutMs: number;
   private readonly onSessionRemoved?: (id: string) => void;
 
   constructor(options: SessionManagerOptions) {
     this.persistPath = options.persistPath;
-    this.reaperIntervalMs = options.reaperIntervalMs ?? 30000;
-    this.heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 30000;
+    this.reaperIntervalMs = options.reaperIntervalMs ?? 60000;
     this.onSessionRemoved = options.onSessionRemoved;
     this.load();
   }
@@ -72,6 +69,7 @@ export class SessionManager {
     };
     this.sessions.set(info.id, info);
     this.save();
+    logger.info({ sessionId: info.id, mode, name }, "Session created");
     return info;
   }
 
@@ -96,8 +94,10 @@ export class SessionManager {
         `Invalid state transition: ${session.state} -> ${newState}`,
       );
     }
+    const oldState = session.state;
     session.state = newState;
     this.save();
+    logger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");
   }
 
   terminateSession(
@@ -110,6 +110,7 @@ export class SessionManager {
     const pid = session.pid;
     this.sessions.delete(id);
     this.save();
+    logger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
     this.onSessionRemoved?.(id);
     return { success: true, pid };
   }
@@ -147,29 +148,6 @@ export class SessionManager {
     this.save();
   }
 
-  recordHeartbeat(id: string): void {
-    const session = this.sessions.get(id);
-    if (!session) {
-      throw new Error(`Session not found: ${id}`);
-    }
-    session.lastHeartbeat = Date.now();
-  }
-
-  getStaleSessionIds(thresholdMs: number = this.heartbeatTimeoutMs): string[] {
-    const now = Date.now();
-    const stale: string[] = [];
-    for (const session of this.sessions.values()) {
-      if (session.mode !== "pty") continue;
-      if (session.state === SessionState.TERMINATED) continue;
-      if (
-        session.lastHeartbeat !== undefined &&
-        now - session.lastHeartbeat > thresholdMs
-      ) {
-        stale.push(session.id);
-      }
-    }
-    return stale;
-  }
 
   startReaper(intervalMs: number = this.reaperIntervalMs): void {
     this.stopReaper();
@@ -184,18 +162,18 @@ export class SessionManager {
   }
 
   private reap(): void {
-    const toRemove: string[] = [];
+    const toRemove: Array<{ id: string; reason: string }> = [];
     // 检查 JSON 会话的子进程是否存活
+    // PTY 会话的生命周期由 IPC socket close 事件管理，不需要 reaper 参与
     for (const session of this.sessions.values()) {
       if (session.mode === "json" && session.pid !== undefined && session.state !== SessionState.TERMINATED) {
         if (!this.isProcessAlive(session.pid)) {
-          toRemove.push(session.id);
+          toRemove.push({ id: session.id, reason: `JSON worker process ${session.pid} is dead` });
         }
       }
     }
-    // 检查 PTY 会话心跳是否超时
-    toRemove.push(...this.getStaleSessionIds());
-    for (const id of toRemove) {
+    for (const { id, reason } of toRemove) {
+      logger.warn({ sessionId: id, reason }, "Reaping stale session");
       this.terminateSession(id);
     }
   }
@@ -244,6 +222,9 @@ export class SessionManager {
         continue;
       }
       this.sessions.set(info.id, info);
+    }
+    if (this.sessions.size > 0) {
+      logger.info({ count: this.sessions.size }, "Sessions restored from persistence");
     }
   }
 }

@@ -80,21 +80,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
-  let heartbeatInterval: NodeJS.Timeout | null = null;
   let reconnecting = false;
   let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
   let framePusher: FramePusher | null = null;
-
-  function setupHeartbeat(): void {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
-    heartbeatInterval = setInterval(() => {
-      if (socket.writable && sessionId) {
-        socket.write(serializeIpc({ type: "heartbeat", sessionId }));
-      }
-    }, 10_000);
-  }
 
   function startFramePush(): void {
     if (framePusher) framePusher.stop();
@@ -169,7 +159,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   }
 
   async function reconnectToServe(): Promise<void> {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
 
     const maxRetries = 60;
     for (let i = 0; i < maxRetries; i++) {
@@ -197,7 +186,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           }
         }
 
-        setupHeartbeat();
         return;
       } catch {
         // 继续重试
@@ -251,7 +239,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     },
     onSessionExit: (code: number) => {
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (idleCheckTimer) clearInterval(idleCheckTimer);
       stopFramePush();
       if (tracker) tracker.dispose();
@@ -269,11 +256,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
   startFramePush();
 
-  setupHeartbeat();
   setupIdleCheck();
 
   process.on("SIGTERM", () => {
-    if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     stopFramePush();
     if (tracker) tracker.dispose();

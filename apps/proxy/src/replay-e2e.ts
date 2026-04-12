@@ -21,7 +21,6 @@
 
 import { connect, type Socket } from "node:net";
 import { WebSocket } from "ws";
-import pino from "pino";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
 import { TerminalTracker } from "./terminal-tracker.js";
@@ -34,7 +33,7 @@ import {
   type TerminalFrame,
 } from "./terminal-frame-renderer.js";
 
-const logger = pino({ level: "silent" });
+import { logger } from "./logger.js";
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {

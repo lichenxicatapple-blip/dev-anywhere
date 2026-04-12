@@ -269,42 +269,6 @@ describe("SessionManager", () => {
     });
   });
 
-  describe("heartbeat", () => {
-    it("records heartbeat timestamp", () => {
-      const s = manager.createSession("pty");
-      const before = Date.now();
-      manager.recordHeartbeat(s.id);
-      const after = Date.now();
-      const hb = manager.getSession(s.id)!.lastHeartbeat!;
-      expect(hb).toBeGreaterThanOrEqual(before);
-      expect(hb).toBeLessThanOrEqual(after);
-    });
-
-    it("returns stale session IDs for PTY sessions past threshold", () => {
-      const s = manager.createSession("pty");
-      // 手动设置过期的心跳时间
-      const session = manager.getSession(s.id)!;
-      session.lastHeartbeat = Date.now() - 60000;
-      const stale = manager.getStaleSessionIds(30000);
-      expect(stale).toContain(s.id);
-    });
-
-    it("does not return fresh sessions as stale", () => {
-      const s = manager.createSession("pty");
-      manager.recordHeartbeat(s.id);
-      const stale = manager.getStaleSessionIds(30000);
-      expect(stale).not.toContain(s.id);
-    });
-
-    it("does not include JSON sessions in stale check", () => {
-      const s = manager.createSession("json");
-      const session = manager.getSession(s.id)!;
-      session.lastHeartbeat = Date.now() - 60000;
-      const stale = manager.getStaleSessionIds(30000);
-      expect(stale).not.toContain(s.id);
-    });
-  });
-
   describe("reaper", () => {
     it("removes dead JSON sessions from registry", () => {
       vi.useFakeTimers();
@@ -341,24 +305,6 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
 
       killSpy.mockRestore();
-      vi.useRealTimers();
-    });
-
-    it("removes stale PTY sessions from registry during reap", () => {
-      vi.useFakeTimers({ now: Date.now() });
-
-      const s = manager.createSession("pty");
-      manager.updateState(s.id, SessionState.WORKING);
-      manager.recordHeartbeat(s.id);
-
-      // 推进时间超过心跳超时
-      vi.advanceTimersByTime(35000);
-
-      manager.startReaper(1000);
-      vi.advanceTimersByTime(1100);
-
-      expect(manager.getSession(s.id)).toBeUndefined();
-
       vi.useRealTimers();
     });
 

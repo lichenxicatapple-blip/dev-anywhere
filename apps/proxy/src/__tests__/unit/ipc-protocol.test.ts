@@ -9,7 +9,7 @@ describe("IPC Protocol", () => {
   describe("serializeIpc", () => {
     it("produces valid JSON terminated with newline", async () => {
       const { serializeIpc } = await importIpc();
-      const msg = { type: "heartbeat" as const };
+      const msg = { type: "session_status_update" as const, sessionId: "s1", state: "idle" };
       const result = serializeIpc(msg);
 
       expect(result.endsWith("\n")).toBe(true);
@@ -38,7 +38,7 @@ describe("IPC Protocol", () => {
 
       createIpcReader(stream, (msg) => messages.push(msg));
 
-      stream.write(serializeIpc({ type: "heartbeat" }));
+      stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
       stream.write(
         serializeIpc({
           type: "session_create_request",
@@ -52,7 +52,7 @@ describe("IPC Protocol", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(messages).toHaveLength(2);
-      expect(messages[0]).toEqual({ type: "heartbeat" });
+      expect(messages[0]).toEqual({ type: "session_status_update", sessionId: "s1", state: "idle" });
       expect(messages[1]).toEqual({
         type: "session_create_request",
         name: "test",
@@ -68,7 +68,7 @@ describe("IPC Protocol", () => {
       createIpcReader(stream, (msg) => messages.push(msg));
 
       // Split a single message across two writes
-      const fullMsg = JSON.stringify({ type: "heartbeat" }) + "\n";
+      const fullMsg = JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n";
       const splitPoint = Math.floor(fullMsg.length / 2);
       stream.write(fullMsg.slice(0, splitPoint));
       stream.write(fullMsg.slice(splitPoint));
@@ -77,7 +77,7 @@ describe("IPC Protocol", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({ type: "heartbeat" });
+      expect(messages[0]).toEqual({ type: "session_status_update", sessionId: "s1", state: "idle" });
     });
 
     it("skips empty lines", async () => {
@@ -87,9 +87,9 @@ describe("IPC Protocol", () => {
 
       createIpcReader(stream, (msg) => messages.push(msg));
 
-      stream.write(JSON.stringify({ type: "heartbeat" }) + "\n");
+      stream.write(JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n");
       stream.write("\n");
-      stream.write(JSON.stringify({ type: "heartbeat_ack" }) + "\n");
+      stream.write(JSON.stringify({ type: "session_create_request", mode: "pty" }) + "\n");
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));
@@ -106,7 +106,7 @@ describe("IPC Protocol", () => {
       createIpcReader(stream, (msg) => messages.push(msg));
 
       stream.write("not-valid-json\n");
-      stream.write(JSON.stringify({ type: "heartbeat" }) + "\n");
+      stream.write(JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n");
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));

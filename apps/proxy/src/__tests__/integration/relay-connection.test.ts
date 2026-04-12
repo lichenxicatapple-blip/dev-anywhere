@@ -7,7 +7,7 @@ import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
 import { buildMessage } from "@cc-anywhere/shared";
 import { RelayConnection } from "#src/relay-connection.js";
 
-const logger = pino({ level: "silent" });
+const relayLogger = pino({ level: "silent" });
 
 // 等待 relay 处理 proxy_register 消息的辅助函数
 function waitForRegistration(): Promise<void> {
@@ -18,7 +18,7 @@ let relay: RelayServer;
 let relayPort: number;
 
 beforeAll(async () => {
-  relay = createRelayServer({ logger, heartbeatInterval: 60000 });
+  relay = createRelayServer({ logger: relayLogger, heartbeatInterval: 60000 });
   await new Promise<void>((resolve) => {
     relay.httpServer.listen(0, () => {
       const addr = relay.httpServer.address();
@@ -44,7 +44,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
     // 等待连接建立和注册完成
@@ -64,7 +64,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -79,7 +79,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -107,7 +107,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -129,7 +129,7 @@ describe("RelayConnection", () => {
     const idPath = join(tmpDir, "proxy-id");
 
     // 第一次创建时应该生成并持久化
-    const conn1 = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    const conn1 = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     const id1 = conn1.getProxyId();
     expect(id1).toBeTruthy();
     expect(id1.length).toBe(21); // nanoid 默认长度
@@ -137,7 +137,7 @@ describe("RelayConnection", () => {
     expect(readFileSync(idPath, "utf-8").trim()).toBe(id1);
 
     // 第二次创建时应该读取已有的 proxyId
-    const conn2 = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    const conn2 = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     const id2 = conn2.getProxyId();
     expect(id2).toBe(id1);
   });
@@ -147,7 +147,7 @@ describe("RelayConnection", () => {
     const idPath = join(tmpDir, "proxy-id");
 
     // 连接到一个不存在的端口
-    conn = new RelayConnection("ws://localhost:19999", logger, { proxyIdPath: idPath });
+    conn = new RelayConnection("ws://localhost:19999", { proxyIdPath: idPath });
 
     // connect() 不应抛异常
     expect(() => conn!.connect()).not.toThrow();
@@ -163,7 +163,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     const connected = new Promise<void>((resolve) => {
       conn!.on("connected", () => resolve());
@@ -180,7 +180,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     const connected = new Promise<void>((resolve) => {
       conn!.on("connected", () => resolve());
@@ -205,7 +205,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     const connected = new Promise<void>((resolve) => {
       conn!.on("connected", () => resolve());
@@ -231,7 +231,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     let connectedCount = 0;
     conn.on("connected", () => { connectedCount++; });
@@ -265,7 +265,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     const connected = new Promise<void>((resolve) => {
       conn!.on("connected", () => resolve());
@@ -291,7 +291,7 @@ describe("RelayConnection", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
-    conn = new RelayConnection(`ws://localhost:${relayPort}`, logger, { proxyIdPath: idPath });
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     const firstConnected = new Promise<void>((resolve) => {
       conn!.once("connected", () => resolve());

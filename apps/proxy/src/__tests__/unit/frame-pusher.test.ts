@@ -41,16 +41,19 @@ describe("frame-pusher: lifecycle", () => {
     const pusher = createFramePusher({ tracker, sessionId: "s1", sendFrame });
 
     pusher.start();
-    vi.advanceTimersByTime(200);
+    // start() 立即推一帧 full
     expect(sendFrame).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(200);
     expect(sendFrame).toHaveBeenCalledTimes(2);
 
+    vi.advanceTimersByTime(200);
+    expect(sendFrame).toHaveBeenCalledTimes(3);
+
     pusher.stop();
     vi.advanceTimersByTime(1000);
     // stop 后不再调用
-    expect(sendFrame).toHaveBeenCalledTimes(2);
+    expect(sendFrame).toHaveBeenCalledTimes(3);
   });
 
   it("start resets lastGrid so next push is full mode", () => {
@@ -147,9 +150,11 @@ describe("frame-pusher: frame modes", () => {
     const pusher = createFramePusher({ tracker, sessionId: "s1", sendFrame });
 
     pusher.start();
-    vi.advanceTimersByTime(600);
+    // start() 立即推一帧 full，之后 hasGridChanged 返回 false 不再推
+    expect(sendFrame).toHaveBeenCalledTimes(1);
 
-    expect(sendFrame).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(600);
+    expect(sendFrame).toHaveBeenCalledTimes(1);
     pusher.stop();
   });
 

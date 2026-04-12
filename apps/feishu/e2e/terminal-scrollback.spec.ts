@@ -1,53 +1,61 @@
 // E2E: PTY 终端 scrollback 历史加载行为验证
-// 前置条件: relay + proxy 在线，H5 build 已完成并在 localhost:5175 上 serve
-// 运行: pnpm --filter feishu exec playwright test
+// 前置条件: relay + proxy 在线，至少一个 PTY session 存在，H5 dev server 在 localhost:5175
+// 运行: pnpm --filter feishu exec playwright test e2e/terminal-scrollback.spec.ts
 import { test, expect } from "@playwright/test";
 
 const BASE_URL = "http://localhost:5175";
 
-// Enable after Task 2 implements scrollback -- 需要完整集成环境
-test.skip("scroll to top loads history lines", async ({ page }) => {
-  // 清理本地状态
+async function waitForSelector(page: import("@playwright/test").Page, selector: string, timeoutMs = 15000): Promise<boolean> {
+  try {
+    await page.waitForSelector(selector, { timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("scroll to top loads history lines", async ({ page }) => {
   await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
   await page.evaluate(() => {
     localStorage.removeItem("cc_proxyId");
     localStorage.removeItem("cc_sessionId");
+    localStorage.removeItem("cc_sessionMode");
   });
   await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
-  await page.waitForTimeout(3000);
 
-  // 选择 proxy
-  const proxyItem = await page.$(".proxy-item");
-  test.skip(!proxyItem, "No online proxy available");
-  await proxyItem!.click();
-  await page.waitForTimeout(2000);
+  // 等 proxy 列表出现
+  const hasProxy = await waitForSelector(page, ".proxy-item");
+  test.skip(!hasProxy, "No online proxy available");
+  await page.click(".proxy-item");
 
-  // 选择 PTY session
-  const sessionItem = await page.$(".sli-wrapper");
-  test.skip(!sessionItem, "No PTY session available");
-  await sessionItem!.click();
-  await page.waitForTimeout(2000);
+  // 等 session 列表出现
+  const hasSession = await waitForSelector(page, ".sli-wrapper");
+  test.skip(!hasSession, "No session available");
 
-  // 确认 terminal-viewport 存在且有行
-  const viewport = await page.$(".terminal-viewport");
-  expect(viewport).not.toBeNull();
+  // 找 PTY session
+  const ptySession = await page.$('.sli-wrapper:has(.sli-badge-pty)');
+  test.skip(!ptySession, "No PTY session available");
+  await ptySession!.click();
+
+  // 等终端 viewport 渲染
+  const hasViewport = await waitForSelector(page, ".terminal-line");
+  expect(hasViewport).toBe(true);
 
   const initialLineCount = await page.$$eval(".terminal-line", (els) => els.length);
   expect(initialLineCount).toBeGreaterThan(0);
 
-  // 滚动到顶部
+  // 滚动到顶部触发 scrollback
   await page.evaluate(() => {
     const vp = document.querySelector(".terminal-viewport");
     if (vp) vp.scrollTop = 0;
   });
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(3000);
 
-  // 检查是否有 loading indicator 或额外行出现
+  // 验证 scrollback 被触发：出现 loading、oldest 标记、或行数增加
   const hasLoading = await page.$(".scrollback-loading");
   const hasOldest = await page.$(".scrollback-oldest");
   const newLineCount = await page.$$eval(".terminal-line", (els) => els.length);
 
-  // 至少有一个条件满足：正在加载、已到最旧、或有新行
   const scrollbackTriggered = hasLoading !== null || hasOldest !== null || newLineCount > initialLineCount;
   expect(scrollbackTriggered).toBe(true);
 });
