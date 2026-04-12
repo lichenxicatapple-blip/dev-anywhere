@@ -104,9 +104,9 @@ export function TerminalViewport({
 
   // H5 环境下通过 DOM 获取 viewport 高度，并绑定原生 scroll 事件
   // Taro ScrollView 的 onScroll prop 在 H5 Web Component 下不触发，
-  // 必须直接 addEventListener 绕过
+  // 必须直接 addEventListener 绕过。小程序环境 onScroll prop 正常工作，不需要此逻辑。
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (process.env.TARO_ENV !== "h5") return;
     const el = document.querySelector(".terminal-viewport");
     if (!el) return;
 
