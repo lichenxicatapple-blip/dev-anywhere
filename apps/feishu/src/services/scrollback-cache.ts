@@ -9,35 +9,63 @@ interface LinesResponse {
 }
 
 export class ScrollbackCache {
-  applyLinesResponse(_response: LinesResponse): void {
-    throw new Error("not implemented");
+  private cache = new Map<number, TermLine>();
+  private _oldestLineId = 0;
+  private _newestLineId = 0;
+
+  applyLinesResponse(response: LinesResponse): void {
+    this._oldestLineId = response.oldestLineId;
+    this._newestLineId = response.newestLineId;
+
+    for (let i = 0; i < response.lines.length; i++) {
+      const lineId = response.fromLineId + i;
+      this.cache.set(lineId, response.lines[i]);
+    }
   }
 
-  getCachedLines(_fromLineId: number, _count: number): Array<TermLine | null> {
-    throw new Error("not implemented");
+  getCachedLines(fromLineId: number, count: number): Array<TermLine | null> {
+    const result: Array<TermLine | null> = [];
+    for (let i = 0; i < count; i++) {
+      result.push(this.cache.get(fromLineId + i) ?? null);
+    }
+    return result;
   }
 
-  getMissingRange(_fromLineId: number, _count: number): { fromLineId: number; count: number } | null {
-    throw new Error("not implemented");
+  getMissingRange(fromLineId: number, count: number): { fromLineId: number; count: number } | null {
+    let missingStart = -1;
+    let missingEnd = -1;
+
+    for (let i = 0; i < count; i++) {
+      const id = fromLineId + i;
+      if (!this.cache.has(id)) {
+        if (missingStart === -1) missingStart = id;
+        missingEnd = id;
+      }
+    }
+
+    if (missingStart === -1) return null;
+    return { fromLineId: missingStart, count: missingEnd - missingStart + 1 };
   }
 
-  isAtOldest(_fromLineId: number): boolean {
-    throw new Error("not implemented");
+  isAtOldest(fromLineId: number): boolean {
+    return fromLineId <= this._oldestLineId;
   }
 
   clearCache(): void {
-    throw new Error("not implemented");
+    this.cache.clear();
+    this._oldestLineId = 0;
+    this._newestLineId = 0;
   }
 
   get cacheSize(): number {
-    throw new Error("not implemented");
+    return this.cache.size;
   }
 
   get oldestLineId(): number {
-    throw new Error("not implemented");
+    return this._oldestLineId;
   }
 
   get newestLineId(): number {
-    throw new Error("not implemented");
+    return this._newestLineId;
   }
 }

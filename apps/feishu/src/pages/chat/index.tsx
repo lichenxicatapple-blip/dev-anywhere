@@ -185,6 +185,19 @@ export default function Chat() {
           }
           break;
         }
+        case "terminal_lines_response": {
+          if (ctrl.sessionId !== sessionId) break;
+          terminalDispatch({
+            type: "APPLY_LINES_RESPONSE",
+            response: {
+              fromLineId: ctrl.fromLineId,
+              oldestLineId: ctrl.oldestLineId,
+              newestLineId: ctrl.newestLineId,
+              lines: ctrl.lines,
+            },
+          });
+          break;
+        }
         default:
           break;
       }
@@ -264,6 +277,29 @@ export default function Chat() {
   const handleBackToBottom = useCallback(() => {
     setIsNearBottom(true);
   }, []);
+
+  const handleScrollToTop = useCallback(() => {
+    if (!relay || !sessionId || !checkConnected()) return;
+    const cache = terminalStateRef.current.scrollbackCache;
+    const fromLineId = cache.oldestLineId > 0
+      ? Math.max(0, cache.oldestLineId - 50)
+      : 0;
+    const count = cache.oldestLineId > 0
+      ? cache.oldestLineId - fromLineId
+      : 50;
+    if (count <= 0) return;
+    terminalDispatch({ type: "REQUEST_SCROLLBACK" });
+    relay.sendControl({
+      type: "terminal_lines_request",
+      sessionId,
+      fromLineId,
+      count,
+    });
+  }, [relay, sessionId, checkConnected, terminalDispatch]);
+
+  const handleTerminalScrollChange = useCallback((nearBottom: boolean) => {
+    terminalDispatch({ type: "SET_USER_SCROLLED_UP", value: !nearBottom });
+  }, [terminalDispatch]);
 
   const handlePinchZoom = useCallback(
     (direction: "in" | "out") => {
@@ -437,8 +473,13 @@ export default function Chat() {
           {isPty ? (
             <TerminalViewport
               lines={terminalState.lines}
+              scrollbackLines={terminalState.scrollbackLines}
               fontSize={terminalState.fontSize}
               onPinchZoom={handlePinchZoom}
+              onScrollToTop={handleScrollToTop}
+              onScrollPositionChange={handleTerminalScrollChange}
+              isLoadingScrollback={terminalState.isLoadingScrollback}
+              isAtOldest={terminalState.isAtOldest}
             />
           ) : (
             <>
