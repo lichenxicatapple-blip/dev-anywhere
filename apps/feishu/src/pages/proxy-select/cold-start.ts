@@ -6,14 +6,16 @@ export function resolveColdStart(
   savedProxyId: string,
   savedSessionId: string,
   proxies: ProxyInfo[],
+  savedSessionMode?: string,
 ): { proxy: ProxyInfo; url: string } | null {
   if (!savedProxyId) return null;
 
   const onlineProxy = proxies.find((p) => p.proxyId === savedProxyId && p.online);
   if (!onlineProxy) return null;
 
+  const mode = savedSessionMode || "json";
   const url = savedSessionId
-    ? `/pages/chat/index?sessionId=${savedSessionId}`
+    ? `/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`
     : "/pages/session-list/index";
 
   return { proxy: onlineProxy, url };

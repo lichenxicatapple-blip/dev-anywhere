@@ -3,6 +3,7 @@
   background: #1E1E1E;
   border-radius: 16px 16px 0 0;
   -webkit-overflow-scrolling: touch;
+  overflow: auto !important;
 }
 
 .terminal-content {

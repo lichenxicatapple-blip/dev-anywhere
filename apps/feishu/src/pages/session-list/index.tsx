@@ -103,6 +103,7 @@ export default function SessionList() {
   const handleSelectSession = useCallback(
     (sessionId: string, mode: "pty" | "json" | undefined) => {
       Taro.setStorageSync("cc_sessionId", sessionId);
+      Taro.setStorageSync("cc_sessionMode", mode || "json");
       sessionDispatch({
         type: "SET_CURRENT_SESSION",
         sessionId,

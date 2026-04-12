@@ -98,6 +98,7 @@ export function handleRelayMessage(
         nav.getStorageSync("cc_proxyId"),
         nav.getStorageSync("cc_sessionId"),
         proxies,
+        nav.getStorageSync("cc_sessionMode"),
       );
       if (result) {
         dispatch({ type: "SET_PROXY", proxyId: result.proxy.proxyId, proxyName: result.proxy.name || null });
