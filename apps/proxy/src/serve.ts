@@ -37,6 +37,7 @@ import {
   type WorkerMessage,
 } from "./ipc-protocol.js";
 import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
+import { createFrameCache, type FrameCache } from "./frame-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -298,7 +299,7 @@ function handleTerminalConnection(
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
   controlHandlers?: ControlMessageHandlers,
-  lastTerminalFrames?: Map<string, string>,
+  frameCache?: FrameCache,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
     switch (msg.type) {
@@ -376,8 +377,15 @@ function handleTerminalConnection(
       }
 
       case "pty_terminal_frame": {
-        // terminal → serve → relay：直接转发终端帧，同时缓存用于 terminal_frame_request 回放
-        lastTerminalFrames?.set(msg.sessionId, msg.frame);
+        // terminal → serve → relay：转发终端帧，同时 merge 到帧缓存维护完整 grid 状态
+        if (frameCache) {
+          try {
+            const parsed = JSON.parse(msg.frame);
+            frameCache.apply(msg.sessionId, parsed.payload);
+          } catch {
+            // parse 失败不影响转发
+          }
+        }
         if (relayConnection) {
           relayConnection.sendRaw(msg.frame);
         } else {
@@ -548,8 +556,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
-  // 缓存每个 session 的最近一帧 terminal_frame JSON，用于 terminal_frame_request 回放
-  const lastTerminalFrames = new Map<string, string>();
+  // 帧缓存：维护每个 session 的完整 grid 状态，delta 帧 merge 到 full 基底
+  const frameCache = createFrameCache();
 
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
@@ -590,14 +598,33 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
         // 信封消息：user_input, tool_approve, tool_deny
         if (parsed.type === "user_input" && parsed.sessionId) {
-          const ws = workerSockets.get(parsed.sessionId);
-          if (ws?.writable) {
-            ws.write(serializeWorkerMsg({
-              type: "worker_input",
-              content: parsed.payload?.text ?? "",
-            }));
+          const session = sessionManager.getSession(parsed.sessionId);
+          if (!session) {
+            logger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: session not found");
+          } else if (session.mode === "json") {
+            const ws = workerSockets.get(parsed.sessionId);
+            if (ws?.writable) {
+              ws.write(serializeWorkerMsg({
+                type: "worker_input",
+                content: parsed.payload?.text ?? "",
+              }));
+              logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to JSON worker");
+            } else {
+              logger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: JSON worker socket not available");
+            }
+          } else {
+            const ts = terminalSockets.get(parsed.sessionId);
+            if (ts?.writable) {
+              ts.write(serializeIpc({
+                type: "pty_input",
+                sessionId: parsed.sessionId,
+                data: (parsed.payload?.text ?? "") + "\r",
+              }));
+              logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to PTY terminal");
+            } else {
+              logger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: PTY terminal socket not available");
+            }
           }
-          logger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to worker");
         } else if (parsed.type === "tool_approve" && parsed.sessionId) {
           const toolId = parsed.payload?.toolId as string | undefined;
           const whitelistTool = parsed.payload?.whitelistTool as boolean | undefined;
@@ -661,13 +688,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "permission_mode_change") {
           logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
         } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          // 直接回放缓存的最近一帧，无需 IPC 往返 terminal 进程
-          const cached = lastTerminalFrames.get(parsed.sessionId);
-          if (cached && relaySend) {
-            relaySend(cached);
-            logger.info({ sessionId: parsed.sessionId }, "Replayed cached terminal frame");
+          // 从帧缓存合成 full 帧回放，确保客户端刷新后拿到完整终端画面
+          const fullFrame = frameCache.getFullFrame(parsed.sessionId);
+          if (fullFrame && relaySend) {
+            relaySend(fullFrame);
+            logger.info({ sessionId: parsed.sessionId }, "Replayed full frame from cache");
           } else {
-            logger.warn({ sessionId: parsed.sessionId, hasCached: !!cached }, "terminal_frame_request: no cached frame");
+            logger.warn({ sessionId: parsed.sessionId, hasCached: !!fullFrame }, "terminal_frame_request: no cached frame");
           }
         } else if (parsed.type === "terminal_lines_request" && parsed.sessionId) {
           // relay → serve → client IPC：转发终端行拉取请求到持有 tracker 的 client
@@ -699,7 +726,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers, lastTerminalFrames);
+    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers, frameCache);
   });
 
   server.listen(SOCK_PATH, () => {
