@@ -239,10 +239,29 @@ export default function Chat() {
   const isPty = mode === "pty";
   const isDark = isPty;
 
-  // PTY 模式：挂载后请求当前终端全量帧，避免因初始帧在客户端连接前发送而丢失
+  // 挂载时确保 client 绑定到正确的 proxy，然后请求终端帧
   useEffect(() => {
-    if (!relay || !sessionId || !isPty) return;
-    relay.sendControl({ type: "terminal_frame_request", sessionId });
+    if (!relay || !sessionId) return;
+
+    // 没有已绑定的 proxy 时，通过 sessionId 请求绑定
+    if (!relay.getBoundProxyId()) {
+      relay.bindBySession(sessionId);
+    }
+
+    // 监听 bind_by_session_response，成功后请求全量帧
+    const unsub = relay.onMessage((msg) => {
+      const ctrl = msg as Record<string, unknown>;
+      if (ctrl.type === "bind_by_session_response" && ctrl.success && isPty) {
+        relay.sendControl({ type: "terminal_frame_request", sessionId });
+      }
+    });
+
+    // 已绑定时直接请求帧
+    if (relay.getBoundProxyId() && isPty) {
+      relay.sendControl({ type: "terminal_frame_request", sessionId });
+    }
+
+    return unsub;
   }, [relay, sessionId, isPty]);
 
   const sendDisabled = computeSendDisabled(

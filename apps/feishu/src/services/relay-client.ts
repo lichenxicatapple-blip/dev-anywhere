@@ -17,6 +17,13 @@ export class RelayClient {
     this.ws.onMessage((raw) => {
       try {
         const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
+        // bind_by_session 成功时更新本地绑定状态
+        if ("type" in parsed && (parsed as Record<string, unknown>).type === "bind_by_session_response") {
+          const resp = parsed as Record<string, unknown>;
+          if (resp.success && typeof resp.proxyId === "string") {
+            this.boundProxyId = resp.proxyId;
+          }
+        }
         this.messageHandlers.forEach((h) => h(parsed));
       } catch (e) {
         console.warn("RelayClient: failed to parse incoming message:", raw.slice(0, 200), e);
@@ -44,6 +51,11 @@ export class RelayClient {
   selectProxy(proxyId: string): void {
     this.ws.send(JSON.stringify({ type: "proxy_select", proxyId }));
     this.boundProxyId = proxyId;
+  }
+
+  // 通过 sessionId 绑定到拥有该 session 的 proxy
+  bindBySession(sessionId: string): void {
+    this.ws.send(JSON.stringify({ type: "bind_by_session", sessionId }));
   }
 
   // 发送 MessageEnvelope

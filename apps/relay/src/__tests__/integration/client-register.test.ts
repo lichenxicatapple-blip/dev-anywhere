@@ -73,7 +73,7 @@ describe("client_register protocol", () => {
       clientId: "c1",
       sessions: {},
     }));
-    // 收到 new 因为没有绑定
+    // 新 client 没有绑定，收到 new
     const newResponse = JSON.parse(await waitForMessage(client1));
     expect(newResponse.status).toBe("new");
 

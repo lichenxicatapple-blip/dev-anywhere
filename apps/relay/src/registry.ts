@@ -143,6 +143,16 @@ export class RelayRegistry {
     }
   }
 
+  // 通过 sessionId 反查所属 proxyId
+  getProxyForSession(sessionId: string): string | undefined {
+    for (const [proxyId, state] of this.proxyStates) {
+      if (state.sessions.has(sessionId)) {
+        return proxyId;
+      }
+    }
+    return undefined;
+  }
+
   // 获取 proxy 关联的所有 sessionId
   getSessionsForProxy(proxyId: string): string[] {
     const state = this.proxyStates.get(proxyId);

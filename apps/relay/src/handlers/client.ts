@@ -126,6 +126,31 @@ export function handleClientConnection(
         return;
       }
 
+      if (msg.type === "bind_by_session") {
+        const proxyId = registry.getProxyForSession(msg.sessionId);
+        if (!proxyId) {
+          clientWs.send(JSON.stringify({
+            type: "bind_by_session_response",
+            success: false,
+            error: `No proxy found for session ${msg.sessionId}`,
+          }));
+          logger.info({ clientId: clientWs.clientId, sessionId: msg.sessionId }, "bind_by_session failed: session not found");
+          return;
+        }
+        if (!clientWs.clientId) {
+          clientWs.clientId = `anon-${nanoid(10)}`;
+        }
+        registry.bindClientById(clientWs.clientId, proxyId, clientWs);
+        clientWs.boundProxyId = proxyId;
+        clientWs.send(JSON.stringify({
+          type: "bind_by_session_response",
+          success: true,
+          proxyId,
+        }));
+        logger.info({ clientId: clientWs.clientId, proxyId, sessionId: msg.sessionId }, "Client bound to proxy via session");
+        return;
+      }
+
       // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy
       if (CLIENT_TO_PROXY_TYPES.has(msg.type)) {
         const targetProxyId = ("proxyId" in msg ? msg.proxyId as string : undefined) || clientWs.boundProxyId;

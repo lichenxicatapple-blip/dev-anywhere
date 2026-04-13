@@ -179,6 +179,18 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     delta: z.number().int().positive(),
   }),
 
+  // client 通过 sessionId 请求绑定到拥有该 session 的 proxy
+  z.object({
+    type: z.literal("bind_by_session"),
+    sessionId: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("bind_by_session_response"),
+    success: z.boolean(),
+    proxyId: z.string().optional(),
+    error: z.string().optional(),
+  }),
+
   // proxy 重连后同步活跃 session 列表给 relay
   z.object({
     type: z.literal("session_sync"),
