@@ -22,6 +22,24 @@ interface ProxySocket extends WebSocket {
   proxyId?: string;
 }
 
+// 通知绑定到指定 proxy 的所有客户端 proxy 已离线
+function notifyClientsProxyOffline(proxyId: string, registry: RelayRegistry, logger: Logger): void {
+  const clients = registry.getClientsForProxy(proxyId);
+  for (const clientWs of clients) {
+    clientWs.send(JSON.stringify({ type: "proxy_offline", proxyId }));
+  }
+  logger.info({ proxyId, clientCount: clients.length }, "Notified clients of proxy offline");
+}
+
+// 通知绑定到指定 proxy 的所有客户端 proxy 已上线
+function notifyClientsProxyOnline(proxyId: string, registry: RelayRegistry, logger: Logger): void {
+  const clients = registry.getClientsForProxy(proxyId);
+  for (const clientWs of clients) {
+    clientWs.send(JSON.stringify({ type: "proxy_online", proxyId }));
+  }
+  logger.info({ proxyId, clientCount: clients.length }, "Notified clients of proxy online");
+}
+
 // proxy 上线或下线时，将最新的 proxy 列表推送给所有已连接的 client。
 // 复用 proxy_list_response 消息类型，client 端已有对应处理逻辑，无需额外适配。
 function broadcastProxyList(registry: RelayRegistry): void {
@@ -67,10 +85,7 @@ export function handleProxyConnection(
       }));
 
       if (status === "reconnected") {
-        const clients = registry.getClientsForProxy(proxyId);
-        for (const clientWs of clients) {
-          clientWs.send(JSON.stringify({ type: "proxy_online", proxyId }));
-        }
+        notifyClientsProxyOnline(proxyId, registry, logger);
       }
 
       broadcastProxyList(registry);
@@ -79,10 +94,7 @@ export function handleProxyConnection(
 
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
-        const clients = registry.getClientsForProxy(proxyWs.proxyId);
-        for (const clientWs of clients) {
-          clientWs.send(JSON.stringify({ type: "proxy_offline", proxyId: proxyWs.proxyId }));
-        }
+        notifyClientsProxyOffline(proxyWs.proxyId, registry, logger);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, resources cleaned up");
         proxyWs.proxyId = undefined;
@@ -155,16 +167,14 @@ export function handleProxyConnection(
 
   proxyWs.on("close", () => {
     if (proxyWs.proxyId) {
-      // 通知所有绑定的客户端 proxy 已离线
-      const clients = registry.getClientsForProxy(proxyWs.proxyId);
-      for (const clientWs of clients) {
-        clientWs.send(JSON.stringify({
-          type: "proxy_offline",
-          proxyId: proxyWs.proxyId,
-        }));
+      notifyClientsProxyOffline(proxyWs.proxyId, registry, logger);
+      // 通过状态转换标记离线，保留所有状态等待重连
+      // proxy_disconnect 已经清理过的情况下 transition 会抛异常，静默忽略
+      try {
+        registry.transitionProxy(proxyWs.proxyId, "online", "offline");
+      } catch {
+        // proxy 已被 proxy_disconnect 清理或已离线，跳过
       }
-      // 标记离线，保留所有状态等待重连
-      registry.markProxyOffline(proxyWs.proxyId);
       logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, state preserved for reconnect");
       broadcastProxyList(registry);
     }
