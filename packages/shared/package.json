@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "pino": "^10.3.1",
     "zod": "^4.3.6",
     "nanoid": "^5.1.7"
   }

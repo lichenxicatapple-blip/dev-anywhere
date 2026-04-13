@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import pino from "pino";
+import { createLogger } from "@cc-anywhere/shared";
 import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
 import { TerminalTracker, type TermSpan } from "#src/terminal-tracker.js";
 import {
   TerminalFrameRenderer,
 } from "#src/terminal-frame-renderer.js";
 
-const relayLogger = pino({ level: "silent" });
+const relayLogger = createLogger({ name: "test", silent: true });
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 
 /**

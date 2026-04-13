@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { WebSocketServer } from "ws";
-import type { Logger } from "pino";
+import type { Logger } from "@cc-anywhere/shared";
 import { RelayRegistry } from "./registry.js";
 import { BufferStore } from "./buffer-store.js";
 import { healthRouter } from "./health.js";

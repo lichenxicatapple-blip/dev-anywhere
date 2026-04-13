@@ -94,3 +94,7 @@ export type {
 // constants
 export { ErrorCode } from "./constants/errors.js";
 export { SessionState } from "./constants/session.js";
+
+// logger
+export { createLogger } from "./logger.js";
+export type { Logger, CreateLoggerOptions } from "./logger.js";

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import pino from "pino";
+import { createLogger } from "@cc-anywhere/shared";
 import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
 import { buildMessage } from "@cc-anywhere/shared";
 import { RelayConnection } from "#src/relay-connection.js";
 
-const relayLogger = pino({ level: "silent" });
+const relayLogger = createLogger({ name: "test", silent: true });
 
 // 等待 relay 处理 proxy_register 消息的辅助函数
 function waitForRegistration(): Promise<void> {

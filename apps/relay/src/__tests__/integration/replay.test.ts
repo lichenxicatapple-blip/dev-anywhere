@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
-import pino from "pino";
+import { createLogger } from "@cc-anywhere/shared";
 import { waitForOpen, waitForMessage, collectMessages, getPort, settle, makeEnvelope } from "../helpers.js";
 
-const logger = pino({ level: "silent" });
+const logger = createLogger({ name: "test", silent: true });
 
 describe("replay_request protocol", () => {
   let relay: RelayServer;

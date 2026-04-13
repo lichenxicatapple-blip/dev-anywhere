@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { Logger } from "pino";
+import type { Logger } from "@cc-anywhere/shared";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";

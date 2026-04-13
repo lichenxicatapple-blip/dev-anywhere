@@ -5,7 +5,7 @@ import {
 import type { RelayControlMessage } from "@cc-anywhere/shared";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
-import type { Logger } from "pino";
+import type { Logger } from "@cc-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
