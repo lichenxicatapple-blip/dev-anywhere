@@ -209,12 +209,13 @@ describe("control-messages: reinitializeOnReconnect", () => {
 
     await handlers.reinitializeOnReconnect();
 
-    // 应为 active session 重新推送 command_list_push 和 file_tree_push
+    // 应为 active session 推送 session_sync + command_list_push + file_tree_push
     const types = sent.map((s) => JSON.parse(s).type);
+    expect(types).toContain("session_sync");
     expect(types).toContain("command_list_push");
     expect(types).toContain("file_tree_push");
-    // terminated session 不应有推送
-    expect(sent.length).toBe(2);
+    // terminated session 不应有推送（session_sync 也只包含 active session）
+    expect(sent.length).toBe(3);
 
     // cleanup 定时器
     handlers.cleanup("active-1");
