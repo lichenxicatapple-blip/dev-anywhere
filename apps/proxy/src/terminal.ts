@@ -143,15 +143,17 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         ptyManager?.write(msg.data);
       }
       if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && tracker && framePusher) {
+        if (msg.rows) tracker.setClientRows(msg.rows);
         tracker.clearAnchor();
-        log.info({ sessionId }, "Frame requested, anchor cleared");
+        log.info({ sessionId, clientRows: msg.rows }, "Frame requested, anchor cleared");
         framePusher.forceFull();
       }
       if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
+        if (msg.rows) tracker.setClientRows(msg.rows);
         if (msg.direction === "up") {
-          tracker.scrollUp(msg.delta);
+          tracker.scrollUp(msg.delta, msg.rows);
         } else {
-          tracker.scrollDown(msg.delta);
+          tracker.scrollDown(msg.delta, msg.rows);
         }
         const grid = tracker.extractGridAtOffset();
         const anchored = tracker.isAnchored();

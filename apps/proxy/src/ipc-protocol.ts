@@ -97,6 +97,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pty_frame_request"),
     sessionId: z.string(),
+    rows: z.number().int().positive().optional(),
   }),
 
   // serve → terminal: relay 转发的 scroll 请求
@@ -105,6 +106,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     direction: z.enum(["up", "down"]),
     delta: z.number().int().positive(),
+    rows: z.number().int().positive().optional(),
   }),
 
   // 客户端请求增强版服务状态（含 relay 连接信息和 worker 状态）

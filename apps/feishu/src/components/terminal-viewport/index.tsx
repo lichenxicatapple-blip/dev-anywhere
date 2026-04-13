@@ -39,6 +39,7 @@ export function TerminalViewport({
   onScrollRef.current = onScroll;
   onPinchZoomRef.current = onPinchZoom;
 
+
   useEffect(() => {
     const el = document.querySelector(".terminal-viewport") as HTMLElement | null;
     if (!el) return;

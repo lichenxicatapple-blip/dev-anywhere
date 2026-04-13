@@ -69,6 +69,7 @@ export class TerminalTracker {
   private lastGridHash: string = "";
   private nextLineId: number;
   private anchorLineId: number | null = null;
+  private clientRows: number | null = null;
 
   constructor(cols = 120, rows = 40) {
     this.terminal = new Terminal({
@@ -105,13 +106,16 @@ export class TerminalTracker {
   }
 
   // 从 xterm headless buffer 中提取当前 viewport 的文本网格（不含 scrollback）
+  // 有 clientRows 时从底部提取 clientRows 行，否则提取全部 terminal.rows 行
   extractGrid(): TermLine[] {
     const buffer = this.terminal.buffer.active;
     const lines: TermLine[] = [];
     const baseY = buffer.baseY;
     const totalRows = this.terminal.rows;
+    const extractRows = this.clientRows ?? totalRows;
+    const startY = baseY + totalRows - extractRows;
 
-    for (let y = baseY; y < baseY + totalRows; y++) {
+    for (let y = startY; y < baseY + totalRows; y++) {
       const bufferLine = buffer.getLine(y);
       if (!bufferLine) {
         lines.push([]);
@@ -269,8 +273,8 @@ export class TerminalTracker {
     return spans;
   }
 
-  scrollUp(delta: number): void {
-    const rows = this.terminal.rows;
+  scrollUp(delta: number, clientRows?: number): void {
+    const rows = clientRows ?? this.terminal.rows;
     const newestId = this.getNewestLineId();
     const oldestId = this.getOldestLineId();
 
@@ -284,12 +288,13 @@ export class TerminalTracker {
     this.anchorLineId = Math.max(this.anchorLineId, oldestId);
   }
 
-  scrollDown(delta: number): void {
+  scrollDown(delta: number, clientRows?: number): void {
     if (this.anchorLineId === null) return;
 
     this.anchorLineId = this.anchorLineId + delta;
     // 锚点 + rows 超过 newestLineId 时回到 live 模式
-    if (this.anchorLineId + this.terminal.rows > this.getNewestLineId()) {
+    const rows = clientRows ?? this.terminal.rows;
+    if (this.anchorLineId + rows > this.getNewestLineId()) {
       this.anchorLineId = null;
     }
   }
@@ -310,16 +315,25 @@ export class TerminalTracker {
     return this.terminal.rows;
   }
 
+  setClientRows(rows: number): void {
+    this.clientRows = rows;
+  }
+
+  getClientRows(): number {
+    return this.clientRows ?? this.terminal.rows;
+  }
+
   // 按 anchorLineId 提取 viewport 栅格，未锚定时等同于 extractGrid（实时画面）
   extractGridAtOffset(): TermLine[] {
     if (this.anchorLineId === null) {
       return this.extractGrid();
     }
 
-    const { lines } = this.extractLines(this.anchorLineId, this.terminal.rows);
+    const rows = this.clientRows ?? this.terminal.rows;
+    const { lines } = this.extractLines(this.anchorLineId, rows);
 
-    // 不足 terminal.rows 行时用空行填充
-    while (lines.length < this.terminal.rows) {
+    // 不足行数时用空行填充
+    while (lines.length < rows) {
       lines.push([]);
     }
     return lines;

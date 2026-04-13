@@ -80,6 +80,19 @@ export default function Chat() {
   const terminalStateRef = useRef(terminalState);
   terminalStateRef.current = terminalState;
 
+  // 根据 viewport 高度和字体大小计算可显示行数
+  const getViewportRows = useCallback(() => {
+    const el = document.querySelector(".terminal-viewport");
+    const contentEl = document.querySelector(".terminal-content");
+    if (!el || !contentEl) return 40;
+    const h = el.getBoundingClientRect().height;
+    const lineH = Math.round(terminalState.fontSize * 1.4);
+    if (lineH <= 0) return 40;
+    const style = getComputedStyle(contentEl);
+    const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    return Math.floor((h - pad) / lineH) || 40;
+  }, [terminalState.fontSize]);
+
   // 字体大小变化时持久化到 Storage
   useEffect(() => {
     Taro.setStorageSync("cc_fontSizeIndex", terminalState.fontSizeIndex);
@@ -244,7 +257,7 @@ export default function Chat() {
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       // 请求终端帧
       if (isPty) {
-        relay.sendControl({ type: "terminal_frame_request", sessionId });
+        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
       }
     }
 
@@ -252,7 +265,7 @@ export default function Chat() {
     if (relay.getBoundProxyId()) {
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
-        relay.sendControl({ type: "terminal_frame_request", sessionId });
+        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
       }
     } else {
       bind();
@@ -326,7 +339,7 @@ export default function Chat() {
       }
 
       const state = terminalStateRef.current;
-      const rows = state.lines.length || 40;
+      const rows = getViewportRows();
       console.log("[scroll] request:", { direction, delta, anchorLineId: state.anchorLineId, newestLineId: state.newestLineId });
 
       if (state.anchorLineId != null) {
@@ -338,7 +351,7 @@ export default function Chat() {
         if (direction === "down" && state.newestLineId != null && targetAnchor + rows > state.newestLineId) {
           console.log("[scroll] return to live");
           terminalDispatch({ type: "CLEAR_ANCHOR" });
-          relay.sendControl({ type: "terminal_frame_request", sessionId });
+          relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
           return;
         }
 
@@ -352,15 +365,16 @@ export default function Chat() {
         }
       }
 
-      // 始终发送到服务端以同步锚点状态
+      // 始终发送到服务端以同步锚点状态，带上客户端 viewport 行数
       relay.sendControl({
         type: "terminal_scroll_request",
         sessionId,
         direction,
         delta,
+        rows,
       });
     },
-    [relay, sessionId, terminalDispatch],
+    [relay, sessionId, terminalDispatch, getViewportRows],
   );
 
   const handlePinchZoom = useCallback(
@@ -525,7 +539,7 @@ export default function Chat() {
   const handleTapToReturn = useCallback(() => {
     terminalDispatch({ type: "CLEAR_ANCHOR" });
     if (relay && sessionId) {
-      relay.sendControl({ type: "terminal_frame_request", sessionId });
+      relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
     }
   }, [relay, sessionId, terminalDispatch]);
 

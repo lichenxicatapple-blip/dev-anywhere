@@ -723,6 +723,15 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           } else {
             logger.warn({ sessionId: parsed.sessionId, hasCached: !!fullFrame }, "terminal_frame_request: no cached frame");
           }
+          // 同时转发到 terminal 进程，传递 clientRows 并触发新帧
+          const targetSocket = terminalSockets.get(parsed.sessionId);
+          if (targetSocket?.writable) {
+            targetSocket.write(serializeIpc({
+              type: "pty_frame_request",
+              sessionId: parsed.sessionId,
+              rows: parsed.rows,
+            }));
+          }
         } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
           // relay → serve → terminal IPC：转发滚动请求到持有 tracker 的 terminal
           const targetSocket = terminalSockets.get(parsed.sessionId);
@@ -732,6 +741,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               sessionId: parsed.sessionId,
               direction: parsed.direction,
               delta: parsed.delta,
+              rows: parsed.rows,
             }));
           } else {
             logger.warn({ sessionId: parsed.sessionId }, "terminal_scroll_request: no terminal socket for session");
