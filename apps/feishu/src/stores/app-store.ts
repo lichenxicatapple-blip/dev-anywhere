@@ -4,11 +4,11 @@ import Taro from "@tarojs/taro";
 
 export type AppPhase =
   | "connecting"
+  | "registering"
   | "reconnecting"
   | "proxy_selecting"
   | "session_browsing"
-  | "chatting"
-  | "proxy_lost";
+  | "chatting";
 
 export interface AppState {
   phase: AppPhase;
@@ -60,7 +60,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_PHASE": {
       const next = action.phase;
       const phaseBeforeDisconnect =
-        (next === "reconnecting" || next === "proxy_lost") ? state.phase : state.phaseBeforeDisconnect;
+        next === "reconnecting" ? state.phase : state.phaseBeforeDisconnect;
       return { ...state, phase: next, phaseBeforeDisconnect };
     }
     default:
@@ -73,7 +73,7 @@ export function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): 
     Taro.removeStorageSync("cc_proxyId");
     Taro.removeStorageSync("cc_sessionId");
   }
-  if (next === "session_browsing" && (prev === "chatting" || prev === "proxy_lost")) {
+  if (next === "session_browsing" && prev === "chatting") {
     Taro.removeStorageSync("cc_sessionId");
   }
 }

@@ -29,7 +29,7 @@ function App({ children }: PropsWithChildren) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const wsRef = useRef<WebSocketManager | null>(null);
-  const timersRef = useRef<Timers>({ proxyLost: null, reconnect: null, coldStartDone: false });
+  const timersRef = useRef<Timers>({ reconnect: null, coldStartDone: false });
   const [relayClient, setRelayClient] = useState<RelayClient | null>(null);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ function App({ children }: PropsWithChildren) {
     ws.connect(relayUrl);
 
     const unsub = relay.onMessage((msg) => {
-      handleRelayMessage(msg as Record<string, unknown>, getState, dispatch, timersRef.current, relay, nav);
+      void handleRelayMessage(msg as Record<string, unknown>, getState, dispatch, timersRef.current, relay, nav);
     });
 
     return () => {

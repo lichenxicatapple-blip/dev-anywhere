@@ -21,15 +21,21 @@ describe("appReducer SET_PHASE", () => {
     expect(next.phase).toBe("proxy_selecting");
   });
 
-  it("records phaseBeforeDisconnect when entering reconnecting", () => {
+  it("accepts registering as a valid phase", () => {
+    const next = appReducer(stateWith("connecting"), { type: "SET_PHASE", phase: "registering" });
+    expect(next.phase).toBe("registering");
+  });
+
+  it("records phaseBeforeDisconnect only when entering reconnecting", () => {
     const next = appReducer(stateWith("chatting"), { type: "SET_PHASE", phase: "reconnecting" });
     expect(next.phase).toBe("reconnecting");
     expect(next.phaseBeforeDisconnect).toBe("chatting");
   });
 
-  it("records phaseBeforeDisconnect when entering proxy_lost", () => {
-    const next = appReducer(stateWith("session_browsing"), { type: "SET_PHASE", phase: "proxy_lost" });
-    expect(next.phaseBeforeDisconnect).toBe("session_browsing");
+  it("does not record phaseBeforeDisconnect on normal transitions", () => {
+    const state = stateWith("proxy_selecting");
+    const next = appReducer(state, { type: "SET_PHASE", phase: "session_browsing" });
+    expect(next.phaseBeforeDisconnect).toBeNull();
   });
 
   it("preserves phaseBeforeDisconnect on normal transitions", () => {
@@ -54,11 +60,6 @@ describe("cleanStorageForPhaseTransition", () => {
     cleanStorageForPhaseTransition("chatting", "session_browsing");
     expect(Taro.removeStorageSync).toHaveBeenCalledWith("cc_sessionId");
     expect(Taro.removeStorageSync).not.toHaveBeenCalledWith("cc_proxyId");
-  });
-
-  it("clears sessionId when transitioning from proxy_lost to session_browsing", () => {
-    cleanStorageForPhaseTransition("proxy_lost", "session_browsing");
-    expect(Taro.removeStorageSync).toHaveBeenCalledWith("cc_sessionId");
   });
 
   it("does not clear anything for session_browsing to chatting", () => {

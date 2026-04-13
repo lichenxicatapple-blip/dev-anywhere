@@ -186,13 +186,6 @@ export default function SessionList() {
     setShowDirPicker(false);
   }, []);
 
-  // 物理返回键或滑动手势回到此页面时，校正 phase
-  Taro.useDidShow(() => {
-    if (appState.phase !== "session_browsing") {
-      appDispatch({ type: "SET_PHASE", phase: "session_browsing" });
-    }
-  });
-
   const hasActiveSessions = sessionState.sessions.length > 0;
   const hasHistory = sessionState.historySessions.length > 0;
   const isEmpty = !hasActiveSessions && !hasHistory;

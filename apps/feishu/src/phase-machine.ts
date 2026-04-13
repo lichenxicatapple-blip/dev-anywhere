@@ -1,11 +1,11 @@
 // 状态机事件处理，从 app.tsx useEffect 中提取以支持单元测试
 import type { ProxyInfo } from "@cc-anywhere/shared";
-import type { AppState, AppPhase, AppAction } from "@/stores/app-store";
+import type { AppState, AppAction } from "@/stores/app-store";
 import { transitionToPhase } from "@/stores/app-store";
-import { resolveColdStart } from "@/pages/proxy-select/cold-start";
+import { ensureBinding, isBindingError } from "@/services/ensure-binding";
+import type { RelayClient } from "@/services/relay-client";
 
 export interface Timers {
-  proxyLost: ReturnType<typeof setTimeout> | null;
   reconnect: ReturnType<typeof setTimeout> | null;
   coldStartDone: boolean;
 }
@@ -21,6 +21,8 @@ export interface PhaseRelay {
   register(): void;
   listProxies(): void;
   selectProxy(proxyId: string): Promise<{ success: boolean; proxyId?: string; error?: string }>;
+  requestProxyList(): Promise<Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>>;
+  getBoundProxyId(): string | null;
 }
 
 type Dispatch = React.Dispatch<AppAction>;
@@ -37,15 +39,18 @@ export function handleWsStatusChange(
   const s = getState();
   if (connected) {
     relay.register();
-    relay.listProxies();
-    // 重连后恢复 proxy 绑定，否则 relay 端 boundProxyId 丢失，
-    // 后续控制消息会被拒绝（NOT_BOUND）
-    if (s.selectedProxyId) {
-      void relay.selectProxy(s.selectedProxyId);
-    }
+
     if (s.phase === "connecting") {
-      dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
+      dispatch({ type: "SET_PHASE", phase: "registering" });
     }
+
+    if (s.phase === "reconnecting") {
+      relay.listProxies();
+      if (s.selectedProxyId) {
+        void relay.selectProxy(s.selectedProxyId);
+      }
+    }
+
     if (timers.reconnect) {
       clearTimeout(timers.reconnect);
       timers.reconnect = null;
@@ -63,59 +68,67 @@ export function handleWsStatusChange(
   }
 }
 
-export function handleRelayMessage(
+export async function handleRelayMessage(
   msg: Record<string, unknown>,
   getState: () => AppState,
   dispatch: Dispatch,
   timers: Timers,
   relay: PhaseRelay,
   nav: PhaseNav,
-): void {
+): Promise<void> {
   const s = getState();
 
-  if (msg.type === "proxy_offline" && msg.proxyId === s.selectedProxyId) {
-    dispatch({ type: "SET_PROXY_ONLINE", online: false });
-    dispatch({ type: "SET_PHASE", phase: "proxy_lost" });
-    nav.showToast("Proxy disconnected");
-    timers.proxyLost = setTimeout(() => {
-      timers.proxyLost = null;
-      transitionToPhase(getState().phase, "proxy_selecting", dispatch);
-      nav.reLaunch("/pages/proxy-select/index");
-    }, 1500);
+  // client_register_response: 从 registering 转入 proxy_selecting
+  if (msg.type === "client_register_response") {
+    if (s.phase === "registering") {
+      relay.listProxies();
+      dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
+    }
+    return;
   }
 
+  // proxy_offline: 只更新标记，不做页面跳转
+  if (msg.type === "proxy_offline" && msg.proxyId === s.selectedProxyId) {
+    dispatch({ type: "SET_PROXY_ONLINE", online: false });
+    nav.showToast("Proxy offline");
+    return;
+  }
+
+  // proxy_online: 只更新标记
   if (msg.type === "proxy_online" && msg.proxyId === s.selectedProxyId) {
-    if (timers.proxyLost) {
-      clearTimeout(timers.proxyLost);
-      timers.proxyLost = null;
-      dispatch({ type: "SET_PHASE", phase: s.phaseBeforeDisconnect ?? "session_browsing" });
-    }
     dispatch({ type: "SET_PROXY_ONLINE", online: true });
     nav.showToast("Proxy reconnected");
+    return;
   }
 
   if (msg.type === "proxy_list_response") {
     const proxies = msg.proxies as ProxyInfo[];
 
+    // 冷启动：首次 proxy_list_response 时在 proxy_selecting 阶段执行
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {
       timers.coldStartDone = true;
-      const result = resolveColdStart(
-        nav.getStorageSync("cc_proxyId"),
-        nav.getStorageSync("cc_sessionId"),
-        proxies,
-        nav.getStorageSync("cc_sessionMode"),
-      );
-      if (result) {
-        dispatch({ type: "SET_PROXY", proxyId: result.proxy.proxyId, proxyName: result.proxy.name || null });
-        dispatch({ type: "SET_PROXY_ONLINE", online: true });
-        void relay.selectProxy(result.proxy.proxyId);
-        const targetPhase: AppPhase = result.url.includes("chat") ? "chatting" : "session_browsing";
-        dispatch({ type: "SET_PHASE", phase: targetPhase });
-        nav.navigateTo(result.url);
-        return;
+      const savedProxyId = nav.getStorageSync("cc_proxyId");
+      if (savedProxyId) {
+        const result = await ensureBinding(relay as unknown as RelayClient, { proxyId: savedProxyId });
+        if (!isBindingError(result)) {
+          const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
+          dispatch({ type: "SET_PROXY", proxyId: savedProxyId, proxyName: proxyInfo?.name || null });
+          dispatch({ type: "SET_PROXY_ONLINE", online: true });
+          const savedSessionId = nav.getStorageSync("cc_sessionId");
+          if (savedSessionId) {
+            const mode = nav.getStorageSync("cc_sessionMode") || "json";
+            dispatch({ type: "SET_PHASE", phase: "chatting" });
+            nav.navigateTo(`/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`);
+          } else {
+            dispatch({ type: "SET_PHASE", phase: "session_browsing" });
+            nav.navigateTo("/pages/session-list/index");
+          }
+          return;
+        }
       }
     }
 
+    // 重连验证
     if (s.selectedProxyId) {
       const selected = proxies.find((p) => p.proxyId === s.selectedProxyId);
       dispatch({ type: "SET_PROXY_ONLINE", online: selected?.online ?? false });

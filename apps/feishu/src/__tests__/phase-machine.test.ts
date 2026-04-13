@@ -22,7 +22,7 @@ function createTestEnv(phase: AppPhase, overrides?: Partial<AppState>) {
   };
   const getState = () => state;
 
-  const timers: Timers = { proxyLost: null, reconnect: null, coldStartDone: false };
+  const timers: Timers = { reconnect: null, coldStartDone: false };
 
   const nav: PhaseNav = {
     reLaunch: vi.fn(),
@@ -35,6 +35,8 @@ function createTestEnv(phase: AppPhase, overrides?: Partial<AppState>) {
     register: vi.fn(),
     listProxies: vi.fn(),
     selectProxy: vi.fn(() => Promise.resolve({ success: true, proxyId: "p1" })),
+    requestProxyList: vi.fn(() => Promise.resolve([])),
+    getBoundProxyId: vi.fn(() => null),
   };
 
   return { getState, dispatch, dispatched, timers, nav, relay };
@@ -48,27 +50,32 @@ describe("handleWsStatusChange", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("ws connect from connecting: transitions to proxy_selecting", () => {
+  it("ws connect from connecting: transitions to registering, calls register, does NOT call listProxies", () => {
     const env = createTestEnv("connecting");
     handleWsStatusChange(true, env.getState, env.dispatch, env.timers, env.relay, env.nav);
 
     expect(findAction(env.dispatched, "SET_CONNECTED")).toEqual({ type: "SET_CONNECTED", connected: true });
-    expect(findAction(env.dispatched, "SET_PHASE")).toEqual({ type: "SET_PHASE", phase: "proxy_selecting" });
+    expect(findAction(env.dispatched, "SET_PHASE")).toEqual({ type: "SET_PHASE", phase: "registering" });
     expect(env.relay.register).toHaveBeenCalled();
-    expect(env.relay.listProxies).toHaveBeenCalled();
+    expect(env.relay.listProxies).not.toHaveBeenCalled();
   });
 
-  it("ws connect from reconnecting: clears reconnect timer, does not set phase", () => {
-    const env = createTestEnv("reconnecting", { phaseBeforeDisconnect: "chatting" });
+  it("ws connect from reconnecting: clears reconnect timer, calls register + listProxies + selectProxy", () => {
+    const env = createTestEnv("reconnecting", {
+      selectedProxyId: "p1",
+      phaseBeforeDisconnect: "chatting",
+    });
     env.timers.reconnect = setTimeout(() => {}, 99999);
 
     handleWsStatusChange(true, env.getState, env.dispatch, env.timers, env.relay, env.nav);
 
     expect(env.timers.reconnect).toBeNull();
-    // phase 不应该在这里恢复，而是等 proxy_list_response 验证
+    expect(env.relay.register).toHaveBeenCalled();
+    expect(env.relay.listProxies).toHaveBeenCalled();
+    expect(env.relay.selectProxy).toHaveBeenCalledWith("p1");
+    // phase 不应在这里恢复，等 proxy_list_response 验证
     const phaseActions = env.dispatched.filter((a) => a.type === "SET_PHASE");
     expect(phaseActions).toHaveLength(0);
-    expect(env.relay.register).toHaveBeenCalled();
   });
 
   it("ws disconnect from chatting: enters reconnecting with 10s timer", () => {
@@ -117,74 +124,93 @@ describe("handleWsStatusChange", () => {
   });
 });
 
-describe("handleRelayMessage: proxy_offline / proxy_online", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+describe("handleRelayMessage: client_register_response", () => {
+  it("from registering phase: calls listProxies, transitions to proxy_selecting", async () => {
+    const env = createTestEnv("registering");
 
-  it("proxy_offline for selected proxy: enters proxy_lost with 1.5s timer", () => {
+    await handleRelayMessage(
+      { type: "client_register_response", status: "new" },
+      env.getState, env.dispatch, env.timers, env.relay, env.nav,
+    );
+
+    expect(env.relay.listProxies).toHaveBeenCalled();
+    expect(env.getState().phase).toBe("proxy_selecting");
+  });
+
+  it("from non-registering phase: ignored (no phase change)", async () => {
+    const env = createTestEnv("proxy_selecting");
+
+    await handleRelayMessage(
+      { type: "client_register_response", status: "new" },
+      env.getState, env.dispatch, env.timers, env.relay, env.nav,
+    );
+
+    expect(env.relay.listProxies).not.toHaveBeenCalled();
+    expect(env.getState().phase).toBe("proxy_selecting");
+  });
+});
+
+describe("handleRelayMessage: proxy_offline / proxy_online", () => {
+  it("proxy_offline for selected proxy: sets proxyOnline=false, shows toast, phase UNCHANGED", async () => {
     const env = createTestEnv("chatting", { selectedProxyId: "p1" });
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_offline", proxyId: "p1" },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
 
-    expect(env.getState().phase).toBe("proxy_lost");
-    expect(env.getState().phaseBeforeDisconnect).toBe("chatting");
-    expect(env.timers.proxyLost).not.toBeNull();
-    expect(env.nav.showToast).toHaveBeenCalledWith("Proxy disconnected");
+    expect(env.getState().proxyOnline).toBe(false);
+    expect(env.getState().phase).toBe("chatting");
+    expect(env.nav.showToast).toHaveBeenCalledWith("Proxy offline");
+    expect(env.nav.reLaunch).not.toHaveBeenCalled();
   });
 
-  it("proxy_offline for different proxy: no action", () => {
+  it("proxy_offline for different proxy: no action", async () => {
     const env = createTestEnv("chatting", { selectedProxyId: "p1" });
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_offline", proxyId: "p2" },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
 
     expect(env.getState().phase).toBe("chatting");
-    expect(env.timers.proxyLost).toBeNull();
+    expect(env.nav.showToast).not.toHaveBeenCalled();
   });
 
-  it("proxy_online within 1.5s: cancels timer and restores phase", () => {
-    const env = createTestEnv("chatting", { selectedProxyId: "p1" });
+  it("proxy_online for selected proxy: sets proxyOnline=true, shows toast, phase UNCHANGED", async () => {
+    const env = createTestEnv("chatting", { selectedProxyId: "p1", proxyOnline: false });
 
-    handleRelayMessage(
-      { type: "proxy_offline", proxyId: "p1" },
-      env.getState, env.dispatch, env.timers, env.relay, env.nav,
-    );
-    expect(env.getState().phase).toBe("proxy_lost");
-
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_online", proxyId: "p1" },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
 
-    expect(env.timers.proxyLost).toBeNull();
-    expect(env.getState().phase).toBe("chatting");
     expect(env.getState().proxyOnline).toBe(true);
+    expect(env.getState().phase).toBe("chatting");
     expect(env.nav.showToast).toHaveBeenCalledWith("Proxy reconnected");
   });
 
-  it("proxy_lost timeout (1.5s): transitions to proxy_selecting and reLaunch", () => {
-    const env = createTestEnv("session_browsing", { selectedProxyId: "p1" });
+  it("proxy_offline then proxy_online: proxyOnline toggles, phase never changes", async () => {
+    const env = createTestEnv("session_browsing", { selectedProxyId: "p1", proxyOnline: true });
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_offline", proxyId: "p1" },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
+    expect(env.getState().proxyOnline).toBe(false);
+    expect(env.getState().phase).toBe("session_browsing");
 
-    vi.advanceTimersByTime(1500);
-
-    expect(env.timers.proxyLost).toBeNull();
-    expect(env.getState().phase).toBe("proxy_selecting");
-    expect(env.nav.reLaunch).toHaveBeenCalledWith("/pages/proxy-select/index");
+    await handleRelayMessage(
+      { type: "proxy_online", proxyId: "p1" },
+      env.getState, env.dispatch, env.timers, env.relay, env.nav,
+    );
+    expect(env.getState().proxyOnline).toBe(true);
+    expect(env.getState().phase).toBe("session_browsing");
   });
 });
 
 describe("handleRelayMessage: proxy_list_response cold start", () => {
-  it("cold start with proxy+session: navigates to chat", () => {
+  it("cold start with saved proxyId + sessionId: calls ensureBinding, transitions to chatting", async () => {
     const env = createTestEnv("proxy_selecting");
     (env.nav.getStorageSync as ReturnType<typeof vi.fn>)
       .mockImplementation((key: string) => {
@@ -193,7 +219,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
         return "";
       });
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "My Proxy", online: true }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
@@ -204,7 +230,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/chat/index?sessionId=s1&mode=json");
   });
 
-  it("cold start with proxy only: navigates to session-list", () => {
+  it("cold start with saved proxyId only: calls ensureBinding, transitions to session_browsing", async () => {
     const env = createTestEnv("proxy_selecting");
     (env.nav.getStorageSync as ReturnType<typeof vi.fn>)
       .mockImplementation((key: string) => {
@@ -212,7 +238,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
         return "";
       });
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
@@ -221,7 +247,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/session-list/index");
   });
 
-  it("cold start fires only once, even if phase returns to proxy_selecting", () => {
+  it("cold start fires only once", async () => {
     const env = createTestEnv("proxy_selecting");
     (env.nav.getStorageSync as ReturnType<typeof vi.fn>)
       .mockImplementation((key: string) => {
@@ -230,29 +256,27 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
       });
     const proxies = [{ proxyId: "p1", name: "P", online: true }];
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
     expect(env.nav.navigateTo).toHaveBeenCalledTimes(1);
 
-    // 模拟用户返回 proxy-select，phase 回到 proxy_selecting
+    // 模拟用户返回 proxy-select
     env.dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
-    expect(env.getState().phase).toBe("proxy_selecting");
     (env.nav.navigateTo as ReturnType<typeof vi.fn>).mockClear();
 
-    // 再次收到 proxy_list_response，不应再触发冷启动
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
     expect(env.nav.navigateTo).not.toHaveBeenCalled();
   });
 
-  it("cold start skipped when no saved proxyId", () => {
+  it("cold start skipped when no saved proxyId", async () => {
     const env = createTestEnv("proxy_selecting");
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
@@ -260,20 +284,39 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.nav.navigateTo).not.toHaveBeenCalled();
     expect(env.getState().phase).toBe("proxy_selecting");
   });
+
+  it("cold start ensureBinding failure: stays in proxy_selecting", async () => {
+    const env = createTestEnv("proxy_selecting");
+    (env.nav.getStorageSync as ReturnType<typeof vi.fn>)
+      .mockImplementation((key: string) => {
+        if (key === "cc_proxyId") return "p1";
+        return "";
+      });
+    (env.relay.selectProxy as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ success: false, error: "Proxy not found" });
+
+    await handleRelayMessage(
+      { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true }] },
+      env.getState, env.dispatch, env.timers, env.relay, env.nav,
+    );
+
+    expect(env.getState().phase).toBe("proxy_selecting");
+    expect(env.nav.navigateTo).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleRelayMessage: reconnect validation via proxy_list_response", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("reconnecting + proxy still online: restores phaseBeforeDisconnect", () => {
+  it("reconnecting + proxy still online: restores phaseBeforeDisconnect", async () => {
     const env = createTestEnv("reconnecting", {
       selectedProxyId: "p1",
       phaseBeforeDisconnect: "chatting",
     });
     env.timers.coldStartDone = true;
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
@@ -282,14 +325,14 @@ describe("handleRelayMessage: reconnect validation via proxy_list_response", () 
     expect(env.nav.reLaunch).not.toHaveBeenCalled();
   });
 
-  it("reconnecting + proxy offline: falls back to proxy_selecting", () => {
+  it("reconnecting + proxy offline: falls back to proxy_selecting", async () => {
     const env = createTestEnv("reconnecting", {
       selectedProxyId: "p1",
       phaseBeforeDisconnect: "chatting",
     });
     env.timers.coldStartDone = true;
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: false }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
@@ -298,14 +341,14 @@ describe("handleRelayMessage: reconnect validation via proxy_list_response", () 
     expect(env.nav.reLaunch).toHaveBeenCalledWith("/pages/proxy-select/index");
   });
 
-  it("reconnecting + proxy disappeared from list: falls back to proxy_selecting", () => {
+  it("reconnecting + proxy not in list: falls back to proxy_selecting", async () => {
     const env = createTestEnv("reconnecting", {
       selectedProxyId: "p1",
       phaseBeforeDisconnect: "session_browsing",
     });
     env.timers.coldStartDone = true;
 
-    handleRelayMessage(
+    await handleRelayMessage(
       { type: "proxy_list_response", proxies: [{ proxyId: "p2", name: "Other", online: true }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );

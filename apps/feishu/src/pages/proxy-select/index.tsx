@@ -66,7 +66,6 @@ export default function ProxySelect() {
   // 选择 proxy
   const handleSelect = useCallback(
     async (proxy: ProxyInfo) => {
-      Taro.setStorageSync("cc_proxyId", proxy.proxyId);
       appDispatch({
         type: "SET_PROXY",
         proxyId: proxy.proxyId,
@@ -82,19 +81,12 @@ export default function ProxySelect() {
           return;
         }
       }
+      Taro.setStorageSync("cc_proxyId", proxy.proxyId);
       transitionToPhase(appState.phase, "session_browsing", appDispatch);
       Taro.navigateTo({ url: "/pages/session-list/index" });
     },
     [relay, appDispatch, appState.phase],
   );
-
-  // 物理返回键或滑动手势回到此页面时，校正 phase
-  Taro.useDidShow(() => {
-    const s = appState;
-    if (s.phase !== "proxy_selecting" && s.phase !== "connecting" && s.phase !== "reconnecting") {
-      appDispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
-    }
-  });
 
   const hasOnlineProxy = proxies.length > 0;
 
