@@ -250,7 +250,8 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     );
 
     expect(env.getState().phase).toBe("session_browsing");
-    expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/session-list/index");
+    // 没有 savedSessionId 时不自动跳转，留在首页
+    expect(env.nav.navigateTo).not.toHaveBeenCalled();
   });
 
   it("cold start fires only once", async () => {
@@ -266,7 +267,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
       { type: "proxy_list_response", proxies },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
-    expect(env.nav.navigateTo).toHaveBeenCalledTimes(1);
+    expect(env.nav.navigateTo).not.toHaveBeenCalled();
 
     // 模拟用户返回 proxy-select
     env.dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });

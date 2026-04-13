@@ -140,6 +140,15 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     title: z.string(),
   }),
 
+  // terminal → serve：PTY 语义状态变化，由 OSC 信号提取器检测
+  z.object({
+    type: z.literal("pty_state_push"),
+    sessionId: z.string(),
+    state: z.enum(["working", "turn_complete", "approval_wait"]),
+    title: z.string().optional(),
+    tool: z.string().optional(),
+  }),
+
   // terminal → serve：终端尺寸变化
   z.object({
     type: z.literal("pty_resize"),

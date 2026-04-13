@@ -8,7 +8,6 @@ import {
   unlinkSync,
   writeFileSync,
   readFileSync,
-  statSync,
   existsSync,
   readdirSync,
   chmodSync,
@@ -85,17 +84,6 @@ async function cleanupStaleResources(): Promise<void> {
     }
     unlinkSync(PID_PATH);
     logger.info("Removed stale PID file");
-  }
-}
-
-// ---------- 文件 mtime 检测 idle/working ----------
-
-function getEventFileMtime(sessionId: string): number | null {
-  const paths = sessionPaths(sessionId);
-  try {
-    return statSync(paths.events).mtimeMs;
-  } catch {
-    return null;
   }
 }
 
@@ -449,6 +437,33 @@ function handleTerminalConnection(
         break;
       }
 
+      case "pty_state_push": {
+        // terminal → serve → relay：PTY 语义状态变化
+        const stateMap: Record<string, SessionState> = {
+          working: SessionState.WORKING,
+          turn_complete: SessionState.IDLE,
+          approval_wait: SessionState.WAITING_APPROVAL,
+        };
+        const sessionState = stateMap[msg.state];
+        if (sessionState) {
+          try { sessionManager.updateState(msg.sessionId, sessionState); } catch {
+            // session 可能已被清理
+          }
+        }
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "pty_state",
+            sessionId: msg.sessionId,
+            payload: {
+              state: msg.state,
+              ...(msg.title !== undefined ? { title: msg.title } : {}),
+              ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
+            },
+          }));
+        }
+        break;
+      }
+
       case "pty_resize": {
         // terminal → serve → relay：转发终端尺寸变化
         if (relayConnection) {
@@ -508,6 +523,28 @@ function handleTerminalConnection(
         terminalSockets.delete(msg.sessionId);
         frameCache?.remove(msg.sessionId);
         controlHandlers?.cleanup(msg.sessionId);
+        // 推送更新后的会话列表给客户端
+        if (relayConnection) {
+          const remaining = sessionManager.listSessions();
+          relayConnection.sendRaw(JSON.stringify({
+            type: "session_list",
+            sessionId: "",
+            seq: 0,
+            timestamp: Date.now(),
+            source: "proxy",
+            version: "1",
+            payload: {
+              sessions: remaining.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                sessionId: s.id,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+              })),
+            },
+          }));
+        }
         logger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
         break;
       }
@@ -772,32 +809,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     logger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
   });
 
-  // 通过事件文件 mtime 检测 PTY 会话的 idle/working 状态
-  const IDLE_THRESHOLD_MS = 3000;
-  const idleCheckInterval = setInterval(() => {
-    const now = Date.now();
-    for (const session of sessionManager.listSessions()) {
-      if (session.mode !== "pty") continue;
-      const mtime = getEventFileMtime(session.id);
-      if (mtime && now - mtime < IDLE_THRESHOLD_MS) {
-        if (session.state !== SessionState.WORKING) {
-          try { sessionManager.updateState(session.id, SessionState.WORKING); } catch {
-            // 状态更新失败不阻断 idle 检测循环
-          }
-        }
-      } else {
-        if (session.state === SessionState.WORKING) {
-          try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {
-            // 状态更新失败不阻断 idle 检测循环
-          }
-        }
-      }
-    }
-  }, 1000);
 
   async function shutdown(): Promise<void> {
     logger.info("Shutting down service");
-    clearInterval(idleCheckInterval);
     sessionManager.stopReaper();
     if (relayConnection) {
       relayConnection.close();

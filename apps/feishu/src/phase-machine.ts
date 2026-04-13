@@ -138,9 +138,6 @@ export async function handleRelayMessage(
             }
           } else {
             dispatch({ type: "SET_PHASE", phase: "session_browsing" });
-            if (!currentPath.includes("/pages/session-list/index")) {
-              nav.navigateTo("/pages/session-list/index");
-            }
           }
           return;
         }

@@ -213,6 +213,11 @@ export default function Chat() {
           }
           break;
         }
+        case "terminal_title": {
+          if (ctrl.sessionId !== sessionId) break;
+          terminalDispatch({ type: "SET_PTY_TITLE", title: (ctrl as unknown as { title: string }).title });
+          break;
+        }
         case "relay_error": {
           console.error("[chat] relay error:", (ctrl as Record<string, unknown>).code, (ctrl as Record<string, unknown>).message);
           break;

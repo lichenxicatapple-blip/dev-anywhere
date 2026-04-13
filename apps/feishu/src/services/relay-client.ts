@@ -15,12 +15,20 @@ export class RelayClient {
 
     // 只注册一次 ws listener，收到消息后分发给所有 handler
     this.ws.onMessage((raw) => {
+      let parsed: MessageEnvelope | RelayControlMessage;
       try {
-        const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
-        this.messageHandlers.forEach((h) => h(parsed));
+        parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
       } catch (e) {
-        console.warn("RelayClient: failed to parse incoming message:", raw.slice(0, 200), e);
+        console.warn("RelayClient: failed to parse JSON:", raw.slice(0, 200), e);
+        return;
       }
+      this.messageHandlers.forEach((h) => {
+        try {
+          h(parsed);
+        } catch (e) {
+          console.warn("RelayClient: message handler error:", parsed.type, e);
+        }
+      });
     });
   }
 

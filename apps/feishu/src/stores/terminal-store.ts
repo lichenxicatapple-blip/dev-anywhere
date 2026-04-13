@@ -24,6 +24,7 @@ export type TerminalAction =
   | { type: "SET_TERMINAL_LINES"; lines: TermLine[] }
   | { type: "SET_FONT_SIZE_INDEX"; index: number }
   | { type: "SET_PTY_STATE"; state: TerminalStoreState["ptyState"]; title?: string }
+  | { type: "SET_PTY_TITLE"; title: string }
   | { type: "SET_APPROVAL_TOOL"; tool: string | null }
   | { type: "CACHE_FRAME"; anchorLineId: number; lines: TermLine[] }
   | { type: "SET_SCROLL_STATE"; anchorLineId: number | null; newestLineId: number | null; lines?: TermLine[] }
@@ -64,6 +65,8 @@ export function terminalReducer(
     }
     case "SET_PTY_STATE":
       return { ...state, ptyState: action.state, ptyTitle: action.title ?? state.ptyTitle };
+    case "SET_PTY_TITLE":
+      return { ...state, ptyTitle: action.title };
     case "SET_APPROVAL_TOOL":
       return { ...state, approvalTool: action.tool };
     case "CACHE_FRAME": {

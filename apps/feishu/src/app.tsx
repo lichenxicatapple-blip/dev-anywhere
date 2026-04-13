@@ -16,6 +16,12 @@ import {
   sessionReducer,
   initialSessionState,
 } from "@/stores/session-store";
+import {
+  FileProvider,
+  FileDispatchProvider,
+  fileReducer,
+  initialFileState,
+} from "@/stores/file-store";
 import { handleWsStatusChange, handleRelayMessage } from "@/phase-machine";
 import type { Timers } from "@/phase-machine";
 import "./app.css";
@@ -26,6 +32,7 @@ const DEFAULT_RELAY_URL = RELAY_URL;
 function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [sessionState, sessionDispatch] = useReducer(sessionReducer, initialSessionState);
+  const [fileState, fileDispatch] = useReducer(fileReducer, initialFileState);
   const stateRef = useRef(state);
   stateRef.current = state;
   const wsRef = useRef<WebSocketManager | null>(null);
@@ -85,7 +92,11 @@ function App({ children }: PropsWithChildren) {
         <AppDispatchProvider value={dispatch}>
           <SessionProvider value={sessionState}>
             <SessionDispatchProvider value={sessionDispatch}>
-              {children}
+              <FileProvider value={fileState}>
+                <FileDispatchProvider value={fileDispatch}>
+                  {children}
+                </FileDispatchProvider>
+              </FileProvider>
             </SessionDispatchProvider>
           </SessionProvider>
         </AppDispatchProvider>

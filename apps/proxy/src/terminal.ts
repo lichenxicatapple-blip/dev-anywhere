@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
 import { TerminalTracker } from "./terminal-tracker.js";
+import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
   createIpcReader,
@@ -107,6 +108,19 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
   let framePusher: FramePusher | null = null;
+  let currentPtyState: PtySemanticState = "turn_complete";
+
+  function sendPtyState(state: "working" | "turn_complete" | "approval_wait", title?: string, tool?: string): void {
+    if (!socket.writable || !sessionId) return;
+    socket.write(serializeIpc({
+      type: "pty_state_push",
+      sessionId,
+      state,
+      ...(title !== undefined ? { title } : {}),
+      ...(tool !== undefined ? { tool } : {}),
+    }));
+    log.info({ sessionId, state, title, tool }, "PTY state pushed");
+  }
 
   function startFramePush(): void {
     if (framePusher) framePusher.stop();
@@ -189,12 +203,16 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     socket.on("error", () => {});
   }
 
-  // idle/working 检测：3 秒无输出则触发快照
+  // idle/working 检测：3 秒无数据输出则从 working 转为 turn_complete
   function setupIdleCheck(): void {
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     idleCheckTimer = setInterval(() => {
       if (lastOutputTime > 0 && Date.now() - lastOutputTime > 3000) {
         lastOutputTime = 0;
+        if (currentPtyState === "working") {
+          currentPtyState = "turn_complete";
+          sendPtyState("turn_complete");
+        }
       }
     }, 3000);
   }
@@ -273,6 +291,19 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     lastOutputTime = Date.now();
     if (tracker) {
       tracker.feed(data);
+    }
+
+    // 有数据输出 → working
+    if (currentPtyState !== "working") {
+      currentPtyState = "working";
+      sendPtyState("working");
+    }
+
+    // OSC 信号仅用于检测 approval_wait
+    const signal = extractOscSignals(data);
+    if (signal?.state === "approval_wait") {
+      currentPtyState = "approval_wait";
+      sendPtyState("approval_wait", signal.title, signal.tool);
     }
   };
 
