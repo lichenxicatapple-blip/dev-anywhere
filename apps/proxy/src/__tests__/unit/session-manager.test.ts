@@ -276,6 +276,40 @@ describe("SessionManager", () => {
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       expect(Array.isArray(data)).toBe(true);
     });
+
+    it("resets WAITING_APPROVAL to IDLE on load", () => {
+      const s = manager.createSession("json");
+      manager.updateState(s.id, SessionState.WORKING);
+      manager.updateState(s.id, SessionState.WAITING_APPROVAL);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
+
+      const manager2 = new SessionManager({ persistPath });
+      const restored = manager2.getSession(s.id);
+      expect(restored).toBeDefined();
+      expect(restored!.state).toBe(SessionState.IDLE);
+      manager2.stopReaper();
+    });
+
+    it("keeps WORKING state unchanged on load", () => {
+      const s = manager.createSession("json");
+      manager.updateState(s.id, SessionState.WORKING);
+
+      const manager2 = new SessionManager({ persistPath });
+      const restored = manager2.getSession(s.id);
+      expect(restored).toBeDefined();
+      expect(restored!.state).toBe(SessionState.WORKING);
+      manager2.stopReaper();
+    });
+
+    it("keeps IDLE state unchanged on load", () => {
+      const s = manager.createSession("json");
+
+      const manager2 = new SessionManager({ persistPath });
+      const restored = manager2.getSession(s.id);
+      expect(restored).toBeDefined();
+      expect(restored!.state).toBe(SessionState.IDLE);
+      manager2.stopReaper();
+    });
   });
 
   describe("reaper", () => {

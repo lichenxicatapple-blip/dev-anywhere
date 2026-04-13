@@ -228,8 +228,26 @@ function connectToWorker(
         }
       });
 
-      sock.on("close", () => { workerSockets.delete(sessionId); });
-      sock.on("error", () => { workerSockets.delete(sessionId); });
+      sock.on("close", () => {
+        workerSockets.delete(sessionId);
+        for (const [requestId, pending] of pendingToolApprovals) {
+          if (pending.sessionId === sessionId) {
+            pending.resolve({ behavior: "deny", message: "Worker disconnected" });
+            pendingToolApprovals.delete(requestId);
+            logger.info({ sessionId, requestId }, "Pending tool approval denied on worker disconnect");
+          }
+        }
+      });
+      sock.on("error", () => {
+        workerSockets.delete(sessionId);
+        for (const [requestId, pending] of pendingToolApprovals) {
+          if (pending.sessionId === sessionId) {
+            pending.resolve({ behavior: "deny", message: "Worker disconnected" });
+            pendingToolApprovals.delete(requestId);
+            logger.info({ sessionId, requestId }, "Pending tool approval denied on worker error");
+          }
+        }
+      });
 
       resolve(sock);
     });
@@ -451,6 +469,7 @@ function handleTerminalConnection(
           ws.write(serializeWorkerMsg({ type: "worker_stop" }));
         }
         workerSockets.delete(msg.sessionId);
+        frameCache?.remove(msg.sessionId);
         controlHandlers?.cleanup(msg.sessionId);
         socket.write(
           serializeIpc({
@@ -487,6 +506,7 @@ function handleTerminalConnection(
       case "pty_deregister": {
         sessionManager.terminateSession(msg.sessionId);
         terminalSockets.delete(msg.sessionId);
+        frameCache?.remove(msg.sessionId);
         controlHandlers?.cleanup(msg.sessionId);
         logger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
         break;

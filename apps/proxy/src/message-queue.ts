@@ -4,6 +4,7 @@ export interface MessageQueue {
   drain(): string[];
   size(): number;
   clear(): void;
+  dropOldest(): void;
 }
 
 export class MemoryMessageQueue implements MessageQueue {
@@ -25,5 +26,12 @@ export class MemoryMessageQueue implements MessageQueue {
 
   clear(): void {
     this.items = [];
+  }
+
+  // 丢弃队列中最旧的一条消息
+  dropOldest(): void {
+    if (this.items.length > 0) {
+      this.items.shift();
+    }
   }
 }

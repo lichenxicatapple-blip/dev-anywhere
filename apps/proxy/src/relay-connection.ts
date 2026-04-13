@@ -18,6 +18,18 @@ const DEFAULT_PROXY_ID_PATH = join(
 const MAX_BACKOFF_MS = 30000;
 // 退避基数 1 秒
 const BASE_BACKOFF_MS = 1000;
+// 消息队列上限
+const MAX_QUEUE_SIZE = 10000;
+
+export const RelayConnectionState = {
+  DISCONNECTED: "disconnected",
+  CONNECTING: "connecting",
+  REGISTERING: "registering",
+  SYNCED: "synced",
+  WAITING_RECONNECT: "waiting_reconnect",
+  CLOSED: "closed",
+} as const;
+export type RelayConnectionState = (typeof RelayConnectionState)[keyof typeof RelayConnectionState];
 
 export interface RelayConnectionOptions {
   // 自定义 proxyId 文件路径，测试时使用临时目录
@@ -34,7 +46,7 @@ export class RelayConnection extends EventEmitter {
   private queue: MemoryMessageQueue = new MemoryMessageQueue();
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private closed: boolean = false;
+  private connectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED;
   private name?: string;
 
   constructor(relayUrl: string, options?: RelayConnectionOptions) {
@@ -42,6 +54,12 @@ export class RelayConnection extends EventEmitter {
     this.relayUrl = relayUrl;
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
+  }
+
+  private transition(to: RelayConnectionState): void {
+    const from = this.connectionState;
+    this.connectionState = to;
+    logger.info({ from, to }, "RelayConnection state transition");
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -64,7 +82,7 @@ export class RelayConnection extends EventEmitter {
 
   // 连接到 relay server
   connect(): void {
-    this.closed = false;
+    this.transition(RelayConnectionState.CONNECTING);
     this.doConnect();
   }
 
@@ -76,6 +94,7 @@ export class RelayConnection extends EventEmitter {
 
       this.ws.on("open", () => {
         this.reconnectAttempt = 0;
+        this.transition(RelayConnectionState.REGISTERING);
         logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
         this.ws!.send(JSON.stringify({
           type: "proxy_register",
@@ -92,6 +111,7 @@ export class RelayConnection extends EventEmitter {
             const status: string = parsed.status;
             const sessions: Record<string, number> | undefined = parsed.sessions;
             logger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
+            this.transition(RelayConnectionState.SYNCED);
             // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
             this.emit("sync", { status, sessions: sessions ?? {} });
             this.flushQueue();
@@ -106,7 +126,8 @@ export class RelayConnection extends EventEmitter {
 
       this.ws.on("close", () => {
         this.ws = null;
-        if (!this.closed) {
+        if (this.connectionState !== RelayConnectionState.CLOSED) {
+          this.transition(RelayConnectionState.WAITING_RECONNECT);
           logger.info("Relay connection closed unexpectedly");
           this.emit("disconnected");
           this.scheduleReconnect();
@@ -120,7 +141,8 @@ export class RelayConnection extends EventEmitter {
       });
     } catch (err) {
       logger.error({ error: String(err) }, "Failed to create relay connection");
-      if (!this.closed) {
+      if (this.connectionState !== RelayConnectionState.CLOSED) {
+        this.transition(RelayConnectionState.WAITING_RECONNECT);
         this.scheduleReconnect();
       }
     }
@@ -152,12 +174,17 @@ export class RelayConnection extends EventEmitter {
     this.sendRaw(raw);
   }
 
-  // 发送原始 JSON 字符串到 relay，离线时自动入队
-  // 用于 handler 模块直接发送已序列化的 relay control 消息
+  // 发送原始 JSON 字符串到 relay，根据 connectionState 决定直发、入队或丢弃
   sendRaw(raw: string): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.connectionState === RelayConnectionState.SYNCED && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
+    } else if (this.connectionState === RelayConnectionState.CLOSED) {
+      logger.warn("Message discarded: connection is closed");
     } else {
+      if (this.queue.size() >= MAX_QUEUE_SIZE) {
+        this.queue.dropOldest();
+        logger.warn({ maxSize: MAX_QUEUE_SIZE }, "Message queue overflow, oldest message dropped");
+      }
       this.queue.enqueue(raw);
       logger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
     }
@@ -165,7 +192,7 @@ export class RelayConnection extends EventEmitter {
 
   // 主动关闭连接，发送 proxy_disconnect 通知 relay 立即清理，不触发重连
   close(): void {
-    this.closed = true;
+    this.transition(RelayConnectionState.CLOSED);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -185,9 +212,10 @@ export class RelayConnection extends EventEmitter {
   }
 
   // 获取连接状态摘要，用于 CLI status 输出
-  getStatus(): { connected: boolean; proxyId: string; reconnectAttempt: number; queueDepth: number } {
+  getStatus(): { connected: boolean; connectionState: RelayConnectionState; proxyId: string; reconnectAttempt: number; queueDepth: number } {
     return {
-      connected: this.ws?.readyState === WebSocket.OPEN,
+      connected: this.connectionState === RelayConnectionState.SYNCED,
+      connectionState: this.connectionState,
       proxyId: this.proxyId,
       reconnectAttempt: this.reconnectAttempt,
       queueDepth: this.queue.size(),

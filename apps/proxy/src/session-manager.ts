@@ -222,6 +222,11 @@ export class SessionManager {
         this.onSessionRemoved?.(info.id);
         continue;
       }
+      // WAITING_APPROVAL 是瞬态，持久化恢复时审批上下文已丢失，重置为 IDLE
+      if (info.state === SessionState.WAITING_APPROVAL) {
+        info.state = SessionState.IDLE;
+        logger.info({ sessionId: info.id }, "Reset WAITING_APPROVAL to IDLE on load");
+      }
       this.sessions.set(info.id, info);
     }
     if (this.sessions.size > 0) {

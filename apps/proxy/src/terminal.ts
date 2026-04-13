@@ -18,6 +18,17 @@ import { terminalLogger as log } from "./logger.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// terminal 进程生命周期状态
+const TerminalState = {
+  INIT: "init",
+  CONNECTING_SERVICE: "connecting_service",
+  CREATING_SESSION: "creating_session",
+  RUNNING: "running",
+  RECONNECTING: "reconnecting",
+  EXITED: "exited",
+} as const;
+type TerminalState = (typeof TerminalState)[keyof typeof TerminalState];
+
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
     const s = connect(sockPath);
@@ -87,10 +98,11 @@ function waitForMessage(
 
 export async function startTerminal(claudeArgs: string[]): Promise<void> {
   log.info("Terminal starting");
+  let terminalState: TerminalState = TerminalState.INIT;
+  terminalState = TerminalState.CONNECTING_SERVICE;
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
-  let reconnecting = false;
   let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
@@ -165,8 +177,8 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
     socket.on("close", () => {
       log.info("Serve socket closed");
-      if (!reconnecting) {
-        reconnecting = true;
+      if (terminalState !== TerminalState.RECONNECTING && terminalState !== TerminalState.EXITED) {
+        terminalState = TerminalState.RECONNECTING;
         reconnectToServe();
       }
     });
@@ -198,12 +210,12 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           : await ensureService();
         if (!newSocket) continue;
         socket = newSocket;
-        reconnecting = false;
         log.info({ attempt: i + 1, sessionId }, "Reconnected to serve");
 
         setupSocketHandlers();
 
         if (sessionId) {
+          terminalState = TerminalState.CREATING_SESSION;
           socket.write(
             serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~"), sessionId }),
           );
@@ -211,9 +223,12 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           if (resp.type === "session_create_response" && !resp.error) {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId }));
+            terminalState = TerminalState.RUNNING;
             startFramePush();
             log.info({ sessionId }, "Session re-registered after reconnect");
           }
+        } else {
+          terminalState = TerminalState.RUNNING;
         }
 
         return;
@@ -222,10 +237,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     }
     log.error({ maxRetries }, "Reconnection exhausted");
-    reconnecting = false;
   }
 
   // 请求创建 PTY 会话
+  terminalState = TerminalState.CREATING_SESSION;
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
     serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~") }),
@@ -272,6 +287,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     },
     onSessionExit: (code: number) => {
+      terminalState = TerminalState.EXITED;
       log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
       if (idleCheckTimer) clearInterval(idleCheckTimer);
       stopFramePush();
@@ -289,6 +305,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   log.info({ sessionId }, "PTY started, frame push active");
 
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
+  terminalState = TerminalState.RUNNING;
   startFramePush();
 
   setupIdleCheck();
