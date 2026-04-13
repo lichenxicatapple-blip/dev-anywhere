@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 Phase: 7
 Plan: Not started
 Status: Executing Phase 04
-Last activity: 2026-04-13 - Completed quick task 260413-g0u: Scroll anchor + prefetch cache
+Last activity: 2026-04-13 - Completed quick task 260413-h9y: Relay + Proxy observability: log persistence and probe endpoints
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -111,6 +111,7 @@ Recent decisions affecting current work:
 | 260412-sbg | Terminal scrollback: client-side PTY history scrolling | 2026-04-12 | f8f2e34 | Needs Review | [260412-sbg-terminal-scrollback-client-side-pty-hist](./quick/260412-sbg-terminal-scrollback-client-side-pty-hist/) |
 | 260413-414 | Server-side scrolling: client sends scroll commands, server pushes viewport frame | 2026-04-13 | 9412649 | | [260413-414-server-side-scrolling-client-sends-scrol](./quick/260413-414-server-side-scrolling-client-sends-scrol/) |
 | 260413-g0u | Scroll anchor + prefetch cache | 2026-04-13 | 8574465 | | [260413-g0u-scroll-anchor-prefetch-cache](./quick/260413-g0u-scroll-anchor-prefetch-cache/) |
+| 260413-h9y | Relay + Proxy observability: log persistence and probe endpoints | 2026-04-13 | 92ca23f | | [260413-h9y-relay-proxy-observability-log-persistenc](./quick/260413-h9y-relay-proxy-observability-log-persistenc/) |
 
 ## Session Continuity
 
