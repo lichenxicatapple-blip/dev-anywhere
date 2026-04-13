@@ -104,7 +104,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("pty_scroll_request"),
     sessionId: z.string(),
     direction: z.enum(["up", "down"]),
-    delta: z.number(),
+    delta: z.number().int().positive(),
   }),
 
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发

@@ -413,7 +413,7 @@ describe("Terminal data flow: server-side scrolling", () => {
     expect(atOffsetText).toBe(liveText);
   });
 
-  it("scrollUp clamps to max available scrollback", async () => {
+  it("scrollUp clamps to max available scrollback and returns oldest content", async () => {
     for (let i = 0; i < 20; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
@@ -423,9 +423,16 @@ describe("Terminal data flow: server-side scrolling", () => {
     const maxOffset = tracker.getNewestLineId() - tracker.getOldestLineId() + 1 - 10;
     expect(offset).toBe(Math.max(0, maxOffset));
 
-    // extractGridAtOffset 应返回最早可用的行
+    // extractGridAtOffset 在 max offset 应返回最早可用的行
     const grid = tracker.extractGridAtOffset();
     expect(grid.length).toBe(10);
+
+    // 验证内容：grid 首行应包含最早的行内容
+    const oldest = tracker.getOldestLineId();
+    const { lines: expectedLines } = tracker.extractLines(oldest, 10);
+    const gridText = grid.map((l) => l.map((s) => s.text).join("")).join("\n");
+    const expectedText = expectedLines.map((l) => l.map((s) => s.text).join("")).join("\n");
+    expect(gridText).toBe(expectedText);
   });
 
   it("scrollDown clamps to 0", () => {
