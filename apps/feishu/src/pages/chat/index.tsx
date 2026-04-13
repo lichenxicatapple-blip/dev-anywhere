@@ -14,6 +14,7 @@ import { SlashCommandPicker } from "@/components/slash-command-picker";
 import { FilePathPicker } from "@/components/file-path-picker";
 import { QuotePreviewBar } from "@/components/quote-preview-bar";
 import type { MessageEnvelope, RelayControlMessage, TerminalFramePayload } from "@cc-anywhere/shared";
+import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import { parseAssistantMessage, routeStreamEvent } from "@/services/message-parser";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import {
@@ -242,27 +243,36 @@ export default function Chat() {
   // 挂载时确保 client 绑定到正确的 proxy，然后请求终端帧
   useEffect(() => {
     if (!relay || !sessionId) return;
+    let cancelled = false;
 
-    // 没有已绑定的 proxy 时，通过 sessionId 请求绑定
-    if (!relay.getBoundProxyId()) {
-      relay.bindBySession(sessionId);
-    }
-
-    // 监听 bind_by_session_response，成功后请求全量帧
-    const unsub = relay.onMessage((msg) => {
-      const ctrl = msg as Record<string, unknown>;
-      if (ctrl.type === "bind_by_session_response" && ctrl.success && isPty) {
+    async function bind() {
+      if (!relay) return;
+      const result = await ensureBinding(relay, {
+        proxyId: appState.selectedProxyId || undefined,
+        sessionId,
+      });
+      if (cancelled) return;
+      if (isBindingError(result)) {
+        console.error("[chat] binding failed:", result.error);
+        return;
+      }
+      // 绑定成功后请求终端帧
+      if (isPty) {
         relay.sendControl({ type: "terminal_frame_request", sessionId });
       }
-    });
-
-    // 已绑定时直接请求帧
-    if (relay.getBoundProxyId() && isPty) {
-      relay.sendControl({ type: "terminal_frame_request", sessionId });
     }
 
-    return unsub;
-  }, [relay, sessionId, isPty]);
+    // 已绑定时直接请求帧，否则走绑定流程
+    if (relay.getBoundProxyId()) {
+      if (isPty) {
+        relay.sendControl({ type: "terminal_frame_request", sessionId });
+      }
+    } else {
+      bind();
+    }
+
+    return () => { cancelled = true; };
+  }, [relay, sessionId, isPty, appState.selectedProxyId]);
 
   const sendDisabled = computeSendDisabled(
     mode,

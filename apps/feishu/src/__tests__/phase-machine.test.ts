@@ -34,7 +34,7 @@ function createTestEnv(phase: AppPhase, overrides?: Partial<AppState>) {
   const relay: PhaseRelay = {
     register: vi.fn(),
     listProxies: vi.fn(),
-    selectProxy: vi.fn(),
+    selectProxy: vi.fn(() => Promise.resolve({ success: true, proxyId: "p1" })),
   };
 
   return { getState, dispatch, dispatched, timers, nav, relay };

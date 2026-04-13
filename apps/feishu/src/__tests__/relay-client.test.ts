@@ -52,15 +52,50 @@ describe("RelayClient", () => {
     );
   });
 
-  it("selectProxy sends proxy_select with proxyId and updates boundProxyId", () => {
-    client.selectProxy("proxy-abc");
+  it("selectProxy sends proxy_select and resolves on success ACK", async () => {
+    const promise = client.selectProxy("proxy-abc");
     expect(ws.send).toHaveBeenCalledWith(
       JSON.stringify({
         type: "proxy_select",
         proxyId: "proxy-abc",
       }),
     );
+    // boundProxyId 在 ACK 之前不应设置
+    expect(client.getBoundProxyId()).toBeNull();
+
+    // 模拟 relay 返回 proxy_select_response
+    wsRawHandler!(JSON.stringify({ type: "proxy_select_response", success: true, proxyId: "proxy-abc" }));
+
+    const result = await promise;
+    expect(result.success).toBe(true);
+    expect(result.proxyId).toBe("proxy-abc");
     expect(client.getBoundProxyId()).toBe("proxy-abc");
+  });
+
+  it("selectProxy resolves with failure on error ACK", async () => {
+    const promise = client.selectProxy("offline-proxy");
+
+    wsRawHandler!(JSON.stringify({ type: "proxy_select_response", success: false, error: "Proxy not online" }));
+
+    const result = await promise;
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Proxy not online");
+    expect(client.getBoundProxyId()).toBeNull();
+  });
+
+  it("requestProxyList sends request and resolves with proxies", async () => {
+    const promise = client.requestProxyList();
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: "proxy_list_request" }),
+    );
+
+    wsRawHandler!(JSON.stringify({
+      type: "proxy_list_response",
+      proxies: [{ proxyId: "p1", online: true, sessions: ["s1"] }],
+    }));
+
+    const proxies = await promise;
+    expect(proxies).toEqual([{ proxyId: "p1", online: true, sessions: ["s1"] }]);
   });
 
   it("listProxies sends proxy_list_request", () => {

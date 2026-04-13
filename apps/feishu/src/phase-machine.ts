@@ -20,7 +20,7 @@ export interface PhaseNav {
 export interface PhaseRelay {
   register(): void;
   listProxies(): void;
-  selectProxy(proxyId: string): void;
+  selectProxy(proxyId: string): Promise<{ success: boolean; proxyId?: string; error?: string }>;
 }
 
 type Dispatch = React.Dispatch<AppAction>;
@@ -41,7 +41,7 @@ export function handleWsStatusChange(
     // 重连后恢复 proxy 绑定，否则 relay 端 boundProxyId 丢失，
     // 后续控制消息会被拒绝（NOT_BOUND）
     if (s.selectedProxyId) {
-      relay.selectProxy(s.selectedProxyId);
+      void relay.selectProxy(s.selectedProxyId);
     }
     if (s.phase === "connecting") {
       dispatch({ type: "SET_PHASE", phase: "proxy_selecting" });
@@ -108,7 +108,7 @@ export function handleRelayMessage(
       if (result) {
         dispatch({ type: "SET_PROXY", proxyId: result.proxy.proxyId, proxyName: result.proxy.name || null });
         dispatch({ type: "SET_PROXY_ONLINE", online: true });
-        relay.selectProxy(result.proxy.proxyId);
+        void relay.selectProxy(result.proxy.proxyId);
         const targetPhase: AppPhase = result.url.includes("chat") ? "chatting" : "session_browsing";
         dispatch({ type: "SET_PHASE", phase: targetPhase });
         nav.navigateTo(result.url);

@@ -17,13 +17,6 @@ export class RelayClient {
     this.ws.onMessage((raw) => {
       try {
         const parsed = JSON.parse(raw) as MessageEnvelope | RelayControlMessage;
-        // bind_by_session 成功时更新本地绑定状态
-        if ("type" in parsed && (parsed as Record<string, unknown>).type === "bind_by_session_response") {
-          const resp = parsed as Record<string, unknown>;
-          if (resp.success && typeof resp.proxyId === "string") {
-            this.boundProxyId = resp.proxyId;
-          }
-        }
         this.messageHandlers.forEach((h) => h(parsed));
       } catch (e) {
         console.warn("RelayClient: failed to parse incoming message:", raw.slice(0, 200), e);
@@ -42,20 +35,43 @@ export class RelayClient {
     );
   }
 
-  // 请求可用代理列表
+  // 请求可用代理列表（fire-and-forget，响应通过 onMessage 处理）
   listProxies(): void {
     this.ws.send(JSON.stringify({ type: "proxy_list_request" }));
   }
 
-  // 选择并绑定一个代理
-  selectProxy(proxyId: string): void {
-    this.ws.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    this.boundProxyId = proxyId;
+  // 请求代理列表并返回 Promise，等待 proxy_list_response 响应
+  requestProxyList(): Promise<Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>> {
+    return new Promise((resolve) => {
+      const unsub = this.onMessage((msg) => {
+        if ("type" in msg && (msg as Record<string, unknown>).type === "proxy_list_response") {
+          unsub();
+          resolve((msg as Record<string, unknown>).proxies as Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>);
+        }
+      });
+      this.ws.send(JSON.stringify({ type: "proxy_list_request" }));
+    });
   }
 
-  // 通过 sessionId 绑定到拥有该 session 的 proxy
-  bindBySession(sessionId: string): void {
-    this.ws.send(JSON.stringify({ type: "bind_by_session", sessionId }));
+  // 选择并绑定一个代理，返回 Promise 等待 proxy_select_response ACK
+  selectProxy(proxyId: string): Promise<{ success: boolean; proxyId?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const unsub = this.onMessage((msg) => {
+        if ("type" in msg && (msg as Record<string, unknown>).type === "proxy_select_response") {
+          unsub();
+          const resp = msg as Record<string, unknown>;
+          if (resp.success) {
+            this.boundProxyId = proxyId;
+          }
+          resolve({
+            success: resp.success as boolean,
+            proxyId: resp.proxyId as string | undefined,
+            error: resp.error as string | undefined,
+          });
+        }
+      });
+      this.ws.send(JSON.stringify({ type: "proxy_select", proxyId }));
+    });
   }
 
   // 发送 MessageEnvelope

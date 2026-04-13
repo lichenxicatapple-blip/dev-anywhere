@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
 import type { ProxyInfo, RelayControlMessage } from "@cc-anywhere/shared";
+import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
@@ -64,7 +65,7 @@ export default function ProxySelect() {
 
   // 选择 proxy
   const handleSelect = useCallback(
-    (proxy: ProxyInfo) => {
+    async (proxy: ProxyInfo) => {
       Taro.setStorageSync("cc_proxyId", proxy.proxyId);
       appDispatch({
         type: "SET_PROXY",
@@ -73,7 +74,13 @@ export default function ProxySelect() {
       });
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (relay) {
-        relay.selectProxy(proxy.proxyId);
+        const result = await ensureBinding(relay, { proxyId: proxy.proxyId });
+        if (isBindingError(result)) {
+          // 绑定失败时回退状态
+          appDispatch({ type: "SET_PROXY_ONLINE", online: false });
+          Taro.showToast({ title: result.error, icon: "none" });
+          return;
+        }
       }
       transitionToPhase(appState.phase, "session_browsing", appDispatch);
       Taro.navigateTo({ url: "/pages/session-list/index" });
