@@ -12,6 +12,7 @@
 
 .terminal-content {
   padding: 16px;
+  box-sizing: border-box;
   display: inline-block;
   min-width: 100%;
   min-height: 100%;

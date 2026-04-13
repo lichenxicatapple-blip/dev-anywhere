@@ -141,18 +141,22 @@ export function TerminalViewport({
     };
   }, []);
 
-  // viewport 高度对齐：缩小到 lineHeight 整数倍，消除顶部行裁剪
+  // viewport 高度对齐：扣除 padding 后缩小到 lineHeight 整数倍，消除顶部行裁剪
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(".terminal-viewport") as HTMLElement | null;
-      if (!el) return;
+      const contentEl = document.querySelector(".terminal-content") as HTMLElement | null;
+      if (!el || !contentEl) return;
       el.style.maxHeight = "";
       void el.offsetHeight;
       const h = el.getBoundingClientRect().height;
       const lineH = Math.round(fontSize * 1.4);
       if (lineH <= 0) return;
-      const remainder = h % lineH;
-      console.log("[viewport-align]", { naturalH: h, lineH, remainder, aligned: h - remainder });
+      const style = getComputedStyle(contentEl);
+      const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      const usable = h - pad;
+      const remainder = usable % lineH;
+      console.log("[viewport-align]", { naturalH: h, lineH, pad, remainder, aligned: h - remainder });
       if (remainder > 0.5) {
         el.style.maxHeight = `${h - remainder}px`;
       }

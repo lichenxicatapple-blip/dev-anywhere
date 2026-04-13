@@ -48,6 +48,10 @@ function App({ children }: PropsWithChildren) {
       navigateTo: (url: string) => Taro.navigateTo({ url }),
       showToast: (title: string) => Taro.showToast({ title, icon: "none", duration: 1500 }),
       getStorageSync: (key: string) => Taro.getStorageSync(key) as string,
+      getCurrentPath: () => {
+        const pages = Taro.getCurrentPages();
+        return pages.length > 0 ? pages[pages.length - 1].route || "" : "";
+      },
     };
 
     ws.onStatusChange((connected) => {

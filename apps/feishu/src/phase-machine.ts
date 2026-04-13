@@ -15,6 +15,7 @@ export interface PhaseNav {
   navigateTo(url: string): void;
   showToast(title: string): void;
   getStorageSync(key: string): string;
+  getCurrentPath(): string;
 }
 
 export interface PhaseRelay {
@@ -115,29 +116,35 @@ export async function handleRelayMessage(
 
     // 冷启动：首次 proxy_list_response 时在 proxy_selecting 阶段执行
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {
+      timers.coldStartDone = true;
       const savedProxyId = nav.getStorageSync("cc_proxyId");
       console.log("[cold-start]", { savedProxyId, proxyCount: proxies.length, boundProxyId: relay.getBoundProxyId() });
       if (!savedProxyId) {
-        timers.coldStartDone = true;
+        // no-op, coldStartDone already true
       } else {
         const result = await ensureBinding(relay as unknown as RelayClient, { proxyId: savedProxyId });
         console.log("[cold-start] binding result:", result);
         if (!isBindingError(result)) {
-          timers.coldStartDone = true;
           const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
           dispatch({ type: "SET_PROXY", proxyId: savedProxyId, proxyName: proxyInfo?.name || null });
           dispatch({ type: "SET_PROXY_ONLINE", online: true });
           const savedSessionId = nav.getStorageSync("cc_sessionId");
+          const currentPath = nav.getCurrentPath();
           if (savedSessionId) {
             const mode = nav.getStorageSync("cc_sessionMode") || "json";
             dispatch({ type: "SET_PHASE", phase: "chatting" });
-            nav.navigateTo(`/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`);
+            if (!currentPath.includes("/pages/chat/index")) {
+              nav.navigateTo(`/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`);
+            }
           } else {
             dispatch({ type: "SET_PHASE", phase: "session_browsing" });
-            nav.navigateTo("/pages/session-list/index");
+            if (!currentPath.includes("/pages/session-list/index")) {
+              nav.navigateTo("/pages/session-list/index");
+            }
           }
           return;
         }
+        timers.coldStartDone = false;
       }
     }
 

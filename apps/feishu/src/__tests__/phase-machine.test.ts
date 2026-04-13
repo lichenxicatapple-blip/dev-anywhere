@@ -29,6 +29,7 @@ function createTestEnv(phase: AppPhase, overrides?: Partial<AppState>) {
     navigateTo: vi.fn(),
     showToast: vi.fn(),
     getStorageSync: vi.fn(() => ""),
+    getCurrentPath: vi.fn(() => "pages/proxy-select/index"),
   };
 
   const relay: PhaseRelay = {
