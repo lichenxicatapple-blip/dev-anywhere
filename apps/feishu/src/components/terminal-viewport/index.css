@@ -2,8 +2,11 @@
   flex: 1;
   background: #1E1E1E;
   border-radius: 16px 16px 0 0;
-  overflow: hidden;
-  touch-action: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .terminal-content {

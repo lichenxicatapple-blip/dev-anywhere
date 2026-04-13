@@ -1,6 +1,7 @@
 // PTY 终端栅格渲染组件，支持服务端滚动和捏合缩放
-// server-side scrolling: content 只有一帧，用 DOM touch/mouse 事件检测滑动方向
-// Taro H5 的 onTouchStart/Move prop 不触发，必须直接 addEventListener
+// native scroll 处理 within-frame 内容溢出（server 终端行数可能超过手机 viewport）
+// 到达滚动边界（顶部/底部）时触发 server-side scroll 请求获取历史内容
+// Taro H5 的 onScroll/onTouch props 不触发，必须直接 addEventListener
 import { useRef, useEffect } from "react";
 import { View, Text } from "@tarojs/components";
 import type { TermLine } from "@cc-anywhere/shared";
@@ -13,12 +14,9 @@ interface TerminalViewportProps {
   onScroll: (direction: "up" | "down", delta: number) => void;
 }
 
-// 每 20px 滑动距离算 1 行
 const PX_PER_LINE = 20;
-// 最小滑动距离才触发滚动请求
-const MIN_SWIPE_PX = 30;
-// 节流间隔
-const THROTTLE_MS = 150;
+const MIN_SWIPE_PX = 20;
+const THROTTLE_MS = 50;
 
 function getDistance(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }): number {
   const dx = a.clientX - b.clientX;
@@ -32,13 +30,11 @@ export function TerminalViewport({
   onPinchZoom,
   onScroll,
 }: TerminalViewportProps) {
-  // 用 ref 保存最新回调，避免 useEffect 频繁重绑
   const onScrollRef = useRef(onScroll);
   const onPinchZoomRef = useRef(onPinchZoom);
   onScrollRef.current = onScroll;
   onPinchZoomRef.current = onPinchZoom;
 
-  // 直接绑定 DOM 事件，同时支持 touch 和 mouse
   useEffect(() => {
     const el = document.querySelector(".terminal-viewport") as HTMLElement | null;
     if (!el) return;
@@ -46,27 +42,19 @@ export function TerminalViewport({
     let startY = 0;
     let isDown = false;
     let lastRequestTime = 0;
-    // 捏合缩放状态
     let pinchStartDist = 0;
     let pinchTriggered = false;
 
-    // 返回 true 表示发出了滚动请求，调用者应重置 startY
     function handleSwipe(dy: number): boolean {
       if (Math.abs(dy) < MIN_SWIPE_PX) return false;
       const now = Date.now();
       if (now - lastRequestTime < THROTTLE_MS) return false;
       lastRequestTime = now;
-
       const delta = Math.max(1, Math.round(Math.abs(dy) / PX_PER_LINE));
-      if (dy > 0) {
-        onScrollRef.current("up", delta);
-      } else {
-        onScrollRef.current("down", delta);
-      }
+      onScrollRef.current(dy > 0 ? "up" : "down", delta);
       return true;
     }
 
-    // --- Touch events ---
     function onTouchStart(e: TouchEvent) {
       if (e.touches.length === 2) {
         pinchStartDist = getDistance(e.touches[0], e.touches[1]);
@@ -87,14 +75,10 @@ export function TerminalViewport({
       }
       if (e.touches.length === 1) {
         const dy = startY - e.touches[0].clientY;
-        // 只在实际发出请求后才重置起始点，否则累积距离
-        if (handleSwipe(dy)) {
-          startY = e.touches[0].clientY;
-        }
+        if (handleSwipe(dy)) startY = e.touches[0].clientY;
       }
     }
 
-    // --- Mouse events (桌面浏览器调试用) ---
     function onMouseDown(e: MouseEvent) {
       startY = e.clientY;
       isDown = true;
@@ -103,13 +87,30 @@ export function TerminalViewport({
     function onMouseMove(e: MouseEvent) {
       if (!isDown) return;
       const dy = startY - e.clientY;
-      if (handleSwipe(dy)) {
-        startY = e.clientY;
-      }
+      if (handleSwipe(dy)) startY = e.clientY;
     }
 
     function onMouseUp() {
       isDown = false;
+    }
+
+    // wheel 事件：触摸板双指垂直滑动
+    let wheelAccum = 0;
+    function onWheel(e: WheelEvent) {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      wheelAccum += e.deltaY;
+      if (Math.abs(wheelAccum) < MIN_SWIPE_PX) return;
+      const now = Date.now();
+      if (now - lastRequestTime < THROTTLE_MS) {
+        wheelAccum = 0;
+        return;
+      }
+      lastRequestTime = now;
+      const clamped = Math.min(Math.abs(wheelAccum), 200);
+      const delta = Math.max(1, Math.round(clamped / PX_PER_LINE));
+      onScrollRef.current(wheelAccum > 0 ? "up" : "down", delta);
+      wheelAccum = 0;
     }
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -117,6 +118,7 @@ export function TerminalViewport({
     el.addEventListener("mousedown", onMouseDown);
     el.addEventListener("mousemove", onMouseMove);
     el.addEventListener("mouseup", onMouseUp);
+    el.addEventListener("wheel", onWheel, { passive: false });
     document.addEventListener("mouseup", onMouseUp);
 
     return () => {
@@ -125,6 +127,7 @@ export function TerminalViewport({
       el.removeEventListener("mousedown", onMouseDown);
       el.removeEventListener("mousemove", onMouseMove);
       el.removeEventListener("mouseup", onMouseUp);
+      el.removeEventListener("wheel", onWheel);
       document.removeEventListener("mouseup", onMouseUp);
     };
   }, []);
