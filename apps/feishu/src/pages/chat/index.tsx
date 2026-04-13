@@ -163,30 +163,18 @@ export default function Chat() {
         case "terminal_frame": {
           if (ctrl.sessionId !== sessionId) break;
           const frame = ctrl.payload as TerminalFramePayload;
+          console.log("[frame]", frame.mode, "anchor=" + ((frame as Record<string, unknown>).anchorLineId ?? "none"), "lines=" + frame.lines.length, "isScrolled=" + ((frame as Record<string, unknown>).isScrolled ?? false), "currentAnchor=" + terminalStateRef.current.anchorLineId);
           if (frame.mode === "full") {
             const fullFrame = frame as TerminalFramePayload & { anchorLineId?: number; newestLineId?: number };
             if (fullFrame.anchorLineId != null) {
-              // 服务端返回的滚动帧：缓存并显示
+              // 始终缓存服务端返回的滚动帧
               terminalDispatch({ type: "CACHE_FRAME", anchorLineId: fullFrame.anchorLineId, lines: frame.lines });
-              terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null });
-              // 直接设置 lines 显示滚动内容（绕过 anchorLineId 守卫）
-              terminalDispatch({ type: "CLEAR_ANCHOR" });
-              terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
-              terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null });
-              // 预取相邻帧
-              const rows = frame.lines.length;
-              const currentAnchor = fullFrame.anchorLineId;
-              const cache = terminalStateRef.current.frameCache;
-              setTimeout(() => {
-                const prefetchUp = currentAnchor - rows;
-                if (prefetchUp >= 0 && !cache.has(prefetchUp) && relay && sessionId) {
-                  relay.sendControl({ type: "terminal_scroll_request", sessionId, direction: "up", delta: rows });
-                }
-                const prefetchDown = currentAnchor + rows;
-                if (fullFrame.newestLineId != null && prefetchDown + rows <= fullFrame.newestLineId && !cache.has(prefetchDown) && relay && sessionId) {
-                  relay.sendControl({ type: "terminal_scroll_request", sessionId, direction: "down", delta: rows });
-                }
-              }, 0);
+              // 只在当前没有锚点（首次滚动响应）时才更新显示并预取
+              if (terminalStateRef.current.anchorLineId == null) {
+                terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
+                terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null });
+              }
+              // 已有锚点时只 cache，不显示不预取，避免乱序响应和 prefetch 循环
             } else {
               // live 帧：仅在非锚定模式下更新
               terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
@@ -335,10 +323,19 @@ export default function Chat() {
 
   const handleTerminalScroll = useCallback(
     (direction: "up" | "down", delta: number) => {
-      if (!relay || !sessionId || !checkConnected()) return;
+      if (!relay || !sessionId) {
+        console.log("[scroll] blocked: no relay or sessionId");
+        return;
+      }
+      if (!checkConnected()) {
+        console.log("[scroll] blocked: checkConnected false, connected=" + appState.connected + " proxyOnline=" + appState.proxyOnline);
+        return;
+      }
 
       const state = terminalStateRef.current;
       const rows = state.lines.length || 40;
+
+      console.log("[scroll]", direction, "delta=" + delta, "anchor=" + state.anchorLineId, "newest=" + state.newestLineId, "rows=" + rows, "cacheSize=" + state.frameCache.size);
 
       // 预估目标 anchorLineId，检查缓存
       if (state.anchorLineId != null) {
@@ -348,6 +345,7 @@ export default function Chat() {
 
         // scrollDown 回到 live 模式
         if (direction === "down" && state.newestLineId != null && targetAnchor + rows > state.newestLineId) {
+          console.log("[scroll] returning to live mode, targetAnchor=" + targetAnchor);
           terminalDispatch({ type: "CLEAR_ANCHOR" });
           relay.sendControl({ type: "terminal_frame_request", sessionId });
           return;
@@ -355,10 +353,13 @@ export default function Chat() {
 
         // 命中缓存则直接显示
         if (state.frameCache.has(targetAnchor)) {
+          console.log("[scroll] cache HIT targetAnchor=" + targetAnchor);
           const cachedLines = state.frameCache.get(targetAnchor)!;
           terminalDispatch({ type: "CLEAR_ANCHOR" });
           terminalDispatch({ type: "SET_TERMINAL_LINES", lines: cachedLines });
           terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: targetAnchor, newestLineId: state.newestLineId });
+        } else {
+          console.log("[scroll] cache MISS targetAnchor=" + targetAnchor);
         }
       }
 
