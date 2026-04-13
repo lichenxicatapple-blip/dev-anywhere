@@ -30,7 +30,7 @@ import {
 import { useCommandState } from "@/stores/command-store";
 import { useFileState } from "@/stores/file-store";
 import { useRelayClient } from "@/stores/relay-store";
-import { useAppState } from "@/stores/app-store";
+import { useAppState, useAppDispatch } from "@/stores/app-store";
 import "./index.css";
 
 type SessionMode = "pty" | "json";
@@ -58,6 +58,7 @@ export default function Chat() {
   const screen = useScreenSize();
   const relay = useRelayClient();
   const appState = useAppState();
+  const appDispatch = useAppDispatch();
 
   // 发送前检查连接状态和 proxy 在线状态，未就绪时提示用户
   const checkConnected = useCallback((): boolean => {
@@ -70,7 +71,7 @@ export default function Chat() {
       return false;
     }
     return true;
-  }, [appState.connected]);
+  }, [appState.connected, appState.proxyOnline]);
 
   const [chatState, chatDispatch] = useReducer(chatReducer, initialChatState);
   const [terminalState, terminalDispatch] = useReducer(terminalReducer, initialTerminalState);
@@ -256,7 +257,10 @@ export default function Chat() {
         console.error("[chat] binding failed:", result.error);
         return;
       }
-      // 绑定成功后请求终端帧
+      // 绑定成功，更新 proxy 状态
+      appDispatch({ type: "SET_PROXY", proxyId: result.proxyId, proxyName: null });
+      appDispatch({ type: "SET_PROXY_ONLINE", online: true });
+      // 请求终端帧
       if (isPty) {
         relay.sendControl({ type: "terminal_frame_request", sessionId });
       }
