@@ -432,6 +432,7 @@ describe("Terminal data flow: anchor-based scrolling", () => {
     const scrolledGrid = tracker.extractGridAtOffset();
     const scrolledText = scrolledGrid.flatMap((l) => l.map((s) => s.text)).join("");
 
+    // scrolled content should differ from live
     expect(scrolledText).not.toBe(liveText);
     expect(scrolledGrid.length).toBe(10);
   });

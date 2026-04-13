@@ -15,13 +15,19 @@ export interface TerminalStoreState {
   ptyState: "working" | "turn_complete" | "approval_wait" | "idle";
   ptyTitle: string | null;
   approvalTool: string | null;
+  frameCache: Map<number, TermLine[]>;
+  anchorLineId: number | null;
+  newestLineId: number | null;
 }
 
 export type TerminalAction =
   | { type: "SET_TERMINAL_LINES"; lines: TermLine[] }
   | { type: "SET_FONT_SIZE_INDEX"; index: number }
   | { type: "SET_PTY_STATE"; state: TerminalStoreState["ptyState"]; title?: string }
-  | { type: "SET_APPROVAL_TOOL"; tool: string | null };
+  | { type: "SET_APPROVAL_TOOL"; tool: string | null }
+  | { type: "CACHE_FRAME"; anchorLineId: number; lines: TermLine[] }
+  | { type: "SET_SCROLL_STATE"; anchorLineId: number | null; newestLineId: number | null }
+  | { type: "CLEAR_ANCHOR" };
 
 function loadFontSizeIndex(): number {
   const stored = Taro.getStorageSync("cc_fontSizeIndex") as number | "";
@@ -38,6 +44,9 @@ export const initialTerminalState: TerminalStoreState = {
   ptyState: "idle",
   ptyTitle: null,
   approvalTool: null,
+  frameCache: new Map(),
+  anchorLineId: null,
+  newestLineId: null,
 };
 
 export function terminalReducer(
@@ -46,6 +55,8 @@ export function terminalReducer(
 ): TerminalStoreState {
   switch (action.type) {
     case "SET_TERMINAL_LINES":
+      // 锚定状态下不更新 lines，防止 live 帧覆盖滚动视图
+      if (state.anchorLineId !== null) return state;
       return { ...state, lines: action.lines };
     case "SET_FONT_SIZE_INDEX": {
       const idx = Math.max(0, Math.min(action.index, FONT_SIZES.length - 1));
@@ -55,6 +66,15 @@ export function terminalReducer(
       return { ...state, ptyState: action.state, ptyTitle: action.title ?? state.ptyTitle };
     case "SET_APPROVAL_TOOL":
       return { ...state, approvalTool: action.tool };
+    case "CACHE_FRAME": {
+      const newCache = new Map(state.frameCache);
+      newCache.set(action.anchorLineId, action.lines);
+      return { ...state, frameCache: newCache };
+    }
+    case "SET_SCROLL_STATE":
+      return { ...state, anchorLineId: action.anchorLineId, newestLineId: action.newestLineId };
+    case "CLEAR_ANCHOR":
+      return { ...state, anchorLineId: null };
     default:
       return state;
   }

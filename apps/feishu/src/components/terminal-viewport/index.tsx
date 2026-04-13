@@ -12,6 +12,8 @@ interface TerminalViewportProps {
   fontSize: number;
   onPinchZoom: (direction: "in" | "out") => void;
   onScroll: (direction: "up" | "down", delta: number) => void;
+  isScrolled?: boolean;
+  onTapToReturn?: () => void;
 }
 
 const PX_PER_LINE = 20;
@@ -29,6 +31,8 @@ export function TerminalViewport({
   fontSize,
   onPinchZoom,
   onScroll,
+  isScrolled,
+  onTapToReturn,
 }: TerminalViewportProps) {
   const onScrollRef = useRef(onScroll);
   const onPinchZoomRef = useRef(onPinchZoom);
@@ -164,6 +168,11 @@ export function TerminalViewport({
           </View>
         ))}
       </View>
+      {isScrolled && (
+        <View className="terminal-scroll-indicator" onClick={onTapToReturn}>
+          <Text className="terminal-scroll-indicator-text">Scrolled - tap to return</Text>
+        </View>
+      )}
     </View>
   );
 }
