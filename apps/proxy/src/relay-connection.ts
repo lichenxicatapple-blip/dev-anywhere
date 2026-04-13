@@ -183,4 +183,14 @@ export class RelayConnection extends EventEmitter {
   getProxyId(): string {
     return this.proxyId;
   }
+
+  // 获取连接状态摘要，用于 CLI status 输出
+  getStatus(): { connected: boolean; proxyId: string; reconnectAttempt: number; queueDepth: number } {
+    return {
+      connected: this.ws?.readyState === WebSocket.OPEN,
+      proxyId: this.proxyId,
+      reconnectAttempt: this.reconnectAttempt,
+      queueDepth: this.queue.size(),
+    };
+  }
 }

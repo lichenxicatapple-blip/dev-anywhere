@@ -373,6 +373,26 @@ function handleTerminalConnection(
         break;
       }
 
+      case "service_status_request": {
+        const relayStatus = relayConnection?.getStatus() ?? null;
+        const sessions = sessionManager.listSessions();
+        socket.write(
+          serializeIpc({
+            type: "service_status_response",
+            relay: relayStatus,
+            sessions: sessions.map((s) => ({
+              id: s.id,
+              mode: s.mode,
+              state: s.state,
+              createdAt: new Date(s.createdAt).toISOString(),
+              ...(s.name !== undefined ? { name: s.name } : {}),
+              hasWorker: workerSockets.has(s.id),
+            })),
+          }),
+        );
+        break;
+      }
+
       case "pty_terminal_frame": {
         // terminal → serve → relay：转发终端帧，scrolled 帧不更新缓存（缓存只跟踪实时画面）
         if (frameCache) {

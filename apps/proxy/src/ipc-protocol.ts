@@ -107,6 +107,30 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     delta: z.number().int().positive(),
   }),
 
+  // 客户端请求增强版服务状态（含 relay 连接信息和 worker 状态）
+  z.object({
+    type: z.literal("service_status_request"),
+  }),
+
+  // 服务端响应增强版服务状态
+  z.object({
+    type: z.literal("service_status_response"),
+    relay: z.object({
+      connected: z.boolean(),
+      proxyId: z.string(),
+      reconnectAttempt: z.number(),
+      queueDepth: z.number(),
+    }).nullable(),
+    sessions: z.array(z.object({
+      id: z.string(),
+      mode: z.enum(["pty", "json"]),
+      state: z.enum(sessionStateValues),
+      createdAt: z.string(),
+      name: z.string().optional(),
+      hasWorker: z.boolean(),
+    })),
+  }),
+
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
   z.object({
     type: z.literal("pty_title_change"),

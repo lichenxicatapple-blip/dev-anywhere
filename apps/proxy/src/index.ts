@@ -4,8 +4,6 @@ import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
-import { startTerminal } from "./terminal.js";
-import { startService } from "./serve.js";
 import {
   PID_PATH,
   SOCK_PATH,
@@ -75,7 +73,33 @@ function showStatus(): Promise<number> {
     });
     sock.on("connect", () => {
       createIpcReader(sock, (msg) => {
-        if (msg.type === "session_list_response") {
+        if (msg.type === "service_status_response") {
+          // 显示 relay 连接状态
+          const relay = msg.relay;
+          if (!relay) {
+            log("Relay:   not configured");
+          } else if (relay.connected) {
+            log(`Relay:   connected (proxy: ${relay.proxyId})`);
+            log(`         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`);
+          } else {
+            log(`Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`);
+          }
+          log("");
+
+          // 显示会话列表
+          const sessions = msg.sessions;
+          if (sessions.length === 0) {
+            log("Sessions: none");
+          } else {
+            log(`Sessions: ${sessions.length}`);
+            for (const s of sessions) {
+              log(`  ${s.id}  ${s.mode}  ${s.state}  worker: ${s.hasWorker ? "yes" : "no"}`);
+            }
+          }
+          sock.destroy();
+          resolve(lines);
+        } else if (msg.type === "session_list_response") {
+          // 向后兼容：旧版 serve 进程返回 session_list_response
           const sessions = msg.sessions;
           if (sessions.length === 0) {
             log("Sessions: none");
@@ -89,7 +113,7 @@ function showStatus(): Promise<number> {
           resolve(lines);
         }
       });
-      sock.write(serializeIpc({ type: "session_list_request" }));
+      sock.write(serializeIpc({ type: "service_status_request" }));
     });
   });
 }
@@ -126,6 +150,7 @@ const program = new Command("cc-anywhere")
       console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
       process.exit(1);
     }
+    const { startTerminal } = await import("./terminal.js");
     await startTerminal(cliArgs);
   });
 
@@ -141,6 +166,7 @@ const serve = new Command("serve")
     if (opts.daemon) {
       await startDaemon();
     } else {
+      const { startService } = await import("./serve.js");
       await startService();
     }
   });
@@ -241,26 +267,26 @@ function openInNewWindow(args: string[]): void {
 }
 
 serve
-  .command("replay-e2e <fixturePath>")
-  .description("Full-chain terminal frame replay for E2E verification")
+  .command("replay <fixturePath>")
+  .description("Full-chain terminal frame replay")
   .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
   .option("--remote", "Render via frame pipeline (simulates remote client view)")
   .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
     const { resolve } = await import("node:path");
     const absPath = resolve(fixturePath);
-    const args = ["__replay-e2e", absPath, "-s", opts.speed];
+    const args = ["__replay", absPath, "-s", opts.speed];
     if (opts.remote) args.push("--remote");
     openInNewWindow(args);
   });
 
 // 新窗口中实际执行的回放逻辑（hidden command）
 serve
-  .command("__replay-e2e <fixturePath>", { hidden: true })
+  .command("__replay <fixturePath>", { hidden: true })
   .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
   .option("--remote", "Render via frame pipeline")
   .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
-    const { runReplayE2E } = await import("./replay-e2e.js");
-    await runReplayE2E(fixturePath, { speed: Number(opts.speed), remote: opts.remote });
+    const { runReplay } = await import("./replay.js");
+    await runReplay(fixturePath, { speed: Number(opts.speed), remote: opts.remote });
   });
 
 program.addCommand(serve);
