@@ -7,3 +7,6 @@ reference/
 .claude/
 .playwright-mcp/
 coverage/
+dist-h5/
+test-results/
+*.png

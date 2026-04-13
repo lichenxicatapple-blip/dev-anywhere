@@ -189,8 +189,10 @@ export async function runReplayE2E(fixturePath: string, options: ReplayOptions =
         payload: {
           mode: "full" as const,
           lines: grid,
-          cursor: tracker.getViewportOffset() === 0 ? tracker.getCursor() : undefined,
-          isScrolled: true,
+          cursor: tracker.isAnchored() ? undefined : tracker.getCursor(),
+          isScrolled: tracker.isAnchored(),
+          anchorLineId: tracker.getAnchorLineId() ?? undefined,
+          newestLineId: tracker.getNewestLineId(),
         },
       };
       socket.write(serializeIpc({
