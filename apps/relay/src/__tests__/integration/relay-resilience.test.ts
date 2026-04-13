@@ -184,7 +184,7 @@ describe("proxy lifecycle", () => {
     const client = ws.client(port);
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     // proxy 异常断线
     const offlinePromise = waitForMessage(client);
@@ -218,6 +218,7 @@ describe("proxy lifecycle", () => {
     const client = ws.client(port);
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
+    await waitForMessage(client); // consume proxy_select_response ACK
     await collectMessages(client, 3, 1000);
 
     // proxy 断线
@@ -259,6 +260,7 @@ describe("proxy lifecycle", () => {
     const client = ws.client(port);
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
+    await waitForMessage(client); // consume proxy_select_response ACK
     await collectMessages(client, 1, 1000);
 
     const beforeStatus = await fetchJson(port, "/status") as { proxyCount: number };
@@ -326,7 +328,8 @@ describe("proxy lifecycle", () => {
     await waitForOpen(client2);
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
     client2.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
+    await waitForMessage(client2); // consume proxy_select_response ACK
 
     const offline1 = waitForMessage(client1);
     const offline2 = waitForMessage(client2);
@@ -413,7 +416,7 @@ describe("client lifecycle", () => {
 
     // proxy_select + 双向
     client.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     const clientMsgP = waitForMessage(client);
     proxy.send(JSON.stringify(makeEnvelope(1)));
@@ -424,7 +427,7 @@ describe("client lifecycle", () => {
     expect(JSON.parse(await proxyMsgP).type).toBe("user_input");
   }, E2E_TIMEOUT);
 
-  it("proxy_select 不存在的 proxy → PROXY_NOT_FOUND", async () => {
+  it("proxy_select 不存在的 proxy → proxy_select_response failure", async () => {
     const client = ws.client(port);
     await waitForOpen(client);
 
@@ -432,11 +435,12 @@ describe("client lifecycle", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "ghost" }));
     const resp = JSON.parse(await msgP);
 
-    expect(resp.type).toBe("relay_error");
-    expect(resp.code).toBe("PROXY_NOT_FOUND");
+    expect(resp.type).toBe("proxy_select_response");
+    expect(resp.success).toBe(false);
+    expect(resp.error).toContain("not online");
   }, E2E_TIMEOUT);
 
-  it("proxy_select 离线 proxy → PROXY_NOT_FOUND", async () => {
+  it("proxy_select 离线 proxy → proxy_select_response failure", async () => {
     const proxyId = uid();
     const proxy = ws.proxy(port);
     await waitForOpen(proxy);
@@ -454,8 +458,9 @@ describe("client lifecycle", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId }));
     const resp = JSON.parse(await msgP);
 
-    expect(resp.type).toBe("relay_error");
-    expect(resp.code).toBe("PROXY_NOT_FOUND");
+    expect(resp.type).toBe("proxy_select_response");
+    expect(resp.success).toBe(false);
+    expect(resp.error).toContain("not online");
   }, E2E_TIMEOUT);
 
   it("Client 断线重连（proxy 在线）→ restored + 增量回放", async () => {
@@ -473,7 +478,7 @@ describe("client lifecycle", () => {
     client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     const liveMsgs = collectMessages(client1, 3);
     proxy.send(JSON.stringify(makeEnvelope(1)));
@@ -513,7 +518,7 @@ describe("client lifecycle", () => {
     client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     await waitForMessage(client1);
     client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     client1.close();
     await settle();
@@ -556,7 +561,7 @@ describe("client lifecycle", () => {
     const client = ws.client(port);
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     proxy.close();
     await settle(200);
@@ -605,7 +610,7 @@ describe("client lifecycle", () => {
     client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     const live1 = collectMessages(client1, 2);
     proxy.send(JSON.stringify(makeEnvelope(1)));
@@ -661,7 +666,7 @@ describe("client lifecycle", () => {
     client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     // 断开后重连
     client1.close();
@@ -1212,7 +1217,7 @@ describe("heartbeat dead connection detection", () => {
     const client = ws.client(port);
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "hb-p" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     // 禁用 pong 模拟死连接（TCP 层面无法在测试中真正断网，这是最接近的方式）
     proxy.pong = () => {};
@@ -1235,7 +1240,7 @@ describe("heartbeat dead connection detection", () => {
     client.send(JSON.stringify({ type: "client_register", clientId: "hb-c1", sessions: {} }));
     await waitForMessage(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "hb-c" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     client.pong = () => {};
     client.on("ping", () => { /* 不回复 */ });
@@ -1290,7 +1295,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     client.send(JSON.stringify({ type: "client_register", clientId: "cable-c", sessions: {} }));
     await waitForMessage(client); // new
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "cable" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     const liveMsgs = collectMessages(client, 3);
     proxy1.send(JSON.stringify(makeEnvelope(1, "cable-s")));
@@ -1353,7 +1358,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "multi" }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     // proxy 交替发送 3 个 session 的消息
     const allLive = collectMessages(client1, 6);

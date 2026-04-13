@@ -79,7 +79,7 @@ describe("client_register protocol", () => {
 
     // 通过 proxy_select 绑定到 proxy
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     // 断开第一个客户端
     client1.close();
@@ -120,7 +120,7 @@ describe("client_register protocol", () => {
     }));
     await waitForMessage(client1); // new response
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     // Proxy 发送 3 条消息
     const makeEnvelope = (seq: number) => ({
@@ -192,7 +192,7 @@ describe("client_register protocol", () => {
     }));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client1); // consume proxy_select_response ACK
 
     // 断开客户端和 proxy
     client1.close();
@@ -229,7 +229,7 @@ describe("client_register protocol", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     // Proxy 断开进入宽限期
     proxy.close();
@@ -269,8 +269,9 @@ describe("client_register protocol", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
 
     const response = JSON.parse(await msgPromise);
-    expect(response.type).toBe("relay_error");
-    expect(response.code).toBe("PROXY_NOT_FOUND");
+    expect(response.type).toBe("proxy_select_response");
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("not online");
   });
 
   it("proxy_select rejects binding to nonexistent proxy", async () => {
@@ -281,8 +282,9 @@ describe("client_register protocol", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "nonexistent" }));
 
     const response = JSON.parse(await msgPromise);
-    expect(response.type).toBe("relay_error");
-    expect(response.code).toBe("PROXY_NOT_FOUND");
+    expect(response.type).toBe("proxy_select_response");
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("not online");
   });
 
   it("client receives proxy_offline on proxy graceful disconnect", async () => {
@@ -294,7 +296,7 @@ describe("client_register protocol", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     // proxy 主动退出
     const msgPromise = waitForMessage(client);
@@ -314,7 +316,7 @@ describe("client_register protocol", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     // proxy 异常断线（跳过 broadcast 的 proxy_list_response）
     const offlinePromise = waitForMessageType(client, "proxy_offline");
@@ -333,6 +335,50 @@ describe("client_register protocol", () => {
     expect(onlineMsg.proxyId).toBe("p1");
   });
 
+  it("proxy_select returns proxy_select_response with success true", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("proxy_select_response");
+    expect(response.success).toBe(true);
+    expect(response.proxyId).toBe("p1");
+  });
+
+  it("proxy_list_response includes sessions per proxy", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await waitForMessage(proxy); // consume register response
+    await settle();
+
+    // proxy 发送 session_sync 注册 session
+    proxy.send(JSON.stringify({
+      type: "session_sync",
+      sessions: [{ id: "s1", mode: "pty", state: "idle" }, { id: "s2", mode: "json", state: "working" }],
+    }));
+    await settle();
+
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "proxy_list_request" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response.type).toBe("proxy_list_response");
+    expect(response.proxies).toHaveLength(1);
+    expect(response.proxies[0].sessions).toEqual(expect.arrayContaining(["s1", "s2"]));
+  });
+
   it("proxy_select still works for clients without client_register", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
@@ -342,7 +388,11 @@ describe("client_register protocol", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+
+    // 先消费 proxy_select_response ACK
+    const ack = JSON.parse(await waitForMessage(client));
+    expect(ack.type).toBe("proxy_select_response");
+    expect(ack.success).toBe(true);
 
     // proxy -> client 应该工作
     const msgPromise = waitForMessage(client);

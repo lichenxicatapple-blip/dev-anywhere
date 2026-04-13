@@ -118,36 +118,14 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_list_request") {
-        const proxies = registry.listProxiesWithName();
+        const proxies = registry.listProxiesWithName().map(p => ({
+          ...p,
+          sessions: registry.getSessionsForProxy(p.proxyId),
+        }));
         clientWs.send(JSON.stringify({
           type: "proxy_list_response",
           proxies,
         }));
-        return;
-      }
-
-      if (msg.type === "bind_by_session") {
-        const proxyId = registry.getProxyForSession(msg.sessionId);
-        if (!proxyId) {
-          clientWs.send(JSON.stringify({
-            type: "bind_by_session_response",
-            success: false,
-            error: `No proxy found for session ${msg.sessionId}`,
-          }));
-          logger.info({ clientId: clientWs.clientId, sessionId: msg.sessionId }, "bind_by_session failed: session not found");
-          return;
-        }
-        if (!clientWs.clientId) {
-          clientWs.clientId = `anon-${nanoid(10)}`;
-        }
-        registry.bindClientById(clientWs.clientId, proxyId, clientWs);
-        clientWs.boundProxyId = proxyId;
-        clientWs.send(JSON.stringify({
-          type: "bind_by_session_response",
-          success: true,
-          proxyId,
-        }));
-        logger.info({ clientId: clientWs.clientId, proxyId, sessionId: msg.sessionId }, "Client bound to proxy via session");
         return;
       }
 
@@ -174,9 +152,9 @@ export function handleClientConnection(
       if (msg.type === "proxy_select") {
         if (!registry.isProxyOnline(msg.proxyId)) {
           clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "PROXY_NOT_FOUND",
-            message: `Proxy not online: ${msg.proxyId}`,
+            type: "proxy_select_response",
+            success: false,
+            error: `Proxy not online: ${msg.proxyId}`,
           }));
           return;
         }
@@ -187,13 +165,18 @@ export function handleClientConnection(
         const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         if (!bound) {
           clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "PROXY_NOT_FOUND",
-            message: `Proxy not online: ${msg.proxyId}`,
+            type: "proxy_select_response",
+            success: false,
+            error: `Proxy not online: ${msg.proxyId}`,
           }));
           return;
         }
         clientWs.boundProxyId = msg.proxyId;
+        clientWs.send(JSON.stringify({
+          type: "proxy_select_response",
+          success: true,
+          proxyId: msg.proxyId,
+        }));
         logger.info({ proxyId: msg.proxyId, clientId: clientWs.clientId }, "Client bound to proxy");
         return;
       }

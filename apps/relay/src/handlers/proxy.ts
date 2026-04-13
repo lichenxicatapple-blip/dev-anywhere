@@ -25,7 +25,10 @@ interface ProxySocket extends WebSocket {
 // proxy 上线或下线时，将最新的 proxy 列表推送给所有已连接的 client。
 // 复用 proxy_list_response 消息类型，client 端已有对应处理逻辑，无需额外适配。
 function broadcastProxyList(registry: RelayRegistry): void {
-  const proxies = registry.listProxiesWithName();
+  const proxies = registry.listProxiesWithName().map(p => ({
+    ...p,
+    sessions: registry.getSessionsForProxy(p.proxyId),
+  }));
   const msg = JSON.stringify({ type: "proxy_list_response", proxies });
   for (const clientWs of registry.getAllClientWs()) {
     clientWs.send(msg);

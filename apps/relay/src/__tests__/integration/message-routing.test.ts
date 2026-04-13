@@ -58,7 +58,7 @@ describe("Phase 6 Integration: Message Routing", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await settle();
+    await waitForMessage(client); // consume proxy_select_response ACK
 
     return { proxy, client };
   }
@@ -243,7 +243,7 @@ describe("Phase 6 Integration: Message Routing", () => {
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1", name: "My MacBook", online: true }]);
+    expect(response.proxies).toEqual([{ proxyId: "p1", name: "My MacBook", online: true, sessions: [] }]);
   });
 
   // ==========================================================

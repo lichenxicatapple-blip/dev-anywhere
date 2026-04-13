@@ -5,7 +5,7 @@ import {
 } from "./session.js";
 
 // 控制消息中复用的子类型
-export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional(), online: z.boolean() });
+export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional(), online: z.boolean(), sessions: z.array(z.string()).optional() });
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
@@ -41,6 +41,12 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     proxies: z.array(ProxyInfoSchema),
   }),
   z.object({ type: z.literal("proxy_select"), proxyId: z.string().min(1) }),
+  z.object({
+    type: z.literal("proxy_select_response"),
+    success: z.boolean(),
+    proxyId: z.string().optional(),
+    error: z.string().optional(),
+  }),
   z.object({
     type: z.literal("relay_error"),
     code: z.string(),
@@ -177,18 +183,6 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     direction: z.enum(["up", "down"]),
     delta: z.number().int().positive(),
-  }),
-
-  // client 通过 sessionId 请求绑定到拥有该 session 的 proxy
-  z.object({
-    type: z.literal("bind_by_session"),
-    sessionId: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("bind_by_session_response"),
-    success: z.boolean(),
-    proxyId: z.string().optional(),
-    error: z.string().optional(),
   }),
 
   // proxy 重连后同步活跃 session 列表给 relay

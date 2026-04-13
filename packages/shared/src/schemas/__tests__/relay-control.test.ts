@@ -160,4 +160,57 @@ describe("RelayControlSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("parses proxy_select_response with success=true and proxyId", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_select_response",
+      success: true,
+      proxyId: "p1",
+    });
+    expect(result.type).toBe("proxy_select_response");
+    if (result.type === "proxy_select_response") {
+      expect(result.success).toBe(true);
+      expect(result.proxyId).toBe("p1");
+    }
+  });
+
+  it("parses proxy_select_response with success=false and error", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_select_response",
+      success: false,
+      error: "Proxy not online: p1",
+    });
+    expect(result.type).toBe("proxy_select_response");
+    if (result.type === "proxy_select_response") {
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Proxy not online: p1");
+    }
+  });
+
+  it("parses proxy_list_response with sessions field in ProxyInfo", () => {
+    const result = RelayControlSchema.parse({
+      type: "proxy_list_response",
+      proxies: [
+        { proxyId: "p1", online: true, sessions: ["s1", "s2"] },
+        { proxyId: "p2", online: false },
+      ],
+    });
+    expect(result.type).toBe("proxy_list_response");
+    if (result.type === "proxy_list_response") {
+      expect(result.proxies[0].sessions).toEqual(["s1", "s2"]);
+      expect(result.proxies[1].sessions).toBeUndefined();
+    }
+  });
+
+  it("rejects bind_by_session type (removed from schema)", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "bind_by_session", sessionId: "s1" }),
+    ).toThrow();
+  });
+
+  it("rejects bind_by_session_response type (removed from schema)", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "bind_by_session_response", success: true, proxyId: "p1" }),
+    ).toThrow();
+  });
 });

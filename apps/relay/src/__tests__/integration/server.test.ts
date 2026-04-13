@@ -66,7 +66,7 @@ describe("Relay Server Integration", () => {
     const response = JSON.parse(await msgPromise);
 
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1", online: true }]);
+    expect(response.proxies).toEqual([{ proxyId: "p1", online: true, sessions: [] }]);
   });
 
   it("client selects proxy and messages route bidirectionally", async () => {
@@ -78,7 +78,10 @@ describe("Relay Server Integration", () => {
     const client = connectClient();
     await waitForOpen(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await new Promise((r) => setTimeout(r, 50));
+    // 消费 proxy_select_response ACK
+    const ack = JSON.parse(await waitForMessage(client));
+    expect(ack.type).toBe("proxy_select_response");
+    expect(ack.success).toBe(true);
 
     // proxy -> client
     const clientMsgPromise = waitForMessage(client);
@@ -121,8 +124,9 @@ describe("Relay Server Integration", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "nonexistent" }));
     const response = JSON.parse(await msgPromise);
 
-    expect(response.type).toBe("relay_error");
-    expect(response.code).toBe("PROXY_NOT_FOUND");
+    expect(response.type).toBe("proxy_select_response");
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("not online");
   });
 
   it("GET /health returns 200 with status ok", async () => {
