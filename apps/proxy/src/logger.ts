@@ -1,5 +1,11 @@
+import { mkdirSync } from "node:fs";
 import pino from "pino";
-import { LOG_PATH, TERMINAL_LOG_PATH } from "./paths.js";
+import { LOG_DIR, LOG_PATH, TERMINAL_LOG_PATH } from "./paths.js";
+
+// 确保日志目录存在，daemon 首次启动时 initWorkspace 可能还未调用
+if (!process.env.VITEST) {
+  mkdirSync(LOG_DIR, { recursive: true });
+}
 
 export const logger = process.env.VITEST
   ? pino({ level: "silent" })

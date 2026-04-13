@@ -19,8 +19,9 @@ export const LASTSEQ_PATH = `${STATE_DIR}/lastseq.json`;
 export const DATA_DIR = `${CC_DIR}/data`;
 
 // 日志
-export const LOG_PATH = `${CC_DIR}/service.log`;
-export const TERMINAL_LOG_PATH = `${CC_DIR}/terminal.log`;
+export const LOG_DIR = `${CC_DIR}/logs`;
+export const LOG_PATH = `${LOG_DIR}/service.log`;
+export const TERMINAL_LOG_PATH = `${LOG_DIR}/terminal.log`;
 
 export function sessionDir(sessionId: string): string {
   return `${DATA_DIR}/${sessionId}`;
@@ -48,6 +49,7 @@ export function initWorkspace(): void {
   mkdirSync(RUN_DIR, { recursive: true });
   mkdirSync(STATE_DIR, { recursive: true });
   mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true });
   if (!existsSync(CONFIG_PATH)) {
     writeFileSync(CONFIG_PATH, DEFAULT_CONFIG);
   }
@@ -57,4 +59,5 @@ export function ensureDirectories(): void {
   mkdirSync(RUN_DIR, { recursive: true });
   mkdirSync(STATE_DIR, { recursive: true });
   mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true });
 }
