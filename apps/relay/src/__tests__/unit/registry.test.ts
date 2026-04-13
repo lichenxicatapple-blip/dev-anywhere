@@ -229,6 +229,72 @@ describe("RelayRegistry", () => {
     });
   });
 
+  describe("getProxyDetail", () => {
+    it("returns undefined for unknown proxy", () => {
+      expect(registry.getProxyDetail("unknown")).toBeUndefined();
+    });
+
+    it("returns detail for online proxy with sessions", () => {
+      const ws = createMockWs();
+      registry.registerProxy("p1", ws, "MacBook");
+      registry.addSessionToProxy("p1", "s1");
+      registry.addSessionToProxy("p1", "s2");
+
+      const detail = registry.getProxyDetail("p1");
+      expect(detail).toBeDefined();
+      expect(detail!.proxyId).toBe("p1");
+      expect(detail!.name).toBe("MacBook");
+      expect(detail!.online).toBe(true);
+      expect(detail!.sessions).toContain("s1");
+      expect(detail!.sessions).toContain("s2");
+      expect(detail!.disconnectedAt).toBeNull();
+    });
+
+    it("returns detail for offline proxy with disconnectedAt timestamp", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.markProxyOffline("p1");
+
+      const detail = registry.getProxyDetail("p1");
+      expect(detail).toBeDefined();
+      expect(detail!.online).toBe(false);
+      expect(detail!.disconnectedAt).toBeTypeOf("number");
+    });
+
+    it("omits name field when proxy has no name", () => {
+      registry.registerProxy("p1", createMockWs());
+      const detail = registry.getProxyDetail("p1");
+      expect(detail).toBeDefined();
+      expect("name" in detail!).toBe(false);
+    });
+  });
+
+  describe("getClientDetails", () => {
+    it("returns empty array when no clients bound", () => {
+      expect(registry.getClientDetails()).toEqual([]);
+    });
+
+    it("returns all client bindings with online status", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", createMockWs(WebSocket.OPEN));
+      registry.bindClientById("c2", "p1", createMockWs(WebSocket.OPEN));
+
+      const details = registry.getClientDetails();
+      expect(details).toHaveLength(2);
+      expect(details[0]).toEqual({ clientId: "c1", proxyId: "p1", online: true });
+      expect(details[1]).toEqual({ clientId: "c2", proxyId: "p1", online: true });
+    });
+
+    it("shows offline status for unbound clients", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", createMockWs());
+      registry.unbindClientById("c1");
+
+      const details = registry.getClientDetails();
+      expect(details).toHaveLength(1);
+      expect(details[0].online).toBe(false);
+    });
+  });
+
   describe("getBufferStats", () => {
     it("returns accurate counts", () => {
       registry.registerProxy("p1", createMockWs());

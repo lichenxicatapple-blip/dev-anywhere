@@ -241,6 +241,32 @@ export class RelayRegistry {
   }
 
 
+  // 获取单个 proxy 的详细状态信息
+  getProxyDetail(proxyId: string): { proxyId: string; name?: string; online: boolean; sessions: string[]; disconnectedAt: number | null } | undefined {
+    const state = this.proxyStates.get(proxyId);
+    if (!state) return undefined;
+    return {
+      proxyId,
+      ...(state.name !== undefined ? { name: state.name } : {}),
+      online: state.ws !== null && state.ws !== undefined && state.ws.readyState === WebSocket.OPEN,
+      sessions: Array.from(state.sessions),
+      disconnectedAt: state.disconnectedAt,
+    };
+  }
+
+  // 获取所有客户端绑定的详细信息
+  getClientDetails(): Array<{ clientId: string; proxyId: string; online: boolean }> {
+    const details: Array<{ clientId: string; proxyId: string; online: boolean }> = [];
+    for (const [clientId, binding] of this.clientBindings) {
+      details.push({
+        clientId,
+        proxyId: binding.proxyId,
+        online: binding.ws !== null && binding.ws !== undefined && binding.ws.readyState === WebSocket.OPEN,
+      });
+    }
+    return details;
+  }
+
   getBufferStats(): BufferStats {
     let totalBuffered = 0;
     for (const [, buffer] of this.sessionBuffers) {
