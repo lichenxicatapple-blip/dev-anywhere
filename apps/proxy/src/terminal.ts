@@ -32,7 +32,10 @@ function sleep(ms: number): Promise<void> {
 
 async function ensureService(autoStart = true): Promise<Socket> {
   const existing = await tryConnect(SOCK_PATH);
-  if (existing) return existing;
+  if (existing) {
+    log.info("Connected to existing service");
+    return existing;
+  }
 
   if (!autoStart) throw new Error("Service is not running");
 
@@ -40,6 +43,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
 
   const isDev = __filename.endsWith(".ts");
   const servePath = join(__dirname, isDev ? "serve.ts" : "serve.js");
+  log.info({ servePath, isDev }, "Auto-starting serve daemon");
   const child = spawn(isDev ? "tsx" : process.execPath, [servePath], {
     detached: true,
     stdio: "ignore",
@@ -51,9 +55,13 @@ async function ensureService(autoStart = true): Promise<Socket> {
     const delay = Math.min(100 * (i + 1), 2000);
     await sleep(delay);
     const socket = await tryConnect(SOCK_PATH);
-    if (socket) return socket;
+    if (socket) {
+      log.info({ attempt: i + 1 }, "Connected to service after retry");
+      return socket;
+    }
   }
 
+  log.error({ maxRetries }, "Failed to connect to service");
   throw new Error(
     `Failed to connect to cc-anywhere service after ${maxRetries} retries. Check ${LOG_PATH} for details.`,
   );
@@ -105,21 +113,25 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       },
     });
     framePusher.start();
+    log.debug({ sessionId }, "Frame push started");
   }
 
   function stopFramePush(): void {
     if (framePusher) {
       framePusher.stop();
       framePusher = null;
+      log.debug("Frame push stopped");
     }
   }
 
   function setupSocketHandlers(): void {
     createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
+        log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
       }
       if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && framePusher) {
+        log.debug({ sessionId }, "Full frame requested");
         framePusher.forceFull();
       }
       if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
@@ -152,6 +164,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     });
 
     socket.on("close", () => {
+      log.info("Serve socket closed");
       if (!reconnecting) {
         reconnecting = true;
         reconnectToServe();
@@ -172,18 +185,21 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   }
 
   async function reconnectToServe(): Promise<void> {
+    log.info("Serve connection lost, starting reconnection");
 
     const maxRetries = 60;
     for (let i = 0; i < maxRetries; i++) {
       await sleep(Math.min(1000 * (i + 1), 5000));
       try {
         const stopped = existsSync(STOPPED_PATH);
+        log.debug({ attempt: i + 1, stopped }, "Reconnect attempt");
         const newSocket = stopped
           ? await tryConnect(SOCK_PATH)
           : await ensureService();
         if (!newSocket) continue;
         socket = newSocket;
         reconnecting = false;
+        log.info({ attempt: i + 1, sessionId }, "Reconnected to serve");
 
         setupSocketHandlers();
 
@@ -196,6 +212,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId }));
             startFramePush();
+            log.info({ sessionId }, "Session re-registered after reconnect");
           }
         }
 
@@ -204,6 +221,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         // 继续重试
       }
     }
+    log.error({ maxRetries }, "Reconnection exhausted");
     reconnecting = false;
   }
 
@@ -224,8 +242,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
+  log.info({ sessionId, cols, rows }, "Session created, tracker initialized");
   tracker = new TerminalTracker(cols, rows);
   tracker.onTitleChange = (title) => {
+    log.debug({ sessionId, title }, "Title change forwarded");
     if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_title_change", sessionId, title }));
     }
@@ -252,6 +272,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     },
     onSessionExit: (code: number) => {
+      log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
       if (idleCheckTimer) clearInterval(idleCheckTimer);
       stopFramePush();
       if (tracker) tracker.dispose();
@@ -265,6 +286,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     },
   });
   ptyManager.start();
+  log.info({ sessionId }, "PTY started, frame push active");
 
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
   startFramePush();
@@ -272,6 +294,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   setupIdleCheck();
 
   process.on("SIGTERM", () => {
+    log.info({ sessionId }, "SIGTERM received, shutting down");
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     stopFramePush();
     if (tracker) tracker.dispose();
