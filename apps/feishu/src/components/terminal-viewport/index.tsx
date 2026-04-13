@@ -18,7 +18,7 @@ interface TerminalViewportProps {
 
 const PX_PER_LINE = 20;
 const MIN_SWIPE_PX = 20;
-const THROTTLE_MS = 50;
+const THROTTLE_MS = 100;
 
 function getDistance(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }): number {
   const dx = a.clientX - b.clientX;
@@ -101,7 +101,10 @@ export function TerminalViewport({
     // wheel 事件：触摸板双指垂直滑动
     let wheelAccum = 0;
     function onWheel(e: WheelEvent) {
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        console.log("[scroll] wheel ignored: horizontal", { deltaX: e.deltaX, deltaY: e.deltaY });
+        return;
+      }
       e.preventDefault();
       wheelAccum += e.deltaY;
       if (Math.abs(wheelAccum) < MIN_SWIPE_PX) return;
@@ -113,7 +116,9 @@ export function TerminalViewport({
       lastRequestTime = now;
       const clamped = Math.min(Math.abs(wheelAccum), 200);
       const delta = Math.max(1, Math.round(clamped / PX_PER_LINE));
-      onScrollRef.current(wheelAccum > 0 ? "up" : "down", delta);
+      const direction = wheelAccum > 0 ? "up" : "down";
+      console.log("[scroll] wheel fire:", { t: Date.now(), direction, delta, wheelAccum, clamped });
+      onScrollRef.current(direction, delta);
       wheelAccum = 0;
     }
 
@@ -135,6 +140,25 @@ export function TerminalViewport({
       document.removeEventListener("mouseup", onMouseUp);
     };
   }, []);
+
+  // viewport 高度对齐：缩小到 lineHeight 整数倍，消除顶部行裁剪
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(".terminal-viewport") as HTMLElement | null;
+      if (!el) return;
+      el.style.maxHeight = "";
+      void el.offsetHeight;
+      const h = el.getBoundingClientRect().height;
+      const lineH = Math.round(fontSize * 1.4);
+      if (lineH <= 0) return;
+      const remainder = h % lineH;
+      console.log("[viewport-align]", { naturalH: h, lineH, remainder, aligned: h - remainder });
+      if (remainder > 0.5) {
+        el.style.maxHeight = `${h - remainder}px`;
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [fontSize]);
 
   const lineStyle = (fs: number) => ({
     fontSize: `${fs}PX`,

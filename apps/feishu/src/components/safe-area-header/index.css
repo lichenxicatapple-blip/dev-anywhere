@@ -8,7 +8,7 @@
 }
 
 .safe-area-header-transparent {
-  background-color: transparent;
+  background-color: var(--color-terminal-bg, #1E1E1E);
 }
 
 .safe-area-header-bar {

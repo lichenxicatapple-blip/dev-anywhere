@@ -3,7 +3,7 @@ import { View } from "@tarojs/components";
 import "./index.css";
 
 interface StatusLineProps {
-  state: "idle" | "working" | "waiting_approval" | "terminated";
+  state: "idle" | "working" | "waiting_approval" | "terminated" | "disconnected";
 }
 
 export function StatusLine({ state }: StatusLineProps) {

@@ -166,14 +166,9 @@ export default function Chat() {
           if (frame.mode === "full") {
             const fullFrame = frame as TerminalFramePayload & { anchorLineId?: number; newestLineId?: number };
             if (fullFrame.anchorLineId != null) {
-              // 始终缓存服务端返回的滚动帧
+              console.log("[scroll] response frame:", { anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId, lineCount: frame.lines.length });
               terminalDispatch({ type: "CACHE_FRAME", anchorLineId: fullFrame.anchorLineId, lines: frame.lines });
-              // 只在当前没有锚点（首次滚动响应）时才更新显示并预取
-              if (terminalStateRef.current.anchorLineId == null) {
-                terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
-                terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null });
-              }
-              // 已有锚点时只 cache，不显示不预取，避免乱序响应和 prefetch 循环
+              terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null, lines: frame.lines });
             } else {
               // live 帧：仅在非锚定模式下更新
               terminalDispatch({ type: "SET_TERMINAL_LINES", lines: frame.lines });
@@ -255,6 +250,7 @@ export default function Chat() {
 
     // 已绑定时直接请求帧，否则走绑定流程
     if (relay.getBoundProxyId()) {
+      appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
         relay.sendControl({ type: "terminal_frame_request", sessionId });
       }
@@ -271,12 +267,14 @@ export default function Chat() {
     chatState.pendingApprovals,
   );
 
-  const statusState = statusFromState(
-    mode,
-    terminalState.ptyState,
-    chatState.isWorking,
-    chatState.pendingApprovals,
-  );
+  const statusState = !appState.connected || !appState.proxyOnline
+    ? "disconnected" as const
+    : statusFromState(
+        mode,
+        terminalState.ptyState,
+        chatState.isWorking,
+        chatState.pendingApprovals,
+      );
 
   const pendingApprovals = chatState.pendingApprovals.filter((a) => a.status === "pending");
 
@@ -322,10 +320,14 @@ export default function Chat() {
 
   const handleTerminalScroll = useCallback(
     (direction: "up" | "down", delta: number) => {
-      if (!relay || !sessionId || !checkConnected()) return;
+      if (!relay || !sessionId) {
+        console.warn("[scroll] not ready:", { hasRelay: !!relay, sessionId });
+        return;
+      }
 
       const state = terminalStateRef.current;
       const rows = state.lines.length || 40;
+      console.log("[scroll] request:", { direction, delta, anchorLineId: state.anchorLineId, newestLineId: state.newestLineId });
 
       if (state.anchorLineId != null) {
         const targetAnchor = direction === "up"
@@ -334,17 +336,19 @@ export default function Chat() {
 
         // scrollDown 回到 live 模式
         if (direction === "down" && state.newestLineId != null && targetAnchor + rows > state.newestLineId) {
+          console.log("[scroll] return to live");
           terminalDispatch({ type: "CLEAR_ANCHOR" });
           relay.sendControl({ type: "terminal_frame_request", sessionId });
           return;
         }
 
         // 命中缓存则直接显示
-        if (state.frameCache.has(targetAnchor)) {
-          const cachedLines = state.frameCache.get(targetAnchor)!;
-          terminalDispatch({ type: "CLEAR_ANCHOR" });
-          terminalDispatch({ type: "SET_TERMINAL_LINES", lines: cachedLines });
-          terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: targetAnchor, newestLineId: state.newestLineId });
+        const cached = state.frameCache.get(targetAnchor);
+        if (cached) {
+          console.log("[scroll] cache hit:", { targetAnchor });
+          terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: targetAnchor, newestLineId: state.newestLineId, lines: cached });
+        } else {
+          console.log("[scroll] cache miss:", { targetAnchor });
         }
       }
 
@@ -356,7 +360,7 @@ export default function Chat() {
         delta,
       });
     },
-    [relay, sessionId, checkConnected, terminalDispatch],
+    [relay, sessionId, terminalDispatch],
   );
 
   const handlePinchZoom = useCallback(
@@ -532,8 +536,8 @@ export default function Chat() {
         statusBarHeight={screen.statusBarHeight}
         transparent={isDark}
       />
-      <StatusLine state={statusState} />
       <View className="chat-page-body">
+        <StatusLine state={statusState} />
         <View className="chat-content">
           {isPty ? (
             <TerminalViewport

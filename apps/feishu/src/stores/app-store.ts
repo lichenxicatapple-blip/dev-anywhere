@@ -1,6 +1,7 @@
 // 应用级状态管理：连接状态、选中代理、客户端标识、AppPhase 状态机
 import { createContext, useContext } from "react";
 import Taro from "@tarojs/taro";
+import type { ProxyInfo } from "@cc-anywhere/shared";
 
 export type AppPhase =
   | "connecting"
@@ -17,6 +18,7 @@ export interface AppState {
   proxyOnline: boolean;
   selectedProxyId: string | null;
   selectedProxyName: string | null;
+  proxies: ProxyInfo[];
   clientId: string;
   relayUrl: string;
 }
@@ -26,7 +28,8 @@ export type AppAction =
   | { type: "SET_PROXY"; proxyId: string | null; proxyName: string | null }
   | { type: "SET_PROXY_ONLINE"; online: boolean }
   | { type: "SET_RELAY_URL"; url: string }
-  | { type: "SET_PHASE"; phase: AppPhase };
+  | { type: "SET_PHASE"; phase: AppPhase }
+  | { type: "SET_PROXIES"; proxies: ProxyInfo[] };
 
 function loadClientId(): string {
   const stored = Taro.getStorageSync("cc_clientId") as string;
@@ -43,6 +46,7 @@ export const initialAppState: AppState = {
   proxyOnline: false,
   selectedProxyId: null,
   selectedProxyName: null,
+  proxies: [],
   clientId: loadClientId(),
   relayUrl: "",
 };
@@ -57,6 +61,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, proxyOnline: action.online };
     case "SET_RELAY_URL":
       return { ...state, relayUrl: action.url };
+    case "SET_PROXIES":
+      return { ...state, proxies: action.proxies };
     case "SET_PHASE": {
       const next = action.phase;
       const phaseBeforeDisconnect =

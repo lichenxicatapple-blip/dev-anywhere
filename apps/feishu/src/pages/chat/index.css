@@ -10,6 +10,10 @@
   background: #1E1E1E;
 }
 
+.chat-page .status-line {
+  margin-bottom: 16px;
+}
+
 /* PTY 模式下 SafeAreaHeader 文字需要白色 */
 .chat-page-dark .safe-area-header-back-icon {
   color: #FFFFFF;

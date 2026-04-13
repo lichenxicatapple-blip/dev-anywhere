@@ -25,7 +25,9 @@ export class RelayClient {
   }
 
   // 发送 client_register，携带 clientId 和各 session 已收到的最大 seq
+  // 注册意味着新连接，旧绑定对新 relay 实例无效
   register(): void {
+    this.boundProxyId = null;
     this.ws.send(
       JSON.stringify({
         type: "client_register",

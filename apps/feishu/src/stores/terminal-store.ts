@@ -26,7 +26,7 @@ export type TerminalAction =
   | { type: "SET_PTY_STATE"; state: TerminalStoreState["ptyState"]; title?: string }
   | { type: "SET_APPROVAL_TOOL"; tool: string | null }
   | { type: "CACHE_FRAME"; anchorLineId: number; lines: TermLine[] }
-  | { type: "SET_SCROLL_STATE"; anchorLineId: number | null; newestLineId: number | null }
+  | { type: "SET_SCROLL_STATE"; anchorLineId: number | null; newestLineId: number | null; lines?: TermLine[] }
   | { type: "CLEAR_ANCHOR" };
 
 function loadFontSizeIndex(): number {
@@ -71,8 +71,11 @@ export function terminalReducer(
       newCache.set(action.anchorLineId, action.lines);
       return { ...state, frameCache: newCache };
     }
-    case "SET_SCROLL_STATE":
-      return { ...state, anchorLineId: action.anchorLineId, newestLineId: action.newestLineId };
+    case "SET_SCROLL_STATE": {
+      const next = { ...state, anchorLineId: action.anchorLineId, newestLineId: action.newestLineId };
+      if (action.lines) next.lines = action.lines;
+      return next;
+    }
     case "CLEAR_ANCHOR":
       return { ...state, anchorLineId: null };
     default:

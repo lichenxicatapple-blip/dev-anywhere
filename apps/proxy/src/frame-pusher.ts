@@ -37,7 +37,7 @@ export interface FramePusher {
  * 创建终端帧推送器
  *
  * 每 200ms 检测 grid 变化，首帧 full 模式，后续 delta 模式只发变化行。
- * terminal.ts 和 replay-e2e.ts 共用此逻辑。
+ * terminal.ts 和 replay.ts 共用此逻辑。
  */
 export function createFramePusher(options: FramePusherOptions): FramePusher {
   const { tracker, sessionId, sendFrame } = options;

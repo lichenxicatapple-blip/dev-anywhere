@@ -61,6 +61,8 @@ export function handleWsStatusChange(
       dispatch({ type: "SET_PHASE", phase: "reconnecting" });
       timers.reconnect = setTimeout(() => {
         timers.reconnect = null;
+        timers.coldStartDone = false;
+        dispatch({ type: "SET_PROXIES", proxies: [] });
         transitionToPhase(getState().phase, "connecting", dispatch);
         nav.reLaunch("/pages/proxy-select/index");
       }, 10000);
@@ -87,30 +89,41 @@ export async function handleRelayMessage(
     return;
   }
 
-  // proxy_offline: 只更新标记，不做页面跳转
-  if (msg.type === "proxy_offline" && msg.proxyId === s.selectedProxyId) {
-    dispatch({ type: "SET_PROXY_ONLINE", online: false });
-    nav.showToast("Proxy offline");
+  // proxy_offline: 更新标记并刷新列表
+  if (msg.type === "proxy_offline") {
+    relay.listProxies();
+    if (msg.proxyId === s.selectedProxyId) {
+      dispatch({ type: "SET_PROXY_ONLINE", online: false });
+      nav.showToast("Proxy offline");
+    }
     return;
   }
 
-  // proxy_online: 只更新标记
-  if (msg.type === "proxy_online" && msg.proxyId === s.selectedProxyId) {
-    dispatch({ type: "SET_PROXY_ONLINE", online: true });
-    nav.showToast("Proxy reconnected");
+  // proxy_online: 更新标记并刷新列表
+  if (msg.type === "proxy_online") {
+    relay.listProxies();
+    if (msg.proxyId === s.selectedProxyId) {
+      dispatch({ type: "SET_PROXY_ONLINE", online: true });
+      nav.showToast("Proxy reconnected");
+    }
     return;
   }
 
   if (msg.type === "proxy_list_response") {
     const proxies = msg.proxies as ProxyInfo[];
+    dispatch({ type: "SET_PROXIES", proxies });
 
     // 冷启动：首次 proxy_list_response 时在 proxy_selecting 阶段执行
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {
-      timers.coldStartDone = true;
       const savedProxyId = nav.getStorageSync("cc_proxyId");
-      if (savedProxyId) {
+      console.log("[cold-start]", { savedProxyId, proxyCount: proxies.length, boundProxyId: relay.getBoundProxyId() });
+      if (!savedProxyId) {
+        timers.coldStartDone = true;
+      } else {
         const result = await ensureBinding(relay as unknown as RelayClient, { proxyId: savedProxyId });
+        console.log("[cold-start] binding result:", result);
         if (!isBindingError(result)) {
+          timers.coldStartDone = true;
           const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
           dispatch({ type: "SET_PROXY", proxyId: savedProxyId, proxyName: proxyInfo?.name || null });
           dispatch({ type: "SET_PROXY_ONLINE", online: true });

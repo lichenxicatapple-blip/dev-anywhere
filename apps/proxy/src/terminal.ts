@@ -142,8 +142,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
       }
-      if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && framePusher) {
-        log.debug({ sessionId }, "Full frame requested");
+      if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && tracker && framePusher) {
+        tracker.clearAnchor();
+        log.info({ sessionId }, "Frame requested, anchor cleared");
         framePusher.forceFull();
       }
       if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
@@ -154,7 +155,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         }
         const grid = tracker.extractGridAtOffset();
         const anchored = tracker.isAnchored();
-        log.debug({ direction: msg.direction, delta: msg.delta, anchored, anchorLineId: tracker.getAnchorLineId() }, "Scroll handled");
+        log.info({ direction: msg.direction, delta: msg.delta, anchored, anchorLineId: tracker.getAnchorLineId(), newestLineId: tracker.getNewestLineId(), rows: tracker.getTerminalRows() }, "Scroll handled");
         const framePayload = {
           type: "terminal_frame" as const,
           sessionId: msg.sessionId,

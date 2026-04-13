@@ -151,7 +151,7 @@ describe("handleRelayMessage: client_register_response", () => {
 });
 
 describe("handleRelayMessage: proxy_offline / proxy_online", () => {
-  it("proxy_offline for selected proxy: sets proxyOnline=false, shows toast, phase UNCHANGED", async () => {
+  it("proxy_offline for selected proxy: sets proxyOnline=false, shows toast, refreshes list", async () => {
     const env = createTestEnv("chatting", { selectedProxyId: "p1" });
 
     await handleRelayMessage(
@@ -162,10 +162,11 @@ describe("handleRelayMessage: proxy_offline / proxy_online", () => {
     expect(env.getState().proxyOnline).toBe(false);
     expect(env.getState().phase).toBe("chatting");
     expect(env.nav.showToast).toHaveBeenCalledWith("Proxy offline");
+    expect(env.relay.listProxies).toHaveBeenCalled();
     expect(env.nav.reLaunch).not.toHaveBeenCalled();
   });
 
-  it("proxy_offline for different proxy: no action", async () => {
+  it("proxy_offline for different proxy: refreshes list, no toast", async () => {
     const env = createTestEnv("chatting", { selectedProxyId: "p1" });
 
     await handleRelayMessage(
@@ -174,10 +175,11 @@ describe("handleRelayMessage: proxy_offline / proxy_online", () => {
     );
 
     expect(env.getState().phase).toBe("chatting");
+    expect(env.relay.listProxies).toHaveBeenCalled();
     expect(env.nav.showToast).not.toHaveBeenCalled();
   });
 
-  it("proxy_online for selected proxy: sets proxyOnline=true, shows toast, phase UNCHANGED", async () => {
+  it("proxy_online for selected proxy: sets proxyOnline=true, shows toast, refreshes list", async () => {
     const env = createTestEnv("chatting", { selectedProxyId: "p1", proxyOnline: false });
 
     await handleRelayMessage(
@@ -188,9 +190,10 @@ describe("handleRelayMessage: proxy_offline / proxy_online", () => {
     expect(env.getState().proxyOnline).toBe(true);
     expect(env.getState().phase).toBe("chatting");
     expect(env.nav.showToast).toHaveBeenCalledWith("Proxy reconnected");
+    expect(env.relay.listProxies).toHaveBeenCalled();
   });
 
-  it("proxy_offline then proxy_online: proxyOnline toggles, phase never changes", async () => {
+  it("proxy_offline then proxy_online: proxyOnline toggles, phase never changes, list refreshed each time", async () => {
     const env = createTestEnv("session_browsing", { selectedProxyId: "p1", proxyOnline: true });
 
     await handleRelayMessage(
@@ -199,6 +202,7 @@ describe("handleRelayMessage: proxy_offline / proxy_online", () => {
     );
     expect(env.getState().proxyOnline).toBe(false);
     expect(env.getState().phase).toBe("session_browsing");
+    expect(env.relay.listProxies).toHaveBeenCalledTimes(1);
 
     await handleRelayMessage(
       { type: "proxy_online", proxyId: "p1" },
@@ -206,6 +210,7 @@ describe("handleRelayMessage: proxy_offline / proxy_online", () => {
     );
     expect(env.getState().proxyOnline).toBe(true);
     expect(env.getState().phase).toBe("session_browsing");
+    expect(env.relay.listProxies).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -273,16 +278,18 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.nav.navigateTo).not.toHaveBeenCalled();
   });
 
-  it("cold start skipped when no saved proxyId", async () => {
+  it("cold start skipped when no saved proxyId, but proxies stored in state", async () => {
     const env = createTestEnv("proxy_selecting");
+    const proxies = [{ proxyId: "p1", name: "P", online: true }];
 
     await handleRelayMessage(
-      { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true }] },
+      { type: "proxy_list_response", proxies },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
 
     expect(env.nav.navigateTo).not.toHaveBeenCalled();
     expect(env.getState().phase).toBe("proxy_selecting");
+    expect(env.getState().proxies).toEqual(proxies);
   });
 
   it("cold start ensureBinding failure: stays in proxy_selecting", async () => {

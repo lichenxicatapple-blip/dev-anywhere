@@ -3,6 +3,7 @@
   width: 100%;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .status-line-idle {
@@ -20,6 +21,11 @@
 
 .status-line-terminated {
   background-color: #999999;
+}
+
+.status-line-disconnected {
+  background-color: #FF4D4F;
+  animation: breathe 1.5s ease-in-out infinite;
 }
 
 .status-line-sweep {

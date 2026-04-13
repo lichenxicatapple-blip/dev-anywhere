@@ -7,7 +7,7 @@
  * relay server → WebSocket client → TerminalFrameRenderer → 终端 ANSI 渲染
  *
  * 用法：
- *   cc-anywhere serve replay-e2e <fixture-path> [-s speed]
+ *   cc-anywhere serve replay <fixture-path> [-s speed]
  *
  * 说明：
  * - 在独立终端窗口中运行，和工作终端完全隔离
@@ -93,7 +93,7 @@ export interface ReplayOptions {
   remote?: boolean;
 }
 
-export async function runReplayE2E(fixturePath: string, options: ReplayOptions = {}): Promise<void> {
+export async function runReplay(fixturePath: string, options: ReplayOptions = {}): Promise<void> {
   const { speed: initialSpeed = 1, remote = false } = options;
   const fileName = fixturePath.split("/").pop() ?? fixturePath;
 

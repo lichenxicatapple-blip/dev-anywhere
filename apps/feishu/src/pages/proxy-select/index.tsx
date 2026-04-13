@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
-import type { ProxyInfo, RelayControlMessage } from "@cc-anywhere/shared";
+import type { ProxyInfo } from "@cc-anywhere/shared";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
@@ -15,12 +15,12 @@ import "./index.css";
 const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
 
 export default function ProxySelect() {
-  const [proxies, setProxies] = useState<ProxyInfo[]>([]);
   const [dots, setDots] = useState("");
   const relay = useRelayClient();
   const appState = useAppState();
   const appDispatch = useAppDispatch();
   const screen = useScreenSize();
+  const proxies = appState.proxies;
 
   // 连接中省略号动画
   useEffect(() => {
@@ -31,33 +31,11 @@ export default function ProxySelect() {
     return () => clearInterval(timer);
   }, [appState.connected]);
 
-  // 请求 proxy 列表
-  const fetchProxies = useCallback(() => {
+  // 下拉刷新
+  usePullDownRefresh(() => {
     if (relay) {
       relay.listProxies();
     }
-  }, [relay]);
-
-  // 监听 proxy 列表变化：app.tsx 在连接时已请求列表，这里只负责接收响应
-  useEffect(() => {
-    if (!relay) return;
-
-    const unsub = relay.onMessage((msg) => {
-      const ctrl = msg as RelayControlMessage;
-      if (ctrl.type === "proxy_list_response") {
-        setProxies(ctrl.proxies);
-      }
-      if (ctrl.type === "proxy_online" || ctrl.type === "proxy_offline") {
-        fetchProxies();
-      }
-    });
-
-    return unsub;
-  }, [relay, fetchProxies]);
-
-  // 下拉刷新
-  usePullDownRefresh(() => {
-    fetchProxies();
     setTimeout(() => {
       Taro.stopPullDownRefresh();
     }, 500);
