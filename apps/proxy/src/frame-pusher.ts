@@ -45,6 +45,7 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
   let interval: NodeJS.Timeout | null = null;
 
   function push(): void {
+    if (tracker.isAnchored()) return;
     if (!tracker.hasGridChanged()) return;
 
     const currentGrid = tracker.extractGrid();
@@ -81,13 +82,15 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
     start(): void {
       if (interval) clearInterval(interval);
       lastGrid = null;
-      // 启动后立即推送一帧全量快照，确保新连接的 serve 拿到初始状态
-      const grid = tracker.extractGrid();
-      const cursor = tracker.getCursor();
-      const payload: TerminalFramePayload = { mode: "full", lines: grid, cursor };
-      const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
-      sendFrame(JSON.stringify(msg));
-      lastGrid = cloneGrid(grid);
+      // 锚定状态下不推 live 帧，只启动定时器等待回到 live 模式
+      if (!tracker.isAnchored()) {
+        const grid = tracker.extractGrid();
+        const cursor = tracker.getCursor();
+        const payload: TerminalFramePayload = { mode: "full", lines: grid, cursor };
+        const msg: RelayControlMessage = { type: "terminal_frame", sessionId, payload };
+        sendFrame(JSON.stringify(msg));
+        lastGrid = cloneGrid(grid);
+      }
       interval = setInterval(push, FRAME_PUSH_INTERVAL_MS);
     },
     stop(): void {
@@ -100,6 +103,7 @@ export function createFramePusher(options: FramePusherOptions): FramePusher {
       push();
     },
     forceFull(): void {
+      if (tracker.isAnchored()) return;
       const currentGrid = tracker.extractGrid();
       const cursor = tracker.getCursor();
       const payload: TerminalFramePayload = { mode: "full", lines: currentGrid, cursor };

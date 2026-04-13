@@ -129,15 +129,18 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           tracker.scrollDown(msg.delta);
         }
         const grid = tracker.extractGridAtOffset();
-        log.debug({ direction: msg.direction, delta: msg.delta, offset: tracker.getViewportOffset() }, "Scroll handled");
+        const anchored = tracker.isAnchored();
+        log.debug({ direction: msg.direction, delta: msg.delta, anchored, anchorLineId: tracker.getAnchorLineId() }, "Scroll handled");
         const framePayload = {
           type: "terminal_frame" as const,
           sessionId: msg.sessionId,
           payload: {
             mode: "full" as const,
             lines: grid,
-            cursor: tracker.getViewportOffset() === 0 ? tracker.getCursor() : undefined,
-            isScrolled: true,
+            cursor: anchored ? undefined : tracker.getCursor(),
+            isScrolled: anchored,
+            anchorLineId: tracker.getAnchorLineId() ?? undefined,
+            newestLineId: tracker.getNewestLineId(),
           },
         };
         socket.write(serializeIpc({
@@ -232,7 +235,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     lastOutputTime = Date.now();
     if (tracker) {
       tracker.feed(data);
-      tracker.resetScroll();
     }
   };
 

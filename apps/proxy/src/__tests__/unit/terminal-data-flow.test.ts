@@ -367,7 +367,7 @@ describe("Terminal data flow: extractGrid viewport-only", () => {
   });
 });
 
-describe("Terminal data flow: server-side scrolling", () => {
+describe("Terminal data flow: anchor-based scrolling", () => {
   let tracker: TerminalTracker;
 
   beforeEach(() => {
@@ -378,7 +378,49 @@ describe("Terminal data flow: server-side scrolling", () => {
     tracker.dispose();
   });
 
-  it("scrollUp increases viewportOffset, extractGridAtOffset returns older lines", async () => {
+  it("scrollUp sets anchorLineId, isAnchored() returns true", async () => {
+    for (let i = 0; i < 50; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    expect(tracker.isAnchored()).toBe(false);
+    expect(tracker.getAnchorLineId()).toBeNull();
+
+    tracker.scrollUp(5);
+    expect(tracker.isAnchored()).toBe(true);
+    expect(tracker.getAnchorLineId()).not.toBeNull();
+  });
+
+  it("scrollDown past newest clears anchor, isAnchored() returns false", async () => {
+    for (let i = 0; i < 50; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(5);
+    expect(tracker.isAnchored()).toBe(true);
+
+    tracker.scrollDown(5);
+    expect(tracker.isAnchored()).toBe(false);
+    expect(tracker.getAnchorLineId()).toBeNull();
+  });
+
+  it("feed() while anchored does NOT clear anchor", async () => {
+    for (let i = 0; i < 50; i++) {
+      await tracker.feed(`line ${i}\r\n`);
+    }
+
+    tracker.scrollUp(10);
+    expect(tracker.isAnchored()).toBe(true);
+    const anchorBefore = tracker.getAnchorLineId();
+
+    await tracker.feed("new output\r\n");
+    await tracker.feed("more output\r\n");
+
+    expect(tracker.isAnchored()).toBe(true);
+    expect(tracker.getAnchorLineId()).toBe(anchorBefore);
+  });
+
+  it("extractGridAtOffset() returns content at anchor position", async () => {
     for (let i = 0; i < 50; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
@@ -386,25 +428,18 @@ describe("Terminal data flow: server-side scrolling", () => {
     const liveGrid = tracker.extractGrid();
     const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
 
-    tracker.scrollUp(5);
-    expect(tracker.getViewportOffset()).toBe(5);
-
+    tracker.scrollUp(15);
     const scrolledGrid = tracker.extractGridAtOffset();
     const scrolledText = scrolledGrid.flatMap((l) => l.map((s) => s.text)).join("");
 
     expect(scrolledText).not.toBe(liveText);
+    expect(scrolledGrid.length).toBe(10);
   });
 
-  it("scrollDown decreases viewportOffset back to live", async () => {
-    for (let i = 0; i < 50; i++) {
+  it("extractGridAtOffset() returns live grid when not anchored", async () => {
+    for (let i = 0; i < 20; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
-
-    tracker.scrollUp(10);
-    expect(tracker.getViewportOffset()).toBe(10);
-
-    tracker.scrollDown(10);
-    expect(tracker.getViewportOffset()).toBe(0);
 
     const liveGrid = tracker.extractGrid();
     const atOffsetGrid = tracker.extractGridAtOffset();
@@ -413,21 +448,18 @@ describe("Terminal data flow: server-side scrolling", () => {
     expect(atOffsetText).toBe(liveText);
   });
 
-  it("scrollUp clamps to max available scrollback and returns oldest content", async () => {
+  it("scrollUp clamps to oldestLineId", async () => {
     for (let i = 0; i < 20; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
 
     tracker.scrollUp(9999);
-    const offset = tracker.getViewportOffset();
-    const maxOffset = tracker.getNewestLineId() - tracker.getOldestLineId() + 1 - 10;
-    expect(offset).toBe(Math.max(0, maxOffset));
+    const anchor = tracker.getAnchorLineId()!;
+    expect(anchor).toBe(tracker.getOldestLineId());
 
-    // extractGridAtOffset 在 max offset 应返回最早可用的行
     const grid = tracker.extractGridAtOffset();
     expect(grid.length).toBe(10);
 
-    // 验证内容：grid 首行应包含最早的行内容
     const oldest = tracker.getOldestLineId();
     const { lines: expectedLines } = tracker.extractLines(oldest, 10);
     const gridText = grid.map((l) => l.map((s) => s.text).join("")).join("\n");
@@ -435,35 +467,40 @@ describe("Terminal data flow: server-side scrolling", () => {
     expect(gridText).toBe(expectedText);
   });
 
-  it("scrollDown clamps to 0", () => {
+  it("scrollDown when not anchored is no-op", () => {
     tracker.scrollDown(100);
-    expect(tracker.getViewportOffset()).toBe(0);
+    expect(tracker.isAnchored()).toBe(false);
   });
 
-  it("resetScroll sets viewportOffset to 0", async () => {
+  it("clearAnchor() returns to live mode", async () => {
     for (let i = 0; i < 30; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
 
     tracker.scrollUp(10);
-    expect(tracker.getViewportOffset()).toBe(10);
+    expect(tracker.isAnchored()).toBe(true);
 
-    tracker.resetScroll();
-    expect(tracker.getViewportOffset()).toBe(0);
+    tracker.clearAnchor();
+    expect(tracker.isAnchored()).toBe(false);
+    expect(tracker.getAnchorLineId()).toBeNull();
   });
 
-  it("new data after scrollUp resets to live via resetScroll", async () => {
-    for (let i = 0; i < 30; i++) {
+  it("scrollDown returns to live when anchor + rows > newestLineId", async () => {
+    for (let i = 0; i < 50; i++) {
       await tracker.feed(`line ${i}\r\n`);
     }
 
-    tracker.scrollUp(5);
-    expect(tracker.getViewportOffset()).toBe(5);
+    tracker.scrollUp(3);
+    expect(tracker.isAnchored()).toBe(true);
 
-    // 模拟 terminal.ts 在 feed 后调用 resetScroll
-    await tracker.feed("new output\r\n");
-    tracker.resetScroll();
-    expect(tracker.getViewportOffset()).toBe(0);
+    tracker.scrollDown(3);
+    expect(tracker.isAnchored()).toBe(false);
+
+    const liveGrid = tracker.extractGrid();
+    const atOffsetGrid = tracker.extractGridAtOffset();
+    const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    const atOffsetText = atOffsetGrid.flatMap((l) => l.map((s) => s.text)).join("");
+    expect(atOffsetText).toBe(liveText);
   });
 });
 

@@ -85,6 +85,8 @@ const TerminalFrameFullSchema = z.object({
   lines: z.array(z.array(TermSpanSchema)),
   cursor: CursorSchema,
   isScrolled: z.boolean().optional(),
+  anchorLineId: z.number().int().optional(),
+  newestLineId: z.number().int().optional(),
 });
 
 const TerminalFrameDeltaSchema = z.object({

@@ -11,6 +11,7 @@ function createMockTracker(overrides: Partial<TerminalTracker> = {}): TerminalTr
     hasGridChanged: vi.fn().mockReturnValue(true),
     extractGrid: vi.fn().mockReturnValue([[makeSpan("hello")]]),
     getCursor: vi.fn().mockReturnValue({ x: 0, y: 0 }),
+    isAnchored: vi.fn().mockReturnValue(false),
     ...overrides,
   } as unknown as TerminalTracker;
 }
@@ -190,6 +191,56 @@ describe("frame-pusher: flush", () => {
     expect(sendFrame).toHaveBeenCalledTimes(1);
     const msg = JSON.parse(sendFrame.mock.calls[0][0]);
     expect(msg.payload.mode).toBe("full");
+  });
+});
+
+describe("frame-pusher: anchor guard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("push() is no-op when tracker.isAnchored() returns true", () => {
+    const tracker = createMockTracker({
+      isAnchored: vi.fn().mockReturnValue(true),
+    });
+    const sendFrame = vi.fn();
+    const pusher = createFramePusher({ tracker, sessionId: "s1", sendFrame });
+
+    pusher.start();
+    expect(sendFrame).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(600);
+    expect(sendFrame).not.toHaveBeenCalled();
+
+    pusher.stop();
+  });
+
+  it("push() works normally when not anchored", () => {
+    const tracker = createMockTracker({
+      isAnchored: vi.fn().mockReturnValue(false),
+    });
+    const sendFrame = vi.fn();
+    const pusher = createFramePusher({ tracker, sessionId: "s1", sendFrame });
+
+    pusher.start();
+    expect(sendFrame).toHaveBeenCalledTimes(1);
+
+    pusher.stop();
+  });
+
+  it("forceFull() is no-op when anchored", () => {
+    const tracker = createMockTracker({
+      isAnchored: vi.fn().mockReturnValue(true),
+    });
+    const sendFrame = vi.fn();
+    const pusher = createFramePusher({ tracker, sessionId: "s1", sendFrame });
+
+    pusher.forceFull();
+    expect(sendFrame).not.toHaveBeenCalled();
   });
 });
 

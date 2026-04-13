@@ -68,7 +68,7 @@ export class TerminalTracker {
   private readonly terminal: InstanceType<typeof Terminal>;
   private lastGridHash: string = "";
   private nextLineId: number;
-  private viewportOffset: number = 0;
+  private anchorLineId: number | null = null;
 
   constructor(cols = 120, rows = 40) {
     this.terminal = new Terminal({
@@ -270,36 +270,53 @@ export class TerminalTracker {
   }
 
   scrollUp(delta: number): void {
-    const maxOffset = Math.max(0, this.getNewestLineId() - this.getOldestLineId() + 1 - this.terminal.rows);
-    this.viewportOffset = Math.min(this.viewportOffset + delta, maxOffset);
+    const rows = this.terminal.rows;
+    const newestId = this.getNewestLineId();
+    const oldestId = this.getOldestLineId();
+
+    if (this.anchorLineId === null) {
+      // 从 live 进入锚定模式：当前 viewport 顶行减去 delta
+      this.anchorLineId = newestId - rows + 1 - delta;
+    } else {
+      this.anchorLineId = this.anchorLineId - delta;
+    }
+    // 下限为 oldestLineId
+    this.anchorLineId = Math.max(this.anchorLineId, oldestId);
   }
 
   scrollDown(delta: number): void {
-    this.viewportOffset = Math.max(0, this.viewportOffset - delta);
+    if (this.anchorLineId === null) return;
+
+    this.anchorLineId = this.anchorLineId + delta;
+    // 锚点 + rows 超过 newestLineId 时回到 live 模式
+    if (this.anchorLineId + this.terminal.rows > this.getNewestLineId()) {
+      this.anchorLineId = null;
+    }
   }
 
-  resetScroll(): void {
-    this.viewportOffset = 0;
+  isAnchored(): boolean {
+    return this.anchorLineId !== null;
   }
 
-  getViewportOffset(): number {
-    return this.viewportOffset;
+  getAnchorLineId(): number | null {
+    return this.anchorLineId;
+  }
+
+  clearAnchor(): void {
+    this.anchorLineId = null;
   }
 
   getTerminalRows(): number {
     return this.terminal.rows;
   }
 
-  // 按 viewportOffset 提取 viewport 栅格，offset=0 时等同于 extractGrid（实时画面）
+  // 按 anchorLineId 提取 viewport 栅格，未锚定时等同于 extractGrid（实时画面）
   extractGridAtOffset(): TermLine[] {
-    if (this.viewportOffset === 0) {
+    if (this.anchorLineId === null) {
       return this.extractGrid();
     }
 
-    const newestId = this.getNewestLineId();
-    const endLineId = newestId - this.viewportOffset;
-    const startLineId = endLineId - this.terminal.rows + 1;
-    const { lines } = this.extractLines(startLineId, this.terminal.rows);
+    const { lines } = this.extractLines(this.anchorLineId, this.terminal.rows);
 
     // 不足 terminal.rows 行时用空行填充
     while (lines.length < this.terminal.rows) {
