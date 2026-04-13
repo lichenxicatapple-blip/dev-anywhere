@@ -5,30 +5,43 @@ import { test, expect } from "@playwright/test";
 
 const BASE_URL = "http://localhost:5175";
 
-// 等待 proxy 列表加载，从 relay 响应中拦截 proxyId（不触发页面跳转）
+// 点击在线 proxy 完成绑定，等待导航到 session-list 后从 localStorage 读取 proxyId
 async function getOnlineProxyId(page: import("@playwright/test").Page): Promise<string | null> {
-  // 先清掉旧状态，确保不会触发冷启动跳转
+  // 先清掉旧状态再加载页面
   await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
   await page.evaluate(() => {
     localStorage.removeItem("cc_proxyId");
     localStorage.removeItem("cc_sessionId");
+    localStorage.removeItem("cc_sessionMode");
   });
-  // 重新加载干净的 proxy-select 页面
-  await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
-  await page.waitForTimeout(3000);
+  await page.reload();
+  try {
+    await page.waitForSelector(".proxy-item", { timeout: 8000 });
+  } catch {
+    console.log("[e2e] .proxy-item not found after 8s wait");
+    return null;
+  }
+  const hasProxy = await page.$(".proxy-item");
+  if (!hasProxy) return null;
 
-  // 检查是否有 proxy 显示，然后通过 DOM 拦截 click 事件获取 proxyId
-  // 用 evaluate 模拟点击并立即读取写入的 proxyId，再阻止导航
+  // click 触发 ensureBinding（async），成功后写 localStorage 并导航到 session-list
+  await hasProxy.click();
+  try {
+    await page.waitForURL(/session-list/, { timeout: 5000 });
+  } catch {
+    const url = page.url();
+    const ls = await page.evaluate(() => localStorage.getItem("cc_proxyId"));
+    console.log(`[e2e] navigation timeout. URL=${url}, cc_proxyId=${ls}`);
+    return null;
+  }
+
   const proxyId = await page.evaluate(() => {
-    const item = document.querySelector(".proxy-item");
-    if (!item) return null;
-    // 直接 click 会触发 navigateTo，改为读取 proxy 列表数据
-    // proxy 列表在 Taro state 里，但我们可以 click 后立即读 localStorage
-    (item as HTMLElement).click();
     const raw = localStorage.getItem("cc_proxyId");
     return raw ? JSON.parse(raw).data : null;
   });
-  // click 可能触发了导航，回到 proxy-select
+  console.log(`[e2e] getOnlineProxyId resolved: ${proxyId}`);
+
+  // 回到 proxy-select 准备后续测试
   await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
   await page.waitForTimeout(500);
   return proxyId;
@@ -55,11 +68,17 @@ test.describe("cold start navigation", () => {
       ({ pid, sid }) => {
         localStorage.setItem("cc_proxyId", JSON.stringify({ data: pid }));
         localStorage.setItem("cc_sessionId", JSON.stringify({ data: sid }));
+        localStorage.setItem("cc_sessionMode", JSON.stringify({ data: "pty" }));
       },
       { pid: proxyId, sid: "test-session-123" },
     );
-    await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
-    await page.waitForTimeout(3000);
+    // reload 触发 SPA 完整重新初始化（goto 同 URL 不会重初始化）
+    await page.reload();
+    try {
+      await page.waitForURL(/chat/, { timeout: 8000 });
+    } catch {
+      // binding 可能失败
+    }
 
     expect(page.url()).toContain("/pages/chat/index");
   });
@@ -72,8 +91,12 @@ test.describe("cold start navigation", () => {
       localStorage.setItem("cc_proxyId", JSON.stringify({ data: pid }));
       localStorage.removeItem("cc_sessionId");
     }, proxyId);
-    await page.goto(`${BASE_URL}/#/pages/proxy-select/index`);
-    await page.waitForTimeout(3000);
+    await page.reload();
+    try {
+      await page.waitForURL(/session-list/, { timeout: 8000 });
+    } catch {
+      // binding 可能失败
+    }
 
     expect(page.url()).toContain("/pages/session-list/index");
   });

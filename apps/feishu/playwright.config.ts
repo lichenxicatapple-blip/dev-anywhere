@@ -6,9 +6,5 @@ export default defineConfig({
   use: {
     viewport: { width: 390, height: 844 },
     hasTouch: true,
-    launchOptions: {
-      executablePath: process.env.CHROME_PATH
-        || "/Users/admin/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    },
   },
 });
