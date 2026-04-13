@@ -337,6 +337,12 @@ function handleTerminalConnection(
                   }),
                 );
                 logger.info({ sessionId: session.id, mode: "json" }, "JSON session created via worker");
+                if (relayConnection) {
+                  relayConnection.sendRaw(JSON.stringify({
+                    type: "session_sync",
+                    sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+                  }));
+                }
               } else if (attempt < maxRetries) {
                 setTimeout(tryConnectWorker, Math.min(100 * attempt, 2000));
               } else {
@@ -464,6 +470,16 @@ function handleTerminalConnection(
           // 会话可能尚未注册，状态更新失败可忽略
         }
         terminalSockets.set(msg.sessionId, socket);
+        // 通知 relay 该 session 存在，确保 relay 建立 proxy-session 关联
+        if (relayConnection) {
+          const session = sessionManager.getSession(msg.sessionId);
+          if (session) {
+            relayConnection.sendRaw(JSON.stringify({
+              type: "session_sync",
+              sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+            }));
+          }
+        }
         logger.info({ sessionId: msg.sessionId }, "PTY session registered");
         break;
       }

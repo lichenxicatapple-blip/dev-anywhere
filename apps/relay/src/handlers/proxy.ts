@@ -88,6 +88,19 @@ export function handleProxyConnection(
       return;
     }
 
+    // proxy 重连后同步 session 列表，relay 据此建立 proxy-session 关联
+    if (result.kind === "control" && result.message.type === "session_sync") {
+      if (!proxyWs.proxyId) return;
+      const sessions = result.message.sessions as Array<{ id: string }>;
+      if (Array.isArray(sessions)) {
+        for (const s of sessions) {
+          registry.addSessionToProxy(proxyWs.proxyId, s.id);
+        }
+        logger.info({ proxyId: proxyWs.proxyId, count: sessions.length }, "Session sync received");
+      }
+      return;
+    }
+
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
       if (PROXY_TO_CLIENT_TYPES.has(result.message.type)) {

@@ -178,6 +178,16 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     direction: z.enum(["up", "down"]),
     delta: z.number().int().positive(),
   }),
+
+  // proxy 重连后同步活跃 session 列表给 relay
+  z.object({
+    type: z.literal("session_sync"),
+    sessions: z.array(z.object({
+      id: z.string(),
+      mode: z.enum(["pty", "json"]),
+      state: z.string(),
+    })),
+  }),
 ]);
 
 export type RelayControlMessage = z.infer<typeof RelayControlSchema>;

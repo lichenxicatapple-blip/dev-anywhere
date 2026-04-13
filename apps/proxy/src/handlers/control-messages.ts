@@ -213,10 +213,23 @@ export function createControlMessageHandlers(
       }
     },
 
-    // relay 重连时重新推送所有活跃 session 的 command list 和 file tree
+    // relay 重连时同步 session 列表并重新推送控制数据
     async reinitializeOnReconnect(): Promise<void> {
       const activeSessions = sessionManager.listSessions()
         .filter((s) => s.state !== "terminated");
+
+      // 先同步 session 列表，relay 据此建立 proxy-session 关联
+      if (activeSessions.length > 0) {
+        send(JSON.stringify({
+          type: "session_sync",
+          sessions: activeSessions.map((s) => ({
+            id: s.id,
+            mode: s.mode,
+            state: s.state,
+          })),
+        }));
+        logger.info({ count: activeSessions.length }, "Session list synced to relay");
+      }
 
       for (const session of activeSessions) {
         const resources = sessionResources.get(session.id);
