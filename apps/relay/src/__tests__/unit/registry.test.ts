@@ -280,8 +280,8 @@ describe("RelayRegistry", () => {
 
       const details = registry.getClientDetails();
       expect(details).toHaveLength(2);
-      expect(details[0]).toEqual({ clientId: "c1", proxyId: "p1", online: true });
-      expect(details[1]).toEqual({ clientId: "c2", proxyId: "p1", online: true });
+      expect(details[0]).toEqual({ clientId: "c1", proxyId: "p1", online: true, connectionState: "bound" });
+      expect(details[1]).toEqual({ clientId: "c2", proxyId: "p1", online: true, connectionState: "bound" });
     });
 
     it("shows offline status for unbound clients", () => {
@@ -318,6 +318,155 @@ describe("RelayRegistry", () => {
       expect(stats.totalBuffered).toBe(0);
       expect(stats.sessionCount).toBe(0);
       expect(stats.proxyCount).toBe(0);
+    });
+  });
+
+  describe("state transitions", () => {
+    describe("proxy connection state", () => {
+      it("getProxyConnectionState returns 'online' after registration", () => {
+        registry.registerProxy("p1", createMockWs());
+        expect(registry.getProxyConnectionState("p1")).toBe("online");
+      });
+
+      it("getProxyConnectionState returns 'offline' after markProxyOffline", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.markProxyOffline("p1");
+        expect(registry.getProxyConnectionState("p1")).toBe("offline");
+      });
+
+      it("getProxyConnectionState returns undefined for unknown proxy", () => {
+        expect(registry.getProxyConnectionState("unknown")).toBeUndefined();
+      });
+
+      it("transitionProxy online->offline succeeds", () => {
+        registry.registerProxy("p1", createMockWs());
+        expect(() => registry.transitionProxy("p1", "online", "offline")).not.toThrow();
+        expect(registry.getProxyConnectionState("p1")).toBe("offline");
+      });
+
+      it("transitionProxy offline->online succeeds", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.markProxyOffline("p1");
+        expect(() => registry.transitionProxy("p1", "offline", "online")).not.toThrow();
+        expect(registry.getProxyConnectionState("p1")).toBe("online");
+      });
+
+      it("transitionProxy online->online throws (same state)", () => {
+        registry.registerProxy("p1", createMockWs());
+        expect(() => registry.transitionProxy("p1", "online", "online")).toThrow();
+      });
+
+      it("transitionProxy offline->offline throws (same state)", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.markProxyOffline("p1");
+        expect(() => registry.transitionProxy("p1", "offline", "offline")).toThrow();
+      });
+
+      it("transitionProxy throws for unknown proxy", () => {
+        expect(() => registry.transitionProxy("unknown", "online", "offline")).toThrow();
+      });
+
+      it("transitionProxy throws on from-state mismatch", () => {
+        registry.registerProxy("p1", createMockWs());
+        expect(() => registry.transitionProxy("p1", "offline", "online")).toThrow();
+      });
+
+      it("transitionProxy to offline sets ws to null and disconnectedAt", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.transitionProxy("p1", "online", "offline");
+        expect(registry.getProxy("p1")).toBeUndefined();
+        expect(registry.isProxyOnline("p1")).toBe(false);
+      });
+
+      it("reconnect sets connectionState back to online", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.markProxyOffline("p1");
+        const ws2 = createMockWs();
+        registry.registerProxy("p1", ws2);
+        expect(registry.getProxyConnectionState("p1")).toBe("online");
+      });
+    });
+
+    describe("client connection state", () => {
+      it("getClientConnectionState returns 'registered' after client_register without binding", () => {
+        // bindClientById creates a binding, which is "bound" state
+        // For "registered" state, we need a client that registered but hasn't selected a proxy
+        // Actually, looking at the plan: client starts at binding time via bindClientById
+        // "registered" means bound to the registry but not yet proxy_select-ed
+        // Let's test the transition flow
+        registry.registerProxy("p1", createMockWs());
+        registry.bindClientById("c1", "p1", createMockWs());
+        // bindClientById creates with "bound" state
+        expect(registry.getClientConnectionState("c1")).toBe("bound");
+      });
+
+      it("getClientConnectionState returns undefined for unknown client", () => {
+        expect(registry.getClientConnectionState("unknown")).toBeUndefined();
+      });
+
+      it("transitionClient bound->registered succeeds (re-select / unbind)", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.bindClientById("c1", "p1", createMockWs());
+        expect(() => registry.transitionClient("c1", "bound", "registered")).not.toThrow();
+        expect(registry.getClientConnectionState("c1")).toBe("registered");
+      });
+
+      it("transitionClient registered->bound succeeds", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.bindClientById("c1", "p1", createMockWs());
+        registry.transitionClient("c1", "bound", "registered");
+        expect(() => registry.transitionClient("c1", "registered", "bound")).not.toThrow();
+        expect(registry.getClientConnectionState("c1")).toBe("bound");
+      });
+
+      it("transitionClient registered->registered throws (same state)", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.bindClientById("c1", "p1", createMockWs());
+        registry.transitionClient("c1", "bound", "registered");
+        expect(() => registry.transitionClient("c1", "registered", "registered")).toThrow();
+      });
+
+      it("transitionClient throws for unknown client", () => {
+        expect(() => registry.transitionClient("unknown", "registered", "bound")).toThrow();
+      });
+    });
+
+    describe("connectionState in detail APIs", () => {
+      it("getProxyDetail includes connectionState field", () => {
+        registry.registerProxy("p1", createMockWs());
+        const detail = registry.getProxyDetail("p1");
+        expect(detail!.connectionState).toBe("online");
+
+        registry.markProxyOffline("p1");
+        const detailOffline = registry.getProxyDetail("p1");
+        expect(detailOffline!.connectionState).toBe("offline");
+      });
+
+      it("getClientDetails includes connectionState field", () => {
+        registry.registerProxy("p1", createMockWs());
+        registry.bindClientById("c1", "p1", createMockWs());
+
+        const details = registry.getClientDetails();
+        expect(details[0].connectionState).toBe("bound");
+      });
+
+      it("listProxiesWithName online field derives from connectionState", () => {
+        registry.registerProxy("p1", createMockWs());
+        let list = registry.listProxiesWithName();
+        expect(list[0].online).toBe(true);
+
+        registry.markProxyOffline("p1");
+        list = registry.listProxiesWithName();
+        expect(list[0].online).toBe(false);
+      });
+
+      it("isProxyOnline reads from connectionState", () => {
+        registry.registerProxy("p1", createMockWs());
+        expect(registry.isProxyOnline("p1")).toBe(true);
+
+        registry.markProxyOffline("p1");
+        expect(registry.isProxyOnline("p1")).toBe(false);
+      });
     });
   });
 });

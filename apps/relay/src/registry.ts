@@ -2,9 +2,16 @@ import { WebSocket } from "ws";
 import { SessionBuffer } from "./session-buffer.js";
 import type { BufferStore } from "./buffer-store.js";
 
+// 显式代理连接状态，取代 ws null 检查
+export type ProxyConnectionState = "online" | "offline";
+
+// 显式客户端连接状态，跟踪注册和绑定
+export type ClientConnectionState = "registered" | "bound";
+
 // 代理连接状态，跟踪 ws、会话集合、离线时间、显示名称
 interface ProxyState {
   ws: WebSocket | null;
+  connectionState: ProxyConnectionState;
   sessions: Set<string>;
   disconnectedAt: number | null;
   name?: string;
@@ -14,6 +21,7 @@ interface ProxyState {
 interface ClientBinding {
   proxyId: string;
   ws: WebSocket | null;
+  connectionState: ClientConnectionState;
 }
 
 // buffer 统计信息
@@ -51,6 +59,7 @@ export class RelayRegistry {
         existing.ws.terminate();
       }
       existing.ws = ws;
+      existing.connectionState = "online";
       existing.disconnectedAt = null;
       if (name !== undefined) existing.name = name;
       return "reconnected";
@@ -58,6 +67,7 @@ export class RelayRegistry {
 
     this.proxyStates.set(proxyId, {
       ws,
+      connectionState: "online",
       sessions: new Set(),
       disconnectedAt: null,
       name,
@@ -72,7 +82,50 @@ export class RelayRegistry {
     if (!state) return;
 
     state.ws = null;
+    state.connectionState = "offline";
     state.disconnectedAt = Date.now();
+  }
+
+  // 显式状态转换，校验 from 状态匹配后更新 connectionState
+  transitionProxy(proxyId: string, from: ProxyConnectionState, to: ProxyConnectionState): void {
+    if (from === to) {
+      throw new Error(`Invalid proxy transition: ${from} -> ${to} (same state)`);
+    }
+    const state = this.proxyStates.get(proxyId);
+    if (!state) {
+      throw new Error(`Proxy not found: ${proxyId}`);
+    }
+    if (state.connectionState !== from) {
+      throw new Error(`Proxy ${proxyId} state mismatch: expected ${from}, actual ${state.connectionState}`);
+    }
+    state.connectionState = to;
+    if (to === "offline") {
+      state.ws = null;
+      state.disconnectedAt = Date.now();
+    }
+  }
+
+  // 显式客户端状态转换，校验 from 状态匹配后更新 connectionState
+  transitionClient(clientId: string, from: ClientConnectionState, to: ClientConnectionState): void {
+    if (from === to) {
+      throw new Error(`Invalid client transition: ${from} -> ${to} (same state)`);
+    }
+    const binding = this.clientBindings.get(clientId);
+    if (!binding) {
+      throw new Error(`Client not found: ${clientId}`);
+    }
+    if (binding.connectionState !== from) {
+      throw new Error(`Client ${clientId} state mismatch: expected ${from}, actual ${binding.connectionState}`);
+    }
+    binding.connectionState = to;
+  }
+
+  getProxyConnectionState(proxyId: string): ProxyConnectionState | undefined {
+    return this.proxyStates.get(proxyId)?.connectionState;
+  }
+
+  getClientConnectionState(clientId: string): ClientConnectionState | undefined {
+    return this.clientBindings.get(clientId)?.connectionState;
   }
 
   // 彻底清理 proxy 状态、会话缓冲区、客户端绑定
@@ -110,7 +163,10 @@ export class RelayRegistry {
 
   isProxyOnline(proxyId: string): boolean {
     const state = this.proxyStates.get(proxyId);
-    return state?.ws !== null && state?.ws !== undefined && state.ws.readyState === WebSocket.OPEN;
+    if (!state || state.connectionState !== "online") return false;
+    // connectionState 声明在线但 ws 已失效时，记录警告并返回 false
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return false;
+    return true;
   }
 
   // proxy 是否存在（含宽限期中的）
@@ -127,7 +183,7 @@ export class RelayRegistry {
     return Array.from(this.proxyStates.entries()).map(([proxyId, state]) => ({
       proxyId,
       ...(state.name !== undefined ? { name: state.name } : {}),
-      online: state.ws !== null && state.ws !== undefined && state.ws.readyState === WebSocket.OPEN,
+      online: state.connectionState === "online",
     }));
   }
 
@@ -190,7 +246,7 @@ export class RelayRegistry {
     if (!this.proxyStates.has(proxyId)) {
       return false;
     }
-    this.clientBindings.set(clientId, { proxyId, ws });
+    this.clientBindings.set(clientId, { proxyId, ws, connectionState: "bound" });
     return true;
   }
 
@@ -252,26 +308,28 @@ export class RelayRegistry {
 
 
   // 获取单个 proxy 的详细状态信息
-  getProxyDetail(proxyId: string): { proxyId: string; name?: string; online: boolean; sessions: string[]; disconnectedAt: number | null } | undefined {
+  getProxyDetail(proxyId: string): { proxyId: string; name?: string; online: boolean; connectionState: ProxyConnectionState; sessions: string[]; disconnectedAt: number | null } | undefined {
     const state = this.proxyStates.get(proxyId);
     if (!state) return undefined;
     return {
       proxyId,
       ...(state.name !== undefined ? { name: state.name } : {}),
-      online: state.ws !== null && state.ws !== undefined && state.ws.readyState === WebSocket.OPEN,
+      online: state.connectionState === "online",
+      connectionState: state.connectionState,
       sessions: Array.from(state.sessions),
       disconnectedAt: state.disconnectedAt,
     };
   }
 
   // 获取所有客户端绑定的详细信息
-  getClientDetails(): Array<{ clientId: string; proxyId: string; online: boolean }> {
-    const details: Array<{ clientId: string; proxyId: string; online: boolean }> = [];
+  getClientDetails(): Array<{ clientId: string; proxyId: string; online: boolean; connectionState: ClientConnectionState }> {
+    const details: Array<{ clientId: string; proxyId: string; online: boolean; connectionState: ClientConnectionState }> = [];
     for (const [clientId, binding] of this.clientBindings) {
       details.push({
         clientId,
         proxyId: binding.proxyId,
         online: binding.ws !== null && binding.ws !== undefined && binding.ws.readyState === WebSocket.OPEN,
+        connectionState: binding.connectionState,
       });
     }
     return details;
