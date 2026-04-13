@@ -286,6 +286,10 @@ export class TerminalTracker {
     return this.viewportOffset;
   }
 
+  getTerminalRows(): number {
+    return this.terminal.rows;
+  }
+
   // 按 viewportOffset 提取 viewport 栅格，offset=0 时等同于 extractGrid（实时画面）
   extractGridAtOffset(): TermLine[] {
     if (this.viewportOffset === 0) {

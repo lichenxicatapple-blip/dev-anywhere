@@ -20,6 +20,7 @@ export const DATA_DIR = `${CC_DIR}/data`;
 
 // 日志
 export const LOG_PATH = `${CC_DIR}/service.log`;
+export const TERMINAL_LOG_PATH = `${CC_DIR}/terminal.log`;
 
 export function sessionDir(sessionId: string): string {
   return `${DATA_DIR}/${sessionId}`;

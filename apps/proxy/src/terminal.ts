@@ -13,6 +13,7 @@ import {
   type IpcMessage,
 } from "./ipc-protocol.js";
 import { createFramePusher, type FramePusher } from "./frame-pusher.js";
+import { terminalLogger as log } from "./logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -77,6 +78,7 @@ function waitForMessage(
 }
 
 export async function startTerminal(claudeArgs: string[]): Promise<void> {
+  log.info("Terminal starting");
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
@@ -127,6 +129,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           tracker.scrollDown(msg.delta);
         }
         const grid = tracker.extractGridAtOffset();
+        log.debug({ direction: msg.direction, delta: msg.delta, offset: tracker.getViewportOffset() }, "Scroll handled");
         const framePayload = {
           type: "terminal_frame" as const,
           sessionId: msg.sessionId,

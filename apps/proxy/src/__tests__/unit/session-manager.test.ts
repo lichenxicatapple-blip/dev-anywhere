@@ -230,7 +230,7 @@ describe("SessionManager", () => {
 
   describe("persistence", () => {
     it("loads sessions from existing file on construction", () => {
-      const s = manager.createSession("pty", "persisted");
+      const s = manager.createSession("json", "persisted");
       const manager2 = new SessionManager({ persistPath });
       const found = manager2.getSession(s.id);
       expect(found).toBeDefined();
@@ -239,12 +239,21 @@ describe("SessionManager", () => {
     });
 
     it("filters out terminated sessions on load", () => {
-      const s1 = manager.createSession("pty");
-      const s2 = manager.createSession("pty");
+      const s1 = manager.createSession("json");
+      const s2 = manager.createSession("json");
       manager.updateState(s1.id, SessionState.TERMINATED);
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(s1.id)).toBeUndefined();
       expect(manager2.getSession(s2.id)).toBeDefined();
+      manager2.stopReaper();
+    });
+
+    it("skips PTY sessions on restore since terminal process is gone", () => {
+      const pty = manager.createSession("pty");
+      const json = manager.createSession("json");
+      const manager2 = new SessionManager({ persistPath });
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+      expect(manager2.getSession(json.id)).toBeDefined();
       manager2.stopReaper();
     });
 

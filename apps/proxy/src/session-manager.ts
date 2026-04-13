@@ -217,7 +217,8 @@ export class SessionManager {
     }
     for (const item of parsed) {
       const info = item as SessionInfo;
-      if (info.state === SessionState.TERMINATED) {
+      // PTY session 的生命周期绑定 terminal 进程，serve 重启后 terminal 已断开，不恢复
+      if (info.state === SessionState.TERMINATED || info.mode === "pty") {
         this.onSessionRemoved?.(info.id);
         continue;
       }

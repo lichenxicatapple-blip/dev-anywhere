@@ -1,17 +1,10 @@
 // PTY 终端栅格渲染组件，支持服务端滚动和捏合缩放
-import { useRef, useCallback, useEffect } from "react";
-import { View, Text, ScrollView } from "@tarojs/components";
-import type { CommonEventFunction } from "@tarojs/components";
+// server-side scrolling: content 只有一帧，用 DOM touch/mouse 事件检测滑动方向
+// Taro H5 的 onTouchStart/Move prop 不触发，必须直接 addEventListener
+import { useRef, useEffect } from "react";
+import { View, Text } from "@tarojs/components";
 import type { TermLine } from "@cc-anywhere/shared";
 import "./index.css";
-
-// Taro View/ScrollView 的 onTouch* 声明为 CommonEventFunction，但运行时事件包含 touch 字段
-interface TouchPoint { clientX: number; clientY: number }
-interface TouchEventLike { touches: TouchPoint[]; changedTouches: TouchPoint[] }
-
-// Taro ScrollView onScroll 事件 detail 结构
-interface ScrollDetail { scrollTop: number; scrollHeight: number }
-interface ScrollEventLike { detail: ScrollDetail }
 
 interface TerminalViewportProps {
   lines: TermLine[];
@@ -20,9 +13,16 @@ interface TerminalViewportProps {
   onScroll: (direction: "up" | "down", delta: number) => void;
 }
 
-function getDistance(touches: { clientX: number; clientY: number }[]): number {
-  const dx = touches[0].clientX - touches[1].clientX;
-  const dy = touches[0].clientY - touches[1].clientY;
+// 每 20px 滑动距离算 1 行
+const PX_PER_LINE = 20;
+// 最小滑动距离才触发滚动请求
+const MIN_SWIPE_PX = 30;
+// 节流间隔
+const THROTTLE_MS = 150;
+
+function getDistance(a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }): number {
+  const dx = a.clientX - b.clientX;
+  const dy = a.clientY - b.clientY;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
@@ -32,106 +32,102 @@ export function TerminalViewport({
   onPinchZoom,
   onScroll,
 }: TerminalViewportProps) {
-  const pinchRef = useRef({ startDistance: 0, triggered: false });
-  const scrollRef = useRef("");
-  const prevLinesLenRef = useRef(0);
-  const userScrolledUpRef = useRef(false);
-  const viewportHeightRef = useRef(0);
-  const lastScrollRequestRef = useRef(0);
+  // 用 ref 保存最新回调，避免 useEffect 频繁重绑
+  const onScrollRef = useRef(onScroll);
+  const onPinchZoomRef = useRef(onPinchZoom);
+  onScrollRef.current = onScroll;
+  onPinchZoomRef.current = onPinchZoom;
 
-  // 新帧到达时，仅在用户未手动滚动时自动滚动到底部
+  // 直接绑定 DOM 事件，同时支持 touch 和 mouse
   useEffect(() => {
-    if (lines.length > 0 && !userScrolledUpRef.current) {
-      scrollRef.current = `term-line-${lines.length - 1}`;
-    }
-    prevLinesLenRef.current = lines.length;
-  }, [lines.length]);
-
-  const handleTouchStart: CommonEventFunction = useCallback((e) => {
-    const te = e as unknown as TouchEventLike;
-    if (te.touches.length === 2) {
-      const touches = te.touches.map((t) => ({ clientX: t.clientX, clientY: t.clientY }));
-      pinchRef.current.startDistance = getDistance(touches);
-      pinchRef.current.triggered = false;
-    }
-  }, []);
-
-  const handleTouchMove: CommonEventFunction = useCallback(
-    (e) => {
-      const te = e as unknown as TouchEventLike;
-      if (te.touches.length === 2 && !pinchRef.current.triggered) {
-        const touches = te.touches.map((t) => ({ clientX: t.clientX, clientY: t.clientY }));
-        const currentDistance = getDistance(touches);
-        const ratio = currentDistance / pinchRef.current.startDistance;
-        if (ratio > 1.3) {
-          pinchRef.current.triggered = true;
-          onPinchZoom("in");
-        } else if (ratio < 0.7) {
-          pinchRef.current.triggered = true;
-          onPinchZoom("out");
-        }
-      }
-    },
-    [onPinchZoom],
-  );
-
-  // 滚动事件处理：检测顶部/底部并发送服务端滚动请求，带 200ms 节流
-  const handleScrollEvent = useCallback(
-    (scrollTop: number, scrollHeight: number) => {
-      const clientHeight = viewportHeightRef.current;
-      const nearBottom = clientHeight > 0 && scrollTop + clientHeight >= scrollHeight - 50;
-      const nearTop = scrollTop < 50;
-
-      const now = Date.now();
-      const throttled = now - lastScrollRequestRef.current < 200;
-
-      if (nearTop && !throttled) {
-        userScrolledUpRef.current = true;
-        lastScrollRequestRef.current = now;
-        onScroll("up", 10);
-      } else if (nearBottom && userScrolledUpRef.current && !throttled) {
-        userScrolledUpRef.current = false;
-        lastScrollRequestRef.current = now;
-        onScroll("down", 10);
-      }
-    },
-    [onScroll],
-  );
-
-  const handleScroll: CommonEventFunction = useCallback(
-    (e) => {
-      const se = e as unknown as ScrollEventLike;
-      handleScrollEvent(se.detail.scrollTop, se.detail.scrollHeight);
-    },
-    [handleScrollEvent],
-  );
-
-  // H5 环境下通过 DOM 获取 viewport 高度，并绑定原生 scroll 事件
-  // Taro ScrollView 的 onScroll prop 在 H5 Web Component 下不触发，
-  // 必须直接 addEventListener 绕过。小程序环境 onScroll prop 正常工作，不需要此逻辑。
-  useEffect(() => {
-    if (process.env.TARO_ENV !== "h5") return;
-    const el = document.querySelector(".terminal-viewport");
+    const el = document.querySelector(".terminal-viewport") as HTMLElement | null;
     if (!el) return;
 
-    viewportHeightRef.current = el.clientHeight;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        viewportHeightRef.current = entry.contentRect.height;
-      }
-    });
-    observer.observe(el);
+    let startY = 0;
+    let isDown = false;
+    let lastRequestTime = 0;
+    // 捏合缩放状态
+    let pinchStartDist = 0;
+    let pinchTriggered = false;
 
-    const nativeScrollHandler = () => {
-      handleScrollEvent(el.scrollTop, el.scrollHeight);
-    };
-    el.addEventListener("scroll", nativeScrollHandler);
+    // 返回 true 表示发出了滚动请求，调用者应重置 startY
+    function handleSwipe(dy: number): boolean {
+      if (Math.abs(dy) < MIN_SWIPE_PX) return false;
+      const now = Date.now();
+      if (now - lastRequestTime < THROTTLE_MS) return false;
+      lastRequestTime = now;
+
+      const delta = Math.max(1, Math.round(Math.abs(dy) / PX_PER_LINE));
+      if (dy > 0) {
+        onScrollRef.current("up", delta);
+      } else {
+        onScrollRef.current("down", delta);
+      }
+      return true;
+    }
+
+    // --- Touch events ---
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        pinchStartDist = getDistance(e.touches[0], e.touches[1]);
+        pinchTriggered = false;
+      } else if (e.touches.length === 1) {
+        startY = e.touches[0].clientY;
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      e.preventDefault();
+      if (e.touches.length === 2 && !pinchTriggered) {
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        const ratio = dist / pinchStartDist;
+        if (ratio > 1.3) { pinchTriggered = true; onPinchZoomRef.current("in"); }
+        else if (ratio < 0.7) { pinchTriggered = true; onPinchZoomRef.current("out"); }
+        return;
+      }
+      if (e.touches.length === 1) {
+        const dy = startY - e.touches[0].clientY;
+        // 只在实际发出请求后才重置起始点，否则累积距离
+        if (handleSwipe(dy)) {
+          startY = e.touches[0].clientY;
+        }
+      }
+    }
+
+    // --- Mouse events (桌面浏览器调试用) ---
+    function onMouseDown(e: MouseEvent) {
+      startY = e.clientY;
+      isDown = true;
+    }
+
+    function onMouseMove(e: MouseEvent) {
+      if (!isDown) return;
+      const dy = startY - e.clientY;
+      if (handleSwipe(dy)) {
+        startY = e.clientY;
+      }
+    }
+
+    function onMouseUp() {
+      isDown = false;
+    }
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("mousedown", onMouseDown);
+    el.addEventListener("mousemove", onMouseMove);
+    el.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("mouseup", onMouseUp);
 
     return () => {
-      observer.disconnect();
-      el.removeEventListener("scroll", nativeScrollHandler);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("mousedown", onMouseDown);
+      el.removeEventListener("mousemove", onMouseMove);
+      el.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("mouseup", onMouseUp);
     };
-  }, [handleScrollEvent]);
+  }, []);
 
   const lineStyle = (fs: number) => ({
     fontSize: `${fs}PX`,
@@ -140,15 +136,7 @@ export function TerminalViewport({
   });
 
   return (
-    <ScrollView
-      className="terminal-viewport"
-      scrollX
-      scrollY
-      scrollIntoView={scrollRef.current}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onScroll={handleScroll}
-    >
+    <View className="terminal-viewport">
       <View className="terminal-content">
         {lines.map((line, i) => (
           <View
@@ -173,6 +161,6 @@ export function TerminalViewport({
           </View>
         ))}
       </View>
-    </ScrollView>
+    </View>
   );
 }
