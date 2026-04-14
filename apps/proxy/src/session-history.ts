@@ -205,33 +205,6 @@ async function extractTitleAndCwd(filePath: string): Promise<{ title: string | n
   });
 }
 
-// 从 user message 中提取纯文本，支持多种格式
-function extractUserText(msg: unknown): string | null {
-  // 格式 1: message 是字符串
-  if (typeof msg === "string") {
-    if (msg.startsWith("<") || msg.startsWith("/")) return null;
-    return msg.slice(0, 80);
-  }
-
-  // 格式 2: message 是 { role: "user", content: "..." | [...] }
-  if (msg && typeof msg === "object" && "content" in msg) {
-    const content = (msg as { content: unknown }).content;
-    if (typeof content === "string") {
-      if (content.startsWith("<") || content.startsWith("/")) return null;
-      return content.slice(0, 80);
-    }
-    if (Array.isArray(content)) {
-      return extractFromBlocks(content);
-    }
-  }
-
-  // 格式 3: message 是 [{ type: "text", text: "..." }, ...]
-  if (Array.isArray(msg)) {
-    return extractFromBlocks(msg);
-  }
-
-  return null;
-}
 
 function extractFromBlocks(blocks: Array<{ type?: string; text?: string }>): string | null {
   const textBlock = blocks.find((b) => b.type === "text" && typeof b.text === "string");
