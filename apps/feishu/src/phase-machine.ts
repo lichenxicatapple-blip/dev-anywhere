@@ -15,6 +15,7 @@ export interface PhaseNav {
   navigateTo(url: string): void;
   showToast(title: string): void;
   getStorageSync(key: string): string;
+  removeStorageSync(key: string): void;
   getCurrentPath(): string;
 }
 
@@ -130,13 +131,18 @@ export async function handleRelayMessage(
           dispatch({ type: "SET_PROXY_ONLINE", online: true });
           const savedSessionId = nav.getStorageSync("cc_sessionId");
           const currentPath = nav.getCurrentPath();
-          if (savedSessionId) {
+          const sessionStillExists = savedSessionId && proxyInfo?.sessions?.includes(savedSessionId);
+          if (savedSessionId && sessionStillExists) {
             const mode = nav.getStorageSync("cc_sessionMode") || "json";
             dispatch({ type: "SET_PHASE", phase: "chatting" });
             if (!currentPath.includes("/pages/chat/index")) {
               nav.navigateTo(`/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`);
             }
           } else {
+            if (savedSessionId && !sessionStillExists) {
+              nav.removeStorageSync("cc_sessionId");
+              nav.removeStorageSync("cc_sessionMode");
+            }
             dispatch({ type: "SET_PHASE", phase: "session_browsing" });
           }
           return;

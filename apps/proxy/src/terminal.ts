@@ -161,6 +161,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         tracker.clearAnchor();
         log.info({ sessionId, clientRows: msg.rows }, "Frame requested, anchor cleared");
         framePusher.forceFull();
+        // 顺便推送当前终端标题，确保客户端刷新后恢复
+        if (tracker.title && socket.writable) {
+          socket.write(serializeIpc({ type: "pty_title_change", sessionId, title: tracker.title }));
+        }
       }
       if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
         if (msg.rows) tracker.setClientRows(msg.rows);

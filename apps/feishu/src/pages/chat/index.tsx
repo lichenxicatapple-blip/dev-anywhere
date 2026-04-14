@@ -598,7 +598,7 @@ export default function Chat() {
   return (
     <View className={`chat-page ${isDark ? "chat-page-dark" : ""} ${screen.className}`}>
       <SafeAreaHeader
-        title={terminalState.ptyTitle || router.params.name || "Chat"}
+        title={terminalState.ptyTitle || (router.params.name ? decodeURIComponent(router.params.name) : null) || "Chat"}
         statusBarHeight={screen.statusBarHeight}
         transparent={isDark}
       />

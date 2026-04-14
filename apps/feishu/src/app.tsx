@@ -35,6 +35,22 @@ import "./app.css";
 declare const RELAY_URL: string;
 const DEFAULT_RELAY_URL = RELAY_URL;
 
+// 从 WebSocket URL 推导 HTTP URL，用于加载字体等静态资源
+function relayHttpUrl(wsUrl: string): string {
+  return wsUrl.replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/(proxy|client)$/, "");
+}
+
+// 动态注入字体 CSS link 标签
+function loadFontCSS(relayUrl: string): void {
+  const base = relayHttpUrl(relayUrl);
+  const href = `${base}/fonts/sarasa-fixed-sc/result.css`;
+  if (document.querySelector(`link[href="${href}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
+
 function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [sessionState, sessionDispatch] = useReducer(sessionReducer, initialSessionState);
@@ -49,6 +65,7 @@ function App({ children }: PropsWithChildren) {
   useEffect(() => {
     const relayUrl = Taro.getStorageSync("cc_relayUrl") as string || DEFAULT_RELAY_URL;
     dispatch({ type: "SET_RELAY_URL", url: relayUrl });
+    loadFontCSS(relayUrl);
 
     const ws = new WebSocketManager();
     wsRef.current = ws;
@@ -62,6 +79,7 @@ function App({ children }: PropsWithChildren) {
       navigateTo: (url: string) => Taro.navigateTo({ url }),
       showToast: (title: string) => Taro.showToast({ title, icon: "none", duration: 1500 }),
       getStorageSync: (key: string) => Taro.getStorageSync(key) as string,
+      removeStorageSync: (key: string) => Taro.removeStorageSync(key),
       getCurrentPath: () => {
         const pages = Taro.getCurrentPages();
         return pages.length > 0 ? pages[pages.length - 1].route || "" : "";

@@ -19,7 +19,7 @@
 }
 
 .terminal-line {
-  font-family: monospace, Menlo, Courier;
+  font-family: "Sarasa Fixed SC", Menlo, Consolas, monospace;
   white-space: pre;
 }
 

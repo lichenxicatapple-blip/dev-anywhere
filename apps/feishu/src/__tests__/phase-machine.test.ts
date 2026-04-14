@@ -29,6 +29,7 @@ function createTestEnv(phase: AppPhase, overrides?: Partial<AppState>) {
     navigateTo: vi.fn(),
     showToast: vi.fn(),
     getStorageSync: vi.fn(() => ""),
+    removeStorageSync: vi.fn(),
     getCurrentPath: vi.fn(() => "pages/proxy-select/index"),
   };
 
@@ -226,7 +227,7 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
       });
 
     await handleRelayMessage(
-      { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "My Proxy", online: true }] },
+      { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "My Proxy", online: true, sessions: ["s1"] }] },
       env.getState, env.dispatch, env.timers, env.relay, env.nav,
     );
 
@@ -234,6 +235,24 @@ describe("handleRelayMessage: proxy_list_response cold start", () => {
     expect(env.getState().selectedProxyId).toBe("p1");
     expect(env.relay.selectProxy).toHaveBeenCalledWith("p1");
     expect(env.nav.navigateTo).toHaveBeenCalledWith("/pages/chat/index?sessionId=s1&mode=json");
+  });
+
+  it("cold start with saved sessionId not in proxy sessions: clears storage, stays on session_browsing", async () => {
+    const env = createTestEnv("proxy_selecting");
+    (env.nav.getStorageSync as ReturnType<typeof vi.fn>)
+      .mockImplementation((key: string) => {
+        if (key === "cc_proxyId") return "p1";
+        if (key === "cc_sessionId") return "s-gone";
+        return "";
+      });
+
+    await handleRelayMessage(
+      { type: "proxy_list_response", proxies: [{ proxyId: "p1", name: "P", online: true, sessions: ["s-other"] }] },
+      env.getState, env.dispatch, env.timers, env.relay, env.nav,
+    );
+
+    expect(env.getState().phase).toBe("session_browsing");
+    expect(env.nav.navigateTo).not.toHaveBeenCalled();
   });
 
   it("cold start with saved proxyId only: calls ensureBinding, transitions to session_browsing", async () => {

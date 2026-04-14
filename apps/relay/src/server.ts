@@ -32,6 +32,17 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
   const registry = new RelayRegistry(store);
   const app = express();
+
+  // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.cc-anywhere/relay-data/fonts 提供
+  const fontsDir = dataDir ? `${dataDir}/fonts` : `${process.env.HOME}/.cc-anywhere/relay-data/fonts`;
+  app.use("/fonts", (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  }, express.static(fontsDir, {
+    maxAge: "30d",
+    immutable: true,
+  }));
+
   app.use(healthRouter(registry));
 
   // 使用 createServer 而非 app.listen，确保 WebSocket upgrade 可在同一端口上处理

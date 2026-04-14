@@ -57,6 +57,15 @@ export default function SessionList() {
       }
 
       const ctrl = msg as RelayControlMessage;
+      // pty_state 实时更新 session 状态（working/idle/approval）
+      if (ctrl.type === "pty_state" && "sessionId" in ctrl && "payload" in ctrl) {
+        const { sessionId: sid, payload } = ctrl as unknown as { sessionId: string; payload: { state: string } };
+        const stateMap: Record<string, string> = { working: "working", turn_complete: "idle", approval_wait: "waiting_approval" };
+        const mapped = stateMap[payload.state];
+        if (mapped) {
+          sessionDispatch({ type: "UPDATE_SESSION_STATE", sessionId: sid, state: mapped as SessionInfo["state"] });
+        }
+      }
       if (ctrl.type === "session_history_response") {
         sessionDispatch({ type: "SET_HISTORY_SESSIONS", sessions: ctrl.sessions });
       }
