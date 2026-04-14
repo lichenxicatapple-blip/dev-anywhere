@@ -18,8 +18,8 @@
   --spacing-lg: 24px;
   --spacing-xl: 32px;
 
-  --bubble-max-width-user: 75%;
-  --bubble-max-width-assistant: 85%;
+  --bubble-max-width-user: 95%;
+  --bubble-max-width-assistant: 95%;
   --page-padding-h: 16px;
   --session-card-height: 64px;
   --input-bar-padding-h: 16px;
@@ -28,20 +28,29 @@
 
 /* Phone landscape */
 .screen-landscape {
-  --bubble-max-width-user: 60%;
-  --bubble-max-width-assistant: 70%;
+  --bubble-max-width-user: 85%;
+  --bubble-max-width-assistant: 90%;
   --page-padding-h: 24px;
   --input-bar-padding-h: 24px;
 }
 
 /* Feishu PC desktop */
 .screen-desktop {
-  --bubble-max-width-user: 50%;
-  --bubble-max-width-assistant: 60%;
+  --bubble-max-width-user: 75%;
+  --bubble-max-width-assistant: 80%;
   --page-padding-h: 32px;
   --session-card-height: 72px;
   --input-bar-padding-h: 32px;
   --picker-max-width: 480px;
+}
+
+body {
+  background: #1a1a2e;
+}
+
+.taro_page {
+  background: #1a1a2e !important;
+  width: 100% !important;
 }
 
 /* Global animations */

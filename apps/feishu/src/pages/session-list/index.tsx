@@ -1,8 +1,9 @@
 // 会话列表页：活跃/历史分区，左滑终止，状态圆点，模式标记，新建会话带目录选择
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
 import Taro from "@tarojs/taro";
 import type { MessageEnvelope, RelayControlMessage, DirEntry, SessionInfo } from "@cc-anywhere/shared";
+import { showToast, showErrorToast } from "@/components/toast";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
 import {
@@ -28,6 +29,7 @@ export default function SessionList() {
   const screen = useScreenSize();
   const [swipeOpenId, setSwipeOpenId] = useState("");
   const [showDirPicker, setShowDirPicker] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
@@ -74,6 +76,24 @@ export default function SessionList() {
         const { path, entries } = ctrl as RelayControlMessage & { path: string; entries: DirEntry[] };
         fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
       }
+      // 会话创建响应：导航到 chat 页面
+      if (ctrl.type === "session_create_response") {
+        setCreating(false);
+        const resp = ctrl as unknown as { sessionId: string; error?: string };
+        if (resp.error) {
+          showErrorToast(resp.error);
+        } else {
+          Taro.setStorageSync("cc_sessionId", resp.sessionId);
+          Taro.setStorageSync("cc_sessionMode", "json");
+          transitionToPhase(appState.phase, "chatting", appDispatch);
+          Taro.navigateTo({ url: `/pages/chat/index?sessionId=${resp.sessionId}&mode=json` });
+        }
+      }
+      // relay 错误提示
+      if (ctrl.type === "relay_error") {
+        const err = ctrl as Record<string, unknown>;
+        showErrorToast(`${err.message || err.code}`);
+      }
       // 目录创建响应：创建成功后刷新父目录缓存
       if (ctrl.type === "dir_create_response") {
         const resp = ctrl as unknown as { path: string; success: boolean; error?: string };
@@ -96,11 +116,11 @@ export default function SessionList() {
 
   const checkConnected = useCallback((): boolean => {
     if (!appState.connected) {
-      Taro.showToast({ title: "Not connected to relay server", icon: "none", duration: 1500 });
+      showToast("Not connected to relay server");
       return false;
     }
     if (!appState.proxyOnline) {
-      Taro.showToast({ title: "Proxy is offline", icon: "none", duration: 1500 });
+      showToast("Proxy is offline");
       return false;
     }
     return true;
@@ -133,32 +153,27 @@ export default function SessionList() {
     (sessionId: string) => {
       if (!checkConnected()) return;
       if (relay) {
-        relay.sendEnvelope({
-          type: "session_terminate",
-          sessionId,
-          payload: { sessionId },
-        } as never);
+        relay.sendControl({ type: "session_terminate", sessionId } as never);
       }
       sessionDispatch({ type: "REMOVE_SESSION", sessionId });
     },
     [relay, sessionDispatch, checkConnected],
   );
 
-  // 恢复历史会话
+  // 恢复历史会话：用 projectDir 作为 cwd，传 Claude 会话 ID 给 --resume
   const handleResumeHistory = useCallback(
     (historySession: HistorySession) => {
       if (!checkConnected()) return;
       if (relay) {
-        relay.sendEnvelope({
+        setCreating(true);
+        relay.sendControl({
           type: "session_create",
-          sessionId: "",
-          payload: { resumeSessionId: historySession.id },
+          cwd: historySession.projectDir,
+          resumeSessionId: historySession.id,
         } as never);
       }
-      transitionToPhase(appState.phase, "chatting", appDispatch);
-      Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay, checkConnected, appState.phase, appDispatch],
+    [relay, checkConnected],
   );
 
   // 点击新建按钮时弹出目录选择器
@@ -177,22 +192,17 @@ export default function SessionList() {
     [relay, checkConnected],
   );
 
-  // 选择目录后创建会话
+  // 选择目录后创建会话，等待 session_create_response 返回 sessionId 再导航
   const handleDirSelect = useCallback(
     (cwd: string) => {
       setShowDirPicker(false);
       if (!checkConnected()) return;
       if (relay) {
-        relay.sendEnvelope({
-          type: "session_create",
-          sessionId: "",
-          payload: { cwd },
-        } as never);
+        setCreating(true);
+        relay.sendControl({ type: "session_create", cwd } as never);
       }
-      transitionToPhase(appState.phase, "chatting", appDispatch);
-      Taro.navigateTo({ url: "/pages/chat/index" });
     },
-    [relay, checkConnected, appState.phase, appDispatch],
+    [relay, checkConnected],
   );
 
   const handleDirPickerCancel = useCallback(() => {
@@ -210,6 +220,31 @@ export default function SessionList() {
   const hasActiveSessions = sessionState.sessions.length > 0;
   const hasHistory = sessionState.historySessions.length > 0;
   const isEmpty = !hasActiveSessions && !hasHistory;
+
+  // 历史会话按 projectDir 分组
+  const historyGroups = useMemo(() => {
+    const groups = new Map<string, typeof sessionState.historySessions>();
+    for (const h of sessionState.historySessions) {
+      const dir = h.projectDir;
+      if (!groups.has(dir)) groups.set(dir, []);
+      groups.get(dir)!.push(h);
+    }
+    return Array.from(groups.entries()).map(([dir, sessions]) => ({
+      dir,
+      shortDir: dir.replace(/^\/Users\/[^/]+/, "~"),
+      sessions,
+    }));
+  }, [sessionState.historySessions]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = useCallback((dir: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(dir)) next.delete(dir);
+      else next.add(dir);
+      return next;
+    });
+  }, []);
 
   return (
     <View className={`session-page ${screen.className}`}>
@@ -239,25 +274,54 @@ export default function SessionList() {
               </View>
             )}
 
+            {hasActiveSessions && hasHistory && (
+              <View className="session-section-divider" />
+            )}
             {hasHistory && (
               <View>
-                <Text className="session-section-header">History Sessions</Text>
-                <View className="session-history-grid">
-                  {sessionState.historySessions.map((h) => (
-                    <HistoryListItem
-                      key={h.id}
-                      id={h.id}
-                      title={h.title}
-                      updatedAt={h.updatedAt}
-                      onSelect={() => handleResumeHistory(h)}
-                    />
-                  ))}
-                </View>
+                <Text className="session-section-header">History</Text>
+                {historyGroups.map((group) => (
+                  <View key={group.dir} className="history-group">
+                    <View className="history-group-header" onClick={() => toggleGroup(group.dir)}>
+                      <View className={`history-group-chevron ${expandedGroups.has(group.dir) ? "expanded" : ""}`} />
+                      <Text className="history-group-path">{group.shortDir}</Text>
+                      <Text className="history-group-count">{group.sessions.length}</Text>
+                    </View>
+                    {expandedGroups.has(group.dir) && (
+                      <View className="history-group-items">
+                        {group.sessions.map((h) => (
+                          <HistoryListItem
+                            key={h.id}
+                            id={h.id}
+                            title={h.title}
+                            projectDir={h.projectDir}
+                            updatedAt={h.updatedAt}
+                            onSelect={() => handleResumeHistory(h)}
+                          />
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                ))}
               </View>
             )}
           </View>
         )}
       </ScrollView>
+
+      {/* Loading overlay */}
+      {creating && (
+        <View className="session-loading-overlay">
+          <View className="session-loading-ring">
+            <View className="session-loading-dot" />
+            <View className="session-loading-dot" />
+            <View className="session-loading-dot" />
+            <View className="session-loading-dot" />
+            <View className="session-loading-dot" />
+          </View>
+          <Text className="session-loading-text">Creating session...</Text>
+        </View>
+      )}
 
       {/* Floating action button for new session */}
       <View className="session-fab" onClick={handleNewSessionPress}>

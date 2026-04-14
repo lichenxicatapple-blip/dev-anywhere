@@ -3,6 +3,8 @@ import { useState, useCallback, useRef } from "react";
 import { View, Text } from "@tarojs/components";
 import type { ToolCallInfo, QuotedMessage } from "@/stores/chat-store";
 import { ToolCallCard } from "@/components/tool-call-card";
+import { MarkdownView } from "@/components/markdown-view";
+import "@/components/markdown-view/index.css";
 import "./index.css";
 
 interface AssistantBubbleProps {
@@ -60,10 +62,8 @@ export function AssistantBubble({
       onTouchCancel={handleTouchEnd}
     >
       <View className="assistant-bubble bubble-enter-assistant">
-        <Text selectable className="assistant-bubble-text">
-          {text}
-          {isPartial && <Text className="assistant-streaming-cursor">|</Text>}
-        </Text>
+        <MarkdownView text={text} className="assistant-bubble-text" />
+        {isPartial && <Text className="assistant-streaming-cursor">|</Text>}
         {toolCalls.map((tc, i) => (
           <ToolCallCard
             key={i}
@@ -72,10 +72,10 @@ export function AssistantBubble({
           />
         ))}
       </View>
-      {showTimestamp && timestamp && (
+      {showTimestamp && timestamp != null && timestamp > 0 && (
         <View className="assistant-bubble-time-row">
           <Text className="assistant-bubble-time">
-            {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            {new Date(timestamp!).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
           </Text>
         </View>
       )}

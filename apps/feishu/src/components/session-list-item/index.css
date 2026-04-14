@@ -109,6 +109,18 @@
 .sli-subtitle {
   font-size: 24px;
   color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sli-time-sep::before {
+  content: "\00b7";
+  margin: 0 8px;
+}
+
+.sli-time-sep {
+  flex-shrink: 0;
 }
 
 /* Meta row: spike 风格 — dot + state label */
@@ -163,8 +175,11 @@
 
 /* Chevron */
 .sli-chevron {
-  font-size: 28px;
-  color: rgba(255, 255, 255, 0.3);
+  width: 16px;
+  height: 16px;
+  border-right: 3px solid rgba(255, 255, 255, 0.3);
+  border-bottom: 3px solid rgba(255, 255, 255, 0.3);
+  transform: rotate(-45deg);
   margin-left: 16px;
   flex-shrink: 0;
 }

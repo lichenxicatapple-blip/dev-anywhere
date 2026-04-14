@@ -30,6 +30,8 @@ import {
 } from "@/stores/command-store";
 import { handleWsStatusChange, handleRelayMessage } from "@/phase-machine";
 import type { Timers } from "@/phase-machine";
+import { ToastContainer, showToast } from "@/components/toast";
+import { ModalContainer } from "@/components/modal";
 import "./app.css";
 
 declare const RELAY_URL: string;
@@ -77,7 +79,7 @@ function App({ children }: PropsWithChildren) {
     const nav = {
       reLaunch: (url: string) => Taro.reLaunch({ url }),
       navigateTo: (url: string) => Taro.navigateTo({ url }),
-      showToast: (title: string) => Taro.showToast({ title, icon: "none", duration: 1500 }),
+      showToast: (title: string) => showToast(title),
       getStorageSync: (key: string) => Taro.getStorageSync(key) as string,
       removeStorageSync: (key: string) => Taro.removeStorageSync(key),
       getCurrentPath: () => {
@@ -122,6 +124,8 @@ function App({ children }: PropsWithChildren) {
                   <CommandProvider value={commandState}>
                     <CommandDispatchProvider value={commandDispatch}>
                       {children}
+                    <ToastContainer />
+                    <ModalContainer />
                     </CommandDispatchProvider>
                   </CommandProvider>
                 </FileDispatchProvider>

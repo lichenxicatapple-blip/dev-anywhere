@@ -1,4 +1,4 @@
-// WebSocket 连接管理器，封装 Taro.connectSocket 并实现指数退避重连
+// WebSocket 连接管理器，封装 Taro.connectSocket 并实现固定间隔重连
 //
 // H5 模式下直接使用原生 WebSocket 而非 Taro.connectSocket polyfill。
 // Taro 的 SocketTask 在构造函数中立即创建 WebSocket 连接，但 onOpen/onMessage
@@ -6,8 +6,7 @@
 // 对于 localhost 等低延迟连接，onopen 事件在 handler 注册前就已触发，导致事件丢失。
 import Taro from "@tarojs/taro";
 
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30000;
+const RECONNECT_INTERVAL_MS = 2000;
 
 const IS_H5 = process.env.TARO_ENV === "h5";
 
@@ -58,7 +57,7 @@ function createNativeTask(url: string): TaskLike {
 
 export class WebSocketManager {
   private task: TaskLike | null = null;
-  private reconnectAttempt = 0;
+
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private url = "";
@@ -131,7 +130,6 @@ export class WebSocketManager {
   private bindTaskEvents(task: TaskLike): void {
     task.onOpen(() => {
       this.connecting = false;
-      this.reconnectAttempt = 0;
       this.connected = true;
       this.flushPendingQueue();
       this.statusHandlers.forEach((h) => h(true));
@@ -157,13 +155,9 @@ export class WebSocketManager {
   }
 
   private scheduleReconnect(): void {
-    const backoff =
-      Math.random() *
-      Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempt));
     this.reconnectTimer = setTimeout(() => {
-      this.reconnectAttempt++;
       this.doConnect();
-    }, backoff);
+    }, RECONNECT_INTERVAL_MS);
   }
 
   send(data: string): boolean {

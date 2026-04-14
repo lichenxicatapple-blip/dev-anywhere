@@ -34,7 +34,7 @@ export function SafeAreaHeader({
       <View style={{ height: `${statusBarHeight}px` }} />
       <View className="safe-area-header-bar">
         <View className="safe-area-header-back" onClick={handleBack}>
-          <Text className="safe-area-header-back-icon">{"<"}</Text>
+          <View className="safe-area-header-back-chevron" />
         </View>
         <Text className="safe-area-header-title">{title}</Text>
         <View className="safe-area-header-right">

@@ -1,7 +1,9 @@
 // Chat 页面：PTY 终端视图和 JSON 聊天气泡双模式，集成工具审批、picker、引用、设置菜单
-import { useState, useCallback, useReducer, useEffect, useRef } from "react";
+import { useState, useCallback, useReducer, useEffect, useRef, useMemo } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { useRouter } from "@tarojs/taro";
+import { showToast, showErrorToast } from "@/components/toast";
+import { showModal } from "@/components/modal";
 import { SafeAreaHeader } from "@/components/safe-area-header";
 import { TerminalViewport } from "@/components/terminal-viewport";
 import { ChatBubbleList } from "@/components/chat-bubble-list";
@@ -15,7 +17,7 @@ import { FilePathPicker } from "@/components/file-path-picker";
 import { QuotePreviewBar } from "@/components/quote-preview-bar";
 import type { MessageEnvelope, RelayControlMessage, TerminalFramePayload } from "@cc-anywhere/shared";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
-import { parseAssistantMessage, routeStreamEvent } from "@/services/message-parser";
+import { parseAssistantMessage, routeStreamEvent, formatToolTitle } from "@/services/message-parser";
 import { useScreenSize } from "@/hooks/use-screen-size";
 import {
   chatReducer,
@@ -63,11 +65,11 @@ export default function Chat() {
   // 发送前检查连接状态和 proxy 在线状态，未就绪时提示用户
   const checkConnected = useCallback((): boolean => {
     if (!appState.connected) {
-      Taro.showToast({ title: "Not connected to relay server", icon: "none", duration: 1500 });
+      showToast("Not connected to relay server");
       return false;
     }
     if (!appState.proxyOnline) {
-      Taro.showToast({ title: "Proxy is offline", icon: "none", duration: 1500 });
+      showToast("Proxy is offline");
       return false;
     }
     return true;
@@ -121,11 +123,21 @@ export default function Chat() {
               if (action) {
                 chatDispatch(action as ChatAction);
               }
+              if (parsed.type === "result") {
+                relay.sendControl({ type: "session_resources_request", sessionId } as never);
+              }
             }
             relay.updateSeq(envelope.sessionId, envelope.seq);
             break;
           }
           case "tool_use_request": {
+            chatDispatch({
+              type: "SET_WORKING_TOOL",
+              toolName: formatToolTitle(
+                envelope.payload.toolName,
+                envelope.payload.parameters as Record<string, unknown> || {},
+              ),
+            });
             chatDispatch({
               type: "ADD_APPROVAL_REQUEST",
               request: {
@@ -171,17 +183,16 @@ export default function Chat() {
               const sessions = envelope.payload.sessions as Array<{ id?: string; sessionId?: string }>;
               const stillExists = sessions.some(s => (s.sessionId || s.id) === sessionId);
               if (!stillExists) {
-                Taro.showModal({
+                void showModal({
                   title: "Session Ended",
                   content: "The terminal session has exited.",
                   showCancel: false,
                   confirmText: "OK",
-                  success: () => {
-                    const target = appState.proxyOnline
-                      ? "/pages/session-list/index"
-                      : "/pages/proxy-select/index";
-                    Taro.reLaunch({ url: target });
-                  },
+                }).then(() => {
+                  const target = appState.proxyOnline
+                    ? "/pages/session-list/index"
+                    : "/pages/proxy-select/index";
+                  Taro.reLaunch({ url: target });
                 });
               }
             }
@@ -203,7 +214,6 @@ export default function Chat() {
           if (frame.mode === "full") {
             const fullFrame = frame as TerminalFramePayload & { anchorLineId?: number; newestLineId?: number };
             if (fullFrame.anchorLineId != null) {
-              console.log("[scroll] response frame:", { anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId, lineCount: frame.lines.length });
               terminalDispatch({ type: "CACHE_FRAME", anchorLineId: fullFrame.anchorLineId, lines: frame.lines });
               terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: fullFrame.anchorLineId, newestLineId: fullFrame.newestLineId ?? null, lines: frame.lines });
             } else {
@@ -255,10 +265,35 @@ export default function Chat() {
         case "file_tree_push": {
           const { path, entries } = ctrl as unknown as { path: string; entries: Array<{ name: string; isDir: boolean }> };
           fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
+          projectRootRef.current = path;
+          break;
+        }
+        case "session_history_messages": {
+          if (ctrl.sessionId === sessionId) {
+            setLoadingHistory(false);
+            const hasHistory = chatStateRef.current.messages.some((m) => m.id.startsWith("history-"));
+            if (ctrl.messages.length > 0 && !hasHistory) {
+              chatDispatch({ type: "LOAD_HISTORY", messages: ctrl.messages });
+            }
+          }
+          break;
+        }
+        case "pending_approvals_push": {
+          if (ctrl.sessionId === sessionId) {
+            const approvals = (ctrl as unknown as { approvals: Array<{ requestId: string; toolName: string; input: Record<string, unknown> }> }).approvals;
+            for (const a of approvals) {
+              chatDispatch({
+                type: "ADD_APPROVAL_REQUEST",
+                request: { requestId: a.requestId, toolName: a.toolName, input: a.input, status: "pending" },
+              });
+            }
+            chatDispatch({ type: "SET_WORKING", isWorking: true });
+          }
           break;
         }
         case "relay_error": {
-          console.error("[chat] relay error:", (ctrl as Record<string, unknown>).code, (ctrl as Record<string, unknown>).message);
+          const err = ctrl as Record<string, unknown>;
+          showErrorToast(`${err.message || err.code}`);
           break;
         }
         default:
@@ -270,15 +305,18 @@ export default function Chat() {
   }, [relay, sessionId, chatDispatch, terminalDispatch]);
 
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [historyShown, setHistoryShown] = useState(30);
   const [pickerMode, setPickerMode] = useState<PickerMode>("none");
   const [filterText, setFilterText] = useState("");
   const [filePickerPath, setFilePickerPath] = useState("/");
+  const projectRootRef = useRef("/");
   const [argumentHint, setArgumentHint] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [permissionMode, setPermissionMode] = useState<"default" | "auto_accept" | "plan">("default");
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const isPty = mode === "pty";
-  const isDark = isPty;
+  const isDark = true;
 
   // 挂载时确保 client 绑定到正确的 proxy，然后请求终端帧
   useEffect(() => {
@@ -293,29 +331,33 @@ export default function Chat() {
       });
       if (cancelled) return;
       if (isBindingError(result)) {
-        console.error("[chat] binding failed:", result.error);
+        showErrorToast(`Binding failed: ${result.error}`);
         return;
       }
       // 绑定成功，更新 proxy 状态
       appDispatch({ type: "SET_PROXY", proxyId: result.proxyId, proxyName: null });
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
-      // 请求终端帧
       if (isPty) {
         relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+      } else {
+        setLoadingHistory(true);
+        relay.sendControl({ type: "session_messages_request", sessionId } as never);
+        relay.sendControl({ type: "session_resources_request", sessionId } as never);
       }
     }
 
-    // 已绑定时直接请求帧，否则走绑定流程
+    // 已绑定时直接请求帧/历史，否则走绑定流程
     const boundId = relay.getBoundProxyId();
-    console.log("[chat-bind]", { boundId, sessionId, isPty, selectedProxyId: appState.selectedProxyId });
     if (boundId) {
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
-        console.log("[chat-bind] requesting frame, rows:", getViewportRows());
         relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+      } else {
+        setLoadingHistory(true);
+        relay.sendControl({ type: "session_messages_request", sessionId } as never);
+        relay.sendControl({ type: "session_resources_request", sessionId } as never);
       }
     } else {
-      console.log("[chat-bind] not bound, calling bind()");
       bind();
     }
 
@@ -381,14 +423,10 @@ export default function Chat() {
 
   const handleTerminalScroll = useCallback(
     (direction: "up" | "down", delta: number) => {
-      if (!relay || !sessionId) {
-        console.warn("[scroll] not ready:", { hasRelay: !!relay, sessionId });
-        return;
-      }
+      if (!relay || !sessionId) return;
 
       const state = terminalStateRef.current;
       const rows = getViewportRows();
-      console.log("[scroll] request:", { direction, delta, anchorLineId: state.anchorLineId, newestLineId: state.newestLineId });
 
       if (state.anchorLineId != null) {
         const targetAnchor = direction === "up"
@@ -397,7 +435,6 @@ export default function Chat() {
 
         // scrollDown 回到 live 模式
         if (direction === "down" && state.newestLineId != null && targetAnchor + rows > state.newestLineId) {
-          console.log("[scroll] return to live");
           terminalDispatch({ type: "CLEAR_ANCHOR" });
           relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
           return;
@@ -406,10 +443,7 @@ export default function Chat() {
         // 命中缓存则直接显示
         const cached = state.frameCache.get(targetAnchor);
         if (cached) {
-          console.log("[scroll] cache hit:", { targetAnchor });
           terminalDispatch({ type: "SET_SCROLL_STATE", anchorLineId: targetAnchor, newestLineId: state.newestLineId, lines: cached });
-        } else {
-          console.log("[scroll] cache miss:", { targetAnchor });
         }
       }
 
@@ -439,6 +473,7 @@ export default function Chat() {
   const handleToolAllow = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
+      chatDispatch({ type: "SET_WORKING", isWorking: true });
       if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "tool_approve",
@@ -457,6 +492,7 @@ export default function Chat() {
   const handleToolAllowAll = useCallback(
     (requestId: string) => {
       chatDispatch({ type: "UPDATE_APPROVAL_STATUS", requestId, status: "approved" });
+      chatDispatch({ type: "SET_WORKING", isWorking: true });
       if (relay && sessionId && checkConnected()) {
         relay.sendEnvelope({
           type: "tool_approve",
@@ -501,7 +537,7 @@ export default function Chat() {
   const handlePickerModeChange = useCallback((newMode: PickerMode) => {
     setPickerMode(newMode);
     if (newMode === "file") {
-      setFilePickerPath("/");
+      setFilePickerPath(projectRootRef.current);
     }
   }, []);
 
@@ -595,12 +631,37 @@ export default function Chat() {
     }
   }, [relay, sessionId, terminalDispatch]);
 
+  // 历史消息分页渲染：只显示最后 historyShown 条历史 + 全部实时消息
+  const historyCount = useMemo(
+    () => chatState.messages.filter((m) => m.id.startsWith("history-")).length,
+    [chatState.messages],
+  );
+  const visibleMessages = useMemo(() => {
+    const skip = Math.max(0, historyCount - historyShown);
+    return skip > 0 ? chatState.messages.slice(skip) : chatState.messages;
+  }, [chatState.messages, historyCount, historyShown]);
+
+  const handleLoadMoreHistory = useCallback(() => {
+    setHistoryShown((prev) => prev + 30);
+  }, []);
+
   return (
     <View className={`chat-page ${isDark ? "chat-page-dark" : ""} ${screen.className}`}>
       <SafeAreaHeader
-        title={terminalState.ptyTitle || (router.params.name ? decodeURIComponent(router.params.name) : null) || "Chat"}
+        title={
+          isPty
+            ? (terminalState.ptyTitle || (router.params.name ? decodeURIComponent(router.params.name) : null) || "Chat")
+            : (chatState.isWorking
+              ? (chatState.workingToolName || "Thinking...")
+              : (router.params.name ? decodeURIComponent(router.params.name) : null) || "Chat")
+        }
         statusBarHeight={screen.statusBarHeight}
         transparent={isDark}
+        onBack={() => {
+          Taro.removeStorageSync("cc_sessionId");
+          Taro.removeStorageSync("cc_sessionMode");
+          Taro.navigateBack();
+        }}
       />
       <View className="chat-page-body">
         <StatusLine state={statusState} />
@@ -617,7 +678,9 @@ export default function Chat() {
           ) : (
             <>
               <ChatBubbleList
-                messages={chatState.messages}
+                messages={visibleMessages}
+                hasMoreHistory={historyCount > historyShown}
+                onLoadMore={handleLoadMoreHistory}
                 isWorking={chatState.isWorking}
                 onScrollThresholdChange={handleScrollThreshold}
                 onToggleToolCollapse={handleToggleToolCollapse}
@@ -680,6 +743,19 @@ export default function Chat() {
 
       {!isPty && (
         <BackToBottomButton visible={!isNearBottom} onClick={handleBackToBottom} />
+      )}
+
+      {loadingHistory && (
+        <View className="chat-loading-overlay">
+          <View className="chat-loading-ring">
+            <View className="chat-loading-dot" />
+            <View className="chat-loading-dot" />
+            <View className="chat-loading-dot" />
+            <View className="chat-loading-dot" />
+            <View className="chat-loading-dot" />
+          </View>
+          <Text className="chat-loading-text">Loading history...</Text>
+        </View>
       )}
 
       {isPty && terminalState.ptyState === "approval_wait" && pendingApprovals.length > 0 && (

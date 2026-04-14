@@ -10,6 +10,7 @@ export interface SessionInfo {
   state: SessionState;
   createdAt: number;
   name?: string;
+  cwd: string;
   claudeSessionId?: string;
   pid?: number;
 }
@@ -59,12 +60,13 @@ export class SessionManager {
     this.load();
   }
 
-  createSession(mode: "pty" | "json", name?: string, id?: string): SessionInfo {
+  createSession(mode: "pty" | "json", cwd: string, name?: string, id?: string): SessionInfo {
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
       state: SessionState.IDLE,
       createdAt: Date.now(),
+      cwd,
       ...(name !== undefined ? { name } : {}),
     };
     this.sessions.set(info.id, info);

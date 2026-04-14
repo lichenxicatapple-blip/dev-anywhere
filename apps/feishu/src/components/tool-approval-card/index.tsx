@@ -98,12 +98,12 @@ function EditPreview({ details }: { details: { old_string?: string; new_string?:
     <View className="tool-preview-edit">
       {details.old_string != null && (
         <Text selectable className="tool-preview-edit-remove">
-          - {String(details.old_string).slice(0, 200)}
+          - {String(details.old_string)}
         </Text>
       )}
       {details.new_string != null && (
         <Text selectable className="tool-preview-edit-add">
-          + {String(details.new_string).slice(0, 200)}
+          + {String(details.new_string)}
         </Text>
       )}
     </View>
@@ -124,7 +124,7 @@ function WritePreview({ filePath, content }: { filePath: string; content: string
     <View className="tool-preview-write">
       <Text selectable className="tool-preview-write-path">{filePath}</Text>
       {content && (
-        <Text selectable className="tool-preview-write-content">{content.slice(0, 200)}</Text>
+        <Text selectable className="tool-preview-write-content">{content}</Text>
       )}
     </View>
   );

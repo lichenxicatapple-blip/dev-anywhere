@@ -98,7 +98,7 @@ export function DirectoryPicker({
                 className="dir-picker-breadcrumb-item"
                 onClick={() => handleNavigate(seg.path)}
               >
-                {i > 0 && <Text className="dir-picker-breadcrumb-sep">/</Text>}
+                {i > 1 && <Text className="dir-picker-breadcrumb-sep">/</Text>}
                 <Text
                   className={`dir-picker-breadcrumb-text ${i === segments.length - 1 ? "active" : ""}`}
                 >
@@ -118,7 +118,7 @@ export function DirectoryPicker({
             >
               <Text className="dir-picker-item-icon">[D]</Text>
               <Text className="dir-picker-item-name">{entry.name}</Text>
-              <Text className="dir-picker-item-arrow">&gt;</Text>
+              <View className="dir-picker-item-chevron" />
             </View>
           ))}
           {dirs.length === 0 && !creatingDir && (

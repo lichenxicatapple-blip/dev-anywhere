@@ -1,12 +1,12 @@
 .file-picker-panel {
   max-height: 50vh;
-  max-width: var(--picker-max-width, 100%);
-  margin: 0 auto;
-  background: #FFFFFF;
-  border-top: 1px solid #E8E8E8;
+  width: 100%;
+  background: #1A1A2E;
+  border-top: 1px solid #00D4AA;
   display: flex;
   flex-direction: column;
   animation: filePickerSlideUp 200ms ease-out;
+  box-shadow: 0 -4px 20px rgba(0, 212, 170, 0.1);
 }
 
 @keyframes filePickerSlideUp {
@@ -24,20 +24,23 @@
   display: flex;
   align-items: center;
   padding: 16px 32px;
-  border-bottom: 1px solid #F0F0F0;
+  border-bottom: 1px solid #2A2A4A;
   flex-shrink: 0;
+  background: #16162B;
 }
 
 .file-picker-title {
   font-size: 26px;
   font-weight: 600;
-  color: #333333;
+  color: #00D4AA;
+  font-family: monospace;
 }
 
 .file-picker-breadcrumb-scroll {
   white-space: nowrap;
-  border-bottom: 1px solid #F0F0F0;
+  border-bottom: 1px solid #2A2A4A;
   flex-shrink: 0;
+  background: #16162B;
 }
 
 .file-picker-breadcrumb-row {
@@ -53,17 +56,19 @@
 
 .file-picker-breadcrumb-sep {
   font-size: 24px;
-  color: #CCCCCC;
+  color: #555577;
   margin: 0 6px;
+  font-family: monospace;
 }
 
 .file-picker-breadcrumb-text {
   font-size: 24px;
-  color: #1890FF;
+  color: #6C8EEF;
+  font-family: monospace;
 }
 
 .file-picker-breadcrumb-text.active {
-  color: #333333;
+  color: #E0E0FF;
   font-weight: 600;
 }
 
@@ -77,37 +82,43 @@
   align-items: center;
   padding: 20px 32px;
   gap: 16px;
-  border-bottom: 1px solid #F5F5F5;
+  border-bottom: 1px solid #2A2A4A;
 }
 
 .file-picker-item:active {
-  background: #F0F7FF;
+  background: #252545;
 }
 
 .file-picker-item-icon {
   font-size: 24px;
-  color: #999999;
+  color: #00D4AA;
   width: 48px;
   text-align: center;
+  font-family: monospace;
 }
 
 .file-picker-item-name {
   flex: 1;
   font-size: 28px;
+  font-family: monospace;
 }
 
 .file-picker-item-name.dir {
-  color: #333333;
+  color: #C0C0E0;
   font-weight: 500;
 }
 
 .file-picker-item-name.file {
-  color: #666666;
+  color: #8888AA;
 }
 
-.file-picker-item-arrow {
-  font-size: 24px;
-  color: #CCCCCC;
+.file-picker-item-chevron {
+  width: 14px;
+  height: 14px;
+  border-right: 3px solid #555577;
+  border-bottom: 3px solid #555577;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
 }
 
 .file-picker-empty {
@@ -119,5 +130,6 @@
 
 .file-picker-empty-text {
   font-size: 26px;
-  color: #CCCCCC;
+  color: #555577;
+  font-family: monospace;
 }

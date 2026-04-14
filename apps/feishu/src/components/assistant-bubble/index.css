@@ -2,20 +2,27 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  max-width: var(--bubble-max-width-assistant, 95%);
+  min-width: 0;
 }
 
 .assistant-bubble {
-  background: #F0F0F0;
+  background: rgba(255, 255, 255, 0.08);
   padding: 16px 32px;
   border-radius: 8px 24px 24px 24px;
-  max-width: var(--bubble-max-width-assistant, 85%);
+  max-width: 100%;
+  box-sizing: border-box;
   word-wrap: break-word;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .assistant-bubble-text {
   font-size: 28px;
   line-height: 1.5;
-  color: #333333;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 @keyframes blink {
@@ -43,12 +50,12 @@
 }
 
 .assistant-bubble-time-row {
-  margin-top: 8px;
+  margin-top: -10px;
 }
 
 .assistant-bubble-time {
-  font-size: 20px;
-  color: #999999;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.35);
 }
 
 @keyframes assistantEnter {

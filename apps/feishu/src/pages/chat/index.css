@@ -15,8 +15,8 @@
 }
 
 /* PTY 模式下 SafeAreaHeader 文字需要白色 */
-.chat-page-dark .safe-area-header-back-icon {
-  color: #FFFFFF;
+.chat-page-dark .safe-area-header-back-chevron {
+  border-color: #FFFFFF;
 }
 
 .chat-page-dark .safe-area-header-title {
@@ -97,7 +97,7 @@
 .settings-panel {
   width: 100%;
   max-width: var(--picker-max-width, 100%);
-  background: #FFFFFF;
+  background: #252540;
   border-radius: 24px 24px 0 0;
   padding: 32px 32px;
   padding-bottom: calc(32px + env(safe-area-inset-bottom));
@@ -121,7 +121,7 @@
 .settings-title {
   font-size: 32px;
   font-weight: 600;
-  color: #333333;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .settings-section {
@@ -130,7 +130,7 @@
 
 .settings-section-label {
   font-size: 24px;
-  color: #999999;
+  color: rgba(255, 255, 255, 0.4);
   margin-bottom: 16px;
   display: block;
 }
@@ -144,24 +144,24 @@
   flex: 1;
   height: 64px;
   border-radius: 12px;
-  background: #F5F5F5;
+  background: rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .settings-chip.active {
-  background: #E6F4FF;
-  border: 1px solid #1890FF;
+  background: rgba(0, 212, 170, 0.15);
+  border: 1px solid #00D4AA;
 }
 
 .settings-chip-text {
   font-size: 24px;
-  color: #666666;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .settings-chip-text.active {
-  color: #1890FF;
+  color: #00D4AA;
   font-weight: 500;
 }
 
@@ -176,32 +176,32 @@
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: #F5F5F5;
+  background: rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .settings-font-btn:active {
-  background: #E8E8E8;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .settings-font-btn-text {
   font-size: 24px;
-  color: #333333;
+  color: rgba(255, 255, 255, 0.85);
   font-weight: 600;
 }
 
 .settings-font-size-display {
   font-size: 32px;
-  color: #333333;
+  color: rgba(255, 255, 255, 0.85);
   min-width: 96px;
   text-align: center;
 }
 
 .settings-window-btn {
   height: 64px;
-  background: #F5F5F5;
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -209,11 +209,63 @@
 }
 
 .settings-window-btn:active {
-  background: #E8E8E8;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .settings-window-btn-text {
   font-size: 24px;
-  color: #1890FF;
+  color: #00D4AA;
   font-weight: 500;
+}
+
+/* History loading overlay - Windows 10 ring spinner */
+.chat-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(26, 26, 46, 0.85);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+}
+
+.chat-loading-ring {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.chat-loading-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #00D4AA;
+  top: 0;
+  left: 50%;
+  margin-left: -6px;
+  transform-origin: 6px 40px;
+  animation: chatSpinner 3s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+.chat-loading-dot:nth-child(1) { animation-delay: 0s; }
+.chat-loading-dot:nth-child(2) { animation-delay: 0.15s; opacity: 0.9; }
+.chat-loading-dot:nth-child(3) { animation-delay: 0.3s; opacity: 0.75; }
+.chat-loading-dot:nth-child(4) { animation-delay: 0.45s; opacity: 0.6; }
+.chat-loading-dot:nth-child(5) { animation-delay: 0.6s; opacity: 0.45; }
+
+@keyframes chatSpinner {
+  0% { transform: rotate(0deg); }
+  50% { transform: rotate(540deg); }
+  100% { transform: rotate(720deg); }
+}
+
+.chat-loading-text {
+  font-size: 26px;
+  color: rgba(255, 255, 255, 0.6);
 }

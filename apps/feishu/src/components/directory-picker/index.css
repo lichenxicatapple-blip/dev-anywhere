@@ -111,10 +111,13 @@
   font-family: monospace;
 }
 
-.dir-picker-item-arrow {
-  font-size: 24px;
-  color: #555577;
-  font-family: monospace;
+.dir-picker-item-chevron {
+  width: 14px;
+  height: 14px;
+  border-right: 3px solid #555577;
+  border-bottom: 3px solid #555577;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
 }
 
 .dir-picker-empty {
@@ -142,6 +145,7 @@
 .dir-picker-create-input {
   flex: 1;
   height: 64px;
+  line-height: 64px;
   background: #1A1A2E;
   border: 1px solid #00D4AA;
   border-radius: 8px;

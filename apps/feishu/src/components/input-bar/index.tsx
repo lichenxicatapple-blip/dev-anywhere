@@ -18,7 +18,7 @@ export function computeSendDisabled(
   pendingApprovals: Array<{ status: string }>,
 ): { disabled: boolean; reason?: string } {
   if (mode === "pty") return { disabled: false };
-  if (isWorking) return { disabled: true, reason: "Claude is working..." };
+  if (isWorking) return { disabled: true };
   if (pendingApprovals.some((a) => a.status === "pending"))
     return { disabled: true, reason: "Waiting for tool approval..." };
   return { disabled: false };
@@ -100,8 +100,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   useImperativeHandle(ref, () => ({
     replaceCommand: (name: string) => {
-      const text = `/${name} `;
-      const token = `/${name}`;
+      const text = `${name} `;
+      const token = name;
       setInputText(text);
       setInsertedTokens(prev => [...prev, token]);
       prevTextRef.current = text;

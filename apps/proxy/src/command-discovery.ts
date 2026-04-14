@@ -32,6 +32,8 @@ const REPL_BUILTINS: CommandEntry[] = [
 const COMMAND_BLACKLIST = new Set([
   "/login", "/logout", "/config", "/plugin", "/mcp",
   "/install", "/setup-token", "/doctor", "/update", "/upgrade",
+  "/memory", "/vim", "/terminal-setup", "/permissions", "/allowed-tools",
+  "/ide", "/listen",
 ]);
 
 export interface DiscoverOptions {

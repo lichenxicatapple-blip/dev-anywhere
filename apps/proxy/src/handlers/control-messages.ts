@@ -3,6 +3,7 @@ import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
 import type { TerminalTracker } from "../terminal-tracker.js";
 import { scanSessionHistory } from "../session-history.js";
+import { discoverCommands } from "../command-discovery.js";
 import { logger } from "../logger.js";
 
 export interface ControlMessageHandlers {
@@ -79,21 +80,6 @@ async function getFileTree(rootPath: string): Promise<Array<{ name: string; isDi
   return result;
 }
 
-// 发现可用 slash 命令
-// 当前使用静态列表，后续 Plan 会实现动态发现
-async function discoverCommands(_workDir: string): Promise<Array<{
-  name: string;
-  description: string;
-  argumentHint?: string;
-  source: string;
-}>> {
-  return [
-    { name: "/help", description: "Show help information", source: "builtin" },
-    { name: "/clear", description: "Clear conversation history", source: "builtin" },
-    { name: "/compact", description: "Compact conversation to reduce context", source: "builtin" },
-    { name: "/config", description: "Show or modify configuration", argumentHint: "[key] [value]", source: "builtin" },
-  ];
-}
 
 export function createControlMessageHandlers(
   send: (data: string) => void,
@@ -205,7 +191,7 @@ export function createControlMessageHandlers(
           type: "command_list_push",
           commands,
         }));
-        logger.debug({ sessionId, count: commands.length }, "Command list pushed");
+        logger.info({ sessionId, count: commands.length, workDir }, "Command list pushed");
       } catch (err) {
         logger.warn({ sessionId, error: String(err) }, "Command discovery failed");
       }

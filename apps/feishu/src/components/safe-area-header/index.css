@@ -26,9 +26,12 @@
   justify-content: center;
 }
 
-.safe-area-header-back-icon {
-  font-size: 36px;
-  color: var(--color-text-primary, #333333);
+.safe-area-header-back-chevron {
+  width: 20px;
+  height: 20px;
+  border-left: 4px solid var(--color-text-primary, #333333);
+  border-bottom: 4px solid var(--color-text-primary, #333333);
+  transform: rotate(45deg);
 }
 
 .safe-area-header-title {

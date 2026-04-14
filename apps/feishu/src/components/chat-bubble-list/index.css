@@ -1,14 +1,22 @@
 .chat-bubble-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  background: #FFFFFF;
+  background: transparent;
   padding: 24px var(--page-padding-h, 32px);
+  scrollbar-width: none;
+}
+
+.chat-bubble-list::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-bubble-row {
   margin-bottom: 24px;
   display: flex;
+  width: 100%;
+  min-width: 0;
 }
 
 .chat-bubble-row.user {
@@ -21,4 +29,58 @@
 
 .chat-bubble-bottom-anchor {
   height: 1px;
+}
+
+/* Claude 正在思考的三点跳动动画 */
+.thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 12px 20px;
+  border-radius: 8px 24px 24px 24px;
+}
+
+.thinking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  animation: thinkingBounce 1.4s ease-in-out infinite;
+}
+
+.thinking-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes thinkingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.chat-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0 24px;
+}
+
+.chat-load-more-text {
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 8px 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.06);
+  letter-spacing: 1px;
 }

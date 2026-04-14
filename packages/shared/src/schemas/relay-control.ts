@@ -196,6 +196,45 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     rows: z.number().int().positive().optional(),
   }),
 
+  // 远程终止 JSON 会话，client -> proxy
+  z.object({ type: z.literal("session_terminate"), sessionId: z.string() }),
+
+  // 远程创建 JSON 会话，client -> proxy -> response
+  z.object({ type: z.literal("session_create"), cwd: z.string(), resumeSessionId: z.string().optional() }),
+  z.object({
+    type: z.literal("session_create_response"),
+    sessionId: z.string(),
+    error: z.string().optional(),
+  }),
+
+  // 客户端请求会话历史消息，client -> proxy
+  z.object({ type: z.literal("session_messages_request"), sessionId: z.string() }),
+
+  // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
+  z.object({ type: z.literal("session_resources_request"), sessionId: z.string() }),
+
+  // proxy 推送当前 pending 的工具审批列表，client 据此恢复审批卡片
+  z.object({
+    type: z.literal("pending_approvals_push"),
+    sessionId: z.string(),
+    approvals: z.array(z.object({
+      requestId: z.string(),
+      toolName: z.string(),
+      input: z.record(z.string(), z.unknown()),
+    })),
+  }),
+
+  // 恢复会话时推送历史消息，proxy -> client
+  z.object({
+    type: z.literal("session_history_messages"),
+    sessionId: z.string(),
+    messages: z.array(z.object({
+      role: z.enum(["user", "assistant"]),
+      text: z.string(),
+      timestamp: z.number().optional(),
+    })),
+  }),
+
   // proxy 重连后同步活跃 session 列表给 relay
   z.object({
     type: z.literal("session_sync"),

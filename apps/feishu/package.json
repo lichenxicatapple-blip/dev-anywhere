@@ -23,6 +23,8 @@
     "@tarojs/runtime": "~3.6.39",
     "@tarojs/shared": "~3.6.39",
     "@tarojs/taro": "~3.6.39",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -35,6 +37,7 @@
     "@tarojs/cli": "~3.6.39",
     "@tarojs/webpack5-runner": "~3.6.39",
     "@types/react": "^18.3.28",
+    "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "babel-preset-taro": "~3.6.39",
     "postcss": "^8.5.8",

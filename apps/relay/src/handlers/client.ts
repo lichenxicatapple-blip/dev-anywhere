@@ -8,10 +8,14 @@ import { parseMessage, routeClientMessage, handleReplayRequest } from "../router
 const CLIENT_TO_PROXY_TYPES = new Set([
   "dir_list_request",
   "dir_create_request",
+  "session_create",
+  "session_terminate",
+  "session_messages_request",
   "terminal_frame_request",
   "terminal_scroll_request",
   "session_list",
   "session_history_request",
+  "session_resources_request",
   "permission_mode_change",
 ]);
 
@@ -69,22 +73,29 @@ function handleClientRegister(
     sessions: sessionSeqMap,
   }));
 
-  // 按 session 独立回放，每个 session 使用各自的 lastSeq
+  // 按 session 独立回放，只重放客户端无法从 session_messages_request 获取的消息类型：
+  // tool_use_request（待审批卡片）和 session_status（工作状态）
+  // assistant_message / tool_result 等会话内容由客户端通过 session_messages_request 获取
+  const REPLAY_TYPES = new Set(["session_status"]);
   const proxySessionIds = registry.getSessionsForProxy(proxyId);
+  let replayCount = 0;
   for (const sessionId of proxySessionIds) {
     const buffer = registry.getSessionBuffer(sessionId);
     if (!buffer) continue;
-    // 未列出的 session 用 -1，回放该 session 全量消息
     const lastSeq = sessions?.[sessionId] ?? -1;
     const missed = buffer.getAfterSeq(lastSeq);
-    for (const msg of missed) {
+    const types = missed.map(m => m.type);
+    const matched = missed.filter(m => REPLAY_TYPES.has(m.type));
+    logger.info({ sessionId, bufferSize: buffer.size(), missedCount: missed.length, types, matchedCount: matched.length }, "Replay buffer debug");
+    for (const msg of matched) {
       if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(msg.raw);
+        replayCount++;
       }
     }
   }
 
-  logger.info({ clientId, proxyId, status: "restored", sessions }, "Client registered");
+  logger.info({ clientId, proxyId, status: "restored", sessions, replayCount }, "Client registered");
 }
 
 // 处理远程客户端 WebSocket 连接生命周期
@@ -107,6 +118,7 @@ export function handleClientConnection(
 
     if (result.kind === "control") {
       const msg = result.message;
+      logger.info({ type: msg.type, clientId: clientWs.clientId, bound: clientWs.boundProxyId }, "Client message received");
 
       if (msg.type === "client_register") {
         handleClientRegister(msg.clientId, msg.sessions, clientWs, registry, logger);
@@ -207,15 +219,12 @@ export function handleClientConnection(
     clientWs.send(JSON.stringify({
       type: "relay_error",
       code: "INVALID_MESSAGE",
-      message: result.error,
+      message: `${result.error} | raw: ${raw.slice(0, 200)}`,
     }));
   });
 
   clientWs.on("close", () => {
     registry.removeClientWs(clientWs);
-    if (clientWs.clientId) {
-      registry.unbindClientById(clientWs.clientId);
-    }
     logger.info({ clientId: clientWs.clientId }, "Client disconnected");
   });
 

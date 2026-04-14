@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { View, Text } from "@tarojs/components";
 import Taro, { usePullDownRefresh } from "@tarojs/taro";
 import type { ProxyInfo } from "@cc-anywhere/shared";
+import { showErrorToast } from "@/components/toast";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState, useAppDispatch, transitionToPhase } from "@/stores/app-store";
@@ -55,7 +56,7 @@ export default function ProxySelect() {
         if (isBindingError(result)) {
           // 绑定失败时回退状态
           appDispatch({ type: "SET_PROXY_ONLINE", online: false });
-          Taro.showToast({ title: result.error, icon: "none" });
+          showErrorToast(result.error);
           return;
         }
       }

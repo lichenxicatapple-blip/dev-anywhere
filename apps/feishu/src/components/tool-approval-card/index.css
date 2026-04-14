@@ -34,6 +34,7 @@
   overflow-y: auto;
   margin-bottom: 20px;
   border-radius: 8px;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Edit 预览：diff 风格 */

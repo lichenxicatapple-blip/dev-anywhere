@@ -59,6 +59,7 @@ export function handleWsStatusChange(
     }
   } else {
     dispatch({ type: "SET_PROXY_ONLINE", online: false });
+    dispatch({ type: "SET_PROXIES", proxies: [] });
     if (s.phase !== "connecting") {
       dispatch({ type: "SET_PHASE", phase: "reconnecting" });
       timers.reconnect = setTimeout(() => {
@@ -119,12 +120,10 @@ export async function handleRelayMessage(
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {
       timers.coldStartDone = true;
       const savedProxyId = nav.getStorageSync("cc_proxyId");
-      console.log("[cold-start]", { savedProxyId, proxyCount: proxies.length, boundProxyId: relay.getBoundProxyId() });
       if (!savedProxyId) {
         // no-op, coldStartDone already true
       } else {
         const result = await ensureBinding(relay as unknown as RelayClient, { proxyId: savedProxyId });
-        console.log("[cold-start] binding result:", result);
         if (!isBindingError(result)) {
           const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
           dispatch({ type: "SET_PROXY", proxyId: savedProxyId, proxyName: proxyInfo?.name || null });
@@ -162,6 +161,24 @@ export async function handleRelayMessage(
         } else {
           transitionToPhase(s.phase, "proxy_selecting", dispatch);
           nav.reLaunch("/pages/proxy-select/index");
+        }
+      }
+
+      // relay 重启后 proxy 延迟上线：phase 已到 proxy_selecting 但 proxy 现在上线了，自动重新绑定
+      if (s.phase === "proxy_selecting" && selected?.online) {
+        const result = await ensureBinding(relay as unknown as RelayClient, { proxyId: s.selectedProxyId });
+        if (!isBindingError(result)) {
+          dispatch({ type: "SET_PROXY_ONLINE", online: true });
+          const savedSessionId = nav.getStorageSync("cc_sessionId");
+          const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);
+          if (savedSessionId && sessionStillExists) {
+            const mode = nav.getStorageSync("cc_sessionMode") || "json";
+            transitionToPhase(s.phase, "chatting", dispatch);
+            nav.reLaunch(`/pages/chat/index?sessionId=${savedSessionId}&mode=${mode}`);
+          } else {
+            transitionToPhase(s.phase, "session_browsing", dispatch);
+            nav.reLaunch("/pages/session-list/index");
+          }
         }
       }
     }

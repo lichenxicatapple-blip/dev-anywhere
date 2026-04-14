@@ -4,7 +4,7 @@ import { computeSendDisabled } from "@/components/input-bar/index";
 describe("computeSendDisabled", () => {
   it("returns disabled when JSON mode and isWorking", () => {
     const result = computeSendDisabled("json", true, []);
-    expect(result).toEqual({ disabled: true, reason: "Claude is working..." });
+    expect(result).toEqual({ disabled: true });
   });
 
   it("returns disabled when JSON mode and has pending approvals", () => {

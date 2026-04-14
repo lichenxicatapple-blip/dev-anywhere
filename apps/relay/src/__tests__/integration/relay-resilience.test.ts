@@ -275,8 +275,9 @@ describe("proxy lifecycle", () => {
 
     await settle();
 
-    const afterStatus = await fetchJson(port, "/status") as { proxyCount: number };
-    expect(afterStatus.proxyCount).toBe(beforeStatus.proxyCount - 1);
+    const afterStatus = await fetchJson(port, "/status") as { proxyCount: number; proxies?: Array<{ proxyId: string; online: boolean }> };
+    // proxy_disconnect 标记离线但保留 state，proxyCount 不变
+    expect(afterStatus.proxyCount).toBe(beforeStatus.proxyCount);
   }, E2E_TIMEOUT);
 
   it("Proxy 未注册就发 envelope → NOT_REGISTERED", async () => {
@@ -489,18 +490,17 @@ describe("client lifecycle", () => {
     client1.close();
     await settle();
 
+    // 注册重放只包含 session_status 类型，assistant_message 不重放
     const client2 = ws.client(port);
     await waitForOpen(client2);
-    const allMsgs = collectMessages(client2, 3);
+    const allMsgs = collectMessages(client2, 1);
     client2.send(JSON.stringify({ type: "client_register", clientId, sessions: { s1: 1 } }));
     const received = await allMsgs;
 
-    expect(received.length).toBe(3);
+    expect(received.length).toBe(1);
     const restored = JSON.parse(received[0]);
     expect(restored.type).toBe("client_register_response");
     expect(restored.status).toBe("restored");
-    expect(JSON.parse(received[1]).seq).toBe(2);
-    expect(JSON.parse(received[2]).seq).toBe(3);
   }, E2E_TIMEOUT);
 
   it("Client 断线重连（proxy 离线）→ proxy_offline + 等 proxy_online", async () => {
@@ -625,16 +625,15 @@ describe("client lifecycle", () => {
     proxy.send(JSON.stringify(makeEnvelope(3)));
     await settle();
 
-    // client2 重连 lastSeq=2 → 收到回放 seq3 + restored
+    // client2 重连，注册重放不包含 assistant_message，只返回 restored 响应
     const client2 = ws.client(port);
     await waitForOpen(client2);
-    const restoreMsgs = collectMessages(client2, 2);
+    const restoreMsgs = collectMessages(client2, 1);
     client2.send(JSON.stringify({ type: "client_register", clientId, sessions: { s1: 2 } }));
     const restored = await restoreMsgs;
     expect(JSON.parse(restored[0]).status).toBe("restored");
-    expect(JSON.parse(restored[1]).seq).toBe(3);
 
-    // 关键：恢复后继续收新消息
+    // 关键：恢复后继续收新消息（实时转发不受重放过滤影响）
     const newMsgP = waitForMessage(client2);
     proxy.send(JSON.stringify(makeEnvelope(4)));
     const newMsg = JSON.parse(await newMsgP);
@@ -1071,8 +1070,9 @@ describe("disk persistence and relay restart", () => {
     proxy.send(JSON.stringify({ type: "proxy_disconnect", proxyId: "p6-3" }));
     await settle();
 
-    expect(existsSync(join(dataDir, "disk-del-a.ndjson"))).toBe(false);
-    expect(existsSync(join(dataDir, "disk-del-b.ndjson"))).toBe(false);
+    // proxy_disconnect 标记离线但保留 session buffer 等待重连，NDJSON 文件不删除
+    expect(existsSync(join(dataDir, "disk-del-a.ndjson"))).toBe(true);
+    expect(existsSync(join(dataDir, "disk-del-b.ndjson"))).toBe(true);
   }, E2E_TIMEOUT);
 
   it("SIGKILL 崩溃 → 磁盘数据存活 → 新进程加载恢复 → replay 可用", async () => {
@@ -1380,25 +1380,16 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
     proxy.send(JSON.stringify(makeEnvelope(3, "sb")));
     await settle();
 
-    // client 重连，lastSeq=0 → 收到所有 session 的全量回放
+    // client 重连，注册重放只包含 session_status 类型，assistant_message 不重放
+    // 会话内容由客户端通过 session_messages_request 获取
     const client2 = ws.client(port);
     await waitForOpen(client2);
-    const allRestore = collectMessages(client2, 9);
+    const allRestore = collectMessages(client2, 1);
     client2.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
     const restoreReceived = await allRestore;
 
     const restoredResp = JSON.parse(restoreReceived[0]);
     expect(restoredResp.status).toBe("restored");
-
-    // 回放的 8 条消息应包含所有 session
-    const replayed = restoreReceived.slice(1).map((r) => JSON.parse(r));
-    const saSeqs = replayed.filter((m: { sessionId: string }) => m.sessionId === "sa").map((m: { seq: number }) => m.seq);
-    const sbSeqs = replayed.filter((m: { sessionId: string }) => m.sessionId === "sb").map((m: { seq: number }) => m.seq);
-    const scSeqs = replayed.filter((m: { sessionId: string }) => m.sessionId === "sc").map((m: { seq: number }) => m.seq);
-
-    expect(saSeqs).toEqual([1, 2, 3, 4]);
-    expect(sbSeqs).toEqual([1, 2, 3]);
-    expect(scSeqs).toEqual([1]);
 
     // 各 session 可独立 replay
     const replaySa = collectMessages(client2, 4);

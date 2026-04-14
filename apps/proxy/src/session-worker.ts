@@ -13,11 +13,20 @@ import {
   type WorkerMessage,
 } from "./ipc-protocol.js";
 
-// 参数格式: session-worker.ts <sessionId> <socketPath> [-- claude args...]
+// 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
 const sessionId = process.argv[2];
 const sockPath = process.argv[3];
 const separatorIdx = process.argv.indexOf("--");
 const claudeArgs = separatorIdx >= 0 ? process.argv.slice(separatorIdx + 1) : [];
+
+// 解析 -- 之前的可选参数
+const preArgs = process.argv.slice(4, separatorIdx >= 0 ? separatorIdx : undefined);
+function getArg(name: string): string | undefined {
+  const idx = preArgs.indexOf(name);
+  return idx >= 0 && idx + 1 < preArgs.length ? preArgs[idx + 1] : undefined;
+}
+const workerCwd = getArg("--cwd");
+const workerResume = getArg("--resume");
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
@@ -30,7 +39,7 @@ const whitelist = new ToolWhitelist();
 
 const pendingApprovals = new Map<
   string,
-  { resolve: (decision: { behavior: "allow" | "deny"; message?: string }) => void }
+  { resolve: (decision: { behavior: "allow" | "deny"; message?: string }) => void; toolName: string; input: Record<string, unknown> }
 >();
 
 function sendToServe(msg: WorkerMessage): void {
@@ -46,7 +55,7 @@ const forwardToRelay = async (
 ): Promise<{ behavior: "allow" | "deny"; message?: string }> => {
   return new Promise((resolve) => {
     const requestId = `${sessionId}-${Date.now()}`;
-    pendingApprovals.set(requestId, { resolve });
+    pendingApprovals.set(requestId, { resolve, toolName, input });
     sendToServe({
       type: "worker_approval_request",
       requestId,
@@ -58,6 +67,8 @@ const forwardToRelay = async (
 
 const session = new JsonSession({
   claudeArgs,
+  cwd: workerCwd,
+  resumeSessionId: workerResume,
   approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
   onEvent: (event: StreamJsonEvent) => {
     // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
@@ -86,12 +97,12 @@ const session = new JsonSession({
 function handleServeConnection(socket: Socket): void {
   serveSocket = socket;
 
-  for (const [requestId] of pendingApprovals) {
+  for (const [requestId, pending] of pendingApprovals) {
     sendToServe({
       type: "worker_approval_request",
       requestId,
-      toolName: "pending-resend",
-      input: {},
+      toolName: pending.toolName,
+      input: pending.input,
     });
   }
 

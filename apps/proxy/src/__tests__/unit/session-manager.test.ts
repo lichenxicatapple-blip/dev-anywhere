@@ -24,7 +24,7 @@ describe("SessionManager", () => {
 
   describe("createSession", () => {
     it("creates a PTY session with unique id and idle state", () => {
-      const info = manager.createSession("pty");
+      const info = manager.createSession("pty", "/tmp/test");
       expect(info.id).toBeTruthy();
       expect(info.mode).toBe("pty");
       expect(info.state).toBe(SessionState.IDLE);
@@ -32,25 +32,25 @@ describe("SessionManager", () => {
     });
 
     it("creates a JSON session with unique id and idle state", () => {
-      const info = manager.createSession("json");
+      const info = manager.createSession("json", "/tmp/test");
       expect(info.id).toBeTruthy();
       expect(info.mode).toBe("json");
       expect(info.state).toBe(SessionState.IDLE);
     });
 
     it("stores optional name in SessionInfo", () => {
-      const info = manager.createSession("pty", "my-session");
+      const info = manager.createSession("pty", "/tmp/test", "my-session");
       expect(info.name).toBe("my-session");
     });
 
     it("generates unique IDs for each session", () => {
-      const s1 = manager.createSession("pty");
-      const s2 = manager.createSession("json");
+      const s1 = manager.createSession("pty", "/tmp/test");
+      const s2 = manager.createSession("json", "/tmp/test");
       expect(s1.id).not.toBe(s2.id);
     });
 
     it("persists session to file after creation", () => {
-      manager.createSession("pty");
+      manager.createSession("pty", "/tmp/test");
       expect(existsSync(persistPath)).toBe(true);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       expect(data).toHaveLength(1);
@@ -59,10 +59,10 @@ describe("SessionManager", () => {
 
   describe("listSessions", () => {
     it("returns sessions sorted by createdAt descending", () => {
-      const s1 = manager.createSession("pty");
+      const s1 = manager.createSession("pty", "/tmp/test");
       // 确保 s2 有更大的 createdAt，避免 Date.now() 同值导致排序不确定
       manager.getSession(s1.id)!.createdAt = 1000;
-      const s2 = manager.createSession("json");
+      const s2 = manager.createSession("json", "/tmp/test");
       manager.getSession(s2.id)!.createdAt = 2000;
       const list = manager.listSessions();
       expect(list).toHaveLength(2);
@@ -77,7 +77,7 @@ describe("SessionManager", () => {
 
   describe("getSession", () => {
     it("returns SessionInfo for existing session", () => {
-      const created = manager.createSession("pty");
+      const created = manager.createSession("pty", "/tmp/test");
       const found = manager.getSession(created.id);
       expect(found).toBeDefined();
       expect(found!.id).toBe(created.id);
@@ -90,20 +90,20 @@ describe("SessionManager", () => {
 
   describe("updateState", () => {
     it("transitions idle -> working", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
     });
 
     it("transitions working -> waiting_approval", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
     it("transitions waiting_approval -> idle", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       manager.updateState(s.id, SessionState.IDLE);
@@ -111,39 +111,39 @@ describe("SessionManager", () => {
     });
 
     it("transitions working -> idle", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.IDLE);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("transitions any state -> error", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.ERROR);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
     });
 
     it("transitions any state -> terminated", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
     it("rejects terminated -> any state (terminal)", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(() => manager.updateState(s.id, SessionState.IDLE)).toThrow();
     });
 
     it("rejects error -> idle (error only goes to terminated)", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.ERROR);
       expect(() => manager.updateState(s.id, SessionState.IDLE)).toThrow();
     });
 
     it("allows error -> terminated", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.ERROR);
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
@@ -154,7 +154,7 @@ describe("SessionManager", () => {
     });
 
     it("persists state change to file", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       const saved = data.find((d: { id: string }) => d.id === s.id);
@@ -164,14 +164,14 @@ describe("SessionManager", () => {
 
   describe("terminateSession", () => {
     it("removes PTY session from registry", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       const result = manager.terminateSession(s.id);
       expect(result.success).toBe(true);
       expect(manager.getSession(s.id)).toBeUndefined();
     });
 
     it("returns pid for JSON sessions", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setPid(s.id, 12345);
       const result = manager.terminateSession(s.id);
       expect(result.success).toBe(true);
@@ -186,8 +186,8 @@ describe("SessionManager", () => {
 
   describe("terminateAll", () => {
     it("marks all non-terminated sessions as terminated", () => {
-      manager.createSession("pty");
-      manager.createSession("json");
+      manager.createSession("pty", "/tmp/test");
+      manager.createSession("json", "/tmp/test");
       const pids = manager.terminateAll();
       const list = manager.listSessions();
       expect(list.every((s) => s.state === SessionState.TERMINATED)).toBe(true);
@@ -195,9 +195,9 @@ describe("SessionManager", () => {
     });
 
     it("returns pids for JSON sessions", () => {
-      const s1 = manager.createSession("json");
+      const s1 = manager.createSession("json", "/tmp/test");
       manager.setPid(s1.id, 111);
-      const s2 = manager.createSession("json");
+      const s2 = manager.createSession("json", "/tmp/test");
       manager.setPid(s2.id, 222);
       const pids = manager.terminateAll();
       expect(pids).toContain(111);
@@ -205,7 +205,7 @@ describe("SessionManager", () => {
     });
 
     it("skips already terminated sessions", () => {
-      const s = manager.createSession("pty");
+      const s = manager.createSession("pty", "/tmp/test");
       manager.updateState(s.id, SessionState.TERMINATED);
       const pids = manager.terminateAll();
       expect(pids).toEqual([]);
@@ -214,7 +214,7 @@ describe("SessionManager", () => {
 
   describe("setClaudeSessionId", () => {
     it("stores claudeSessionId on session", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setClaudeSessionId(s.id, "claude-abc");
       expect(manager.getSession(s.id)!.claudeSessionId).toBe("claude-abc");
     });
@@ -222,7 +222,7 @@ describe("SessionManager", () => {
 
   describe("setPid", () => {
     it("stores pid on session", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setPid(s.id, 9999);
       expect(manager.getSession(s.id)!.pid).toBe(9999);
     });
@@ -230,7 +230,7 @@ describe("SessionManager", () => {
 
   describe("persistence", () => {
     it("loads sessions from existing file on construction", () => {
-      const s = manager.createSession("json", "persisted");
+      const s = manager.createSession("json", "/tmp/test", "persisted");
       const manager2 = new SessionManager({ persistPath });
       const found = manager2.getSession(s.id);
       expect(found).toBeDefined();
@@ -239,8 +239,8 @@ describe("SessionManager", () => {
     });
 
     it("filters out terminated sessions on load", () => {
-      const s1 = manager.createSession("json");
-      const s2 = manager.createSession("json");
+      const s1 = manager.createSession("json", "/tmp/test");
+      const s2 = manager.createSession("json", "/tmp/test");
       manager.updateState(s1.id, SessionState.TERMINATED);
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(s1.id)).toBeUndefined();
@@ -249,8 +249,8 @@ describe("SessionManager", () => {
     });
 
     it("skips PTY sessions on restore since terminal process is gone", () => {
-      const pty = manager.createSession("pty");
-      const json = manager.createSession("json");
+      const pty = manager.createSession("pty", "/tmp/test");
+      const json = manager.createSession("json", "/tmp/test");
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(pty.id)).toBeUndefined();
       expect(manager2.getSession(json.id)).toBeDefined();
@@ -270,7 +270,7 @@ describe("SessionManager", () => {
     });
 
     it("uses atomic write (temp + rename)", () => {
-      manager.createSession("pty");
+      manager.createSession("pty", "/tmp/test");
       // 验证文件存在且内容可解析
       expect(existsSync(persistPath)).toBe(true);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
@@ -278,7 +278,7 @@ describe("SessionManager", () => {
     });
 
     it("resets WAITING_APPROVAL to IDLE on load", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
@@ -291,7 +291,7 @@ describe("SessionManager", () => {
     });
 
     it("keeps WORKING state unchanged on load", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.updateState(s.id, SessionState.WORKING);
 
       const manager2 = new SessionManager({ persistPath });
@@ -302,7 +302,7 @@ describe("SessionManager", () => {
     });
 
     it("keeps IDLE state unchanged on load", () => {
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
 
       const manager2 = new SessionManager({ persistPath });
       const restored = manager2.getSession(s.id);
@@ -319,7 +319,7 @@ describe("SessionManager", () => {
         throw new Error("ESRCH");
       });
 
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setPid(s.id, 99999);
       manager.updateState(s.id, SessionState.WORKING);
 
@@ -338,7 +338,7 @@ describe("SessionManager", () => {
         return true;
       });
 
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setPid(s.id, 99999);
       manager.updateState(s.id, SessionState.WORKING);
 
@@ -354,7 +354,7 @@ describe("SessionManager", () => {
     it("stopReaper clears the interval", () => {
       vi.useFakeTimers();
 
-      const s = manager.createSession("json");
+      const s = manager.createSession("json", "/tmp/test");
       manager.setPid(s.id, 99999);
       manager.updateState(s.id, SessionState.WORKING);
 

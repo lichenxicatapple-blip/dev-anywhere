@@ -44,7 +44,7 @@ export function SlashCommandPicker({
             onClick={() => onSelect(cmd)}
           >
             <View className="slash-picker-item-top">
-              <Text className="slash-picker-item-name">/{cmd.name}</Text>
+              <Text className="slash-picker-item-name">{cmd.name}</Text>
               <Text className="slash-picker-item-source">{cmd.source}</Text>
             </View>
             <Text className="slash-picker-item-desc">{cmd.description}</Text>

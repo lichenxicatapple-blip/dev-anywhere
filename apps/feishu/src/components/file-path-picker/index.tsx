@@ -71,7 +71,7 @@ export function FilePathPicker({
               className="file-picker-breadcrumb-item"
               onClick={() => onNavigate(seg.path)}
             >
-              {i > 0 && <Text className="file-picker-breadcrumb-sep">/</Text>}
+              {i > 1 && <Text className="file-picker-breadcrumb-sep">/</Text>}
               <Text
                 className={`file-picker-breadcrumb-text ${i === segments.length - 1 ? "active" : ""}`}
               >
@@ -97,7 +97,7 @@ export function FilePathPicker({
               {entry.name}
             </Text>
             {entry.isDir && (
-              <Text className="file-picker-item-arrow">{">"}</Text>
+              <View className="file-picker-item-chevron" />
             )}
           </View>
         ))}

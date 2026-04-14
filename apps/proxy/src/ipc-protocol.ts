@@ -11,6 +11,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("session_create_request"),
     name: z.string().optional(),
     mode: z.enum(["pty", "json"]),
+    cwd: z.string(),
     sessionId: z.string().optional(),
   }),
 

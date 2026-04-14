@@ -23,19 +23,3 @@
   white-space: pre;
 }
 
-.terminal-scroll-indicator {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.7);
-  border-radius: 16px;
-  padding: 8px 20px;
-  z-index: 10;
-}
-
-.terminal-scroll-indicator-text {
-  color: #ffffff;
-  font-size: 24px;
-  white-space: nowrap;
-}

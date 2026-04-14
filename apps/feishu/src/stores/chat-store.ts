@@ -33,6 +33,7 @@ export interface ChatMessage {
 export interface ChatStoreState {
   messages: ChatMessage[];
   isWorking: boolean;
+  workingToolName: string;
   pendingApprovals: ToolApprovalRequest[];
   quotedMessage: QuotedMessage | null;
 }
@@ -47,13 +48,16 @@ export type ChatAction =
   | { type: "ADD_APPROVAL_REQUEST"; request: ToolApprovalRequest }
   | { type: "UPDATE_APPROVAL_STATUS"; requestId: string; status: "approved" | "denied" }
   | { type: "SET_WORKING"; isWorking: boolean }
+  | { type: "SET_WORKING_TOOL"; toolName: string }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_QUOTE"; quote: QuotedMessage }
-  | { type: "CLEAR_QUOTE" };
+  | { type: "CLEAR_QUOTE" }
+  | { type: "LOAD_HISTORY"; messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }> };
 
 export const initialChatState: ChatStoreState = {
   messages: [],
   isWorking: false,
+  workingToolName: "",
   pendingApprovals: [],
   quotedMessage: null,
 };
@@ -87,7 +91,7 @@ export function chatReducer(state: ChatStoreState, action: ChatAction): ChatStor
       const msgs = state.messages.map((m) =>
         m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
       );
-      return { ...state, messages: msgs, isWorking: false };
+      return { ...state, messages: msgs, isWorking: false, workingToolName: "", pendingApprovals: [] };
     }
     case "ADD_TOOL_CALL":
       return {
@@ -139,13 +143,26 @@ export function chatReducer(state: ChatStoreState, action: ChatAction): ChatStor
         ),
       };
     case "SET_WORKING":
-      return { ...state, isWorking: action.isWorking };
+      return { ...state, isWorking: action.isWorking, workingToolName: action.isWorking ? state.workingToolName : "" };
+    case "SET_WORKING_TOOL":
+      return { ...state, workingToolName: action.toolName };
     case "CLEAR_MESSAGES":
       return { ...state, messages: [], pendingApprovals: [] };
     case "SET_QUOTE":
       return { ...state, quotedMessage: action.quote };
     case "CLEAR_QUOTE":
       return { ...state, quotedMessage: null };
+    case "LOAD_HISTORY": {
+      const historyMsgs: ChatMessage[] = action.messages.map((m, i) => ({
+        id: `history-${i}`,
+        role: m.role,
+        text: m.text,
+        isPartial: false,
+        timestamp: m.timestamp || 0,
+        toolCalls: [],
+      }));
+      return { ...state, messages: [...historyMsgs, ...state.messages] };
+    }
     default:
       return state;
   }

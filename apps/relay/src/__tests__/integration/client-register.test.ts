@@ -149,8 +149,9 @@ describe("client_register protocol", () => {
     await waitForOpen(client2);
     connections.push(client2);
 
-    // 收集 restored response + 2 条回放消息
-    const allMessages = collectMessages(client2, 3);
+    // 注册重放只包含 session_status 类型，assistant_message 不重放
+    // 会话内容由客户端通过 session_messages_request 获取
+    const allMessages = collectMessages(client2, 1);
     client2.send(JSON.stringify({
       type: "client_register",
       clientId: "c1",
@@ -158,21 +159,11 @@ describe("client_register protocol", () => {
     }));
 
     const received = await allMessages;
-    expect(received.length).toBe(3);
+    expect(received.length).toBe(1);
 
-    // 第一条是 restored response
     const restored = JSON.parse(received[0]);
     expect(restored.type).toBe("client_register_response");
     expect(restored.status).toBe("restored");
-
-    // 后续是回放的消息（各自独立帧，不是数组）
-    const replay1 = JSON.parse(received[1]);
-    expect(replay1.seq).toBe(2);
-    expect(replay1.payload.text).toBe("msg-2");
-
-    const replay2 = JSON.parse(received[2]);
-    expect(replay2.seq).toBe(3);
-    expect(replay2.payload.text).toBe("msg-3");
   });
 
   it("returns status 'proxy_offline' when proxy is in grace period", async () => {

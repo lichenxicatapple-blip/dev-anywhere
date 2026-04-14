@@ -5,6 +5,7 @@
 import { useRef, useEffect } from "react";
 import { View, Text } from "@tarojs/components";
 import type { TermLine } from "@cc-anywhere/shared";
+import { BackToBottomButton } from "@/components/back-to-bottom";
 import "./index.css";
 
 interface TerminalViewportProps {
@@ -102,10 +103,7 @@ export function TerminalViewport({
     // wheel 事件：触摸板双指垂直滑动
     let wheelAccum = 0;
     function onWheel(e: WheelEvent) {
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        console.log("[scroll] wheel ignored: horizontal", { deltaX: e.deltaX, deltaY: e.deltaY });
-        return;
-      }
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       e.preventDefault();
       wheelAccum += e.deltaY;
       if (Math.abs(wheelAccum) < MIN_SWIPE_PX) return;
@@ -118,7 +116,6 @@ export function TerminalViewport({
       const clamped = Math.min(Math.abs(wheelAccum), 200);
       const delta = Math.max(1, Math.round(clamped / PX_PER_LINE));
       const direction = wheelAccum > 0 ? "up" : "down";
-      console.log("[scroll] wheel fire:", { t: Date.now(), direction, delta, wheelAccum, clamped });
       onScrollRef.current(direction, delta);
       wheelAccum = 0;
     }
@@ -157,7 +154,6 @@ export function TerminalViewport({
       const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
       const usable = h - pad;
       const remainder = usable % lineH;
-      console.log("[viewport-align]", { naturalH: h, lineH, pad, remainder, aligned: h - remainder });
       if (remainder > 0.5) {
         el.style.maxHeight = `${h - remainder}px`;
       }
@@ -197,11 +193,7 @@ export function TerminalViewport({
           </View>
         ))}
       </View>
-      {isScrolled && (
-        <View className="terminal-scroll-indicator" onClick={onTapToReturn}>
-          <Text className="terminal-scroll-indicator-text">Scrolled - tap to return</Text>
-        </View>
-      )}
+      <BackToBottomButton visible={!!isScrolled} onClick={onTapToReturn ?? (() => {})} />
     </View>
   );
 }

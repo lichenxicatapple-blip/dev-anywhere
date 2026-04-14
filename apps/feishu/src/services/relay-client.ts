@@ -8,12 +8,14 @@ export class RelayClient {
   private boundProxyId: string | null = null;
   private sessionSeqMap: Record<string, number> = {};
   private messageHandlers = new Set<(msg: MessageEnvelope | RelayControlMessage) => void>();
+  private pendingMessages: Array<MessageEnvelope | RelayControlMessage> = [];
 
   constructor(ws: WebSocketManager, clientId: string) {
     this.ws = ws;
     this.clientId = clientId;
 
     // 只注册一次 ws listener，收到消息后分发给所有 handler
+    // handler 未注册时先缓冲，等 onMessage 注册后 flush
     this.ws.onMessage((raw) => {
       let parsed: MessageEnvelope | RelayControlMessage;
       try {
@@ -22,13 +24,21 @@ export class RelayClient {
         console.warn("RelayClient: failed to parse JSON:", raw.slice(0, 200), e);
         return;
       }
-      this.messageHandlers.forEach((h) => {
-        try {
-          h(parsed);
-        } catch (e) {
-          console.warn("RelayClient: message handler error:", parsed.type, e);
-        }
-      });
+      if (this.messageHandlers.size === 0) {
+        this.pendingMessages.push(parsed);
+        return;
+      }
+      this.dispatch(parsed);
+    });
+  }
+
+  private dispatch(msg: MessageEnvelope | RelayControlMessage): void {
+    this.messageHandlers.forEach((h) => {
+      try {
+        h(msg);
+      } catch (e) {
+        console.warn("RelayClient: message handler error:", (msg as { type?: string }).type, e);
+      }
     });
   }
 
@@ -106,6 +116,13 @@ export class RelayClient {
   // 注册收到消息的回调，返回取消注册函数
   onMessage(handler: (msg: MessageEnvelope | RelayControlMessage) => void): () => void {
     this.messageHandlers.add(handler);
+    if (this.pendingMessages.length > 0) {
+      const buffered = this.pendingMessages;
+      this.pendingMessages = [];
+      for (const msg of buffered) {
+        this.dispatch(msg);
+      }
+    }
     return () => {
       this.messageHandlers.delete(handler);
     };

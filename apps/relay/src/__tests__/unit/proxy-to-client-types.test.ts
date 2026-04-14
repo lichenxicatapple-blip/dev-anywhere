@@ -21,6 +21,9 @@ describe("PROXY_TO_CLIENT_TYPES completeness", () => {
     "session_history_response",
     "pty_state",
     "session_list",
+    "session_create_response",
+    "session_history_messages",
+    "pending_approvals_push",
   ];
 
   it.each(EXPECTED_TYPES)("includes '%s'", (type) => {

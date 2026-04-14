@@ -11,6 +11,9 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "pty_state",
   "dir_list_response",
   "dir_create_response",
+  "session_create_response",
+  "session_history_messages",
+  "pending_approvals_push",
   "command_list_push",
   "file_tree_push",
   "session_history_response",
@@ -96,8 +99,8 @@ export function handleProxyConnection(
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger);
-        registry.unregisterProxy(proxyWs.proxyId);
-        logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, resources cleaned up");
+        registry.markProxyOffline(proxyWs.proxyId);
+        logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, marked offline");
         proxyWs.proxyId = undefined;
         broadcastProxyList(registry);
       }
@@ -160,7 +163,7 @@ export function handleProxyConnection(
       proxyWs.send(JSON.stringify({
         type: "relay_error",
         code: "INVALID_MESSAGE",
-        message: result.error,
+        message: `${result.error} | raw: ${raw.slice(0, 200)}`,
       }));
       return;
     }

@@ -71,10 +71,10 @@ export function UserBubble({
         )}
         <Text selectable className="user-bubble-text">{displayText}</Text>
       </View>
-      {showTimestamp && timestamp && (
+      {showTimestamp && timestamp != null && timestamp > 0 && (
         <View className="user-bubble-time-row">
           <Text className="user-bubble-time">
-            {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            {new Date(timestamp!).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
           </Text>
         </View>
       )}

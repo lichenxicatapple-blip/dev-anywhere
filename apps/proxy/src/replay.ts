@@ -133,6 +133,7 @@ export async function runReplay(fixturePath: string, options: ReplayOptions = {}
       type: "session_create_request",
       mode: "pty",
       sessionId,
+      cwd: process.cwd(),
     }));
   });
 

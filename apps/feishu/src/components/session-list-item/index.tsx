@@ -2,7 +2,8 @@
 import { useCallback, useRef } from "react";
 import { View, Text } from "@tarojs/components";
 import type { CommonEventFunction } from "@tarojs/components";
-import Taro from "@tarojs/taro";
+import { showToast } from "@/components/toast";
+import { showModal } from "@/components/modal";
 import type { SessionInfo } from "@cc-anywhere/shared";
 import { formatRelativeTime } from "@/utils/relative-time";
 import { formatSessionName } from "@/utils/format-session-name";
@@ -63,16 +64,15 @@ export function SessionListItem({
 
   const handleTerminate = useCallback(() => {
     if (session.mode === "pty") {
-      Taro.showToast({ title: "PTY session - terminate from computer", icon: "none" });
+      showToast("PTY session - terminate from computer");
     } else {
-      Taro.showModal({
+      void showModal({
         title: "End session?",
         content: "Claude process will be terminated.",
-        success: (res) => {
-          if (res.confirm) {
-            onTerminate();
-          }
-        },
+      }).then((res) => {
+        if (res.confirm) {
+          onTerminate();
+        }
       });
     }
   }, [session.mode, onTerminate]);
@@ -107,7 +107,7 @@ export function SessionListItem({
           </View>
         </View>
         {session.mode && <ModeTag mode={session.mode} />}
-        <Text className="sli-chevron">{">"}</Text>
+        <View className="sli-chevron" />
       </View>
       <View className="sli-action" onClick={handleTerminate}>
         <Text className="sli-action-text">Terminate</Text>
@@ -116,27 +116,31 @@ export function SessionListItem({
   );
 }
 
-// 历史会话列表项，简化版本
+// 历史会话列表项，显示标题、项目路径和相对时间
 interface HistoryListItemProps {
   id: string;
   title: string;
+  projectDir: string;
   updatedAt: number;
   onSelect: () => void;
 }
 
-export function HistoryListItem({ title, updatedAt, onSelect }: HistoryListItemProps) {
+export function HistoryListItem({ title, projectDir, updatedAt, onSelect }: HistoryListItemProps) {
+  const shortDir = projectDir.replace(/^\/Users\/[^/]+/, "~");
   return (
     <View className="sli-wrapper">
       <View className="sli-item" onClick={onSelect}>
-        <View className="sli-state-dot sli-state-terminated" />
         <View className="sli-info">
           <Text className="sli-title" numberOfLines={1}>
             {title}
           </Text>
-          <Text className="sli-subtitle">{formatRelativeTime(updatedAt)}</Text>
+          <View className="sli-meta-row">
+            <Text className="sli-subtitle">{shortDir}</Text>
+            <Text className="sli-subtitle sli-time-sep">{formatRelativeTime(updatedAt)}</Text>
+          </View>
         </View>
         <Text className="sli-resume-tag">Resume</Text>
-        <Text className="sli-chevron">{">"}</Text>
+        <View className="sli-chevron" />
       </View>
     </View>
   );

@@ -22,6 +22,7 @@ describe("IPC Protocol", () => {
         type: "session_create_request" as const,
         name: "test-session",
         mode: "pty" as const,
+        cwd: "/tmp/test",
       };
       const serialized = serializeIpc(msg);
       const parsed = JSON.parse(serialized.trim());
@@ -44,6 +45,7 @@ describe("IPC Protocol", () => {
           type: "session_create_request",
           name: "test",
           mode: "pty",
+          cwd: "/tmp/test",
         }),
       );
       stream.end();
@@ -57,6 +59,7 @@ describe("IPC Protocol", () => {
         type: "session_create_request",
         name: "test",
         mode: "pty",
+        cwd: "/tmp/test",
       });
     });
 
@@ -89,7 +92,7 @@ describe("IPC Protocol", () => {
 
       stream.write(JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n");
       stream.write("\n");
-      stream.write(JSON.stringify({ type: "session_create_request", mode: "pty" }) + "\n");
+      stream.write(JSON.stringify({ type: "session_create_request", mode: "pty", cwd: "/tmp/test" }) + "\n");
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));

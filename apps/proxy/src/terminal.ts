@@ -107,6 +107,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
+  const sessionCwd = process.env.INIT_CWD || process.cwd();
   let framePusher: FramePusher | null = null;
   let currentPtyState: PtySemanticState = "turn_complete";
 
@@ -242,7 +243,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         if (sessionId) {
           terminalState = TerminalState.CREATING_SESSION;
           socket.write(
-            serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~"), sessionId }),
+            serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), sessionId }),
           );
           const resp = await waitForMessage(socket, "session_create_response");
           if (resp.type === "session_create_response" && !resp.error) {
@@ -268,7 +269,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   terminalState = TerminalState.CREATING_SESSION;
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
-    serializeIpc({ type: "session_create_request", mode: "pty", name: (process.env.INIT_CWD || process.cwd()).replace(process.env.HOME || "", "~") }),
+    serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~") }),
   );
 
   const response = await responsePromise;
