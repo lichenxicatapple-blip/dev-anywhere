@@ -15,6 +15,7 @@ describe("PROXY_TO_CLIENT_TYPES completeness", () => {
     "terminal_title",
     "terminal_resize",
     "dir_list_response",
+    "dir_create_response",
     "command_list_push",
     "file_tree_push",
     "session_history_response",

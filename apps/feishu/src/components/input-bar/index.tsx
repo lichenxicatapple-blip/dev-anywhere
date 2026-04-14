@@ -1,8 +1,16 @@
 // 统一输入栏组件，PTY 和 JSON 模式共用，集成 picker 触发和引用预览
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useImperativeHandle, forwardRef } from "react";
 import { View, Text, Input } from "@tarojs/components";
 import type { QuotedMessage } from "@/stores/chat-store";
 import "./index.css";
+
+export interface InputBarHandle {
+  // 替换整个输入为 /{name} ，注册 token 用于原子删除
+  replaceCommand: (name: string, argumentHint?: string) => void;
+  // 找到最后一个 @，从该位置替换为 @{path} ，注册 token
+  insertFileRef: (path: string) => void;
+  focus: () => void;
+}
 
 export function computeSendDisabled(
   mode: "pty" | "json",
@@ -73,7 +81,7 @@ interface InputBarProps {
   argumentHint?: string;
 }
 
-export function InputBar({
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({
   onSend,
   disabled,
   disabledReason,
@@ -84,11 +92,39 @@ export function InputBar({
   quotedMessage,
   onCancelQuote,
   argumentHint,
-}: InputBarProps) {
+}, ref) {
   const [inputText, setInputText] = useState("");
   const [insertedTokens, setInsertedTokens] = useState<string[]>([]);
   const [inputFocus, setInputFocus] = useState(false);
   const prevTextRef = useRef("");
+
+  useImperativeHandle(ref, () => ({
+    replaceCommand: (name: string) => {
+      const text = `/${name} `;
+      const token = `/${name}`;
+      setInputText(text);
+      setInsertedTokens(prev => [...prev, token]);
+      prevTextRef.current = text;
+      onPickerModeChange?.("none");
+      onFilterChange?.(text);
+    },
+    insertFileRef: (path: string) => {
+      const token = `@${path}`;
+      const replacement = `${token} `;
+      setInputText(prev => {
+        const atIdx = prev.lastIndexOf("@");
+        const newText = atIdx >= 0 ? prev.slice(0, atIdx) + replacement : prev + replacement;
+        prevTextRef.current = newText;
+        onPickerModeChange?.("none");
+        onFilterChange?.(newText);
+        return newText;
+      });
+      setInsertedTokens(prev => [...prev, token]);
+    },
+    focus: () => {
+      setInputFocus(true);
+    },
+  }), [onPickerModeChange, onFilterChange]);
 
   const handleInput = useCallback(
     (e: { detail: { value: string } }) => {
@@ -179,4 +215,4 @@ export function InputBar({
       </View>
     </View>
   );
-}
+});

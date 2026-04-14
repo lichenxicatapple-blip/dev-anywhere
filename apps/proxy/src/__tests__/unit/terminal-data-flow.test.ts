@@ -345,10 +345,12 @@ describe("Terminal data flow: extractGrid viewport-only", () => {
     tracker.dispose();
   });
 
-  it("returns exactly terminal.rows lines", async () => {
+  it("trims trailing empty lines, keeps cursor row", async () => {
     await tracker.feed("short\r\n");
     const grid = tracker.extractGrid();
-    expect(grid.length).toBe(10);
+    // "short" 占 1 行 + 光标在下一行 = 2 行（尾部空行被裁掉）
+    expect(grid.length).toBe(2);
+    expect(grid[0].some(s => s.text.includes("short"))).toBe(true);
   });
 
   it("returns only viewport when scrollback exists", async () => {

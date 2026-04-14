@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
 import type { TerminalTracker } from "../terminal-tracker.js";
@@ -7,6 +7,7 @@ import { logger } from "../logger.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;
+  handleDirCreateRequest(msg: { path: string }): Promise<void>;
   handleSessionHistoryRequest(): Promise<void>;
   registerTracker(sessionId: string, tracker: TerminalTracker): void;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
@@ -144,6 +145,37 @@ export function createControlMessageHandlers(
           error: String(err),
         }));
         logger.warn({ path: msg.path, error: String(err) }, "Dir list request failed");
+      }
+    },
+
+    async handleDirCreateRequest(msg: { path: string }): Promise<void> {
+      if (!isPathSafe(msg.path)) {
+        send(JSON.stringify({
+          type: "dir_create_response",
+          path: msg.path,
+          success: false,
+          error: "Invalid path: must be absolute and must not contain path traversal",
+        }));
+        logger.warn({ path: msg.path }, "Rejected dir_create_request: unsafe path");
+        return;
+      }
+
+      try {
+        await mkdir(msg.path, { recursive: true });
+        send(JSON.stringify({
+          type: "dir_create_response",
+          path: msg.path,
+          success: true,
+        }));
+        logger.info({ path: msg.path }, "Directory created");
+      } catch (err) {
+        send(JSON.stringify({
+          type: "dir_create_response",
+          path: msg.path,
+          success: false,
+          error: String(err),
+        }));
+        logger.warn({ path: msg.path, error: String(err) }, "Dir create failed");
       }
     },
 

@@ -113,7 +113,16 @@ export class TerminalTracker {
     const baseY = buffer.baseY;
     const totalRows = this.terminal.rows;
     const extractRows = this.clientRows ?? totalRows;
-    const startY = baseY + totalRows - extractRows;
+
+    // 以光标行为锚点提取：光标放在提取区域的底部附近
+    // 确保光标上方的内容（logo、输出）被包含
+    const cursorAbsY = baseY + buffer.cursorY;
+    // 光标在提取区域倒数第 3 行，留几行余量显示光标下方内容
+    const bottomMargin = Math.min(3, extractRows - 1);
+    let startY = cursorAbsY - (extractRows - 1 - bottomMargin);
+    // 不超出 buffer 边界
+    startY = Math.max(startY, baseY);
+    startY = Math.min(startY, baseY + totalRows - extractRows);
 
     for (let y = startY; y < baseY + totalRows; y++) {
       const bufferLine = buffer.getLine(y);
@@ -167,7 +176,32 @@ export class TerminalTracker {
       lines.push(spans);
     }
 
-    return lines;
+    return this.trimEmptyLines(lines, startY);
+  }
+
+  // 裁剪首尾空行：移除开头和结尾连续的纯空行，保留中间内容
+  // startY 是提取起始的绝对行号，用于计算光标在提取结果中的位置
+  private trimEmptyLines(lines: TermLine[], startY: number): TermLine[] {
+    const buffer = this.terminal.buffer.active;
+    const cursorAbsY = buffer.baseY + buffer.cursorY;
+    const cursorInExtracted = cursorAbsY - startY;
+
+    const isNonEmpty = (i: number) => {
+      if (i === cursorInExtracted) return true;
+      const line = lines[i];
+      return line.some(span => span.text.trim().length > 0);
+    };
+
+    // 找第一个非空行
+    let start = 0;
+    while (start < lines.length && !isNonEmpty(start)) start++;
+
+    // 找最后一个非空行
+    let end = lines.length - 1;
+    while (end >= start && !isNonEmpty(end)) end--;
+
+    if (start > end) return [];
+    return lines.slice(start, end + 1);
   }
 
   // 获取光标相对于 viewport 的位置

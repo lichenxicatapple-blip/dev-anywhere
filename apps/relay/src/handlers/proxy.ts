@@ -10,6 +10,7 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "terminal_resize",
   "pty_state",
   "dir_list_response",
+  "dir_create_response",
   "command_list_push",
   "file_tree_push",
   "session_history_response",
@@ -133,7 +134,7 @@ export function handleProxyConnection(
             clientWs.send(raw);
           }
         }
-        logger.debug({ proxyId: proxyWs.proxyId, type: result.message.type }, "Forwarded control message from proxy to clients");
+        logger.info({ proxyId: proxyWs.proxyId, type: result.message.type, clientCount: clients.length }, "Forwarded control message from proxy to clients");
         return;
       }
       // 其他控制消息代理端不应发送

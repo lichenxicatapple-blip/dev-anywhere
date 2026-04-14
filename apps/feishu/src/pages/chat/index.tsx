@@ -6,7 +6,7 @@ import { SafeAreaHeader } from "@/components/safe-area-header";
 import { TerminalViewport } from "@/components/terminal-viewport";
 import { ChatBubbleList } from "@/components/chat-bubble-list";
 import { InputBar, computeSendDisabled } from "@/components/input-bar";
-import type { PickerMode } from "@/components/input-bar";
+import type { PickerMode, InputBarHandle } from "@/components/input-bar";
 import { StatusLine } from "@/components/status-line";
 import { BackToBottomButton } from "@/components/back-to-bottom";
 import { ToolApprovalCard } from "@/components/tool-approval-card";
@@ -27,8 +27,8 @@ import {
   initialTerminalState,
   FONT_SIZES,
 } from "@/stores/terminal-store";
-import { useCommandState } from "@/stores/command-store";
-import { useFileState } from "@/stores/file-store";
+import { useCommandState, useCommandDispatch } from "@/stores/command-store";
+import { useFileState, useFileDispatch } from "@/stores/file-store";
 import { useRelayClient } from "@/stores/relay-store";
 import { useAppState, useAppDispatch } from "@/stores/app-store";
 import "./index.css";
@@ -99,7 +99,10 @@ export default function Chat() {
   }, [terminalState.fontSizeIndex]);
 
   const commandState = useCommandState();
+  const commandDispatch = useCommandDispatch();
   const fileState = useFileState();
+  const fileDispatch = useFileDispatch();
+  const inputBarRef = useRef<InputBarHandle>(null);
 
   // relay 消息订阅：路由 envelope 和 control 消息到对应的 store
   useEffect(() => {
@@ -163,6 +166,27 @@ export default function Chat() {
             }
             break;
           }
+          case "session_list": {
+            if (sessionId && envelope.payload?.sessions) {
+              const sessions = envelope.payload.sessions as Array<{ id?: string; sessionId?: string }>;
+              const stillExists = sessions.some(s => (s.sessionId || s.id) === sessionId);
+              if (!stillExists) {
+                Taro.showModal({
+                  title: "Session Ended",
+                  content: "The terminal session has exited.",
+                  showCancel: false,
+                  confirmText: "OK",
+                  success: () => {
+                    const target = appState.proxyOnline
+                      ? "/pages/session-list/index"
+                      : "/pages/proxy-select/index";
+                    Taro.reLaunch({ url: target });
+                  },
+                });
+              }
+            }
+            break;
+          }
           default:
             break;
         }
@@ -218,6 +242,21 @@ export default function Chat() {
           terminalDispatch({ type: "SET_PTY_TITLE", title: (ctrl as unknown as { title: string }).title });
           break;
         }
+        case "command_list_push": {
+          const commands = (ctrl as unknown as { commands: Array<{ name: string; description: string; argumentHint?: string; source: string }> }).commands;
+          commandDispatch({ type: "SET_COMMANDS", commands });
+          break;
+        }
+        case "dir_list_response": {
+          const { path, entries } = ctrl as unknown as { path: string; entries: Array<{ name: string; isDir: boolean }> };
+          fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
+          break;
+        }
+        case "file_tree_push": {
+          const { path, entries } = ctrl as unknown as { path: string; entries: Array<{ name: string; isDir: boolean }> };
+          fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
+          break;
+        }
         case "relay_error": {
           console.error("[chat] relay error:", (ctrl as Record<string, unknown>).code, (ctrl as Record<string, unknown>).message);
           break;
@@ -267,12 +306,16 @@ export default function Chat() {
     }
 
     // 已绑定时直接请求帧，否则走绑定流程
-    if (relay.getBoundProxyId()) {
+    const boundId = relay.getBoundProxyId();
+    console.log("[chat-bind]", { boundId, sessionId, isPty, selectedProxyId: appState.selectedProxyId });
+    if (boundId) {
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
+        console.log("[chat-bind] requesting frame, rows:", getViewportRows());
         relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
       }
     } else {
+      console.log("[chat-bind] not bound, calling bind()");
       bind();
     }
 
@@ -470,13 +513,17 @@ export default function Chat() {
     (cmd: { name: string; argumentHint?: string }) => {
       setPickerMode("none");
       setArgumentHint(cmd.argumentHint || "");
+      inputBarRef.current?.replaceCommand(cmd.name, cmd.argumentHint);
+      inputBarRef.current?.focus();
     },
     [],
   );
 
   const handleSelectFile = useCallback(
-    (_path: string) => {
+    (path: string) => {
       setPickerMode("none");
+      inputBarRef.current?.insertFileRef(path);
+      inputBarRef.current?.focus();
     },
     [],
   );
@@ -616,6 +663,7 @@ export default function Chat() {
 
         <View className="input-bar-wrapper">
           <InputBar
+            ref={inputBarRef}
             onSend={handleSend}
             disabled={sendDisabled.disabled}
             disabledReason={sendDisabled.reason}

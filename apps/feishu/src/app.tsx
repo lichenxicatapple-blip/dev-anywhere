@@ -22,6 +22,12 @@ import {
   fileReducer,
   initialFileState,
 } from "@/stores/file-store";
+import {
+  CommandProvider,
+  CommandDispatchProvider,
+  commandReducer,
+  initialCommandState,
+} from "@/stores/command-store";
 import { handleWsStatusChange, handleRelayMessage } from "@/phase-machine";
 import type { Timers } from "@/phase-machine";
 import "./app.css";
@@ -33,6 +39,7 @@ function App({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(appReducer, initialAppState);
   const [sessionState, sessionDispatch] = useReducer(sessionReducer, initialSessionState);
   const [fileState, fileDispatch] = useReducer(fileReducer, initialFileState);
+  const [commandState, commandDispatch] = useReducer(commandReducer, initialCommandState);
   const stateRef = useRef(state);
   stateRef.current = state;
   const wsRef = useRef<WebSocketManager | null>(null);
@@ -94,7 +101,11 @@ function App({ children }: PropsWithChildren) {
             <SessionDispatchProvider value={sessionDispatch}>
               <FileProvider value={fileState}>
                 <FileDispatchProvider value={fileDispatch}>
-                  {children}
+                  <CommandProvider value={commandState}>
+                    <CommandDispatchProvider value={commandDispatch}>
+                      {children}
+                    </CommandDispatchProvider>
+                  </CommandProvider>
                 </FileDispatchProvider>
               </FileProvider>
             </SessionDispatchProvider>

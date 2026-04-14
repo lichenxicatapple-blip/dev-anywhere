@@ -56,12 +56,6 @@ export default function SessionList() {
         });
       }
 
-      // 终端标题变化，更新会话名称
-      if (msg.type === "terminal_title" && "sessionId" in msg && "title" in msg) {
-        const { sessionId, title } = msg as { sessionId: string; title: string };
-        sessionDispatch({ type: "UPDATE_SESSION_NAME", sessionId, name: title });
-      }
-
       const ctrl = msg as RelayControlMessage;
       if (ctrl.type === "session_history_response") {
         sessionDispatch({ type: "SET_HISTORY_SESSIONS", sessions: ctrl.sessions });
@@ -70,6 +64,15 @@ export default function SessionList() {
       if (ctrl.type === "dir_list_response") {
         const { path, entries } = ctrl as RelayControlMessage & { path: string; entries: DirEntry[] };
         fileDispatch({ type: "SET_DIR_ENTRIES", path, entries });
+      }
+      // 目录创建响应：创建成功后刷新父目录缓存
+      if (ctrl.type === "dir_create_response") {
+        const resp = ctrl as unknown as { path: string; success: boolean; error?: string };
+        if (resp.success) {
+          const parentPath = resp.path.replace(/\/[^/]+\/?$/, "") || "/";
+          fileDispatch({ type: "SET_DIR_ENTRIES", path: parentPath, entries: [] });
+          if (relay) relay.sendControl({ type: "dir_list_request", path: parentPath });
+        }
       }
     });
 
@@ -101,7 +104,7 @@ export default function SessionList() {
 
   // 点击活跃会话，进入聊天页
   const handleSelectSession = useCallback(
-    (sessionId: string, mode: "pty" | "json" | undefined) => {
+    (sessionId: string, mode: "pty" | "json" | undefined, name?: string) => {
       Taro.setStorageSync("cc_sessionId", sessionId);
       Taro.setStorageSync("cc_sessionMode", mode || "json");
       sessionDispatch({
@@ -110,7 +113,8 @@ export default function SessionList() {
         mode: mode || "json",
       });
       transitionToPhase(appState.phase, "chatting", appDispatch);
-      Taro.navigateTo({ url: `/pages/chat/index?sessionId=${sessionId}&mode=${mode || "json"}` });
+      const nameParam = name ? `&name=${encodeURIComponent(name)}` : "";
+      Taro.navigateTo({ url: `/pages/chat/index?sessionId=${sessionId}&mode=${mode || "json"}${nameParam}` });
     },
     [sessionDispatch, appState.phase, appDispatch],
   );
@@ -186,6 +190,14 @@ export default function SessionList() {
     setShowDirPicker(false);
   }, []);
 
+  const handleCreateDir = useCallback(
+    (path: string) => {
+      if (!checkConnected() || !relay) return;
+      relay.sendControl({ type: "dir_create_request", path } as never);
+    },
+    [relay, checkConnected],
+  );
+
   const hasActiveSessions = sessionState.sessions.length > 0;
   const hasHistory = sessionState.historySessions.length > 0;
   const isEmpty = !hasActiveSessions && !hasHistory;
@@ -211,7 +223,7 @@ export default function SessionList() {
                     session={s}
                     swipeOpen={swipeOpenId === s.sessionId}
                     onSwipeToggle={handleSwipeToggle}
-                    onSelect={() => handleSelectSession(s.sessionId, s.mode)}
+                    onSelect={() => handleSelectSession(s.sessionId, s.mode, s.name)}
                     onTerminate={() => handleTerminate(s.sessionId)}
                   />
                 ))}
@@ -249,6 +261,7 @@ export default function SessionList() {
         onSelect={handleDirSelect}
         onCancel={handleDirPickerCancel}
         onRequestDir={handleRequestDir}
+        onCreateDir={handleCreateDir}
         dirEntries={fileState.tree}
       />
     </View>

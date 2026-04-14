@@ -118,6 +118,15 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     path: z.string(),
   }),
 
+  // 目录创建请求与响应
+  z.object({ type: z.literal("dir_create_request"), path: z.string() }),
+  z.object({
+    type: z.literal("dir_create_response"),
+    path: z.string(),
+    success: z.boolean(),
+    error: z.string().optional(),
+  }),
+
   // 命令列表推送，proxy 将可用命令列表推给 client
   z.object({
     type: z.literal("command_list_push"),

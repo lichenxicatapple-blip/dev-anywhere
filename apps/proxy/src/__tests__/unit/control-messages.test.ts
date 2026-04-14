@@ -108,6 +108,82 @@ describe("control-messages: path traversal defense", () => {
 });
 
 
+describe("control-messages: dir_create", () => {
+  let sent: string[];
+
+  beforeEach(() => {
+    sent = [];
+  });
+
+  it("creates directory at valid absolute path", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-mkdir-"));
+    const newDir = join(tmpDir, "my-project");
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    await handlers.handleDirCreateRequest({ path: newDir });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.type).toBe("dir_create_response");
+    expect(response.success).toBe(true);
+    expect(response.path).toBe(newDir);
+
+    // 验证目录确实存在
+    const { statSync } = await import("node:fs");
+    expect(statSync(newDir).isDirectory()).toBe(true);
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("creates nested directories recursively", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-mkdir-"));
+    const deepDir = join(tmpDir, "a", "b", "c");
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    await handlers.handleDirCreateRequest({ path: deepDir });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.success).toBe(true);
+
+    const { statSync } = await import("node:fs");
+    expect(statSync(deepDir).isDirectory()).toBe(true);
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("rejects relative path", async () => {
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    await handlers.handleDirCreateRequest({ path: "relative/path" });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.type).toBe("dir_create_response");
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("Invalid path");
+  });
+
+  it("succeeds silently if directory already exists", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-mkdir-"));
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    await handlers.handleDirCreateRequest({ path: tmpDir });
+
+    const response = JSON.parse(sent[0]);
+    // recursive: true 使 mkdir 不报错如果已存在
+    expect(response.success).toBe(true);
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns error for permission-denied path", async () => {
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    // /proc 在 macOS 不存在，/System 需要 root 权限
+    await handlers.handleDirCreateRequest({ path: "/System/forbidden-test-dir" });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.success).toBe(false);
+    expect(response.error).toBeDefined();
+  });
+});
+
 describe("control-messages: command list push", () => {
   it("sends command_list_push with static commands", async () => {
     const sent: string[] = [];

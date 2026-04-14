@@ -504,7 +504,7 @@ function handleTerminalConnection(
           // 会话可能尚未注册，状态更新失败可忽略
         }
         terminalSockets.set(msg.sessionId, socket);
-        // 通知 relay 该 session 存在，确保 relay 建立 proxy-session 关联
+        // 通知 relay 该 session 存在，并推送会话列表给客户端
         if (relayConnection) {
           const session = sessionManager.getSession(msg.sessionId);
           if (session) {
@@ -513,12 +513,39 @@ function handleTerminalConnection(
               sessions: [{ id: session.id, mode: session.mode, state: session.state }],
             }));
           }
+          const allSessions = sessionManager.listSessions();
+          relayConnection.sendRaw(JSON.stringify({
+            type: "session_list",
+            sessionId: "",
+            seq: 0,
+            timestamp: Date.now(),
+            source: "proxy",
+            version: "1",
+            payload: {
+              sessions: allSessions.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                sessionId: s.id,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+              })),
+            },
+          }));
         }
         logger.info({ sessionId: msg.sessionId }, "PTY session registered");
         break;
       }
 
       case "pty_deregister": {
+        // 先通知客户端状态变更，再清理 session
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "pty_state",
+            sessionId: msg.sessionId,
+            payload: { state: "turn_complete" },
+          }));
+        }
         sessionManager.terminateSession(msg.sessionId);
         terminalSockets.delete(msg.sessionId);
         frameCache?.remove(msg.sessionId);
@@ -726,6 +753,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         // 控制消息：dir_list_request, session_history_request, terminal_scroll_request
         else if (parsed.type === "dir_list_request") {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
+        } else if (parsed.type === "dir_create_request") {
+          controlHandlers.handleDirCreateRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
         } else if (parsed.type === "session_list") {
