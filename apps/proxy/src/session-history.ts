@@ -205,13 +205,3 @@ async function extractTitleAndCwd(filePath: string): Promise<{ title: string | n
   });
 }
 
-
-function extractFromBlocks(blocks: Array<{ type?: string; text?: string }>): string | null {
-  const textBlock = blocks.find((b) => b.type === "text" && typeof b.text === "string");
-  if (textBlock?.text) {
-    const text = textBlock.text.replace(/<[^>]+>/g, "").trim();
-    if (text && !text.startsWith("/")) return text.slice(0, 80);
-  }
-  return null;
-}
-
