@@ -70,63 +70,6 @@
   background: rgba(255, 255, 255, 0.5);
 }
 
-.markdown-view pre code {
-  font-family: "Sarasa Fixed SC", monospace, Menlo, Courier;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  background: none;
-  padding: 0;
-  border-radius: 0;
-  color: #abb2bf;
-}
-
-/* highlight.js atom-one-dark 内联主题，避免外部 CSS 引入问题 */
-.markdown-view .hljs-comment,
-.markdown-view .hljs-quote { color: #5c6370; font-style: italic; }
-.markdown-view .hljs-doctag,
-.markdown-view .hljs-keyword,
-.markdown-view .hljs-formula { color: #c678dd; }
-.markdown-view .hljs-section,
-.markdown-view .hljs-name,
-.markdown-view .hljs-selector-tag,
-.markdown-view .hljs-deletion,
-.markdown-view .hljs-subst { color: #e06c75; }
-.markdown-view .hljs-literal { color: #56b6c2; }
-.markdown-view .hljs-string,
-.markdown-view .hljs-regexp,
-.markdown-view .hljs-addition,
-.markdown-view .hljs-attribute,
-.markdown-view .hljs-meta .hljs-string { color: #98c379; }
-.markdown-view .hljs-attr,
-.markdown-view .hljs-variable,
-.markdown-view .hljs-template-variable,
-.markdown-view .hljs-type,
-.markdown-view .hljs-selector-class,
-.markdown-view .hljs-selector-attr,
-.markdown-view .hljs-selector-pseudo,
-.markdown-view .hljs-number { color: #d19a66; }
-.markdown-view .hljs-symbol,
-.markdown-view .hljs-bullet,
-.markdown-view .hljs-link,
-.markdown-view .hljs-meta,
-.markdown-view .hljs-selector-id,
-.markdown-view .hljs-title { color: #61afe2; }
-.markdown-view .hljs-built_in,
-.markdown-view .hljs-title.class_,
-.markdown-view .hljs-class .hljs-title { color: #e6c07b; }
-.markdown-view .hljs-emphasis { font-style: italic; }
-.markdown-view .hljs-strong { font-weight: bold; }
-
-/* 行内代码 */
-.markdown-view code {
-  font-family: inherit;
-  font-size: inherit;
-  background: rgba(255, 255, 255, 0.1);
-  padding: 0.0625rem 0.25rem;
-  border-radius: 0.1875rem;
-  color: #e06c75;
-  word-break: break-all;
-}
 
 /* 表格 */
 .markdown-view table {
