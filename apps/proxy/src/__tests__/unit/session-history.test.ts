@@ -135,15 +135,76 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("Array format message");
   });
 
-  it("skips user messages starting with < or /", async () => {
+  it("extracts slash command from XML tags, skips pure XML noise and /clear", async () => {
     writeSession("-test-proj", "skip", [
-      JSON.stringify({ type: "user", message: "<command>clear</command>" }),
-      JSON.stringify({ type: "user", message: "/help" }),
+      JSON.stringify({ type: "user", message: "<some-xml>noise</some-xml>" }),
+      JSON.stringify({ type: "user", message: "<command-name>/clear</command-name><command-args></command-args>" }),
+      JSON.stringify({ type: "user", message: "<command-name>/gsd-progress</command-name><command-args>2</command-args>" }),
       JSON.stringify({ type: "user", message: { role: "user", content: "Real question" } }),
     ]);
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
-    expect(result[0].title).toBe("Real question");
+    expect(result[0].title).toBe("/gsd-progress 2");
+  });
+
+  it("reads cwd from JSONL instead of decoding directory name", async () => {
+    // 模拟 Claude Code 的编码：下划线和路径分隔符都变成连字符
+    writeSession("-Users-admin-workspace-bmo_intraday_statement-airflow_dags_sbl", "sess1", [
+      JSON.stringify({ type: "progress", cwd: "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl", sessionId: "sess1" }),
+      JSON.stringify({ type: "user", message: { role: "user", content: "Check the DAG" } }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].projectDir).toBe("/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl");
+    expect(result[0].title).toBe("Check the DAG");
+  });
+
+  it("skips isMeta user messages for title extraction", async () => {
+    writeSession("-test-proj", "meta1", [
+      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /Users/admin/.claude/skills/gsd" }] } }),
+      JSON.stringify({ type: "user", message: { role: "user", content: "What is this project about?" } }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("What is this project about?");
+  });
+
+  it("deduplicates sessions with same title + projectDir, keeps newest", async () => {
+    writeSession("-test-proj", "old1", [
+      JSON.stringify({ type: "progress", cwd: "/test/proj", sessionId: "old1" }),
+      JSON.stringify({ type: "user", message: "Same question" }),
+    ]);
+    await new Promise((r) => setTimeout(r, 50));
+    writeSession("-test-proj", "new1", [
+      JSON.stringify({ type: "progress", cwd: "/test/proj", sessionId: "new1" }),
+      JSON.stringify({ type: "user", message: "Same question" }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("new1");
+    expect(result[0].title).toBe("Same question");
+  });
+
+  it("does NOT dedup when all user messages are isMeta and titles fall back to unique session IDs", async () => {
+    // 模拟 MaoGe 场景：所有 user 消息都是 isMeta，title 回退到 sessionId 前缀
+    writeSession("-test-proj", "aaaaaaaa-1111", [
+      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: "<command-name>/clear</command-name>" } }),
+      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill" }] } }),
+    ]);
+    await new Promise((r) => setTimeout(r, 50));
+    writeSession("-test-proj", "bbbbbbbb-2222", [
+      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: "<command-name>/clear</command-name>" } }),
+      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill" }] } }),
+    ]);
+
+    const result = await scanSessionHistory();
+    // 两个 session 的 title 分别是 "aaaaaaaa" 和 "bbbbbbbb"，不同，不去重
+    expect(result).toHaveLength(2);
+    expect(result[0].title).toBe("bbbbbbbb");
+    expect(result[1].title).toBe("aaaaaaaa");
   });
 });

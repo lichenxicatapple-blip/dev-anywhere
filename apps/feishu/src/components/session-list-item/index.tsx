@@ -126,10 +126,10 @@ interface HistoryListItemProps {
 }
 
 export function HistoryListItem({ title, projectDir, updatedAt, onSelect }: HistoryListItemProps) {
-  const shortDir = projectDir.replace(/^\/Users\/[^/]+/, "~");
+  const shortDir = formatSessionName(projectDir);
   return (
     <View className="sli-wrapper">
-      <View className="sli-item" onClick={onSelect}>
+      <View className="sli-item sli-history" onClick={onSelect}>
         <View className="sli-info">
           <Text className="sli-title" numberOfLines={1}>
             {title}
@@ -140,7 +140,6 @@ export function HistoryListItem({ title, projectDir, updatedAt, onSelect }: Hist
           </View>
         </View>
         <Text className="sli-resume-tag">Resume</Text>
-        <View className="sli-chevron" />
       </View>
     </View>
   );

@@ -4,6 +4,7 @@
   overflow: hidden;
   margin: 0 var(--page-padding-h) 16px;
   border-radius: 16px;
+  background: #21213a;
 }
 
 .sli-item {
@@ -11,6 +12,7 @@
   align-items: center;
   background: #21213a;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
   padding: 12px 32px;
   box-sizing: border-box;
   position: relative;
@@ -182,6 +184,12 @@
   transform: rotate(-45deg);
   margin-left: 16px;
   flex-shrink: 0;
+}
+
+/* History item title: smaller than active session */
+.sli-history .sli-title {
+  font-size: 28px;
+  font-weight: 500;
 }
 
 /* Resume tag for history items */

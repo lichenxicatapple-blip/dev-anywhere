@@ -13,6 +13,7 @@ import {
 import type { HistorySession } from "@/stores/session-store";
 import { useFileState, useFileDispatch } from "@/stores/file-store";
 import { useScreenSize } from "@/hooks/use-screen-size";
+import { formatSessionName } from "@/utils/format-session-name";
 import { SessionListItem, HistoryListItem } from "@/components/session-list-item";
 import { EmptyState } from "@/components/empty-state";
 import { DirectoryPicker } from "@/components/directory-picker";
@@ -30,6 +31,7 @@ export default function SessionList() {
   const [swipeOpenId, setSwipeOpenId] = useState("");
   const [showDirPicker, setShowDirPicker] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   // 设置导航栏标题为 proxy 名称
   useEffect(() => {
@@ -47,6 +49,7 @@ export default function SessionList() {
       if (msg.type === "session_list" && "payload" in msg) {
         const env = msg as MessageEnvelope & { payload: { sessions: SessionInfo[] } };
         sessionDispatch({ type: "SET_SESSIONS", sessions: env.payload.sessions });
+        setLoaded(true);
       }
       // session_status 是 MessageEnvelope 类型，实时更新单个会话状态
       if (msg.type === "session_status" && "payload" in msg) {
@@ -231,7 +234,7 @@ export default function SessionList() {
     }
     return Array.from(groups.entries()).map(([dir, sessions]) => ({
       dir,
-      shortDir: dir.replace(/^\/Users\/[^/]+/, "~"),
+      shortDir: formatSessionName(dir),
       sessions,
     }));
   }, [sessionState.historySessions]);
@@ -249,7 +252,7 @@ export default function SessionList() {
   return (
     <View className={`session-page ${screen.className}`}>
       <ScrollView className="session-scroll" scrollY>
-        {isEmpty ? (
+        {loaded && isEmpty ? (
           <EmptyState
             title="No Active Sessions"
             subtitle="Create a new session or connect from your computer"

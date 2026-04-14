@@ -125,8 +125,11 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
 
 // 从 message 字段提取文本，统一处理多种格式
 function extractSlashCommand(text: string): string | null {
-  const match = text.match(/<command-name>([^<]+)<\/command-name>/);
-  return match ? match[1] : null;
+  const nameMatch = text.match(/<command-name>([^<]+)<\/command-name>/);
+  if (!nameMatch) return null;
+  const argsMatch = text.match(/<command-args>([^<]+)<\/command-args>/);
+  const args = argsMatch ? argsMatch[1].trim() : "";
+  return args ? `${nameMatch[1]} ${args}` : nameMatch[1];
 }
 
 function extractMessageText(msg: unknown): string | null {
@@ -170,15 +173,12 @@ function extractMessageText(msg: unknown): string | null {
 async function extractTitleAndCwd(filePath: string): Promise<{ title: string | null; cwd: string | null }> {
   return new Promise((resolve) => {
     const rl = createInterface({ input: createReadStream(filePath, { encoding: "utf-8" }), crlfDelay: Infinity });
-    let lineCount = 0;
     let resolved = false;
     let cwd: string | null = null;
     let title: string | null = null;
 
     rl.on("line", (line) => {
       if (resolved) return;
-      lineCount++;
-      if (lineCount > 50) { rl.close(); return; }
       if (!line.trim()) return;
 
       try {
@@ -186,8 +186,12 @@ async function extractTitleAndCwd(filePath: string): Promise<{ title: string | n
         if (!cwd && typeof obj.cwd === "string") {
           cwd = obj.cwd;
         }
-        if (!title && obj.type === "user") {
-          title = extractUserText(obj.message);
+        if (!title && obj.type === "user" && !obj.isMeta) {
+          const text = extractMessageText(obj.message);
+          // 跳过重置/管理类命令，它们不代表会话主题
+          if (text && text.length >= 2 && !/^\/(clear|model|compact|help|config|logout)(\s|$)/.test(text)) {
+            title = text.slice(0, 80);
+          }
         }
         if (cwd && title) {
           resolved = true;

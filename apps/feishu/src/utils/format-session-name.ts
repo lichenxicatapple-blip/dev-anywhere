@@ -8,10 +8,12 @@ export function formatSessionName(name: string | undefined): string {
   // 不是路径，直接返回
   if (!name.startsWith("/") && !name.startsWith("~")) return name;
 
-  const parts = name.split("/").filter(Boolean);
+  // 先把绝对路径的 home 目录替换为 ~
+  const normalized = name.replace(/^\/Users\/[^/]+/, "~");
+  const parts = normalized.split("/").filter(Boolean);
 
   // 3 级以内足够短，直接显示
-  if (parts.length <= 3) return name;
+  if (parts.length <= 3) return normalized;
 
   // 取最后两级，前面保留路径前缀
   const prefix = parts[0] === "~" ? "~" : "";
