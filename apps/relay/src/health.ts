@@ -13,23 +13,20 @@ export function healthRouter(registry: RelayRegistry): Router {
   });
 
   router.get("/status", (_req, res) => {
-    const bufferStats = registry.getBufferStats();
     res.json({
       proxyCount: registry.listProxies().length,
       clientCount: registry.countClients(),
       uptime: process.uptime(),
-      buffers: bufferStats,
     });
   });
 
-  // 连接总览：proxy/client 计数、绑定关系、缓冲区统计
+  // 连接总览：proxy/client 计数、绑定关系
   router.get("/api/status", (_req, res) => {
     res.json({
       proxyCount: registry.listProxies().length,
       clientCount: registry.countClients(),
       uptime: process.uptime(),
       bindings: registry.getClientDetails(),
-      buffers: registry.getBufferStats(),
     });
   });
 

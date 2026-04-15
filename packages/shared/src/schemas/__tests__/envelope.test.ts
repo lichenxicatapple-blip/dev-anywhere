@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MessageEnvelopeSchema } from "../envelope.js";
 import {
-  TerminalFramePayloadSchema,
   PtyStatePayloadSchema,
   SessionCreatePayloadSchema,
   SessionListPayloadSchema,
@@ -76,35 +75,6 @@ describe("MessageEnvelopeSchema", () => {
         makeEnvelope("heartbeat", {}, { source: "client" }),
       );
       expect(result.source).toBe("client");
-    });
-  });
-
-  describe("TerminalFramePayloadSchema", () => {
-    it("validates lines with full span attributes", () => {
-      const result = TerminalFramePayloadSchema.parse({
-        mode: "full",
-        lines: [[{ text: "hello", fg: "#00FF00", bold: true }]],
-      });
-      const lines = result.lines as Array<Array<{ text: string; fg?: string; bold?: boolean }>>;
-      expect(lines[0][0].text).toBe("hello");
-      expect(lines[0][0].fg).toBe("#00FF00");
-      expect(lines[0][0].bold).toBe(true);
-    });
-
-    it("validates minimal span without optional fields", () => {
-      const result = TerminalFramePayloadSchema.parse({
-        mode: "full",
-        lines: [[{ text: " " }]],
-      });
-      const lines = result.lines as Array<Array<{ text: string; fg?: string }>>;
-      expect(lines[0][0].text).toBe(" ");
-      expect(lines[0][0].fg).toBeUndefined();
-    });
-
-    it("rejects lines that is not an array", () => {
-      expect(() =>
-        TerminalFramePayloadSchema.parse({ lines: "not an array" }),
-      ).toThrow();
     });
   });
 

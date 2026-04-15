@@ -34,9 +34,6 @@ export {
   SessionSwitchPayloadSchema,
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
-  TermSpanSchema,
-  CursorSchema,
-  TerminalFramePayloadSchema,
   PtyStatePayloadSchema,
 } from "./schemas/session.js";
 export type {
@@ -46,12 +43,6 @@ export type {
   SessionSwitchPayload,
   SessionTerminatePayload,
   SessionStatusPayload,
-  TermSpan,
-  TermLine,
-  Cursor,
-  TerminalFramePayload,
-  TerminalFrameFull,
-  TerminalFrameDelta,
   PtyStatePayload,
 } from "./schemas/session.js";
 export {

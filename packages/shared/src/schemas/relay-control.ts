@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  TerminalFramePayloadSchema,
   PtyStatePayloadSchema,
 } from "./session.js";
 
@@ -151,13 +150,6 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     sessions: z.array(HistorySessionSchema),
   }),
 
-  // PTY 实时画面推送，从 Envelope 迁移到 Control 层
-  z.object({
-    type: z.literal("terminal_frame"),
-    sessionId: z.string(),
-    payload: TerminalFramePayloadSchema,
-  }),
-
   // PTY 语义状态，从 Envelope 迁移到 Control 层
   z.object({
     type: z.literal("pty_state"),
@@ -178,22 +170,6 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     cols: z.number().int().positive(),
     rows: z.number().int().positive(),
-  }),
-
-  // 客户端请求当前终端全量帧，client -> proxy
-  z.object({
-    type: z.literal("terminal_frame_request"),
-    sessionId: z.string(),
-    rows: z.number().int().positive().optional(),
-  }),
-
-  // 终端滚动请求，client -> proxy，服务端维护偏移量并推回 terminal_frame
-  z.object({
-    type: z.literal("terminal_scroll_request"),
-    sessionId: z.string(),
-    direction: z.enum(["up", "down"]),
-    delta: z.number().int().positive(),
-    rows: z.number().int().positive().optional(),
   }),
 
   // 远程终止 JSON 会话，client -> proxy

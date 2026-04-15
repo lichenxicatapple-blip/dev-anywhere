@@ -1,6 +1,4 @@
 import { WebSocket } from "ws";
-import { SessionBuffer } from "./session-buffer.js";
-import type { BufferStore } from "./buffer-store.js";
 
 // 显式代理连接状态，取代 ws null 检查
 export type ProxyConnectionState = "online" | "offline";
@@ -24,32 +22,11 @@ interface ClientBinding {
   connectionState: ClientConnectionState;
 }
 
-// buffer 统计信息
-export interface BufferStats {
-  totalBuffered: number;
-  sessionCount: number;
-  proxyCount: number;
-}
-
-// 代理注册、客户端绑定、会话缓冲区、宽限期管理
+// 代理注册、客户端绑定、宽限期管理
 export class RelayRegistry {
   private proxyStates = new Map<string, ProxyState>();
   private clientBindings = new Map<string, ClientBinding>();
-  private sessionBuffers = new Map<string, SessionBuffer>();
   private connectedClients = new Set<WebSocket>();
-  private store: BufferStore | null;
-
-  constructor(store: BufferStore | null = null) {
-    this.store = store;
-    if (store) {
-      const loaded = store.loadAll();
-      for (const [sessionId, msgs] of loaded) {
-        const buffer = new SessionBuffer(store, sessionId);
-        buffer.loadMessages(msgs);
-        this.sessionBuffers.set(sessionId, buffer);
-      }
-    }
-  }
 
   registerProxy(proxyId: string, ws: WebSocket, name?: string): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
@@ -128,19 +105,10 @@ export class RelayRegistry {
     return this.clientBindings.get(clientId)?.connectionState;
   }
 
-  // 彻底清理 proxy 状态、会话缓冲区、客户端绑定
+  // 彻底清理 proxy 状态和客户端绑定
   cleanupProxy(proxyId: string): void {
     const state = this.proxyStates.get(proxyId);
     if (!state) return;
-
-    // 清理该 proxy 拥有的所有会话缓冲区（含磁盘文件）
-    for (const sessionId of state.sessions) {
-      const buffer = this.sessionBuffers.get(sessionId);
-      if (buffer) {
-        buffer.clear();
-      }
-      this.sessionBuffers.delete(sessionId);
-    }
 
     // 解绑所有绑定到该 proxy 的客户端
     for (const [clientId, binding] of this.clientBindings) {
@@ -215,30 +183,9 @@ export class RelayRegistry {
     return state ? Array.from(state.sessions) : [];
   }
 
-  getOrCreateSessionBuffer(sessionId: string): SessionBuffer {
-    let buffer = this.sessionBuffers.get(sessionId);
-    if (!buffer) {
-      buffer = new SessionBuffer(this.store, sessionId);
-      this.sessionBuffers.set(sessionId, buffer);
-    }
-    return buffer;
-  }
-
-  getSessionBuffer(sessionId: string): SessionBuffer | undefined {
-    return this.sessionBuffers.get(sessionId);
-  }
-
-  // 获取 proxy 所有 session 的最大 seq 映射，用于重连对账
-  getSessionSeqMap(proxyId: string): Record<string, number> {
-    const sessionIds = this.getSessionsForProxy(proxyId);
-    const map: Record<string, number> = {};
-    for (const sessionId of sessionIds) {
-      const buffer = this.sessionBuffers.get(sessionId);
-      if (buffer && buffer.size() > 0) {
-        map[sessionId] = buffer.getLastSeq();
-      }
-    }
-    return map;
+  // 获取 proxy 所有 session 的 seq 映射（relay 无状态后返回空映射）
+  getSessionSeqMap(_proxyId: string): Record<string, number> {
+    return {};
   }
 
   // clientId 绑定方式
@@ -335,15 +282,4 @@ export class RelayRegistry {
     return details;
   }
 
-  getBufferStats(): BufferStats {
-    let totalBuffered = 0;
-    for (const [, buffer] of this.sessionBuffers) {
-      totalBuffered += buffer.size();
-    }
-    return {
-      totalBuffered,
-      sessionCount: this.sessionBuffers.size,
-      proxyCount: this.proxyStates.size,
-    };
-  }
 }

@@ -1,7 +1,7 @@
 // 终端状态管理：PTY 栅格数据、字体大小、PTY 语义状态
 import { createContext, useContext } from "react";
 import Taro from "@tarojs/taro";
-import type { TermLine } from "@cc-anywhere/shared";
+import type { TermLine } from "@/types/terminal-legacy";
 
 export type { TermLine };
 
