@@ -1,15 +1,8 @@
 .chat-bubble-list {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  height: 0;
   background: transparent;
   padding: 24px var(--page-padding-h, 32px);
-  scrollbar-width: none;
-}
-
-.chat-bubble-list::-webkit-scrollbar {
-  display: none;
 }
 
 .chat-bubble-row {
