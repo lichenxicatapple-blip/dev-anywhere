@@ -215,13 +215,11 @@ serve
     const { resolve } = await import("node:path");
     const { createRecordingTap } = await import("./tap.js");
     const { PtyManager } = await import("./pty-manager.js");
-    const { TerminalTracker } = await import("./terminal-tracker.js");
 
     const absPath = resolve(outputPath);
     const { tap: recordTap, writeResize, stop: stopRecording } = createRecordingTap(absPath);
     const cols = process.stdout.columns ?? 120;
     const rows = process.stdout.rows ?? 40;
-    const tracker = new TerminalTracker(cols, rows);
 
     // 录制初始终端尺寸
     writeResize(cols, rows);
@@ -230,17 +228,14 @@ serve
       claudeArgs: [],
       tap: (data: string) => {
         recordTap(data);
-        tracker.feed(data);
       },
       stdin: process.stdin,
       stdout: process.stdout,
       onResize: (newCols, newRows) => {
         writeResize(newCols, newRows);
-        tracker.resize(newCols, newRows);
       },
       onSessionExit: (code: number) => {
         stopRecording();
-        tracker.dispose();
         console.error(`\nRecording saved to ${absPath}`);
         process.exit(code);
       },

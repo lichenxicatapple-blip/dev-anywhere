@@ -1,8 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { TerminalTracker } from "#src/terminal-tracker.js";
 import type { SessionManager } from "#src/session-manager.js";
 import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
 
@@ -15,15 +14,6 @@ function createMockSessionManager(sessions: Array<{ id: string; state: string }>
       createdAt: new Date().toISOString(),
     })),
   } as unknown as SessionManager;
-}
-
-function createMockTracker(overrides: Partial<TerminalTracker> = {}): TerminalTracker {
-  return {
-    extractLines: vi.fn().mockReturnValue({ startLineId: 0, lines: [[{ text: "line content" }]] }),
-    getOldestLineId: vi.fn().mockReturnValue(0),
-    getNewestLineId: vi.fn().mockReturnValue(10),
-    ...overrides,
-  } as unknown as TerminalTracker;
 }
 
 describe("control-messages: path traversal defense", () => {
@@ -254,10 +244,8 @@ describe("control-messages: cleanup", () => {
   it("clears refresh timer on cleanup without error", async () => {
     const sent: string[] = [];
 
-    const tracker = createMockTracker();
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
 
-    handlers.registerTracker("sess-1", tracker);
     await handlers.pushCommandList("sess-1", "/tmp");
 
     // cleanup 应正常完成，不抛异常

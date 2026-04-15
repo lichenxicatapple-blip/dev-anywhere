@@ -1,7 +1,6 @@
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
-import type { TerminalTracker } from "../terminal-tracker.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
 import { logger } from "../logger.js";
@@ -10,7 +9,6 @@ export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;
   handleDirCreateRequest(msg: { path: string }): Promise<void>;
   handleSessionHistoryRequest(): Promise<void>;
-  registerTracker(sessionId: string, tracker: TerminalTracker): void;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
   reinitializeOnReconnect(): Promise<void>;
@@ -86,7 +84,6 @@ export function createControlMessageHandlers(
   sessionManager: SessionManager,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
-  const trackers = new Map<string, TerminalTracker>();
 
   function getResources(sessionId: string): SessionResources {
     let res = sessionResources.get(sessionId);
@@ -98,9 +95,6 @@ export function createControlMessageHandlers(
   }
 
   return {
-    registerTracker(sessionId: string, tracker: TerminalTracker): void {
-      trackers.set(sessionId, tracker);
-    },
 
     async handleDirListRequest(msg: { path: string }): Promise<void> {
       // T-06-13: 路径遍历防御
@@ -281,7 +275,6 @@ export function createControlMessageHandlers(
         }
         sessionResources.delete(sessionId);
       }
-      trackers.delete(sessionId);
     },
   };
 }

@@ -37,7 +37,6 @@ import {
 import { nanoid } from "nanoid";
 import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
 import { readSessionMessages } from "./session-history.js";
-import { createFrameCache, type FrameCache } from "./frame-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -318,7 +317,6 @@ function handleTerminalConnection(
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
   controlHandlers?: ControlMessageHandlers,
-  frameCache?: FrameCache,
 ): void {
   createIpcReader(socket, (msg: IpcMessage) => {
     switch (msg.type) {
@@ -422,17 +420,7 @@ function handleTerminalConnection(
       }
 
       case "pty_terminal_frame": {
-        // terminal → serve → relay：转发终端帧，scrolled 帧不更新缓存（缓存只跟踪实时画面）
-        if (frameCache) {
-          try {
-            const parsed = JSON.parse(msg.frame);
-            if (!parsed.payload?.isScrolled) {
-              frameCache.apply(msg.sessionId, parsed.payload);
-            }
-          } catch {
-            // parse 失败不影响转发
-          }
-        }
+        // terminal → serve → relay：转发终端帧
         if (relayConnection) {
           relayConnection.sendRaw(msg.frame);
         } else {
@@ -500,7 +488,7 @@ function handleTerminalConnection(
           ws.write(serializeWorkerMsg({ type: "worker_stop" }));
         }
         workerSockets.delete(msg.sessionId);
-        frameCache?.remove(msg.sessionId);
+
         controlHandlers?.cleanup(msg.sessionId);
         socket.write(
           serializeIpc({
@@ -564,7 +552,7 @@ function handleTerminalConnection(
         }
         sessionManager.terminateSession(msg.sessionId);
         terminalSockets.delete(msg.sessionId);
-        frameCache?.remove(msg.sessionId);
+
         controlHandlers?.cleanup(msg.sessionId);
         // 推送更新后的会话列表给客户端
         if (relayConnection) {
@@ -664,9 +652,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
-  // 帧缓存：维护每个 session 的完整 grid 状态，delta 帧 merge 到 full 基底
-  const frameCache = createFrameCache();
-
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
@@ -897,7 +882,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             ws.write(serializeWorkerMsg({ type: "worker_stop" }));
           }
           workerSockets.delete(sid);
-          frameCache?.remove(sid);
           controlHandlers.cleanup(sid);
           logger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");
           // 推送更新后的 session 列表
@@ -939,15 +923,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "permission_mode_change") {
           logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
         } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          // 从帧缓存合成 full 帧回放，确保客户端刷新后拿到完整终端画面
-          const fullFrame = frameCache.getFullFrame(parsed.sessionId);
-          if (fullFrame && relaySend) {
-            relaySend(fullFrame);
-            logger.info({ sessionId: parsed.sessionId }, "Replayed full frame from cache");
-          } else {
-            logger.warn({ sessionId: parsed.sessionId, hasCached: !!fullFrame }, "terminal_frame_request: no cached frame");
-          }
-          // 同时转发到 terminal 进程，传递 clientRows 并触发新帧
+          // TODO: Plan 09-02/03 将通过 EventStore 快照恢复替代帧缓存
+          logger.info({ sessionId: parsed.sessionId }, "terminal_frame_request received (frame cache removed, awaiting v2 recovery)");
           const targetSocket = terminalSockets.get(parsed.sessionId);
           if (targetSocket?.writable) {
             targetSocket.write(serializeIpc({
@@ -987,7 +964,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers, frameCache);
+    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers);
   });
 
   server.listen(SOCK_PATH, () => {

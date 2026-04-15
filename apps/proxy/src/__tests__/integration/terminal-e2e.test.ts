@@ -1,22 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { WebSocket } from "ws";
-import { createLogger } from "@cc-anywhere/shared";
-import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
-import { TerminalTracker, type TermSpan } from "#src/terminal-tracker.js";
-import {
-  TerminalFrameRenderer,
-} from "#src/terminal-frame-renderer.js";
+import pkg from "@xterm/headless";
+const { Terminal: HeadlessTerminal } = pkg;
+import { SerializeAddon } from "@xterm/addon-serialize";
 
-const relayLogger = createLogger({ name: "test", silent: true });
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
+
+// headless terminal 的 write 是异步的，需要等待回调
+function termWrite(terminal: InstanceType<typeof HeadlessTerminal>, data: string): Promise<void> {
+  return new Promise((resolve) => {
+    terminal.write(data, resolve);
+  });
+}
 
 /**
  * 从 NDJSON fixture 文件加载录制的 PTY chunk
- * 数据行格式：{"ts":<ms>, "data":"<escaped string>"}
- * resize 行格式：{"ts":<ms>, "resize":{"cols":<n>, "rows":<n>}}
- * 只返回 data 行，过滤掉 resize 行
  */
 function loadRecordedChunks(): Array<{ ts: number; data: string }> {
   const content = readFileSync(join(FIXTURES_DIR, "claude-chunks.ndjson"), "utf-8");
@@ -27,92 +26,25 @@ function loadRecordedChunks(): Array<{ ts: number; data: string }> {
     .filter((record: { data?: string }) => record.data !== undefined);
 }
 
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) { resolve(); return; }
-    ws.on("open", resolve);
-    ws.on("error", reject);
-  });
+// 批量写入 chunk 到 terminal
+async function feedChunks(terminal: InstanceType<typeof HeadlessTerminal>, chunks: Array<{ data: string }>, count: number): Promise<void> {
+  const n = Math.min(count, chunks.length);
+  for (let i = 0; i < n; i++) {
+    await termWrite(terminal, chunks[i].data);
+  }
 }
-
-function waitForMessage(ws: WebSocket, timeoutMs = 5000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("waitForMessage timeout")), timeoutMs);
-    ws.once("message", (data) => {
-      clearTimeout(timer);
-      resolve(data.toString());
-    });
-  });
-}
-
-const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * 终端端到端集成测试
+ * 终端端到端集成测试（v2 pipeline）
  *
- * 使用 `cc-anywhere serve record` 录制的真实 PTY chunk（NDJSON 格式）
- * 按原始分片逐 chunk 喂入 TerminalTracker，精确还原 PtyManager.onData 的行为。
+ * 使用录制的真实 PTY chunk 验证 @xterm/headless + @xterm/addon-serialize 链路
  */
-describe("Terminal E2E with recorded PTY chunks", () => {
-  let relay: RelayServer;
-  let port: number;
-  const connections: WebSocket[] = [];
+describe("Terminal E2E with headless + serialize (v2 pipeline)", () => {
   let chunks: Array<{ ts: number; data: string }>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     chunks = loadRecordedChunks();
-
-    relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger: relayLogger });
-    await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
-    });
-    const addr = relay.httpServer.address();
-    port = typeof addr === "object" && addr !== null ? addr.port : 0;
   });
-
-  afterEach(async () => {
-    for (const ws of connections) {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-      }
-    }
-    connections.length = 0;
-    await relay.close();
-  });
-
-  function connectProxy(): WebSocket {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/proxy`);
-    connections.push(ws);
-    return ws;
-  }
-
-  function connectClient(): WebSocket {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/client`);
-    connections.push(ws);
-    return ws;
-  }
-
-  async function setupBoundPair(): Promise<{ proxyWs: WebSocket; clientWs: WebSocket }> {
-    const proxyWs = connectProxy();
-    await waitForOpen(proxyWs);
-    proxyWs.send(JSON.stringify({ type: "proxy_register", proxyId: "e2e-proxy" }));
-    await settle();
-    const clientWs = connectClient();
-    await waitForOpen(clientWs);
-    clientWs.send(JSON.stringify({ type: "client_register", clientId: "e2e-client" }));
-    await settle();
-    clientWs.send(JSON.stringify({ type: "proxy_select", proxyId: "e2e-proxy" }));
-    await settle();
-    return { proxyWs, clientWs };
-  }
-
-  // 喂入前 N 个 chunk 到 tracker
-  async function feedChunks(tracker: TerminalTracker, count: number): Promise<void> {
-    const n = Math.min(count, chunks.length);
-    for (let i = 0; i < n; i++) {
-      await tracker.feed(chunks[i].data);
-    }
-  }
 
   it("fixture has real PTY chunks with varying sizes", () => {
     expect(chunks.length).toBeGreaterThan(100);
@@ -121,227 +53,106 @@ describe("Terminal E2E with recorded PTY chunks", () => {
     const minSize = Math.min(...sizes);
     const maxSize = Math.max(...sizes);
 
-    // 真实 PTY chunk 大小不固定
     expect(maxSize).toBeGreaterThan(minSize * 10);
 
-    // 时间戳单调递增
     for (let i = 1; i < chunks.length; i++) {
       expect(chunks[i].ts).toBeGreaterThanOrEqual(chunks[i - 1].ts);
     }
   });
 
-  it("each chunk feed produces a valid extractable grid", async () => {
-    const tracker = new TerminalTracker(120, 40);
+  it("headless terminal processes ANSI sequences correctly from real data", async () => {
+    const terminal = new HeadlessTerminal({ cols: 120, rows: 40, scrollback: 5000, allowProposedApi: true });
+    const serializeAddon = new SerializeAddon();
+    terminal.loadAddon(serializeAddon);
 
-    // 逐 chunk 喂入前 50 个，每次检查 extractGrid
-    const n = Math.min(50, chunks.length);
-    for (let i = 0; i < n; i++) {
-      await tracker.feed(chunks[i].data);
-      const grid = tracker.extractGrid();
-      expect(Array.isArray(grid)).toBe(true);
-    }
+    await feedChunks(terminal, chunks, 50);
 
-    const finalGrid = tracker.extractGrid();
-    const allText = finalGrid.flatMap((l) => l.map((s) => s.text)).join("");
-    expect(allText.trim().length).toBeGreaterThan(0);
+    const serialized = serializeAddon.serialize();
+    expect(serialized.length).toBeGreaterThan(0);
+    expect(serialized.trim().length).toBeGreaterThan(0);
 
-    tracker.dispose();
+    terminal.dispose();
   });
 
-  it("lineId grows monotonically as chunks arrive", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    const lineIdHistory: number[] = [];
+  it("serialize output can be loaded back into another headless terminal (round-trip)", async () => {
+    const terminal1 = new HeadlessTerminal({ cols: 120, rows: 40, scrollback: 5000, allowProposedApi: true });
+    const addon1 = new SerializeAddon();
+    terminal1.loadAddon(addon1);
 
-    const n = Math.min(100, chunks.length);
-    for (let i = 0; i < n; i++) {
-      await tracker.feed(chunks[i].data);
-      lineIdHistory.push(tracker.getNewestLineId());
-    }
+    await feedChunks(terminal1, chunks, 30);
+    const serialized1 = addon1.serialize();
 
-    // 单调递增或保持不变
-    for (let i = 1; i < lineIdHistory.length; i++) {
-      expect(lineIdHistory[i]).toBeGreaterThanOrEqual(lineIdHistory[i - 1]);
-    }
-    // 整体有增长
-    expect(lineIdHistory[lineIdHistory.length - 1]).toBeGreaterThan(lineIdHistory[0]);
+    const terminal2 = new HeadlessTerminal({ cols: 120, rows: 40, scrollback: 5000, allowProposedApi: true });
+    const addon2 = new SerializeAddon();
+    terminal2.loadAddon(addon2);
+    await termWrite(terminal2, serialized1);
+    const serialized2 = addon2.serialize();
 
-    tracker.dispose();
+    expect(serialized2).toBe(serialized1);
+
+    terminal1.dispose();
+    terminal2.dispose();
   });
 
-  it("TerminalFrameRenderer: applyFrame full sets viewport", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    await feedChunks(tracker, 20);
-    const grid = tracker.extractGrid();
+  it("write data -> serialize -> load -> serialize again -> outputs match", async () => {
+    const terminal1 = new HeadlessTerminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
+    const addon1 = new SerializeAddon();
+    terminal1.loadAddon(addon1);
 
-    const renderer = new TerminalFrameRenderer();
-    renderer.applyFrame({
-      type: "terminal_frame",
-      sessionId: "pty-1",
-      payload: { mode: "full", lines: grid },
-    });
+    await termWrite(terminal1, "\x1b[31mRed text\x1b[0m\r\n");
+    await termWrite(terminal1, "\x1b[1mBold text\x1b[0m\r\n");
+    await termWrite(terminal1, "Normal text\r\n");
 
-    const viewport = renderer.getViewportLines();
-    expect(viewport.length).toBe(grid.length);
-    expect(viewport[0]).toEqual(grid[0]);
+    const snap1 = addon1.serialize();
 
-    tracker.dispose();
+    const terminal2 = new HeadlessTerminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
+    const addon2 = new SerializeAddon();
+    terminal2.loadAddon(addon2);
+    await termWrite(terminal2, snap1);
+
+    const snap2 = addon2.serialize();
+    expect(snap2).toBe(snap1);
+
+    terminal1.dispose();
+    terminal2.dispose();
   });
 
-  it("TerminalFrameRenderer: applyFrame delta only updates specified lines", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    await feedChunks(tracker, 20);
-    const grid = tracker.extractGrid();
+  it("full data feed produces non-empty serialize output with content", async () => {
+    const terminal = new HeadlessTerminal({ cols: 120, rows: 40, scrollback: 5000, allowProposedApi: true });
+    const serializeAddon = new SerializeAddon();
+    terminal.loadAddon(serializeAddon);
 
-    const renderer = new TerminalFrameRenderer();
-    // 先设置 full 帧
-    renderer.applyFrame({
-      type: "terminal_frame",
-      sessionId: "pty-1",
-      payload: { mode: "full", lines: grid },
-    });
+    await feedChunks(terminal, chunks, chunks.length);
 
-    const originalLine0 = [...renderer.getViewportLines()[0]];
-    const newSpans: TermSpan[] = [{ text: "REPLACED LINE", fg: "#ff0000" }];
+    const serialized = serializeAddon.serialize();
+    expect(serialized.length).toBeGreaterThan(100);
 
-    // delta 帧只更新第 2 行
-    renderer.applyFrame({
-      type: "terminal_frame",
-      sessionId: "pty-1",
-      payload: { mode: "delta", lines: [{ lineIndex: 1, spans: newSpans }] },
-    });
-
-    // 第 0 行不变
-    expect(renderer.getViewportLines()[0]).toEqual(originalLine0);
-    // 第 1 行已更新
-    expect(renderer.getViewportLines()[1][0].text).toBe("REPLACED LINE");
+    terminal.dispose();
   });
 
-  it("extractLines at mid-stream: content stable after more chunks arrive", async () => {
-    const tracker = new TerminalTracker(120, 40);
+  it("headless terminal captures title via OSC 0", async () => {
+    const terminal = new HeadlessTerminal({ cols: 80, rows: 24, allowProposedApi: true });
+    const titles: string[] = [];
+    terminal.onTitleChange((t: string) => titles.push(t));
 
-    // 喂入一半 chunk
-    const halfIdx = Math.floor(chunks.length / 2);
-    await feedChunks(tracker, halfIdx);
+    await termWrite(terminal, "\x1b]0;My Title\x07some text\r\n");
 
-    const oldest = tracker.getOldestLineId();
-    const { lines } = tracker.extractLines(oldest, 10);
-    const textBefore = lines.map((l) => l.map((s) => s.text).join("")).join("\n");
-
-    // 喂入剩余 chunk
-    for (let i = halfIdx; i < chunks.length; i++) {
-      await tracker.feed(chunks[i].data);
-    }
-
-    // 如果 scrollback 没溢出，同一 lineId 范围的内容不变
-    const newOldest = tracker.getOldestLineId();
-    if (newOldest <= oldest) {
-      const { lines: linesAfter } = tracker.extractLines(oldest, 10);
-      const textAfter = linesAfter.map((l) => l.map((s) => s.text).join("")).join("\n");
-      expect(textAfter).toBe(textBefore);
-    }
-
-    tracker.dispose();
+    expect(titles).toContain("My Title");
+    terminal.dispose();
   });
 
-  it("relay e2e: client receives terminal_frame from chunked data", async () => {
-    const { proxyWs, clientWs } = await setupBoundPair();
-    const tracker = new TerminalTracker(120, 40);
+  it("multiple serialize snapshots are stable when no new data arrives", async () => {
+    const terminal = new HeadlessTerminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
+    const addon = new SerializeAddon();
+    terminal.loadAddon(addon);
 
-    await feedChunks(tracker, 30);
-    const grid = tracker.extractGrid();
+    await feedChunks(terminal, chunks, 20);
 
-    const clientMsgPromise = waitForMessage(clientWs);
-    proxyWs.send(JSON.stringify({
-      type: "terminal_frame",
-      sessionId: "pty-1",
-      payload: { mode: "full", lines: grid },
-    }));
+    const snap1 = addon.serialize();
+    const snap2 = addon.serialize();
 
-    const received = JSON.parse(await clientMsgPromise);
-    expect(received.type).toBe("terminal_frame");
-    expect(received.payload.lines.length).toBe(grid.length);
+    expect(snap2).toBe(snap1);
 
-    tracker.dispose();
-  });
-
-  it("relay e2e: terminal_scroll_request routed to proxy", async () => {
-    const { proxyWs, clientWs } = await setupBoundPair();
-
-    const proxyMsgPromise = waitForMessage(proxyWs);
-    clientWs.send(JSON.stringify({
-      type: "terminal_scroll_request",
-      sessionId: "pty-1",
-      direction: "up",
-      delta: 5,
-    }));
-
-    const received = JSON.parse(await proxyMsgPromise);
-    expect(received.type).toBe("terminal_scroll_request");
-    expect(received.direction).toBe("up");
-    expect(received.delta).toBe(5);
-  });
-
-  it("colored spans survive full chain with real data", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    // Claude Code 前几个 chunk 包含带颜色的 logo
-    await feedChunks(tracker, 10);
-
-    const oldest = tracker.getOldestLineId();
-    const { lines } = tracker.extractLines(oldest, 10);
-    const allSpans = lines.flatMap((l) => l);
-    const coloredSpans = allSpans.filter((s) => s.fg);
-
-    // Claude Code logo 区域应有颜色
-    expect(coloredSpans.length).toBeGreaterThan(0);
-
-    tracker.dispose();
-  });
-
-  it("server-side scroll: extractGridAtOffset returns scrolled content", async () => {
-    const tracker = new TerminalTracker(120, 40);
-    await feedChunks(tracker, chunks.length);
-
-    const liveGrid = tracker.extractGrid();
-    tracker.scrollUp(5);
-    const scrolledGrid = tracker.extractGridAtOffset();
-
-    // 滚动后的 grid 应和 live grid 不同
-    const liveText = liveGrid.flatMap((l) => l.map((s) => s.text)).join("");
-    const scrolledText = scrolledGrid.flatMap((l) => l.map((s) => s.text)).join("");
-    expect(scrolledText).not.toBe(liveText);
-
-    // scrollDown 回来应和 live 一致
-    tracker.scrollDown(5);
-    const backGrid = tracker.extractGridAtOffset();
-    const backText = backGrid.flatMap((l) => l.map((s) => s.text)).join("");
-    expect(backText).toBe(liveText);
-
-    tracker.dispose();
-  });
-
-  it("extractLines covers full buffer range from oldest to newest", async () => {
-    const tracker = new TerminalTracker(120, 40);
-
-    for (const chunk of chunks) {
-      await tracker.feed(chunk.data);
-    }
-
-    const oldest = tracker.getOldestLineId();
-    const newest = tracker.getNewestLineId();
-    const totalLines = newest - oldest + 1;
-
-    // 能拉取全部范围
-    const { lines: allLines } = tracker.extractLines(oldest, totalLines);
-    expect(allLines.length).toBe(totalLines);
-
-    // 最后一行应有内容（不全是空的）
-    // viewport 底部可能是空行，往上找一个非空行
-    const lastNonEmptyIdx = [...allLines].reverse().findIndex(
-      (line: Array<{ text: string }>) => line.map((s) => s.text).join("").trim().length > 0,
-    );
-    const actualIdx = lastNonEmptyIdx >= 0 ? allLines.length - 1 - lastNonEmptyIdx : -1;
-    expect(actualIdx).toBeGreaterThan(0);
-
-    tracker.dispose();
+    terminal.dispose();
   });
 });

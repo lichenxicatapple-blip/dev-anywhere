@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
-import { TerminalTracker } from "./terminal-tracker.js";
+import pkg from "@xterm/headless";
+const { Terminal: HeadlessTerminal } = pkg;
+import { SerializeAddon } from "@xterm/addon-serialize";
+import { EventStore } from "./event-store.js";
+import { sessionPaths } from "./paths.js";
 import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
@@ -13,7 +17,6 @@ import {
   serializeIpc,
   type IpcMessage,
 } from "./ipc-protocol.js";
-import { createFramePusher, type FramePusher } from "./frame-pusher.js";
 import { terminalLogger as log } from "./logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -104,12 +107,15 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
-  let tracker: TerminalTracker | null = null;
   let lastOutputTime = 0;
   let idleCheckTimer: NodeJS.Timeout | null = null;
   const sessionCwd = process.env.INIT_CWD || process.cwd();
-  let framePusher: FramePusher | null = null;
   let currentPtyState: PtySemanticState = "turn_complete";
+
+  // D-24: headless + EventStore 在 terminal.ts 进程
+  let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
+  let serializeAddon: SerializeAddon | null = null;
+  let eventStore: EventStore | null = null;
 
   function sendPtyState(state: "working" | "turn_complete" | "approval_wait", title?: string, tool?: string): void {
     if (!socket.writable || !sessionId) return;
@@ -123,78 +129,14 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     log.info({ sessionId, state, title, tool }, "PTY state pushed");
   }
 
-  function startFramePush(): void {
-    if (framePusher) framePusher.stop();
-    if (!tracker || !sessionId) return;
-    framePusher = createFramePusher({
-      tracker,
-      sessionId,
-      sendFrame: (frameJson) => {
-        if (socket.writable && sessionId) {
-          socket.write(serializeIpc({
-            type: "pty_terminal_frame",
-            sessionId,
-            frame: frameJson,
-          }));
-        }
-      },
-    });
-    framePusher.start();
-    log.debug({ sessionId }, "Frame push started");
-  }
-
-  function stopFramePush(): void {
-    if (framePusher) {
-      framePusher.stop();
-      framePusher = null;
-      log.debug("Frame push stopped");
-    }
-  }
-
   function setupSocketHandlers(): void {
     createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
         log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
       }
-      if (msg.type === "pty_frame_request" && msg.sessionId === sessionId && tracker && framePusher) {
-        if (msg.rows) tracker.setClientRows(msg.rows);
-        tracker.clearAnchor();
-        log.info({ sessionId, clientRows: msg.rows }, "Frame requested, anchor cleared");
-        framePusher.forceFull();
-        // 顺便推送当前终端标题，确保客户端刷新后恢复
-        if (tracker.title && socket.writable) {
-          socket.write(serializeIpc({ type: "pty_title_change", sessionId, title: tracker.title }));
-        }
-      }
-      if (msg.type === "pty_scroll_request" && msg.sessionId === sessionId && tracker) {
-        if (msg.rows) tracker.setClientRows(msg.rows);
-        if (msg.direction === "up") {
-          tracker.scrollUp(msg.delta, msg.rows);
-        } else {
-          tracker.scrollDown(msg.delta, msg.rows);
-        }
-        const grid = tracker.extractGridAtOffset();
-        const anchored = tracker.isAnchored();
-        log.info({ direction: msg.direction, delta: msg.delta, anchored, anchorLineId: tracker.getAnchorLineId(), newestLineId: tracker.getNewestLineId(), rows: tracker.getTerminalRows() }, "Scroll handled");
-        const framePayload = {
-          type: "terminal_frame" as const,
-          sessionId: msg.sessionId,
-          payload: {
-            mode: "full" as const,
-            lines: grid,
-            cursor: anchored ? undefined : tracker.getCursor(),
-            isScrolled: anchored,
-            anchorLineId: tracker.getAnchorLineId() ?? undefined,
-            newestLineId: tracker.getNewestLineId(),
-          },
-        };
-        socket.write(serializeIpc({
-          type: "pty_terminal_frame",
-          sessionId: msg.sessionId,
-          frame: JSON.stringify(framePayload),
-        }));
-      }
+      // pty_frame_request 和 pty_scroll_request 不再需要处理，
+      // Phase 9 binary 链路中客户端直接用 xterm.js scrollback
     });
 
     socket.on("close", () => {
@@ -250,7 +192,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId }));
             terminalState = TerminalState.RUNNING;
-            startFramePush();
             log.info({ sessionId }, "Session re-registered after reconnect");
           }
         } else {
@@ -283,28 +224,57 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  log.info({ sessionId, cols, rows }, "Session created, tracker initialized");
-  tracker = new TerminalTracker(cols, rows);
-  tracker.onTitleChange = (title) => {
-    log.debug({ sessionId, title }, "Title change forwarded");
-    if (socket.writable && sessionId) {
-      socket.write(serializeIpc({ type: "pty_title_change", sessionId, title }));
-    }
-  };
+  log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal + EventStore");
+
+  // D-24: headless terminal + serialize addon
+  headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true }); // D-19
+  serializeAddon = new SerializeAddon();
+  headlessTerminal.loadAddon(serializeAddon);
+
+  // EventStore 初始化
+  const paths = sessionPaths(sessionId);
+  eventStore = new EventStore(paths.events);
+  eventStore.open({ cols, rows, sessionId, createdAt: new Date().toISOString() });
 
   const tap: DataTap = (data: string) => {
     lastOutputTime = Date.now();
-    if (tracker) {
-      tracker.feed(data);
+
+    // D-14 步骤 2: headless terminal 状态追踪
+    if (headlessTerminal) {
+      headlessTerminal.write(data);
     }
 
-    // 有数据输出 → working
+    // D-14 步骤 3: EventStore 立即写盘
+    if (eventStore) {
+      eventStore.appendPtyData(Buffer.from(data, "utf-8"));
+
+      // D-04: 每 N 事件触发快照
+      if (eventStore.shouldSnapshot() && serializeAddon) {
+        const serialized = serializeAddon.serialize();
+        eventStore.appendSnapshot(serialized);
+      }
+    }
+
+    // D-14 步骤 4: JSON IPC 帧推送到 serve（临时保留，Plan 02 替换为 binary IPC）
+    if (socket.writable && sessionId) {
+      socket.write(serializeIpc({
+        type: "pty_terminal_frame",
+        sessionId,
+        frame: JSON.stringify({
+          type: "terminal_frame",
+          sessionId,
+          payload: { mode: "full", lines: [] },
+        }),
+      }));
+    }
+
+    // 有数据输出即为 working
     if (currentPtyState !== "working") {
       currentPtyState = "working";
       sendPtyState("working");
     }
 
-    // OSC 信号仅用于检测 approval_wait
+    // OSC 信号检测 approval_wait
     const signal = extractOscSignals(data);
     if (signal?.state === "approval_wait") {
       currentPtyState = "approval_wait";
@@ -320,17 +290,26 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     stdin: process.stdin,
     stdout: process.stdout,
     onResize: (newCols, newRows) => {
-      if (tracker) tracker.resize(newCols, newRows);
+      if (headlessTerminal) headlessTerminal.resize(newCols, newRows);
+      if (eventStore) eventStore.appendResize(newCols, newRows);
       if (socket.writable && sessionId) {
         socket.write(serializeIpc({ type: "pty_resize", sessionId, cols: newCols, rows: newRows }));
       }
     },
-    onSessionExit: (code: number) => {
+    onSessionExit: async (code: number) => {
       terminalState = TerminalState.EXITED;
       log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
       if (idleCheckTimer) clearInterval(idleCheckTimer);
-      stopFramePush();
-      if (tracker) tracker.dispose();
+      // D-03: 会话结束时归档 EventStore
+      if (eventStore) {
+        await eventStore.close();
+        eventStore = null;
+      }
+      if (headlessTerminal) {
+        headlessTerminal.dispose();
+        headlessTerminal = null;
+      }
+      serializeAddon = null;
       if (socket.writable && sessionId) {
         socket.write(
           serializeIpc({ type: "pty_deregister", sessionId }),
@@ -341,19 +320,25 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     },
   });
   ptyManager.start();
-  log.info({ sessionId }, "PTY started, frame push active");
+  log.info({ sessionId }, "PTY started with headless terminal + EventStore");
 
   socket.write(serializeIpc({ type: "pty_register", sessionId }));
   terminalState = TerminalState.RUNNING;
-  startFramePush();
 
   setupIdleCheck();
 
-  process.on("SIGTERM", () => {
+  process.on("SIGTERM", async () => {
     log.info({ sessionId }, "SIGTERM received, shutting down");
     if (idleCheckTimer) clearInterval(idleCheckTimer);
-    stopFramePush();
-    if (tracker) tracker.dispose();
+    if (eventStore) {
+      await eventStore.close();
+      eventStore = null;
+    }
+    if (headlessTerminal) {
+      headlessTerminal.dispose();
+      headlessTerminal = null;
+    }
+    serializeAddon = null;
     if (socket.writable && sessionId) {
       socket.write(serializeIpc({ type: "pty_deregister", sessionId }));
     }
