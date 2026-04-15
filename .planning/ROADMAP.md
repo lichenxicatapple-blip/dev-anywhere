@@ -87,7 +87,7 @@ Plans:
 - Integer phases (7, 8, 9, ...): Planned milestone work
 - Decimal phases (8.1, 8.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 7: Project Scaffold + Design Tokens** - Vite + React + Tailwind + shadcn/ui project with design tokens and dev tooling
+- [x] **Phase 7: Project Scaffold + Design Tokens** - Vite + React + Tailwind + shadcn/ui project with design tokens and dev tooling
 - [ ] **Phase 8: Business Logic Adaptation** - Migrate state machine, stores, and WebSocket layer to browser-native APIs
 - [ ] **Phase 9: PTY Pipeline Full Chain** - EventStore persistence, binary WebSocket frames, relay passthrough, xterm.js rendering
 - [ ] **Phase 10: Pages + Components Migration** - All three pages and 17 custom components migrated to HTML + Tailwind + shadcn/ui
@@ -111,8 +111,8 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 07-01-PLAN.md — Scaffold apps/web with Vite + React 19 + Tailwind v4 + shadcn/ui, define design tokens, configure dev proxy
-- [ ] 07-02-PLAN.md — Create Token Showcase page to visually validate all design tokens and get human approval
+- [x] 07-01-PLAN.md — Scaffold apps/web with Vite + React 19 + Tailwind v4 + shadcn/ui, define design tokens, configure dev proxy
+- [x] 07-02-PLAN.md — Create Token Showcase page to visually validate all design tokens and get human approval
 
 ### Phase 8: Business Logic Adaptation
 **Goal**: All non-UI business logic (state machine, stores, services, WebSocket layer) works with browser-native APIs instead of Taro
@@ -249,7 +249,7 @@ Phase 7 --+-- Phase 8 ----------+
 | 4. Relay Server - Core Transport | v1.0 | 3/3 | Complete | 2026-04-12 |
 | 5. Relay Server - Resilience | v1.0 | 3/3 | Complete | 2026-04-12 |
 | 6. Feishu Mini Program - Core Interaction | v1.0 | 13/13 | Complete | 2026-04-14 |
-| 7. Project Scaffold + Design Tokens | v2.0 | 0/2 | Not started | - |
+| 7. Project Scaffold + Design Tokens | v2.0 | 2/2 | Complete | 2026-04-15 |
 | 8. Business Logic Adaptation | v2.0 | 0/1 | Not started | - |
 | 9. PTY Pipeline Full Chain | v2.0 | 0/3 | Not started | - |
 | 10. Pages + Components Migration | v2.0 | 0/3 | Not started | - |
