@@ -531,22 +531,25 @@ function processIpcBytes(chunk: Buffer, state: IpcParserState): void {
 | A5 | @xterm/addon-unicode11 对 CJK 宽字符必要 | Standard Stack | 中文显示宽度错误 |
 | A6 | VS Code Dark+ 色板匹配 ANSI 16 色为 Code Examples 中列出的值 | Code Examples | 终端颜色与本地不一致 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **xterm.js unicode11 addon 是否需要启用**
+1. **xterm.js unicode11 addon 是否需要启用** -- RESOLVED
    - What we know: @xterm/addon-unicode11 提供 Unicode 11 宽字符表，CJK 字符需要正确的 wcwidth
    - What's unclear: xterm.js 默认的 wcwidth 实现是否已覆盖常见 CJK 范围
    - Recommendation: Spike 阶段测试中文渲染，如果宽度正确就不启用（减少依赖）
+   - **Resolution:** Plan 09-04 installs @xterm/addon-unicode11 as optional, with code commented showing how to enable. Visual checkpoint (09-04 Task 2) validates CJK rendering; if width is correct without it, the addon stays disabled.
 
-2. **IPC binary 帧标识字节的最终选择**
+2. **IPC binary 帧标识字节的最终选择** -- RESOLVED
    - What we know: 需要区分 NDJSON (`{` = 0x7B) 和 binary frame
    - What's unclear: 0x00 vs 其他 magic byte 的取舍
    - Recommendation: 0x00 最简单，且不可能出现在合法 JSON 行的第一个字节
+   - **Resolution:** Plan 09-02 uses 0x00 as IPC_BINARY_MARKER per recommendation. 0x00 cannot be the first byte of a valid JSON line, providing unambiguous binary/JSON discrimination.
 
-3. **EventStore 异步写入的错误处理策略**
+3. **EventStore 异步写入的错误处理策略** -- RESOLVED
    - What we know: D-02 要求每事件立即写盘，但同步 I/O 会阻塞事件循环
    - What's unclear: 异步 write 失败时如何处理（重试？跳过？关闭 fd？）
    - Recommendation: 保持 fd 打开，async write with error logging。写入失败记日志但不崩溃进程
+   - **Resolution:** Plan 09-01 uses writeSync on a pre-opened fd (D-02 requires immediate persistence). Synchronous but on pre-opened fd so cost is only actual I/O. Errors are logged via pino but do not crash the process.
 
 ## Environment Availability
 

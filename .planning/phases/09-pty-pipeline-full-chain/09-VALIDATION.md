@@ -40,8 +40,9 @@ created: 2026-04-15
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 09-01-01 | 01 | 1 | PTY-01 | — | N/A | unit | `pnpm --filter proxy test` | ❌ W0 | ⬜ pending |
 | 09-01-02 | 01 | 1 | PTY-02 | — | N/A | unit | `pnpm --filter proxy test` | ❌ W0 | ⬜ pending |
-| 09-02-01 | 02 | 2 | PTY-03 | — | N/A | unit | `pnpm --filter relay test` | ❌ W0 | ⬜ pending |
-| 09-03-01 | 03 | 3 | FRONT-07 | — | N/A | e2e | `pnpm --filter feishu exec playwright test` | ❌ W0 | ⬜ pending |
+| 09-02-01 | 02 | 2 | PTY-03 | — | N/A | unit | `pnpm --filter proxy test` | ❌ W0 | ⬜ pending |
+| 09-03-01 | 03 | 2 | PTY-04 | — | N/A | unit | `pnpm --filter relay test` | ❌ W0 | ⬜ pending |
+| 09-04-01 | 04 | 3 | FRONT-07 | — | N/A | e2e | `pnpm --filter web build` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
