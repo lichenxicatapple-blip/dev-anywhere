@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: React SPA + xterm.js Migration
-status: completed
-stopped_at: Phase 9 context gathered
-last_updated: "2026-04-15T13:22:58.350Z"
-last_activity: 2026-04-15 -- Phase 7 complete (scaffold + design tokens + visual verification)
+status: executing
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-04-15T15:21:47.815Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_plans: 6
+  completed_plans: 3
+  percent: 50
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在任何地方（电脑或手机）都能与 Claude Code 实时交互，体验一致，不丢失上下文
-**Current focus:** v2.0 Phase 7 — Project Scaffold + Design Tokens
+**Current focus:** Phase 09 — pty-pipeline-full-chain
 
 ## Current Position
 
-Phase: 7 of 13 (Project Scaffold + Design Tokens) -- COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase 7 complete
-Last activity: 2026-04-15 -- Phase 7 complete (scaffold + design tokens + visual verification)
+Phase: 09 (pty-pipeline-full-chain) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-04-15
 
 Progress: [▓░░░░░░░░░] 14%
 
@@ -56,6 +56,8 @@ Progress: [▓░░░░░░░░░] 14%
 - v1.0 completed with 28 plans across 6 phases
 - Trend: Stable
 
+| Phase 09 P01 | 12min | 2 tasks | 15 files |
+
 ## Accumulated Context
 
 ### Decisions
@@ -68,6 +70,8 @@ Recent decisions affecting current work:
 - [v2.0]: Binary WebSocket frames for PTY data — no base64+JSON overhead, relay becomes passthrough
 - [v2.0]: EventStore + @xterm/headless snapshots for persistence — enables proxy restart recovery
 - [v2.0]: Tailwind CSS v4 + shadcn/ui — design tokens via @theme, source-copied components
+- [Phase 09]: writeSync on pre-opened fd for D-02 immediate disk persistence
+- [Phase 09]: allowProposedApi required for @xterm/addon-serialize 0.14.0 on headless 6.0.0
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ None yet for v2.0.
 
 ## Session Continuity
 
-Last session: 2026-04-15T13:22:58.348Z
-Stopped at: Phase 9 context gathered
-Resume file: .planning/phases/09-pty-pipeline-full-chain/09-CONTEXT.md
+Last session: 2026-04-15T15:21:47.812Z
+Stopped at: Completed 09-01-PLAN.md
+Resume file: None

@@ -141,7 +141,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 09-01-PLAN.md — EventStore CCAE binary persistence + headless xterm snapshots + delete old pipeline
+- [x] 09-01-PLAN.md — EventStore CCAE binary persistence + headless xterm snapshots + delete old pipeline
 - [ ] 09-02-PLAN.md — Proxy-side IPC mixed protocol + RelayConnection binary forwarding
 - [ ] 09-03-PLAN.md — Relay binary passthrough + delete buffer code + clean shared types
 - [ ] 09-04-PLAN.md — Browser /pty-test page with xterm.js + visual verification
