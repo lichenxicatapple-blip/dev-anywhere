@@ -1,7 +1,7 @@
 # CC Anywhere: Feishu Taro to React SPA + PWA Migration Plan
 
 **Created:** 2026-04-15
-**Updated:** 2026-04-15 (v3 -- remove artificial limits, trust modern hardware)
+**Updated:** 2026-04-15 (v4 -- persistent snapshots, binary frames, no artificial limits)
 **Source:** apps/feishu (Taro 3.6 mini program)
 **Target:** apps/web (Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui + xterm.js + PWA)
 **Status:** Draft - Pending review
@@ -28,9 +28,11 @@ BEFORE (current):
   Scrollback: scroll_request -> server -> anchor offset -> terminal_frame
 
 AFTER (xterm.js):
-  PTY bytes -> ReplayBuffer (growable, raw bytes) -> relay (passthrough)
-  -> client -> xterm.js (ANSI parse + render + scrollback, all local)
+  PTY bytes -> EventStore (binary persistence to disk) + @xterm/headless (periodic snapshots)
+  -> binary WebSocket frame -> relay (binary passthrough) -> client -> xterm.js
   Scrollback: xterm.js built-in, zero server involvement
+  Reconnection: latest snapshot + events since snapshot from disk
+  Proxy restart: restore from disk, resume where left off
 ```
 
 ---
@@ -95,7 +97,7 @@ apps/web/
       ensure-binding.ts
       message-parser.ts
       relay-client.ts
-      websocket.ts              # Strip Taro codepath, native WebSocket only
+      websocket.ts              # Strip Taro codepath, native WebSocket only, binary frame support
     stores/
       app-store.ts              # localStorage instead of Taro storage
       chat-store.ts
@@ -128,7 +130,7 @@ apps/web/
 
 ## 3. Design Tokens
 
-Design tokens are the single source of truth for visual consistency. Defined as Tailwind v4 `@theme` directives in `app.css`, they replace all CSS variables and hardcoded values from the Taro codebase.
+Defined as Tailwind v4 `@theme` directives in `app.css`. Single source of truth for visual consistency.
 
 ### Token Definitions (app.css)
 
@@ -203,8 +205,6 @@ Replace current CSS variable overrides (`.screen-landscape`, `.screen-desktop`) 
 
 ### shadcn/ui Theme Integration
 
-shadcn/ui uses CSS variables for theming. The `components.json` will be configured to use our design tokens:
-
 ```json
 {
   "style": "new-york",
@@ -222,7 +222,7 @@ shadcn/ui uses CSS variables for theming. The `components.json` will be configur
 }
 ```
 
-shadcn/ui's default dark theme (zinc palette) maps well to our `#1E1E1E` surface / `#D4D4D4` text scheme. We override the accent/primary HSL variables to match `--color-accent: #00D4AA` and `--color-primary: #1890FF`.
+shadcn/ui's default dark theme (zinc palette) maps well to our `#1E1E1E` surface / `#D4D4D4` text scheme. Override accent/primary HSL variables to match `--color-accent: #00D4AA` and `--color-primary: #1890FF`.
 
 ---
 
@@ -249,7 +249,7 @@ Each current component maps to one of: shadcn/ui component, native HTML, xterm.j
 
 ### Migrated as Custom (with review)
 
-Every file below gets reviewed for: dead code, naming improvements, type tightening, tech debt cleanup. NOT blind copy.
+Every file gets reviewed for: dead code, naming improvements, type tightening, tech debt cleanup.
 
 | Component | Migration Type | Review Focus |
 |-----------|---------------|-------------|
@@ -299,7 +299,7 @@ Every file below gets reviewed for: dead code, naming improvements, type tighten
 
 ### Navigation
 
-react-router's `useNavigate()` is sufficient. No wrapper needed. The `toWebPath()` conversion for Taro-style URLs (`/pages/chat/index?x=1` -> `/pages/chat?x=1`) is a one-line utility used only in the `nav` object for `phase-machine.ts`.
+react-router's `useNavigate()` is sufficient. No wrapper needed. Change the URL strings directly in `phase-machine.ts`: `/pages/chat/index` -> `/chat`, `/pages/session-list/index` -> `/session-list`, etc.
 
 ---
 
@@ -311,7 +311,7 @@ This is the most impactful change. It touches all three tiers: proxy, relay, and
 
 | Package | File | Lines | What It Does |
 |---------|------|-------|-------------|
-| proxy | `terminal-tracker.ts` | ~180 | @xterm/headless to parse PTY output into TermLine[] grid |
+| proxy | `terminal-tracker.ts` (current version) | ~180 | @xterm/headless to parse PTY output into TermLine[] grid |
 | proxy | `frame-pusher.ts` | ~120 | Diff engine: compare grids, emit full/delta terminal_frame JSON |
 | proxy | `frame-cache.ts` | ~60 | Merge delta frames into cached full grid for reconnection |
 | proxy | `terminal-frame-renderer.ts` | ~100 | ANSI renderer for replay tool |
@@ -354,7 +354,7 @@ function XTerminal({ sessionId }: { sessionId: string }) {
       },
       fontFamily: 'Sarasa Fixed SC, SF Mono, monospace',
       fontSize: 14,
-      scrollback: 10000,  // user-configurable, generous default
+      scrollback: 10000,  // user-configurable
       convertEol: true,
     });
     const fit = new FitAddon();
@@ -363,7 +363,7 @@ function XTerminal({ sessionId }: { sessionId: string }) {
     fit.fit();
     termRef.current = term;
 
-    // Write incoming PTY bytes
+    // Write incoming PTY bytes (binary frames)
     const unsubscribe = ws.onPtyData(sessionId, (data: Uint8Array) => {
       term.write(data);
     });
@@ -375,75 +375,76 @@ function XTerminal({ sessionId }: { sessionId: string }) {
 }
 ```
 
-**Proxy side (`apps/proxy`):**
+**Proxy side (`apps/proxy`) -- EventStore + TerminalTracker:**
 
-The proxy changes from "parse then push frames" to "buffer raw bytes and forward":
+Restore the design from commit b05bec2 with improvements. The proxy persists all PTY data and snapshots to disk.
 
 ```typescript
-// Growable replay buffer replacing TerminalTracker + FramePusher.
-// No fixed size limit. A terminal session's full output is tens of MB at most.
-// Proxy runs on a developer machine with plenty of memory.
-class ReplayBuffer {
-  private chunks: Uint8Array[] = [];
-  private totalBytes = 0;
+// EventStore (restored from b05bec2): binary format, gzip support, disk persistence
+// Binary format: CCAE header + length-prefixed records
+// Event types: PTY_OUTPUT (1), SNAPSHOT (2), PTY_INPUT (3)
+// 1-second buffer window for batching writes to disk
+// Supports gzip archival of completed sessions
+class EventStore {
+  // append(type, payload) -- buffered write, auto-flush every 1s
+  // flush() -- immediate write to disk
+  // writeSnapshot(payload) -- bypasses buffer, writes directly
+  // readEvents(afterSeq) -- read events from disk (archive + active file)
+  // getLatestSnapshot() -- find most recent SNAPSHOT event
+  // archive() -- gzip the active file for long-term storage
+}
+```
 
-  write(data: Uint8Array): void {
-    this.chunks.push(data);
-    this.totalBytes += data.length;
-  }
-
-  // For reconnection: replay ALL buffered data. Never truncate.
-  getAll(): Uint8Array {
-    const result = new Uint8Array(this.totalBytes);
-    let offset = 0;
-    for (const chunk of this.chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return result;
-  }
-
-  clear(): void {
-    this.chunks = [];
-    this.totalBytes = 0;
-  }
+```typescript
+// TerminalTracker (restored from b05bec2): @xterm/headless + serialize addon
+// Feeds all PTY data into a headless xterm instance
+// Generates serialized snapshots on:
+//   - state transition: working -> idle
+//   - every 100 events
+// Snapshots are both persisted to EventStore and written to snapshot.bin
+class TerminalTracker {
+  // feed(data) -- write to headless xterm
+  // takeSnapshot() -- serialize terminal state, write to EventStore
+  // shouldSnapshot() -- true when 100+ events since last snapshot
+  // onStateChange(from, to) -- auto-snapshot on working->idle
 }
 ```
 
 The PTY data flow becomes:
 1. `node-pty` emits data
-2. Data written to ReplayBuffer (for reconnection)
-3. Data forwarded to relay as binary WebSocket frame
-4. (OSC title extraction continues as before -- it reads the raw stream)
+2. Data written to EventStore as PTY_OUTPUT event (persisted to disk)
+3. Data fed to TerminalTracker's headless xterm (for periodic snapshots)
+4. Data forwarded to relay as binary WebSocket frame
+5. OSC title extraction continues (reads the raw stream)
+6. On proxy restart: EventStore + latest snapshot loaded from disk, session resumes
 
 **Relay side (`apps/relay`):**
 
 Relay becomes a binary passthrough for PTY data:
-- New message type: `pty_data` (binary frame, sessionId header)
-- Relay does NOT parse or cache the content
-- Relay broadcasts to all clients bound to the proxy
-- The existing JSON control messages (session_create, tool_approve, etc.) remain unchanged
+- Binary WebSocket frames = PTY data (passthrough, no parsing)
+- JSON text WebSocket frames = control messages (existing behavior)
+- Relay broadcasts binary frames to all clients bound to that proxy+session
+- Relay does NOT parse, cache, or modify PTY data
 
 ### 5.3 Protocol Changes
 
-**New binary frame format (proxy -> relay -> client):**
+**Binary frame format (proxy -> relay -> client):**
+
+PTY data is transmitted as binary WebSocket frames. The relay distinguishes binary vs text frames at the WebSocket protocol level -- no header parsing needed for routing.
 
 ```
-[1 byte: message type = 0x01 for pty_data]
-[2 bytes: sessionId length (uint16 BE)]
-[N bytes: sessionId (UTF-8)]
-[remaining bytes: raw PTY data]
+Binary frame:
+  [2 bytes: sessionId length (uint16 BE)]
+  [N bytes: sessionId (UTF-8)]
+  [remaining bytes: raw PTY data]
+
+Text frame (JSON):
+  { "type": "...", ... }  // existing control messages, unchanged
 ```
 
-Or simpler: use a JSON envelope with base64-encoded data for the initial implementation, optimize to binary frames later if needed:
+The relay routes binary frames by extracting the sessionId prefix and broadcasting to all clients bound to that session. The client strips the sessionId prefix and writes the remaining bytes to xterm.js.
 
-```json
-{
-  "type": "pty_data",
-  "sessionId": "abc123",
-  "data": "<base64 encoded PTY bytes>"
-}
-```
+This is a day-one decision. Binary frames avoid the 33% base64 overhead and the encoding/decoding cost on every frame. The routing logic is trivial (2-byte length prefix + sessionId) and the relay already handles different WebSocket message types.
 
 **Removed message types:**
 - `terminal_frame` (full/delta grid JSON)
@@ -456,61 +457,73 @@ Or simpler: use a JSON envelope with base64-encoded data for the initial impleme
 - `pty_state` (semantic state: idle, working, etc.)
 - All chat/tool/session messages
 
-### 5.4 Exception Handling Design
+### 5.4 Persistence and Reconnection Design
 
-#### Reconnection: Scrollback Recovery
+This is the critical section. All PTY data and snapshots are persisted to disk.
 
-**Problem:** Client disconnects and reconnects. xterm.js instance is fresh, scrollback is empty.
+#### Disk Layout (per session)
 
-**Solution:** Proxy maintains a ReplayBuffer (growable array of raw PTY byte chunks). On reconnection, proxy sends the full buffer content. xterm.js replays it, rebuilding the visible state and scrollback.
+```
+~/.cc-anywhere/data/{sessionId}/
+  events.bin       # Active binary event log (CCAE format)
+  events.bin.gz    # Archived (gzipped) event log for completed sessions
+  snapshot.bin     # Latest serialized xterm state (fast-access copy)
+```
 
-The natural limit is xterm.js's scrollback setting (default 10000 lines, user-configurable). Even if the ReplayBuffer contains more data than xterm.js's scrollback can hold, xterm.js simply discards lines beyond its scrollback limit during replay. The data is complete on the wire; the client-side display limit is the user's choice.
+#### Snapshot Strategy
 
-**Reconnection sequence:**
+The proxy runs @xterm/headless with the serialize addon. Snapshots are taken:
+- On every working -> idle state transition (Claude finishes a response)
+- Every 100 PTY_OUTPUT events (safety net during long outputs)
+
+A snapshot captures the full xterm terminal state: screen content, scrollback buffer, cursor position, colors, attributes. It can be loaded into any xterm instance (headless or browser) via the serialize addon to reconstruct the exact visual state.
+
+#### Reconnection: Client Reconnects to Running Proxy
+
 1. Client connects, sends session bind request
 2. Relay forwards bind to proxy
-3. Proxy sends the full ReplayBuffer content as one or more `pty_data` messages
-4. Proxy then switches to live forwarding
-5. Use a sequence counter to prevent duplicate data at the switchover point
+3. Proxy reads the latest snapshot from EventStore on disk
+4. Proxy reads all PTY_OUTPUT events after the snapshot's sequence number
+5. Proxy sends: snapshot (as a typed binary frame) + subsequent raw PTY events
+6. Client loads snapshot into xterm.js via serialize addon, then writes subsequent events
+7. Proxy switches to live forwarding with a sequence counter to prevent duplicates
 
-#### Multi-Client Viewing Same Session
+The client's xterm.js instance is fully reconstructed. Scrollback, colors, cursor position -- everything matches the proxy's headless xterm state.
 
-**Problem:** Multiple clients (phone + tablet + desktop) watching the same PTY session.
+#### Proxy Restart Recovery
 
-**Solution:** Relay broadcasts every `pty_data` frame to ALL clients bound to that proxy+session. Each client's xterm.js processes the bytes independently. This is simpler than the current approach (single cached grid frame).
+1. Proxy starts, discovers existing session data in `~/.cc-anywhere/data/{sessionId}/`
+2. Loads latest snapshot from disk into a new headless xterm instance
+3. Replays PTY_OUTPUT events after the snapshot to catch up
+4. Resumes normal operation: new PTY output appends to EventStore, snapshots continue
+5. When a client connects, the reconnection flow above works unchanged
 
-**Late joiner:** Gets the ReplayBuffer dump first, then switches to live. Other clients are unaffected.
+This is why disk persistence is non-negotiable. Without it, a proxy restart means all terminal history is lost.
+
+#### Session History Playback
+
+The EventStore on disk contains the complete PTY event stream. A replay tool can:
+- Read `events.bin` (or `events.bin.gz` for archived sessions)
+- Feed events to a headless xterm or browser xterm.js at real-time or accelerated speed
+- Jump to any snapshot point and replay forward from there
+
+This enables reviewing past sessions without the proxy running.
+
+#### Multi-Client Viewing
+
+Relay broadcasts every binary frame to ALL clients bound to that proxy+session. Each client's xterm.js processes the bytes independently. Late joiners get the snapshot + catchup flow. Other clients are unaffected.
 
 #### UTF-8 / ANSI Truncation at Frame Boundaries
 
-**Problem:** PTY emits bytes in arbitrary chunks. A UTF-8 multi-byte character or ANSI escape sequence might be split across two chunks.
-
-**Solution:** xterm.js handles this natively. Its parser maintains state across `write()` calls. Partial UTF-8 sequences are buffered internally until complete. This is one of the key advantages over the custom TerminalTracker -- no special handling needed on proxy or relay side. Forward raw bytes as-is.
+xterm.js handles this natively. Its parser maintains state across `write()` calls. Partial UTF-8 sequences are buffered internally until complete. Forward raw bytes as-is, no special handling needed.
 
 #### High-Speed Output
 
-**Problem:** `cat large-file.txt` or compilation output floods the terminal.
+xterm.js has built-in write batching via requestAnimationFrame. It coalesces rapid `write()` calls and batches DOM updates. This is the same engine VS Code uses. No proxy-side throttling.
 
-**Solution:** xterm.js has built-in write batching -- it coalesces rapid `write()` calls and batches DOM updates internally using requestAnimationFrame. Write speed is not 1:1 with render speed. Trust xterm.js to handle this; it's the same engine VS Code uses.
+#### Backpressure
 
-No proxy-side throttling or output sampling. Forward everything. The client-side rendering engine handles its own pace.
-
-#### Binary Data Encoding
-
-**Decision:** Start with base64 over JSON text frames for simplicity and debugging. Migrate to binary WebSocket frames if profiling shows encoding overhead matters.
-
-- JSON+base64: ~33% overhead, but trivially debuggable, works with existing JSON message routing
-- Binary frames: zero overhead, but requires separate routing path in relay
-
-For the initial migration, JSON+base64 is correct. The overhead is negligible at terminal output rates (typically <10KB/s, burst <1MB/s). Optimization to binary frames can be a follow-up task.
-
-#### Backpressure: Slow Client
-
-**Problem:** Fast PTY output + slow mobile network = data accumulates in relay's send buffer.
-
-**Solution:** WebSocket already has TCP-level flow control. If a client's network is slow, the OS TCP send buffer fills, and the WebSocket library handles this. The relay should monitor `ws.readyState` and disconnect truly dead clients (no heartbeat response). Do not silently drop data or pause forwarding based on `bufferedAmount` thresholds -- the user expects complete output.
-
-If a client disconnects under load, it reconnects and gets the full ReplayBuffer. No data is lost.
+WebSocket has TCP-level flow control. If a client's network is slow, the OS TCP send buffer fills and the WebSocket library handles backpressure. The relay monitors `ws.readyState` and disconnects dead clients (no heartbeat response). No data is silently dropped. If a client disconnects under load, it reconnects and gets the full replay.
 
 ### 5.5 terminal-store.ts Rewrite
 
@@ -563,9 +576,9 @@ const router = createHashRouter([
     element: <App />,
     children: [
       { index: true, element: <ProxySelect /> },
-      { path: "pages/proxy-select", element: <ProxySelect /> },
-      { path: "pages/session-list", element: <SessionList /> },
-      { path: "pages/chat", element: <Chat /> },
+      { path: "proxy-select", element: <ProxySelect /> },
+      { path: "session-list", element: <SessionList /> },
+      { path: "chat", element: <Chat /> },
     ],
   },
 ]);
@@ -575,16 +588,18 @@ const router = createHashRouter([
 
 | Taro URL | Hash URL |
 |----------|----------|
-| `/pages/proxy-select/index` | `/#/pages/proxy-select` |
-| `/pages/session-list/index` | `/#/pages/session-list` |
-| `/pages/chat/index?sessionId=x&mode=pty` | `/#/pages/chat?sessionId=x&mode=pty` |
+| `/pages/proxy-select/index` | `/#/proxy-select` |
+| `/pages/session-list/index` | `/#/session-list` |
+| `/pages/chat/index?sessionId=x&mode=pty` | `/#/chat?sessionId=x&mode=pty` |
 
 ### Nav Object for phase-machine.ts
 
+Change the URL strings directly in `phase-machine.ts`. The Taro-style paths (`/pages/chat/index`) become simple paths (`/chat`). `useNavigate()` handles everything:
+
 ```typescript
 const nav = {
-  reLaunch: (url: string) => navigate(toWebPath(url), { replace: true }),
-  navigateTo: (url: string) => navigate(toWebPath(url)),
+  reLaunch: (url: string) => navigate(url, { replace: true }),
+  navigateTo: (url: string) => navigate(url),
   showToast: (title: string) => toast({ description: title }),  // shadcn toast
   getStorageSync: (key: string) => localStorage.getItem(key) || "",
   removeStorageSync: (key: string) => localStorage.removeItem(key),
@@ -592,7 +607,7 @@ const nav = {
 };
 ```
 
-`phase-machine.ts` requires zero changes.
+No `toWebPath()` conversion function. The URLs in `phase-machine.ts` are updated to use the new paths directly.
 
 ---
 
@@ -715,8 +730,6 @@ CMD ["node", "relay/index.js"]
 
 ## 11. Phased Execution Plan
 
-The xterm.js change affects all three tiers. The phases reflect this cross-cutting scope.
-
 ### Phase A: Project Scaffold + Design Tokens
 
 **Goal:** Empty Vite + React + Tailwind + shadcn/ui project that builds. Design tokens defined.
@@ -727,7 +740,6 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 | Configure | Tailwind v4, shadcn/ui (Button, Dialog, ScrollArea, Toast), design tokens in app.css |
 | Setup | `cn()` utility, path aliases, RELAY_URL define |
 | Verify | `pnpm dev` starts, `pnpm build` produces dist/, shadcn Button renders with correct theme |
-| Effort | 2-3 hours |
 
 ### Phase B: Review and Migrate Business Logic
 
@@ -737,10 +749,9 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 |------|---------|
 | Review | Each of the 26 "zero Taro dependency" files for dead code, naming, type improvements |
 | Migrate | `phase-machine.ts`, stores (chat, command, file, relay, session), services (ensure-binding, message-parser, relay-client), utils, types |
-| Adapt | `app-store.ts` (localStorage), `websocket.ts` (strip Taro codepath) |
+| Adapt | `app-store.ts` (localStorage), `websocket.ts` (strip Taro codepath, add binary frame handling) |
 | Rewrite | `use-screen-size.ts` (window.resize, no Taro APIs) |
 | Verify | `pnpm typecheck` passes, unit tests pass |
-| Effort | 3-4 hours |
 
 ### Phase C: xterm.js Integration (Client)
 
@@ -749,25 +760,26 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 | Item | Details |
 |------|---------|
 | Create | `components/terminal/index.tsx`, `components/terminal/use-terminal.ts` |
-| Install | `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`, `@xterm/addon-unicode11` |
+| Install | `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`, `@xterm/addon-unicode11`, `@xterm/addon-serialize` |
 | Rewrite | `terminal-store.ts` to manage xterm.js instance instead of grid state |
 | Test | Feed xterm.js with recorded PTY data, verify rendering |
 | Verify | Terminal renders ANSI output correctly, scrollback works, resize works |
-| Effort | 3-4 hours |
 
-### Phase D: xterm.js Integration (Proxy + Relay)
+### Phase D: Persistence + Binary Pipeline (Proxy + Relay)
 
-**Goal:** Proxy forwards raw PTY bytes, relay passes through, client renders via xterm.js.
+**Goal:** Proxy persists PTY data to disk, forwards as binary frames, relay passes through, client renders via xterm.js.
 
 | Item | Details |
 |------|---------|
-| Proxy | Add ReplayBuffer (growable, no size limit), forward raw PTY data instead of frame-pushing |
-| Proxy | Keep OSC title extraction (reads raw stream) |
-| Relay | Add `pty_data` passthrough routing (broadcast to bound clients) |
-| Protocol | Add `pty_data` message type to shared schemas |
-| Wire | End-to-end: PTY -> proxy -> relay -> client xterm.js |
-| Verify | Live terminal output visible in browser, scrollback works, reconnection replays full buffer |
-| Effort | 6-8 hours |
+| Proxy | Restore EventStore from b05bec2 (binary format, gzip, disk persistence) |
+| Proxy | Restore TerminalTracker (@xterm/headless + serialize addon for periodic snapshots) |
+| Proxy | Forward raw PTY data as binary WebSocket frames |
+| Proxy | Reconnection handler: send latest snapshot + events since snapshot |
+| Relay | Binary frame passthrough routing (binary = PTY, text = JSON control) |
+| Relay | Broadcast binary frames to all clients bound to session |
+| Protocol | Binary frame format with sessionId prefix (shared schema) |
+| Wire | End-to-end: PTY -> EventStore -> binary WS -> relay -> client xterm.js |
+| Verify | Live terminal visible in browser, reconnection replays correctly, proxy restart recovers state |
 | **Risk** | Highest risk phase. Touches all three tiers. Must be tested end-to-end. |
 
 ### Phase E: Migrate Pages and Components
@@ -782,7 +794,6 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 | Replace | Toast -> shadcn Toast, Modal -> shadcn Dialog, buttons -> shadcn Button |
 | CSS | Convert inline CSS and CSS files to Tailwind utilities during migration |
 | Verify | All pages load, navigation works, WebSocket connects, chat functional |
-| Effort | 10-14 hours (largest phase) |
 
 ### Phase F: Proxy + Relay Cleanup
 
@@ -790,13 +801,12 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 
 | Item | Details |
 |------|---------|
-| Delete proxy | `terminal-tracker.ts`, `frame-pusher.ts`, `frame-cache.ts`, `terminal-frame-renderer.ts` |
+| Delete proxy | `frame-pusher.ts`, `frame-cache.ts`, `terminal-frame-renderer.ts` |
 | Delete proxy | Related tests: `frame-pusher.test.ts`, `frame-cache.test.ts`, `terminal-data-flow.test.ts` |
 | Clean relay | Remove FrameCache usage, remove `terminal_frame` routing |
 | Clean shared | Remove `TerminalFramePayloadSchema` if no longer referenced |
-| Update | `replay.ts` to use raw byte replay instead of frame replay |
+| Update | `replay.ts` to use EventStore binary format (read events.bin, feed xterm.js) |
 | Verify | Proxy builds, relay builds, existing tests pass (minus deleted ones) |
-| Effort | 3-4 hours |
 
 ### Phase G: Tests + Relay Integration
 
@@ -804,12 +814,11 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 
 | Item | Details |
 |------|---------|
-| Tests | Migrate test files, remove Taro mocks, add xterm.js integration tests |
+| Tests | Migrate test files, remove Taro mocks, add xterm.js integration tests, add EventStore tests (restore from b05bec2) |
 | Relay | `express.static()` config, `WEB_DIST_DIR` env var |
 | E2E | Playwright tests against web build |
 | Docker | Update Dockerfile for multi-stage build |
 | Verify | `pnpm test` passes, `pnpm exec playwright test` passes, relay serves SPA |
-| Effort | 4-5 hours |
 
 ### Phase H: PWA Polish
 
@@ -821,21 +830,19 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 | Manifest | Tune vite-plugin-pwa config |
 | Wake Lock | Add Screen Wake Lock hook (acquire on active session) |
 | Verify | Chrome "Install" prompt, offline shell loads, Lighthouse PWA audit |
-| Effort | 1-2 hours |
 
 ### Execution Summary
 
-| Phase | Scope | Est. Effort | Depends On |
-|-------|-------|-------------|------------|
-| A: Scaffold + Tokens | apps/web setup | 2-3h | - |
-| B: Business Logic | Review + migrate 26+ files | 3-4h | A |
-| C: xterm.js Client | Terminal component | 3-4h | A |
-| D: xterm.js Proxy+Relay | Binary passthrough pipeline | 6-8h | C |
-| E: Pages + Components | UI migration | 10-14h | B, D |
-| F: Server Cleanup | Delete old terminal code | 3-4h | D, E |
-| G: Tests + Integration | Testing + relay serving | 4-5h | E, F |
-| H: PWA Polish | Icons, offline, wake lock | 1-2h | G |
-| **Total** | | **33-44h** | |
+| Phase | Scope | Depends On |
+|-------|-------|------------|
+| A: Scaffold + Tokens | apps/web setup | - |
+| B: Business Logic | Review + migrate 26+ files | A |
+| C: xterm.js Client | Terminal component + serialize addon | A |
+| D: Persistence + Binary Pipeline | EventStore, snapshots, binary WS, reconnection | C |
+| E: Pages + Components | UI migration | B, D |
+| F: Server Cleanup | Delete old terminal code | D, E |
+| G: Tests + Integration | Testing + relay serving | E, F |
+| H: PWA Polish | Icons, offline, wake lock | G |
 
 ```
 Phase A --+-- Phase B ----------+
@@ -844,7 +851,7 @@ Phase A --+-- Phase B ----------+
                                    +-- Phase E -- Phase F -- Phase G -- Phase H
 ```
 
-Phases B and C can run in parallel after A. Phase D depends only on C. Phase E requires both B and D. This is the critical path.
+Phases B and C can run in parallel after A. Phase D depends only on C. Phase E requires both B and D.
 
 ---
 
@@ -864,6 +871,7 @@ Phases B and C can run in parallel after A. Phase D depends only on C. Phase E r
 | `@xterm/addon-fit` | ^0.10.x | Terminal auto-resize |
 | `@xterm/addon-web-links` | ^0.11.x | Clickable links |
 | `@xterm/addon-unicode11` | ^0.8.x | CJK character width |
+| `@xterm/addon-serialize` | ^0.13.x | Snapshot deserialization (load snapshot into browser xterm) |
 | `clsx` | ^2.x | Conditional className utility (for shadcn cn()) |
 | `tailwind-merge` | ^2.x | Tailwind class dedup (for shadcn cn()) |
 | `class-variance-authority` | ^0.7.x | Component variants (shadcn dependency) |
@@ -880,6 +888,12 @@ Phases B and C can run in parallel after A. Phase D depends only on C. Phase E r
 | `@types/react-dom` | ^19.x | Type definitions |
 | `typescript` | ^5.8.x | Compiler |
 
+**Proxy additional dependencies (for restored EventStore + TerminalTracker):**
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@xterm/headless` | ^5.x | Headless terminal for snapshot generation (already in proxy) |
+| `@xterm/addon-serialize` | ^0.13.x | Serialize terminal state for snapshots (already in proxy) |
+
 **shadcn/ui components (source-copied, not npm packages):**
 - Button, Dialog (AlertDialog), ScrollArea, Toast + Toaster
 
@@ -889,31 +903,29 @@ All `@tarojs/*`, `babel-preset-taro`, `webpack`, `@babel/*`, `postcss` (handled 
 
 ---
 
-## 13. Risks and Pitfalls
+## 13. Pitfalls
 
-### Risk 1: xterm.js Mobile Performance
-
-**Concern:** xterm.js is designed for desktop. On low-end mobile devices, rendering high-speed output (compilation, `cat` large file) might stutter.
-
-**Mitigation:** xterm.js is used in VS Code which runs on Chromebooks and other constrained devices. xterm.js batches DOM updates internally via requestAnimationFrame. Profile early in Phase C with real mobile devices.
-
-### Risk 2: Input Event Shape (`e.detail.value` -> `e.target.value`)
+### Pitfall 1: Input Event Shape (`e.detail.value` -> `e.target.value`)
 
 **Affected files:** `input-bar/index.tsx`, `directory-picker/index.tsx`
 
 **Mitigation:** Mechanical search-replace. Caught at compile time since the types differ.
 
-### Risk 3: WebSocket Reconnection in PWA Background
+### Pitfall 2: WebSocket Reconnection in PWA Background
 
-**Concern:** PWA goes to background, WebSocket dies, app must reconnect on return.
+PWA goes to background, WebSocket dies. `visibilitychange` event triggers reconnection. Proxy sends snapshot + catchup events from disk. Full state restored.
 
-**Mitigation:** `visibilitychange` event triggers reconnection. ReplayBuffer on proxy side means the reconnecting client gets the full session history replayed by xterm.js.
+### Pitfall 3: Taro pxtransform Residual Values
 
-### Risk 4: Binary Frame Encoding Overhead
+750-scale CSS values render at 2x intended size if not converted. Any CSS value >40px for font-size or >60px for buttons is likely 750-scale. Divide by 2.
 
-**Concern:** base64 encoding adds 33% overhead to PTY data.
+### Pitfall 4: CSS Class `.taro_page`
 
-**Mitigation:** Terminal output is typically <10KB/s. Even at burst rates of 1MB/s, base64 overhead is negligible. Optimize to binary frames only if profiling justifies it.
+Taro injects `.taro_page` as page wrapper. Remove these rules. Apply equivalent styles to `#root` or `body`.
+
+### Pitfall 5: RELAY_URL Define Constant
+
+Taro uses `defineConstants`, Vite uses `define` with `JSON.stringify`. The existing `declare const RELAY_URL` in code works unchanged.
 
 ---
 
@@ -922,7 +934,7 @@ All `@tarojs/*`, `babel-preset-taro`, `webpack`, `@babel/*`, `postcss` (handled 
 | # | Claim | Risk | Mitigation |
 |---|-------|------|------------|
 | A1 | xterm.js handles split UTF-8/ANSI across write() calls | LOW | Documented behavior, used by VS Code |
-| A2 | xterm.js mobile rendering is adequate for terminal output rates | MEDIUM | Profile in Phase C |
-| A3 | Tailwind v4 `@theme` works with shadcn/ui CSS variables | LOW | Both use CSS custom properties |
-| A4 | base64 encoding overhead is negligible at terminal rates | LOW | Can migrate to binary frames later |
-| A5 | shadcn/ui components work with Tailwind v4 | LOW | shadcn docs list v4 as supported |
+| A2 | Tailwind v4 `@theme` works with shadcn/ui CSS variables | LOW | Both use CSS custom properties |
+| A3 | shadcn/ui components work with Tailwind v4 | LOW | shadcn docs list v4 as supported |
+| A4 | @xterm/addon-serialize can load snapshots generated by @xterm/headless | LOW | Same addon used in both environments, documented API |
+| A5 | Binary WebSocket frames pass through standard reverse proxies (Nginx, Cloudflare) | LOW | Binary WS is part of the RFC 6455 standard |
