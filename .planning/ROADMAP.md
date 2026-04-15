@@ -107,12 +107,12 @@ Plans:
   2. `pnpm --filter web build` produces a dist/ folder with all assets
   3. shadcn/ui Button component renders with the project's accent color (#00D4AA) and design tokens (spacing, radius, font) are applied
   4. Vite dev server proxies WebSocket connections to a local relay, so the web app can connect to the relay during development
-**Plans**: TBD
+**Plans:** 2 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
+- [ ] 07-01-PLAN.md — Scaffold apps/web with Vite + React 19 + Tailwind v4 + shadcn/ui, define design tokens, configure dev proxy
+- [ ] 07-02-PLAN.md — Create Token Showcase page to visually validate all design tokens and get human approval
 
 ### Phase 8: Business Logic Adaptation
 **Goal**: All non-UI business logic (state machine, stores, services, WebSocket layer) works with browser-native APIs instead of Taro
