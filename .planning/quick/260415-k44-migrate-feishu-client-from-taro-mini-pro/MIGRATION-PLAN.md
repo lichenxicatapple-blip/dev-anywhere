@@ -1,498 +1,560 @@
 # CC Anywhere: Feishu Taro to React SPA + PWA Migration Plan
 
 **Created:** 2026-04-15
+**Updated:** 2026-04-15 (v2 -- incorporates shadcn/ui, xterm.js, design tokens decisions)
 **Source:** apps/feishu (Taro 3.6 mini program)
-**Target:** apps/web (Vite + React + TypeScript + Tailwind CSS v4 + PWA)
+**Target:** apps/web (Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui + xterm.js + PWA)
 **Status:** Draft - Pending review
 
 ---
 
-## 1. New Project Structure
+## 1. Architecture Overview
+
+This migration replaces three layers simultaneously:
+
+1. **Framework layer**: Taro mini program -> Vite + React SPA + PWA
+2. **Component layer**: Custom UI primitives -> shadcn/ui (Radix UI + Tailwind)
+3. **Terminal rendering layer**: Custom TerminalViewport grid renderer -> xterm.js
+
+The xterm.js change is the most impactful: it eliminates the entire server-side terminal parsing pipeline (TerminalTracker, FramePusher, FrameCache, delta compression, anchor scroll) in favor of forwarding raw PTY bytes to the client. This simplifies proxy, relay, AND client simultaneously.
+
+### Before vs After Data Flow
+
+```
+BEFORE (current):
+  PTY bytes -> TerminalTracker (@xterm/headless, ANSI -> grid) -> FramePusher (diff)
+  -> terminal_frame JSON (full/delta) -> relay (FrameCache, merge) -> client
+  -> TerminalViewport (grid render, span-by-span)
+  Scrollback: scroll_request -> server -> anchor offset -> terminal_frame
+
+AFTER (xterm.js):
+  PTY bytes -> replay buffer (ring buffer, raw bytes) -> relay (passthrough)
+  -> client -> xterm.js (ANSI parse + render + scrollback, all local)
+  Scrollback: xterm.js built-in, zero server involvement
+```
+
+---
+
+## 2. New Project Structure
 
 ```
 apps/web/
   index.html                    # Vite entry HTML (mounts #root)
   vite.config.ts                # Vite + Tailwind + PWA plugin config
   tsconfig.json                 # TypeScript config (extends root)
-  package.json                  # Dependencies, scripts
+  package.json
+  components.json               # shadcn/ui configuration
   public/
     icons/
-      icon-192.png              # PWA icon 192x192
-      icon-512.png              # PWA icon 512x512
+      icon-192.png              # PWA icon
+      icon-512.png              # PWA icon
   src/
     main.tsx                    # React entry: createHashRouter + RouterProvider
     app.tsx                     # App shell: providers, WebSocket init, Outlet
-    app.css                     # @import "tailwindcss" + @theme + global animations
+    app.css                     # @import "tailwindcss" + @theme (design tokens)
     routes.tsx                  # Route table definitions
+    lib/
+      utils.ts                  # cn() helper for shadcn/ui (clsx + twMerge)
     pages/
-      proxy-select/
-        index.tsx               # Proxy selection page
-      session-list/
-        index.tsx               # Session list page
-      chat/
-        index.tsx               # Chat page (PTY + JSON dual mode)
+      proxy-select/index.tsx
+      session-list/index.tsx
+      chat/index.tsx
     components/
-      assistant-bubble/
-        index.tsx
-      back-to-bottom/
-        index.tsx
-      chat-bubble-list/
-        index.tsx
+      ui/                       # shadcn/ui components (generated)
+        button.tsx
+        dialog.tsx
+        scroll-area.tsx
+        toast.tsx
+        toaster.tsx
+        use-toast.ts
+      terminal/                 # xterm.js wrapper
+        index.tsx               # XTerminal component
+        use-terminal.ts         # Hook: xterm lifecycle, fit, write
+      assistant-bubble/index.tsx
+      chat-bubble-list/index.tsx
       directory-picker/
         index.tsx
-        path-utils.ts           # Pure utility, copy verbatim
-      empty-state/
-        index.tsx
-      file-path-picker/
-        index.tsx
-      input-bar/
-        index.tsx
-      markdown-view/
-        index.tsx
-      modal/
-        index.tsx
-      proxy-list-item/
-        index.tsx
-      quote-preview-bar/
-        index.tsx
-      safe-area-header/
-        index.tsx               # Rewrite: no safe area insets in browser
-      session-list-item/
-        index.tsx
-      slash-command-picker/
-        index.tsx
-      status-line/
-        index.tsx
-      terminal-viewport/
-        index.tsx
-      toast/
-        index.tsx
-      tool-approval-card/
-        index.tsx
-      tool-call-card/
-        index.tsx
-      typewriter/
-        index.tsx
-      user-bubble/
-        index.tsx
+        path-utils.ts
+      empty-state/index.tsx
+      file-path-picker/index.tsx
+      input-bar/index.tsx
+      markdown-view/index.tsx
+      proxy-list-item/index.tsx
+      quote-preview-bar/index.tsx
+      header/index.tsx          # Renamed from safe-area-header (no safe area in browser)
+      session-list-item/index.tsx
+      slash-command-picker/index.tsx
+      status-line/index.tsx
+      tool-approval-card/index.tsx
+      tool-call-card/index.tsx
+      typewriter/index.tsx
+      user-bubble/index.tsx
     hooks/
-      use-screen-size.ts        # Rewrite: window.resize instead of Taro API
+      use-screen-size.ts        # Rewrite: window.resize, no Taro
     services/
-      ensure-binding.ts         # Copy verbatim
-      message-parser.ts         # Copy verbatim
-      relay-client.ts           # Copy verbatim
-      websocket.ts              # Adapt: strip Taro codepath, native WebSocket only
+      ensure-binding.ts
+      message-parser.ts
+      relay-client.ts
+      websocket.ts              # Strip Taro codepath, native WebSocket only
     stores/
-      app-store.ts              # Adapt: localStorage instead of Taro storage
-      chat-store.ts             # Copy verbatim
-      command-store.ts          # Copy verbatim
-      file-store.ts             # Copy verbatim
-      relay-store.ts            # Copy verbatim
-      session-store.ts          # Copy verbatim
-      terminal-store.ts         # Adapt: localStorage instead of Taro storage
+      app-store.ts              # localStorage instead of Taro storage
+      chat-store.ts
+      command-store.ts
+      file-store.ts
+      relay-store.ts
+      session-store.ts
+      terminal-store.ts         # Rewrite: manages xterm.js instance, no grid/frame state
     utils/
-      format-session-name.ts    # Copy verbatim
-      relative-time.ts          # Copy verbatim
-      summarize-tool-input.ts   # Copy verbatim
-      text-truncate.ts          # Copy verbatim
+      format-session-name.ts
+      relative-time.ts
+      summarize-tool-input.ts
+      text-truncate.ts
     types/
-      stream-json.ts            # Copy verbatim
-    phase-machine.ts            # Copy verbatim
-    __tests__/                  # Test files (most copy, one adapt)
-      app-store.test.ts         # Adapt: remove Taro mock
-      directory-picker.test.ts
-      ensure-binding.test.ts
-      format-session-name.test.ts
-      input-bar-logic.test.ts
-      input-bar-pure.test.ts
-      message-parser.test.ts
-      phase-machine.test.ts
-      relay-client.test.ts
-      session-store.test.ts
-      summarize-tool-input.test.ts
-      use-screen-size.test.ts
-      utils.test.ts
+      stream-json.ts
+    phase-machine.ts
+    __tests__/
+      ...                       # Migrated test files
 ```
 
-**Config files:**
+### Config Files
 
 - `vite.config.ts`: Vite + `@tailwindcss/vite` + `@vitejs/plugin-react` + `vite-plugin-pwa`, `@` alias, RELAY_URL define, dev server proxy
-- `tsconfig.json`: Extends monorepo root, `paths: { "@/*": ["./src/*"] }`, `jsx: "react-jsx"`, `target: "ES2022"`
-- `index.html`: Minimal HTML with `<div id="root">`, viewport meta, dark background
+- `tsconfig.json`: Extends root, `paths: { "@/*": ["./src/*"] }`, `jsx: "react-jsx"`, `target: "ES2022"`
+- `components.json`: shadcn/ui config -- style "new-york", Tailwind CSS v4, `@/components/ui` path, `@/lib/utils` import
+- `index.html`: Minimal HTML with `<div id="root">`, viewport meta, dark background `#1E1E1E`
 - `package.json`: `@cc-anywhere/shared` workspace reference, build/dev/test scripts
 
 ---
 
-## 2. Module Inventory: Copy / Adapt / Rewrite / Drop
+## 3. Design Tokens
 
-### COPY (26 files) - Zero Taro dependency, copy verbatim
+Design tokens are the single source of truth for visual consistency. Defined as Tailwind v4 `@theme` directives in `app.css`, they replace all CSS variables and hardcoded values from the Taro codebase.
 
-| File | Reason |
-|------|--------|
-| `phase-machine.ts` | Pure logic, no Taro imports; PhaseNav interface abstracts navigation |
-| `services/ensure-binding.ts` | Only imports local types, no Taro |
-| `services/message-parser.ts` | Pure parser, imports only local types |
-| `services/relay-client.ts` | Only depends on WebSocketManager type and @cc-anywhere/shared |
-| `stores/chat-store.ts` | React context only, no Taro |
-| `stores/command-store.ts` | React context only, no Taro |
-| `stores/file-store.ts` | React context only, no Taro |
-| `stores/relay-store.ts` | React context only, no Taro |
-| `stores/session-store.ts` | React context only, no Taro |
-| `types/stream-json.ts` | Pure type definitions |
-| `utils/format-session-name.ts` | Pure function, no imports |
-| `utils/relative-time.ts` | Pure function, no imports |
-| `utils/summarize-tool-input.ts` | Pure function, no imports |
-| `utils/text-truncate.ts` | Pure function, no imports |
-| `components/directory-picker/path-utils.ts` | Pure path utilities, no Taro |
-| `components/modal/index.tsx` | Uses createPortal + native DOM, no Taro imports |
-| `components/toast/index.tsx` | Uses native DOM rendering, no Taro imports |
-| `__tests__/directory-picker.test.ts` | Tests pure functions |
-| `__tests__/ensure-binding.test.ts` | Tests pure logic with mocks |
-| `__tests__/format-session-name.test.ts` | Tests pure function |
-| `__tests__/input-bar-logic.test.ts` | Tests pure computation |
-| `__tests__/input-bar-pure.test.ts` | Tests pure functions |
-| `__tests__/message-parser.test.ts` | Tests pure parser |
-| `__tests__/phase-machine.test.ts` | Tests pure state machine logic |
-| `__tests__/relay-client.test.ts` | Tests with WebSocketManager mock |
-| `__tests__/session-store.test.ts` | Tests pure reducer |
-| `__tests__/summarize-tool-input.test.ts` | Tests pure function |
-| `__tests__/utils.test.ts` | Tests pure utility functions |
-
-### ADAPT (28 files) - Has Taro imports, business logic reusable, mechanical replacement
-
-| File | Taro Imports | Web Replacement |
-|------|-------------|----------------|
-| `app.tsx` | `Taro` (navigation, storage, useDidShow) | react-router `navigate()`, `localStorage`, `visibilitychange` event |
-| `services/websocket.ts` | `Taro` (connectSocket) | Strip Taro codepath, keep native WebSocket only |
-| `stores/app-store.ts` | `Taro` (getStorageSync, setStorageSync, removeStorageSync) | `localStorage` API |
-| `stores/terminal-store.ts` | `Taro` (getStorageSync) | `localStorage.getItem()` |
-| `hooks/use-screen-size.ts` | `Taro` (getSystemInfoSync, onWindowResize, offWindowResize) | `window.innerWidth/Height`, `resize` event listener |
-| `pages/chat/index.tsx` | `View`, `Text`, `Taro`, `useRouter` | `div`, `span`, react-router `useParams`+`useSearchParams` |
-| `pages/proxy-select/index.tsx` | `View`, `Text`, `Taro`, `usePullDownRefresh` | `div`, `span`, remove pull-down-refresh |
-| `pages/session-list/index.tsx` | `View`, `Text`, `ScrollView`, `Taro` | `div`, `span`, `div` with overflow-auto |
-| `components/assistant-bubble/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/back-to-bottom/index.tsx` | `View` | `div` |
-| `components/chat-bubble-list/index.tsx` | `View`, `Text`, `ScrollView` | `div`, `span`, `div` with overflow-auto |
-| `components/directory-picker/index.tsx` | `View`, `Text`, `ScrollView`, `Input` | `div`, `span`, `div` overflow-auto, `input` |
-| `components/empty-state/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/file-path-picker/index.tsx` | `View`, `Text`, `ScrollView` | `div`, `span`, `div` overflow-auto |
-| `components/input-bar/index.tsx` | `View`, `Text`, `Input` | `div`, `span`, `input` (e.detail.value -> e.target.value) |
-| `components/markdown-view/index.tsx` | `View`, `RichText`, `ScrollView` | `div`, `div` with dangerouslySetInnerHTML, `div` overflow-auto |
-| `components/proxy-list-item/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/quote-preview-bar/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/safe-area-header/index.tsx` | `View`, `Text`, `Taro` (navigateBack) | `div`, `span`, react-router `navigate(-1)` |
-| `components/session-list-item/index.tsx` | `View`, `Text`, `CommonEventFunction` | `div`, `span`, `React.TouchEvent`/`React.MouseEvent` |
-| `components/slash-command-picker/index.tsx` | `View`, `Text`, `ScrollView` | `div`, `span`, `div` overflow-auto |
-| `components/status-line/index.tsx` | `View` | `div` |
-| `components/terminal-viewport/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/tool-approval-card/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/tool-call-card/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/typewriter/index.tsx` | `View`, `Text` | `div`, `span` |
-| `components/user-bubble/index.tsx` | `View`, `Text` | `div`, `span` |
-| `__tests__/app-store.test.ts` | `Taro` (vi.mock) | Replace mock with localStorage mock |
-| `__tests__/use-screen-size.test.ts` | Tests pure functions only | Likely copy, but verify after use-screen-size rewrite |
-
-### REWRITE (1 file) - Fundamentally different in web context
-
-| File | Reason |
-|------|--------|
-| `hooks/use-screen-size.ts` | Taro.getSystemInfoSync/onWindowResize have no 1:1 equivalent; need full rewrite using window.resize, statusBarHeight=0, safeArea computed from viewport |
-
-### DROP (4 files) - Taro-only config, no web equivalent
-
-| File | Reason |
-|------|--------|
-| `app.config.ts` | Taro app config (pages, window, ext), replaced by react-router route table |
-| `pages/chat/index.config.ts` | Taro page config (navigationStyle, disableScroll), no equivalent needed |
-| `pages/proxy-select/index.config.ts` | Taro page config (enablePullDownRefresh), no equivalent needed |
-| `pages/session-list/index.config.ts` | Taro page config (navigationBarTitleText), handled by document.title |
-
-### CSS files (22 files, 2784 lines) - Convert to Tailwind utility classes
-
-All CSS files from `apps/feishu/src/` will be migrated to Tailwind during the CSS conversion phase. They are not "copied" or "dropped" -- they are transformed. See Section 5 for the detailed strategy.
-
----
-
-## 3. Taro Component to HTML Element Mapping Table
-
-| Taro Component | HTML Equivalent | Prop Changes | Usage Count | Notes |
-|---------------|----------------|--------------|-------------|-------|
-| `<View>` | `<div>` | `className` stays, `onClick` stays | ~200+ | Direct replacement, most common |
-| `<Text>` | `<span>` | `selectable` -> no equivalent (browser text is selectable by default) | ~80+ | Direct replacement |
-| `<ScrollView>` | `<div className="overflow-auto">` | Remove `scrollY`/`scrollX` props; use CSS `overflow-y-auto`/`overflow-x-auto` | ~6 | chat-bubble-list, session-list, directory-picker, file-path-picker, slash-command-picker, markdown-view |
-| `<RichText nodes={html}>` | `<div dangerouslySetInnerHTML={{__html: html}}>` | `nodes` string -> `dangerouslySetInnerHTML` | 1 | markdown-view only |
-| `<Input>` | `<input>` | `onInput` event: `e.detail.value` -> `e.target.value`; `onConfirm` -> `onKeyDown` Enter check; `confirmType` -> no equivalent | 2 | input-bar, directory-picker |
-| `<Image>` | `<img>` | `mode` prop -> CSS `object-fit` | 0 | Not currently used in codebase |
-
-**ScrollView specific prop removal:**
-
-| Taro Prop | Web Equivalent |
-|-----------|---------------|
-| `scrollY` | `className="overflow-y-auto"` (CSS, always on) |
-| `scrollX` | `className="overflow-x-auto"` (CSS) |
-| `scrollWithAnimation` | `scroll-behavior: smooth` (CSS) |
-| `scrollTop` | `element.scrollTop = value` (imperative) |
-| `onScroll` | Standard `onScroll` event, but `e.currentTarget.scrollTop` instead of `e.detail.scrollTop` |
-| `onScrollToLower` | Intersection Observer or scroll position check |
-| `enhanced` | Remove (Taro-specific optimization) |
-
----
-
-## 4. Taro API to Web API Replacement Table
-
-| Taro API | Web Equivalent | Files Affected | Notes |
-|----------|---------------|----------------|-------|
-| `Taro.navigateTo({ url })` | `navigate(path)` | app.tsx, proxy-select, session-list, phase-machine nav | react-router `useNavigate()` |
-| `Taro.reLaunch({ url })` | `navigate(path, { replace: true })` | app.tsx, chat/index.tsx, phase-machine nav | Replace entire history stack |
-| `Taro.navigateBack()` | `navigate(-1)` | safe-area-header, chat | Numeric arg = history.back() |
-| `Taro.getStorageSync(key)` | `localStorage.getItem(key) \|\| ""` | app-store (loadClientId, cleanStorage), terminal-store (loadFontSizeIndex), app.tsx, chat, proxy-select, session-list | Note: returns `null` not `""`, need `\|\| ""` |
-| `Taro.setStorageSync(key, val)` | `localStorage.setItem(key, JSON.stringify(val))` | app-store, chat, proxy-select, session-list | For non-string values, JSON.stringify |
-| `Taro.removeStorageSync(key)` | `localStorage.removeItem(key)` | app-store (cleanStorage), chat | Direct replacement |
-| `Taro.getCurrentPages()` | `window.location.hash` or `useLocation()` | app.tsx (getCurrentPath in nav object) | `hash.replace(/^#/, "")` gives current path |
-| `Taro.useDidShow()` | `useEffect` + `visibilitychange` event | app.tsx | Re-acquire WebSocket on tab return |
-| `useRouter()` | `useParams()` + `useSearchParams()` | chat/index.tsx | `router.params.sessionId` -> `searchParams.get("sessionId")` |
-| `usePullDownRefresh()` | Remove; use refresh button or manual trigger | proxy-select | Browser has no native pull-down-refresh |
-| `Taro.stopPullDownRefresh()` | Remove | proxy-select | N/A in browser |
-| `Taro.onWindowResize(cb)` | `window.addEventListener("resize", cb)` | use-screen-size.ts | Standard DOM event |
-| `Taro.offWindowResize(cb)` | `window.removeEventListener("resize", cb)` | use-screen-size.ts | Standard DOM event |
-| `Taro.getSystemInfoSync()` | `{ windowWidth: window.innerWidth, windowHeight: window.innerHeight }` | use-screen-size.ts | No deviceType/statusBarHeight/safeArea in browser |
-| `Taro.connectSocket({ url })` | `new WebSocket(url)` | websocket.ts | Already has native WebSocket codepath |
-| `Taro.getApp().tt?.setWindowSize()` | Remove | chat/index.tsx (handleWindowToggle) | Feishu desktop-specific, no web equivalent |
-| `Taro.setNavigationBarTitle()` | `document.title = title` | session-list | Standard DOM |
-| `CommonEventFunction` type | `React.TouchEvent \| React.MouseEvent` | session-list-item | Type-only change |
-| `declare const RELAY_URL` (defineConstants) | `define: { RELAY_URL: JSON.stringify(...) }` in vite.config.ts | websocket.ts, app.tsx | Vite `define` requires JSON.stringify |
-
-**Navigation helper function for URL format conversion:**
-
-```typescript
-// Taro URLs: /pages/chat/index?sessionId=xxx
-// Hash router: /pages/chat?sessionId=xxx (no /index suffix)
-function toWebPath(taroUrl: string): string {
-  return taroUrl.replace(/\/index(\?|$)/, "$1");
-}
-```
-
-**Updated nav object for phase-machine.ts (in app.tsx):**
-
-```typescript
-const nav = {
-  reLaunch: (url: string) => navigate(toWebPath(url), { replace: true }),
-  navigateTo: (url: string) => navigate(toWebPath(url)),
-  showToast: (title: string) => showToast(title),
-  getStorageSync: (key: string) => localStorage.getItem(key) || "",
-  removeStorageSync: (key: string) => localStorage.removeItem(key),
-  getCurrentPath: () => window.location.hash.replace(/^#/, ""),
-};
-```
-
-This means `phase-machine.ts` requires zero changes.
-
----
-
-## 5. CSS Migration Strategy (750px to Tailwind)
-
-### Design Width Analysis
-
-Taro config uses `designWidth: 750` with pxtransform. In H5 mode, Taro converts 750-scale px values to rem. In the web version, Tailwind utility classes replace all CSS.
-
-**Conversion formula:** `real_px = taro_px / 2` (750 design width on ~375px device)
-
-**app.css exception:** Uses real pixel values via CSS variables (4px, 8px, 16px, etc.). No conversion needed -- these map directly to Tailwind spacing.
-
-### CSS File Inventory
-
-| File | Lines | Complexity | Notes |
-|------|-------|-----------|-------|
-| `app.css` | 104 | Simple | CSS variables + keyframes, real px values, migrate to `@theme` + Tailwind |
-| `components/assistant-bubble/index.css` | 112 | Medium | Dark theme bubble styles, some 750-scale values |
-| `components/back-to-bottom/index.css` | 37 | Simple | Float button positioning |
-| `components/chat-bubble-list/index.css` | 79 | Medium | Scroll container, load-more styles |
-| `components/directory-picker/index.css` | 257 | Complex | Modal overlay, breadcrumb, tree list, input |
-| `components/empty-state/index.css` | 37 | Simple | Centered text layout |
-| `components/file-path-picker/index.css` | 135 | Medium | Tree navigation styles |
-| `components/input-bar/index.css` | 119 | Medium | Input field, buttons, 750-scale button sizes |
-| `components/markdown-view/index.css` | 167 | Complex | Code blocks, syntax highlighting, prose styles |
-| `components/modal/index.css` | 124 | Medium | Overlay, card, buttons |
-| `components/proxy-list-item/index.css` | 34 | Simple | Card layout with status dot |
-| `components/quote-preview-bar/index.css` | 53 | Simple | Preview bar above input |
-| `components/safe-area-header/index.css` | 53 | Simple | Fixed header, back button chevron |
-| `components/session-list-item/index.css` | 207 | Complex | Swipe gesture, dual-line layout, status dots, mode badges |
-| `components/slash-command-picker/index.css` | 104 | Medium | Dropdown list, highlight |
-| `components/status-line/index.css` | 64 | Simple | 4px color bar with animations |
-| `components/terminal-viewport/index.css` | 25 | Simple | Monospace grid, dark background |
-| `components/toast/index.css` | 63 | Simple | Top-bar toast animation |
-| `components/tool-approval-card/index.css` | 206 | Complex | Card layout, code preview, action buttons, PTY overlay |
-| `components/tool-call-card/index.css` | 89 | Medium | Collapsible card |
-| `components/typewriter/index.css` | 27 | Simple | Cursor blink animation |
-| `components/user-bubble/index.css` | 118 | Medium | Right-aligned bubble, quote block |
-| `pages/chat/index.css` | 270 | Complex | Page layout, settings panel, loading overlay, dark theme |
-| `pages/proxy-select/index.css` | 78 | Simple | Page layout, connecting state |
-| `pages/session-list/index.css` | 222 | Complex | Page layout, FAB, directory picker modal, history groups |
-
-**Total: 22 CSS files, 2784 lines**
-
-### 750-Scale Value to Tailwind Mapping
-
-| 750-scale px | Real px | Tailwind Utility | Example Usage |
-|-------------|---------|-----------------|---------------|
-| 16px | 8px | `p-2`, `gap-2`, `text-[8px]` | Small spacing |
-| 20px | 10px | `p-2.5`, `text-[10px]` | Small text |
-| 22px | 11px | `text-[11px]` | Small caption text |
-| 24px | 12px | `p-3`, `gap-3`, `text-xs` | Standard spacing |
-| 28px | 14px | `text-sm` | Body text |
-| 30px | 15px | `p-[15px]` | Intermediate spacing |
-| 32px | 16px | `p-4`, `text-base` | Standard padding, base text |
-| 36px | 18px | `rounded-2xl`, `text-lg` | Border radius |
-| 40px | 20px | `p-5`, `text-xl` | Section spacing |
-| 48px | 24px | `p-6`, `w-6 h-6` | Icon containers |
-| 60px | 30px | `p-[30px]` | Large spacing |
-| 72px | 36px | `w-9 h-9` | Button size |
-| 80px | 40px | `w-10 h-10` | Large button |
-| 100px | 50px | `w-[50px]` | Custom sizes |
-| 160px | 80px | `w-20` | Large elements |
-
-### Dark Mode Migration
-
-**Current pattern:**
-```css
-.chat-page-dark .component { color: #fff; }
-```
-
-**Tailwind pattern:**
-```html
-<!-- Set on <html> element since app is dark-themed by default -->
-<html class="dark">
-```
-```tsx
-<div className="text-white dark:text-white">
-```
-
-Since the app is dark-themed by default, the simplest approach is to design dark-first and add light mode later if needed. Most colors can be set directly without the `dark:` prefix.
-
-### app.css CSS Variables to Tailwind @theme Migration
+### Token Definitions (app.css)
 
 ```css
-/* Current app.css :root variables */
-:root {
-  --color-primary: #1890FF;
-  --color-success: #52C41A;
-  --color-warning: #FAAD14;
-  --color-error: #FF4D4F;
-  /* ... more */
-}
-
-/* Tailwind v4 @theme directive equivalent */
 @import "tailwindcss";
 
 @theme {
+  /* Color: Semantic */
   --color-primary: #1890FF;
+  --color-accent: #00D4AA;
   --color-success: #52C41A;
   --color-warning: #FAAD14;
   --color-error: #FF4D4F;
   --color-working: #1890FF;
   --color-terminated: #999999;
-  --color-surface: #FFFFFF;
-  --color-surface-secondary: #F5F5F5;
-  --color-terminal-bg: #1E1E1E;
-  --color-text-primary: #333333;
-  --color-text-secondary: #999999;
-  --color-border: #E8E8E8;
-  --color-border-light: #F0F0F0;
+
+  /* Color: Surface */
+  --color-surface: #1E1E1E;
+  --color-surface-secondary: #252526;
+  --color-surface-elevated: #2D2D30;
+  --color-page-bg: #1A1A2E;
+
+  /* Color: Text */
+  --color-text-primary: #D4D4D4;
+  --color-text-secondary: #808080;
+  --color-text-muted: #5A5A5A;
+
+  /* Color: Border */
+  --color-border: #3C3C3C;
+  --color-border-light: #2D2D30;
+
+  /* Spacing (matching current CSS variables) */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Typography */
+  --font-mono: "Sarasa Fixed SC", "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
 }
 ```
 
-These become usable as `bg-primary`, `text-error`, `border-border`, etc.
+### Token Source Mapping
 
-### Keyframe Animations
+Values extracted from current CSS files. This table documents where each token comes from so nothing is lost:
 
-The 5 keyframe animations in app.css (`pulse`, `breathing`, `sweepRight`, `bubbleEntranceLeft`, `bubbleEntranceRight`) will be kept as custom CSS in app.css alongside the Tailwind import. Tailwind v4 supports arbitrary animation names via `animate-[name]` or they can be registered via `@theme`.
+| Token | Current Source | Value | Notes |
+|-------|--------------|-------|-------|
+| `--color-surface` | `--color-terminal-bg` in app.css | `#1E1E1E` | Was only terminal bg, now primary surface |
+| `--color-page-bg` | `body { background: #1a1a2e }` in app.css | `#1A1A2E` | Page background |
+| `--color-accent` | New (from CONTEXT.md decision) | `#00D4AA` | shadcn/ui theme accent |
+| `--color-text-primary` | `#D4D4D4` in terminal-viewport spans | `#D4D4D4` | Default text on dark bg |
+| `--color-text-secondary` | `--color-text-secondary` in app.css | `#999999` -> `#808080` | Adjusted for dark bg contrast |
+| `--font-mono` | terminal-viewport CSS `font-family` | Sarasa Fixed SC chain | CJK mono font |
+
+### Responsive Layout Tokens
+
+Replace current CSS variable overrides (`.screen-landscape`, `.screen-desktop`) with Tailwind responsive prefixes:
+
+| Current CSS Class | Tailwind | Bubble Max Width | Page Padding |
+|------------------|----------|-----------------|--------------|
+| `.screen-portrait` (default) | (default) | 95% | 16px |
+| `.screen-landscape` (>=500px) | `sm:` | 85-90% | 24px |
+| `.screen-desktop` (>=860px) | `md:` | 75-80% | 32px |
+
+### shadcn/ui Theme Integration
+
+shadcn/ui uses CSS variables for theming. The `components.json` will be configured to use our design tokens:
+
+```json
+{
+  "style": "new-york",
+  "tailwind": {
+    "config": "",
+    "css": "src/app.css",
+    "baseColor": "zinc",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui"
+  }
+}
+```
+
+shadcn/ui's default dark theme (zinc palette) maps well to our `#1E1E1E` surface / `#D4D4D4` text scheme. We override the accent/primary HSL variables to match `--color-accent: #00D4AA` and `--color-primary: #1890FF`.
 
 ---
 
-## 6. PWA Configuration
+## 4. Component Migration Map
 
-### manifest.json (via vite-plugin-pwa)
+Each current component maps to one of: shadcn/ui component, native HTML, xterm.js, or custom (migrated with review). No component is blindly copied.
 
-```typescript
-// In vite.config.ts VitePWA plugin config
-manifest: {
-  name: "CC Anywhere",
-  short_name: "CC Anywhere",
-  description: "Remote Claude Code interaction from any device",
-  theme_color: "#1A1A2E",
-  background_color: "#1A1A2E",
-  display: "standalone",
-  orientation: "any",
-  start_url: "/",
-  scope: "/",
-  icons: [
-    {
-      src: "/icons/icon-192.png",
-      sizes: "192x192",
-      type: "image/png",
-    },
-    {
-      src: "/icons/icon-512.png",
-      sizes: "512x512",
-      type: "image/png",
-      purpose: "any maskable",
-    },
-  ],
+### Replaced by shadcn/ui
+
+| Current Component | shadcn/ui Replacement | Notes |
+|------------------|----------------------|-------|
+| `components/toast/` | `shadcn/toast` + `Toaster` | Replace custom DOM-based toast. Use `useToast()` hook. |
+| `components/modal/` | `shadcn/dialog` (AlertDialog) | Replace custom Portal-based modal. Radix provides focus trap, ESC dismiss. |
+| `components/back-to-bottom/` | `shadcn/button` variant | Simple floating button, use Button with custom styling |
+| Various `<button>` elements | `shadcn/button` | Consistent button styling across all components |
+| `ScrollView` usages | `shadcn/scroll-area` or native `overflow-auto` | Evaluate per component |
+
+### Replaced by xterm.js
+
+| Current Component | Replacement | Notes |
+|------------------|-------------|-------|
+| `components/terminal-viewport/` | `components/terminal/XTerminal` | Entire grid renderer removed. xterm.js handles ANSI parse, render, scroll. |
+| `components/back-to-bottom/` (in terminal context) | xterm.js scroll API | `terminal.scrollToBottom()` |
+
+### Migrated as Custom (with review)
+
+Every file below gets reviewed for: dead code, naming improvements, type tightening, tech debt cleanup. NOT blind copy.
+
+| Component | Migration Type | Review Focus |
+|-----------|---------------|-------------|
+| `assistant-bubble/` | Taro -> HTML + Tailwind | View->div, Text->span, CSS->Tailwind |
+| `chat-bubble-list/` | Taro -> HTML + Tailwind + ScrollArea | ScrollView replacement, scroll anchoring via native `overflow-anchor` |
+| `directory-picker/` | Taro -> HTML + Tailwind + Dialog | Use Dialog for overlay, Input->input |
+| `empty-state/` | Taro -> HTML + Tailwind | Simple, View->div |
+| `file-path-picker/` | Taro -> HTML + Tailwind | ScrollView->overflow-auto |
+| `input-bar/` | Taro -> HTML + Tailwind | Input->input, `e.detail.value`->`e.target.value` |
+| `markdown-view/` | Taro -> HTML + Tailwind | RichText->dangerouslySetInnerHTML (browser safe) |
+| `proxy-list-item/` | Taro -> HTML + Tailwind | View->div |
+| `quote-preview-bar/` | Taro -> HTML + Tailwind | View->div, Text->span |
+| `safe-area-header/` -> `header/` | Rewrite | No safe area insets in browser. Use `navigate(-1)` from react-router. Rename. |
+| `session-list-item/` | Taro -> HTML + Tailwind | CommonEventFunction->React events, swipe gesture review |
+| `slash-command-picker/` | Taro -> HTML + Tailwind | ScrollView->overflow-auto |
+| `status-line/` | Taro -> HTML + Tailwind | View->div |
+| `tool-approval-card/` | Taro -> HTML + Tailwind + Button | Use shadcn Button for approve/deny |
+| `tool-call-card/` | Taro -> HTML + Tailwind | View->div, collapsible card |
+| `typewriter/` | Taro -> HTML + Tailwind | View->div, cursor animation |
+| `user-bubble/` | Taro -> HTML + Tailwind | View->div, Text->span |
+
+### Deleted (no web equivalent)
+
+| File | Reason |
+|------|--------|
+| `app.config.ts` | Taro app config, replaced by react-router |
+| `pages/*/index.config.ts` | Taro page config, no equivalent needed |
+| `components/terminal-viewport/` | Replaced entirely by xterm.js |
+| `components/terminal-viewport/index.css` | Replaced by xterm.js built-in styles |
+
+### Taro API to Web API Quick Reference
+
+| Taro API | Web Equivalent | Notes |
+|----------|---------------|-------|
+| `Taro.navigateTo({ url })` | `navigate(path)` | react-router `useNavigate()` |
+| `Taro.reLaunch({ url })` | `navigate(path, { replace: true })` | |
+| `Taro.navigateBack()` | `navigate(-1)` | |
+| `Taro.getStorageSync(key)` | `localStorage.getItem(key) \|\| ""` | Returns null, not "" |
+| `Taro.setStorageSync(key, val)` | `localStorage.setItem(key, val)` | JSON.stringify for non-string |
+| `Taro.removeStorageSync(key)` | `localStorage.removeItem(key)` | |
+| `Taro.getCurrentPages()` | `window.location.hash` / `useLocation()` | |
+| `Taro.useDidShow()` | `useEffect` + `visibilitychange` | |
+| `useRouter()` | `useParams()` + `useSearchParams()` | |
+| `Taro.onWindowResize` | `window.addEventListener("resize", ...)` | |
+| `Taro.getSystemInfoSync()` | `window.innerWidth/Height` | |
+| `Taro.connectSocket()` | `new WebSocket(url)` | Already has native path |
+
+### Navigation
+
+react-router's `useNavigate()` is sufficient. No wrapper/helper needed. The `toWebPath()` conversion for Taro-style URLs (`/pages/chat/index?x=1` -> `/pages/chat?x=1`) is a one-line utility used only in the `nav` object for `phase-machine.ts`.
+
+---
+
+## 5. xterm.js Integration (Detailed Design)
+
+This is the most impactful change. It touches all three tiers: proxy, relay, and client.
+
+### 5.1 What Gets Deleted
+
+| Package | File | Lines | What It Does |
+|---------|------|-------|-------------|
+| proxy | `terminal-tracker.ts` | ~180 | @xterm/headless to parse PTY output into TermLine[] grid |
+| proxy | `frame-pusher.ts` | ~120 | Diff engine: compare grids, emit full/delta terminal_frame JSON |
+| proxy | `frame-cache.ts` | ~60 | Merge delta frames into cached full grid for reconnection |
+| proxy | `terminal-frame-renderer.ts` | ~100 | ANSI renderer for replay tool |
+| relay | FrameCache usage in `handlers/proxy.ts` | ~30 | Server-side frame caching and merge |
+| shared | `TerminalFramePayloadSchema` (full/delta) | ~40 | Grid-based frame schema |
+| shared | `TermSpanSchema`, `CursorSchema` | ~15 | Grid cell types |
+| feishu | `terminal-viewport/` | ~200 | Custom grid renderer with touch/pinch/wheel handlers |
+| feishu | `terminal-store.ts` (grid parts) | ~80 | Grid state, font size, scroll offset management |
+| **Total** | | **~825** | Entire server-side terminal parsing pipeline |
+
+### 5.2 What Gets Added
+
+**Client side (`apps/web`):**
+
+```
+components/terminal/
+  index.tsx           # XTerminal React component
+  use-terminal.ts     # Hook: create Terminal, attach FitAddon, handle resize
+```
+
+Dependencies:
+- `@xterm/xterm` - Terminal emulator core
+- `@xterm/addon-fit` - Auto-resize terminal to container
+- `@xterm/addon-web-links` - Clickable links in terminal output
+- `@xterm/addon-unicode11` - Unicode width detection (CJK characters)
+
+```tsx
+// Simplified XTerminal component
+function XTerminal({ sessionId }: { sessionId: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const ws = useRelayClient();
+
+  useEffect(() => {
+    const term = new Terminal({
+      theme: {
+        background: '#1E1E1E',
+        foreground: '#D4D4D4',
+        cursor: '#D4D4D4',
+      },
+      fontFamily: 'Sarasa Fixed SC, SF Mono, monospace',
+      fontSize: 14,
+      scrollback: 10000,
+      convertEol: true,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(containerRef.current!);
+    fit.fit();
+    termRef.current = term;
+
+    // Write incoming PTY bytes
+    const unsubscribe = ws.onPtyData(sessionId, (data: Uint8Array) => {
+      term.write(data);
+    });
+
+    return () => { unsubscribe(); term.dispose(); };
+  }, [sessionId]);
+
+  return <div ref={containerRef} className="w-full h-full" />;
 }
 ```
 
-### Service Worker Strategy
+**Proxy side (`apps/proxy`):**
 
-- **Generator:** `generateSW` (Workbox, auto-generated by vite-plugin-pwa)
-- **Update behavior:** `registerType: "autoUpdate"` -- activate new service workers immediately, no user prompt
-- **Caching rules:**
-  - `CacheFirst` for static assets (JS, CSS, fonts, icons) with 30-day expiration
-  - `NetworkFirst` or skip caching for API/dynamic data
-  - Do NOT cache WebSocket connections (Workbox only intercepts HTTP fetch)
-- **Offline shell:** `navigateFallback: "index.html"` returns the SPA shell when offline
-- **Precache:** Vite build output is automatically precached by Workbox
+The proxy changes from "parse then push frames" to "buffer raw bytes and forward":
 
-### What NOT to Cache
-
-- WebSocket connections (`ws://`, `wss://`) -- not HTTP, Workbox cannot intercept
-- Dynamic API responses from relay health endpoint
-- Font files from relay server (served from relay data dir, not bundled)
-
-### Future PWA Capabilities
-
-**Screen Wake Lock API** (keep screen awake during active sessions):
 ```typescript
-// Acquire when session is active, release on visibility change
-if ("wakeLock" in navigator) {
-  const lock = await navigator.wakeLock.request("screen");
-  document.addEventListener("visibilitychange", async () => {
-    if (document.visibilityState === "visible") {
-      await navigator.wakeLock.request("screen");
+// New: simple replay buffer replacing TerminalTracker + FramePusher
+class ReplayBuffer {
+  private buffer: Uint8Array;
+  private writePos = 0;
+
+  constructor(maxBytes = 1024 * 1024) { // 1MB ring buffer
+    this.buffer = new Uint8Array(maxBytes);
+  }
+
+  write(data: Uint8Array): void {
+    // Ring buffer append
+    if (this.writePos + data.length > this.buffer.length) {
+      // Shift or wrap
     }
-  });
+    this.buffer.set(data, this.writePos);
+    this.writePos += data.length;
+  }
+
+  // For reconnection: dump entire buffer
+  getAll(): Uint8Array {
+    return this.buffer.slice(0, this.writePos);
+  }
 }
 ```
 
-**Web Speech API** (voice mode, future feature):
-- `SpeechSynthesis` for reading Claude's responses aloud
-- `SpeechRecognition` for voice-to-text input
-- Neither available in mini programs; this validates the migration direction
+The PTY data flow becomes:
+1. `node-pty` emits data
+2. Data written to ReplayBuffer (for reconnection)
+3. Data forwarded to relay as binary WebSocket frame
+4. (OSC title extraction continues as before -- it reads the raw stream)
+
+**Relay side (`apps/relay`):**
+
+Relay becomes a binary passthrough for PTY data:
+- New message type: `pty_data` (binary frame, sessionId header)
+- Relay does NOT parse or cache the content
+- Relay broadcasts to all clients bound to the proxy
+- The existing JSON control messages (session_create, tool_approve, etc.) remain unchanged
+
+### 5.3 Protocol Changes
+
+**New binary frame format (proxy -> relay -> client):**
+
+```
+[1 byte: message type = 0x01 for pty_data]
+[2 bytes: sessionId length (uint16 BE)]
+[N bytes: sessionId (UTF-8)]
+[remaining bytes: raw PTY data]
+```
+
+Or simpler: use a JSON envelope with base64-encoded data for the initial implementation, optimize to binary frames later if needed:
+
+```json
+{
+  "type": "pty_data",
+  "sessionId": "abc123",
+  "data": "<base64 encoded PTY bytes>"
+}
+```
+
+**Removed message types:**
+- `terminal_frame` (full/delta grid JSON)
+- `terminal_frame_request` (client asking for current grid)
+- `terminal_scroll_request` (server-side scroll)
+
+**Kept message types (unchanged):**
+- `terminal_title` (OSC title extraction, still useful)
+- `terminal_resize` (cols/rows notification)
+- `pty_state` (semantic state: idle, working, etc.)
+- All chat/tool/session messages
+
+### 5.4 Exception Handling Design
+
+#### Reconnection: Scrollback Recovery
+
+**Problem:** Client disconnects and reconnects. xterm.js instance is fresh, scrollback is empty.
+
+**Solution:** Proxy maintains a ReplayBuffer (ring buffer of raw PTY bytes, ~1MB default). On reconnection, proxy sends the full buffer content. xterm.js replays it, rebuilding the visible state and scrollback.
+
+**Edge cases:**
+- Buffer overflows (very long session): Client gets the last ~1MB. Oldest output is lost. This is acceptable -- terminal emulators have finite scrollback too.
+- Reconnection during high-speed output: Buffer the replay, then switch to live stream. Use a sequence counter to avoid duplicates.
+
+#### Multi-Client Viewing Same Session
+
+**Problem:** Multiple clients (phone + tablet + desktop) watching the same PTY session.
+
+**Solution:** Relay broadcasts every `pty_data` frame to ALL clients bound to that proxy+session. Each client's xterm.js processes the bytes independently. This is simpler than the current approach (single cached grid frame).
+
+**Edge case:** If one client connects late, it gets the ReplayBuffer dump first, then switches to live. Other clients are unaffected.
+
+#### Backpressure: Slow Client
+
+**Problem:** Fast PTY output + slow mobile network = data accumulates in relay's send buffer.
+
+**Solution:** Multi-level approach:
+1. **WebSocket bufferedAmount monitoring:** If `ws.bufferedAmount` exceeds threshold (e.g., 256KB), pause forwarding to that client. Resume when buffer drains.
+2. **Per-client drop policy:** If a client falls too far behind, drop intermediate frames (the client will catch up from ReplayBuffer on next reconnect).
+3. **Flow notification:** Send a control message `{ type: "pty_flow", state: "paused" | "resumed" }` so the client can show a "catching up..." indicator.
+
+This is strictly better than the current system where a slow client delays grid diffing for all clients.
+
+#### UTF-8 / ANSI Truncation at Frame Boundaries
+
+**Problem:** PTY emits bytes in arbitrary chunks. A UTF-8 multi-byte character or ANSI escape sequence might be split across two chunks.
+
+**Solution:** xterm.js handles this natively. Its parser maintains state across `write()` calls. Partial UTF-8 sequences are buffered internally until complete. This is one of the key advantages over the custom TerminalTracker, which also had to handle this but in our code.
+
+No special handling needed on proxy or relay side. Just forward raw bytes as-is.
+
+#### High-Speed Output Flow Control (Mobile Rendering)
+
+**Problem:** `cat large-file.txt` or compilation output floods the terminal. Mobile xterm.js rendering can't keep up.
+
+**Solution:**
+1. **xterm.js built-in buffering:** xterm.js batches DOM updates internally. Write speed is not 1:1 with render speed.
+2. **Write throttling on client:** If writes queue up, batch them (`term.write(accumulatedChunk)` instead of per-frame).
+3. **Proxy-side output sampling:** If output rate exceeds threshold (e.g., >100KB/s sustained), proxy can reduce forwarding frequency. The ReplayBuffer still captures everything for completeness.
+
+#### Binary Data Encoding
+
+**Decision:** Start with base64 over JSON text frames for simplicity and debugging. Migrate to binary WebSocket frames if profiling shows encoding overhead matters.
+
+- JSON+base64: ~33% overhead, but trivially debuggable, works with existing JSON message routing
+- Binary frames: zero overhead, but requires separate routing path in relay
+
+For the initial migration, JSON+base64 is correct. The overhead is negligible at terminal output rates (typically <10KB/s, burst <1MB/s). Optimization to binary frames can be a follow-up task.
+
+### 5.5 terminal-store.ts Rewrite
+
+The current `terminal-store.ts` manages:
+- Grid state (lines, cursor) -- **DELETE** (xterm.js manages this)
+- Font size index and persistence -- **KEEP** (user preference)
+- Scroll offset and anchor -- **DELETE** (xterm.js manages scrollback)
+- Frame application (full/delta merge) -- **DELETE**
+
+New `terminal-store.ts` responsibilities:
+- Font size preference (persisted to localStorage)
+- xterm.js Terminal instance reference per session
+- Terminal theme/config derived from design tokens
 
 ---
 
-## 7. Routing Setup (react-router hash mode)
+## 6. CSS Migration Strategy
+
+### Approach
+
+All CSS files are converted to Tailwind utility classes during component migration. No separate "CSS conversion phase" -- each component's CSS is converted as part of its migration.
+
+**Design-width conversion:** Taro 750px design width -> divide by 2 for real px -> map to Tailwind utilities.
+
+| 750-scale px | Real px | Tailwind | Usage |
+|-------------|---------|---------|-------|
+| 28px | 14px | `text-sm` | Body text |
+| 32px | 16px | `text-base`, `p-4` | Base text, padding |
+| 36px | 18px | `rounded-2xl` | Border radius |
+| 72px | 36px | `w-9 h-9` | Button size |
+
+**app.css special case:** Uses real pixel values (not 750-scale). CSS variables migrate directly to `@theme` tokens. Keyframe animations (`pulse`, `breathing`, `sweepRight`, `bubbleEntranceLeft`, `bubbleEntranceRight`) kept as custom CSS alongside `@import "tailwindcss"`.
+
+### Dark Mode
+
+The app is dark-themed by default. Set `<html class="dark">`. Design tokens define dark-theme colors as the baseline. No `dark:` prefix needed for the default state. Light mode is a future enhancement.
+
+Replace current `.chat-page-dark .component { ... }` pattern with direct dark-first Tailwind classes.
+
+---
+
+## 7. Routing Setup
 
 ### Route Table
 
 ```typescript
-// src/main.tsx
-import { createHashRouter, RouterProvider } from "react-router-dom";
-import { createRoot } from "react-dom/client";
-import App from "./app";
-import ProxySelect from "./pages/proxy-select";
-import SessionList from "./pages/session-list";
-import Chat from "./pages/chat";
-
 const router = createHashRouter([
   {
     path: "/",
@@ -505,342 +567,84 @@ const router = createHashRouter([
     ],
   },
 ]);
-
-createRoot(document.getElementById("root")!).render(
-  <RouterProvider router={router} />
-);
 ```
 
-### URL Structure Mapping
+### URL Mapping
 
-| Taro URL | Hash URL | Behavior |
-|----------|----------|----------|
-| `/pages/proxy-select/index` | `/#/pages/proxy-select` | Proxy selection |
-| `/pages/session-list/index` | `/#/pages/session-list` | Session list |
-| `/pages/chat/index?sessionId=x&mode=pty` | `/#/pages/chat?sessionId=x&mode=pty` | Chat with params |
-| `/` (root) | `/#/` | Redirects to proxy-select |
+| Taro URL | Hash URL |
+|----------|----------|
+| `/pages/proxy-select/index` | `/#/pages/proxy-select` |
+| `/pages/session-list/index` | `/#/pages/session-list` |
+| `/pages/chat/index?sessionId=x&mode=pty` | `/#/pages/chat?sessionId=x&mode=pty` |
 
-### App Shell Component
-
-`app.tsx` becomes the shell that wraps all pages:
-- Providers (AppProvider, SessionProvider, etc.)
-- WebSocket initialization
-- `<Outlet />` for nested route rendering
-- Toast and Modal containers
-
-### Navigation Helper
+### Nav Object for phase-machine.ts
 
 ```typescript
-// Convert Taro-style URLs to web hash paths
-function toWebPath(taroUrl: string): string {
-  return taroUrl.replace(/\/index(\?|$)/, "$1");
-}
-// "/pages/chat/index?sessionId=abc" -> "/pages/chat?sessionId=abc"
+const nav = {
+  reLaunch: (url: string) => navigate(toWebPath(url), { replace: true }),
+  navigateTo: (url: string) => navigate(toWebPath(url)),
+  showToast: (title: string) => toast({ description: title }),  // shadcn toast
+  getStorageSync: (key: string) => localStorage.getItem(key) || "",
+  removeStorageSync: (key: string) => localStorage.removeItem(key),
+  getCurrentPath: () => window.location.hash.replace(/^#/, ""),
+};
 ```
+
+`phase-machine.ts` requires zero changes.
 
 ---
 
-## 8. Relay Static File Serving
+## 8. PWA Configuration
+
+### manifest (via vite-plugin-pwa)
+
+```typescript
+VitePWA({
+  registerType: "autoUpdate",
+  manifest: {
+    name: "CC Anywhere",
+    short_name: "CC Anywhere",
+    theme_color: "#1E1E1E",
+    background_color: "#1A1A2E",
+    display: "standalone",
+    icons: [
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+    ],
+  },
+  workbox: {
+    runtimeCaching: [
+      {
+        urlPattern: /\.(?:js|css|woff2?)$/,
+        handler: "CacheFirst",
+        options: { cacheName: "static-assets", expiration: { maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 } },
+      },
+    ],
+    navigateFallback: "index.html",
+  },
+})
+```
+
+### Future PWA Capabilities
+
+- **Screen Wake Lock API:** Keep screen awake during active sessions
+- **Web Speech API:** Voice readback + voice input
+- Neither available in mini programs; this validates the migration direction
+
+---
+
+## 9. Relay Static File Serving
 
 ### Express.static Configuration
 
 ```typescript
-// In apps/relay/src/server.ts, add after existing routes
-
-const webDistDir = process.env.WEB_DIST_DIR
-  || path.resolve(__dirname, "../../web/dist");
-
-// Serve the web SPA static assets
-if (fs.existsSync(webDistDir)) {
-  app.use(express.static(webDistDir, {
-    maxAge: "7d",
-    etag: true,
-  }));
-
-  // SPA fallback: hash routing means the server only sees / and static assets
-  // This fallback handles direct access to non-root paths (safety net)
-  app.get("*", (req, res, next) => {
-    // Skip WebSocket upgrade paths and API routes
-    if (req.path === "/proxy" || req.path === "/client" || req.path.startsWith("/health")) {
-      return next();
-    }
-    res.sendFile(path.join(webDistDir, "index.html"));
-  });
-}
-```
-
-### WEB_DIST_DIR Environment Variable
-
-| Scenario | Value | Notes |
-|----------|-------|-------|
-| Development | Not set, Vite dev server on :5175 | Relay doesn't serve static files |
-| Production (Docker) | `/app/web-dist` | Copied during Docker build |
-| Local testing | `../../web/dist` (default) | Relative to relay dist |
-
-### Font Serving
-
-Already exists in relay server -- `/fonts` route with CORS headers and 30-day cache. No changes needed.
-
-### Security Headers
-
-No additional CORS configuration needed for same-origin static serving. The existing CORS on `/fonts` handles cross-origin font loading.
-
----
-
-## 9. Responsive Design Breakpoints
-
-### Three-Tier Breakpoints
-
-| Tier | Width Range | Tailwind Prefix | Layout |
-|------|------------|----------------|--------|
-| Mobile | <768px | (default) | Current feishu layout: single column, bottom input bar, full-width bubbles |
-| Tablet | 768px - 1024px | `md:` | Side panel possible for session list, wider bubbles |
-| Desktop | >1024px | `lg:` | Multi-column layout, sidebar navigation, wider content area |
-
-### Per-Breakpoint Layout Differences
-
-**Mobile (<768px):**
-- Single column, full-width
-- Bottom-anchored input bar
-- Bubble max-width: 95%
-- Page horizontal padding: 16px
-- Matches current feishu mini program behavior exactly
-
-**Tablet (768px - 1024px):**
-- Single column with wider margins
-- Bubble max-width: 85-90%
-- Page horizontal padding: 24px
-- Session list could show as side panel (future enhancement)
-
-**Desktop (>1024px):**
-- Wider content area, centered
-- Bubble max-width: 75-80%
-- Page horizontal padding: 32px
-- Potential for persistent sidebar with session list
-
-### Tailwind Responsive Usage
-
-```tsx
-// Example: bubble max-width responsive
-<div className="max-w-[95%] md:max-w-[85%] lg:max-w-[75%]">
-  {/* bubble content */}
-</div>
-```
-
-### CSS Variable Mapping
-
-The existing `screen-portrait`, `screen-landscape`, `screen-desktop` CSS classes with CSS variable overrides map naturally to Tailwind breakpoints:
-
-| Current CSS Class | Tailwind Equivalent |
-|------------------|-------------------|
-| `.screen-portrait` (default) | Default styles (no prefix) |
-| `.screen-landscape` (>500px) | `sm:` or custom breakpoint |
-| `.screen-desktop` (>860px) | `md:` or `lg:` |
-
-**Strategy:** Initial migration targets mobile-first (matching current feishu behavior). The `useScreenSize` hook will still classify viewport size, but CSS will use Tailwind responsive prefixes instead of JavaScript-driven class toggling.
-
----
-
-## 10. Phased Execution Plan
-
-### Phase A: Scaffold apps/web
-
-**Goal:** Empty Vite + React + TypeScript + Tailwind + PWA project that builds and runs.
-
-| Item | Details |
-|------|---------|
-| Files | `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`, `src/main.tsx`, `src/app.tsx` (minimal), `src/app.css` |
-| Dependencies | ~12 packages (see Dependencies section) |
-| Estimated effort | 1-2 hours |
-| Dependencies on prior phases | None |
-| Verification | `pnpm dev` starts, `pnpm build` produces dist/ |
-
-### Phase B: Copy clean files
-
-**Goal:** All COPY-category files are in apps/web/src, path aliases resolve.
-
-| Item | Details |
-|------|---------|
-| Files | 26+ files from COPY inventory |
-| Estimated effort | 30 minutes |
-| Dependencies on prior phases | Phase A (tsconfig paths must resolve) |
-| Verification | `pnpm typecheck` passes for copied files |
-
-### Phase C: Migrate services layer
-
-**Goal:** WebSocket, stores, and hooks working with web APIs.
-
-| Item | Details |
-|------|---------|
-| Files | `websocket.ts`, `app-store.ts`, `terminal-store.ts`, `use-screen-size.ts` |
-| Changes | Strip Taro codepaths, replace with localStorage/window APIs |
-| Estimated effort | 2-3 hours |
-| Dependencies on prior phases | Phase B (relay-client.ts must exist) |
-| Verification | `pnpm typecheck` passes, unit tests pass |
-
-### Phase D: Migrate components
-
-**Goal:** All component .tsx files render with HTML elements.
-
-| Item | Details |
-|------|---------|
-| Files | 18 component directories |
-| Changes | Mechanical `View`->`div`, `Text`->`span`, `ScrollView`->`div overflow-auto`, `Input`->`input`, `RichText`->dangerouslySetInnerHTML |
-| Estimated effort | 4-6 hours |
-| Dependencies on prior phases | Phase C (stores must be adapted) |
-| Verification | Components compile, no Taro imports remain |
-
-### Phase E: Migrate pages + app shell + routing
-
-**Goal:** App runs end-to-end with hash routing, navigation works.
-
-| Item | Details |
-|------|---------|
-| Files | `app.tsx`, `main.tsx`, `routes.tsx`, 3 page components |
-| Changes | react-router integration, nav object rewrite, visibilitychange hook, route params |
-| Estimated effort | 4-6 hours |
-| Dependencies on prior phases | Phase D (components must render) |
-| Verification | App loads in browser, navigation between pages works, WebSocket connects |
-
-### Phase F: CSS to Tailwind conversion
-
-**Goal:** All visual styling migrated from CSS files to Tailwind utility classes.
-
-| Item | Details |
-|------|---------|
-| Files | 22 CSS files, 2784 lines total |
-| Changes | Convert 750-scale values, replace with Tailwind utilities, migrate dark theme |
-| Estimated effort | 8-12 hours (largest phase) |
-| Dependencies on prior phases | Phase E (pages must be functional for visual verification) |
-| Verification | Visual parity with feishu H5 build, no remaining component CSS files |
-
-### Phase G: Tests
-
-**Goal:** All unit tests pass, E2E tests work against web build.
-
-| Item | Details |
-|------|---------|
-| Files | 13 test files, Playwright config |
-| Changes | Remove Taro mocks, adapt test for localStorage, update Playwright config for Vite |
-| Estimated effort | 2-3 hours |
-| Dependencies on prior phases | Phase F (full app must be functional) |
-| Verification | `pnpm test` passes, `pnpm exec playwright test` passes |
-
-### Phase H: Relay integration
-
-**Goal:** Relay serves built web SPA, single Docker container deployment works.
-
-| Item | Details |
-|------|---------|
-| Files | `apps/relay/src/server.ts`, `Dockerfile` update, build scripts |
-| Changes | express.static() config, WEB_DIST_DIR env var, Docker multi-stage build |
-| Estimated effort | 2-3 hours |
-| Dependencies on prior phases | Phase F (must have a buildable dist/) |
-| Verification | `pnpm build` produces dist/, relay serves it, WebSocket + SPA on same port |
-
-### Phase I: PWA polish
-
-**Goal:** Installable PWA with proper icons, offline shell, wake lock.
-
-| Item | Details |
-|------|---------|
-| Files | PWA icons, manifest tuning, service worker config |
-| Changes | Generate icons, test install flow, add wake lock hook |
-| Estimated effort | 1-2 hours |
-| Dependencies on prior phases | Phase H (needs deployed build) |
-| Verification | Chrome "Install" prompt appears, offline shell loads, lighthouse PWA audit passes |
-
-### Execution Summary
-
-| Phase | Est. Files | Est. Effort | Depends On |
-|-------|-----------|-------------|------------|
-| A: Scaffold | ~8 | 1-2h | - |
-| B: Copy clean | ~26 | 30min | A |
-| C: Services | ~4 | 2-3h | B |
-| D: Components | ~18 | 4-6h | C |
-| E: Pages + routing | ~6 | 4-6h | D |
-| F: CSS to Tailwind | ~22 | 8-12h | E |
-| G: Tests | ~13 | 2-3h | F |
-| H: Relay integration | ~3 | 2-3h | F |
-| I: PWA polish | ~4 | 1-2h | H |
-| **Total** | **~104** | **25-38h** | |
-
-Phases G, H, and I can be parallelized after Phase F completes.
-
----
-
-## 11. Deployment Flexibility
-
-### Scenario 1: Local Development
-
-Vite dev server on `:5175` with proxy to relay on `:3100`.
-
-```typescript
-// vite.config.ts
-server: {
-  port: 5175,
-  proxy: {
-    "/client": { target: "ws://localhost:3100", ws: true },
-    "/proxy": { target: "ws://localhost:3100", ws: true },
-    "/fonts": { target: "http://localhost:3100" },
-    "/health": { target: "http://localhost:3100" },
-  },
-}
-```
-
-**Workflow:** `pnpm --filter web dev` + `pnpm --filter relay dev` running separately. HMR on `:5175`, WebSocket proxied to relay.
-
-### Scenario 2: Cloud Relay (Primary Use Case)
-
-Single process serves both WebSocket and SPA static files on one port.
-
-```
-User's Computer A ─── proxy ──┐
-User's Computer B ─── proxy ──┤
-                               ├── Cloud Relay (:3100)
-Phone/Tablet ── browser SPA ──┘     ├── WebSocket /proxy, /client
-                                    ├── Static files /index.html, /assets/*
-                                    └── Fonts /fonts/*
-```
-
-- Docker container runs relay with `WEB_DIST_DIR=/app/web-dist`
-- Single port, single domain, no CORS issues
-- WSS via Nginx TLS termination or cloud load balancer
-- User accesses `https://relay.example.com/` in mobile browser
-
-### Scenario 3: Tunnel / Local-Only (Budget Users)
-
-For users who don't want to run a cloud server.
-
-```
-User's Computer ─── proxy + relay (localhost:3100)
-                         ├── ngrok/cloudflare tunnel
-Phone ── browser ────────┘
-```
-
-- Relay runs locally alongside proxy
-- Tunnel service (ngrok, cloudflare tunnel) exposes `:3100` publicly
-- Same static serving as cloud scenario
-- Relay `WEB_DIST_DIR` points to local web build
-
-### Relay Express.static Configuration (Production)
-
-```typescript
-import path from "node:path";
-import fs from "node:fs";
-
 const webDistDir = process.env.WEB_DIST_DIR
   || path.resolve(__dirname, "../../web/dist");
 
 if (fs.existsSync(webDistDir)) {
-  // Static assets with long cache (hashed filenames from Vite)
-  app.use(express.static(webDistDir, {
-    maxAge: "7d",
-    etag: true,
-    index: "index.html",
-  }));
+  app.use(express.static(webDistDir, { maxAge: "7d", etag: true }));
 
-  // SPA fallback for direct URL access
+  // SPA fallback (hash routing means this rarely fires)
   app.get("*", (req, res, next) => {
     if (req.path === "/proxy" || req.path === "/client"
       || req.path.startsWith("/health") || req.path.startsWith("/fonts")) {
@@ -851,24 +655,51 @@ if (fs.existsSync(webDistDir)) {
 }
 ```
 
+---
+
+## 10. Deployment
+
+### Primary: Cloud Relay
+
+Multiple computers -> one cloud relay -> mobile browser.
+
+```
+Computer A -- proxy --> Cloud Relay (:3100) <-- browser (phone/tablet)
+Computer B -- proxy -->     |
+                            +-- WebSocket /proxy, /client
+                            +-- Static files /index.html, /assets/*
+                            +-- Fonts /fonts/*
+```
+
+Single Docker container, single port, single domain. WSS via Nginx TLS termination or cloud load balancer.
+
+### Budget: Local Relay + Tunnel
+
+For users who don't want a cloud server.
+
+```
+Computer -- proxy + relay (localhost:3100)
+                  |
+                  +-- Tailscale / Cloudflare Tunnel
+                  |
+Phone -- browser --+
+```
+
+Same static serving, exposed via tunnel. Zero cloud cost.
+
 ### Docker Multi-Stage Build
 
 ```dockerfile
-# Stage 1: Build web
 FROM node:20-alpine AS web-build
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter web build
+RUN pnpm install --frozen-lockfile && pnpm --filter web build
 
-# Stage 2: Build relay
 FROM node:20-alpine AS relay-build
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile
-RUN pnpm --filter relay build
+RUN pnpm install --frozen-lockfile && pnpm --filter relay build
 
-# Stage 3: Runtime
 FROM node:20-alpine
 WORKDIR /app
 COPY --from=relay-build /app/apps/relay/dist ./relay
@@ -880,124 +711,229 @@ CMD ["node", "relay/index.js"]
 
 ---
 
-## Risks and Pitfalls
+## 11. Phased Execution Plan
 
-### Pitfall 1: Input Event Shape
+The xterm.js change affects all three tiers. The phases reflect this cross-cutting scope.
 
-**Issue:** Taro `<Input>` fires `onInput` with `e.detail.value`. Standard `<input>` uses `e.target.value`.
-**Affected files:** `input-bar/index.tsx`, `directory-picker/index.tsx`
-**Mitigation:** Search-replace all `e.detail.value` -> `e.target.value` in input handlers. Also change `onInput` -> `onChange` where appropriate.
+### Phase A: Project Scaffold + Design Tokens
 
-### Pitfall 2: ScrollView onScroll Event Differences
+**Goal:** Empty Vite + React + Tailwind + shadcn/ui project that builds. Design tokens defined.
 
-**Issue:** Taro ScrollView `onScroll` provides `e.detail.scrollTop`. Standard div scroll uses `e.currentTarget.scrollTop`.
-**Affected files:** `chat-bubble-list/index.tsx`
-**Mitigation:** Existing implementation already uses `ref.current.scrollTop` via addEventListener in some places. Verify each ScrollView usage.
+| Item | Details |
+|------|---------|
+| Create | `apps/web/` with package.json, vite.config.ts, tsconfig.json, index.html |
+| Configure | Tailwind v4, shadcn/ui (Button, Dialog, ScrollArea, Toast), design tokens in app.css |
+| Setup | `cn()` utility, path aliases, RELAY_URL define |
+| Verify | `pnpm dev` starts, `pnpm build` produces dist/, shadcn Button renders with correct theme |
+| Effort | 2-3 hours |
 
-### Pitfall 3: 750-Scale CSS Values at 2x
+### Phase B: Review and Migrate Business Logic
 
-**Issue:** CSS values from 750-design-width that aren't converted will render at 2x intended size (72px buttons become huge).
-**Affected files:** All component CSS files (not app.css)
-**Mitigation:** Systematic audit: any value that seems unusually large (>40px for font-size, >60px for buttons) is 750-scale. Divide by 2.
+**Goal:** All pure logic files reviewed and migrated. No Taro dependency files yet.
 
-### Pitfall 4: `.taro_page` CSS Class
+| Item | Details |
+|------|---------|
+| Review | Each of the 26 "zero Taro dependency" files for dead code, naming, type improvements |
+| Migrate | `phase-machine.ts`, stores (chat, command, file, relay, session), services (ensure-binding, message-parser, relay-client), utils, types |
+| Adapt | `app-store.ts` (localStorage), `websocket.ts` (strip Taro codepath) |
+| Rewrite | `use-screen-size.ts` (window.resize, no Taro APIs) |
+| Verify | `pnpm typecheck` passes, unit tests pass |
+| Effort | 3-4 hours |
 
-**Issue:** Taro injects `.taro_page` as page wrapper. Standard React won't have this class. app.css has `.taro_page { background: #1a1a2e !important; }`.
-**Mitigation:** Remove `.taro_page` rules. Apply equivalent styles to `#root` or `body` in app.css / index.html.
+### Phase C: xterm.js Integration (Client)
 
-### Pitfall 5: WebSocket Reconnection in PWA Background
+**Goal:** xterm.js terminal component working, fed by mock data or direct WebSocket.
 
-**Issue:** When PWA goes to background, WebSocket disconnects. On return, app may not reconnect.
-**Affected files:** `app.tsx`
-**Mitigation:** The existing `Taro.useDidShow` reconnection logic maps to `visibilitychange` event:
-```typescript
-useEffect(() => {
-  const handler = () => {
-    if (document.visibilityState === "visible" && ws && !ws.isConnected()) {
-      ws.connect(url);
-    }
-  };
-  document.addEventListener("visibilitychange", handler);
-  return () => document.removeEventListener("visibilitychange", handler);
-}, []);
+| Item | Details |
+|------|---------|
+| Create | `components/terminal/index.tsx`, `components/terminal/use-terminal.ts` |
+| Install | `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`, `@xterm/addon-unicode11` |
+| Rewrite | `terminal-store.ts` to manage xterm.js instance instead of grid state |
+| Test | Feed xterm.js with recorded PTY data, verify rendering |
+| Verify | Terminal renders ANSI output correctly, scrollback works, resize works |
+| Effort | 3-4 hours |
+
+### Phase D: xterm.js Integration (Proxy + Relay)
+
+**Goal:** Proxy forwards raw PTY bytes, relay passes through, client renders via xterm.js.
+
+| Item | Details |
+|------|---------|
+| Proxy | Add ReplayBuffer, forward raw PTY data instead of frame-pushing |
+| Proxy | Keep OSC title extraction (reads raw stream) |
+| Relay | Add `pty_data` passthrough routing (broadcast to bound clients) |
+| Protocol | Add `pty_data` message type to shared schemas |
+| Wire | End-to-end: PTY -> proxy -> relay -> client xterm.js |
+| Verify | Live terminal output visible in browser, scrollback works, reconnection replays |
+| Effort | 6-8 hours |
+| **Risk** | Highest risk phase. Touches all three tiers. Must be tested end-to-end. |
+
+### Phase E: Migrate Pages and Components
+
+**Goal:** All pages render with HTML + Tailwind + shadcn/ui. App navigates end-to-end.
+
+| Item | Details |
+|------|---------|
+| Pages | `proxy-select`, `session-list`, `chat` -- Taro components -> HTML + Tailwind |
+| App Shell | `app.tsx` with providers, WebSocket init, react-router `<Outlet />` |
+| Components | All 17 custom components migrated (see Component Migration Map) |
+| Replace | Toast -> shadcn Toast, Modal -> shadcn Dialog, buttons -> shadcn Button |
+| CSS | Convert inline CSS and CSS files to Tailwind utilities during migration |
+| Verify | All pages load, navigation works, WebSocket connects, chat functional |
+| Effort | 10-14 hours (largest phase) |
+
+### Phase F: Proxy + Relay Cleanup
+
+**Goal:** Delete obsolete server-side terminal parsing code.
+
+| Item | Details |
+|------|---------|
+| Delete proxy | `terminal-tracker.ts`, `frame-pusher.ts`, `frame-cache.ts`, `terminal-frame-renderer.ts` |
+| Delete proxy | Related tests: `frame-pusher.test.ts`, `frame-cache.test.ts`, `terminal-data-flow.test.ts` |
+| Clean relay | Remove FrameCache usage, remove `terminal_frame` routing |
+| Clean shared | Remove `TerminalFramePayloadSchema` if no longer referenced |
+| Update | `replay.ts` to use raw byte replay instead of frame replay |
+| Verify | Proxy builds, relay builds, existing tests pass (minus deleted ones) |
+| Effort | 3-4 hours |
+
+### Phase G: Tests + Relay Integration
+
+**Goal:** All tests pass, relay serves built web SPA.
+
+| Item | Details |
+|------|---------|
+| Tests | Migrate test files, remove Taro mocks, add xterm.js integration tests |
+| Relay | `express.static()` config, `WEB_DIST_DIR` env var |
+| E2E | Playwright tests against web build |
+| Docker | Update Dockerfile for multi-stage build |
+| Verify | `pnpm test` passes, `pnpm exec playwright test` passes, relay serves SPA |
+| Effort | 4-5 hours |
+
+### Phase H: PWA Polish
+
+**Goal:** Installable PWA with proper icons, offline shell.
+
+| Item | Details |
+|------|---------|
+| Icons | Generate 192x192 and 512x512 PNG icons |
+| Manifest | Tune vite-plugin-pwa config |
+| Wake Lock | Add Screen Wake Lock hook (acquire on active session) |
+| Verify | Chrome "Install" prompt, offline shell loads, Lighthouse PWA audit |
+| Effort | 1-2 hours |
+
+### Execution Summary
+
+| Phase | Scope | Est. Effort | Depends On |
+|-------|-------|-------------|------------|
+| A: Scaffold + Tokens | apps/web setup | 2-3h | - |
+| B: Business Logic | Review + migrate 26+ files | 3-4h | A |
+| C: xterm.js Client | Terminal component | 3-4h | A |
+| D: xterm.js Proxy+Relay | Binary passthrough pipeline | 6-8h | C |
+| E: Pages + Components | UI migration | 10-14h | B, D |
+| F: Server Cleanup | Delete old terminal code | 3-4h | D, E |
+| G: Tests + Integration | Testing + relay serving | 4-5h | E, F |
+| H: PWA Polish | Icons, offline, wake lock | 1-2h | G |
+| **Total** | | **33-44h** | |
+
+```
+Phase A ──┬── Phase B ────────┐
+          │                   │
+          └── Phase C ── Phase D ──┤
+                                   ├── Phase E ── Phase F ── Phase G ── Phase H
 ```
 
-### Pitfall 6: Vite HMR WebSocket vs App WebSocket
-
-**Issue:** Both Vite HMR and the app use WebSocket, possible confusion.
-**Mitigation:** No actual conflict. Vite HMR uses `/@vite/client` path. App WebSocket uses `/client` path, proxied to relay. Vite proxy config handles the separation.
-
-### Pitfall 7: RELAY_URL Define Constant
-
-**Issue:** Existing code uses `declare const RELAY_URL: string` with Taro's `defineConstants`. Vite uses `define` which requires `JSON.stringify`.
-**Mitigation:** In `vite.config.ts`, use `define: { RELAY_URL: JSON.stringify(process.env.RELAY_URL || "ws://localhost:3100/client") }`. The existing `declare const RELAY_URL` declaration in code works unchanged.
-
-### Pitfall 8: `IS_H5` Environment Check in websocket.ts
-
-**Issue:** `const IS_H5 = process.env.TARO_ENV === "h5"` will be `undefined` in Vite, causing the Taro codepath to be used.
-**Mitigation:** Remove the `IS_H5` branching entirely in the web version. Only keep the native WebSocket path.
+Phases B and C can run in parallel after A. Phase D depends only on C. Phase E requires both B and D. This is the critical path.
 
 ---
 
-## Dependencies to Add / Remove
+## 12. Dependencies
 
 ### New Dependencies (apps/web)
 
 **Runtime:**
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `react` | ^18.3.1 | UI framework (keep current version) |
+| `react` | ^18.3.1 | UI framework |
 | `react-dom` | ^18.3.1 | DOM renderer |
-| `react-router-dom` | ^7.14.1 | Client-side routing with createHashRouter |
-| `marked` | ^18.0.0 | Markdown rendering (keep current version) |
-| `highlight.js` | ^11.11.1 | Syntax highlighting (keep current version) |
+| `react-router-dom` | ^7.14.1 | Client-side routing (HashRouter) |
+| `marked` | ^18.0.0 | Markdown rendering |
+| `highlight.js` | ^11.11.1 | Syntax highlighting |
+| `@xterm/xterm` | ^5.x | Terminal emulator |
+| `@xterm/addon-fit` | ^0.10.x | Terminal auto-resize |
+| `@xterm/addon-web-links` | ^0.11.x | Clickable links |
+| `@xterm/addon-unicode11` | ^0.8.x | CJK character width |
+| `clsx` | ^2.x | Conditional className utility (for shadcn cn()) |
+| `tailwind-merge` | ^2.x | Tailwind class dedup (for shadcn cn()) |
+| `class-variance-authority` | ^0.7.x | Component variants (shadcn dependency) |
 
 **Dev Dependencies:**
 | Package | Version | Purpose |
 |---------|---------|---------|
 | `vite` | ^6.0.8 | Build tool + dev server |
 | `@vitejs/plugin-react` | ^4.5.2 | React fast refresh |
-| `tailwindcss` | ^4.2.2 | Utility-first CSS framework |
-| `@tailwindcss/vite` | ^4.2.2 | First-party Tailwind Vite plugin |
-| `vite-plugin-pwa` | ^1.2.0 | PWA manifest + service worker |
-| `@types/react` | ^18.3.28 | React type definitions |
-| `@types/react-dom` | ^19.2.3 | ReactDOM type definitions |
-| `typescript` | ^5.8.x | TypeScript compiler |
-| `vitest` | ^4.1.2 | Testing framework |
-| `@playwright/test` | ^1.52.0 | E2E testing |
-| `@cc-anywhere/shared` | workspace:* | Shared types and schemas |
+| `tailwindcss` | ^4.2.2 | CSS framework |
+| `@tailwindcss/vite` | ^4.2.2 | Tailwind Vite plugin |
+| `vite-plugin-pwa` | ^1.2.0 | PWA support |
+| `@types/react` | ^18.x | Type definitions |
+| `@types/react-dom` | ^19.x | Type definitions |
+| `typescript` | ^5.8.x | Compiler |
 
-### Packages NOT Carried Over (Taro-specific)
+**shadcn/ui components (source-copied, not npm packages):**
+- Button, Dialog (AlertDialog), ScrollArea, Toast + Toaster
 
-| Package | Reason |
-|---------|--------|
-| `@tarojs/components` | Replaced by HTML elements |
-| `@tarojs/helper` | Taro build helper |
-| `@tarojs/plugin-framework-react` | Taro React adapter |
-| `@tarojs/plugin-platform-h5` | Taro H5 compilation |
-| `@tarojs/plugin-platform-lark` | Feishu mini program compilation |
-| `@tarojs/react` | Taro React runtime |
-| `@tarojs/runtime` | Taro runtime |
-| `@tarojs/shared` | Taro shared utilities |
-| `@tarojs/taro` | Taro core API |
-| `@tarojs/cli` | Taro CLI |
-| `@tarojs/webpack5-runner` | Taro webpack builder |
-| `@babel/core` | Replaced by Vite (esbuild/SWC) |
-| `@babel/preset-react` | Replaced by @vitejs/plugin-react |
-| `@babel/runtime` | Babel runtime helper |
-| `babel-preset-taro` | Taro babel preset |
-| `postcss` | Handled by Tailwind Vite plugin |
-| `webpack` | Replaced by Vite |
+### Packages Dropped (Taro-specific)
+
+All `@tarojs/*`, `babel-preset-taro`, `webpack`, `@babel/*`, `postcss` (handled by Tailwind Vite plugin).
 
 ---
 
-## Assumptions Log
+## 13. Risks and Pitfalls
 
-| # | Claim | Risk if Wrong | Mitigation |
-|---|-------|---------------|------------|
-| A1 | Tailwind v4 `@theme` directive replaces `tailwind.config.js` for custom colors | LOW | Fallback to CSS custom properties which already work |
-| A2 | vite-plugin-pwa v1.2.0 is compatible with Vite 6.x | LOW | Widely used combination, downgrade to Vite 5 if needed |
-| A3 | react-router-dom v7 `createHashRouter` is stable | LOW | v7 is the current stable release |
-| A4 | Tailwind `@tailwindcss/vite` plugin works with Vite 6 | LOW | First-party integration, well-tested |
-| A5 | Browser `visibilitychange` event fires reliably on mobile Chrome/Safari | LOW | Standard API, supported since Chrome 33 / Safari 7 |
-| A6 | WebSocket reconnection on `visibilitychange` is sufficient for PWA background recovery | MEDIUM | May need additional heartbeat/ping mechanism if OS kills the connection |
+### Risk 1: xterm.js Mobile Performance (HIGH)
+
+**Concern:** xterm.js is designed for desktop. On low-end mobile devices, rendering high-speed output (compilation, `cat` large file) might stutter.
+
+**Mitigation:** xterm.js is used in VS Code which runs on Chromebooks and other constrained devices. Additionally, we control the write rate: batch rapid writes, and the proxy-side output sampling provides a safety valve. Profile early in Phase C with real mobile devices.
+
+### Risk 2: xterm.js Bundle Size (MEDIUM)
+
+**Concern:** xterm.js core + addons add ~300-400KB to the bundle.
+
+**Mitigation:** Terminal rendering is the core value proposition of the app. This is not optional. Lazy-load the terminal component so it doesn't block initial page load (proxy-select page doesn't need it).
+
+### Risk 3: ReplayBuffer Memory (LOW)
+
+**Concern:** 1MB per session replay buffer on the proxy side.
+
+**Mitigation:** 1MB is nothing on a development machine. Even 10 concurrent sessions = 10MB. Can make configurable.
+
+### Risk 4: Input Event Shape (`e.detail.value` -> `e.target.value`) (LOW)
+
+**Affected files:** `input-bar/index.tsx`, `directory-picker/index.tsx`
+
+**Mitigation:** Mechanical search-replace. Caught at compile time since the types differ.
+
+### Risk 5: WebSocket Reconnection in PWA Background (MEDIUM)
+
+**Concern:** PWA goes to background, WebSocket dies, app must reconnect on return.
+
+**Mitigation:** `visibilitychange` event triggers reconnection. ReplayBuffer on proxy side means no data loss. xterm.js replays the buffer to rebuild scrollback.
+
+### Risk 6: Binary Frame Encoding Overhead (LOW)
+
+**Concern:** base64 encoding adds 33% overhead to PTY data.
+
+**Mitigation:** Terminal output is typically <10KB/s. Even at burst rates of 1MB/s, base64 overhead is negligible. Optimize to binary frames only if profiling justifies it.
+
+---
+
+## 14. Assumptions Log
+
+| # | Claim | Risk | Mitigation |
+|---|-------|------|------------|
+| A1 | xterm.js handles split UTF-8/ANSI across write() calls | LOW | Documented behavior, used by VS Code |
+| A2 | xterm.js mobile rendering is adequate for terminal output rates | MEDIUM | Profile in Phase C, fallback: write throttling |
+| A3 | Tailwind v4 `@theme` works with shadcn/ui CSS variables | LOW | Both use CSS custom properties |
+| A4 | 1MB replay buffer is sufficient for reconnection | LOW | Configurable, 1MB ~= 10K lines of terminal output |
+| A5 | base64 encoding overhead is negligible at terminal rates | LOW | Can migrate to binary frames later |
+| A6 | shadcn/ui components work with Tailwind v4 | LOW | shadcn docs list v4 as supported |
