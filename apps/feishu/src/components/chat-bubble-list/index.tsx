@@ -31,9 +31,6 @@ export function ChatBubbleList({
   const isNearBottomRef = useRef(true);
   const [visibleTimestamps, setVisibleTimestamps] = useState<Set<string>>(new Set());
   const [scrollIntoViewId, setScrollIntoViewId] = useState("");
-  const [scrollTopState, setScrollTopState] = useState(0);
-  // ScrollView 的 scrollTop 需要变化才能触发滚动，用 toggle 强制刷新
-  const scrollToggleRef = useRef(0);
 
   const handleToggleTimestamp = useCallback((msgId: string) => {
     setVisibleTimestamps((prev) => {
@@ -89,7 +86,7 @@ export function ChatBubbleList({
     if (messages.length > 0) {
       scrollToBottom();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <ScrollView
