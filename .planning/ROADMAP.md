@@ -137,13 +137,13 @@ Plans:
   3. Live PTY output appears in browser xterm.js terminal with correct ANSI colors, cursor positioning, and CJK character rendering
   4. Binary WebSocket frames flow through relay without parsing or modification (relay distinguishes binary=PTY vs text=JSON at protocol level)
   5. Proxy restart recovers session state from disk (loads latest snapshot, replays subsequent events into headless xterm)
-**Plans**: TBD
+**Plans:** 3 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 09-01: TBD
-- [ ] 09-02: TBD
-- [ ] 09-03: TBD
+- [ ] 09-01-PLAN.md — EventStore CCAE binary persistence + headless xterm snapshots + delete old pipeline
+- [ ] 09-02-PLAN.md — IPC mixed protocol + RelayConnection binary + relay passthrough + clean shared types
+- [ ] 09-03-PLAN.md — Browser /pty-test page with xterm.js + visual verification
 
 ### Phase 10: Pages + Components Migration
 **Goal**: All three pages (proxy-select, session-list, chat) and all custom components render with HTML + Tailwind + shadcn/ui, full app navigation works end-to-end
@@ -251,7 +251,7 @@ Phase 7 --+-- Phase 8 ----------+
 | 6. Feishu Mini Program - Core Interaction | v1.0 | 13/13 | Complete | 2026-04-14 |
 | 7. Project Scaffold + Design Tokens | v2.0 | 2/2 | Complete | 2026-04-15 |
 | 8. Business Logic Adaptation | v2.0 | 0/1 | Not started | - |
-| 9. PTY Pipeline Full Chain | v2.0 | 0/3 | Not started | - |
+| 9. PTY Pipeline Full Chain | v2.0 | 0/3 | Planned | - |
 | 10. Pages + Components Migration | v2.0 | 0/3 | Not started | - |
 | 11. PTY Resilience | v2.0 | 0/2 | Not started | - |
 | 12. Deployment + PWA Basics | v2.0 | 0/2 | Not started | - |
