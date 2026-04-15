@@ -663,7 +663,7 @@ export default function Chat() {
           Taro.navigateBack();
         }}
       />
-      <View className="chat-page-body">
+      <View className="chat-page-body" style={{ paddingTop: `${screen.statusBarHeight + 88}px` }}>
         <StatusLine state={statusState} />
         <View className="chat-content">
           {isPty ? (

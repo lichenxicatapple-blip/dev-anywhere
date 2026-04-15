@@ -1,5 +1,6 @@
 // JSON 模式聊天气泡列表，使用 ScrollView 原生滚动组件
-// ScrollView 支持嵌套滚动隔离，内层 ScrollView scrollX 不会与外层 scrollY 冲突
+// ScrollView 解决嵌套滚动隔离，内层 ScrollView scrollX 不会与外层 scrollY 冲突
+// 滚动控制通过 DOM ref 命令式操作，避免 ScrollView 声明式 props 的竞态问题
 import { useRef, useEffect, useCallback, useState } from "react";
 import { View, Text, ScrollView } from "@tarojs/components";
 import type { ChatMessage, QuotedMessage } from "@/stores/chat-store";
@@ -17,7 +18,10 @@ interface ChatBubbleListProps {
   onQuote?: (quote: QuotedMessage) => void;
 }
 
-const BOTTOM_ANCHOR_ID = "chat-bottom-anchor";
+// H5 模式下 Taro ScrollView 渲染为普通 div，通过 DOM query 获取底层元素
+function getScrollElement(): HTMLElement | null {
+  return document.querySelector(".chat-bubble-list") as HTMLElement | null;
+}
 
 export function ChatBubbleList({
   messages,
@@ -29,8 +33,11 @@ export function ChatBubbleList({
   onQuote,
 }: ChatBubbleListProps) {
   const isNearBottomRef = useRef(true);
+  const prevScrollHeightRef = useRef(0);
+  const prevScrollTopRef = useRef(0);
+  const isLoadingMoreRef = useRef(false);
+  const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const [visibleTimestamps, setVisibleTimestamps] = useState<Set<string>>(new Set());
-  const [scrollIntoViewId, setScrollIntoViewId] = useState("");
 
   const handleToggleTimestamp = useCallback((msgId: string) => {
     setVisibleTimestamps((prev) => {
@@ -45,12 +52,12 @@ export function ChatBubbleList({
   }, []);
 
   const handleScroll = useCallback(
-    (e: { detail: { scrollTop: number; scrollHeight: number; clientHeight?: number } }) => {
-      const { scrollTop, scrollHeight } = e.detail;
-      // ScrollView 的 detail 可能不含 clientHeight，回退到容器高度估算
-      const clientHeight = e.detail.clientHeight || 0;
+    () => {
+      const el = getScrollElement();
+      if (!el) return;
+      const { scrollTop, scrollHeight, clientHeight } = el;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      const nearBottom = clientHeight === 0 ? true : distanceFromBottom < 50;
+      const nearBottom = distanceFromBottom < 50;
       if (nearBottom !== isNearBottomRef.current) {
         isNearBottomRef.current = nearBottom;
         onScrollThresholdChange(nearBottom);
@@ -59,44 +66,50 @@ export function ChatBubbleList({
     [onScrollThresholdChange],
   );
 
-  // 新消息到达时，如果在底部附近则自动滚到底
+  // 消息变化时的滚动处理：合并为单个 effect 避免竞争
+  // 两种场景互斥：load more 做位置补偿，新消息做滚到底
   useEffect(() => {
-    if (isNearBottomRef.current) {
-      setScrollIntoViewId(BOTTOM_ANCHOR_ID);
-      // 清除 scrollIntoView 以便下次再触发同一 id
-      const timer = setTimeout(() => setScrollIntoViewId(""), 100);
-      return () => clearTimeout(timer);
+    const el = getScrollElement();
+    if (!el) return;
+
+    // 场景 1：load more — 补偿 scrollTop 保持当前查看位置不变
+    // 消息可能分多批渲染，每批都需要补偿，直到 delta=0 才结束
+    if (prevScrollHeightRef.current > 0) {
+      const delta = el.scrollHeight - prevScrollHeightRef.current;
+      if (delta > 0) {
+        el.scrollTop = prevScrollTopRef.current + delta;
+        prevScrollTopRef.current = el.scrollTop;
+        prevScrollHeightRef.current = el.scrollHeight;
+      } else {
+        prevScrollHeightRef.current = 0;
+        prevScrollTopRef.current = 0;
+      }
+      return;
+    }
+
+    // 场景 2：新消息到达 — 如果在底部附近则自动滚到底
+    if (isNearBottomRef.current && bottomAnchorRef.current) {
+      bottomAnchorRef.current.scrollIntoView?.({ behavior: "smooth" });
     }
   }, [messages.length]);
 
   const handleLoadMore = useCallback(() => {
-    // ScrollView 的滚动位置补偿由原生组件自动处理
-    // 加载更多后不需要手动调整 scrollTop
+    const el = getScrollElement();
+    if (el) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      prevScrollTopRef.current = el.scrollTop;
+      isLoadingMoreRef.current = true;
+    }
     onLoadMore?.();
   }, [onLoadMore]);
-
-  // 滚动到底部的命令式方法，供外部或初始化调用
-  const scrollToBottom = useCallback(() => {
-    setScrollIntoViewId(BOTTOM_ANCHOR_ID);
-    setTimeout(() => setScrollIntoViewId(""), 100);
-  }, []);
-
-  // 初次加载时滚到底部
-  useEffect(() => {
-    if (messages.length > 0) {
-      scrollToBottom();
-    }
-  }, []);
 
   return (
     <ScrollView
       className="chat-bubble-list"
       scrollY
-      scrollWithAnimation
-      scrollIntoView={scrollIntoViewId}
-      onScroll={handleScroll}
       enhanced
       showScrollbar={false}
+      onScroll={handleScroll}
     >
       {hasMoreHistory && (
         <View className="chat-load-more">
@@ -137,7 +150,7 @@ export function ChatBubbleList({
           </View>
         </View>
       )}
-      <View id={BOTTOM_ANCHOR_ID} className="chat-bubble-bottom-anchor" />
+      <View ref={bottomAnchorRef} className="chat-bubble-bottom-anchor" />
     </ScrollView>
   );
 }
