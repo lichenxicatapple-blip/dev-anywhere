@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: executing
-stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-04-10T12:47:51.312Z"
-last_activity: 2026-04-10
+milestone: v2.0
+milestone_name: React SPA + xterm.js Migration
+status: defining_requirements
+stopped_at:
+last_updated: "2026-04-15T07:00:00.000Z"
+last_activity: 2026-04-15
 progress:
-  total_phases: 10
-  completed_phases: 6
-  total_plans: 28
-  completed_plans: 28
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-03)
+See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** 在任何地方（电脑或手机）都能与 Claude Code 实时交互，体验一致，不丢失上下文
-**Current focus:** Phase 04 — relay-server-core-transport
+**Current focus:** v2.0 — React SPA + xterm.js Migration
 
 ## Current Position
 
-Phase: 7
-Plan: Not started
-Status: Executing Phase 04
-Last activity: 2026-04-15 - Completed quick task 260415-k44: Migrate feishu client from Taro mini program to pure React SPA + PWA
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-15 — Milestone v2.0 started
 
 Progress: [░░░░░░░░░░] 0%
 
