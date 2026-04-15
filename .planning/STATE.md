@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: React SPA + xterm.js Migration
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-04-15T15:21:47.815Z"
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-04-15T15:35:13.085Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 6
-  completed_plans: 3
-  percent: 50
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Phase: 09 (pty-pipeline-full-chain) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-04-15
 
@@ -57,6 +57,7 @@ Progress: [▓░░░░░░░░░] 14%
 - Trend: Stable
 
 | Phase 09 P01 | 12min | 2 tasks | 15 files |
+| Phase 09 P02 | 8min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [v2.0]: Tailwind CSS v4 + shadcn/ui — design tokens via @theme, source-copied components
 - [Phase 09]: writeSync on pre-opened fd for D-02 immediate disk persistence
 - [Phase 09]: allowProposedApi required for @xterm/addon-serialize 0.14.0 on headless 6.0.0
+- [Phase 09]: createIpcReader rewritten as Buffer state machine for mixed binary+NDJSON protocol
+- [Phase 09]: RelayConnection.sendBinary() drops on disconnect (D-46), no queue for binary frames
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet for v2.0.
 
 ## Session Continuity
 
-Last session: 2026-04-15T15:21:47.812Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-04-15T15:35:13.082Z
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None

@@ -20,7 +20,7 @@
 
 - [x] **PTY-01**: proxy 端 @xterm/headless + serialize addon 快照机制
 - [x] **PTY-02**: proxy 端 EventStore 二进制持久化恢复（落盘 + gzip）
-- [ ] **PTY-03**: proxy 转发原始 PTY 字节流（替换 TerminalTracker + frame 推送）
+- [x] **PTY-03**: proxy 转发原始 PTY 字节流（替换 TerminalTracker + frame 推送）
 - [ ] **PTY-04**: relay 端 binary WebSocket frame 透传
 - [ ] **PTY-05**: 客户端断线重连：快照 + 增量事件重放
 - [ ] **PTY-06**: 多客户端同时观看同一 session 广播
@@ -70,7 +70,7 @@
 | FRONT-10 | Phase 8 | Pending |
 | PTY-01 | Phase 9 | Complete |
 | PTY-02 | Phase 9 | Complete |
-| PTY-03 | Phase 9 | Pending |
+| PTY-03 | Phase 9 | Complete |
 | PTY-04 | Phase 9 | Pending |
 | PTY-05 | Phase 11 | Pending |
 | PTY-06 | Phase 11 | Pending |
