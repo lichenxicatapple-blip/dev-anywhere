@@ -15,7 +15,8 @@ import { ToolApprovalCard } from "@/components/tool-approval-card";
 import { SlashCommandPicker } from "@/components/slash-command-picker";
 import { FilePathPicker } from "@/components/file-path-picker";
 import { QuotePreviewBar } from "@/components/quote-preview-bar";
-import type { MessageEnvelope, RelayControlMessage, TerminalFramePayload } from "@cc-anywhere/shared";
+import type { MessageEnvelope } from "@cc-anywhere/shared";
+import type { TerminalFramePayload } from "@/types/terminal-legacy";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import { parseAssistantMessage, routeStreamEvent, formatToolTitle } from "@/services/message-parser";
 import { useScreenSize } from "@/hooks/use-screen-size";
@@ -204,10 +205,11 @@ export default function Chat() {
         return;
       }
 
-      // RelayControlMessage 类型
-      const ctrl = msg as RelayControlMessage;
+      // v1 遗留消息类型 terminal_frame 已从 shared 包移除
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctrl = msg as any;
 
-      switch (ctrl.type) {
+      switch (ctrl.type as string) {
         case "terminal_frame": {
           if (ctrl.sessionId !== sessionId) break;
           const frame = ctrl.payload as TerminalFramePayload;
@@ -338,7 +340,7 @@ export default function Chat() {
       appDispatch({ type: "SET_PROXY", proxyId: result.proxyId, proxyName: null });
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
-        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() } as never);
       } else {
         setLoadingHistory(true);
         relay.sendControl({ type: "session_messages_request", sessionId } as never);
@@ -351,7 +353,7 @@ export default function Chat() {
     if (boundId) {
       appDispatch({ type: "SET_PROXY_ONLINE", online: true });
       if (isPty) {
-        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+        relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() } as never);
       } else {
         setLoadingHistory(true);
         relay.sendControl({ type: "session_messages_request", sessionId } as never);
@@ -436,7 +438,7 @@ export default function Chat() {
         // scrollDown 回到 live 模式
         if (direction === "down" && state.newestLineId != null && targetAnchor + rows > state.newestLineId) {
           terminalDispatch({ type: "CLEAR_ANCHOR" });
-          relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+          relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() } as never);
           return;
         }
 
@@ -454,7 +456,7 @@ export default function Chat() {
         direction,
         delta,
         rows,
-      });
+      } as never);
     },
     [relay, sessionId, terminalDispatch, getViewportRows],
   );
@@ -627,7 +629,7 @@ export default function Chat() {
   const handleTapToReturn = useCallback(() => {
     terminalDispatch({ type: "CLEAR_ANCHOR" });
     if (relay && sessionId) {
-      relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() });
+      relay.sendControl({ type: "terminal_frame_request", sessionId, rows: getViewportRows() } as never);
     }
   }, [relay, sessionId, terminalDispatch]);
 

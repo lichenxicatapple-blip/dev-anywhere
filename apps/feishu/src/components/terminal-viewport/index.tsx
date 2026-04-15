@@ -4,7 +4,7 @@
 // Taro H5 的 onScroll/onTouch props 不触发，必须直接 addEventListener
 import { useRef, useEffect } from "react";
 import { View, Text } from "@tarojs/components";
-import type { TermLine } from "@cc-anywhere/shared";
+import type { TermLine } from "@/types/terminal-legacy";
 import { BackToBottomButton } from "@/components/back-to-bottom";
 import "./index.css";
 

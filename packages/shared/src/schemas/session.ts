@@ -56,56 +56,6 @@ export const SessionStatusPayloadSchema = z.object({
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 
-// 终端栅格帧，一个 span 表示一段同属性的文本
-export const TermSpanSchema = z.object({
-  text: z.string(),
-  fg: z.string().optional(),
-  bg: z.string().optional(),
-  bold: z.boolean().optional(),
-  dim: z.boolean().optional(),
-  italic: z.boolean().optional(),
-  underline: z.boolean().optional(),
-  strikethrough: z.boolean().optional(),
-});
-export type TermSpan = z.infer<typeof TermSpanSchema>;
-
-export type TermLine = TermSpan[];
-
-// 终端栅格帧负载：full 模式为完整画面，delta 模式只包含变化行
-// 光标位置，相对于 viewport 左上角
-export const CursorSchema = z.object({
-  x: z.number().int(),
-  y: z.number().int(),
-}).optional();
-
-export type Cursor = z.infer<typeof CursorSchema>;
-
-const TerminalFrameFullSchema = z.object({
-  mode: z.literal("full"),
-  lines: z.array(z.array(TermSpanSchema)),
-  cursor: CursorSchema,
-  isScrolled: z.boolean().optional(),
-  anchorLineId: z.number().int().optional(),
-  newestLineId: z.number().int().optional(),
-});
-
-const TerminalFrameDeltaSchema = z.object({
-  mode: z.literal("delta"),
-  lines: z.array(z.object({
-    lineIndex: z.number(),
-    spans: z.array(TermSpanSchema),
-  })),
-  cursor: CursorSchema,
-});
-
-export const TerminalFramePayloadSchema = z.discriminatedUnion("mode", [
-  TerminalFrameFullSchema,
-  TerminalFrameDeltaSchema,
-]);
-export type TerminalFramePayload = z.infer<typeof TerminalFramePayloadSchema>;
-export type TerminalFrameFull = z.infer<typeof TerminalFrameFullSchema>;
-export type TerminalFrameDelta = z.infer<typeof TerminalFrameDeltaSchema>;
-
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({
   state: z.enum(["working", "turn_complete", "approval_wait"]),

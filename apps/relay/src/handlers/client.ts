@@ -11,8 +11,6 @@ const CLIENT_TO_PROXY_TYPES = new Set([
   "session_create",
   "session_terminate",
   "session_messages_request",
-  "terminal_frame_request",
-  "terminal_scroll_request",
   "session_list",
   "session_history_request",
   "session_resources_request",

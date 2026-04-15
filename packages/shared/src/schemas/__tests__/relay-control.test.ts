@@ -50,29 +50,34 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
-  it("rejects terminal_scroll_request with non-positive delta", () => {
+  it("rejects terminal_scroll_request (removed from schema)", () => {
     expect(() =>
       RelayControlSchema.parse({
         type: "terminal_scroll_request",
         sessionId: "sess-1",
         direction: "up",
-        delta: 0,
+        delta: 5,
       }),
     ).toThrow();
   });
 
-  it("parses valid terminal_scroll_request", () => {
-    const result = RelayControlSchema.parse({
-      type: "terminal_scroll_request",
-      sessionId: "sess-1",
-      direction: "up",
-      delta: 5,
-    });
-    expect(result.type).toBe("terminal_scroll_request");
-    if (result.type === "terminal_scroll_request") {
-      expect(result.direction).toBe("up");
-      expect(result.delta).toBe(5);
-    }
+  it("rejects terminal_frame_request (removed from schema)", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "terminal_frame_request",
+        sessionId: "sess-1",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects terminal_frame (removed from schema)", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "terminal_frame",
+        sessionId: "sess-1",
+        payload: { mode: "full", lines: [] },
+      }),
+    ).toThrow();
   });
 
   it("parses proxy_list_response with proxies array", () => {
@@ -148,17 +153,6 @@ describe("RelayControlSchema", () => {
     if (result.type === "file_tree_push") {
       expect(result.entries[0].name).toBe("index.ts");
     }
-  });
-
-  it("rejects terminal_scroll_request with invalid direction", () => {
-    expect(() =>
-      RelayControlSchema.parse({
-        type: "terminal_scroll_request",
-        sessionId: "sess-1",
-        direction: "left",
-        delta: 5,
-      }),
-    ).toThrow();
   });
 
   it("parses proxy_select_response with success=true and proxyId", () => {

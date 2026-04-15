@@ -192,23 +192,6 @@ describe("Phase 6 Integration: Message Routing", () => {
     expect(clientReceived.sessions[0].id).toBe("s1");
   });
 
-  it("routes terminal_scroll_request from client to proxy", async () => {
-    const { proxy, client } = await setupBoundPair();
-
-    const proxyMsgPromise = waitForMessage(proxy);
-    client.send(JSON.stringify({
-      type: "terminal_scroll_request",
-      sessionId: "s1",
-      direction: "up",
-      delta: 5,
-    }));
-
-    const proxyReceived = JSON.parse(await proxyMsgPromise);
-    expect(proxyReceived.type).toBe("terminal_scroll_request");
-    expect(proxyReceived.direction).toBe("up");
-    expect(proxyReceived.delta).toBe(5);
-    expect(proxyReceived.sessionId).toBe("s1");
-  });
 
   // ==========================================================
   // 4. proxy_list_response 包含 name
@@ -305,27 +288,6 @@ describe("Phase 6 Integration: Message Routing", () => {
     expect(received.code).toBe("NOT_BOUND");
   });
 
-  it("unbound client sending terminal_scroll_request receives relay_error", async () => {
-    const proxy = connectProxy();
-    await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await waitForMessage(proxy);
-
-    const client = connectClient();
-    await waitForOpen(client);
-    // 不 bind，直接发 terminal_scroll_request
-    const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      type: "terminal_scroll_request",
-      sessionId: "s1",
-      direction: "up",
-      delta: 5,
-    }));
-
-    const received = JSON.parse(await msgPromise);
-    expect(received.type).toBe("relay_error");
-    expect(received.code).toBe("NOT_BOUND");
-  });
 
   // ==========================================================
   // 多消息连续路由
