@@ -84,8 +84,6 @@ export function handleProxyConnection(
         logger.warn({ sessionIdLen, dataLen: data.length }, "Binary frame rejected: malformed sessionId prefix");
         return;
       }
-      const sessionId = data.subarray(1, 1 + sessionIdLen).toString("utf-8");
-
       if (!proxyWs.proxyId) {
         logger.warn("Binary frame from unregistered proxy, dropped");
         return;

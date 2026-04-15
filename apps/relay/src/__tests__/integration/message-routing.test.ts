@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@cc-anywhere/shared";
-import { waitForOpen, waitForMessage, collectMessages, getPort, settle } from "../helpers.js";
+import { waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
 
