@@ -39,11 +39,14 @@
 - [ ] **DEPLOY-01**: relay 同进程 serve 前端静态文件（express.static）
 - [ ] **DEPLOY-02**: Vite 开发模式 WebSocket proxy 到 relay
 
+## Notifications + Quick Actions (NOTIF)
+
+- [ ] **NOTIF-01**: Browser Push API 通知（任务完成/工具审批/出错时推送，即使页面关闭也能收到）
+- [ ] **NOTIF-02**: 快捷操作面板（一键常用命令、快速切换会话）
+
 ## Future Requirements (Deferred)
 
 - 飞书网页应用配置（开放平台注册、JSSDK 鉴权）
-- 通知推送（需要服务端推送能力）
-- 快捷操作面板
 
 ## Out of Scope
 
@@ -55,4 +58,29 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| — | — | Pending roadmap creation |
+| FRONT-01 | Phase 7 | Pending |
+| FRONT-02 | Phase 7 | Pending |
+| FRONT-03 | Phase 10 | Pending |
+| FRONT-04 | Phase 10 | Pending |
+| FRONT-05 | Phase 10 | Pending |
+| FRONT-06 | Phase 10 | Pending |
+| FRONT-07 | Phase 9 | Pending |
+| FRONT-08 | Phase 10 | Pending |
+| FRONT-09 | Phase 8 | Pending |
+| FRONT-10 | Phase 8 | Pending |
+| PTY-01 | Phase 9 | Pending |
+| PTY-02 | Phase 9 | Pending |
+| PTY-03 | Phase 9 | Pending |
+| PTY-04 | Phase 9 | Pending |
+| PTY-05 | Phase 11 | Pending |
+| PTY-06 | Phase 11 | Pending |
+| PTY-07 | Phase 11 | Pending |
+| PWA-01 | Phase 12 | Pending |
+| PWA-02 | Phase 12 | Pending |
+| PWA-03 | Phase 13 | Pending |
+| PWA-04 | Phase 13 | Pending |
+| PWA-05 | Phase 13 | Pending |
+| DEPLOY-01 | Phase 12 | Pending |
+| DEPLOY-02 | Phase 7 | Pending |
+| NOTIF-01 | Phase 14 | Pending |
+| NOTIF-02 | Phase 14 | Pending |
