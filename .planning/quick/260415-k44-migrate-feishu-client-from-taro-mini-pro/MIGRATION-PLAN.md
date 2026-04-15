@@ -1,7 +1,7 @@
 # CC Anywhere: Feishu Taro to React SPA + PWA Migration Plan
 
 **Created:** 2026-04-15
-**Updated:** 2026-04-15 (v2 -- incorporates shadcn/ui, xterm.js, design tokens decisions)
+**Updated:** 2026-04-15 (v3 -- remove artificial limits, trust modern hardware)
 **Source:** apps/feishu (Taro 3.6 mini program)
 **Target:** apps/web (Vite + React + TypeScript + Tailwind CSS v4 + shadcn/ui + xterm.js + PWA)
 **Status:** Draft - Pending review
@@ -28,7 +28,7 @@ BEFORE (current):
   Scrollback: scroll_request -> server -> anchor offset -> terminal_frame
 
 AFTER (xterm.js):
-  PTY bytes -> replay buffer (ring buffer, raw bytes) -> relay (passthrough)
+  PTY bytes -> ReplayBuffer (growable, raw bytes) -> relay (passthrough)
   -> client -> xterm.js (ANSI parse + render + scrollback, all local)
   Scrollback: xterm.js built-in, zero server involvement
 ```
@@ -182,8 +182,6 @@ Design tokens are the single source of truth for visual consistency. Defined as 
 
 ### Token Source Mapping
 
-Values extracted from current CSS files. This table documents where each token comes from so nothing is lost:
-
 | Token | Current Source | Value | Notes |
 |-------|--------------|-------|-------|
 | `--color-surface` | `--color-terminal-bg` in app.css | `#1E1E1E` | Was only terminal bg, now primary surface |
@@ -301,7 +299,7 @@ Every file below gets reviewed for: dead code, naming improvements, type tighten
 
 ### Navigation
 
-react-router's `useNavigate()` is sufficient. No wrapper/helper needed. The `toWebPath()` conversion for Taro-style URLs (`/pages/chat/index?x=1` -> `/pages/chat?x=1`) is a one-line utility used only in the `nav` object for `phase-machine.ts`.
+react-router's `useNavigate()` is sufficient. No wrapper needed. The `toWebPath()` conversion for Taro-style URLs (`/pages/chat/index?x=1` -> `/pages/chat?x=1`) is a one-line utility used only in the `nav` object for `phase-machine.ts`.
 
 ---
 
@@ -341,7 +339,7 @@ Dependencies:
 - `@xterm/addon-unicode11` - Unicode width detection (CJK characters)
 
 ```tsx
-// Simplified XTerminal component
+// XTerminal component
 function XTerminal({ sessionId }: { sessionId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -356,7 +354,7 @@ function XTerminal({ sessionId }: { sessionId: string }) {
       },
       fontFamily: 'Sarasa Fixed SC, SF Mono, monospace',
       fontSize: 14,
-      scrollback: 10000,
+      scrollback: 10000,  // user-configurable, generous default
       convertEol: true,
     });
     const fit = new FitAddon();
@@ -382,27 +380,32 @@ function XTerminal({ sessionId }: { sessionId: string }) {
 The proxy changes from "parse then push frames" to "buffer raw bytes and forward":
 
 ```typescript
-// New: simple replay buffer replacing TerminalTracker + FramePusher
+// Growable replay buffer replacing TerminalTracker + FramePusher.
+// No fixed size limit. A terminal session's full output is tens of MB at most.
+// Proxy runs on a developer machine with plenty of memory.
 class ReplayBuffer {
-  private buffer: Uint8Array;
-  private writePos = 0;
-
-  constructor(maxBytes = 1024 * 1024) { // 1MB ring buffer
-    this.buffer = new Uint8Array(maxBytes);
-  }
+  private chunks: Uint8Array[] = [];
+  private totalBytes = 0;
 
   write(data: Uint8Array): void {
-    // Ring buffer append
-    if (this.writePos + data.length > this.buffer.length) {
-      // Shift or wrap
-    }
-    this.buffer.set(data, this.writePos);
-    this.writePos += data.length;
+    this.chunks.push(data);
+    this.totalBytes += data.length;
   }
 
-  // For reconnection: dump entire buffer
+  // For reconnection: replay ALL buffered data. Never truncate.
   getAll(): Uint8Array {
-    return this.buffer.slice(0, this.writePos);
+    const result = new Uint8Array(this.totalBytes);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return result;
+  }
+
+  clear(): void {
+    this.chunks = [];
+    this.totalBytes = 0;
   }
 }
 ```
@@ -459,11 +462,16 @@ Or simpler: use a JSON envelope with base64-encoded data for the initial impleme
 
 **Problem:** Client disconnects and reconnects. xterm.js instance is fresh, scrollback is empty.
 
-**Solution:** Proxy maintains a ReplayBuffer (ring buffer of raw PTY bytes, ~1MB default). On reconnection, proxy sends the full buffer content. xterm.js replays it, rebuilding the visible state and scrollback.
+**Solution:** Proxy maintains a ReplayBuffer (growable array of raw PTY byte chunks). On reconnection, proxy sends the full buffer content. xterm.js replays it, rebuilding the visible state and scrollback.
 
-**Edge cases:**
-- Buffer overflows (very long session): Client gets the last ~1MB. Oldest output is lost. This is acceptable -- terminal emulators have finite scrollback too.
-- Reconnection during high-speed output: Buffer the replay, then switch to live stream. Use a sequence counter to avoid duplicates.
+The natural limit is xterm.js's scrollback setting (default 10000 lines, user-configurable). Even if the ReplayBuffer contains more data than xterm.js's scrollback can hold, xterm.js simply discards lines beyond its scrollback limit during replay. The data is complete on the wire; the client-side display limit is the user's choice.
+
+**Reconnection sequence:**
+1. Client connects, sends session bind request
+2. Relay forwards bind to proxy
+3. Proxy sends the full ReplayBuffer content as one or more `pty_data` messages
+4. Proxy then switches to live forwarding
+5. Use a sequence counter to prevent duplicate data at the switchover point
 
 #### Multi-Client Viewing Same Session
 
@@ -471,35 +479,21 @@ Or simpler: use a JSON envelope with base64-encoded data for the initial impleme
 
 **Solution:** Relay broadcasts every `pty_data` frame to ALL clients bound to that proxy+session. Each client's xterm.js processes the bytes independently. This is simpler than the current approach (single cached grid frame).
 
-**Edge case:** If one client connects late, it gets the ReplayBuffer dump first, then switches to live. Other clients are unaffected.
-
-#### Backpressure: Slow Client
-
-**Problem:** Fast PTY output + slow mobile network = data accumulates in relay's send buffer.
-
-**Solution:** Multi-level approach:
-1. **WebSocket bufferedAmount monitoring:** If `ws.bufferedAmount` exceeds threshold (e.g., 256KB), pause forwarding to that client. Resume when buffer drains.
-2. **Per-client drop policy:** If a client falls too far behind, drop intermediate frames (the client will catch up from ReplayBuffer on next reconnect).
-3. **Flow notification:** Send a control message `{ type: "pty_flow", state: "paused" | "resumed" }` so the client can show a "catching up..." indicator.
-
-This is strictly better than the current system where a slow client delays grid diffing for all clients.
+**Late joiner:** Gets the ReplayBuffer dump first, then switches to live. Other clients are unaffected.
 
 #### UTF-8 / ANSI Truncation at Frame Boundaries
 
 **Problem:** PTY emits bytes in arbitrary chunks. A UTF-8 multi-byte character or ANSI escape sequence might be split across two chunks.
 
-**Solution:** xterm.js handles this natively. Its parser maintains state across `write()` calls. Partial UTF-8 sequences are buffered internally until complete. This is one of the key advantages over the custom TerminalTracker, which also had to handle this but in our code.
+**Solution:** xterm.js handles this natively. Its parser maintains state across `write()` calls. Partial UTF-8 sequences are buffered internally until complete. This is one of the key advantages over the custom TerminalTracker -- no special handling needed on proxy or relay side. Forward raw bytes as-is.
 
-No special handling needed on proxy or relay side. Just forward raw bytes as-is.
+#### High-Speed Output
 
-#### High-Speed Output Flow Control (Mobile Rendering)
+**Problem:** `cat large-file.txt` or compilation output floods the terminal.
 
-**Problem:** `cat large-file.txt` or compilation output floods the terminal. Mobile xterm.js rendering can't keep up.
+**Solution:** xterm.js has built-in write batching -- it coalesces rapid `write()` calls and batches DOM updates internally using requestAnimationFrame. Write speed is not 1:1 with render speed. Trust xterm.js to handle this; it's the same engine VS Code uses.
 
-**Solution:**
-1. **xterm.js built-in buffering:** xterm.js batches DOM updates internally. Write speed is not 1:1 with render speed.
-2. **Write throttling on client:** If writes queue up, batch them (`term.write(accumulatedChunk)` instead of per-frame).
-3. **Proxy-side output sampling:** If output rate exceeds threshold (e.g., >100KB/s sustained), proxy can reduce forwarding frequency. The ReplayBuffer still captures everything for completeness.
+No proxy-side throttling or output sampling. Forward everything. The client-side rendering engine handles its own pace.
 
 #### Binary Data Encoding
 
@@ -509,6 +503,14 @@ No special handling needed on proxy or relay side. Just forward raw bytes as-is.
 - Binary frames: zero overhead, but requires separate routing path in relay
 
 For the initial migration, JSON+base64 is correct. The overhead is negligible at terminal output rates (typically <10KB/s, burst <1MB/s). Optimization to binary frames can be a follow-up task.
+
+#### Backpressure: Slow Client
+
+**Problem:** Fast PTY output + slow mobile network = data accumulates in relay's send buffer.
+
+**Solution:** WebSocket already has TCP-level flow control. If a client's network is slow, the OS TCP send buffer fills, and the WebSocket library handles this. The relay should monitor `ws.readyState` and disconnect truly dead clients (no heartbeat response). Do not silently drop data or pause forwarding based on `bufferedAmount` thresholds -- the user expects complete output.
+
+If a client disconnects under load, it reconnects and gets the full ReplayBuffer. No data is lost.
 
 ### 5.5 terminal-store.ts Rewrite
 
@@ -617,7 +619,7 @@ VitePWA({
       {
         urlPattern: /\.(?:js|css|woff2?)$/,
         handler: "CacheFirst",
-        options: { cacheName: "static-assets", expiration: { maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 } },
+        options: { cacheName: "static-assets", expiration: { maxAgeSeconds: 30 * 24 * 60 * 60 } },
       },
     ],
     navigateFallback: "index.html",
@@ -759,12 +761,12 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 
 | Item | Details |
 |------|---------|
-| Proxy | Add ReplayBuffer, forward raw PTY data instead of frame-pushing |
+| Proxy | Add ReplayBuffer (growable, no size limit), forward raw PTY data instead of frame-pushing |
 | Proxy | Keep OSC title extraction (reads raw stream) |
 | Relay | Add `pty_data` passthrough routing (broadcast to bound clients) |
 | Protocol | Add `pty_data` message type to shared schemas |
 | Wire | End-to-end: PTY -> proxy -> relay -> client xterm.js |
-| Verify | Live terminal output visible in browser, scrollback works, reconnection replays |
+| Verify | Live terminal output visible in browser, scrollback works, reconnection replays full buffer |
 | Effort | 6-8 hours |
 | **Risk** | Highest risk phase. Touches all three tiers. Must be tested end-to-end. |
 
@@ -836,10 +838,10 @@ The xterm.js change affects all three tiers. The phases reflect this cross-cutti
 | **Total** | | **33-44h** | |
 
 ```
-Phase A ──┬── Phase B ────────┐
-          │                   │
-          └── Phase C ── Phase D ──┤
-                                   ├── Phase E ── Phase F ── Phase G ── Phase H
+Phase A --+-- Phase B ----------+
+          |                     |
+          +-- Phase C -- Phase D --+
+                                   +-- Phase E -- Phase F -- Phase G -- Phase H
 ```
 
 Phases B and C can run in parallel after A. Phase D depends only on C. Phase E requires both B and D. This is the critical path.
@@ -889,37 +891,25 @@ All `@tarojs/*`, `babel-preset-taro`, `webpack`, `@babel/*`, `postcss` (handled 
 
 ## 13. Risks and Pitfalls
 
-### Risk 1: xterm.js Mobile Performance (HIGH)
+### Risk 1: xterm.js Mobile Performance
 
 **Concern:** xterm.js is designed for desktop. On low-end mobile devices, rendering high-speed output (compilation, `cat` large file) might stutter.
 
-**Mitigation:** xterm.js is used in VS Code which runs on Chromebooks and other constrained devices. Additionally, we control the write rate: batch rapid writes, and the proxy-side output sampling provides a safety valve. Profile early in Phase C with real mobile devices.
+**Mitigation:** xterm.js is used in VS Code which runs on Chromebooks and other constrained devices. xterm.js batches DOM updates internally via requestAnimationFrame. Profile early in Phase C with real mobile devices.
 
-### Risk 2: xterm.js Bundle Size (MEDIUM)
-
-**Concern:** xterm.js core + addons add ~300-400KB to the bundle.
-
-**Mitigation:** Terminal rendering is the core value proposition of the app. This is not optional. Lazy-load the terminal component so it doesn't block initial page load (proxy-select page doesn't need it).
-
-### Risk 3: ReplayBuffer Memory (LOW)
-
-**Concern:** 1MB per session replay buffer on the proxy side.
-
-**Mitigation:** 1MB is nothing on a development machine. Even 10 concurrent sessions = 10MB. Can make configurable.
-
-### Risk 4: Input Event Shape (`e.detail.value` -> `e.target.value`) (LOW)
+### Risk 2: Input Event Shape (`e.detail.value` -> `e.target.value`)
 
 **Affected files:** `input-bar/index.tsx`, `directory-picker/index.tsx`
 
 **Mitigation:** Mechanical search-replace. Caught at compile time since the types differ.
 
-### Risk 5: WebSocket Reconnection in PWA Background (MEDIUM)
+### Risk 3: WebSocket Reconnection in PWA Background
 
 **Concern:** PWA goes to background, WebSocket dies, app must reconnect on return.
 
-**Mitigation:** `visibilitychange` event triggers reconnection. ReplayBuffer on proxy side means no data loss. xterm.js replays the buffer to rebuild scrollback.
+**Mitigation:** `visibilitychange` event triggers reconnection. ReplayBuffer on proxy side means the reconnecting client gets the full session history replayed by xterm.js.
 
-### Risk 6: Binary Frame Encoding Overhead (LOW)
+### Risk 4: Binary Frame Encoding Overhead
 
 **Concern:** base64 encoding adds 33% overhead to PTY data.
 
@@ -932,8 +922,7 @@ All `@tarojs/*`, `babel-preset-taro`, `webpack`, `@babel/*`, `postcss` (handled 
 | # | Claim | Risk | Mitigation |
 |---|-------|------|------------|
 | A1 | xterm.js handles split UTF-8/ANSI across write() calls | LOW | Documented behavior, used by VS Code |
-| A2 | xterm.js mobile rendering is adequate for terminal output rates | MEDIUM | Profile in Phase C, fallback: write throttling |
+| A2 | xterm.js mobile rendering is adequate for terminal output rates | MEDIUM | Profile in Phase C |
 | A3 | Tailwind v4 `@theme` works with shadcn/ui CSS variables | LOW | Both use CSS custom properties |
-| A4 | 1MB replay buffer is sufficient for reconnection | LOW | Configurable, 1MB ~= 10K lines of terminal output |
-| A5 | base64 encoding overhead is negligible at terminal rates | LOW | Can migrate to binary frames later |
-| A6 | shadcn/ui components work with Tailwind v4 | LOW | shadcn docs list v4 as supported |
+| A4 | base64 encoding overhead is negligible at terminal rates | LOW | Can migrate to binary frames later |
+| A5 | shadcn/ui components work with Tailwind v4 | LOW | shadcn docs list v4 as supported |
