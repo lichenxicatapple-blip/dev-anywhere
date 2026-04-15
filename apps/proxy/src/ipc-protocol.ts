@@ -2,6 +2,28 @@ import { z } from "zod";
 import { SessionState } from "@cc-anywhere/shared";
 import { LineBuffer } from "./line-buffer.js";
 
+// IPC binary 帧标记字节，0x00 不可能是 JSON 行的首字节（JSON 以 '{' 开头）
+export const IPC_BINARY_MARKER = 0x00;
+
+// 编码 binary PTY 数据帧用于 IPC 传输
+// 格式: [1B 0x00 marker][4B payload_len uint32LE][1B sessionId_len][sessionId UTF-8][PTY data]
+export function encodeBinaryIpcFrame(sessionId: string, data: Buffer): Buffer {
+  const sessionIdBuf = Buffer.from(sessionId, "utf-8");
+  const payloadLen = 1 + sessionIdBuf.length + data.length;
+  const frame = Buffer.alloc(1 + 4 + payloadLen);
+  let offset = 0;
+  frame[offset] = IPC_BINARY_MARKER;
+  offset += 1;
+  frame.writeUInt32LE(payloadLen, offset);
+  offset += 4;
+  frame[offset] = sessionIdBuf.length;
+  offset += 1;
+  sessionIdBuf.copy(frame, offset);
+  offset += sessionIdBuf.length;
+  data.copy(frame, offset);
+  return frame;
+}
+
 const sessionStateValues = Object.values(SessionState) as [string, ...string[]];
 
 // IPC 消息 schema，客户端与服务端通过 Unix domain socket 使用 NDJSON 通信
@@ -266,28 +288,65 @@ export function serializeIpc(msg: IpcMessage): string {
   return JSON.stringify(msg) + "\n";
 }
 
-// 从可读流中读取 NDJSON 消息，通过 LineBuffer 保证完整行分割
+// 混合协议 IPC 读取器，支持 NDJSON 控制消息和 binary PTY 帧
+// binary 帧以 0x00 开头，NDJSON 行以 '{' 开头，通过首字节区分
 export function createIpcReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: IpcMessage) => void,
+  onBinaryFrame?: (sessionId: string, data: Buffer) => void,
 ): void {
-  const lineBuffer = new LineBuffer();
-  lineBuffer.on("data", (line: Buffer | string) => {
-    const str = typeof line === "string" ? line : line.toString();
-    if (str.length === 0) return;
+  let buf = Buffer.alloc(0);
 
-    try {
-      const raw = JSON.parse(str);
-      const result = IpcMessageSchema.safeParse(raw);
-      if (result.success) {
-        onMessage(result.data);
+  // 解析状态机：不断消费 buf 中的完整消息
+  function drain(): void {
+    while (buf.length > 0) {
+      if (buf[0] === IPC_BINARY_MARKER) {
+        // binary 帧: [1B marker][4B payload_len LE][payload]
+        // 需要至少 5 字节才能读取 header
+        if (buf.length < 5) return;
+        const payloadLen = buf.readUInt32LE(1);
+        const totalFrameLen = 1 + 4 + payloadLen;
+        if (buf.length < totalFrameLen) return;
+
+        // 解析 payload: [1B sessionId_len][sessionId][pty data]
+        const payloadStart = 5;
+        const sessionIdLen = buf[payloadStart];
+        const sessionId = buf.subarray(payloadStart + 1, payloadStart + 1 + sessionIdLen).toString("utf-8");
+        const ptyData = Buffer.from(buf.subarray(payloadStart + 1 + sessionIdLen, totalFrameLen));
+
+        if (onBinaryFrame) {
+          onBinaryFrame(sessionId, ptyData);
+        }
+
+        buf = buf.subarray(totalFrameLen);
       } else {
-        console.warn("IPC message validation failed:", result.error);
-      }
-    } catch (err) {
-      console.warn("IPC message parse error:", err);
-    }
-  });
+        // NDJSON 行: 找 \n 分隔符
+        const newlineIdx = buf.indexOf(0x0a); // '\n'
+        if (newlineIdx === -1) return;
 
-  (stream as NodeJS.ReadableStream).pipe(lineBuffer);
+        const line = buf.subarray(0, newlineIdx).toString("utf-8");
+        buf = buf.subarray(newlineIdx + 1);
+
+        if (line.length === 0) continue;
+
+        try {
+          const raw = JSON.parse(line);
+          const result = IpcMessageSchema.safeParse(raw);
+          if (result.success) {
+            onMessage(result.data);
+          } else {
+            console.warn("IPC message validation failed:", result.error);
+          }
+        } catch (err) {
+          console.warn("IPC message parse error:", err);
+        }
+      }
+    }
+  }
+
+  stream.on("data", (chunk: Buffer | string) => {
+    const incoming = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    buf = Buffer.concat([buf, incoming]);
+    drain();
+  });
 }
