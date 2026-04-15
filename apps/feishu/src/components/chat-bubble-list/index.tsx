@@ -32,7 +32,11 @@ export function ChatBubbleList({
 }: ChatBubbleListProps) {
   const isNearBottomRef = useRef(true);
   const isLoadingMoreRef = useRef(false);
-  const bottomAnchorRef = useRef<HTMLDivElement>(null);
+  const anchorMsgIdRef = useRef("");
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const [scrollToView, setScrollToView] = useState("");
+  const [scrollAnimate, setScrollAnimate] = useState(true);
   const [visibleTimestamps, setVisibleTimestamps] = useState<Set<string>>(new Set());
 
   const handleToggleTimestamp = useCallback((msgId: string) => {
@@ -62,21 +66,37 @@ export function ChatBubbleList({
     [onScrollThresholdChange],
   );
 
-  // 消息变化时的滚动处理
+  // 统一用 ScrollView scrollIntoView prop 处理滚动，兼容 H5 和小程序
   useEffect(() => {
-    // load more 时跳过自动滚动，浏览器 scroll anchoring 保持位置
     if (isLoadingMoreRef.current) {
       isLoadingMoreRef.current = false;
+      // 锚定到 load more 前的第一条可见消息，无动画瞬间跳转
+      if (anchorMsgIdRef.current) {
+        const anchorId = anchorMsgIdRef.current;
+        anchorMsgIdRef.current = "";
+        setScrollAnimate(false);
+        setScrollToView("");
+        setTimeout(() => {
+          setScrollToView(anchorId);
+          // 恢复动画，下次新消息滚动时使用
+          setTimeout(() => setScrollAnimate(true), 100);
+        }, 50);
+      }
       return;
     }
 
-    // 新消息到达时，如果在底部附近则自动滚到底
-    if (isNearBottomRef.current && bottomAnchorRef.current) {
-      bottomAnchorRef.current.scrollIntoView?.({ behavior: "smooth" });
+    // 新消息或初始加载时自动滚到底
+    if (isNearBottomRef.current && messages.length > 0) {
+      setScrollToView("");
+      setTimeout(() => setScrollToView("chat-bottom-anchor"), 50);
     }
   }, [messages.length]);
 
   const handleLoadMore = useCallback(() => {
+    // 记录当前第一条可见消息 ID 作为锚点
+    if (messagesRef.current.length > 0) {
+      anchorMsgIdRef.current = messagesRef.current[0].id;
+    }
     isLoadingMoreRef.current = true;
     onLoadMore?.();
   }, [onLoadMore]);
@@ -86,6 +106,8 @@ export function ChatBubbleList({
       className="chat-bubble-list"
       scrollY
       showScrollbar={false}
+      scrollIntoView={scrollToView}
+      scrollWithAnimation={scrollAnimate}
       onScroll={handleScroll}
     >
       {hasMoreHistory && (
@@ -94,7 +116,7 @@ export function ChatBubbleList({
         </View>
       )}
       {messages.map((msg) => (
-        <View key={msg.id} className={`chat-bubble-row ${msg.role}`}>
+        <View key={msg.id} id={msg.id} className={`chat-bubble-row ${msg.role}`}>
           {msg.role === "user" ? (
             <UserBubble
               text={msg.text}
@@ -127,7 +149,7 @@ export function ChatBubbleList({
           </View>
         </View>
       )}
-      <View ref={bottomAnchorRef} className="chat-bubble-bottom-anchor" />
+      <View id="chat-bottom-anchor" className="chat-bubble-bottom-anchor" />
     </ScrollView>
   );
 }

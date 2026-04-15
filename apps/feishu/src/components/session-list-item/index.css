@@ -24,7 +24,7 @@
   transform: translateX(-160px);
 }
 
-/* Swipe action button */
+/* Swipe action button: 默认藏在右侧外面，滑动时跟着进来 */
 .sli-action {
   position: absolute;
   right: 0;
@@ -36,6 +36,12 @@
   align-items: center;
   justify-content: center;
   border-radius: 0 16px 16px 0;
+  transform: translateX(100%);
+  transition: transform 0.25s ease-out;
+}
+
+.sli-swiped ~ .sli-action {
+  transform: translateX(0);
 }
 
 .sli-action-text {
