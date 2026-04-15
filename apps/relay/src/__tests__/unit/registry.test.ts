@@ -97,32 +97,26 @@ describe("RelayRegistry", () => {
     it("markProxyOffline sets ws to null and preserves state", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
-      registry.getOrCreateSessionBuffer("s1");
 
       registry.markProxyOffline("p1");
 
       expect(registry.getProxy("p1")).toBeUndefined();
       expect(registry.hasProxy("p1")).toBe(true);
-      expect(registry.getSessionBuffer("s1")).toBeDefined();
     });
 
     it("state persists indefinitely after markProxyOffline", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
-      registry.getOrCreateSessionBuffer("s1");
 
       registry.markProxyOffline("p1");
 
-      // 没有定时器，状态永远保留
       expect(registry.hasProxy("p1")).toBe(true);
-      expect(registry.getSessionBuffer("s1")).toBeDefined();
     });
 
     it("reconnect after offline restores state", () => {
       const ws1 = createMockWs();
       registry.registerProxy("p1", ws1);
       registry.addSessionToProxy("p1", "s1");
-      registry.getOrCreateSessionBuffer("s1");
 
       registry.markProxyOffline("p1");
       expect(registry.getProxy("p1")).toBeUndefined();
@@ -132,7 +126,6 @@ describe("RelayRegistry", () => {
       expect(status).toBe("reconnected");
       expect(registry.getProxy("p1")).toBe(ws2);
       expect(registry.isProxyOnline("p1")).toBe(true);
-      expect(registry.getSessionBuffer("s1")).toBeDefined();
     });
 
     it("markProxyOffline does nothing for unknown proxy", () => {
@@ -140,34 +133,22 @@ describe("RelayRegistry", () => {
     });
   });
 
-  describe("session buffers", () => {
-    it("getOrCreateSessionBuffer creates buffer on first access", () => {
-      const buffer = registry.getOrCreateSessionBuffer("s1");
-      expect(buffer).toBeDefined();
-      expect(buffer.size()).toBe(0);
-    });
-
-    it("getOrCreateSessionBuffer returns same buffer on second access", () => {
-      const buffer1 = registry.getOrCreateSessionBuffer("s1");
-      const buffer2 = registry.getOrCreateSessionBuffer("s1");
-      expect(buffer1).toBe(buffer2);
-    });
-
-    it("getSessionBuffer returns undefined for unknown session", () => {
-      expect(registry.getSessionBuffer("unknown")).toBeUndefined();
-    });
-
+  describe("session tracking", () => {
     it("addSessionToProxy tracks sessionId in proxy session set", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.addSessionToProxy("p1", "s2");
-      registry.getOrCreateSessionBuffer("s1");
-      registry.getOrCreateSessionBuffer("s2");
 
-      // 清理 proxy 时会话缓冲区也被清理
+      const sessions = registry.getSessionsForProxy("p1");
+      expect(sessions).toContain("s1");
+      expect(sessions).toContain("s2");
+    });
+
+    it("unregisterProxy cleans up sessions", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "s1");
       registry.unregisterProxy("p1");
-      expect(registry.getSessionBuffer("s1")).toBeUndefined();
-      expect(registry.getSessionBuffer("s2")).toBeUndefined();
+      expect(registry.getSessionsForProxy("p1")).toEqual([]);
     });
   });
 
@@ -292,32 +273,6 @@ describe("RelayRegistry", () => {
       const details = registry.getClientDetails();
       expect(details).toHaveLength(1);
       expect(details[0].online).toBe(false);
-    });
-  });
-
-  describe("getBufferStats", () => {
-    it("returns accurate counts", () => {
-      registry.registerProxy("p1", createMockWs());
-      registry.registerProxy("p2", createMockWs());
-
-      const buf1 = registry.getOrCreateSessionBuffer("s1");
-      buf1.append({ raw: "{}", seq: 1, type: "user_input", source: "proxy" });
-      buf1.append({ raw: "{}", seq: 2, type: "assistant_message", source: "proxy" });
-
-      const buf2 = registry.getOrCreateSessionBuffer("s2");
-      buf2.append({ raw: "{}", seq: 1, type: "user_input", source: "proxy" });
-
-      const stats = registry.getBufferStats();
-      expect(stats.totalBuffered).toBe(3);
-      expect(stats.sessionCount).toBe(2);
-      expect(stats.proxyCount).toBe(2);
-    });
-
-    it("returns zeros when empty", () => {
-      const stats = registry.getBufferStats();
-      expect(stats.totalBuffered).toBe(0);
-      expect(stats.sessionCount).toBe(0);
-      expect(stats.proxyCount).toBe(0);
     });
   });
 

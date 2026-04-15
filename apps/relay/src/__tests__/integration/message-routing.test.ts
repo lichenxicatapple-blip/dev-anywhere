@@ -102,21 +102,6 @@ describe("Phase 6 Integration: Message Routing", () => {
   // 2. Control 消息端到端（proxy -> relay -> client）
   // ==========================================================
 
-  it("routes terminal_frame control message from proxy to client", async () => {
-    const { proxy, client } = await setupBoundPair();
-
-    const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "terminal_frame",
-      sessionId: "s1",
-      payload: { mode: "full", lines: [[{ text: "$ hello", fg: "#00ff00" }]] },
-    }));
-
-    const received = JSON.parse(await msgPromise);
-    expect(received.type).toBe("terminal_frame");
-    expect(received.payload.lines[0][0].text).toBe("$ hello");
-  });
-
   it("routes pty_state control message from proxy to client", async () => {
     const { proxy, client } = await setupBoundPair();
 
@@ -247,60 +232,52 @@ describe("Phase 6 Integration: Message Routing", () => {
   });
 
   // ==========================================================
-  // 5. Buffer 行为验证
+  // 5. Binary frame passthrough
   // ==========================================================
 
-  it("terminal_frame does not enter session buffer", async () => {
+  it("routes binary frame from proxy to client", async () => {
     const { proxy, client } = await setupBoundPair();
 
-    // 发送 Envelope 消息使 buffer 增长
-    proxy.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(), source: "proxy", version: "1.0",
-      type: "assistant_message",
-      payload: { text: "msg-1", isPartial: false },
-    }));
-    await settle();
+    // 构造 binary 帧: [1B sessionIdLen][sessionId UTF-8][PTY data]
+    const sessionId = "s1";
+    const ptyData = Buffer.from("\x1b[32mhello\x1b[0m", "utf-8");
+    const frame = Buffer.alloc(1 + sessionId.length + ptyData.length);
+    frame[0] = sessionId.length;
+    frame.write(sessionId, 1, "utf-8");
+    ptyData.copy(frame, 1 + sessionId.length);
 
-    const bufferBefore = relay.registry.getSessionBuffer("s1");
-    expect(bufferBefore).toBeDefined();
-    const sizeBefore = bufferBefore!.size();
-    expect(sizeBefore).toBe(1);
+    const msgPromise = new Promise<Buffer>((resolve) => {
+      client.once("message", (data: Buffer) => resolve(data));
+    });
 
-    // 发送 terminal_frame（Control 消息，不应进 buffer）
-    const clientMsgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "terminal_frame",
-      sessionId: "s1",
-      payload: { mode: "full", lines: [[{ text: "frame" }]] },
-    }));
-    await clientMsgPromise;
-    await settle();
+    proxy.send(frame);
+    const received = await msgPromise;
 
-    expect(relay.registry.getSessionBuffer("s1")!.size()).toBe(sizeBefore);
+    // client 收到完整 binary 帧（含 sessionId 前缀）
+    expect(Buffer.isBuffer(received)).toBe(true);
+    expect(received.length).toBe(frame.length);
+    const receivedSessionIdLen = received[0];
+    expect(receivedSessionIdLen).toBe(sessionId.length);
+    const receivedSessionId = received.subarray(1, 1 + receivedSessionIdLen).toString("utf-8");
+    expect(receivedSessionId).toBe(sessionId);
+    const receivedPtyData = received.subarray(1 + receivedSessionIdLen);
+    expect(receivedPtyData.toString("utf-8")).toBe("\x1b[32mhello\x1b[0m");
   });
 
-  it("assistant_message enters session buffer", async () => {
-    const { proxy } = await setupBoundPair();
+  it("binary frame from unregistered proxy is dropped", async () => {
+    // 直接连接不注册的 proxy
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
 
-    proxy.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(), source: "proxy", version: "1.0",
-      type: "assistant_message",
-      payload: { text: "msg-1", isPartial: false },
-    }));
+    const client = connectClient();
+    await waitForOpen(client);
+
+    // 发送 binary 帧（proxy 未注册）
+    const frame = Buffer.from([2, 0x73, 0x31, 0x41]);
+    proxy.send(frame);
     await settle();
 
-    const buffer = relay.registry.getSessionBuffer("s1");
-    expect(buffer).toBeDefined();
-    expect(buffer!.size()).toBe(1);
-
-    proxy.send(JSON.stringify({
-      seq: 2, sessionId: "s1", timestamp: Date.now(), source: "proxy", version: "1.0",
-      type: "assistant_message",
-      payload: { text: "msg-2", isPartial: false },
-    }));
-    await settle();
-
-    expect(buffer!.size()).toBe(2);
+    // client 不应收到任何消息（没有绑定关系）
   });
 
   // ==========================================================
@@ -354,29 +331,31 @@ describe("Phase 6 Integration: Message Routing", () => {
   // 多消息连续路由
   // ==========================================================
 
-  it("routes interleaved terminal_frame and pty_state in sequence", async () => {
+  it("routes interleaved JSON control and binary frames in sequence", async () => {
     const { proxy, client } = await setupBoundPair();
 
-    const messagesPromise = collectMessages(client, 3);
-
-    proxy.send(JSON.stringify({
-      type: "terminal_frame", sessionId: "s1",
-      payload: { mode: "full", lines: [[{ text: "$ npm test" }]] },
-    }));
+    // 先发一个 JSON control 消息
+    const jsonMsgPromise = waitForMessage(client);
     proxy.send(JSON.stringify({
       type: "pty_state", sessionId: "s1",
       payload: { state: "working", title: "Running tests" },
     }));
-    proxy.send(JSON.stringify({
-      type: "terminal_frame", sessionId: "s1",
-      payload: { mode: "full", lines: [[{ text: "$ npm test" }], [{ text: "PASS", fg: "#00ff00" }]] },
-    }));
+    const jsonReceived = JSON.parse(await jsonMsgPromise);
+    expect(jsonReceived.type).toBe("pty_state");
 
-    const received = (await messagesPromise).map((m) => JSON.parse(m));
-    expect(received).toHaveLength(3);
-    expect(received[0].type).toBe("terminal_frame");
-    expect(received[1].type).toBe("pty_state");
-    expect(received[2].type).toBe("terminal_frame");
-    expect(received[2].payload.lines).toHaveLength(2);
+    // 再发一个 binary 帧
+    const sessionId = "s1";
+    const ptyData = Buffer.from("PASS", "utf-8");
+    const frame = Buffer.alloc(1 + sessionId.length + ptyData.length);
+    frame[0] = sessionId.length;
+    frame.write(sessionId, 1, "utf-8");
+    ptyData.copy(frame, 1 + sessionId.length);
+
+    const binaryMsgPromise = new Promise<Buffer>((resolve) => {
+      client.once("message", (data: Buffer) => resolve(data));
+    });
+    proxy.send(frame);
+    const binaryReceived = await binaryMsgPromise;
+    expect(Buffer.isBuffer(binaryReceived)).toBe(true);
   });
 });

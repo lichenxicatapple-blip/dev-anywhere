@@ -3,9 +3,11 @@ import type { Logger } from "@cc-anywhere/shared";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 
+// binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
+const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
+
 // proxy → client 透传的控制消息类型，relay 不处理内容，直接转发
 export const PROXY_TO_CLIENT_TYPES = new Set([
-  "terminal_frame",
   "terminal_title",
   "terminal_resize",
   "pty_state",
@@ -70,7 +72,35 @@ export function handleProxyConnection(
     proxyWs.isAlive = true;
   });
 
-  proxyWs.on("message", (data) => {
+  proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
+    // D-07: binary 帧透传，只解析 sessionId 前缀用于路由，不修改内容
+    if (isBinary) {
+      if (data.length < 2 || data.length > MAX_BINARY_FRAME_SIZE) {
+        logger.warn({ size: data.length }, "Binary frame rejected: invalid size");
+        return;
+      }
+      const sessionIdLen = data[0];
+      if (sessionIdLen === 0 || sessionIdLen > 255 || data.length < 1 + sessionIdLen) {
+        logger.warn({ sessionIdLen, dataLen: data.length }, "Binary frame rejected: malformed sessionId prefix");
+        return;
+      }
+      const sessionId = data.subarray(1, 1 + sessionIdLen).toString("utf-8");
+
+      if (!proxyWs.proxyId) {
+        logger.warn("Binary frame from unregistered proxy, dropped");
+        return;
+      }
+
+      // D-42: zero-copy, forward entire buffer including sessionId prefix
+      const clients = registry.getClientsForProxy(proxyWs.proxyId);
+      for (const clientWs of clients) {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data);
+        }
+      }
+      return;
+    }
+
     const raw = data.toString();
     const result = parseMessage(raw);
 

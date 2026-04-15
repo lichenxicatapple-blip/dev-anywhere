@@ -415,26 +415,11 @@ describe("client_register protocol", () => {
     expect(response.sessions).toBeUndefined();
   });
 
-  it("proxy receives proxy_register_response with status 'reconnected' and session seq map", async () => {
+  it("proxy receives proxy_register_response with status 'reconnected' and empty session seq map", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
     proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
     await waitForMessage(proxy1); // consume register response
-    await settle();
-
-    // proxy 发送消息填充 buffer
-    proxy1.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(),
-      source: "proxy" as const, version: "1.0",
-      type: "assistant_message" as const,
-      payload: { text: "msg-1", isPartial: false },
-    }));
-    proxy1.send(JSON.stringify({
-      seq: 5, sessionId: "s1", timestamp: Date.now(),
-      source: "proxy" as const, version: "1.0",
-      type: "assistant_message" as const,
-      payload: { text: "msg-5", isPartial: false },
-    }));
     await settle();
 
     // proxy 断线
@@ -451,7 +436,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("reconnected");
-    expect(response.sessions).toBeDefined();
-    expect(response.sessions.s1).toBe(5);
+    // relay 无状态，sessions 为空对象
+    expect(response.sessions).toEqual({});
   });
 });

@@ -3,7 +3,6 @@ import { createServer, type Server } from "node:http";
 import { WebSocketServer } from "ws";
 import type { Logger } from "@cc-anywhere/shared";
 import { RelayRegistry } from "./registry.js";
-import { BufferStore } from "./buffer-store.js";
 import { healthRouter } from "./health.js";
 import { handleProxyConnection } from "./handlers/proxy.js";
 import { handleClientConnection } from "./handlers/client.js";
@@ -26,11 +25,7 @@ export interface RelayServer {
 export function createRelayServer(options: RelayServerOptions): RelayServer {
   const { heartbeatInterval = 30000, logger, dataDir } = options;
 
-  const store = dataDir ? new BufferStore(dataDir) : null;
-  if (!store) {
-    logger.warn("DATA_DIR not set, buffer persistence disabled. Relay restart will lose all buffered messages.");
-  }
-  const registry = new RelayRegistry(store);
+  const registry = new RelayRegistry();
   const app = express();
 
   // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.cc-anywhere/relay-data/fonts 提供
