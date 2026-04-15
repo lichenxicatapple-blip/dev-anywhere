@@ -60,7 +60,7 @@ describe("RelayConnection", () => {
     expect(registered).toBeTruthy();
   });
 
-  it("sends MessageEnvelope to relay via send()", async () => {
+  it("sends MessageEnvelope to relay via sendEnvelope()", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
@@ -72,7 +72,7 @@ describe("RelayConnection", () => {
     const envelope = buildMessage("assistant_message", "test-session", 1, { text: "hello", isPartial: false }, "proxy");
 
     // send 不应抛异常
-    expect(() => conn!.send(envelope)).not.toThrow();
+    expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
   });
 
   it("emits 'message' event when relay forwards a message", async () => {
@@ -224,7 +224,7 @@ describe("RelayConnection", () => {
 
     // 在断开状态下发送消息，不应抛异常
     const envelope = buildMessage("assistant_message", "test-session", 1, { text: "queued", isPartial: false }, "proxy");
-    expect(() => conn!.send(envelope)).not.toThrow();
+    expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
   });
 
   it("reconnects automatically after unexpected close", async () => {
@@ -311,7 +311,7 @@ describe("RelayConnection", () => {
 
     // 在离线时发送消息
     const envelope = buildMessage("assistant_message", "sess-1", 1, { text: "buffered-msg", isPartial: false }, "proxy");
-    conn.send(envelope);
+    conn.sendEnvelope(envelope);
 
     // 等待重连
     const reconnected = new Promise<void>((resolve) => {

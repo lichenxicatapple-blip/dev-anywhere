@@ -168,10 +168,18 @@ export class RelayConnection extends EventEmitter {
     }, backoff);
   }
 
-  // 发送 MessageEnvelope 到 relay，离线时自动入队
-  send(envelope: MessageEnvelope): void {
+  // D-46: 发送 MessageEnvelope 到 relay，离线时自动入队
+  sendEnvelope(envelope: MessageEnvelope): void {
     const raw = JSON.stringify(envelope);
     this.sendRaw(raw);
+  }
+
+  // D-46: 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
+  sendBinary(data: Buffer): void {
+    if (this.connectionState === RelayConnectionState.SYNCED && this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+    }
+    // binary 帧无队列，断线丢弃
   }
 
   // 发送原始 JSON 字符串到 relay，根据 connectionState 决定直发、入队或丢弃

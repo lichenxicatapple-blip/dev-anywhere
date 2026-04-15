@@ -148,7 +148,7 @@ function connectToWorker(
                   { text: JSON.stringify(msg.event), isPartial: true },
                   "proxy",
                 );
-                relayConnection.send(envelope);
+                relayConnection.sendEnvelope(envelope);
               } catch (err) {
                 logger.debug({ sessionId, error: String(err) }, "Failed to forward event to relay");
               }
@@ -180,7 +180,7 @@ function connectToWorker(
                   },
                   "proxy",
                 );
-                relayConnection.send(envelope);
+                relayConnection.sendEnvelope(envelope);
                 pendingToolApprovals.set(msg.requestId, {
                   sessionId,
                   toolName: msg.toolName,
@@ -419,16 +419,6 @@ function handleTerminalConnection(
         break;
       }
 
-      case "pty_terminal_frame": {
-        // terminal → serve → relay：转发终端帧
-        if (relayConnection) {
-          relayConnection.sendRaw(msg.frame);
-        } else {
-          console.error("[serve] pty_terminal_frame dropped: relayConnection is null");
-        }
-        break;
-      }
-
       case "pty_title_change": {
         // terminal → serve → relay：转发终端标题变化
         if (relayConnection) {
@@ -606,6 +596,17 @@ function handleTerminalConnection(
       default: {
         logger.warn({ type: (msg as IpcMessage).type }, "Unhandled IPC message type");
       }
+    }
+  }, (sessionId, data) => {
+    // D-06: binary PTY 数据从 terminal 进程转发到 relay
+    // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][PTY data]
+    if (relayConnection) {
+      const sessionIdBuf = Buffer.from(sessionId, "utf-8");
+      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + data.length);
+      wsFrame[0] = sessionIdBuf.length;
+      sessionIdBuf.copy(wsFrame, 1);
+      data.copy(wsFrame, 1 + sessionIdBuf.length);
+      relayConnection.sendBinary(wsFrame);
     }
   });
 
@@ -923,30 +924,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "permission_mode_change") {
           logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
         } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          // TODO: Plan 09-02/03 将通过 EventStore 快照恢复替代帧缓存
-          logger.info({ sessionId: parsed.sessionId }, "terminal_frame_request received (frame cache removed, awaiting v2 recovery)");
-          const targetSocket = terminalSockets.get(parsed.sessionId);
-          if (targetSocket?.writable) {
-            targetSocket.write(serializeIpc({
-              type: "pty_frame_request",
-              sessionId: parsed.sessionId,
-              rows: parsed.rows,
-            }));
-          }
+          // Phase 9: 帧请求已由 EventStore 快照恢复替代，Phase 11 实现恢复协议
+          logger.debug({ sessionId: parsed.sessionId }, "terminal_frame_request ignored (v2 binary pipeline)");
         } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
-          // relay → serve → terminal IPC：转发滚动请求到持有 tracker 的 terminal
-          const targetSocket = terminalSockets.get(parsed.sessionId);
-          if (targetSocket?.writable) {
-            targetSocket.write(serializeIpc({
-              type: "pty_scroll_request",
-              sessionId: parsed.sessionId,
-              direction: parsed.direction,
-              delta: parsed.delta,
-              rows: parsed.rows,
-            }));
-          } else {
-            logger.warn({ sessionId: parsed.sessionId }, "terminal_scroll_request: no terminal socket for session");
-          }
+          // Phase 9: 滚动由客户端 xterm.js scrollback 直接处理
+          logger.debug({ sessionId: parsed.sessionId }, "terminal_scroll_request ignored (client-side xterm.js scrollback)");
         }
       } catch (err) {
         logger.warn({ error: String(err) }, "Failed to parse relay message");

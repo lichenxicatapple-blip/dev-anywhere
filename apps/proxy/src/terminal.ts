@@ -15,6 +15,7 @@ import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
   createIpcReader,
   serializeIpc,
+  encodeBinaryIpcFrame,
   type IpcMessage,
 } from "./ipc-protocol.js";
 import { terminalLogger as log } from "./logger.js";
@@ -255,17 +256,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     }
 
-    // D-14 步骤 4: JSON IPC 帧推送到 serve（临时保留，Plan 02 替换为 binary IPC）
+    // D-27: binary IPC 帧推送到 serve
     if (socket.writable && sessionId) {
-      socket.write(serializeIpc({
-        type: "pty_terminal_frame",
-        sessionId,
-        frame: JSON.stringify({
-          type: "terminal_frame",
-          sessionId,
-          payload: { mode: "full", lines: [] },
-        }),
-      }));
+      socket.write(encodeBinaryIpcFrame(sessionId, Buffer.from(data, "utf-8")));
     }
 
     // 有数据输出即为 working
