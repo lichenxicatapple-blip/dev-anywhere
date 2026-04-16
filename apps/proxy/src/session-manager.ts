@@ -219,9 +219,19 @@ export class SessionManager {
     }
     for (const item of parsed) {
       const info = item as SessionInfo;
-      // PTY session 的生命周期绑定 terminal 进程，serve 重启后 terminal 已断开，不恢复
-      if (info.state === SessionState.TERMINATED || info.mode === "pty") {
+      if (info.state === SessionState.TERMINATED) {
         this.onSessionRemoved?.(info.id);
+        continue;
+      }
+      if (info.mode === "pty") {
+        if (info.pid && this.isProcessAlive(info.pid)) {
+          // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
+          logger.info({ sessionId: info.id, pid: info.pid }, "PTY session skipped on load, terminal alive");
+        } else {
+          // terminal 进程已死，清理数据
+          this.onSessionRemoved?.(info.id);
+          logger.info({ sessionId: info.id, pid: info.pid }, "PTY session cleaned on load, terminal dead");
+        }
         continue;
       }
       // WAITING_APPROVAL 是瞬态，持久化恢复时审批上下文已丢失，重置为 IDLE

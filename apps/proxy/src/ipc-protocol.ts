@@ -80,6 +80,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pty_register"),
     sessionId: z.string(),
+    pid: z.number(),
   }),
 
   // 客户端取消注册 PTY 会话

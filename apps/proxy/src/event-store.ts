@@ -12,6 +12,7 @@ import {
   existsSync,
   unlinkSync,
   readdirSync,
+  mkdirSync,
 } from "node:fs";
 import { createGzip } from "node:zlib";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -93,6 +94,7 @@ export class EventStore {
   // 初始化：创建文件写入 header + METADATA 事件
   open(metadata: { cols: number; rows: number; sessionId: string; createdAt: string }): void {
     this.metadata = metadata;
+    mkdirSync(dirname(this.eventsPath), { recursive: true });
     this.fd = openSync(this.eventsPath, "a");
 
     // 写入文件头
@@ -115,9 +117,14 @@ export class EventStore {
   }
 
   // D-05: 快照作为 SNAPSHOT 事件写入
-  appendSnapshot(serialized: string): void {
+  // payload 格式: [2B cols LE][2B rows LE][serialize text bytes]
+  appendSnapshot(serialized: string, cols: number, rows: number): void {
     if (this.fd === null) throw new Error("EventStore not open");
-    const payload = Buffer.from(serialized, "utf-8");
+    const textBuf = Buffer.from(serialized, "utf-8");
+    const payload = Buffer.alloc(4 + textBuf.length);
+    payload.writeUInt16LE(cols, 0);
+    payload.writeUInt16LE(rows, 2);
+    textBuf.copy(payload, 4);
     const event = encodeEvent(EventType.SNAPSHOT, payload);
     writeSync(this.fd, event);
     this.eventCount++;
@@ -150,7 +157,7 @@ export class EventStore {
   }
 
   // D-15/D-49: 轮转活跃文件到 gzip 归档，新文件以 SNAPSHOT 开头确保自包含
-  async rotate(currentSnapshot: string): Promise<void> {
+  async rotate(currentSnapshot: string, cols: number, rows: number): Promise<void> {
     if (this.fd !== null) {
       closeSync(this.fd);
       this.fd = null;
@@ -181,30 +188,24 @@ export class EventStore {
       writeSync(this.fd, metaEvent);
     }
 
-    // D-49: 新文件开头写入当前 SNAPSHOT
-    const payload = Buffer.from(currentSnapshot, "utf-8");
-    const snapshotEvent = encodeEvent(EventType.SNAPSHOT, payload);
+    // D-49: 新文件开头写入当前 SNAPSHOT（带尺寸前缀）
+    const textBuf = Buffer.from(currentSnapshot, "utf-8");
+    const snapshotPayload = Buffer.alloc(4 + textBuf.length);
+    snapshotPayload.writeUInt16LE(cols, 0);
+    snapshotPayload.writeUInt16LE(rows, 2);
+    textBuf.copy(snapshotPayload, 4);
+    const snapshotEvent = encodeEvent(EventType.SNAPSHOT, snapshotPayload);
     writeSync(this.fd, snapshotEvent);
 
     this.eventCount = 2; // METADATA + SNAPSHOT
   }
 
-  // D-03: 会话结束时归档剩余文件
-  async close(): Promise<void> {
+  // 关闭文件描述符，数据目录由 serve 的 onSessionRemoved 统一清理
+  close(): void {
     if (this.fd !== null) {
       closeSync(this.fd);
       this.fd = null;
     }
-
-    if (!existsSync(this.eventsPath)) return;
-
-    const archivePath = `${this.eventsPath}.gz`;
-    await pipeline(
-      createReadStream(this.eventsPath),
-      createGzip(),
-      createWriteStream(archivePath),
-    );
-    unlinkSync(this.eventsPath);
   }
 
   // 同步关闭 fd，不做 gzip 归档（用于测试清理）
@@ -216,7 +217,8 @@ export class EventStore {
   }
 
   // D-48: 反向扫描找到最近的 SNAPSHOT 事件
-  static findLatestSnapshot(eventsPath: string): Buffer | null {
+  // 返回 { cols, rows, data } 或 null，data 是 serialize 文本的 Buffer
+  static findLatestSnapshot(eventsPath: string): { cols: number; rows: number; data: Buffer } | null {
     if (!existsSync(eventsPath)) return null;
 
     const fileSize = statSync(eventsPath).size;
@@ -246,7 +248,12 @@ export class EventStore {
           const eventBuf = Buffer.alloc(totalLen);
           readSync(fd, eventBuf, 0, totalLen, eventStart);
           const decoded = decodeEvent(eventBuf, 0);
-          return decoded.payload;
+          // payload 格式: [2B cols LE][2B rows LE][serialize text bytes]
+          if (decoded.payload.length < 4) return null;
+          const cols = decoded.payload.readUInt16LE(0);
+          const rows = decoded.payload.readUInt16LE(2);
+          const data = decoded.payload.subarray(4);
+          return { cols, rows, data };
         }
 
         pos = eventStart;

@@ -191,7 +191,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           const resp = await waitForMessage(socket, "session_create_response");
           if (resp.type === "session_create_response" && !resp.error) {
             sessionId = resp.sessionId;
-            socket.write(serializeIpc({ type: "pty_register", sessionId }));
+            socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
             terminalState = TerminalState.RUNNING;
             log.info({ sessionId }, "Session re-registered after reconnect");
           }
@@ -250,9 +250,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       eventStore.appendPtyData(Buffer.from(data, "utf-8"));
 
       // D-04: 每 N 事件触发快照
-      if (eventStore.shouldSnapshot() && serializeAddon) {
+      if (eventStore.shouldSnapshot() && serializeAddon && headlessTerminal) {
         const serialized = serializeAddon.serialize();
-        eventStore.appendSnapshot(serialized);
+        eventStore.appendSnapshot(serialized, headlessTerminal.cols, headlessTerminal.rows);
       }
     }
 
@@ -289,52 +289,40 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         socket.write(serializeIpc({ type: "pty_resize", sessionId, cols: newCols, rows: newRows }));
       }
     },
-    onSessionExit: async (code: number) => {
+    onSessionExit: (code: number) => {
       terminalState = TerminalState.EXITED;
       log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
       if (idleCheckTimer) clearInterval(idleCheckTimer);
-      // D-03: 会话结束时归档 EventStore
-      if (eventStore) {
-        await eventStore.close();
-        eventStore = null;
-      }
-      if (headlessTerminal) {
-        headlessTerminal.dispose();
-        headlessTerminal = null;
-      }
-      serializeAddon = null;
+      // pty_deregister 通知 serve 做 session 清理（数据目录、relay 通知等）
+      // terminal 的 fd 会随进程退出被 OS 关闭，serve 负责删除数据目录
       if (socket.writable && sessionId) {
-        socket.write(
-          serializeIpc({ type: "pty_deregister", sessionId }),
-        );
+        const msg = serializeIpc({ type: "pty_deregister", sessionId });
+        socket.end(msg, () => {
+          process.exit(code);
+        });
+      } else {
+        process.exit(code);
       }
-      socket.end();
-      process.exit(code);
     },
   });
   ptyManager.start();
   log.info({ sessionId }, "PTY started with headless terminal + EventStore");
 
-  socket.write(serializeIpc({ type: "pty_register", sessionId }));
+  socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
   terminalState = TerminalState.RUNNING;
 
   setupIdleCheck();
 
-  process.on("SIGTERM", async () => {
+  process.on("SIGTERM", () => {
     log.info({ sessionId }, "SIGTERM received, shutting down");
     if (idleCheckTimer) clearInterval(idleCheckTimer);
-    if (eventStore) {
-      await eventStore.close();
-      eventStore = null;
-    }
-    if (headlessTerminal) {
-      headlessTerminal.dispose();
-      headlessTerminal = null;
-    }
-    serializeAddon = null;
     if (socket.writable && sessionId) {
-      socket.write(serializeIpc({ type: "pty_deregister", sessionId }));
+      const msg = serializeIpc({ type: "pty_deregister", sessionId });
+      socket.end(msg, () => {
+        process.exit(143);
+      });
+    } else {
+      process.exit(143);
     }
-    ptyManager?.cleanup(143);
   });
 }

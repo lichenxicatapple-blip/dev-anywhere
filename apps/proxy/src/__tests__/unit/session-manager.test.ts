@@ -248,8 +248,9 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("skips PTY sessions on restore since terminal process is gone", () => {
+    it("skips PTY sessions on restore when terminal process is dead", () => {
       const pty = manager.createSession("pty", "/tmp/test");
+      manager.setPid(pty.id, 999999);
       const json = manager.createSession("json", "/tmp/test");
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(pty.id)).toBeUndefined();
@@ -308,6 +309,86 @@ describe("SessionManager", () => {
       const restored = manager2.getSession(s.id);
       expect(restored).toBeDefined();
       expect(restored!.state).toBe(SessionState.IDLE);
+      manager2.stopReaper();
+    });
+  });
+
+  describe("PTY session cleanup on load()", () => {
+    it("does not delete data when PTY session PID is alive", () => {
+      const removedIds: string[] = [];
+      const pty = manager.createSession("pty", "/tmp/test");
+      // process.pid 是当前进程，一定存活
+      manager.setPid(pty.id, process.pid);
+
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      // PTY 会话不加载到内存（即使进程存活），但也不触发 onSessionRemoved
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+      expect(removedIds).not.toContain(pty.id);
+      manager2.stopReaper();
+    });
+
+    it("deletes data when PTY session PID is dead", () => {
+      const removedIds: string[] = [];
+      const pty = manager.createSession("pty", "/tmp/test");
+      manager.setPid(pty.id, 999999);
+
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+      expect(removedIds).toContain(pty.id);
+      manager2.stopReaper();
+    });
+
+    it("deletes data when PTY session has no PID", () => {
+      const removedIds: string[] = [];
+      const pty = manager.createSession("pty", "/tmp/test");
+      // 不设置 PID
+
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+      expect(removedIds).toContain(pty.id);
+      manager2.stopReaper();
+    });
+
+    it("deletes data for TERMINATED sessions regardless of mode", () => {
+      const removedIds: string[] = [];
+      const json = manager.createSession("json", "/tmp/test");
+      manager.updateState(json.id, SessionState.TERMINATED);
+
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.getSession(json.id)).toBeUndefined();
+      expect(removedIds).toContain(json.id);
+      manager2.stopReaper();
+    });
+
+    it("restores JSON sessions normally regardless of PTY cleanup", () => {
+      const removedIds: string[] = [];
+      const pty = manager.createSession("pty", "/tmp/test");
+      manager.setPid(pty.id, 999999);
+      const json = manager.createSession("json", "/tmp/test", "my-json");
+
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      // PTY dead -> cleaned
+      expect(removedIds).toContain(pty.id);
+      // JSON session restored normally
+      const restored = manager2.getSession(json.id);
+      expect(restored).toBeDefined();
+      expect(restored!.name).toBe("my-json");
+      expect(restored!.mode).toBe("json");
       manager2.stopReaper();
     });
   });

@@ -127,7 +127,7 @@ describe("EventStore: file operations", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
 
-    store.appendSnapshot("terminal state snapshot data");
+    store.appendSnapshot("terminal state snapshot data", 80, 24);
     const data = readFileSync(eventsPath);
 
     // 查找 SNAPSHOT 事件
@@ -139,7 +139,10 @@ describe("EventStore: file operations", () => {
       const totalLen = data.readUInt32LE(offset + 13 + payloadLen);
       if (type === EventType.SNAPSHOT) {
         const payload = data.subarray(offset + 13, offset + 13 + payloadLen);
-        expect(payload.toString("utf-8")).toBe("terminal state snapshot data");
+        // payload 格式: [2B cols][2B rows][text]
+        expect(payload.readUInt16LE(0)).toBe(80);
+        expect(payload.readUInt16LE(2)).toBe(24);
+        expect(payload.subarray(4).toString("utf-8")).toBe("terminal state snapshot data");
         foundSnapshot = true;
       }
       offset += totalLen;
@@ -258,15 +261,17 @@ describe("EventStore: findLatestSnapshot (reverse scan)", () => {
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
 
     store.appendPtyData(Buffer.from("data 1"));
-    store.appendSnapshot("snapshot-A");
+    store.appendSnapshot("snapshot-A", 80, 24);
     store.appendPtyData(Buffer.from("data 2"));
-    store.appendSnapshot("snapshot-B");
+    store.appendSnapshot("snapshot-B", 120, 40);
     store.appendPtyData(Buffer.from("data 3"));
     store.closeSync();
 
     const result = EventStore.findLatestSnapshot(eventsPath);
     expect(result).not.toBeNull();
-    expect(result!.toString("utf-8")).toBe("snapshot-B");
+    expect(result!.cols).toBe(120);
+    expect(result!.rows).toBe(40);
+    expect(result!.data.toString("utf-8")).toBe("snapshot-B");
   });
 
   it("findLatestSnapshot returns null when no SNAPSHOT exists", () => {
@@ -293,8 +298,8 @@ describe("EventStore: rotation", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
     store.appendPtyData(Buffer.from("original data"));
-    store.appendSnapshot("snapshot for rotation");
-    await store.rotate("current snapshot after rotation");
+    store.appendSnapshot("snapshot for rotation", 80, 24);
+    await store.rotate("current snapshot after rotation", 80, 24);
 
     // 归档文件应存在
     const archivePath = join(tmpDir, "events.001.bin.gz");
@@ -322,7 +327,10 @@ describe("EventStore: rotation", () => {
       const totalLen = newData.readUInt32LE(offset + 13 + payloadLen);
       if (type === EventType.SNAPSHOT) {
         const payload = newData.subarray(offset + 13, offset + 13 + payloadLen);
-        expect(payload.toString("utf-8")).toBe("current snapshot after rotation");
+        // payload 格式: [2B cols][2B rows][text]
+        expect(payload.readUInt16LE(0)).toBe(80);
+        expect(payload.readUInt16LE(2)).toBe(24);
+        expect(payload.subarray(4).toString("utf-8")).toBe("current snapshot after rotation");
         foundSnapshot = true;
       }
       offset += totalLen;
@@ -337,15 +345,15 @@ describe("EventStore: rotation", () => {
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
     store.appendPtyData(Buffer.from("data 1"));
 
-    await store.rotate("snap1");
+    await store.rotate("snap1", 80, 24);
     expect(existsSync(join(tmpDir, "events.001.bin.gz"))).toBe(true);
 
     store.appendPtyData(Buffer.from("data 2"));
-    await store.rotate("snap2");
+    await store.rotate("snap2", 80, 24);
     expect(existsSync(join(tmpDir, "events.002.bin.gz"))).toBe(true);
 
     store.appendPtyData(Buffer.from("data 3"));
-    await store.rotate("snap3");
+    await store.rotate("snap3", 80, 24);
     expect(existsSync(join(tmpDir, "events.003.bin.gz"))).toBe(true);
 
     store.closeSync();
@@ -372,21 +380,18 @@ describe("EventStore: close", () => {
     eventsPath = join(tmpDir, "events.bin");
   });
 
-  it("close gzips remaining active file at session end", async () => {
+  it("close releases fd without deleting file", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
     store.appendPtyData(Buffer.from("session data"));
-    await store.close();
+    store.close();
 
-    // events.bin 应被归档为 events.bin.gz
-    expect(existsSync(join(tmpDir, "events.bin.gz"))).toBe(true);
-    // 原始文件不再存在
-    expect(existsSync(eventsPath)).toBe(false);
+    // events.bin 仍然存在，数据目录由 serve 的 onSessionRemoved 统一清理
+    expect(existsSync(eventsPath)).toBe(true);
 
-    // 验证归档内容
-    const compressed = readFileSync(join(tmpDir, "events.bin.gz"));
-    const decompressed = gunzipSync(compressed);
-    expect(decompressed.subarray(0, 4).toString("ascii")).toBe("CCAE");
+    // 验证文件内容完整
+    const data = readFileSync(eventsPath);
+    expect(data.subarray(0, 4).toString("ascii")).toBe("CCAE");
   });
 });
 
@@ -403,7 +408,7 @@ describe("EventStore: readEventsAfterSnapshot", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
     store.appendPtyData(Buffer.from("before snapshot"));
-    store.appendSnapshot("the snapshot");
+    store.appendSnapshot("the snapshot", 80, 24);
     store.appendPtyData(Buffer.from("after 1"));
     store.appendPtyData(Buffer.from("after 2"));
     store.closeSync();
@@ -422,5 +427,107 @@ describe("EventStore: readEventsAfterSnapshot", () => {
     expect(afterEvents[0].type).toBe(EventType.SNAPSHOT);
     expect(afterEvents[1].payload.toString()).toBe("after 1");
     expect(afterEvents[2].payload.toString()).toBe("after 2");
+  });
+});
+
+describe("EventStore: edge cases", () => {
+  let tmpDir: string;
+  let eventsPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "eventstore-edge-"));
+    eventsPath = join(tmpDir, "events.bin");
+  });
+
+  it("open auto-creates parent directory if it does not exist", () => {
+    const nestedPath = join(tmpDir, "deep", "nested", "session", "events.bin");
+    const store = new EventStore(nestedPath);
+    store.open({ cols: 80, rows: 24, sessionId: "test-mkdir", createdAt: "2026-01-01T00:00:00Z" });
+    expect(existsSync(nestedPath)).toBe(true);
+    store.closeSync();
+  });
+
+  it("findLatestSnapshot returns null for file with only header", () => {
+    const store = new EventStore(eventsPath);
+    store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
+    // METADATA is written on open, but no SNAPSHOT
+    store.closeSync();
+    const result = EventStore.findLatestSnapshot(eventsPath);
+    expect(result).toBeNull();
+  });
+
+  it("handles large payload (64KB) correctly", () => {
+    const store = new EventStore(eventsPath);
+    store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
+    const largeData = Buffer.alloc(64 * 1024, 0x42); // 64KB of 'B'
+    store.appendPtyData(largeData);
+    store.closeSync();
+
+    const events = EventStore.readEventsFromFile(eventsPath);
+    const ptyEvents = events.filter((e) => e.type === EventType.PTY_DATA);
+    expect(ptyEvents.length).toBe(1);
+    expect(ptyEvents[0].payload.length).toBe(64 * 1024);
+    expect(ptyEvents[0].payload[0]).toBe(0x42);
+    expect(ptyEvents[0].payload[65535]).toBe(0x42);
+  });
+
+  it("snapshot does not clear history events (D-47)", () => {
+    const store = new EventStore(eventsPath);
+    store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
+    store.appendPtyData(Buffer.from("before-1"));
+    store.appendPtyData(Buffer.from("before-2"));
+    store.appendSnapshot("snap", 80, 24);
+    store.appendPtyData(Buffer.from("after-1"));
+    store.closeSync();
+
+    const events = EventStore.readEventsFromFile(eventsPath);
+    const ptyEvents = events.filter((e) => e.type === EventType.PTY_DATA);
+    // 快照前后的 PTY_DATA 都应保留
+    expect(ptyEvents.length).toBe(3);
+    expect(ptyEvents[0].payload.toString()).toBe("before-1");
+    expect(ptyEvents[1].payload.toString()).toBe("before-2");
+    expect(ptyEvents[2].payload.toString()).toBe("after-1");
+  });
+
+  it("shouldSnapshot fires correctly after rotation resets eventCount", async () => {
+    // rotation 后 eventCount 重置为 2 (METADATA + SNAPSHOT)
+    // 下一次 shouldSnapshot 应在第 100 个事件时触发
+    const store = new EventStore(eventsPath, 50); // 低阈值便于触发 rotate
+    store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
+
+    // 写够数据触发 rotate
+    store.appendPtyData(Buffer.alloc(200, 0x41));
+    expect(store.shouldRotate()).toBe(true);
+    await store.rotate("snap-rotate", 80, 24);
+
+    // rotation 后 eventCount = 2, 写 97 个事件到 eventCount = 99
+    for (let i = 0; i < 97; i++) {
+      store.appendPtyData(Buffer.from("x"));
+    }
+    expect(store.shouldSnapshot()).toBe(false); // eventCount = 99
+
+    store.appendPtyData(Buffer.from("x")); // eventCount = 100
+    expect(store.shouldSnapshot()).toBe(true);
+
+    store.closeSync();
+  });
+
+  it("findLatestSnapshot handles truncated file gracefully", () => {
+    const store = new EventStore(eventsPath);
+    store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
+    store.appendPtyData(Buffer.from("data"));
+    store.appendSnapshot("snap", 80, 24);
+    store.closeSync();
+
+    // 截断文件：删掉最后 2 个字节破坏 trailer
+    const data = readFileSync(eventsPath);
+    const { writeFileSync: writeFS } = require("node:fs");
+    writeFS(eventsPath, data.subarray(0, data.length - 2));
+
+    // 不应崩溃，返回 null 或能处理
+    const result = EventStore.findLatestSnapshot(eventsPath);
+    // 截断后 totalLen 读取的值不正确，reverse scan 应在边界检查处停止
+    // 具体行为取决于截断位置，但不应抛异常
+    expect(() => EventStore.findLatestSnapshot(eventsPath)).not.toThrow();
   });
 });

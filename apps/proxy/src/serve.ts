@@ -497,6 +497,7 @@ function handleTerminalConnection(
         } catch {
           // 会话可能尚未注册，状态更新失败可忽略
         }
+        sessionManager.setPid(msg.sessionId, msg.pid);
         terminalSockets.set(msg.sessionId, socket);
         // 通知 relay 该 session 存在，并推送会话列表给客户端
         if (relayConnection) {
@@ -613,12 +614,50 @@ function handleTerminalConnection(
   socket.on("close", () => {
     for (const [sessionId, terminalSocket] of terminalSockets) {
       if (terminalSocket === socket) {
-        const session = sessionManager.getSession(sessionId);
-        if (session && session.mode === "pty" && session.state !== SessionState.TERMINATED) {
-          sessionManager.terminateSession(sessionId);
-          logger.info({ sessionId }, "PTY session terminated on client disconnect");
-        }
         terminalSockets.delete(sessionId);
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          // pty_deregister 已完成清理
+          logger.info({ sessionId }, "Terminal socket closed, session already cleaned");
+          continue;
+        }
+        if (session.mode === "pty" && session.pid && isProcessAlive(session.pid)) {
+          // terminal 进程仍存活，serve 正在重启，不做清理
+          logger.info({ sessionId, pid: session.pid }, "Terminal socket closed but process alive, skipping cleanup");
+          continue;
+        }
+        // terminal 进程已死（crash），执行完整清理
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "pty_state",
+            sessionId,
+            payload: { state: "turn_complete" },
+          }));
+        }
+        sessionManager.terminateSession(sessionId);
+        controlHandlers?.cleanup(sessionId);
+        if (relayConnection) {
+          const remaining = sessionManager.listSessions();
+          relayConnection.sendRaw(JSON.stringify({
+            type: "session_list",
+            sessionId: "",
+            seq: 0,
+            timestamp: Date.now(),
+            source: "proxy",
+            version: "1",
+            payload: {
+              sessions: remaining.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                sessionId: s.id,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+              })),
+            },
+          }));
+        }
+        logger.info({ sessionId }, "PTY session cleaned up on socket close (crash fallback)");
       }
     }
   });
