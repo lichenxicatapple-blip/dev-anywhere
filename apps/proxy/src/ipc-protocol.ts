@@ -159,6 +159,21 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     cols: z.number(),
     rows: z.number(),
   }),
+
+  // serve → terminal：请求 HeadlessTerminal serialize() 快照
+  z.object({
+    type: z.literal("pty_subscribe"),
+    sessionId: z.string(),
+  }),
+
+  // terminal → serve：serialize() 结果
+  z.object({
+    type: z.literal("pty_snapshot"),
+    sessionId: z.string(),
+    cols: z.number(),
+    rows: z.number(),
+    data: z.string(),
+  }),
 ]);
 
 // serve 与 session-worker 之间的通信协议

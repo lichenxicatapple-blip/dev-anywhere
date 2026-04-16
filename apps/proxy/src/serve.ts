@@ -597,6 +597,21 @@ function handleTerminalConnection(
         break;
       }
 
+      case "pty_snapshot": {
+        // terminal serialize() 结果转发给 relay → client
+        if (relayConnection) {
+          relayConnection.sendRaw(JSON.stringify({
+            type: "session_snapshot",
+            sessionId: msg.sessionId,
+            cols: msg.cols,
+            rows: msg.rows,
+            data: msg.data,
+          }));
+          logger.info({ sessionId: msg.sessionId, cols: msg.cols, rows: msg.rows }, "Session snapshot forwarded to relay");
+        }
+        break;
+      }
+
       default: {
         logger.warn({ type: (msg as IpcMessage).type }, "Unhandled IPC message type");
       }
@@ -965,8 +980,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           logger.info("Session list sent via relay");
         } else if (parsed.type === "permission_mode_change") {
           logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
+        } else if (parsed.type === "session_subscribe" && parsed.sessionId) {
+          const sid = parsed.sessionId as string;
+          const ts = terminalSockets.get(sid);
+          if (ts?.writable) {
+            ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid }));
+            logger.info({ sessionId: sid }, "Subscribe forwarded to terminal");
+          } else {
+            logger.warn({ sessionId: sid }, "Subscribe failed: terminal socket not available");
+          }
         } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          // Phase 9: 帧请求已由 EventStore 快照恢复替代，Phase 11 实现恢复协议
           logger.debug({ sessionId: parsed.sessionId }, "terminal_frame_request ignored (v2 binary pipeline)");
         } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
           // Phase 9: 滚动由客户端 xterm.js scrollback 直接处理

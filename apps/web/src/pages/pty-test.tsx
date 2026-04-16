@@ -7,8 +7,8 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { xtermTheme } from "@/lib/xterm-theme";
-import { findReplayStart, replayChunks, type ReplayChunk } from "@/lib/terminal-replay";
-import { wsManagerRef } from "@/hooks/use-relay-setup";
+import { applySnapshot, findReplayStart, replayChunks, type ReplayChunk } from "@/lib/terminal-replay";
+import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 
 async function loadFixture(terminal: Terminal, name: string): Promise<void> {
@@ -136,14 +136,42 @@ export function PtyTest() {
       return;
     }
 
-    if (!sessionId.trim() || !wsManagerRef) {
+    if (!sessionId.trim() || !wsManagerRef || !relayClientRef) {
       return;
     }
 
+    // 先 subscribeBinary，snapshot 到达前的 binary 帧丢弃
+    let snapshotApplied = false;
     const unsub = wsManagerRef.subscribeBinary(sessionId, (data) => {
-      terminalRef.current?.write(data);
+      if (snapshotApplied) {
+        terminalRef.current?.write(data);
+      }
     });
     unsubBinaryRef.current = unsub;
+
+    // 监听 session_snapshot JSON 响应
+    const unsubSnapshot = relayClientRef.onMessage((msg) => {
+      const m = msg as Record<string, unknown>;
+      if (m.type === "session_snapshot" && m.sessionId === sessionId) {
+        unsubSnapshot();
+        if (terminalRef.current && typeof m.data === "string") {
+          terminalRef.current.reset();
+          applySnapshot(terminalRef.current, {
+            cols: m.cols as number,
+            rows: m.rows as number,
+            data: m.data as string,
+          });
+        }
+        snapshotApplied = true;
+      }
+    });
+
+    // 发送订阅请求，触发 terminal serialize()
+    wsManagerRef.send(JSON.stringify({
+      type: "session_subscribe",
+      sessionId,
+    }));
+
     setSubscribed(true);
   }, [subscribed, sessionId]);
 

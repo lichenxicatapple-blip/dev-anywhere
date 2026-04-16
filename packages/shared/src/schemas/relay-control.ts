@@ -220,6 +220,18 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
       state: z.string(),
     })),
   }),
+
+  // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态
+  z.object({ type: z.literal("session_subscribe"), sessionId: z.string() }),
+
+  // PTY 会话快照，proxy -> client，serialize() 的全量终端状态
+  z.object({
+    type: z.literal("session_snapshot"),
+    sessionId: z.string(),
+    cols: z.number().int().positive(),
+    rows: z.number().int().positive(),
+    data: z.string(),
+  }),
 ]);
 
 export type RelayControlMessage = z.infer<typeof RelayControlSchema>;

@@ -15,6 +15,7 @@ const CLIENT_TO_PROXY_TYPES = new Set([
   "session_history_request",
   "session_resources_request",
   "permission_mode_change",
+  "session_subscribe",
 ]);
 
 // 扩展 WebSocket 实例存储客户端元数据

@@ -8,8 +8,6 @@ import { PtyManager } from "./pty-manager.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { EventStore } from "./event-store.js";
-import { sessionPaths } from "./paths.js";
 import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
@@ -113,10 +111,9 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   const sessionCwd = process.env.INIT_CWD || process.cwd();
   let currentPtyState: PtySemanticState = "turn_complete";
 
-  // headless terminal + EventStore 在 terminal.ts 进程内维护
+  // headless terminal 在 terminal.ts 进程内维护，用于按需 serialize() 给远程 client
   let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   let serializeAddon: SerializeAddon | null = null;
-  let eventStore: EventStore | null = null;
 
   function sendPtyState(state: "working" | "turn_complete" | "approval_wait", title?: string, tool?: string): void {
     if (!socket.writable || !sessionId) return;
@@ -135,6 +132,18 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
         log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
+      } else if (msg.type === "pty_subscribe" && msg.sessionId === sessionId) {
+        if (serializeAddon && headlessTerminal) {
+          const data = serializeAddon.serialize();
+          socket.write(serializeIpc({
+            type: "pty_snapshot",
+            sessionId: msg.sessionId,
+            cols: headlessTerminal.cols,
+            rows: headlessTerminal.rows,
+            data,
+          }));
+          log.info({ sessionId, cols: headlessTerminal.cols, rows: headlessTerminal.rows, bytes: data.length }, "Snapshot sent via IPC");
+        }
       }
     });
 
@@ -223,16 +232,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
-  log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal + EventStore");
+  log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal");
 
   headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
   serializeAddon = new SerializeAddon();
   headlessTerminal.loadAddon(serializeAddon);
-
-  // EventStore 初始化
-  const paths = sessionPaths(sessionId);
-  eventStore = new EventStore(paths.events);
-  eventStore.open({ cols, rows, sessionId, createdAt: new Date().toISOString() });
 
   const tap: DataTap = (data: string) => {
     lastOutputTime = Date.now();
@@ -240,21 +244,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     // headless terminal 状态追踪
     if (headlessTerminal) {
       headlessTerminal.write(data);
-    }
-
-    // EventStore 立即写盘
-    if (eventStore) {
-      eventStore.appendPtyData(Buffer.from(data, "utf-8"));
-
-      // 每 N 事件触发快照，超阈值时轮转截断旧数据
-      if (eventStore.shouldSnapshot() && serializeAddon && headlessTerminal) {
-        const serialized = serializeAddon.serialize();
-        eventStore.appendSnapshot(serialized, headlessTerminal.cols, headlessTerminal.rows);
-        if (eventStore.shouldRotate()) {
-          eventStore.rotate(serialized, headlessTerminal.cols, headlessTerminal.rows);
-          log.info({ sessionId }, "EventStore rotated");
-        }
-      }
     }
 
     // binary IPC 帧推送到 serve
@@ -285,7 +274,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     stdout: process.stdout,
     onResize: (newCols, newRows) => {
       if (headlessTerminal) headlessTerminal.resize(newCols, newRows);
-      if (eventStore) eventStore.appendResize(newCols, newRows);
       if (socket.writable && sessionId) {
         socket.write(serializeIpc({ type: "pty_resize", sessionId, cols: newCols, rows: newRows }));
       }
@@ -307,7 +295,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     },
   });
   ptyManager.start();
-  log.info({ sessionId }, "PTY started with headless terminal + EventStore");
+  log.info({ sessionId }, "PTY started with headless terminal");
 
   socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
   terminalState = TerminalState.RUNNING;
