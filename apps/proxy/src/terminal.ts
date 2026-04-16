@@ -8,6 +8,7 @@ import { PtyManager } from "./pty-manager.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
 import {
@@ -236,7 +237,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
   serializeAddon = new SerializeAddon();
+  const unicodeAddon = new UnicodeGraphemesAddon();
   headlessTerminal.loadAddon(serializeAddon);
+  headlessTerminal.loadAddon(unicodeAddon);
+  // addon activate() 里已经设置 activeVersion = '15-graphemes'
 
   const tap: DataTap = (data: string) => {
     lastOutputTime = Date.now();

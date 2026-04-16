@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { xtermTheme } from "@/lib/xterm-theme";
@@ -42,16 +43,24 @@ export function PtyTest() {
 
       const serializeAddon = new SerializeAddon();
       const webLinksAddon = new WebLinksAddon();
-      const unicode11Addon = new Unicode11Addon();
+      const unicodeAddon = new UnicodeGraphemesAddon();
 
       terminal.loadAddon(serializeAddon);
       terminal.loadAddon(webLinksAddon);
-      terminal.loadAddon(unicode11Addon);
-      terminal.unicode.activeVersion = "11";
+      terminal.loadAddon(unicodeAddon);
 
       if (containerRef.current) {
         containerRef.current.replaceChildren();
         terminal.open(containerRef.current);
+      }
+
+      // 必须在 terminal.open() 之后加载，WebGL renderer 按 cell 坐标直接绘制字符，
+      // 不依赖 DOM letter-spacing 补偿，避免 CJK/box-drawing 错位
+      try {
+        const webglAddon = new WebglAddon();
+        terminal.loadAddon(webglAddon);
+      } catch (err) {
+        console.warn("WebGL addon failed, fallback to DOM renderer", err);
       }
 
       terminalRef.current = terminal;
