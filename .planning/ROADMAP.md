@@ -126,7 +126,7 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md — Zustand stores (app/session/chat/command/file/toast), hash router config, toast component
-- [ ] 08-02-PLAN.md — WebSocket manager (text+binary+backoff), relay-client, ensure-binding, phase-machine
+- [x] 08-02-PLAN.md — WebSocket manager (text+binary+backoff), relay-client, ensure-binding, phase-machine
 - [ ] 08-03-PLAN.md — App.tsx wiring, useRelaySetup hook, pty-test unified WebSocket, end-to-end verification
 
 ### Phase 9: PTY Pipeline Full Chain
