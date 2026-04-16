@@ -16,6 +16,7 @@ export default tseslint.config(
       "reference/**",
       "coverage/**",
       ".claude/worktrees/**",
+      "**/scripts/**",
     ],
   },
   js.configs.recommended,

@@ -9,7 +9,6 @@ import {
   readFileSync,
   statSync,
   existsSync,
-  unlinkSync,
   renameSync,
   mkdirSync,
 } from "node:fs";

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdtempSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
   statSync,
   existsSync,
@@ -511,11 +512,8 @@ describe("EventStore: edge cases", () => {
 
     // 截断文件：删掉最后 2 个字节破坏 trailer
     const data = readFileSync(eventsPath);
-    const { writeFileSync: writeFS } = require("node:fs");
-    writeFS(eventsPath, data.subarray(0, data.length - 2));
+    writeFileSync(eventsPath, data.subarray(0, data.length - 2));
 
-    // 不应崩溃，返回 null 或能处理
-    const result = EventStore.findLatestSnapshot(eventsPath);
     // 截断后 totalLen 读取的值不正确，reverse scan 应在边界检查处停止
     // 具体行为取决于截断位置，但不应抛异常
     expect(() => EventStore.findLatestSnapshot(eventsPath)).not.toThrow();
