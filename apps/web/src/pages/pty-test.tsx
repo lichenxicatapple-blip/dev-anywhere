@@ -1,28 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { xtermTheme } from "@/lib/xterm-theme";
-import { applySnapshot, findReplayStart, replayChunks, type ReplayChunk } from "@/lib/terminal-replay";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
-
-async function loadFixture(terminal: Terminal, name: string): Promise<void> {
-  const resp = await fetch(`/fixtures/${name}.json`);
-  if (!resp.ok) {
-    console.error(`[pty-test] Failed to load fixture: ${resp.status}`);
-    return;
-  }
-  const chunks: ReplayChunk[] = await resp.json();
-  const startIndex = findReplayStart(chunks);
-  replayChunks(terminal, chunks, startIndex);
-  terminal.write("", () => terminal.scrollToBottom());
-  console.log(`[pty-test] Fixture "${name}" loaded: replayed from index ${startIndex}/${chunks.length}`);
-}
 
 export function PtyTest() {
   const connected = useAppStore((s) => s.connected);
@@ -35,34 +20,30 @@ export function PtyTest() {
 
   const terminalRef = useRef<Terminal | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
   const unsubBinaryRef = useRef<(() => void) | null>(null);
 
   // xterm.js 终端初始化
   useEffect(() => {
     let terminal: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
 
     const init = async () => {
-      // D-41: 等待 Sarasa Fixed SC 字体加载完成
       await document.fonts.ready;
 
       terminal = new Terminal({
         scrollback: 5000,
         fontFamily: '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
         fontSize: 14,
-        cursorBlink: true,
+        cursorBlink: false,
+        cursorInactiveStyle: "none",
         disableStdin: true,
         theme: xtermTheme,
         allowProposedApi: true,
       });
 
-      fitAddon = new FitAddon();
       const serializeAddon = new SerializeAddon();
       const webLinksAddon = new WebLinksAddon();
       const unicode11Addon = new Unicode11Addon();
 
-      terminal.loadAddon(fitAddon);
       terminal.loadAddon(serializeAddon);
       terminal.loadAddon(webLinksAddon);
       terminal.loadAddon(unicode11Addon);
@@ -71,30 +52,10 @@ export function PtyTest() {
       if (containerRef.current) {
         containerRef.current.replaceChildren();
         terminal.open(containerRef.current);
-        fitAddon.fit();
       }
 
       terminalRef.current = terminal;
-      fitAddonRef.current = fitAddon;
-
       (window as unknown as Record<string, unknown>).__xterm = terminal;
-
-      const params = new URLSearchParams(window.location.search || window.location.hash.split("?")[1] || "");
-      const fixture = params.get("fixture");
-      if (fixture) {
-        fitAddon.dispose();
-        fitAddonRef.current = null;
-        loadFixture(terminal, fixture).then(() => {
-          const xtermEl = containerRef.current?.querySelector(".xterm");
-          if (xtermEl && containerRef.current) {
-            containerRef.current.style.width = `${xtermEl.scrollWidth}px`;
-          }
-          const scrollContainer = containerRef.current?.parentElement;
-          if (scrollContainer) {
-            scrollContainer.scrollTop = scrollContainer.scrollHeight;
-          }
-        });
-      }
     };
 
     init();
@@ -104,21 +65,8 @@ export function PtyTest() {
     return () => {
       terminal?.dispose();
       terminalRef.current = null;
-      fitAddonRef.current = null;
       delete (window as unknown as Record<string, unknown>).__xterm;
     };
-  }, []);
-
-  // 容器尺寸变化时自动适配
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const ro = new ResizeObserver(() => {
-      fitAddonRef.current?.fit();
-    });
-    ro.observe(container);
-    return () => ro.disconnect();
   }, []);
 
   // 清理 binary subscription
@@ -156,10 +104,13 @@ export function PtyTest() {
         unsubSnapshot();
         if (terminalRef.current && typeof m.data === "string") {
           terminalRef.current.reset();
-          applySnapshot(terminalRef.current, {
-            cols: m.cols as number,
-            rows: m.rows as number,
-            data: m.data as string,
+          terminalRef.current.resize(m.cols as number, m.rows as number);
+          terminalRef.current.write(m.data as string, () => {
+            // 容器宽度跟随 xterm 实际渲染宽度
+            const xtermEl = containerRef.current?.querySelector(".xterm");
+            if (xtermEl && containerRef.current) {
+              containerRef.current.style.width = `${xtermEl.scrollWidth}px`;
+            }
           });
         }
         snapshotApplied = true;
@@ -234,11 +185,10 @@ export function PtyTest() {
         </Button>
       </div>
 
-      {/* 外层滚动容器撑满屏幕，内层贴合 terminal 实际宽度 */}
       <div className="flex-1 overflow-auto" style={{ backgroundColor: "#1E1E1E" }}>
         <div
           ref={containerRef}
-          style={{ width: "fit-content", minHeight: "100%" }}
+          style={{ minHeight: "100%" }}
         />
       </div>
     </div>
