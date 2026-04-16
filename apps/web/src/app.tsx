@@ -1,19 +1,14 @@
-import { useState, useEffect } from "react";
-import { TokenShowcase } from "./pages/token-showcase";
-import { PtyTest } from "./pages/pty-test";
+import { RouterProvider } from "react-router";
+import { router } from "@/lib/router";
+import { useRelaySetup } from "@/hooks/use-relay-setup";
+import { Toast } from "@/components/toast";
 
 export function App() {
-  const [route, setRoute] = useState(window.location.hash);
-
-  useEffect(() => {
-    const handler = () => setRoute(window.location.hash);
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
-  }, []);
-
-  if (route === "#/pty-test") {
-    return <PtyTest />;
-  }
-
-  return <TokenShowcase />;
+  useRelaySetup();
+  return (
+    <>
+      <RouterProvider router={router} />
+      <Toast />
+    </>
+  );
 }
