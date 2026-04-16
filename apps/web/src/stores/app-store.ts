@@ -31,11 +31,13 @@ interface AppStoreState {
   transitionToPhase: (next: AppPhase) => void;
 }
 
+// clientId 必须 per-tab 独立，否则同 origin 多 tab 共享同 id 时，后连的
+// client_register 会在 relay 侧覆盖 binding.ws，导致 broadcast 只到最后一个 tab
 function loadClientId(): string {
-  const stored = localStorage.getItem("cc_clientId");
+  const stored = sessionStorage.getItem("cc_clientId");
   if (stored) return stored;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  localStorage.setItem("cc_clientId", id);
+  sessionStorage.setItem("cc_clientId", id);
   return id;
 }
 
