@@ -12,7 +12,7 @@ export interface SessionInfo {
   name?: string;
   cwd: string;
   claudeSessionId?: string;
-  pid?: number;
+  pid: number;
 }
 
 export interface SessionManagerOptions {
@@ -60,13 +60,14 @@ export class SessionManager {
     this.load();
   }
 
-  createSession(mode: "pty" | "json", cwd: string, name?: string, id?: string): SessionInfo {
+  createSession(mode: "pty" | "json", cwd: string, pid: number, name?: string, id?: string): SessionInfo {
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
       state: SessionState.IDLE,
       createdAt: Date.now(),
       cwd,
+      pid,
       ...(name !== undefined ? { name } : {}),
     };
     this.sessions.set(info.id, info);
@@ -234,13 +235,20 @@ export class SessionManager {
         }
         continue;
       }
-      // WAITING_APPROVAL 是瞬态，持久化恢复时审批上下文已丢失，重置为 IDLE
-      if (info.state === SessionState.WAITING_APPROVAL) {
-        info.state = SessionState.IDLE;
-        logger.info({ sessionId: info.id }, "Reset WAITING_APPROVAL to IDLE on load");
+      // JSON 会话：检查 worker 进程是否存活，无 PID 或进程已死则清理
+      if (info.pid && this.isProcessAlive(info.pid)) {
+        if (info.state === SessionState.WAITING_APPROVAL) {
+          info.state = SessionState.IDLE;
+          logger.info({ sessionId: info.id }, "Reset WAITING_APPROVAL to IDLE on load");
+        }
+        this.sessions.set(info.id, info);
+      } else {
+        this.onSessionRemoved?.(info.id);
+        logger.info({ sessionId: info.id, pid: info.pid }, "JSON session cleaned on load, worker dead");
       }
-      this.sessions.set(info.id, info);
     }
+    // 清理后回写磁盘，避免已清理的会话在下次启动时重复处理
+    this.save();
     if (this.sessions.size > 0) {
       logger.info({ count: this.sessions.size }, "Sessions restored from persistence");
     }

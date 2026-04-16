@@ -184,7 +184,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         if (sessionId) {
           terminalState = TerminalState.CREATING_SESSION;
           socket.write(
-            serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), sessionId }),
+            serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), pid: process.pid, sessionId }),
           );
           const resp = await waitForMessage(socket, "session_create_response");
           if (resp.type === "session_create_response" && !resp.error) {
@@ -209,7 +209,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   terminalState = TerminalState.CREATING_SESSION;
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
-    serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~") }),
+    serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), pid: process.pid }),
   );
 
   const response = await responsePromise;

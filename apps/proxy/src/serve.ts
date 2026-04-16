@@ -123,7 +123,6 @@ function connectToWorker(
       createWorkerReader(sock, (msg: WorkerMessage) => {
         switch (msg.type) {
           case "worker_ready":
-            sessionManager.setPid(sessionId, msg.pid);
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
           case "worker_event":
@@ -249,7 +248,7 @@ function connectToWorker(
   });
 }
 
-function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string }): void {
+function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string }): number {
   const isDev = __filename.endsWith(".ts");
   const workerPath = join(__dirname, isDev ? "session-worker.ts" : "session-worker.js");
   const paths = sessionPaths(sessionId);
@@ -264,7 +263,9 @@ function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionI
     stdio: "ignore",
   });
   child.unref();
-  logger.info({ sessionId, workerPid: child.pid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
+  const workerPid = child.pid!;
+  logger.info({ sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
+  return workerPid;
 }
 
 async function reconnectWorkers(
@@ -323,11 +324,12 @@ function handleTerminalConnection(
       case "session_create_request": {
         if (msg.mode === "pty") {
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
-          const session = existing ?? sessionManager.createSession("pty", msg.cwd, msg.name, msg.sessionId);
+          const session = existing ?? sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
           if (existing) {
             try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {
               // 已存在的 PTY 会话状态更新失败不阻断创建流程
             }
+            sessionManager.setPid(session.id, msg.pid);
           }
           socket.write(
             serializeIpc({
@@ -337,8 +339,9 @@ function handleTerminalConnection(
           );
           logger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
         } else {
-          const session = sessionManager.createSession("json", msg.cwd, msg.name);
-          spawnWorker(session.id);
+          const pendingId = nanoid();
+          const workerPid = spawnWorker(pendingId);
+          const session = sessionManager.createSession("json", msg.cwd, workerPid, msg.name, pendingId);
 
           const paths = sessionPaths(session.id);
           let attempt = 0;
@@ -802,7 +805,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const name = cwd.replace(process.env.HOME || "", "~");
           // 先生成 ID 和启动 worker，连接成功后再注册 session
           const pendingId = nanoid();
-          spawnWorker(pendingId, { cwd, resumeSessionId });
+          const workerPid = spawnWorker(pendingId, { cwd, resumeSessionId });
 
           const paths = sessionPaths(pendingId);
           let attempt = 0;
@@ -815,7 +818,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             ).then((sock) => {
               if (sock) {
                 // worker 连接成功，正式注册 session
-                const session = sessionManager.createSession("json", cwd, name, pendingId);
+                const session = sessionManager.createSession("json", cwd, workerPid, name, pendingId);
                 if (resumeSessionId) {
                   sessionManager.setClaudeSessionId(session.id, resumeSessionId);
                 }
