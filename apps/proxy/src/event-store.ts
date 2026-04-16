@@ -1,6 +1,5 @@
 // CCAE 二进制事件持久化存储
-// 格式定义：D-29 文件头，D-30 事件结构，D-31 事件类型
-// 写入策略：D-02 每事件立即写盘，保持 fd 打开
+// 文件格式：6 字节文件头 + 事件序列，每事件立即 writeSync 写盘
 
 import {
   openSync,
@@ -11,13 +10,10 @@ import {
   statSync,
   existsSync,
   unlinkSync,
-  readdirSync,
+  renameSync,
   mkdirSync,
 } from "node:fs";
-import { createGzip } from "node:zlib";
-import { createReadStream, createWriteStream } from "node:fs";
 import { dirname } from "node:path";
-import { pipeline } from "node:stream/promises";
 
 // 文件头常量
 const CCAE_MAGIC = Buffer.from("CCAE", "ascii");
@@ -101,14 +97,14 @@ export class EventStore {
     const header = writeFileHeader();
     writeSync(this.fd, header);
 
-    // D-23: METADATA 作为文件第一个事件
+    // METADATA 作为文件第一个事件
     const metaPayload = Buffer.from(JSON.stringify(metadata), "utf-8");
     const metaEvent = encodeEvent(EventType.METADATA, metaPayload);
     writeSync(this.fd, metaEvent);
     this.eventCount = 1;
   }
 
-  // D-02: 立即写盘，不做缓冲
+  // 立即写盘，不做缓冲
   appendPtyData(data: Buffer): void {
     if (this.fd === null) throw new Error("EventStore not open");
     const event = encodeEvent(EventType.PTY_DATA, data);
@@ -116,7 +112,7 @@ export class EventStore {
     this.eventCount++;
   }
 
-  // D-05: 快照作为 SNAPSHOT 事件写入
+  // 快照作为 SNAPSHOT 事件写入
   // payload 格式: [2B cols LE][2B rows LE][serialize text bytes]
   appendSnapshot(serialized: string, cols: number, rows: number): void {
     if (this.fd === null) throw new Error("EventStore not open");
@@ -141,7 +137,7 @@ export class EventStore {
     this.eventCount++;
   }
 
-  // D-04: 每 SNAPSHOT_INTERVAL 个事件触发一次快照
+  // 每 SNAPSHOT_INTERVAL 个事件触发一次快照
   shouldSnapshot(): boolean {
     return this.eventCount > 0 && this.eventCount % SNAPSHOT_INTERVAL === 0;
   }
@@ -156,47 +152,38 @@ export class EventStore {
     }
   }
 
-  // D-15/D-49: 轮转活跃文件到 gzip 归档，新文件以 SNAPSHOT 开头确保自包含
-  async rotate(currentSnapshot: string, cols: number, rows: number): Promise<void> {
+  // 轮转：先写新文件（METADATA + 最新 SNAPSHOT），成功后替换旧文件，保证崩溃安全
+  rotate(currentSnapshot: string, cols: number, rows: number): void {
     if (this.fd !== null) {
       closeSync(this.fd);
       this.fd = null;
     }
 
-    const dir = dirname(this.eventsPath);
-    const seq = this.nextSequenceNumber(dir);
-    const seqStr = String(seq).padStart(3, "0");
-    const archivePath = `${dir}/events.${seqStr}.bin.gz`;
+    const tmpPath = this.eventsPath + ".tmp";
+    const tmpFd = openSync(tmpPath, "w");
 
-    // gzip 压缩旧文件
-    await pipeline(
-      createReadStream(this.eventsPath),
-      createGzip(),
-      createWriteStream(archivePath),
-    );
-    unlinkSync(this.eventsPath);
-
-    // 创建新的 events.bin
-    this.fd = openSync(this.eventsPath, "a");
     const header = writeFileHeader();
-    writeSync(this.fd, header);
+    writeSync(tmpFd, header);
 
-    // 写入 METADATA
     if (this.metadata) {
       const metaPayload = Buffer.from(JSON.stringify(this.metadata), "utf-8");
       const metaEvent = encodeEvent(EventType.METADATA, metaPayload);
-      writeSync(this.fd, metaEvent);
+      writeSync(tmpFd, metaEvent);
     }
 
-    // D-49: 新文件开头写入当前 SNAPSHOT（带尺寸前缀）
     const textBuf = Buffer.from(currentSnapshot, "utf-8");
     const snapshotPayload = Buffer.alloc(4 + textBuf.length);
     snapshotPayload.writeUInt16LE(cols, 0);
     snapshotPayload.writeUInt16LE(rows, 2);
     textBuf.copy(snapshotPayload, 4);
     const snapshotEvent = encodeEvent(EventType.SNAPSHOT, snapshotPayload);
-    writeSync(this.fd, snapshotEvent);
+    writeSync(tmpFd, snapshotEvent);
 
+    closeSync(tmpFd);
+
+    // 原子替换：新文件写入成功才覆盖旧文件
+    renameSync(tmpPath, this.eventsPath);
+    this.fd = openSync(this.eventsPath, "a");
     this.eventCount = 2; // METADATA + SNAPSHOT
   }
 
@@ -216,7 +203,7 @@ export class EventStore {
     }
   }
 
-  // D-48: 反向扫描找到最近的 SNAPSHOT 事件
+  // 反向扫描找到最近的 SNAPSHOT 事件
   // 返回 { cols, rows, data } 或 null，data 是 serialize 文本的 Buffer
   static findLatestSnapshot(eventsPath: string): { cols: number; rows: number; data: Buffer } | null {
     if (!existsSync(eventsPath)) return null;
@@ -308,17 +295,4 @@ export class EventStore {
     return events;
   }
 
-  // 扫描目录中已有的归档文件，确定下一个序号
-  private nextSequenceNumber(dir: string): number {
-    const files = readdirSync(dir);
-    let max = 0;
-    for (const f of files) {
-      const match = f.match(/^events\.(\d{3})\.bin\.gz$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > max) max = n;
-      }
-    }
-    return max + 1;
-  }
 }

@@ -7,6 +7,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { Button } from "@/components/ui/button";
 import { xtermTheme } from "@/lib/xterm-theme";
+import { findReplayStart, replayChunks, type ReplayChunk } from "@/lib/terminal-replay";
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -25,6 +26,20 @@ function getStatusText(status: ConnectionStatus, errorMsg: string): string {
     connected: "Connected",
   };
   return labels[status];
+}
+
+async function loadFixture(terminal: Terminal, name: string): Promise<void> {
+  const resp = await fetch(`/fixtures/${name}.json`);
+  if (!resp.ok) {
+    console.error(`[pty-test] Failed to load fixture: ${resp.status}`);
+    return;
+  }
+  const chunks: ReplayChunk[] = await resp.json();
+  const startIndex = findReplayStart(chunks);
+  replayChunks(terminal, chunks, startIndex);
+  // 所有 write 是异步排队的，用空 write 回调确保前面的数据处理完后再滚动到底部
+  terminal.write("", () => terminal.scrollToBottom());
+  console.log(`[pty-test] Fixture "${name}" loaded: replayed from index ${startIndex}/${chunks.length}`);
 }
 
 export function PtyTest() {
@@ -49,7 +64,7 @@ export function PtyTest() {
 
       terminal = new Terminal({
         scrollback: 5000, // D-19
-        fontFamily: '"Sarasa Fixed SC", ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
         fontSize: 14,
         cursorBlink: true,
         disableStdin: true, // D-44: 只读模式
@@ -69,12 +84,37 @@ export function PtyTest() {
       terminal.unicode.activeVersion = "11";
 
       if (containerRef.current) {
+        // StrictMode 双渲染时清除前一次残留的 DOM
+        containerRef.current.replaceChildren();
         terminal.open(containerRef.current);
         fitAddon.fit();
       }
 
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
+
+      // 暴露给 Playwright 测试注入数据
+      (window as unknown as Record<string, unknown>).__xterm = terminal;
+
+      // URL 参数 ?fixture=<name> 时加载 fixture 回放，禁用 FitAddon 锁定 PTY 原始尺寸
+      const params = new URLSearchParams(window.location.search || window.location.hash.split("?")[1] || "");
+      const fixture = params.get("fixture");
+      if (fixture) {
+        fitAddon.dispose();
+        fitAddonRef.current = null;
+        loadFixture(terminal, fixture).then(() => {
+          // 容器宽度贴合 terminal 实际渲染宽度，避免右侧空白
+          const xtermEl = containerRef.current?.querySelector(".xterm");
+          if (xtermEl && containerRef.current) {
+            containerRef.current.style.width = `${xtermEl.scrollWidth}px`;
+          }
+          // 外层滚动容器滚到底部，显示终端最新状态
+          const scrollContainer = containerRef.current?.parentElement;
+          if (scrollContainer) {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+          }
+        });
+      }
     };
 
     init();
@@ -85,6 +125,7 @@ export function PtyTest() {
       terminal?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      delete (window as unknown as Record<string, unknown>).__xterm;
     };
   }, []);
 
@@ -126,24 +167,47 @@ export function PtyTest() {
         type: "client_register",
         clientId: `pty-test-${Date.now()}`,
       }));
-      setStatus("connected");
     };
 
     ws.onmessage = (event: MessageEvent) => {
       // D-26: 按数据类型分发
       if (event.data instanceof ArrayBuffer) {
-        // D-43: 解析 binary frame
+        // D-43: 解析 binary frame，按 sessionId 过滤
         const view = new Uint8Array(event.data);
         if (view.length < 2) return;
-        const sessionIdLen = view[0];
-        const ptyData = view.subarray(1 + sessionIdLen);
+        const sidLen = view[0];
+        if (view.length < 1 + sidLen) return;
+        const frameSid = new TextDecoder().decode(view.subarray(1, 1 + sidLen));
+        if (sessionId && frameSid !== sessionId) return;
+        const ptyData = view.subarray(1 + sidLen);
         terminalRef.current?.write(ptyData);
       } else {
         try {
           const msg = JSON.parse(event.data as string);
-          console.log("[pty-test] JSON message:", msg.type);
-        } catch {
-          // 忽略解析错误
+          console.log("[pty-test] JSON message:", msg.type, msg);
+
+          // 收到注册响应后，请求 proxy 列表
+          if (msg.type === "client_register_response") {
+            ws.send(JSON.stringify({
+              type: "proxy_list_request",
+            }));
+          }
+          // proxy_select 成功后标记为已连接
+          if (msg.type === "proxy_select_response" && msg.success) {
+            setStatus("connected");
+          }
+          // proxy 列表推送：自动选择第一个在线的 proxy
+          if (msg.type === "proxy_list_response" && Array.isArray(msg.proxies)) {
+            const onlineProxy = msg.proxies.find((p: { online: boolean }) => p.online);
+            if (onlineProxy) {
+              ws.send(JSON.stringify({
+                type: "proxy_select",
+                proxyId: onlineProxy.proxyId,
+              }));
+            }
+          }
+        } catch (err) {
+          console.error("[pty-test] Failed to parse JSON message:", err, event.data);
         }
       }
     };
@@ -226,12 +290,13 @@ export function PtyTest() {
         </Button>
       </div>
 
-      {/* xterm.js 终端容器 */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-hidden"
-        style={{ backgroundColor: "#1E1E1E" }}
-      />
+      {/* 外层滚动容器撑满屏幕，内层贴合 terminal 实际宽度 */}
+      <div className="flex-1 overflow-auto" style={{ backgroundColor: "#1E1E1E" }}>
+        <div
+          ref={containerRef}
+          style={{ width: "fit-content", minHeight: "100%" }}
+        />
+      </div>
     </div>
   );
 }

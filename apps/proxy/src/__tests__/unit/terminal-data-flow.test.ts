@@ -135,7 +135,7 @@ describe("v2 pipeline: EventStore receives data in correct order", () => {
     store.appendPtyData(Buffer.from("second line\r\n"));
 
     const serialized = addon.serialize();
-    store.appendSnapshot(serialized);
+    store.appendSnapshot(serialized, terminal.cols, terminal.rows);
 
     store.closeSync();
 

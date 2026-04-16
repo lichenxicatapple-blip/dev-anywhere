@@ -113,7 +113,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   const sessionCwd = process.env.INIT_CWD || process.cwd();
   let currentPtyState: PtySemanticState = "turn_complete";
 
-  // D-24: headless + EventStore 在 terminal.ts 进程
+  // headless terminal + EventStore 在 terminal.ts 进程内维护
   let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   let serializeAddon: SerializeAddon | null = null;
   let eventStore: EventStore | null = null;
@@ -136,8 +136,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
       }
-      // pty_frame_request 和 pty_scroll_request 不再需要处理，
-      // Phase 9 binary 链路中客户端直接用 xterm.js scrollback
     });
 
     socket.on("close", () => {
@@ -227,8 +225,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   const rows = process.stdout.rows ?? 24;
   log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal + EventStore");
 
-  // D-24: headless terminal + serialize addon
-  headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true }); // D-19
+  headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
   serializeAddon = new SerializeAddon();
   headlessTerminal.loadAddon(serializeAddon);
 
@@ -240,23 +237,27 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   const tap: DataTap = (data: string) => {
     lastOutputTime = Date.now();
 
-    // D-14 步骤 2: headless terminal 状态追踪
+    // headless terminal 状态追踪
     if (headlessTerminal) {
       headlessTerminal.write(data);
     }
 
-    // D-14 步骤 3: EventStore 立即写盘
+    // EventStore 立即写盘
     if (eventStore) {
       eventStore.appendPtyData(Buffer.from(data, "utf-8"));
 
-      // D-04: 每 N 事件触发快照
+      // 每 N 事件触发快照，超阈值时轮转截断旧数据
       if (eventStore.shouldSnapshot() && serializeAddon && headlessTerminal) {
         const serialized = serializeAddon.serialize();
         eventStore.appendSnapshot(serialized, headlessTerminal.cols, headlessTerminal.rows);
+        if (eventStore.shouldRotate()) {
+          eventStore.rotate(serialized, headlessTerminal.cols, headlessTerminal.rows);
+          log.info({ sessionId }, "EventStore rotated");
+        }
       }
     }
 
-    // D-27: binary IPC 帧推送到 serve
+    // binary IPC 帧推送到 serve
     if (socket.writable && sessionId) {
       socket.write(encodeBinaryIpcFrame(sessionId, Buffer.from(data, "utf-8")));
     }

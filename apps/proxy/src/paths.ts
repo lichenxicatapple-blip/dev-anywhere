@@ -5,15 +5,14 @@ const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
 export const CONFIG_PATH = `${CC_DIR}/config.json`;
 
 // 运行时文件
-export const RUN_DIR = `${CC_DIR}/run`;
+const RUN_DIR = `${CC_DIR}/run`;
 export const SOCK_PATH = `${RUN_DIR}/cc-anywhere.sock`;
 export const PID_PATH = `${RUN_DIR}/cc-anywhere.pid`;
 export const STOPPED_PATH = `${RUN_DIR}/stopped`;
 
 // 持久化状态
-export const STATE_DIR = `${CC_DIR}/state`;
+const STATE_DIR = `${CC_DIR}/state`;
 export const SESSIONS_PATH = `${STATE_DIR}/sessions.json`;
-export const LASTSEQ_PATH = `${STATE_DIR}/lastseq.json`;
 
 // 会话数据
 export const DATA_DIR = `${CC_DIR}/data`;
@@ -21,7 +20,6 @@ export const DATA_DIR = `${CC_DIR}/data`;
 // 日志
 export const LOG_DIR = `${CC_DIR}/logs`;
 export const LOG_PATH = `${LOG_DIR}/service.log`;
-export const TERMINAL_LOG_PATH = `${LOG_DIR}/terminal.log`;
 
 export function sessionDir(sessionId: string): string {
   return `${DATA_DIR}/${sessionId}`;

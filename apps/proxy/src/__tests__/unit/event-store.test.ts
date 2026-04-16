@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdtempSync,
   readFileSync,
+  readdirSync,
   statSync,
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { gunzipSync } from "node:zlib";
 import { EventStore, EventType, encodeEvent, decodeEvent, writeFileHeader, HEADER_SIZE, EVENT_OVERHEAD } from "#src/event-store.js";
 
 describe("CCAE binary format: file header", () => {
@@ -294,31 +294,27 @@ describe("EventStore: rotation", () => {
     eventsPath = join(tmpDir, "events.bin");
   });
 
-  it("rotate moves events.bin to events.001.bin.gz, creates new events.bin with header + SNAPSHOT", async () => {
+  it("rotate replaces events.bin with new file containing METADATA + SNAPSHOT", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
     store.appendPtyData(Buffer.from("original data"));
-    store.appendSnapshot("snapshot for rotation", 80, 24);
-    await store.rotate("current snapshot after rotation", 80, 24);
+    store.appendSnapshot("old snapshot", 80, 24);
 
-    // 归档文件应存在
-    const archivePath = join(tmpDir, "events.001.bin.gz");
-    expect(existsSync(archivePath)).toBe(true);
+    const sizeBefore = statSync(eventsPath).size;
+    store.rotate("fresh snapshot after rotation", 80, 24);
 
-    // 归档应该是 gzip 数据，解压后包含 CCAE header
-    const compressed = readFileSync(archivePath);
-    const decompressed = gunzipSync(compressed);
-    expect(decompressed.subarray(0, 4).toString("ascii")).toBe("CCAE");
+    // 旧数据被截断，新文件应该比轮转前小很多
+    const sizeAfter = statSync(eventsPath).size;
+    expect(sizeAfter).toBeLessThan(sizeBefore);
 
-    // 新的 events.bin 应该存在，包含 header + METADATA + SNAPSHOT
-    expect(existsSync(eventsPath)).toBe(true);
+    // 新文件是合法 CCAE 格式
     const newData = readFileSync(eventsPath);
     expect(newData.subarray(0, 4).toString("ascii")).toBe("CCAE");
 
-    // 新文件第一个事件应该是 METADATA
+    // 第一个事件是 METADATA
     expect(newData.readUInt8(HEADER_SIZE)).toBe(EventType.METADATA);
 
-    // 找 SNAPSHOT 事件
+    // 包含传入的最新 SNAPSHOT
     let offset = HEADER_SIZE;
     let foundSnapshot = false;
     while (offset < newData.length) {
@@ -327,46 +323,43 @@ describe("EventStore: rotation", () => {
       const totalLen = newData.readUInt32LE(offset + 13 + payloadLen);
       if (type === EventType.SNAPSHOT) {
         const payload = newData.subarray(offset + 13, offset + 13 + payloadLen);
-        // payload 格式: [2B cols][2B rows][text]
         expect(payload.readUInt16LE(0)).toBe(80);
         expect(payload.readUInt16LE(2)).toBe(24);
-        expect(payload.subarray(4).toString("utf-8")).toBe("current snapshot after rotation");
+        expect(payload.subarray(4).toString("utf-8")).toBe("fresh snapshot after rotation");
         foundSnapshot = true;
       }
       offset += totalLen;
     }
     expect(foundSnapshot).toBe(true);
 
+    // 不产生 .gz 归档文件
+    const gzFiles = readdirSync(tmpDir).filter(f => f.endsWith(".gz"));
+    expect(gzFiles).toHaveLength(0);
+
     store.closeSync();
   });
 
-  it("rotate increments sequence number: .001, .002, .003", async () => {
+  it("rotate preserves write capability, new events append correctly", () => {
     const store = new EventStore(eventsPath);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
-    store.appendPtyData(Buffer.from("data 1"));
+    store.appendPtyData(Buffer.from("before rotation"));
+    store.rotate("snap", 80, 24);
 
-    await store.rotate("snap1", 80, 24);
-    expect(existsSync(join(tmpDir, "events.001.bin.gz"))).toBe(true);
-
-    store.appendPtyData(Buffer.from("data 2"));
-    await store.rotate("snap2", 80, 24);
-    expect(existsSync(join(tmpDir, "events.002.bin.gz"))).toBe(true);
-
-    store.appendPtyData(Buffer.from("data 3"));
-    await store.rotate("snap3", 80, 24);
-    expect(existsSync(join(tmpDir, "events.003.bin.gz"))).toBe(true);
-
+    // 轮转后继续写入
+    store.appendPtyData(Buffer.from("after rotation"));
     store.closeSync();
+
+    const events = EventStore.readEventsFromFile(eventsPath);
+    const ptyEvents = events.filter(e => e.type === EventType.PTY_DATA);
+    expect(ptyEvents).toHaveLength(1);
+    expect(ptyEvents[0].payload.toString()).toBe("after rotation");
   });
 
-  it("rotate triggers when file size exceeds threshold", () => {
-    const store = new EventStore(eventsPath, 100); // 100 bytes threshold for testing
+  it("shouldRotate returns true when file exceeds threshold", () => {
+    const store = new EventStore(eventsPath, 100);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
-
-    // 写入足够多数据超过 threshold
     store.appendPtyData(Buffer.alloc(200, 0x41));
     expect(store.shouldRotate()).toBe(true);
-
     store.closeSync();
   });
 });
@@ -489,16 +482,13 @@ describe("EventStore: edge cases", () => {
     expect(ptyEvents[2].payload.toString()).toBe("after-1");
   });
 
-  it("shouldSnapshot fires correctly after rotation resets eventCount", async () => {
-    // rotation 后 eventCount 重置为 2 (METADATA + SNAPSHOT)
-    // 下一次 shouldSnapshot 应在第 100 个事件时触发
-    const store = new EventStore(eventsPath, 50); // 低阈值便于触发 rotate
+  it("shouldSnapshot fires correctly after rotation resets eventCount", () => {
+    const store = new EventStore(eventsPath, 50);
     store.open({ cols: 80, rows: 24, sessionId: "test-1", createdAt: "2026-01-01T00:00:00Z" });
 
-    // 写够数据触发 rotate
     store.appendPtyData(Buffer.alloc(200, 0x41));
     expect(store.shouldRotate()).toBe(true);
-    await store.rotate("snap-rotate", 80, 24);
+    store.rotate("snap-rotate", 80, 24);
 
     // rotation 后 eventCount = 2, 写 97 个事件到 eventCount = 99
     for (let i = 0; i < 97; i++) {

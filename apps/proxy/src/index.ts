@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -204,84 +204,6 @@ serve
   .action(async () => {
     stopService();
     await startDaemon();
-  });
-
-// ---------- record ----------
-
-serve
-  .command("record <outputPath>")
-  .description("Record PTY data chunks to NDJSON file for test fixtures")
-  .action(async (outputPath: string) => {
-    const { resolve } = await import("node:path");
-    const { createRecordingTap } = await import("./tap.js");
-    const { PtyManager } = await import("./pty-manager.js");
-
-    const absPath = resolve(outputPath);
-    const { tap: recordTap, writeResize, stop: stopRecording } = createRecordingTap(absPath);
-    const cols = process.stdout.columns ?? 120;
-    const rows = process.stdout.rows ?? 40;
-
-    // 录制初始终端尺寸
-    writeResize(cols, rows);
-
-    const ptyManager = new PtyManager({
-      claudeArgs: [],
-      tap: (data: string) => {
-        recordTap(data);
-      },
-      stdin: process.stdin,
-      stdout: process.stdout,
-      onResize: (newCols, newRows) => {
-        writeResize(newCols, newRows);
-      },
-      onSessionExit: (code: number) => {
-        stopRecording();
-        console.error(`\nRecording saved to ${absPath}`);
-        process.exit(code);
-      },
-    });
-
-    ptyManager.start();
-  });
-
-// 在新终端窗口中执行命令，和当前工作终端完全隔离
-function openInNewWindow(args: string[]): void {
-  const scriptPath = join(__dirname, "index.js");
-  const cmd = `${process.execPath} ${scriptPath} serve ${args.join(" ")}`;
-  const termProgram = process.env.TERM_PROGRAM;
-
-  if (termProgram === "iTerm.app") {
-    execSync(`osascript -e 'tell application "iTerm2" to create window with default profile command "${cmd}"'`);
-  } else if (termProgram === "Apple_Terminal") {
-    execSync(`osascript -e 'tell application "Terminal" to do script "${cmd}"'`);
-  } else {
-    console.error(`Unsupported terminal: ${termProgram ?? "unknown"}. Requires iTerm2 or Terminal.app on macOS.`);
-    process.exit(1);
-  }
-  console.log("Replay opened in new window.");
-}
-
-serve
-  .command("replay <fixturePath>")
-  .description("Full-chain terminal frame replay")
-  .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
-  .option("--remote", "Render via frame pipeline (simulates remote client view)")
-  .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
-    const { resolve } = await import("node:path");
-    const absPath = resolve(fixturePath);
-    const args = ["__replay", absPath, "-s", opts.speed];
-    if (opts.remote) args.push("--remote");
-    openInNewWindow(args);
-  });
-
-// 新窗口中实际执行的回放逻辑（hidden command）
-serve
-  .command("__replay <fixturePath>", { hidden: true })
-  .option("-s, --speed <multiplier>", "Playback speed (0=instant, default 1)", "1")
-  .option("--remote", "Render via frame pipeline")
-  .action(async (fixturePath: string, opts: { speed: string; remote?: boolean }) => {
-    const { runReplay } = await import("./replay.js");
-    await runReplay(fixturePath, { speed: Number(opts.speed), remote: opts.remote });
   });
 
 program.addCommand(serve);

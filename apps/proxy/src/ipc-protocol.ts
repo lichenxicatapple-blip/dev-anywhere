@@ -111,28 +111,6 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   }),
 
   // client → serve：PTY 终端帧推送，frame 是 JSON.stringify 后的 terminal_frame Control 消息
-  z.object({
-    type: z.literal("pty_terminal_frame"),
-    sessionId: z.string(),
-    frame: z.string(),
-  }),
-
-  // serve → client：客户端请求当前终端全量帧
-  z.object({
-    type: z.literal("pty_frame_request"),
-    sessionId: z.string(),
-    rows: z.number().int().positive().optional(),
-  }),
-
-  // serve → terminal: relay 转发的 scroll 请求
-  z.object({
-    type: z.literal("pty_scroll_request"),
-    sessionId: z.string(),
-    direction: z.enum(["up", "down"]),
-    delta: z.number().int().positive(),
-    rows: z.number().int().positive().optional(),
-  }),
-
   // 客户端请求增强版服务状态（含 relay 连接信息和 worker 状态）
   z.object({
     type: z.literal("service_status_request"),

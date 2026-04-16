@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import type { DataTap } from "./tap.js";
@@ -19,7 +18,7 @@ export interface PtyManagerOptions {
   tap: DataTap;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
-  onSessionExit?: (code: number) => void;
+  onSessionExit?: (code: number) => void | Promise<void>;
   onResize?: (cols: number, rows: number) => void;
 }
 
@@ -103,8 +102,6 @@ export class PtyManager {
 
   /**
    * PTY 数据到达时的统一处理：OSC 9 修复 + 输出到终端 + 传给 tap
-   *
-   * start() 和 startFromFixture() 共用此方法，确保下游路径一致。
    */
   private handleData(data: string): void {
     // PTY 的 onlcr 会把 OSC 序列里的 \n 转成 \r\n，还原为 \n
@@ -115,48 +112,6 @@ export class PtyManager {
     );
     this.stdout.write(fixed);
     this.tap(data);
-  }
-
-  /**
-   * 从 NDJSON fixture 文件回放 PTY 数据，替代 start() 的 pty.spawn
-   *
-   * 按录制时间戳逐 chunk 触发 handleData()，下游路径和真实 PTY 完全一致。
-   */
-  async startFromFixture(
-    fixturePath: string,
-    options?: { speed?: number; isPaused?: () => boolean; getSpeed?: () => number },
-  ): Promise<void> {
-    const content = readFileSync(fixturePath, "utf-8");
-    const records: Array<{ ts: number; data?: string; resize?: { cols: number; rows: number } }> = content
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-
-    const getSpeed = options?.getSpeed ?? (() => options?.speed ?? 1);
-    const isPaused = options?.isPaused ?? (() => false);
-
-    let elapsed = 0;
-
-    for (const record of records) {
-      while (isPaused()) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
-      const speed = getSpeed();
-      const waitMs = speed === 0 ? 0 : (record.ts - elapsed) / speed;
-      if (waitMs > 0) {
-        await new Promise((r) => setTimeout(r, waitMs));
-      }
-      elapsed = record.ts;
-
-      if (record.resize) {
-        this.onResize?.(record.resize.cols, record.resize.rows);
-      } else if (record.data) {
-        this.handleData(record.data);
-      }
-    }
-
-    this.onSessionExit?.(0);
   }
 
   // 向 PTY 子进程写入数据，用于远程输入注入
