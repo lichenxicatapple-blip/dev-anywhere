@@ -122,10 +122,12 @@ Plans:
   1. phase-machine navigates between routes using react-router (hash mode), with localStorage replacing Taro storage
   2. relay-store establishes WebSocket connection using native browser WebSocket (no Taro codepath), including binary frame reception
   3. All migrated stores and services pass type checking (`pnpm --filter web typecheck`)
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 08-01: TBD
+- [ ] 08-01-PLAN.md — Zustand stores (app/session/chat/command/file/toast), hash router config, toast component
+- [ ] 08-02-PLAN.md — WebSocket manager (text+binary+backoff), relay-client, ensure-binding, phase-machine
+- [ ] 08-03-PLAN.md — App.tsx wiring, useRelaySetup hook, pty-test unified WebSocket, end-to-end verification
 
 ### Phase 9: PTY Pipeline Full Chain
 **Goal**: Raw PTY bytes flow from proxy through relay to browser xterm.js, with all data persisted to disk for recovery
@@ -251,8 +253,8 @@ Phase 7 --+-- Phase 8 ----------+
 | 5. Relay Server - Resilience | v1.0 | 3/3 | Complete | 2026-04-12 |
 | 6. Feishu Mini Program - Core Interaction | v1.0 | 13/13 | Complete | 2026-04-14 |
 | 7. Project Scaffold + Design Tokens | v2.0 | 2/2 | Complete | 2026-04-15 |
-| 8. Business Logic Adaptation | v2.0 | 0/1 | Not started | - |
-| 9. PTY Pipeline Full Chain | v2.0 | 0/4 | Planned | - |
+| 8. Business Logic Adaptation | v2.0 | 0/3 | Planned | - |
+| 9. PTY Pipeline Full Chain | v2.0 | 4/4 | Complete | 2026-04-16 |
 | 10. Pages + Components Migration | v2.0 | 0/3 | Not started | - |
 | 11. PTY Resilience | v2.0 | 0/2 | Not started | - |
 | 12. Deployment + PWA Basics | v2.0 | 0/2 | Not started | - |
