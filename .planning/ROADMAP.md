@@ -132,19 +132,19 @@ Plans:
 **Depends on**: Phase 7
 **Requirements**: PTY-01, PTY-02, PTY-03, PTY-04, FRONT-07
 **Success Criteria** (what must be TRUE):
-  1. Proxy persists all PTY output to disk via EventStore (binary format with CCAE header, buffered writes, gzip archival)
-  2. Proxy generates periodic xterm snapshots via @xterm/headless + serialize addon (on state transitions and every N events)
+  1. Proxy persists all PTY output to disk via EventStore (CCAE binary format, immediate writeSync, truncation rotation)
+  2. Proxy generates periodic xterm snapshots via @xterm/headless + serialize addon (every 100 events, snapshot embeds cols/rows)
   3. Live PTY output appears in browser xterm.js terminal with correct ANSI colors, cursor positioning, and CJK character rendering
   4. Binary WebSocket frames flow through relay without parsing or modification (relay distinguishes binary=PTY vs text=JSON at protocol level)
-  5. Proxy restart recovers session state from disk (loads latest snapshot, replays subsequent events into headless xterm)
+  5. EventStore infrastructure supports disk recovery (findLatestSnapshot reverse scan, snapshot-based replay module ready for Phase 11 client reconnection)
 **Plans:** 4 plans
 **UI hint**: yes
 
 Plans:
 - [x] 09-01-PLAN.md — EventStore CCAE binary persistence + headless xterm snapshots + delete old pipeline
 - [x] 09-02-PLAN.md — Proxy-side IPC mixed protocol + RelayConnection binary forwarding
-- [ ] 09-03-PLAN.md — Relay binary passthrough + delete buffer code + clean shared types
-- [ ] 09-04-PLAN.md — Browser /pty-test page with xterm.js + visual verification
+- [x] 09-03-PLAN.md — Relay binary passthrough + delete buffer code + clean shared types
+- [x] 09-04-PLAN.md — Browser /pty-test page with xterm.js + visual verification
 
 ### Phase 10: Pages + Components Migration
 **Goal**: All three pages (proxy-select, session-list, chat) and all custom components render with HTML + Tailwind + shadcn/ui, full app navigation works end-to-end

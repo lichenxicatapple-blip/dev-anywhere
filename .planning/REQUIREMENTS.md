@@ -64,14 +64,14 @@
 | FRONT-04 | Phase 10 | Pending |
 | FRONT-05 | Phase 10 | Pending |
 | FRONT-06 | Phase 10 | Pending |
-| FRONT-07 | Phase 9 | Pending |
+| FRONT-07 | Phase 9 | Complete |
 | FRONT-08 | Phase 10 | Pending |
 | FRONT-09 | Phase 8 | Pending |
 | FRONT-10 | Phase 8 | Pending |
 | PTY-01 | Phase 9 | Complete |
 | PTY-02 | Phase 9 | Complete |
 | PTY-03 | Phase 9 | Complete |
-| PTY-04 | Phase 9 | Pending |
+| PTY-04 | Phase 9 | Complete |
 | PTY-05 | Phase 11 | Pending |
 | PTY-06 | Phase 11 | Pending |
 | PTY-07 | Phase 11 | Pending |
