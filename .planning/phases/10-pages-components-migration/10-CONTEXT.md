@@ -22,6 +22,12 @@
 ### Meta — 交付定位
 
 - **D-META-01:** Phase 10 是**重做机会，不是一比一迁移**。Feishu 源码（apps/feishu/src）是参考资料而非规格书。允许重新设计信息架构、组件边界、交互方式、视觉风格，只要 FRONT-03~08 能力覆盖即可。Researcher 和 Planner 不必为"偏离 Feishu 现状"增加摩擦。
+- **D-META-02:** **所有业务组件必须在统一设计规范纲领下重新设计**，不允许零散落地、各自拟态。实操流程：
+  1. **在进入 /gsd-plan-phase 前必须先跑 /gsd-ui-phase 10，产出 10-UI-SPEC.md**（设计契约），作为下游所有 component 实现的权威依据。
+  2. UI-SPEC.md 必须覆盖：视觉 tokens（扩展 Phase 7 + 本 phase D-02/D-03 的覆盖）、排版层级、间距系统、component variants 与状态（default/hover/active/focus/disabled）、交互动效语汇（时长/缓动/发生条件）、icon 规则、空状态/加载/错误态模板、响应式断点内的变体规则。
+  3. **不允许某个组件"自己发挥"**：新组件出现之前先回到 UI-SPEC.md 校验 variant 是否存在；缺失则先更新 UI-SPEC.md 再实现，保持设计系统单一真源。
+  4. 每个 plan 的视觉验证 checkpoint（D-39）必须包含"与 UI-SPEC 一致性"的人工复核项，不只是"看起来能用"。
+  5. shadcn 原子组件（D-32）在 Plan 10-01 安装后，需按 UI-SPEC 做一次集中主题覆盖（theme layer / component className 重映射），之后各业务组件只消费已 override 的原子。
 
 ### 视觉基调与主题
 
@@ -113,14 +119,16 @@
 ### 切片与交付
 
 - **D-38:** Plan 切片建议（最终由 Planner 确定）：
-  - **10-01** App Shell + shadcn/ui 原子全集 + 响应式 Layout（含 master-detail 骨架 + 空状态占位）+ Cmd+K palette 框架
+  - **前置（非本 phase 内的 plan，但必须在 /gsd-plan-phase 10 之前完成）：** `/gsd-ui-phase 10` 产出 `10-UI-SPEC.md`（设计契约），见 D-META-02。
+  - **10-01** App Shell + shadcn/ui 原子全集 + **按 UI-SPEC 做主题 override 层**（tokens、radius、字体、component className 映射）+ 响应式 Layout（含 master-detail 骨架 + 空状态占位）+ Cmd+K palette 框架 + Toast 替换为 Sonner
   - **10-02** ProxySelect（移动端页 + 桌面侧栏 `ProxySwitcher` 控件）
   - **10-03** SessionList（移动端页 + 桌面侧栏列表 + 新建 session Dialog）
   - **10-04** Chat JSON 模式（消息流 + 虚拟滚动 + Markdown 渲染 + InputBar 全功能 + ToolApproval 分级卡）
   - **10-05** Chat PTY 模式（xterm 集成 + PTY 原始键位升级跨包改动）
   - **10-06（可选）** 并排 tab（分列主区），如 Planner 评估 10-04/10-05 已过载。
-- **D-39:** **每个 plan 完成后强制视觉验证**：Claude 启动 `pnpm --filter web dev`，用 Playwright MCP 打开页面并截图；用户在聊天窗口看图批准后再 commit。对应 memory 中的 "UI/UX needs approval" 和 "Test before commit"。
-- **D-40:** 起步 Plan 是 10-01（必须先有 Shell），首个用户可见页面是 10-02 ProxySelect。
+  - **注：** 若 Planner 评估 Plan 10-01 负载过重（shadcn 安装 + 主题 override + master-detail 骨架 + Cmd+K + Toast 替换同时交付），可拆为 10-01a（shadcn + 主题层）+ 10-01b（Layout + Cmd+K + Toast）。
+- **D-39:** **每个 plan 完成后强制视觉验证**：Claude 启动 `pnpm --filter web dev`，用 Playwright MCP 打开页面并截图；**截图复核必须附带"与 10-UI-SPEC.md 一致性"检查项**（tokens / variants / 状态 / 间距 / 动效是否匹配规范）；用户在聊天窗口看图批准后再 commit。对应 memory 中的 "UI/UX needs approval" 和 "Test before commit"。
+- **D-40:** 起步 Plan 是 10-01（必须先有 Shell 和主题 override 层），首个用户可见页面是 10-02 ProxySelect。
 - **D-41:** `/pty-test` 调试页保留（不删），方便以后排查 PTY 链路时跳过完整 Chat 启动路径。
 
 ### Claude's Discretion
@@ -139,6 +147,10 @@
 ## Canonical References
 
 **Downstream agents MUST read these before planning or implementing.**
+
+### 本 phase 设计契约（最高权威，planner/implementer 必读）
+- `.planning/phases/10-pages-components-migration/10-UI-SPEC.md` — **先于 planning 产出**；所有组件实现必须遵守。未产出该文件时不得进入 `/gsd-plan-phase 10`。
+- `.planning/phases/10-pages-components-migration/10-CONTEXT.md` — 本文件
 
 ### 项目级规格
 - `.planning/REQUIREMENTS.md` — FRONT-03/04/05/06/08（本 phase 覆盖的 REQ）和 FRONT-07（Phase 9 已交付的 PTY）
