@@ -270,5 +270,42 @@
 
 ---
 
+## Addendum (2026-04-17, post-discussion locked decisions)
+
+> 以下决策在 research 完成后 / planning 前产生，**优先级高于前文同主题决策**。
+
+- **D-21 重框（覆盖 D-21 原"键位通道"语义）**：
+  - **后端通道**采用方案 A：新增 relay envelope 消息类型 `remote_input_raw`（`{ type, sessionId, data: string }`），只改 `packages/shared/src/schemas/relay-control.ts` + `apps/proxy/src/serve.ts` + client。`apps/proxy/src/ipc-protocol.ts` 与 `apps/proxy/src/terminal.ts` **保持不变**（已核实 terminal.ts L135 是 raw write，`\r` 追加仅在 serve.ts L771 envelope 层）。
+  - **客户端 UI** 从"物理键盘捕获 + 全键位 ANSI 映射表"调整为**语义功能面板**（非键位按钮），跨 JSON / PTY 模式统一呈现：
+    - 打断输出 — PTY 发 `\x03` / JSON 发 `worker_abort` 控制消息
+    - 切换审批模式 — PTY 发 `\t` / JSON 操作 permission-mode chip
+    - 历史上一条 — PTY 发 `\x1b[A` / JSON 走 InputBar 本地历史栈
+    - 历史下一条 — PTY 发 `\x1b[B` / JSON 同上
+    - 取消 — PTY 发 `\x1b` / JSON 关闭浮层或清空 quote
+  - **放弃物理键盘捕获**：不实现 research §2.2 完整 ANSI 映射表。`apps/web/src/lib/ansi-keys.ts` 缩减为 5 条预烤 ANSI 常量 + 对应 sender 函数。
+  - **UI 位置**：InputBar 旁或 Chat 头部的可折叠面板（延续 Feishu `settings-panel` pattern），具体空间位置由 Planner 在 Plan 10-04 统筹。
+
+- **D-18 重确认：并排 tab 本 phase 交付**：
+  - 新增 Plan 10-06（并排 tab + chat-store per-session 重写）。
+  - chat-store 当前未接线（仅 `pages/chat.tsx` 只读 selector），本 phase 首次通电直接按 per-session slice map 设计（key = sessionId），避免 Phase 11 再重构已落地消费者。
+  - chat-store 新 shape 参考 `apps/web/src/stores/session-store.ts` 的 Map-like pattern（sessions[] + currentSessionId）。
+  - 所有 chat-store action 签名带 sessionId 第一参数（例：`appendAssistantText(sessionId, text)`）。
+  - SplitPane 布局组件新建于 `apps/web/src/components/shell/split-pane.tsx`，激活阈值 = `lg` (1024px)，MVP 最多两列。
+  - URL 结构：`/chat/:id?mode=...&split=<secondSessionId>` 承载双 sessionId。
+
+- **D-38 细化：Plan 切片定稿为 7 个 Plan**：
+  - **10-01a** — shadcn 14 原子安装（Dialog / Sheet / Tooltip / Popover / ScrollArea / Textarea / Badge / Avatar / Separator / Select / DropdownMenu / Sonner / Command）+ 主题 override（`--primary` amber `#D4A574`、`--radius` `0.375rem`、Button label `font-weight: 400`）+ `apps/web/playwright.config.ts` 与 `apps/web/e2e/helpers.ts` 配置
+  - **10-01b** — AppShell + Sidebar + EmptyState + master-detail 响应式骨架（md 768px 激活）+ CommandPalette (Cmd+K) + Sonner 迁移（toast.tsx 改为 Sonner wrapper 保留 useToast API）+ 顶层 Layout 父路由
+  - **10-02** — ProxySwitcher（`layout="page"|"dropdown"`）+ ProxyStatusDot + proxy-select.tsx 重写
+  - **10-03** — SessionList（`layout="page"|"sidebar"`）+ SessionRow + CreateSessionDialog + master-detail 点击即时切换主区
+  - **10-04** — Chat JSON 模式：ChatPage 调度 / ChatHeader / ChatJsonView / MessageBubble / MarkdownView / ToolApprovalCard / InputBar（含斜杠 / @ / 历史）/ SlashCommandPicker / QuotePreviewBar / FilePathPicker / BackToBottom / StatusLine + **语义功能面板**（D-21 新形态，JSON 模式实现）+ websocket.ts JSON 消息 dispatcher 接线 chat-store
+  - **10-05** — Chat PTY 模式：ChatPtyView + `apps/web/src/lib/create-xterm.ts` 抽 pty-test 共享配置 + `apps/web/src/lib/ansi-keys.ts` 5 条 ANSI 常量 + 语义功能面板 PTY 通路 + `remote_input_raw` envelope 端到端（shared schema + serve.ts + proxy 单测）
+  - **10-06** — chat-store per-session 重写（Map-like slice map）+ 所有 Chat 消费者改 sessionId-scoped selector + SplitPane 布局组件 + chat.tsx URL 双 sessionId + e2e/split-pane.spec.ts
+
+- **PATTERNS.md 两行标注修订**：PATTERNS.md 第 99–100 行的 `apps/proxy/src/ipc-protocol.ts` 与 `apps/proxy/src/terminal.ts` 标为 "modify, option B only"；本 phase 采用方案 A，这两个文件**不修改**，Planner 请忽略这两条 analog 行并**不要将其列入任何 PLAN.md 的 `files_modified` 清单**。
+
+---
+
 *Phase: 10-pages-components-migration*
 *Context gathered: 2026-04-17*
+*Addendum: 2026-04-17*
