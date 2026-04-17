@@ -35,9 +35,10 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
       showErrorToast("Relay client not available");
       return;
     }
+    const displayName = proxyName ?? proxyId;
     const result = await relay.selectProxy(proxyId);
     if (!result.success) {
-      showErrorToast(`选择 Proxy 失败: ${result.error ?? "unknown"}`);
+      showErrorToast(`选择 ${displayName} 失败：${result.error ?? "unknown"}`);
       return;
     }
     localStorage.setItem("cc_proxyId", proxyId);
@@ -65,16 +66,19 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                 type="button"
                 data-slot="proxy-item"
                 data-proxy-id={p.proxyId}
+                data-online={p.online}
+                disabled={!p.online}
                 onClick={() => handleSelect(p.proxyId, p.name)}
-                className="w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border border-border bg-card hover:bg-accent transition-colors text-left"
+                className="w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border border-border bg-card hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card"
                 aria-pressed={selectedProxyId === p.proxyId}
+                title={!p.online ? "Proxy 离线，无法连接" : undefined}
               >
                 <ProxyStatusDot status={p.online ? "online" : "offline"} />
-                <span className="text-sm font-normal flex-1">
+                <span className="text-sm font-normal flex-1 truncate min-w-0">
                   {p.name ?? p.proxyId}
                 </span>
                 {!p.online && (
-                  <span className="text-xs text-muted-foreground">离线</span>
+                  <span className="text-xs text-muted-foreground shrink-0">离线</span>
                 )}
               </button>
             </li>
@@ -120,14 +124,20 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                   type="button"
                   data-slot="proxy-item"
                   data-proxy-id={p.proxyId}
+                  data-online={p.online}
+                  disabled={!p.online}
                   onClick={() => handleSelect(p.proxyId, p.name)}
-                  className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   aria-pressed={selectedProxyId === p.proxyId}
+                  title={!p.online ? "Proxy 离线" : undefined}
                 >
                   <ProxyStatusDot status={p.online ? "online" : "offline"} />
-                  <span className="text-sm font-normal flex-1 truncate">
+                  <span className="text-sm font-normal flex-1 truncate min-w-0">
                     {p.name ?? p.proxyId}
                   </span>
+                  {!p.online && (
+                    <span className="text-xs text-muted-foreground shrink-0">离线</span>
+                  )}
                 </button>
               </li>
             ))}

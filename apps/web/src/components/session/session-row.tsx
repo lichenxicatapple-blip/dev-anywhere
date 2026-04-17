@@ -52,7 +52,7 @@ export function SessionRow({ session, selected, onClick, onTerminate }: SessionR
   return (
     <li
       className={cn(
-        "relative flex items-center gap-2 px-3 transition-colors",
+        "relative flex items-center gap-2 px-3 w-full min-w-0 transition-colors",
         "min-h-[44px] md:h-9 md:min-h-0",
         "hover:bg-accent",
         selected && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",

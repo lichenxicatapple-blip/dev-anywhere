@@ -65,7 +65,7 @@ export function SessionList({ layout }: SessionListProps) {
   }
 
   const listElement = (
-    <ul role="list" className="flex flex-col">
+    <ul role="list" className="flex flex-col w-full min-w-0">
       {sessions.map((s) => (
         <SessionRow
           key={s.sessionId}
@@ -94,9 +94,10 @@ export function SessionList({ layout }: SessionListProps) {
   }
 
   // layout === "sidebar": 列表占据 Sidebar 中段；底部 CTA 由 CreateSessionButton 承载
+  // 直接用 overflow-y-auto 而非 ScrollArea，避免 radix ScrollArea 内部 table-wrapper 打破 truncate 链路
   return (
     <>
-      <ScrollArea className="h-full">{listElement}</ScrollArea>
+      <div className="h-full overflow-y-auto">{listElement}</div>
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
