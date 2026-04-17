@@ -9,14 +9,29 @@ test.describe("Sonner toast — 挂载持久化", () => {
     await resetLocalState(page);
   });
 
+  // Sonner v2 延迟挂载 portal：触发一次 toast 后才会注入 [data-sonner-toaster] 节点。
+  // 验证策略：beforeEach 触发一次 toast 以物化 portal；然后断言其始终存在。
+  test.beforeEach(async ({ page }) => {
+    await page.evaluate(async () => {
+      const mod = await import("/src/components/toast.tsx");
+      mod.showToast("e2e-mount");
+    });
+    await expect(
+      page.locator("[data-sonner-toaster], section[aria-label^='Notifications']"),
+    ).toHaveCount(1);
+  });
+
   test("Toaster 容器挂在 AppShell 根节点", async ({ page }) => {
-    // Sonner 挂载后会在 DOM 里注入 [data-sonner-toaster] 区域，验证 AppShell 正确引入
-    const toasterRegion = page.locator("[data-sonner-toaster], [aria-label='Notifications']");
+    const toasterRegion = page.locator(
+      "[data-sonner-toaster], section[aria-label^='Notifications']",
+    );
     await expect(toasterRegion).toHaveCount(1);
   });
 
   test("Toaster 容器跨路由切换不 unmount", async ({ page }) => {
-    const toasterRegion = page.locator("[data-sonner-toaster], [aria-label='Notifications']");
+    const toasterRegion = page.locator(
+      "[data-sonner-toaster], section[aria-label^='Notifications']",
+    );
     await expect(toasterRegion).toHaveCount(1);
 
     await page.goto(`${BASE_URL}/#/sessions`);

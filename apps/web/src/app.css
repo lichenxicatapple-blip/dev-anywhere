@@ -58,6 +58,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+html,
 body {
   @apply bg-background text-foreground;
 }
