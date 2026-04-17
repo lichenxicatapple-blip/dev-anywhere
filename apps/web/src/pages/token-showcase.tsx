@@ -1,26 +1,40 @@
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 const surfaceColors = [
-  { name: "background", hex: "#1E1E1E", className: "bg-background" },
-  { name: "card", hex: "#252526", className: "bg-card" },
-  { name: "popover", hex: "#2D2D2D", className: "bg-popover" },
-  { name: "input", hex: "#3C3C3C", className: "bg-input" },
-  { name: "border", hex: "#404040", className: "bg-background border border-border" },
+  { name: "background", cssVar: "--background", className: "bg-background" },
+  { name: "card", cssVar: "--card", className: "bg-card" },
+  { name: "popover", cssVar: "--popover", className: "bg-popover" },
+  { name: "input", cssVar: "--input", className: "bg-input" },
+  { name: "border", cssVar: "--border", className: "bg-background border border-border" },
 ] as const;
 
 const accentColors = [
-  { name: "primary", hex: "#00D4AA", className: "bg-primary" },
-  { name: "primary-foreground", hex: "#1E1E1E", className: "bg-primary-foreground text-primary", textSample: true },
-  { name: "destructive", hex: "#F44747", className: "bg-destructive" },
-  { name: "muted", hex: "#252526", className: "bg-muted" },
+  { name: "primary", cssVar: "--primary", className: "bg-primary" },
+  { name: "primary-foreground", cssVar: "--primary-foreground", className: "bg-primary-foreground text-primary" },
+  { name: "destructive", cssVar: "--destructive", className: "bg-destructive" },
+  { name: "muted", cssVar: "--muted", className: "bg-muted" },
 ] as const;
 
 const statusColors = [
-  { name: "working", hex: "#4FC1FF", cssVar: "--color-status-working" },
-  { name: "success", hex: "#00D4AA", cssVar: "--color-status-success" },
-  { name: "warning", hex: "#E8AB5A", cssVar: "--color-status-warning" },
-  { name: "error", hex: "#F44747", cssVar: "--color-status-error" },
+  { name: "working", cssVar: "--color-status-working" },
+  { name: "success", cssVar: "--color-status-success" },
+  { name: "warning", cssVar: "--color-status-warning" },
+  { name: "error", cssVar: "--color-status-error" },
 ] as const;
+
+function useCssVarValues(cssVars: readonly string[]): Record<string, string> {
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const style = getComputedStyle(document.documentElement);
+    const next: Record<string, string> = {};
+    for (const v of cssVars) {
+      next[v] = style.getPropertyValue(v).trim().toUpperCase() || v;
+    }
+    setValues(next);
+  }, [cssVars]);
+  return values;
+}
 
 const typographySamples = [
   { className: "text-3xl font-bold", label: "Heading 3XL (30px) -- font-sans" },
@@ -71,7 +85,16 @@ function ColorSwatch({
   );
 }
 
+const allCssVars = [
+  ...surfaceColors.map((c) => c.cssVar),
+  ...accentColors.map((c) => c.cssVar),
+  "--muted-foreground",
+  ...statusColors.map((c) => c.cssVar),
+];
+
 export function TokenShowcase() {
+  const vars = useCssVarValues(allCssVars);
+
   return (
     <div className="min-h-screen p-3 sm:p-4 lg:p-6">
       <div className="max-w-4xl mx-auto space-y-8">
@@ -89,7 +112,7 @@ export function TokenShowcase() {
               <ColorSwatch
                 key={c.name}
                 className={c.className}
-                label={`${c.hex} / ${c.name}`}
+                label={`${vars[c.cssVar] ?? c.cssVar} / ${c.name}`}
               />
             ))}
           </div>
@@ -102,15 +125,17 @@ export function TokenShowcase() {
               <ColorSwatch
                 key={c.name}
                 className={c.className}
-                label={`${c.hex} / ${c.name}`}
+                label={`${vars[c.cssVar] ?? c.cssVar} / ${c.name}`}
               />
             ))}
             <div>
               <div className="h-20 rounded-md border border-border bg-background flex items-center justify-center">
-                <span className="text-muted-foreground">#808080</span>
+                <span className="text-muted-foreground">
+                  {vars["--muted-foreground"] ?? "—"}
+                </span>
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                #808080 / muted-foreground
+                {vars["--muted-foreground"] ?? "—"} / muted-foreground
               </p>
             </div>
           </div>
@@ -126,7 +151,7 @@ export function TokenShowcase() {
                   style={{ backgroundColor: `var(${c.cssVar})` }}
                 />
                 <p className="text-sm text-muted-foreground mt-1">
-                  {c.hex} / {c.name}
+                  {vars[c.cssVar] ?? c.cssVar} / {c.name}
                 </p>
               </div>
             ))}
