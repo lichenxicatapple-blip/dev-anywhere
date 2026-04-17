@@ -8,7 +8,7 @@
   --card-foreground: #D4D4D4;
   --popover: #2D2D2D;
   --popover-foreground: #D4D4D4;
-  --primary: #00D4AA;
+  --primary: #D4A574;
   --primary-foreground: #1E1E1E;
   --secondary: #2D2D2D;
   --secondary-foreground: #D4D4D4;
@@ -19,8 +19,8 @@
   --destructive: #F44747;
   --border: #404040;
   --input: #3C3C3C;
-  --ring: #00D4AA;
-  --radius: 0.25rem;
+  --ring: #D4A574;
+  --radius: 0.375rem;
 
   --color-status-working: #4FC1FF;
   --color-status-success: #00D4AA;

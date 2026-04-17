@@ -1,10 +1,24 @@
-"use client"
+"use client";
 
-// shadcn CLI 默认模板依赖 next-themes 且 import 自身导致循环引用
-// Phase 10 锁定深色主题（D-04），由 Plan 10-01a Task 2 重写为 UI-SPEC 契约版本
-// 这里提供最小可通过 typecheck 的 Toaster 直通包装
-import { Toaster as SonnerToaster } from "sonner"
+import { Toaster as SonnerToaster } from "sonner";
 
-export function Toaster(props: React.ComponentProps<typeof SonnerToaster>) {
-  return <SonnerToaster {...props} />
+// UI-SPEC §Color + Sonner status mapping
+// 深色锁定（D-04），四种状态走 --color-status-* CSS 变量的 border-l-4 视觉锚
+// 仅导出 Toaster 根组件；业务侧 toast() 调用由 Plan 10-01b 的 toast 兼容层注入
+export function Toaster() {
+  return (
+    <SonnerToaster
+      theme="dark"
+      position="top-center"
+      toastOptions={{
+        classNames: {
+          toast: "bg-card text-foreground border border-border",
+          success: "border-l-4 !border-l-[var(--color-status-success)]",
+          error: "border-l-4 !border-l-[var(--color-status-error)]",
+          warning: "border-l-4 !border-l-[var(--color-status-warning)]",
+          info: "border-l-4 !border-l-[var(--color-status-working)]",
+        },
+      }}
+    />
+  );
 }
