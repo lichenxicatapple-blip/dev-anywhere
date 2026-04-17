@@ -1327,27 +1327,37 @@ export function ChatJsonView({ sessionId }: { sessionId: string }) {
 
 ---
 
-## 14. Open Questions for Planner
+## 14. Open Questions (Resolved)
 
 1. **D-21 方案选择**：推荐方案 A（仅 shared + serve + client）vs 完整方案（+ IPC + terminal）。Researcher 推荐 A；**Planner 需 confirm 与用户或直接采用**。
+   **Resolution:** 方案 A 锁定，详见 CONTEXT Addendum
 
 2. **PTY 模式 InputBar 是 `<input>` 还是 `<textarea>`**（A7）。影响方向键 UX 含义（在编辑区内 vs 发给 PTY）。
+   **Resolution:** textarea（CONTEXT D-26 已锁 1-8 行自撑高 textarea）
 
 3. **并排 tab 是否本 phase 实施**（A6）。推荐推迟到 Phase 11；Planner 和用户对齐。
+   **Resolution:** 本 phase 交付 Plan 10-06，详见 CONTEXT Addendum
 
 4. **iOS 真机测试如何接入 GSD workflow**。Plan 10-01 和 10-04 的 acceptance 需要真机验证，用户是否有 iPhone 可测？
+   **Resolution:** 归 VALIDATION.md Manual-Only Verifications，用户配合真机截图验证（operational，非 plan scope）
 
 5. **`radix-ui@1.4.3` umbrella 与 shadcn add 产生的 `@radix-ui/react-*` 子包是否冲突**。Plan 10-01 开头跑 `pnpm install && pnpm --filter web typecheck` 后决定是否移除 umbrella。
+   **Resolution:** Plan 10-01a 首任务跑 typecheck 后决定，归 executor 现场判断
 
 6. **本地 echo（A8）** — 是否在 PTY 模式下做客户端即时回显来掩盖延迟？Researcher 推荐不做。
+   **Resolution:** 不做，沿用 Phase 9 纯被动回显（研究推荐，Phase 11+ 再评估）
 
 7. **Plan 10-01 是否拆成 10-01a（shadcn install + theme override）和 10-01b（AppShell + master-detail + Cmd+K + Toast）**。CONTEXT D-38 已建议可拆，Planner 决定。
+   **Resolution:** 拆 10-01a/10-01b，详见 CONTEXT Addendum
 
 8. **DECCKM (Application Cursor Keys mode)** 是否需要在 client 端感知并切换 ANSI 序列。Researcher 建议本 phase 仅发 Normal 模式序列，Phase 11+ 再评估。
+   **Resolution:** 本 phase 采用语义功能面板而非物理键位捕获（CONTEXT Addendum D-21 重框），DECCKM 无需处理
 
 9. **`useVirtualizer` scrollToIndex behavior: "auto" vs "smooth"** for follow-output。Researcher 建议 streaming 每 delta 用 "auto"（无动画），用户手动点 BackToBottom 用 "smooth"。
+   **Resolution:** Planner 实施细节 — streaming delta 用 'auto'（无动画），用户点 BackToBottom 用 'smooth'。由 Plan 10-04 executor 在 code 中实现，无需 plan level 决策
 
 10. **SlashCommandPicker 和 FilePathPicker 的 popover 定位**：在 InputBar 上方绝对定位 vs 直接用 shadcn Popover anchored。Researcher 建议直接 CSS 绝对定位（popover 用在全局 trigger 更合适；输入联动 picker 自己管理更稳），Planner 实施时再 evaluate。
+   **Resolution:** Planner 实施细节 — SlashCommandPicker 和 FilePathPicker 用 CSS 绝对定位（与 InputBar 同 stacking context），不复用 shadcn Popover anchor。由 Plan 10-04 executor 实施
 
 ---
 

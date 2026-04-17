@@ -158,13 +158,18 @@ Plans:
   3. Chat page renders JSON mode (chat bubbles, Markdown, tool approval cards) and PTY mode (xterm.js terminal) correctly
   4. All shared UI components (InputBar, Toast, Modal, StatusLine, BackToBottom, etc.) work with shadcn/ui replacements
   5. App shell provides safe area handling, navigation header, and responsive layout across mobile/tablet/desktop breakpoints
-**Plans**: TBD
+**Plans:** 8 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 10-01: TBD
-- [ ] 10-02: TBD
-- [ ] 10-03: TBD
+- [ ] 10-01a-PLAN.md — shadcn atom set install + Phase 10 theme override (amber primary, 0.375rem radius, Button font-weight 400) + Playwright e2e scaffolding
+- [ ] 10-01b-PLAN.md — AppShell + Sidebar + EmptyState + CommandPalette (Cmd+K) + Sonner migration + nested router with AppShell as parent
+- [ ] 10-02-PLAN.md — ProxySwitcher dual-layout (page | dropdown) + ProxyStatusDot + rewritten proxy-select page + sidebar dropdown slot
+- [ ] 10-03-PLAN.md — SessionList dual-layout + SessionRow + CreateSessionDialog + master-detail instant switch
+- [ ] 10-04a-PLAN.md — Chat JSON core rendering (virtualized messages + Markdown + ToolApprovalCard + BackToBottom + StatusLine + chat-dispatcher wiring)
+- [ ] 10-04b-PLAN.md — Chat JSON input half + ChatHeader + SemanticActionPanel (JSON+PTY routes) + shared FilePathPicker (refactors CreateSessionDialog CWD field)
+- [ ] 10-05-PLAN.md — Chat PTY primitives (createXterm factory + ChatPtyView self-contained + remote_input_raw envelope + ansi-keys 5 constants + proxy serve.ts branch)
+- [ ] 10-06-PLAN.md — chat-store per-session rewrite (removes CustomEvent bridge) + SplitPane dual-chat layout (lg viewport)
 
 ### Phase 11: PTY Resilience
 **Goal**: PTY sessions survive disconnections, support multiple viewers, and can be replayed from history
