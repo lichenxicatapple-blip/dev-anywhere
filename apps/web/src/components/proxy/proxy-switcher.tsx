@@ -54,8 +54,10 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
       return <EmptyState variant="no-proxy" />;
     }
     return (
-      <div className="flex flex-col gap-2 p-4 h-full overflow-auto">
-        <h2 className="text-lg font-semibold mb-2">选择一个 Proxy</h2>
+      <div className="flex flex-col gap-3 p-4 h-full overflow-auto">
+        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          本地 Proxy
+        </h3>
         <ul role="list" className="flex flex-col gap-2">
           {proxies.map((p) => (
             <li key={p.proxyId}>
