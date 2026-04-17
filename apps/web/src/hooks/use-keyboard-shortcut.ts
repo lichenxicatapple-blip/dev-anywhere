@@ -1,9 +1,10 @@
-// 全局键盘快捷键注册 hook，支持 meta/ctrl 修饰，跨平台兼容 Mac Cmd 与 Win/Linux Ctrl
+// 全局键盘快捷键注册 hook
+// modifier: true 表示需要任一修饰键（metaKey || ctrlKey），跨平台兼容 Mac Cmd 与 Win/Linux Ctrl
+// modifier 未设置或为 false 时，按 key 触发不需要修饰键
 import { useEffect } from "react";
 
 interface Options {
-  meta?: boolean;
-  ctrl?: boolean;
+  modifier?: boolean;
   preventDefault?: boolean;
 }
 
@@ -14,8 +15,7 @@ export function useKeyboardShortcut(
 ): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const needsModifier = opts.meta || opts.ctrl;
-      const modifierOk = needsModifier ? e.metaKey || e.ctrlKey : true;
+      const modifierOk = opts.modifier ? e.metaKey || e.ctrlKey : true;
       if (e.key.toLowerCase() === key.toLowerCase() && modifierOk) {
         if (opts.preventDefault) e.preventDefault();
         handler(e);
@@ -23,5 +23,5 @@ export function useKeyboardShortcut(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [key, handler, opts.meta, opts.ctrl, opts.preventDefault]);
+  }, [key, handler, opts.modifier, opts.preventDefault]);
 }

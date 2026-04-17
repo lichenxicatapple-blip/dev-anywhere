@@ -1,6 +1,7 @@
 // Cmd+K / Ctrl+K 全局命令面板，订阅 app-store 与 session-store，分组展示会话 / Proxy / 动作
 // 文案与分组锁定 10-UI-SPEC.md Copywriting Contract
-import { useState, useCallback } from "react";
+// open/onOpenChange 由 AppShell 控制，以便 header 搜索按钮也能打开此面板（移动端等无键盘设备触发入口）
+import { useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -14,20 +15,24 @@ import {
   CommandEmpty,
 } from "@/components/ui/command";
 
-export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+interface CommandPaletteProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const proxies = useAppStore((s) => s.proxies);
   const sessions = useSessionStore((s) => s.sessions);
 
   const onOpenKey = useCallback(() => {
-    setOpen((prev) => !prev);
-  }, []);
+    onOpenChange(!open);
+  }, [open, onOpenChange]);
 
-  useKeyboardShortcut("k", onOpenKey, { meta: true, ctrl: true, preventDefault: true });
+  useKeyboardShortcut("k", onOpenKey, { modifier: true, preventDefault: true });
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
+    <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandInput placeholder="搜索会话、proxy 或命令…" />
       <CommandList>
         <CommandEmpty>没有匹配结果</CommandEmpty>
@@ -40,7 +45,7 @@ export function CommandPalette() {
                 value={`session-${s.sessionId}-${s.name ?? ""}`}
                 onSelect={() => {
                   navigate(`/chat/${s.sessionId}?mode=${s.mode}`);
-                  setOpen(false);
+                  onOpenChange(false);
                 }}
               >
                 {s.name ?? s.sessionId}
@@ -58,7 +63,7 @@ export function CommandPalette() {
                 onSelect={() => {
                   // Plan 10-02 会绑定 selectProxy，这里先导航回根路由占位
                   navigate("/");
-                  setOpen(false);
+                  onOpenChange(false);
                 }}
               >
                 {p.name ?? p.proxyId}
@@ -72,7 +77,7 @@ export function CommandPalette() {
             value="action-new-session"
             onSelect={() => {
               navigate("/sessions");
-              setOpen(false);
+              onOpenChange(false);
             }}
           >
             新建会话
