@@ -42,7 +42,7 @@ must_haves:
     - "New messages stream in with auto-scroll to bottom (follow-output), freezes if user scrolls up, unfreezes at bottom"
     - "Markdown renders with GFM + code highlight; script/iframe/object/embed tags are dropped"
     - "User sees a ToolApprovalCard (compact) when Claude requests a tool; three buttons 允许 / 总是允许此工具 / 拒绝; y/n/a shortcuts work when card focused"
-    - "chat-dispatcher service registers with wsManager and routes JSON control messages to chat-store"
+    - "chat-dispatcher service subscribes to relayClient.onMessage and routes envelope + control messages to chat-store using real schema type literals (assistant_message / tool_use_request / tool_result / pending_approvals_push / session_history_messages)"
     - "chat.tsx dispatches to ChatJsonView for mode=json; InputBar area left as stub for Plan 10-04b"
     - "All chat components receive sessionId as prop and use scoped selectors (ready for Plan 10-06 per-session store)"
   artifacts:
@@ -56,15 +56,15 @@ must_haves:
     - path: "apps/web/src/components/chat/tool-approval-card.tsx"
       provides: "Inline / floating tool approval with y/n/a keyboard"
     - path: "apps/web/src/services/chat-dispatcher.ts"
-      provides: "JSON protocol dispatcher — forward compat with per-session chat-store"
+      provides: "Envelope + control dispatcher — real schema type literals, forward compat with per-session chat-store"
   key_links:
     - from: "apps/web/src/components/chat/chat-json-view.tsx"
       to: "useChatStore(sessionId-scoped selector)"
       via: "per-session slice read"
       pattern: "useChatStore"
     - from: "apps/web/src/services/chat-dispatcher.ts"
-      to: "wsManager.onMessage"
-      via: "JSON dispatcher registration"
+      to: "relayClientRef.current.onMessage"
+      via: "envelope + control dispatcher registration"
       pattern: "onMessage"
     - from: "apps/web/src/hooks/use-relay-setup.ts"
       to: "registerChatDispatcher"
@@ -73,7 +73,7 @@ must_haves:
 ---
 
 <objective>
-Deliver the core Chat JSON rendering surface (FRONT-06 half 1): dependency install, markdown view, message bubble, tool approval card, virtualized list container, status/BackToBottom helpers, and the WebSocket-to-chat-store dispatcher. **InputBar, pickers, quote preview, semantic action panel, chat header — all deferred to Plan 10-04b.** chat.tsx is stubbed for the InputBar region so the page can still render.
+Deliver the core Chat JSON rendering surface (FRONT-06 half 1): dependency install, markdown view, message bubble, tool approval card, virtualized list container, status/BackToBottom helpers, and the relay-to-chat-store dispatcher. **InputBar, pickers, quote preview, semantic action panel, chat header — all deferred to Plan 10-04b.** chat.tsx is stubbed for the InputBar region so the page can still render.
 
 **CRITICAL: every Chat component receives `sessionId` as prop from the start.** Plan 10-06 rewrites chat-store to per-session map; by passing sessionId prop now, consumers only need to change their selector in 10-06, not their prop drilling.
 
@@ -95,7 +95,12 @@ Output: 8 new chat components/utils/hooks, 1 rewritten page (chat.tsx stub for i
 @.planning/phases/10-pages-components-migration/10-PATTERNS.md
 @apps/web/src/pages/chat.tsx
 @apps/web/src/services/websocket.ts
+@apps/web/src/services/relay-client.ts
 @apps/web/src/stores/chat-store.ts
+@packages/shared/src/schemas/envelope.ts
+@packages/shared/src/schemas/chat.ts
+@packages/shared/src/schemas/tool.ts
+@packages/shared/src/schemas/relay-control.ts
 @apps/feishu/src/components/tool-approval-card/index.tsx
 @apps/feishu/src/utils/summarize-tool-input.ts
 
@@ -123,19 +128,30 @@ const messages = useChatStore((s) => s.bySessionId[sessionId]?.messages ?? []);
 Chat-dispatcher shape (new `apps/web/src/services/chat-dispatcher.ts`):
 ```ts
 export function registerChatDispatcher(): () => void;
-// Registers a wsManager.onMessage handler that:
-//   1. JSON.parse raw text
-//   2. safeParse via RelayControlSchema
-//   3. Switch by type:
-//        assistant_message_delta → appendAssistantText
-//        assistant_message_complete → markTurnComplete
-//        tool_request → addApprovalRequest
-//        tool_approved / tool_denied → updateApprovalStatus
-// Returns a cleanup function that unregisters.
+// Subscribes to relayClient.onMessage (NOT wsManager.onMessage — relay-client
+// has already JSON.parsed and centralizes all subscribers per its dispatch loop,
+// see apps/web/src/services/relay-client.ts L19-L32).
+// Routes MessageEnvelope chat/tool types + RelayControlMessage chat-related types
+// to useChatStore actions. Returns a cleanup function.
 ```
 
 Wiring point — `apps/web/src/hooks/use-relay-setup.ts`:
 Add `registerChatDispatcher()` call inside the setup effect; cleanup in return.
+
+**Schema type literals that this dispatcher MUST handle (verified 2026-04-17 against packages/shared/src/schemas/envelope.ts + chat.ts + tool.ts + relay-control.ts):**
+
+Envelopes (`MessageEnvelopeSchema`, carry `sessionId` + `type` + `payload`):
+- `assistant_message` — payload `{ text: string, isPartial: boolean }`
+- `tool_use_request` — payload `{ toolName: string, toolId: string, parameters: Record<string, unknown> }`
+- `tool_result` — payload `{ toolId: string, result: unknown, isError: boolean }`
+- `thinking` — payload `{ text: string }` — ignored by chat-store (not stored in messages[]); future: expose via status-line
+- `user_input` — envelope that proxy echoes back our own send; chat-store adds optimistic user message on send in Plan 10-04b, so dispatcher does NOT re-add on echo (would double-insert)
+
+RelayControl (`RelayControlSchema`, carry `type` + other fields):
+- `pending_approvals_push` — `{ sessionId, approvals: Array<{ requestId, toolName, input }> }` — reconciles full pending set after reconnect
+- `session_history_messages` — `{ sessionId, messages: Array<{ role, text, timestamp? }> }` — hydrates history on session resume
+
+**There is NO `assistant_message_delta` / `assistant_message_complete` / `tool_request` / `tool_approved` / `tool_denied` in the schema.** The prior plan draft used fictitious names; zod safeParse would silently drop them. The dispatcher MUST use the literals above (confirmed against `packages/shared/src/schemas/envelope.ts:39-129` + `packages/shared/src/schemas/relay-control.ts:30-235`).
 
 react-markdown + GFM + highlight security config (RESEARCH §2.7):
 ```tsx
@@ -385,6 +401,13 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
     ```tsx
     // 工具审批卡, 紧凑态三按钮 + 详情展开 + 会话白名单记忆
     // y/n/a 快捷键仅在卡片聚焦时响应 (UI-SPEC A11y 第 5 条)
+    // 发送审批结果走 MessageEnvelope tool_approve / tool_deny (见 packages/shared/src/schemas/tool.ts):
+    //   relayClientRef.current.sendEnvelope({
+    //     seq, sessionId, timestamp, source: "client", version,
+    //     type: "tool_approve", payload: { toolId, whitelistTool? }
+    //   })
+    //   或 type: "tool_deny", payload: { toolId, reason? }
+    // 注意: 这些是 envelope 不是 RelayControl, sendEnvelope 而非 sendControl.
     import { useEffect, useRef, useState } from "react";
     import { ChevronDown, ChevronUp } from "lucide-react";
     import type { ToolApprovalRequest } from "@/stores/chat-store";
@@ -418,6 +441,17 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
       localStorage.setItem(whitelistKey(sessionId), JSON.stringify([...current, toolName]));
     }
 
+    // 构造一个满足 MessageEnvelope BaseEnvelopeFields 的工具函数, 由本组件消费
+    function buildEnvelopeBase(sessionId: string) {
+      return {
+        seq: 0, // relay-client / serve 会重写 seq
+        sessionId,
+        timestamp: Date.now(),
+        source: "client" as const,
+        version: "1",
+      };
+    }
+
     export function ToolApprovalCard({ approval, sessionId, container }: ToolApprovalCardProps) {
       const [expanded, setExpanded] = useState(false);
       const [acted, setActed] = useState(false);
@@ -430,17 +464,22 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
         if (acted || isResolved) return;
         setActed(true);
         const relay = relayClientRef.current;
-        relay?.sendControl({
-          type: "tool_approve",
-          sessionId,
-          payload: {
-            toolId: approval.requestId,
-            toolName: approval.toolName,
-            decision,
-            whitelistTool,
-          },
-        });
-        if (whitelistTool) addToWhitelist(sessionId, approval.toolName);
+        if (!relay) return;
+        const base = buildEnvelopeBase(sessionId);
+        if (decision === "allow") {
+          relay.sendEnvelope({
+            ...base,
+            type: "tool_approve",
+            payload: { toolId: approval.requestId, whitelistTool },
+          });
+          if (whitelistTool) addToWhitelist(sessionId, approval.toolName);
+        } else {
+          relay.sendEnvelope({
+            ...base,
+            type: "tool_deny",
+            payload: { toolId: approval.requestId },
+          });
+        }
       }
 
       // 键盘快捷键: y=allow, n=deny, a=always
@@ -827,6 +866,7 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
     - `apps/web/src/components/chat/tool-approval-card.tsx` has three buttons labeled `允许` / `总是允许此工具` / `拒绝` (exact copy)
     - `apps/web/src/components/chat/tool-approval-card.tsx` has keyboard handler scoped to `card.contains(document.activeElement)` (NOT global)
     - `apps/web/src/components/chat/tool-approval-card.tsx` writes `cc_toolWhitelist:${sessionId}` to localStorage on "always" action
+    - `apps/web/src/components/chat/tool-approval-card.tsx` sends approvals via `relay.sendEnvelope({ type: "tool_approve", payload: { toolId, whitelistTool } })` and denials via `{ type: "tool_deny", payload: { toolId } }` (matches packages/shared/src/schemas/tool.ts ToolApprovePayloadSchema + ToolDenyPayloadSchema)
     - `apps/web/src/components/chat/chat-json-view.tsx` uses `useVirtualizer` with `overscan: 5` and `ref={virtualizer.measureElement}` (ref callback, not prop)
     - `apps/web/src/components/chat/chat-json-view.tsx` has `scrollReady` state guarding virtualizer children render (RESEARCH Pitfall 1)
     - `apps/web/src/components/chat/chat-json-view.tsx` streaming-delta scrollToIndex uses `behavior: "auto"`; user-click BackToBottom scrollToIndex uses `behavior: "smooth"` (RESEARCH Q9)
@@ -840,88 +880,158 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
 </task>
 
 <task type="auto">
-  <name>Task 3: chat-dispatcher + use-relay-setup wiring + chat.tsx stub</name>
+  <name>Task 3: chat-dispatcher (real schema literals) + use-relay-setup wiring + chat.tsx stub</name>
   <files>
     apps/web/src/services/chat-dispatcher.ts,
     apps/web/src/hooks/use-relay-setup.ts,
     apps/web/src/pages/chat.tsx
   </files>
   <read_first>
-    - apps/web/src/services/websocket.ts L96-L103 (dispatch point — onMessage registration)
-    - apps/web/src/services/relay-client.ts
+    - apps/web/src/services/relay-client.ts L19-L32 + L116-L129 (messageHandlers dispatch loop — dispatcher subscribes HERE, not wsManager)
+    - apps/web/src/services/ensure-binding.ts (relayClientRef export)
     - apps/web/src/hooks/use-relay-setup.ts (dispatcher registration target)
-    - apps/web/src/stores/chat-store.ts (action signatures)
-    - packages/shared/src/schemas/relay-control.ts (message types to dispatch)
-    - .planning/phases/10-pages-components-migration/10-PATTERNS.md L653-L738 (websocket dispatch)
+    - apps/web/src/stores/chat-store.ts (action signatures: appendAssistantText / markTurnComplete / addApprovalRequest / updateApprovalStatus / loadHistory / setWorking)
+    - packages/shared/src/schemas/envelope.ts L39-L129 (MessageEnvelopeSchema — 16 concrete envelope types; chat dispatcher handles: assistant_message, tool_use_request, tool_result, thinking [pass-through], user_input [ignore echo])
+    - packages/shared/src/schemas/chat.ts (AssistantMessagePayloadSchema: {text, isPartial})
+    - packages/shared/src/schemas/tool.ts (ToolUseRequestPayloadSchema: {toolName, toolId, parameters}; ToolResultPayloadSchema: {toolId, result, isError})
+    - packages/shared/src/schemas/relay-control.ts L192-L212 (pending_approvals_push / session_history_messages — chat-related control types)
+    - .planning/phases/10-pages-components-migration/10-PATTERNS.md L653-L738 (dispatcher pattern)
   </read_first>
   <action>
-    **Edit A — apps/web/src/services/chat-dispatcher.ts (new):**
+    **Edit A — apps/web/src/services/chat-dispatcher.ts (new — uses REAL schema type literals):**
+
+    This dispatcher subscribes to `relayClient.onMessage` (NOT `wsManager.onMessage` directly). The relay-client already JSON.parses and type-tags all inbound messages per its handler loop — see `apps/web/src/services/relay-client.ts:19-32` and `116-129`. Subscribing at the relay-client layer means every chat-store update reuses relay-client's buffering / pending-flush semantics.
+
     ```ts
-    // JSON 模式消息 dispatcher, 订阅 wsManager.onMessage
-    // 把 relay 发来的 control/envelope 消息分发给 chat-store
-    // 每条消息都带 sessionId, 为 Plan 10-06 per-session store 预留
-    import { RelayControlSchema } from "@cc-anywhere/shared";
-    import { wsManager } from "@/services/websocket";
-    import { useChatStore } from "@/stores/chat-store";
+    // Chat 模式消息 dispatcher.
+    // 订阅 relayClient.onMessage, 按 MessageEnvelopeSchema / RelayControlSchema 的真实 type literal 分发.
+    // 真实 type literals (已于 2026-04-17 对 packages/shared/src/schemas/* 核实):
+    //   Envelope 层 (apps/web/.../envelope.ts L39-L129):
+    //     - "assistant_message"   payload: AssistantMessagePayloadSchema { text, isPartial }
+    //     - "tool_use_request"    payload: ToolUseRequestPayloadSchema { toolName, toolId, parameters }
+    //     - "tool_result"         payload: ToolResultPayloadSchema { toolId, result, isError }
+    //     - "thinking"            忽略, 不入 chat-store messages 数组
+    //     - "user_input"          忽略 echo (本端发送时已乐观入 store, 见 Plan 10-04b)
+    //   Control 层 (apps/web/.../relay-control.ts L192-L212):
+    //     - "pending_approvals_push"    reconcile pending set
+    //     - "session_history_messages"  hydrate 历史
+    // 不存在 "assistant_message_delta" / "assistant_message_complete" / "tool_request" /
+    // "tool_approved" / "tool_denied" 这些 literal (旧 draft 使用了虚构名, safeParse 会静默 drop).
+    import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
+    import { relayClientRef } from "@/services/ensure-binding";
+    import { useChatStore, type ChatMessage, type ToolCallInfo } from "@/stores/chat-store";
+
+    type InboundMessage = MessageEnvelope | RelayControlMessage;
+
+    function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant_message" }>) {
+      const store = useChatStore.getState();
+      // payload.isPartial=true => streaming chunk; false => turn done
+      if (env.payload.isPartial) {
+        store.appendAssistantText(env.payload.text);
+        store.setWorking(true);
+      } else {
+        // 最终消息: 追加剩余文本 (可能为空) 然后 markTurnComplete 翻转 isPartial
+        if (env.payload.text.length > 0) {
+          store.appendAssistantText(env.payload.text);
+        }
+        store.markTurnComplete();
+      }
+    }
+
+    function handleToolUseRequest(env: Extract<MessageEnvelope, { type: "tool_use_request" }>) {
+      const store = useChatStore.getState();
+      store.addApprovalRequest({
+        requestId: env.payload.toolId,  // 审批 ID = toolId (ToolUseRequestPayloadSchema)
+        toolName: env.payload.toolName,
+        input: env.payload.parameters,
+        status: "pending",
+      });
+      store.setWorking(true);
+    }
+
+    function handleToolResult(env: Extract<MessageEnvelope, { type: "tool_result" }>) {
+      // 工具结果到达 => 对应 approval 已完成, 标记为 approved (被拒绝的不会有 tool_result)
+      const store = useChatStore.getState();
+      store.updateApprovalStatus(env.payload.toolId, "approved");
+      // NOTE: 详细的 tool call 输出流转 (追加 toolCall 到 message / 展示结果 JSON)
+      // 由 Plan 10-04b ChatHeader + tool result rendering 进一步扩展; 本 Plan 仅维持 pending 生命周期.
+    }
+
+    function handlePendingApprovalsPush(msg: Extract<RelayControlMessage, { type: "pending_approvals_push" }>) {
+      const store = useChatStore.getState();
+      // 重连后 relay 推送 proxy 当前 pending 审批全量; 直接 append 各项到 store (清理旧的 pending 由 clearMessages 负责, 此处只增量补齐未知的)
+      const existingIds = new Set(store.pendingApprovals.map((a) => a.requestId));
+      for (const appr of msg.approvals) {
+        if (existingIds.has(appr.requestId)) continue;
+        store.addApprovalRequest({
+          requestId: appr.requestId,
+          toolName: appr.toolName,
+          input: appr.input,
+          status: "pending",
+        });
+      }
+    }
+
+    function handleSessionHistoryMessages(msg: Extract<RelayControlMessage, { type: "session_history_messages" }>) {
+      const store = useChatStore.getState();
+      // loadHistory 是 chat-store 现有 API, 接受 {role, text, timestamp?} 数组
+      store.loadHistory(msg.messages);
+    }
 
     export function registerChatDispatcher(): () => void {
-      const handler = (raw: string) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          return;
-        }
-        const result = RelayControlSchema.safeParse(parsed);
-        if (!result.success) return;
-        const msg = result.data;
+      const relay = relayClientRef.current;
+      if (!relay) {
+        console.warn("registerChatDispatcher called before relayClient bound; skipping");
+        return () => {};
+      }
 
-        // 仅处理与 chat-store 相关的类型; 其他由 phase-machine 处理
+      return relay.onMessage((msg: InboundMessage) => {
         switch (msg.type) {
-          case "assistant_message_delta": {
-            useChatStore.getState().appendAssistantText(msg.payload.text);
+          // MessageEnvelope chat 类
+          case "assistant_message":
+            handleAssistantMessage(msg);
             break;
-          }
-          case "assistant_message_complete": {
-            useChatStore.getState().markTurnComplete();
+          case "tool_use_request":
+            handleToolUseRequest(msg);
             break;
-          }
-          case "tool_request": {
-            useChatStore.getState().addApprovalRequest({
-              requestId: msg.payload.requestId,
-              toolName: msg.payload.toolName,
-              input: msg.payload.input,
-              status: "pending",
-            });
+          case "tool_result":
+            handleToolResult(msg);
             break;
-          }
-          case "tool_approved":
-          case "tool_denied": {
-            useChatStore.getState().updateApprovalStatus(
-              msg.payload.requestId,
-              msg.type === "tool_approved" ? "approved" : "denied",
-            );
+          case "thinking":
+            // 不入消息列表; Plan 10-04b 可暴露给 StatusLine
             break;
-          }
-        }
-      };
+          case "user_input":
+            // Echo: 本端已乐观入 store, 不重复
+            break;
 
-      return wsManager.onMessage(handler);
+          // RelayControlMessage chat 类
+          case "pending_approvals_push":
+            handlePendingApprovalsPush(msg);
+            break;
+          case "session_history_messages":
+            handleSessionHistoryMessages(msg);
+            break;
+
+          // 其他 type 由 phase-machine 或后续 Plan 的 dispatcher 处理, 这里忽略
+          default:
+            break;
+        }
+      });
     }
     ```
-    Note: the exact message type names (`assistant_message_delta` etc.) may differ in `packages/shared/src/schemas/*`. Executor should inspect the actual schema and use correct names + extract fields accordingly. If types don't match exactly, consult packages/shared schemas and adapt — do NOT invent new message types.
 
     **Edit B — apps/web/src/hooks/use-relay-setup.ts (modify):**
     Add dispatcher registration inside the existing setup effect:
     ```ts
     import { registerChatDispatcher } from "@/services/chat-dispatcher";
 
-    // inside the useEffect that sets up relay:
+    // inside the useEffect that sets up relay (AFTER relayClient is bound to ref):
     const unregisterChat = registerChatDispatcher();
 
     // inside cleanup:
     unregisterChat();
     ```
+    The ordering matters: relay-client must be bound (see `apps/web/src/services/ensure-binding.ts`) before `registerChatDispatcher` runs, otherwise it no-ops with a warning. Place the registration after the existing `ensureBinding()` / relayClient init step.
 
     **Edit C — apps/web/src/pages/chat.tsx (rewrite — minimal stub, no ChatHeader / InputBar yet):**
     ```tsx
@@ -964,19 +1074,24 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
     }
     ```
 
-    Commit message: `feat(10-04a): chat dispatcher + use-relay-setup wiring + chat stub page`
+    Commit message: `feat(10-04a): chat dispatcher (real schema types) + use-relay-setup wiring + chat stub page`
   </action>
   <verify>
     <automated>pnpm --filter web typecheck</automated>
   </verify>
   <acceptance_criteria>
-    - `apps/web/src/services/chat-dispatcher.ts` uses `RelayControlSchema.safeParse` and returns an unregister function
-    - `apps/web/src/hooks/use-relay-setup.ts` calls `registerChatDispatcher()` and cleans up
+    - `apps/web/src/services/chat-dispatcher.ts` subscribes via `relayClientRef.current.onMessage` (grep `relayClientRef.current.onMessage` = 1 match) — NOT `wsManager.onMessage`
+    - `apps/web/src/services/chat-dispatcher.ts` switch cases use EXACTLY these real literals: `assistant_message`, `tool_use_request`, `tool_result`, `thinking`, `user_input`, `pending_approvals_push`, `session_history_messages` (grep each literal in the file returns ≥ 1 match; total 7)
+    - `apps/web/src/services/chat-dispatcher.ts` contains ZERO occurrences of the fictitious names `assistant_message_delta`, `assistant_message_complete`, `tool_request`, `tool_approved`, `tool_denied` (grep each returns 0)
+    - `apps/web/src/services/chat-dispatcher.ts` maps `assistant_message` to `appendAssistantText` when `payload.isPartial=true` and to `markTurnComplete` when `payload.isPartial=false`
+    - `apps/web/src/services/chat-dispatcher.ts` maps `tool_use_request` payload's `toolId` → `requestId`, `parameters` → `input`
+    - `apps/web/src/services/chat-dispatcher.ts` returns the unsubscribe function from `relay.onMessage`
+    - `apps/web/src/hooks/use-relay-setup.ts` calls `registerChatDispatcher()` after relay binding and cleans up in the effect return
     - `apps/web/src/pages/chat.tsx` dispatches on `mode === "pty"` vs JSON, with PTY placeholder + chat-header placeholder
     - `apps/web/src/pages/chat.tsx` has `data-slot="chat-header-placeholder"` noting Plan 10-04b will replace it
     - `pnpm --filter web typecheck` exits 0
   </acceptance_criteria>
-  <done>ChatJsonView reachable via chat.tsx, dispatcher piped, input region left as stub.</done>
+  <done>ChatJsonView reachable via chat.tsx, dispatcher wired to real schema types (no fictitious literals), input region left as stub.</done>
 </task>
 
 <task type="auto">
@@ -1079,9 +1194,10 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
     - ChatJsonView (virtualized) + follow-output + BackToBottom
     - MessageBubble role variants
     - MarkdownView with XSS protection, GFM, code highlight
-    - ToolApprovalCard (compact + expandable, y/n/a shortcut)
+    - ToolApprovalCard (compact + expandable, y/n/a shortcut) — sends tool_approve / tool_deny envelopes per packages/shared/src/schemas/tool.ts
     - StatusLine + BackToBottom helpers
-    - chat-dispatcher.ts registered in use-relay-setup
+    - chat-dispatcher.ts — real schema literals (assistant_message / tool_use_request / tool_result / thinking / user_input / pending_approvals_push / session_history_messages) — no more fictitious "_delta" / "_complete" names
+    - chat-dispatcher wired via use-relay-setup
     - chat.tsx minimally dispatches mode=json to ChatJsonView (InputBar slot placeholder)
     - 2 Playwright e2e specs (tool-approval, follow-output)
     - 2 unit tests (message-bubble, markdown-view)
@@ -1096,16 +1212,17 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
     5. Markdown test: inject `<script>alert(1)</script>` into a message → script dropped; markdown code block rendered with github-dark syntax colors
     6. Scroll up in message list → BackToBottom appears; click it → scrolls to bottom with smooth animation
     7. Trigger a tool approval (run a command that requires Bash) → ToolApprovalCard appears inline with 允许 / 总是允许此工具 / 拒绝
-    8. Focus the card (Tab to it) → press `y` → allow sent; press `n` → deny sent; `a` → always allow (check localStorage cc_toolWhitelist:{sessionId})
-    9. Cross-reference 10-UI-SPEC.md six dimensions:
+    8. Focus the card (Tab to it) → press `y` → allow sent (inspect network: tool_approve envelope with `payload.toolId` present); press `n` → deny sent; `a` → always allow (check localStorage cc_toolWhitelist:{sessionId})
+    9. Reconnect scenario: kill relay briefly, reconnect → verify `pending_approvals_push` re-populates any pending cards (chat-dispatcher handles it) — this is the key regression prevented by using real schema types
+    10. Cross-reference 10-UI-SPEC.md six dimensions:
        - **Color:** User bubble `bg-primary` amber; assistant bubble `bg-card`; destructive 拒绝 red; status working cyan; streaming cursor cyan
        - **Typography:** messages text-sm (14px); code blocks 13px mono
        - **Spacing:** placeholder 48px; bubble max-w 80%; message px-4 py-2
        - **States:** Hover on BackToBottom → outline; card focus → amber ring on buttons
        - **Copy:** All strings match Copywriting Contract — ToolApproval buttons, status messages
        - **Responsive:** Sidebar appears at md
-    10. Run e2e: `pnpm --filter web exec playwright test tool-approval.spec.ts follow-output.spec.ts`
-    11. Unit tests: `pnpm --filter web test message-bubble markdown-view`
+    11. Run e2e: `pnpm --filter web exec playwright test tool-approval.spec.ts follow-output.spec.ts`
+    12. Unit tests: `pnpm --filter web test message-bubble markdown-view`
   </how-to-verify>
   <resume-signal>Type "approved" to commit, or describe issues</resume-signal>
   <files>N/A — checkpoint task, human verifies outputs from prior tasks</files>
@@ -1132,18 +1249,21 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
 |-----------|----------|-----------|-------------|-----------------|
 | T-10-04a-01 | Tampering | Markdown XSS via `<script>`/`<iframe>` | mitigate | react-markdown `skipHtml: true` + `disallowedElements: ["script", "iframe", "object", "embed"]` — unit tested in markdown-view.test.tsx |
 | T-10-04a-02 | Tampering | Markdown URL protocol `javascript:` | mitigate | react-markdown blocks javascript: URLs by default; external links forced to `rel="noopener noreferrer"` |
-| T-10-04a-03 | Tampering | chat-dispatcher processes untrusted JSON | mitigate | All messages validated via `RelayControlSchema.safeParse` before dispatch; unknown types silently dropped (forward-compat) |
+| T-10-04a-03 | Tampering | chat-dispatcher processes untrusted JSON | mitigate | Messages arrive pre-parsed + shape-validated through relay-client's dispatch pipeline; dispatcher uses TypeScript discriminated-union narrowing (no runtime guesswork); unknown types fall to `default: break` (forward-compat, no crash) |
 | T-10-04a-04 | Denial of Service | Large message list O(n) render | mitigate | Virtual scrolling with overscan 5 ensures only visible items render; MessageBubble wrapped in memo |
 | T-10-04a-05 | Tampering | ToolApprovalCard keyboard shortcut hijacking | mitigate | Keyboard listener scoped to `card.contains(document.activeElement)` — does NOT swallow global typing |
 | T-10-04a-06 | Repudiation | localStorage cc_toolWhitelist manipulation | accept | User-controlled local preference; no security boundary |
+| T-10-04a-07 | Information Disclosure | Fictitious schema types silently drop real messages | mitigate | Dispatcher switch only uses literals verified against packages/shared/src/schemas/*; acceptance criteria greps confirm no ghost literals remain; `default: break` documents the forward-compat posture |
 </threat_model>
 
 <verification>
 - `pnpm --filter web typecheck` exits 0
 - `pnpm --filter web test message-bubble markdown-view` all pass
 - Markdown XSS tests pass (script/iframe/object/embed dropped)
+- `grep -n "assistant_message_delta\|assistant_message_complete\|\"tool_request\"\|\"tool_approved\"\|\"tool_denied\"" apps/web/src/services/chat-dispatcher.ts` returns 0 matches
+- `grep -c "assistant_message\|tool_use_request\|tool_result\|pending_approvals_push\|session_history_messages" apps/web/src/services/chat-dispatcher.ts` returns N matches (N = number of real type literal cases, ≥ 5)
 - Playwright suites run (may skip tests that need dev store hooks)
-- Manual: JSON rendering flow works (view stream, approve tool)
+- Manual: JSON rendering flow works (view stream, approve tool, see reconnect reconcile pending approvals)
 - User approved visual match
 </verification>
 
@@ -1153,7 +1273,7 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
 - Virtualized list handles 1000+ messages without jank (checkpoint perf trace review)
 - XSS defense verified in unit tests
 - Tool approval y/n/a shortcuts scoped correctly
-- Dispatcher wired via use-relay-setup
+- Dispatcher wired via use-relay-setup AND uses real schema literals only (no fictitious names that would silently drop real messages)
 - ChatJsonView has input-bar-slot placeholder ready for Plan 10-04b
 - User approved
 </success_criteria>
@@ -1162,7 +1282,7 @@ Chat.tsx stub contract: renders ChatHeader placeholder + ChatJsonView + a static
 Create `.planning/phases/10-pages-components-migration/10-04a-SUMMARY.md` with:
 - Dependencies installed with versions
 - Component APIs (each with props signature)
-- Dispatcher message types handled (list from chat-dispatcher switch)
+- Dispatcher message types handled (list from chat-dispatcher switch — real literals only, cross-referenced to packages/shared file:line)
 - scrollToIndex behavior policy (auto for streaming, smooth for user click)
 - E2E suite outcomes
 - Visual checkpoint screenshots

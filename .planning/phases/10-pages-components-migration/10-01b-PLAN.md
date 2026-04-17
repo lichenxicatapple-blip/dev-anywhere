@@ -17,6 +17,8 @@ files_modified:
   - apps/web/src/hooks/use-keyboard-shortcut.ts
   - apps/web/src/app.tsx
   - apps/web/src/lib/router.tsx
+  - apps/web/src/components/proxy/proxy-switcher.tsx
+  - apps/web/src/components/session/session-list.tsx
   - apps/web/e2e/shell.spec.ts
   - apps/web/e2e/toast.spec.ts
 autonomous: false
@@ -39,12 +41,13 @@ must_haves:
     - "Sonner Toaster is mounted inside AppShell and survives route changes"
     - "Legacy showToast API still works — phase-machine calls do not break"
     - "toast-store.ts is deleted, no consumers remain"
+    - "proxy-switcher.tsx and session-list.tsx exist as stub modules so Sidebar imports resolve; Plans 10-02/10-03 replace their bodies without touching sidebar.tsx"
   artifacts:
     - path: "apps/web/src/components/shell/app-shell.tsx"
       provides: "Top-level layout with header + sidebar + Outlet + Toaster"
       min_lines: 30
     - path: "apps/web/src/components/shell/sidebar.tsx"
-      provides: "Desktop-only left column (280px, collapsible)"
+      provides: "Desktop-only left column (280px, collapsible) wired to proxy-switcher + session-list modules"
     - path: "apps/web/src/components/shell/empty-state.tsx"
       provides: "variant-based empty copy container"
     - path: "apps/web/src/components/shell/command-palette.tsx"
@@ -52,6 +55,12 @@ must_haves:
     - path: "apps/web/src/components/toast.tsx"
       provides: "Sonner-backed showToast / showErrorToast / useToast API"
       exports: ["showToast", "showErrorToast", "showSuccessToast", "showWarningToast", "useToast", "Toaster"]
+    - path: "apps/web/src/components/proxy/proxy-switcher.tsx"
+      provides: "Stub ProxySwitcher module (placeholder render) reserved for Plan 10-02 real implementation"
+      exports: ["ProxySwitcher"]
+    - path: "apps/web/src/components/session/session-list.tsx"
+      provides: "Stub SessionList + CreateSessionButton modules reserved for Plan 10-03 real implementation"
+      exports: ["SessionList", "CreateSessionButton"]
   key_links:
     - from: "apps/web/src/app.tsx"
       to: "AppShell via router"
@@ -65,14 +74,18 @@ must_haves:
       to: "useSessionStore + useAppStore"
       via: "selector subscription for search items"
       pattern: "useSessionStore"
+    - from: "apps/web/src/components/shell/sidebar.tsx"
+      to: "apps/web/src/components/proxy/proxy-switcher.tsx + apps/web/src/components/session/session-list.tsx"
+      via: "direct ESM imports — module path is the contract; Plans 10-02/10-03 overwrite file bodies, Sidebar never re-imports"
+      pattern: "from \"@/components/proxy/proxy-switcher\""
 ---
 
 <objective>
-Build the app chrome: AppShell layout, responsive master-detail skeleton (sidebar at ≥md), EmptyState container, CommandPalette wired to Cmd+K, and Sonner migration with legacy `showToast` API preserved. All downstream plans render inside this shell.
+Build the app chrome: AppShell layout, responsive master-detail skeleton (sidebar at ≥md), EmptyState container, CommandPalette wired to Cmd+K, and Sonner migration with legacy `showToast` API preserved. Also lay down **stub modules** for `proxy-switcher.tsx` and `session-list.tsx` so Sidebar imports resolve cleanly — Plans 10-02 and 10-03 later overwrite these files with real implementations, and never touch `sidebar.tsx` (resolves W3 sidebar write-conflict — interface-first pattern).
 
-Purpose: Establish the routing + layout + global UI services in one coherent plan so that 10-02/10-03/10-04/10-05/10-06 all land in a consistent shell.
+Purpose: Establish the routing + layout + global UI services in one coherent plan so that 10-02/10-03/10-04/10-05/10-06 all land in a consistent shell. Freeze the Sidebar → module-path contract so downstream plans only replace bodies, never signatures.
 
-Output: 4 new shell components, 2 new hooks, rewritten toast wrapper + deleted toast-store, updated phase-machine + app.tsx + router.tsx + 2 Playwright e2e specs.
+Output: 4 new shell components, 2 new hooks, rewritten toast wrapper + deleted toast-store, 2 stub component modules (proxy-switcher, session-list), updated phase-machine + app.tsx + router.tsx + 2 Playwright e2e specs.
 </objective>
 
 <execution_context>
@@ -115,15 +128,30 @@ export function AppShell(): JSX.Element;
 //   </div>
 ```
 
-Sidebar props:
+Sidebar shape:
 ```tsx
 interface SidebarProps { className?: string; }
 // Width: 280px fixed (UI-SPEC Spacing: desktop sidebar width)
 // Sections (top→bottom):
-//   - Top: ProxySwitcher layout="dropdown" (placeholder slot until Plan 10-02)
-//   - Middle: SessionList layout="sidebar" (placeholder slot until Plan 10-03)
-//   - Bottom: "+ 新建会话" button (placeholder; wires to create dialog in 10-03)
+//   - Top: <ProxySwitcher layout="dropdown" />  (real in 10-02, stub in 10-01b)
+//   - Middle: <SessionList layout="sidebar" />  (real in 10-03, stub in 10-01b)
+//   - Bottom: <CreateSessionButton />           (real in 10-03, stub in 10-01b)
 // Collapse state: via useSidebarCollapsed hook, persists cc_sidebarCollapsed
+//
+// Sidebar is STABLE after 10-01b — Plans 10-02/10-03 MUST NOT modify sidebar.tsx.
+// They overwrite the imported modules (proxy-switcher.tsx / session-list.tsx) instead.
+```
+
+Stub module contracts frozen in 10-01b (Plans 10-02/10-03 honor these exports):
+```tsx
+// apps/web/src/components/proxy/proxy-switcher.tsx — stub in 10-01b, real in 10-02
+interface ProxySwitcherProps { layout: "page" | "dropdown"; }
+export function ProxySwitcher(props: ProxySwitcherProps): JSX.Element;
+
+// apps/web/src/components/session/session-list.tsx — stub in 10-01b, real in 10-03
+interface SessionListProps { layout: "page" | "sidebar"; }
+export function SessionList(props: SessionListProps): JSX.Element;
+export function CreateSessionButton(): JSX.Element;
 ```
 
 EmptyState props (new):
@@ -190,13 +218,15 @@ createHashRouter([
 <tasks>
 
 <task type="auto">
-  <name>Task 1: Create empty-state + hooks + toast wrapper (stateless prereqs)</name>
+  <name>Task 1: Create empty-state + hooks + toast wrapper + ProxySwitcher/SessionList stubs (stateless prereqs)</name>
   <files>
     apps/web/src/components/shell/empty-state.tsx,
     apps/web/src/hooks/use-sidebar-collapsed.ts,
     apps/web/src/hooks/use-keyboard-shortcut.ts,
     apps/web/src/components/toast.tsx,
-    apps/web/src/services/phase-machine.ts
+    apps/web/src/services/phase-machine.ts,
+    apps/web/src/components/proxy/proxy-switcher.tsx,
+    apps/web/src/components/session/session-list.tsx
   </files>
   <read_first>
     - apps/web/src/components/toast.tsx (current 20-line stub to be replaced)
@@ -368,9 +398,63 @@ createHashRouter([
     }
     ```
 
+    **Edit F — apps/web/src/components/proxy/proxy-switcher.tsx (new stub — frozen contract):**
+    ```tsx
+    // ProxySwitcher 占位实现 (Plan 10-01b), Plan 10-02 整体替换 body, 签名保持不变.
+    // 之所以在 10-01b 创建而非 10-02 初建, 是为了让 Sidebar 在 W2 就能直接 import 该模块,
+    // W3 并行执行的 10-02 / 10-03 无需再修改 sidebar.tsx (解决 W3 write-conflict).
+    interface ProxySwitcherProps {
+      layout: "page" | "dropdown";
+    }
+
+    export function ProxySwitcher({ layout }: ProxySwitcherProps) {
+      return (
+        <div
+          data-slot="proxy-switcher-stub"
+          data-layout={layout}
+          className="text-xs text-muted-foreground"
+        >
+          ProxySwitcher ({layout}) — Plan 10-02 will implement
+        </div>
+      );
+    }
+    ```
+
+    **Edit G — apps/web/src/components/session/session-list.tsx (new stub — frozen contract):**
+    ```tsx
+    // SessionList 占位实现 (Plan 10-01b), Plan 10-03 整体替换 body, 签名保持不变.
+    // 同样是为了 Sidebar 在 W2 即可 import, W3 并行无冲突.
+    interface SessionListProps {
+      layout: "page" | "sidebar";
+    }
+
+    export function SessionList({ layout }: SessionListProps) {
+      return (
+        <div
+          data-slot="session-list-stub"
+          data-layout={layout}
+          className="p-4 text-xs text-muted-foreground"
+        >
+          SessionList ({layout}) — Plan 10-03 will implement
+        </div>
+      );
+    }
+
+    export function CreateSessionButton() {
+      return (
+        <div
+          data-slot="create-session-button-stub"
+          className="text-xs text-muted-foreground"
+        >
+          + 新建会话 — Plan 10-03 will implement
+        </div>
+      );
+    }
+    ```
+
     Do NOT delete `apps/web/src/stores/toast-store.ts` yet — Task 2 deletes it after verifying no callers remain.
 
-    Commit message: `feat(10-01b): sonner wrapper + empty-state + shell hooks`
+    Commit message: `feat(10-01b): sonner wrapper + empty-state + shell hooks + proxy/session stubs`
   </action>
   <verify>
     <automated>pnpm --filter web typecheck && pnpm --filter web test phase-machine 2>&1 | tail -20</automated>
@@ -381,10 +465,12 @@ createHashRouter([
     - `apps/web/src/hooks/use-sidebar-collapsed.ts` uses key `cc_sidebarCollapsed` and values `"1"` / `"0"`
     - `apps/web/src/hooks/use-keyboard-shortcut.ts` registers `window.addEventListener("keydown", ...)` and cleans up
     - `apps/web/src/components/shell/empty-state.tsx` contains exact Chinese copy strings from UI-SPEC: `尚未连接 Proxy`, `选择一个会话`, `开始对话`
+    - `apps/web/src/components/proxy/proxy-switcher.tsx` exists and exports `ProxySwitcher({ layout })`; renders a stub with `data-slot="proxy-switcher-stub"`
+    - `apps/web/src/components/session/session-list.tsx` exists and exports BOTH `SessionList({ layout })` and `CreateSessionButton`; renders stubs with `data-slot="session-list-stub"` / `data-slot="create-session-button-stub"`
     - `pnpm --filter web typecheck` exits 0
     - `pnpm --filter web test phase-machine` passes (existing unit tests)
   </acceptance_criteria>
-  <done>Sonner compatibility layer works, phase-machine migrated, shell hooks available.</done>
+  <done>Sonner compatibility layer works, phase-machine migrated, shell hooks available, ProxySwitcher/SessionList stub modules in place.</done>
 </task>
 
 <task type="auto">
@@ -403,19 +489,25 @@ createHashRouter([
     - apps/web/src/lib/router.tsx (flat route list to convert to nested)
     - apps/web/src/stores/app-store.ts (proxies selector for CommandPalette)
     - apps/web/src/stores/session-store.ts (sessions selector for CommandPalette)
+    - apps/web/src/components/proxy/proxy-switcher.tsx (stub created by Task 1 — imports directly without conditional logic)
+    - apps/web/src/components/session/session-list.tsx (stub created by Task 1)
     - .planning/phases/10-pages-components-migration/10-UI-SPEC.md "Component Inventory" AppShell + Sidebar + CommandPalette rows; "Spacing Scale" sidebar 280px + header 48px
     - .planning/phases/10-pages-components-migration/10-PATTERNS.md L286-L412 (AppShell sticky header pattern + command-palette pattern + router pattern)
     - .planning/phases/10-pages-components-migration/10-RESEARCH.md §2.10 (master-detail CSS class approach, NOT useMediaQuery) + §2.4 (CommandDialog + Cmd+K registration)
   </read_first>
   <action>
-    **Edit A — apps/web/src/components/shell/sidebar.tsx (new):**
+    **Edit A — apps/web/src/components/shell/sidebar.tsx (new — real imports from stub modules):**
     ```tsx
     // 桌面端侧栏，280px 固定宽度，md 断点以上可见
-    // 顶部: ProxySwitcher 占位（Plan 10-02 填充）
-    // 中部: SessionList 占位（Plan 10-03 填充）
-    // 底部: 新建会话按钮占位（Plan 10-03 填充）
+    // 顶部: ProxySwitcher (stub in 10-01b, real impl in 10-02 — body swap, Sidebar untouched)
+    // 中部: SessionList (stub in 10-01b, real impl in 10-03)
+    // 底部: CreateSessionButton (stub in 10-01b, real impl in 10-03)
+    //
+    // ⚠ FROZEN: 下游 Plan 10-02 / 10-03 禁止修改 sidebar.tsx —— 仅替换被 import 的模块 body.
     import { Separator } from "@/components/ui/separator";
     import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
+    import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
+    import { SessionList, CreateSessionButton } from "@/components/session/session-list";
     import { cn } from "@/lib/utils";
 
     interface SidebarProps {
@@ -439,24 +531,21 @@ createHashRouter([
           aria-label="Sidebar navigation"
         >
           <div className="px-4 py-3" data-slot="sidebar-proxy-switcher">
-            {/* Plan 10-02 inserts ProxySwitcher layout="dropdown" */}
-            <div className="text-xs text-muted-foreground">Proxy (placeholder)</div>
+            <ProxySwitcher layout="dropdown" />
           </div>
           <Separator />
           <div className="flex-1 overflow-auto" data-slot="sidebar-session-list">
-            {/* Plan 10-03 inserts SessionList layout="sidebar" */}
-            <div className="p-4 text-xs text-muted-foreground">Sessions (placeholder)</div>
+            <SessionList layout="sidebar" />
           </div>
           <Separator />
           <div className="p-3" data-slot="sidebar-new-session">
-            {/* Plan 10-03 inserts CreateSessionDialog trigger */}
-            <div className="text-xs text-muted-foreground">+ 新建会话 (placeholder)</div>
+            <CreateSessionButton />
           </div>
         </nav>
       );
     }
     ```
-    Placeholders reference `data-slot` so downstream plans can swap contents without changing Sidebar API.
+    `data-slot` attributes preserved as stable anchors for e2e; content is rendered by the imported modules whose bodies are replaced in W3 by 10-02/10-03.
 
     **Edit B — apps/web/src/components/shell/command-palette.tsx (new):**
     ```tsx
@@ -635,6 +724,7 @@ createHashRouter([
     - `apps/web/src/components/shell/app-shell.tsx` contains `className="hidden md:flex"` on Sidebar (CSS responsive, not JS)
     - `apps/web/src/components/shell/sidebar.tsx` uses `w-[280px]` exactly (UI-SPEC Spacing)
     - `apps/web/src/components/shell/sidebar.tsx` has `<nav>` root with `aria-label` (UI-SPEC A11y item 1)
+    - `apps/web/src/components/shell/sidebar.tsx` imports `ProxySwitcher` from `@/components/proxy/proxy-switcher` and `SessionList` + `CreateSessionButton` from `@/components/session/session-list` (grep: all three imports present)
     - `apps/web/src/components/shell/command-palette.tsx` uses `CommandInput` placeholder exact string: `搜索会话、proxy 或命令…`
     - `apps/web/src/lib/router.tsx` uses nested `children` array under root `/` path
     - `apps/web/src/lib/router.tsx` keeps `/pty-test` and `/tokens` outside AppShell children
@@ -795,18 +885,19 @@ createHashRouter([
   <name>Task 4: Visual verification checkpoint — AppShell + Sidebar + CommandPalette + Sonner</name>
   <what-built>
     - AppShell layout with sticky 48px header, Outlet main, Sidebar (280px desktop-only), Toaster + CommandPalette mounted
-    - Sidebar with three slots (proxy switcher / session list / new session) as placeholders
+    - Sidebar imports ProxySwitcher + SessionList + CreateSessionButton from their respective module paths (stubs now, real implementations from 10-02/10-03)
     - EmptyState component with three variants
     - CommandPalette wired to Cmd+K globally, pulls proxies + sessions from stores
     - Sonner migration: legacy showToast API preserved, phase-machine migrated, toast-store deleted
     - router.tsx nested routing with AppShell as parent for /, /sessions, /chat/:id
     - Playwright e2e specs (shell.spec.ts + toast.spec.ts)
+    - Stub modules (proxy-switcher.tsx / session-list.tsx) creating the frozen module-path contract for W3 plans
   </what-built>
   <how-to-verify>
     1. Start dev server: `pnpm --filter web dev`
     2. Playwright MCP captures screenshots at http://localhost:5173 for:
        - **Mobile 390x844:** AppShell header visible, sidebar hidden, main fills viewport
-       - **Desktop 1280x800:** AppShell header visible, sidebar 280px wide on left, main fills remaining width
+       - **Desktop 1280x800:** AppShell header visible, sidebar 280px wide on left, main fills remaining width; sidebar shows three stub slots (ProxySwitcher / SessionList / CreateSessionButton placeholder texts)
     3. Press Cmd+K (Mac) or Ctrl+K — CommandPalette dialog opens with placeholder `搜索会话、proxy 或命令…`; Escape closes it
     4. Navigate: /#/ → /#/sessions → /#/chat/test → /#/ (DevTools → Application → Local Storage should not show any error; Toaster region stays mounted as inspected via DevTools → Elements `[data-sonner-toaster]`)
     5. Trigger a toast manually via DevTools console:
@@ -819,7 +910,7 @@ createHashRouter([
        - **Typography:** Header "CC Anywhere" text-sm font-semibold (14px, 600 weight)
        - **Spacing:** Header h-12 (48px), sidebar w-[280px], Separator between sidebar sections
        - **States:** Hover on CommandItem → `--accent` bg; selected item gets amber bg
-       - **Copy:** Sidebar placeholders (can be stub text); CommandPalette placeholder exact match; EmptyState `尚未连接 Proxy` heading + body
+       - **Copy:** Sidebar stubs (placeholder texts are acceptable at this stage); CommandPalette placeholder exact match; EmptyState `尚未连接 Proxy` heading + body
        - **Responsive:** md breakpoint 768px — scrub viewport from 760 to 780 and observe sidebar appear; no layout shift
     7. Run e2e: `pnpm --filter web exec playwright test shell.spec.ts toast.spec.ts` (dev server running) — must pass
     8. Confirm no TypeScript errors: `pnpm --filter web typecheck`
@@ -860,6 +951,7 @@ createHashRouter([
 - `pnpm --filter web typecheck` exits 0
 - `grep -rn "useToastStore\|toast-store" apps/web/src` returns 0 matches
 - `ls apps/web/src/stores/toast-store.ts` returns "No such file or directory"
+- `ls apps/web/src/components/proxy/proxy-switcher.tsx apps/web/src/components/session/session-list.tsx` returns both files
 - `pnpm --filter web exec playwright test shell.spec.ts toast.spec.ts` passes (dev server running)
 - `pnpm --filter web test phase-machine` passes
 - Sidebar rendered at desktop viewport, hidden at mobile viewport (verified manually + e2e)
@@ -876,15 +968,16 @@ createHashRouter([
 - toast-store.ts fully deleted, zero lingering references
 - /pty-test and /tokens still accessible outside the shell (regression check)
 - All copy in EmptyState + CommandPalette matches 10-UI-SPEC.md Copywriting Contract verbatim
+- ProxySwitcher / SessionList / CreateSessionButton stub modules exist; Plan 10-02/10-03 can replace their bodies without touching sidebar.tsx
 - User explicitly approved visual match
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/10-pages-components-migration/10-01b-SUMMARY.md` with:
-- List of created + deleted files
+- List of created + deleted files (include proxy-switcher.tsx / session-list.tsx stubs)
 - phase-machine.ts migration diff (showToast call sites)
 - Router structure diff (flat → nested)
-- Sidebar placeholder slots enumerated with data-slot attrs for 10-02/10-03 wiring
+- Sidebar module-path contract enumerated (ProxySwitcher from @/components/proxy/proxy-switcher; SessionList + CreateSessionButton from @/components/session/session-list) — note: Plans 10-02/10-03 overwrite module bodies only, sidebar.tsx FROZEN
 - E2E spec outcomes
 - Visual checkpoint screenshot links
 </output>
