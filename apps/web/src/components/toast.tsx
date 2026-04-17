@@ -25,7 +25,7 @@ export function showWarningToast(message: string): void {
   toast.warning(message);
 }
 
-// hook 形式兼容，原 useToastStore 消费者只需替换 import 路径即可
+// hook 形式兼容：原 store 消费者只需替换 import 路径即可
 export function useToast() {
   return { toast, dismiss: toast.dismiss };
 }
