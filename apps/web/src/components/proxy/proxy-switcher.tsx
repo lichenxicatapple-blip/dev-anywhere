@@ -5,10 +5,10 @@
 // sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径, 本 Plan 只替换 body
 // 新增 export 或改 props 签名会破坏 sidebar.tsx 与 10-03 并行, 禁止
 import { useNavigate } from "react-router";
+import { ChevronDown } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { showErrorToast } from "@/components/toast";
-import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverTrigger,
@@ -84,24 +84,28 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     );
   }
 
-  // layout === "dropdown"
+  // layout === "dropdown" —— proxy scope chip: card 样式，边框 + 右侧 chevron
   const currentProxy = proxies.find((p) => p.proxyId === selectedProxyId);
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 h-9"
+        <button
+          type="button"
           data-slot="proxy-switcher-trigger"
+          className="group w-full flex items-center gap-2 px-3 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`Proxy: ${currentProxy?.name ?? "未选择"}`}
         >
           <ProxyStatusDot
             status={currentProxy?.online ? "online" : "offline"}
           />
-          <span className="text-sm font-normal truncate flex-1 text-left">
+          <span className="text-sm font-normal truncate flex-1">
             {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择"}
           </span>
-        </Button>
+          <ChevronDown
+            className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden
+          />
+        </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[260px] p-1">
         {proxies.length === 0 ? (

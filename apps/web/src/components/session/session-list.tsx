@@ -103,13 +103,14 @@ export function SessionList({ layout }: SessionListProps) {
 }
 
 // 侧栏底部的 "+ 新建会话" 按钮触发器 —— 被 10-01b sidebar.tsx 直接 import
+// card 样式（border + hover）与顶部 proxy chip 在视觉层级上同级：均为 scope 层的操作
 export function CreateSessionButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button
-        className="w-full justify-start gap-2"
-        variant="ghost"
+        variant="outline"
+        className="w-full justify-start gap-2 h-10"
         onClick={() => setOpen(true)}
       >
         <Plus aria-hidden="true" />
