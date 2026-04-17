@@ -306,6 +306,74 @@
 
 ---
 
+## Addendum (2026-04-18, post-Wave-3 UX adjustments)
+
+> 以下是 Wave 1-3 执行后、视觉验证阶段发现的 UI-SPEC 偏离。**优先级高于前文**；Wave 4+ planner 请以此为准。
+
+- **D-42：CommandPalette / Cmd+K 入口下架**
+  - 原 UI-SPEC 将 `命令面板 + Cmd+K` 列为 10-01b must_have
+  - 实际用 review 发现：app surface area 小（3 页）、`动作` 分组里只有"新建会话"重复 sidebar 现有 CTA、`会话/Proxy` 分组的搜索价值未兑现
+  - 决策：**删除** `components/shell/command-palette.tsx`、AppShell header 搜索按钮、`useKeyboardShortcut` 对 Cmd+K 的注册、`e2e/shell.spec.ts` Cmd+K 测试组
+  - **保留**：shadcn `Command` / `CommandDialog` / `CommandInput` 原子（未来 Settings 面板可复用）+ `useKeyboardShortcut` hook 本体
+  - 后续再启用触发点：Settings feature 落地时加一个 header 齿轮图标打开 Settings Dialog（**不走 Cmd+K**）
+
+- **D-43：Sidebar 三段改 breadcrumb 型布局**
+  - 原结构：ProxySwitcher dropdown 行 + Separator + SessionList + Separator + CreateSessionButton
+  - 实际视觉：三段视觉语言一致都像"一行" → 语义层级不清（scope 和 object 长得一样）
+  - 新结构：
+    - **Proxy chip**：`p-2` 外层，内部按钮带 `border + chevron` 作为"scope selector card"
+    - **会话 section**：小字 label `会话 · N`（从 `useSessionStore.sessions.length` 来）+ edge-to-edge session row list
+    - **+ 新建会话 card**：`p-2` 外层，outline button 作为常驻次级 CTA
+  - 删除内部 `<Separator />`；用 card vs row 视觉对比做分层
+
+- **D-44：Desktop `/` 和 `/sessions` 主区改 EmptyState，消除重复渲染**
+  - 原实现：ProxySelectPage → `<ProxySwitcher layout="page" />`、SessionListPage → `<SessionList layout="page" />`（主区在 desktop 重复渲染 sidebar 已经有的列表 + 重复的 "+ 新建会话" 大按钮）
+  - 新实现：
+    - `pages/proxy-select.tsx`：`<div className="md:hidden">` 渲染 page layout；`<div className="hidden md:block">` 渲染 `<EmptyState variant="no-session" />`
+    - `pages/session-list.tsx`：同样的双视图分叉
+  - **主区空状态 NOT 自带 CTA** — 用户确认首屏 CTA 由 sidebar 承担即可，主区保持文案 only
+
+- **D-45：Proxy offline 可视禁用**
+  - 原实现：offline proxy 可点击，触发 server 反错（"Proxy not online"）
+  - 新实现：`disabled={!p.online}` + `disabled:opacity-50 disabled:cursor-not-allowed` + `title` tooltip；在 `page` 和 `dropdown` 两个 layout 都应用
+  - Toast 错误文案从 `Proxy not online: {proxyId}` 改为 `选择 {displayName} 失败：{reason}`（用 proxy name 而非内部 id）
+
+- **D-46：Session row truncation chain 修复（不是 UI-SPEC 偏离，是 bug）**
+  - Session row 在 sidebar 长名字不截断，原因：`<li>` 未 `w-full`、`<ul>` 未 `w-full min-w-0`、Radix ScrollArea Viewport 内部 table-wrapper 允许内容横向溢出
+  - 新实现：
+    - `session-row.tsx` `<li>` 加 `w-full min-w-0`
+    - `session-list.tsx` `<ul>` 加 `w-full min-w-0`
+    - sidebar layout 用 plain `<div className="h-full overflow-y-auto">` 替代 `ScrollArea`（避免 radix 内部 wrapper）；page layout 继续用 ScrollArea（无截断场景）
+
+- **D-47：useKeyboardShortcut API 规范化**
+  - 原 API：`{ meta: true, ctrl: true, preventDefault: true }` — 两个 flag 均 `true` 但实现是 OR 关系，语义和实现不一致
+  - 新 API：单一 `modifier: boolean`，含义"需任一修饰键（metaKey || ctrlKey）"，跨平台兼容
+  - hook 保留（Wave 4+ 还会用），调用方仅 CommandPalette 一处、随其删除
+
+- **D-48：html + body 背景锁定**
+  - `<html>` 原默认透明；配合 body `bg-background` 在极端布局（Radix Dialog scrollbar 补偿、resize 节流）可能露出浏览器默认白底
+  - 修法：`app.css` 将 `body` 的 `@apply bg-background text-foreground` 扩到 `html, body`
+  - 防御性加固，不是必修 bug
+
+- **D-49：Token Showcase 标签改为动态读 CSS var**
+  - Phase 07 的 Token Showcase 页用硬编码 hex 字符串做标签（`"#00D4AA / primary"`）；10-01a 改主题为 amber 后标签对不上 swatch 实际颜色
+  - 修法：`useCssVarValues` hook 在 useEffect 里取 `getComputedStyle(document.documentElement).getPropertyValue(cssVar)`，动态渲染标签文字
+  - 以后再改主题 token，标签自动同步
+
+- **D-50：AppShell header 极简**
+  - 原实现含"搜索"按钮 + ⌘K kbd（搭配 Cmd+K）
+  - 新实现：只留 `CC Anywhere` 文字标题
+  - 右侧留空间给未来 Settings 齿轮 / 帮助图标等
+
+### 未回滚但需注意的事项
+
+- 原 10-01b 的 20 个 Playwright e2e 测试，移除 Cmd+K 组后剩 16 个；全 passing
+- UI-SPEC `Copywriting Contract` 的 `命令面板 placeholder` 条目（L236）**作废**
+- UI-SPEC `Responsive` 部分（L264-266）的 `ProxySelect becomes sidebar-top dropdown, not a page` **生效**（10-02 原实现是 page in all viewports，现已按 UI-SPEC 修）
+
+---
+
 *Phase: 10-pages-components-migration*
 *Context gathered: 2026-04-17*
-*Addendum: 2026-04-17*
+*Addendum 1: 2026-04-17 (planning-phase locked decisions)*
+*Addendum 2: 2026-04-18 (post-Wave-3 UX adjustments)*

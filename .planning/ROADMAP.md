@@ -158,14 +158,14 @@ Plans:
   3. Chat page renders JSON mode (chat bubbles, Markdown, tool approval cards) and PTY mode (xterm.js terminal) correctly
   4. All shared UI components (InputBar, Toast, Modal, StatusLine, BackToBottom, etc.) work with shadcn/ui replacements
   5. App shell provides safe area handling, navigation header, and responsive layout across mobile/tablet/desktop breakpoints
-**Plans:** 2/8 plans executed
+**Plans:** 4/8 plans executed
 **UI hint**: yes
 
 Plans:
 - [x] 10-01a-PLAN.md — shadcn atom set install + Phase 10 theme override (amber primary, 0.375rem radius, Button font-weight 400) + Playwright e2e scaffolding
 - [x] 10-01b-PLAN.md — AppShell + Sidebar + EmptyState + CommandPalette (Cmd+K) + Sonner migration + nested router with AppShell as parent
-- [ ] 10-02-PLAN.md — ProxySwitcher dual-layout (page | dropdown) + ProxyStatusDot + rewritten proxy-select page + sidebar dropdown slot
-- [ ] 10-03-PLAN.md — SessionList dual-layout + SessionRow + CreateSessionDialog + master-detail instant switch
+- [x] 10-02-PLAN.md — ProxySwitcher dual-layout (page | dropdown) + ProxyStatusDot + rewritten proxy-select page + sidebar dropdown slot
+- [x] 10-03-PLAN.md — SessionList dual-layout + SessionRow + CreateSessionDialog + master-detail instant switch
 - [ ] 10-04a-PLAN.md — Chat JSON core rendering (virtualized messages + Markdown + ToolApprovalCard + BackToBottom + StatusLine + chat-dispatcher wiring)
 - [ ] 10-04b-PLAN.md — Chat JSON input half + ChatHeader + SemanticActionPanel (JSON+PTY routes) + shared FilePathPicker (refactors CreateSessionDialog CWD field)
 - [ ] 10-05-PLAN.md — Chat PTY primitives (createXterm factory + ChatPtyView self-contained + remote_input_raw envelope + ansi-keys 5 constants + proxy serve.ts branch)
@@ -260,7 +260,7 @@ Phase 7 --+-- Phase 8 ----------+
 | 7. Project Scaffold + Design Tokens | v2.0 | 2/2 | Complete | 2026-04-15 |
 | 8. Business Logic Adaptation | v2.0 | 0/3 | Planned | - |
 | 9. PTY Pipeline Full Chain | v2.0 | 4/4 | Complete | 2026-04-16 |
-| 10. Pages + Components Migration | v2.0 | 2/8 | In Progress|  |
+| 10. Pages + Components Migration | v2.0 | 4/8 | In Progress|  |
 | 11. PTY Resilience | v2.0 | 0/2 | Not started | - |
 | 12. Deployment + PWA Basics | v2.0 | 0/2 | Not started | - |
 | 13. PWA Advanced Features | v2.0 | 0/2 | Not started | - |

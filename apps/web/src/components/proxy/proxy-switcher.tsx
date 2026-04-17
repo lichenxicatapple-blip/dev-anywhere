@@ -127,7 +127,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                   data-online={p.online}
                   disabled={!p.online}
                   onClick={() => handleSelect(p.proxyId, p.name)}
-                  className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-pressed={selectedProxyId === p.proxyId}
                   title={!p.online ? "Proxy 离线" : undefined}
                 >
