@@ -1,7 +1,7 @@
 // 状态机事件处理，直接访问 zustand store 和 router，不再通过 PhaseNav 间接注入
 import type { ProxyInfo } from "@cc-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
-import { useToastStore } from "@/stores/toast-store";
+import { showToast } from "@/components/toast";
 import { router } from "@/lib/router";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
@@ -73,7 +73,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       useAppStore.getState().setProxyOnline(false);
-      useToastStore.getState().showToast("Proxy offline");
+      showToast("Proxy offline");
     }
     return;
   }
@@ -83,7 +83,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       useAppStore.getState().setProxyOnline(true);
-      useToastStore.getState().showToast("Proxy reconnected");
+      showToast("Proxy reconnected");
     }
     return;
   }
