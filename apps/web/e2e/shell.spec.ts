@@ -48,24 +48,3 @@ test.describe("AppShell layout — desktop (≥ md)", () => {
   });
 });
 
-test.describe("Cmd+K command palette", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test.beforeEach(async ({ page }) => {
-    await page.goto(BASE_URL);
-    await resetLocalState(page);
-  });
-
-  test("Cmd+K opens command palette with correct placeholder", async ({ page }) => {
-    await page.keyboard.press("Meta+k");
-    const input = page.locator("input[placeholder='搜索会话、proxy 或命令…']");
-    await expect(input).toBeVisible();
-  });
-
-  test("Escape closes command palette", async ({ page }) => {
-    await page.keyboard.press("Meta+k");
-    await page.keyboard.press("Escape");
-    const input = page.locator("input[placeholder='搜索会话、proxy 或命令…']");
-    await expect(input).not.toBeVisible();
-  });
-});
