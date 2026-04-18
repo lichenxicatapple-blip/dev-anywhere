@@ -373,7 +373,51 @@
 
 ---
 
+## Addendum 3 — post-Wave-4 scope correction (2026-04-18)
+
+Wave 4 验证过程中暴露两个设计问题：移动端 chat 顶部双层 header 浪费纵向空间；SplitPane 双 chat 并排是 Phase 10 起点时的锁定决策，但当前没有真实使用需求，放在 Phase 10 只是负担。本 Addendum 收敛契约。
+
+- **D-51：Chat 页顶部极简化（覆盖 D-13 与 UI-SPEC 中 ChatHeader 的定义）**
+  - AppShell header 在 `/chat/*` 路由下**隐藏**（AppShell 用 `useLocation()` 条件渲染）。非 chat 路由（proxy-select / session-list）继续显示 AppShell header。
+  - ChatHeader 成为 chat 路由唯一顶部 chrome（48px，sticky，safe-area top padding 生效）。
+  - ChatHeader 只含三件套：
+    1. **返回按钮**（左侧图标）—— 导航回 `/sessions`。移动端和桌面端**同样显示**，不再区分。
+    2. **会话标题**（flex-1，truncate，居中或左对齐由 10-04b 定）—— session 名称；尾字截断 ellipsis。
+    3. **overflow 菜单**（右侧 `⋯` 图标，shadcn DropdownMenu）。下拉内容：
+       - **Permission mode** 子菜单（或平铺 checkbox group）：Normal / Plan / Always allow
+       - Rename session
+       - Duplicate session
+       - Terminate session（destructive，与前者之间有分割线）
+  - **删除**：UI-SPEC L188 中 ChatHeader 的"permission-mode menu"独立按钮；"sidebar toggle (desktop)"独立按钮；"back button (mobile)"的移动端限定。
+  - 桌面端 sidebar 折叠机制**不在本 phase 交付**（见 D-52 相关段落）。
+
+- **D-52：撤回 SplitPane（本 phase 不交付，降级至 backlog）**
+  - 原 D-18 + Addendum 1 D-18 重确认：Phase 10 交付 SplitPane 双 chat 并排。
+  - 重新评估后**撤回**：CC Anywhere 核心价值是移动端连续性；SplitPane 只在 `≥lg 1024px` 激活，属于桌面 power-user 功能；当前用户未提出并排需求；持有它意味着每次 ChatHeader / router / chat-store 改动都要兼顾两套状态模型（split vs 非 split），持续税收。
+  - **Plan 10-06 瘦身**：删除 Task 3（SplitPane 组件、ChatHeader split picker、chat.tsx split dispatch、e2e/split-pane.spec.ts），保留 Task 1 / Task 2（chat-store per-session Map 重写 + 6 个 chat 组件改 sessionId-scoped selector）。chat-store per-session 重写是**核心数据模型修复**，无论 SplitPane 做不做都需要。
+  - **ROADMAP 10-06 行**去掉 "+ SplitPane dual-chat layout (lg viewport)" 后缀。
+  - `ui-spec.md` "Responsive Breakpoints" 中 "split-pane activation at lg 1024px, max 2 panes" **作废**（后续 backlog 落地时再重写）。
+  - **Backlog 入条（999.x）**："SplitPane dual-chat（桌面端 ≥lg）"，触发条件：用户提出真实多屏并排需求，或桌面端使用量显著上升。
+  - **配套回收**：原计划的 sidebar 折叠机制（chevron handle + Cmd+\）主要理由是 SplitPane 需要横向空间；没 SplitPane 就没那么急，当前 phase **不做** sidebar 折叠。若桌面 280px sidebar 成为阻碍（例如 session-list 过长挤压 main），再提独立 decimal phase 处理。
+
+- **D-53：Settings 扩展槽搬家（覆盖 D-50 的 header 右侧留位意图）**
+  - 原 D-50：AppShell header 右侧留位给未来 Settings 齿轮图标。
+  - 新方案：AppShell header 在 chat 路由下整个隐藏，桌面端 Settings 入口挪至 **Sidebar 底部齿轮图标**（与 ProxySwitcher / "+ 新建 session" 浮动按钮同区域）。非 chat 路由的 AppShell header 不再承担 Settings 图标。
+  - 实现时机：Sidebar 底部齿轮**占位** icon 在 Plan 10-04b 一并加上（click 打开空 Dialog 或 toast "Settings coming soon"），真正的 Settings feature 另起独立 phase。
+
+### 本 Addendum 的契约作用域
+
+- **生效对象**：Plan 10-04b（Wave 5）和 Plan 10-06（Wave 6）
+- **已交付 Plan 不回滚**：10-01a / 10-01b / 10-02 / 10-03 / 10-04a / 10-05 保持现状；AppShell header 的条件隐藏由 10-04b 在新增 ChatHeader 时一并实现（此时 chat.tsx 会重写，是自然集成点）。
+- **UI-SPEC 失效条目**：
+  - L188 ChatHeader props 行：删除 "permission-mode menu"、"sidebar toggle (desktop)" 两项独立按钮；back button 从 mobile-only 改为全视口
+  - L287 附近 `ChatHeader back button: visible on < md, hidden on ≥ md` 条目**作废**（全视口显示）
+  - `Responsive` 段 `split-pane activation at lg 1024px, max 2 panes` **作废**
+
+---
+
 *Phase: 10-pages-components-migration*
 *Context gathered: 2026-04-17*
 *Addendum 1: 2026-04-17 (planning-phase locked decisions)*
 *Addendum 2: 2026-04-18 (post-Wave-3 UX adjustments)*
+*Addendum 3: 2026-04-18 (post-Wave-4 scope correction — D-51/D-52/D-53)*

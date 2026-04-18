@@ -169,7 +169,7 @@ Plans:
 - [x] 10-04a-PLAN.md — Chat JSON core rendering (virtualized messages + Markdown + ToolApprovalCard + BackToBottom + StatusLine + chat-dispatcher wiring)
 - [ ] 10-04b-PLAN.md — Chat JSON input half + ChatHeader + SemanticActionPanel (JSON+PTY routes) + shared FilePathPicker (refactors CreateSessionDialog CWD field)
 - [x] 10-05-PLAN.md — Chat PTY primitives (createXterm factory + ChatPtyView self-contained + remote_input_raw envelope + ansi-keys 5 constants + proxy serve.ts branch)
-- [ ] 10-06-PLAN.md — chat-store per-session rewrite (removes CustomEvent bridge) + SplitPane dual-chat layout (lg viewport)
+- [ ] 10-06-PLAN.md — chat-store per-session rewrite (retires CustomEvent bridge; SplitPane dual-chat 已按 D-52 降级至 backlog)
 
 ### Phase 11: PTY Resilience
 **Goal**: PTY sessions survive disconnections, support multiple viewers, and can be replayed from history

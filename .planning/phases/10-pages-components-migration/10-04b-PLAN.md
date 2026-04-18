@@ -16,12 +16,15 @@ files_modified:
   - apps/web/src/components/chat/chat-header.tsx
   - apps/web/src/components/chat/chat-json-view.tsx
   - apps/web/src/components/session/create-session-dialog.tsx
+  - apps/web/src/components/shell/app-shell.tsx
+  - apps/web/src/components/shell/sidebar.tsx
   - apps/web/src/pages/chat.tsx
   - apps/web/src/hooks/use-input-history.ts
   - apps/web/src/hooks/use-textarea-autosize.ts
   - apps/web/src/hooks/use-visual-viewport.ts
   - apps/web/e2e/input-bar.spec.ts
   - apps/web/e2e/file-picker.spec.ts
+  - apps/web/e2e/chat-chrome.spec.ts
 autonomous: false
 requirements:
   - FRONT-06
@@ -40,7 +43,9 @@ must_haves:
     - "FilePathPicker subscribes to file-store and dispatches dir_list_request on cache miss; shared as refactored reusable component"
     - "QuotePreviewBar appears above InputBar when chat-store.quotedMessage is set; dismiss clears it"
     - "SemanticActionPanel (5 buttons: 打断输出/切换审批模式/历史上一条/历史下一条/取消) routes JSON actions (worker_abort / permission_mode_change / history / cancel) via CustomEvent bridge (Plan 10-06 Task 1 will migrate to store-backed selectors and remove the bridge)"
-    - "ChatHeader renders (session title, mode badge, permission-mode dropdown, back/sidebar toggle, overflow menu with terminate)"
+    - "ChatHeader (per D-51) 三件套：返回按钮（全视口显示）/ 会话标题（flex-1 truncate）+ mode badge / overflow 菜单。Overflow 内容：Permission mode 子菜单（默认 / 自动允许 / 规划模式）、Rename、Duplicate、Terminate（destructive）。**删除** 独立 permission-mode 顶栏按钮和独立 sidebar-toggle 按钮。"
+    - "AppShell (per D-51) 在 /chat/* 路由下隐藏 header（useLocation 条件渲染）。非 chat 路由继续显示。"
+    - "Sidebar 底部添加 Settings 齿轮图标占位（per D-53）——点击打开空 Dialog 或 toast “Settings coming soon”，真正的 Settings feature 另起独立 phase。"
     - "chat.tsx now composes ChatHeader + ChatJsonView + InputBar region — full JSON mode operational"
     - "CreateSessionDialog (from Plan 10-03) is refactored to reuse FilePathPicker subset for CWD field (inline inline FilePathPicker subset -> shared component)"
   artifacts:
@@ -821,10 +826,11 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     ```
     Both JSON and PTY routes are wired in this plan. Plan 10-05 delivered `ansi-keys.ts` and `sendSemanticAction` in Wave 4; this Wave 5 plan consumes them directly. No further modifications to this file are expected (Plan 10-06 Task 1 will migrate the CustomEvent bridge when chat-store becomes per-session).
 
-    **Edit C — apps/web/src/components/chat/chat-header.tsx (new):**
+    **Edit C — apps/web/src/components/chat/chat-header.tsx (new) — per D-51 三件套：**
     ```tsx
-    // Chat 页顶栏: session 标题 / back 按钮 (mobile) / sidebar toggle (desktop) / permission-mode / overflow
-    import { ArrowLeft, PanelLeftClose, PanelLeftOpen, MoreVertical } from "lucide-react";
+    // Chat 页顶栏 (D-51 极简): 返回按钮 (全视口) | 会话标题 + mode badge (flex-1 truncate) | overflow 菜单
+    // overflow 包含: Permission mode 子菜单 / Rename / Duplicate / Terminate (destructive)
+    import { ArrowLeft, MoreVertical } from "lucide-react";
     import { useNavigate } from "react-router";
     import { Button } from "@/components/ui/button";
     import { Badge } from "@/components/ui/badge";
@@ -833,9 +839,14 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
       DropdownMenuTrigger,
       DropdownMenuContent,
       DropdownMenuItem,
+      DropdownMenuSub,
+      DropdownMenuSubTrigger,
+      DropdownMenuSubContent,
+      DropdownMenuRadioGroup,
+      DropdownMenuRadioItem,
+      DropdownMenuSeparator,
     } from "@/components/ui/dropdown-menu";
     import { useSessionStore } from "@/stores/session-store";
-    import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
     import { useAppStore } from "@/stores/app-store";
     import { relayClientRef } from "@/services/ensure-binding";
 
@@ -846,17 +857,26 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     export function ChatHeader({ sessionId }: ChatHeaderProps) {
       const navigate = useNavigate();
       const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
-      const { collapsed, toggle } = useSidebarCollapsed();
       const permissionMode = useAppStore((s) => s.permissionMode ?? "default");
-
-      const permissionLabel: Record<string, string> = {
-        default: "默认",
-        auto_accept: "自动允许",
-        plan: "规划模式",
-      };
 
       function changePermission(mode: "default" | "auto_accept" | "plan") {
         relayClientRef.current?.sendControl({ type: "permission_mode_change", mode });
+      }
+
+      function handleRename() {
+        // 占位: 触发 Rename Dialog (另一个 Plan 接入); 本 Plan 发事件或调用 useSessionStore.renamePrompt()
+        // 最小实现: 弹 prompt, 调用 sendControl session_rename (若 relay 已支持) 或 store-local rename
+        // 如果当前 session_rename envelope 未定义, 占位为 toast: "Rename coming soon" + TODO 注释
+      }
+
+      function handleDuplicate() {
+        // 占位: 复制当前 session 的 cwd + mode 作为新 session 创建种子; 发 session_create 走正常流程
+        // 最小实现: sendControl({ type: "session_create", cwd: session?.cwd ?? ".", resumeSessionId: undefined })
+      }
+
+      function handleTerminate() {
+        relayClientRef.current?.sendControl({ type: "session_terminate", sessionId });
+        navigate("/sessions");
       }
 
       return (
@@ -867,23 +887,14 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
           <Button
             variant="ghost"
             size="icon-sm"
-            className="md:hidden"
             onClick={() => navigate("/sessions")}
             aria-label="返回会话列表"
+            data-slot="chat-back-button"
           >
             <ArrowLeft aria-hidden="true" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="hidden md:inline-flex"
-            onClick={toggle}
-            aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
-          >
-            {collapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
-          </Button>
           <div className="flex-1 min-w-0 flex items-center gap-2">
-            <span className="text-sm font-semibold truncate">
+            <span className="text-sm font-semibold truncate" data-slot="chat-session-title">
               {session?.name ?? sessionId.slice(0, 8)}
             </span>
             {session && (
@@ -894,29 +905,36 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-xs">
-                {permissionLabel[permissionMode]}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => changePermission("default")}>默认</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => changePermission("auto_accept")}>自动允许</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => changePermission("plan")}>规划模式</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="会话操作">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="会话操作"
+                data-slot="chat-overflow-trigger"
+              >
                 <MoreVertical aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" data-slot="chat-overflow-menu">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Permission mode</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup
+                    value={permissionMode}
+                    onValueChange={(v) => changePermission(v as "default" | "auto_accept" | "plan")}
+                  >
+                    <DropdownMenuRadioItem value="default">默认</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="auto_accept">自动允许</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="plan">规划模式</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuItem onClick={handleRename}>Rename</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDuplicate}>Duplicate</DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
-                onClick={() => {
-                  relayClientRef.current?.sendControl({ type: "session_terminate", sessionId });
-                  navigate("/sessions");
-                }}
+                data-slot="chat-terminate-item"
+                onClick={handleTerminate}
               >
                 终止会话
               </DropdownMenuItem>
@@ -927,7 +945,70 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     }
     ```
 
-    Commit message: `feat(10-04b): input-bar + semantic panel + chat header`
+    **Edit D — apps/web/src/components/shell/app-shell.tsx (modify per D-51) — 条件隐藏 AppShell header：**
+    ```tsx
+    import { Outlet, useLocation } from "react-router";
+    import { Sidebar } from "./sidebar";
+    import { Toaster } from "@/components/toast";
+
+    export function AppShell() {
+      const location = useLocation();
+      const isChatRoute = location.pathname.startsWith("/chat/");
+
+      return (
+        <div className="flex flex-col h-dvh bg-background text-foreground">
+          {!isChatRoute && (
+            <header
+              className="sticky top-0 z-10 flex items-center gap-2 px-4 h-12 bg-card border-b border-border"
+              role="banner"
+              data-slot="app-shell-header"
+            >
+              <span className="text-sm font-semibold">CC Anywhere</span>
+            </header>
+          )}
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar className="hidden md:flex" />
+            <main className="flex-1 overflow-hidden" role="main">
+              <Outlet />
+            </main>
+          </div>
+          <Toaster />
+        </div>
+      );
+    }
+    ```
+
+    **Edit E — apps/web/src/components/shell/sidebar.tsx (modify per D-53) — 底部 Settings 齿轮占位：**
+    ```tsx
+    // 在 Sidebar 底部区域 (与 "+ 新建会话" 浮动按钮同区) 新增 Settings 齿轮 Button
+    import { Settings } from "lucide-react";
+    import { toast } from "@/components/toast";
+    // ... existing imports ...
+
+    export function Sidebar({ className }: { className?: string }) {
+      // ... existing body ...
+      return (
+        <aside className={...} data-slot="sidebar">
+          {/* existing: ProxySwitcher dropdown + session list */}
+          <div className="mt-auto border-t border-border p-2 flex items-center justify-between">
+            {/* existing: "+ 新建会话" button */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="设置"
+              data-slot="sidebar-settings-trigger"
+              onClick={() => toast.info("Settings coming soon")}
+            >
+              <Settings aria-hidden="true" />
+            </Button>
+          </div>
+        </aside>
+      );
+    }
+    ```
+    （真正的 Settings Dialog 另起独立 phase；本 plan 只放占位，点击弹 toast）
+
+    Commit message: `feat(10-04b): input-bar + semantic panel + chat header (D-51 极简) + app-shell conditional header (D-51) + sidebar settings slot (D-53)`
   </action>
   <verify>
     <automated>pnpm --filter web typecheck</automated>
@@ -940,12 +1021,18 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     - `apps/web/src/components/chat/semantic-action-panel.tsx` JSON `interrupt` dispatches `worker_abort`; `togglePermissionMode` cycles default→auto_accept→plan→default
     - `apps/web/src/components/chat/semantic-action-panel.tsx` PTY branch calls `sendSemanticAction(sessionId, "interrupt" | "toggle_permission" | "history_prev" | "history_next" | "cancel")` (grep: 5 matches of sendSemanticAction inside semantic-action-panel.tsx)
     - `apps/web/src/components/chat/semantic-action-panel.tsx` imports `sendSemanticAction` from `@/lib/ansi-keys` (Plan 10-05 deliverable)
-    - `apps/web/src/components/chat/chat-header.tsx` has permission-mode dropdown with labels `默认` / `自动允许` / `规划模式`
-    - `apps/web/src/components/chat/chat-header.tsx` terminate action uses `text-destructive` class and exact copy `终止会话`
-    - `apps/web/src/components/chat/chat-header.tsx` root has `data-slot="chat-header"` (needed by Plan 10-06 split-pane e2e)
+    - **D-51：ChatHeader 只有三件套**：root div 内恰好 3 个直接子元素 —— 返回按钮 + session 标题容器 (含 mode badge) + overflow DropdownMenu。`grep -c 'Button' apps/web/src/components/chat/chat-header.tsx` 计数应 ≤ 2（返回按钮 + overflow 触发按钮），不存在独立的 permission-mode 按钮。
+    - **D-51：删除 sidebar-toggle**：`grep 'useSidebarCollapsed\|PanelLeftOpen\|PanelLeftClose' apps/web/src/components/chat/chat-header.tsx` 返回 0 匹配
+    - **D-51：返回按钮全视口显示**：返回按钮的 className 不含 `md:hidden`；`data-slot="chat-back-button"` 存在
+    - **D-51：overflow 菜单内容完整**：DropdownMenuContent 内依次包含：Permission mode 子菜单（DropdownMenuSub + DropdownMenuRadioGroup）/ Rename / Duplicate / DropdownMenuSeparator / Terminate(destructive)
+    - `apps/web/src/components/chat/chat-header.tsx` terminate 动作使用 `text-destructive` 类和文字 `终止会话`；`data-slot="chat-terminate-item"`
+    - `apps/web/src/components/chat/chat-header.tsx` root 有 `data-slot="chat-header"`；overflow 触发器有 `data-slot="chat-overflow-trigger"`；会话标题有 `data-slot="chat-session-title"`
+    - **D-51：AppShell 条件隐藏 header**：`apps/web/src/components/shell/app-shell.tsx` 导入 `useLocation`；存在判断 `location.pathname.startsWith("/chat/")`；只有非 chat 路由渲染 `<header>`
+    - **D-51：AppShell header 带 data-slot**：非 chat 路由的 header 有 `data-slot="app-shell-header"`（用于 e2e 断言存在/隐藏）
+    - **D-53：Sidebar Settings 占位**：`apps/web/src/components/shell/sidebar.tsx` 底部区域含 `data-slot="sidebar-settings-trigger"` 的 Button，图标为 lucide `Settings`
     - `pnpm --filter web typecheck` exits 0
   </acceptance_criteria>
-  <done>InputBar + SemanticActionPanel + ChatHeader built; cross-component history wired via temporary CustomEvent bridge.</done>
+  <done>InputBar + SemanticActionPanel + ChatHeader (D-51 极简三件套) 构建完成；AppShell 条件隐藏 header；Sidebar 加 Settings 占位；跨组件 history 走临时 CustomEvent bridge（Plan 10-06 Task 1 会迁移到 store）。</done>
 </task>
 
 <task type="auto">
@@ -1326,10 +1413,11 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
 </task>
 
 <task type="auto">
-  <name>Task 5: Playwright e2e specs (input-bar / file-picker)</name>
+  <name>Task 5: Playwright e2e specs (input-bar / file-picker / chat-chrome)</name>
   <files>
     apps/web/e2e/input-bar.spec.ts,
-    apps/web/e2e/file-picker.spec.ts
+    apps/web/e2e/file-picker.spec.ts,
+    apps/web/e2e/chat-chrome.spec.ts
   </files>
   <read_first>
     - apps/web/e2e/helpers.ts
@@ -1394,6 +1482,87 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     });
     ```
 
+    **apps/web/e2e/chat-chrome.spec.ts (new) — D-51 断言：**
+    ```ts
+    import { test, expect } from "@playwright/test";
+    import { BASE_URL, resetLocalState } from "./helpers";
+
+    test.describe("AppShell header — D-51 conditional hide on chat route", () => {
+      test.use({ viewport: { width: 1280, height: 800 } });
+
+      test.beforeEach(async ({ page }) => {
+        await page.goto(BASE_URL);
+        await resetLocalState(page);
+      });
+
+      test("AppShell header visible on /sessions", async ({ page }) => {
+        await page.goto(`${BASE_URL}/#/sessions`);
+        const header = page.locator('[data-slot="app-shell-header"]');
+        await expect(header).toBeVisible();
+      });
+
+      test("AppShell header HIDDEN on /chat/*", async ({ page }) => {
+        await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
+        const header = page.locator('[data-slot="app-shell-header"]');
+        await expect(header).toHaveCount(0);
+      });
+    });
+
+    test.describe("ChatHeader — D-51 三件套", () => {
+      test.use({ viewport: { width: 1280, height: 800 } });
+
+      test.beforeEach(async ({ page }) => {
+        await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
+        await resetLocalState(page);
+        await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
+      });
+
+      test("has three direct children: back button + title + overflow", async ({ page }) => {
+        const header = page.locator('[data-slot="chat-header"]');
+        await expect(header).toBeVisible();
+        await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
+        await expect(page.locator('[data-slot="chat-session-title"]')).toBeVisible();
+        await expect(page.locator('[data-slot="chat-overflow-trigger"]')).toBeVisible();
+      });
+
+      test("back button is visible at ALL viewports (no md:hidden)", async ({ page }) => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
+      });
+
+      test("no standalone permission-mode button or sidebar-toggle", async ({ page }) => {
+        const permissionBtn = page.locator('[data-slot="chat-header"] button:has-text("默认"), [data-slot="chat-header"] button:has-text("自动允许"), [data-slot="chat-header"] button:has-text("规划模式")');
+        await expect(permissionBtn).toHaveCount(0);
+        const sidebarToggle = page.locator('[data-slot="chat-header"] [aria-label*="侧栏"]');
+        await expect(sidebarToggle).toHaveCount(0);
+      });
+
+      test("overflow menu contains Permission mode + Rename + Duplicate + Terminate(destructive)", async ({ page }) => {
+        await page.locator('[data-slot="chat-overflow-trigger"]').click();
+        const menu = page.locator('[data-slot="chat-overflow-menu"]');
+        await expect(menu).toBeVisible();
+        await expect(menu.getByText("Permission mode")).toBeVisible();
+        await expect(menu.getByText("Rename")).toBeVisible();
+        await expect(menu.getByText("Duplicate")).toBeVisible();
+        const terminate = page.locator('[data-slot="chat-terminate-item"]');
+        await expect(terminate).toBeVisible();
+        await expect(terminate).toHaveClass(/text-destructive/);
+      });
+    });
+
+    test.describe("Sidebar Settings slot — D-53", () => {
+      test.use({ viewport: { width: 1280, height: 800 } });
+
+      test("Sidebar has Settings gear at bottom", async ({ page }) => {
+        await page.goto(`${BASE_URL}/#/sessions`);
+        const settings = page.locator('[data-slot="sidebar-settings-trigger"]');
+        await expect(settings).toBeVisible();
+      });
+    });
+    ```
+
     **apps/web/e2e/file-picker.spec.ts (new):**
     ```ts
     import { test, expect } from "@playwright/test";
@@ -1434,18 +1603,19 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     });
     ```
 
-    Commit message: `test(10-04b): input + file picker e2e`
+    Commit message: `test(10-04b): input + file picker + chat chrome (D-51/D-53) e2e`
   </action>
   <verify>
-    <automated>pnpm --filter web typecheck && pnpm --filter web exec playwright test --list 2>&1 | grep -E "input-bar|file-picker" | wc -l</automated>
+    <automated>pnpm --filter web typecheck && pnpm --filter web exec playwright test --list 2>&1 | grep -E "input-bar|file-picker|chat-chrome" | wc -l</automated>
   </verify>
   <acceptance_criteria>
     - `apps/web/e2e/input-bar.spec.ts` exists; tests `/` trigger, Escape close, send button disabled state, ArrowUp history
     - `apps/web/e2e/file-picker.spec.ts` exists; tests `@` trigger (mode=insert) and CreateSessionDialog picker (mode=select)
-    - Playwright lists at least 2 new spec files
+    - `apps/web/e2e/chat-chrome.spec.ts` exists; covers D-51 (AppShell header conditional hide + ChatHeader 三件套 + back 全视口 + overflow 内容) 和 D-53 (Sidebar Settings 占位)
+    - Playwright lists at least 3 new spec files
     - Typecheck passes
   </acceptance_criteria>
-  <done>E2E coverage for FRONT-06 input-side + shared picker in CreateSessionDialog.</done>
+  <done>E2E coverage for FRONT-06 input-side + shared picker in CreateSessionDialog + D-51/D-53 chrome assertions.</done>
 </task>
 
 <task type="checkpoint:human-verify" gate="blocking">
@@ -1456,36 +1626,41 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
     - FilePathPicker (shared, insert + select modes, dirsOnly option)
     - QuotePreviewBar (reads chat-store.quotedMessage, dismiss clears)
     - SemanticActionPanel (5 icon buttons, JSON routes wired; CustomEvent bridge to InputBar for history/cancel)
-    - ChatHeader (back/sidebar toggle, session title, mode badge, permission-mode dropdown, terminate overflow)
+    - **ChatHeader (D-51 极简三件套)**：返回按钮（全视口）+ 会话标题 + mode badge + overflow 菜单（Permission mode 子菜单 / Rename / Duplicate / Terminate destructive）。**无** 独立 permission-mode 按钮、**无** sidebar-toggle。
+    - **AppShell header 条件隐藏（D-51）**：/chat/* 路由下 header 不渲染
+    - **Sidebar Settings 齿轮占位（D-53）**：点击 toast "Settings coming soon"
     - chat.tsx composes ChatHeader + ChatJsonView with real InputBar region
     - CreateSessionDialog refactored to use shared FilePathPicker (mode=select, dirsOnly)
-    - 2 Playwright e2e specs
+    - 3 Playwright e2e specs（input-bar / file-picker / chat-chrome）
   </what-built>
   <how-to-verify>
     1. Start relay + proxy + web dev
-    2. Navigate to /sessions → click "新建会话" → Dialog now shows a FilePathPicker below the CWD input; typing or clicking dirs updates the CWD field
-    3. Create a JSON session → open Chat page → verify full composition: ChatHeader at top, messages in middle, QuotePreviewBar + InputBar + SemanticActionPanel at bottom
-    4. Playwright MCP + manual checks:
-       - **Mobile 390x844:** Header 48px with back-button; messages scroll; InputBar at bottom with 1-row initial height; SemanticActionPanel as icon column to the right of InputBar
-       - **Desktop 1280x800:** Sidebar left, chat main; header with back/toggle + session title + mode badge + permission-mode + "..." menu
-    5. Send a message "hello" → User bubble right-aligned; assistant response streams
-    6. Type `/` → SlashCommandPicker opens above InputBar with live commands from command-store; select one → `/name ` inserted and focus returns to textarea
-    7. Type `@` → FilePathPicker (mode=insert) opens with current directory listing (dir_list_request observable in WS traffic)
-    8. Trigger a tool approval → card appears inline (Plan 10-04a wiring intact); focus card and press `y`/`n`/`a`
-    9. Send "one", "two", "three" → ArrowUp on empty InputBar recalls "three" → ArrowUp again "two" → ArrowDown "three" → Escape clears (via InputBar native handler)
-    10. Semantic panel buttons → "打断输出" → worker_abort sent; "历史上一条" dispatches CustomEvent cc:input-history-prev → InputBar recalls (observe network + input value); "取消" clears quote
-    11. Check permission-mode dropdown → selecting "自动允许" sends permission_mode_change
-    12. Textarea autosize: paste a 500-char block → grows up to 240px then scrolls internally
-    13. On iOS Safari (if available): focus InputBar → keyboard pops up → InputBar stays above keyboard via visualViewport offset
-    14. CreateSessionDialog end-to-end: click "新建会话" → FilePathPicker shows dirs only (files hidden) → click a dir → CWD field fills with absolute path → submit creates session
-    15. Cross-reference 10-UI-SPEC.md six dimensions:
+    2. 导航到 /sessions → AppShell header 有"CC Anywhere"字样显示（非 chat 路由）
+    3. 点击"新建会话" → Dialog now shows a FilePathPicker below the CWD input; typing or clicking dirs updates the CWD field
+    4. 创建 JSON session → 打开 Chat page → **验证 D-51**：AppShell header **不再显示**；ChatHeader 是唯一顶部 chrome；内容只有返回按钮 + 会话名 + overflow `⋯`
+    5. Playwright MCP + 人工检查：
+       - **Mobile 390x844:** ChatHeader 48px，返回按钮可见；messages 滚动；InputBar 在底部（1 行初高）；SemanticActionPanel 作为 icon 列在 InputBar 右侧
+       - **Desktop 1280x800:** Sidebar 左侧；主区顶部仍是 ChatHeader（**没有 AppShell header**）；返回按钮依然可见（不再 md:hidden）
+    6. 点击 ChatHeader 的 overflow `⋯` → 展开菜单依次看到：Permission mode(子菜单) / Rename / Duplicate / 分隔线 / Terminate(红色)。点 Permission mode → 子菜单列出 默认 / 自动允许 / 规划模式
+    7. Send a message "hello" → User bubble right-aligned; assistant response streams
+    8. Type `/` → SlashCommandPicker opens above InputBar with live commands from command-store
+    9. Type `@` → FilePathPicker (mode=insert) opens with current directory listing (dir_list_request observable in WS traffic)
+    10. Trigger a tool approval → card appears inline; focus card and press `y`/`n`/`a`
+    11. ArrowUp history / ArrowDown / Escape 行为如前
+    12. Semantic panel buttons → "打断输出" → worker_abort sent; "历史上一条" dispatches CustomEvent → InputBar recalls; "取消" clears quote
+    13. Overflow → Permission mode → 选 "自动允许" → permission_mode_change 发出（radio group 勾选态生效）
+    14. Textarea autosize: paste a 500-char block → grows up to 240px then scrolls internally
+    15. On iOS Safari (if available): focus InputBar → keyboard pops up → InputBar stays above keyboard via visualViewport offset
+    16. CreateSessionDialog end-to-end: 点 "新建会话" → FilePathPicker 仅显示目录 → 点目录 → CWD 填入绝对路径 → submit 创建会话
+    17. **D-53 Sidebar Settings**：桌面端 Sidebar 底部可见齿轮图标；点击 → toast "Settings coming soon"
+    18. Cross-reference 10-UI-SPEC.md 六维度：
        - **Color:** ChatHeader bg-card; InputBar textarea bg-input; picker shadows from popover
        - **Typography:** InputBar font-normal; picker entries font-mono 13px; header title text-sm font-semibold
        - **Spacing:** Header 48px; InputBar min 48 / max 240; picker max-h 60
        - **States:** Focus ring on textarea; hover on picker entries; disabled send button at empty
-       - **Copy:** All strings match Copywriting Contract — InputBar placeholders, permission labels, terminate copy, picker empty state
-       - **Responsive:** Back button visible <md; sidebar toggle visible ≥md
-    16. Run e2e: `pnpm --filter web exec playwright test input-bar.spec.ts file-picker.spec.ts`
+       - **Copy:** 文案匹配 Copywriting Contract——InputBar placeholders / permission 标签（默认/自动允许/规划模式）/ 终止会话 / picker 空态
+       - **Responsive (D-51 更新):** 返回按钮全视口显示（不再 md:hidden）；AppShell header 仅非-chat 路由显示
+    19. Run e2e: `pnpm --filter web exec playwright test input-bar.spec.ts file-picker.spec.ts chat-chrome.spec.ts`
   </how-to-verify>
   <resume-signal>Type "approved" to commit, or describe issues</resume-signal>
   <files>N/A — checkpoint task, human verifies outputs from prior tasks</files>
@@ -1521,10 +1696,11 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
 
 <verification>
 - `pnpm --filter web typecheck` exits 0
-- `pnpm --filter web exec playwright test input-bar.spec.ts file-picker.spec.ts` passes
+- `pnpm --filter web exec playwright test input-bar.spec.ts file-picker.spec.ts chat-chrome.spec.ts` passes
 - Plan 10-04a tests (message-bubble, markdown-view, tool-approval, follow-output) still pass
 - Manual: full user flow works end-to-end (send / receive / slash / @ / history / quote / terminate)
 - Manual: CreateSessionDialog uses FilePathPicker (select, dirsOnly)
+- **D-51/D-53 验证**：/chat/* 路由下无 AppShell header；ChatHeader 只有返回/标题/overflow 三件套；Sidebar 底部 Settings 齿轮占位存在
 - User approved visual match
 </verification>
 
@@ -1533,6 +1709,9 @@ The dialog's CWD field now uses the shared picker. Inline inline implementation 
 - FilePathPicker is shared across InputBar (insert) and CreateSessionDialog (select, dirsOnly)
 - CustomEvent bridge is documented as temporary; to be removed in Plan 10-06 Task 1
 - chat.tsx composes full JSON mode
+- **D-51**: AppShell header 在 /chat/* 下隐藏；ChatHeader 实现三件套（返回 / 标题+badge / overflow 含 permission-mode 子菜单 + Rename + Duplicate + Terminate），无独立 permission-mode 按钮和 sidebar-toggle；返回按钮全视口显示
+- **D-53**: Sidebar 底部 Settings 齿轮占位（`data-slot="sidebar-settings-trigger"`），点击 toast "Settings coming soon"
+- chat-chrome.spec.ts e2e 覆盖以上 D-51/D-53 断言
 - User approved
 </success_criteria>
 
