@@ -4,8 +4,10 @@ import type { ITheme } from "@xterm/xterm";
 export const xtermTheme: ITheme = {
   background: "#1E1E1E",
   foreground: "#D4D4D4",
-  cursor: "#D4D4D4",
-  cursorAccent: "#00D4AA",
+  // 远程观察镜语义：我们是只读展示端，不接管 Claude Code 自己画的光标，
+  // xterm WebGL 叠加的硬光标与背景同色做肉眼隐身（8-hex alpha 在 WebGL renderer 上不生效）
+  cursor: "#1E1E1E",
+  cursorAccent: "#1E1E1E",
   selectionBackground: "#264F78",
   selectionForeground: undefined,
   black: "#000000",

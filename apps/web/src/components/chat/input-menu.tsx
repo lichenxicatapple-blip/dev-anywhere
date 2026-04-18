@@ -2,6 +2,7 @@
 // 10-08 首版只放占位项 "更多功能即将加入"；后续 plan 往这里塞 Resume / 清屏 / 字号等
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -16,13 +17,50 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useAppStore } from "@/stores/app-store";
 
 interface InputMenuProps {
   sessionId: string;
   mode: "json" | "pty";
 }
 
-function MenuBody({ mode: _mode }: { mode: "json" | "pty" }) {
+function MenuBody({ mode }: { mode: "json" | "pty" }) {
+  const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
+  const setPtyAutoscale = useAppStore((s) => s.setPtyAutoscale);
+
+  if (mode === "pty") {
+    return (
+      <div
+        className="flex flex-col gap-1 p-2"
+        data-slot="input-menu-content"
+      >
+        <button
+          type="button"
+          onClick={() => setPtyAutoscale(!ptyAutoscale)}
+          className="flex items-center justify-between gap-3 rounded-sm px-2 py-2 text-sm text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          role="switch"
+          aria-checked={ptyAutoscale}
+        >
+          <span className="flex-1 text-left">终端字号自适应</span>
+          <span
+            aria-hidden="true"
+            className={cn(
+              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+              ptyAutoscale ? "bg-primary" : "bg-muted",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute h-4 w-4 rounded-full bg-background shadow transition-transform",
+                ptyAutoscale ? "translate-x-[18px]" : "translate-x-[2px]",
+              )}
+            />
+          </span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex flex-col gap-1 p-2"
@@ -38,20 +76,8 @@ function MenuBody({ mode: _mode }: { mode: "json" | "pty" }) {
   );
 }
 
-function TriggerButton() {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label="更多"
-      data-slot="input-menu-trigger"
-    >
-      <MoreHorizontal aria-hidden="true" />
-    </Button>
-  );
-}
-
+// Radix asChild 会把 onClick / ref 透传到直接 child element，如果再包一层函数组件
+// 而不 forwardRef + 不 spread props，就会把透传吞掉，点击无效。这里直接内联 Button
 export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const [open, setOpen] = useState(false);
@@ -60,7 +86,15 @@ export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <TriggerButton />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="更多"
+            data-slot="input-menu-trigger"
+          >
+            <MoreHorizontal aria-hidden="true" />
+          </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-60 p-0">
           <MenuBody mode={mode} />
@@ -72,7 +106,15 @@ export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <TriggerButton />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="更多"
+          data-slot="input-menu-trigger"
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </Button>
       </SheetTrigger>
       <SheetContent side="bottom" className="h-auto">
         <SheetHeader>

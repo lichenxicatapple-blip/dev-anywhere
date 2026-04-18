@@ -29,6 +29,8 @@ interface AppStoreState {
   clientId: string;
   relayUrl: string;
   permissionMode: PermissionMode;
+  // PTY 终端 xterm 字号自适应容器：缩字号铺满视口 vs 保 14 字号允许滚动
+  ptyAutoscale: boolean;
   // 模块级代码 (phase-machine) 想弹 toast 但 Sonner 可能还没订阅就绪时, 经由此处暂存, 等 AppShell mount 后消费
   pendingToast: PendingToast | null;
 
@@ -39,6 +41,7 @@ interface AppStoreState {
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
   setPermissionMode: (mode: PermissionMode) => void;
+  setPtyAutoscale: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -76,6 +79,7 @@ export const useAppStore = create<AppStoreState>()(
       clientId: loadClientId(),
       relayUrl: "",
       permissionMode: "default",
+      ptyAutoscale: localStorage.getItem("cc_ptyAutoscale") === "on",
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -85,6 +89,10 @@ export const useAppStore = create<AppStoreState>()(
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
       setPermissionMode: (mode) => set({ permissionMode: mode }),
+      setPtyAutoscale: (enabled) => {
+        localStorage.setItem("cc_ptyAutoscale", enabled ? "on" : "off");
+        set({ ptyAutoscale: enabled });
+      },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =
           phase === "reconnecting"
