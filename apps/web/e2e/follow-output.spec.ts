@@ -72,11 +72,11 @@ test.describe("ChatJsonView — follow-output baseline", () => {
     await expect(btb).toHaveCount(0);
   });
 
-  test("input-bar-slot placeholder present (10-04b will replace)", async ({
+  test("input-bar-region present (InputBar + SemanticActionPanel wired)", async ({
     page,
   }) => {
-    const slot = page.locator('[data-slot="input-bar-slot"]');
-    await expect(slot).toBeVisible();
+    const region = page.locator('[data-slot="input-bar-region"]');
+    await expect(region).toBeVisible();
   });
 });
 

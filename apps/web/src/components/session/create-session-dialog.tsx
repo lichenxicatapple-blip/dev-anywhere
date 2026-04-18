@@ -1,6 +1,6 @@
-// 新建会话 Dialog，字段: name（可选）/ mode（JSON|PTY）/ CWD
+// 新建会话 Dialog, 字段: name (可选) / mode (JSON|PTY) / CWD
+// CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
 // 不包含 permission mode / resume —— CONTEXT D-30 移到 Chat 会话设置菜单
-// CWD 当前用 Textarea 临时承载，10-04b 会把共享 FilePathPicker 替换进来（CONTEXT Addendum Warning 3）
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
@@ -15,7 +15,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { FilePathPicker } from "@/components/chat/file-path-picker";
 
 interface CreateSessionDialogProps {
   open: boolean;
@@ -126,14 +126,20 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               </label>
             </div>
           </fieldset>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-2">
             <span className="text-sm">工作目录</span>
-            <Textarea
+            <input
+              type="text"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
-              placeholder="输入绝对路径，例如 /Users/you/project"
-              rows={1}
-              className="font-mono text-[13px] min-h-9"
+              placeholder="输入或选择绝对路径"
+              className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <FilePathPicker
+              mode="select"
+              dirsOnly
+              filter={cwd}
+              onSelect={(path) => setCwd(path)}
             />
           </label>
           <DialogFooter>
