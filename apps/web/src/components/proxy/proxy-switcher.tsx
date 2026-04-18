@@ -47,6 +47,9 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     useAppStore.getState().setProxy(proxyId, proxyName ?? null);
     useAppStore.getState().setProxyOnline(true);
     useAppStore.getState().transitionToPhase("session_browsing");
+    // 绑定成功后显式请求 session 列表 + 历史, proxy 收到后以 envelope 推回, session-dispatcher 写入 store
+    relay.sendControl({ type: "session_list" });
+    relay.sendControl({ type: "session_history_request" });
     setDropdownOpen(false);
     if (layout === "page") {
       navigate("/sessions");
@@ -99,13 +102,12 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
         <button
           type="button"
           data-slot="proxy-switcher-trigger"
-          className="group w-full flex items-center gap-2 px-3 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group w-full flex items-center gap-2 px-4 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={`Proxy: ${currentProxy?.name ?? "未选择 Proxy"}`}
         >
-          <ProxyStatusDot
-            status={currentProxy?.online ? "online" : "offline"}
-          />
-          <span className="text-sm font-normal truncate flex-1">
+          {/* 左侧 placeholder 与右侧 chevron 等宽, 让 name 真正居中 */}
+          <span className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="text-sm font-normal truncate flex-1 text-center">
             {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择 Proxy"}
           </span>
           <ChevronDown

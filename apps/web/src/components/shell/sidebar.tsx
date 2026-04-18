@@ -30,7 +30,7 @@ export function Sidebar({ className }: SidebarProps) {
       aria-label="Sidebar navigation"
     >
       {/* Proxy scope chip —— 带边框的 card，视觉上与下方 session list 拉开层级 */}
-      <div className="p-2" data-slot="sidebar-proxy-switcher">
+      <div className="px-2 py-2" data-slot="sidebar-proxy-switcher">
         <ProxySwitcher layout="dropdown" />
       </div>
 
@@ -45,7 +45,7 @@ export function Sidebar({ className }: SidebarProps) {
       </div>
 
       {/* 底部行动区: 仅 + 新建会话 card (Settings 齿轮 D-53 已迁移至 AppShell 顶栏) */}
-      <div className="p-2" data-slot="sidebar-new-session">
+      <div className="px-2 py-2" data-slot="sidebar-new-session">
         <CreateSessionButton />
       </div>
     </nav>
