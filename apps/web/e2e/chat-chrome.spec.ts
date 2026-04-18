@@ -80,12 +80,12 @@ test.describe("ChatHeader — D-51 三件套", () => {
   });
 });
 
-test.describe("Sidebar Settings slot — D-53", () => {
+test.describe("AppShell Settings slot — D-53", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("Sidebar has Settings gear at bottom", async ({ page }) => {
+  test("AppShell header has Settings gear on non-chat routes", async ({ page }) => {
     await page.goto(`${BASE_URL}/#/sessions`);
-    const settings = page.locator('[data-slot="sidebar-settings-trigger"]');
+    const settings = page.locator('[data-slot="app-shell-settings-trigger"]');
     await expect(settings).toBeVisible();
   });
 });

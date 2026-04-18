@@ -2,7 +2,12 @@
 // 文案源自 10-UI-SPEC.md Copywriting Contract，不允许本组件自由发挥
 import type { ReactNode } from "react";
 
-type Variant = "no-proxy" | "no-session" | "no-messages";
+type Variant =
+  | "no-proxy"
+  | "no-proxy-selected"
+  | "no-session-yet"
+  | "no-session"
+  | "no-messages";
 
 interface EmptyStateProps {
   variant: Variant;
@@ -14,9 +19,17 @@ const COPY: Record<Variant, { heading: string; body: string }> = {
     heading: "尚未连接 Proxy",
     body: "在本地运行 cc-anywhere 后，它会出现在这里。查看安装指引 →",
   },
+  "no-proxy-selected": {
+    heading: "请先选择 Proxy",
+    body: "从左上角选择一个本地代理后，再创建或查看会话。",
+  },
+  "no-session-yet": {
+    heading: "暂无会话",
+    body: "本地启动 cc-anywhere，或远程新建会话。",
+  },
   "no-session": {
     heading: "选择一个会话",
-    body: "从左侧列表选择，或点击「新建会话」开始。",
+    body: "从左侧列表点击一项进入对话。",
   },
   "no-messages": {
     heading: "开始对话",

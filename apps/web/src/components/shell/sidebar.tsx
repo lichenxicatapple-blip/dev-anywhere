@@ -3,13 +3,10 @@
 //   顶部 proxy chip card（scope 选择器，视觉上独立）
 //   中部 session list（工作对象，行式列表，edge-to-edge 选中条贴左边）
 //   底部 + 新建会话 card（行动号召）
-import { Settings } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
 import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
 import { SessionList, CreateSessionButton } from "@/components/session/session-list";
-import { Button } from "@/components/ui/button";
-import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -37,9 +34,9 @@ export function Sidebar({ className }: SidebarProps) {
         <ProxySwitcher layout="dropdown" />
       </div>
 
-      {/* Session list section —— 小字 label + edge-to-edge row list */}
+      {/* Session list section —— section label 用 text-sm semibold foreground，与空态文案拉开层级 */}
       <div className="flex flex-col flex-1 overflow-hidden" data-slot="sidebar-session-list">
-        <div className="px-4 pt-3 pb-2 text-xs font-medium text-muted-foreground">
+        <div className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
           会话{sessionCount > 0 ? ` · ${sessionCount}` : ""}
         </div>
         <div className="flex-1 overflow-auto">
@@ -47,20 +44,9 @@ export function Sidebar({ className }: SidebarProps) {
         </div>
       </div>
 
-      {/* 底部行动区: 左侧 + 新建会话 card, 右侧 Settings 齿轮占位 (D-53) */}
-      <div className="p-2 flex items-center gap-2">
-        <div className="flex-1" data-slot="sidebar-new-session">
-          <CreateSessionButton />
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="设置"
-          data-slot="sidebar-settings-trigger"
-          onClick={() => toast.info("Settings coming soon")}
-        >
-          <Settings aria-hidden="true" />
-        </Button>
+      {/* 底部行动区: 仅 + 新建会话 card (Settings 齿轮 D-53 已迁移至 AppShell 顶栏) */}
+      <div className="p-2" data-slot="sidebar-new-session">
+        <CreateSessionButton />
       </div>
     </nav>
   );

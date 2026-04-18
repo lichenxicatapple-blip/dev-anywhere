@@ -8,9 +8,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Plus } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
+import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/shell/empty-state";
+import { cn } from "@/lib/utils";
 import { SessionRow } from "./session-row";
 import { CreateSessionDialog } from "./create-session-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
@@ -22,6 +25,7 @@ interface SessionListProps {
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -41,7 +45,9 @@ export function SessionList({ layout }: SessionListProps) {
     if (layout === "sidebar") {
       return (
         <>
-          <div className="p-4 text-xs text-muted-foreground">还没有会话</div>
+          <div className="px-4 py-3 text-sm text-muted-foreground/70">
+            {hasProxy ? "暂无会话" : "请先选择 Proxy"}
+          </div>
           <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         </>
       );
@@ -50,12 +56,14 @@ export function SessionList({ layout }: SessionListProps) {
       <div className="flex flex-col h-full">
         <div className="flex-1">
           <EmptyState
-            variant="no-session"
+            variant={hasProxy ? "no-session" : "no-proxy-selected"}
             action={
-              <Button onClick={() => setCreateOpen(true)}>
-                <Plus aria-hidden="true" />
-                新建会话
-              </Button>
+              hasProxy ? (
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus aria-hidden="true" />
+                  新建会话
+                </Button>
+              ) : undefined
             }
           />
         </div>
@@ -104,19 +112,46 @@ export function SessionList({ layout }: SessionListProps) {
 }
 
 // 侧栏底部的 "+ 新建会话" 按钮触发器 —— 被 10-01b sidebar.tsx 直接 import
-// card 样式（border + hover）与顶部 proxy chip 在视觉层级上同级：均为 scope 层的操作
+// 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因
 export function CreateSessionButton() {
   const [open, setOpen] = useState(false);
+  const [tipOpen, setTipOpen] = useState(false);
+  const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+
+  function handleClick() {
+    if (!hasProxy) {
+      setTipOpen(true);
+      window.setTimeout(() => setTipOpen(false), 2000);
+      return;
+    }
+    setOpen(true);
+  }
+
+  const button = (
+    <Button
+      variant="outline"
+      className={cn(
+        "w-full justify-start gap-2 h-10",
+        !hasProxy && "opacity-50 hover:bg-background",
+      )}
+      aria-disabled={!hasProxy}
+      onClick={handleClick}
+    >
+      <Plus aria-hidden="true" />
+      新建会话
+    </Button>
+  );
+
   return (
     <>
-      <Button
-        variant="outline"
-        className="w-full justify-start gap-2 h-10"
-        onClick={() => setOpen(true)}
-      >
-        <Plus aria-hidden="true" />
-        新建会话
-      </Button>
+      {hasProxy ? (
+        button
+      ) : (
+        <Tooltip open={tipOpen} onOpenChange={setTipOpen}>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side="top">请先选择 Proxy</TooltipContent>
+        </Tooltip>
+      )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />
     </>
   );

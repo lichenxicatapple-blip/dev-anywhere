@@ -4,8 +4,9 @@
 //
 // sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径, 本 Plan 只替换 body
 // 新增 export 或改 props 签名会破坏 sidebar.tsx 与 10-03 并行, 禁止
+import { useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Check } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { showErrorToast } from "@/components/toast";
@@ -25,6 +26,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   const proxies = useAppStore((s) => s.proxies);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const navigate = useNavigate();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   async function handleSelect(
     proxyId: string,
@@ -45,6 +47,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     useAppStore.getState().setProxy(proxyId, proxyName ?? null);
     useAppStore.getState().setProxyOnline(true);
     useAppStore.getState().transitionToPhase("session_browsing");
+    setDropdownOpen(false);
     if (layout === "page") {
       navigate("/sessions");
     }
@@ -91,19 +94,19 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   // layout === "dropdown" —— proxy scope chip: card 样式，边框 + 右侧 chevron
   const currentProxy = proxies.find((p) => p.proxyId === selectedProxyId);
   return (
-    <Popover>
+    <Popover open={dropdownOpen} onOpenChange={setDropdownOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           data-slot="proxy-switcher-trigger"
           className="group w-full flex items-center gap-2 px-3 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`Proxy: ${currentProxy?.name ?? "未选择"}`}
+          aria-label={`Proxy: ${currentProxy?.name ?? "未选择 Proxy"}`}
         >
           <ProxyStatusDot
             status={currentProxy?.online ? "online" : "offline"}
           />
           <span className="text-sm font-normal truncate flex-1">
-            {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择"}
+            {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择 Proxy"}
           </span>
           <ChevronDown
             className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
@@ -135,7 +138,10 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                   <span className="text-sm font-normal flex-1 truncate min-w-0">
                     {p.name ?? p.proxyId}
                   </span>
-                  {!p.online && (
+                  {selectedProxyId === p.proxyId && (
+                    <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
+                  )}
+                  {!p.online && selectedProxyId !== p.proxyId && (
                     <span className="text-xs text-muted-foreground shrink-0">离线</span>
                   )}
                 </button>
