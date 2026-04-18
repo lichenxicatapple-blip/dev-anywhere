@@ -13,7 +13,7 @@ export function ProxySelectPage() {
 
   let subtitle: string;
   if (proxies.length === 0) subtitle = "在电脑上启动 cc-anywhere。";
-  else if (!hasProxy) subtitle = "左上角选择一个 Proxy。";
+  else if (!hasProxy) subtitle = "选择一个 Proxy。";
   else if (sessionCount === 0) subtitle = "在电脑上启动 cc-anywhere，或新建会话。";
   else subtitle = "选择一个会话继续，或新建。";
 

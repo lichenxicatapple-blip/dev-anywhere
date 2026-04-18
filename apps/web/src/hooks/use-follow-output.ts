@@ -15,15 +15,30 @@ export function useFollowOutput(
 
   useEffect(() => {
     if (!el) return;
-    const onScroll = () => {
+    const compute = () => {
       const threshold = thresholdRef.current;
-      const atBottom =
-        el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
-      setIsAtBottom(atBottom);
+      setIsAtBottom(
+        el.scrollTop + el.clientHeight >= el.scrollHeight - threshold,
+      );
     };
-    onScroll();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+    compute();
+    el.addEventListener("scroll", compute, { passive: true });
+    // scroll 事件不会在 scrollHeight 变化 (内容变多/变少) 时触发, virtualizer
+    // estimate→measure 过渡里 inner sizer 会从 estimate*N 缩回 measured total,
+    // 浏览器 clamp scrollTop 的那次不一定补发 scroll, isAtBottom 会卡在 false
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    const mo = new MutationObserver(() => {
+      for (const child of Array.from(el.children)) ro.observe(child);
+      compute();
+    });
+    mo.observe(el, { childList: true });
+    return () => {
+      el.removeEventListener("scroll", compute);
+      ro.disconnect();
+      mo.disconnect();
+    };
   }, [el]);
 
   const scrollToBottom = () => {
