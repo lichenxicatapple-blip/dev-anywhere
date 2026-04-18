@@ -58,6 +58,39 @@ export const MarkdownView = memo(function MarkdownView({
               </code>
             );
           },
+          // GFM 表格: prose 默认样式弱且被 bubble 挤压, 自定义带边框 + 外层 overflow-x-auto
+          // not-prose 禁用 prose 对 table/th/td 的默认规则, 避免与自定义冲突
+          // th/td 用 whitespace-nowrap 让宽度按内容撑开, 超过 bubble 宽度时外层滚动
+          table: ({ children, ...rest }) => (
+            <div className="not-prose my-3 overflow-x-auto rounded-md border border-border/60">
+              <table className="border-collapse text-[13px]" {...rest}>
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children, ...rest }) => (
+            <thead className="bg-foreground/5" {...rest}>
+              {children}
+            </thead>
+          ),
+          th: ({ children, style, ...rest }) => (
+            <th
+              className="border border-border/60 px-3 py-1.5 text-left font-semibold whitespace-nowrap"
+              style={style}
+              {...rest}
+            >
+              {children}
+            </th>
+          ),
+          td: ({ children, style, ...rest }) => (
+            <td
+              className="border border-border/60 px-3 py-1.5 whitespace-nowrap align-top"
+              style={style}
+              {...rest}
+            >
+              {children}
+            </td>
+          ),
         }}
       >
         {text}

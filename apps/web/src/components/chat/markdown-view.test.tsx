@@ -42,4 +42,14 @@ describe("MarkdownView XSS 防护", () => {
     expect(link?.getAttribute("target")).toBe("_blank");
     expect(link?.getAttribute("rel")).toContain("noopener");
   });
+
+  // GFM 表格在超出 bubble 宽度时需横向滚动, 关键是 <table> 外必须有 overflow-x 容器
+  // 否则长表格 (如语言对比表) 会被 max-w-[80%] bubble 挤压换行
+  it("wraps GFM table in overflow-x container", () => {
+    const md = "| A | B |\n| - | - |\n| 1 | 2 |";
+    const { container } = render(<MarkdownView text={md} />);
+    const table = container.querySelector("table");
+    expect(table).not.toBeNull();
+    expect(table?.parentElement?.className).toContain("overflow-x-auto");
+  });
 });
