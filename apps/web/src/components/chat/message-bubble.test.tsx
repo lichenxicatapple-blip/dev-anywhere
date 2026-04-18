@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, it, expect } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MessageBubble } from "./message-bubble";
 import type { ChatMessage } from "@/stores/chat-store";
+
+// vitest 不自动 cleanup, 手工 afterEach 否则相邻 render 的 DOM 会累积
+afterEach(cleanup);
 
 function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
   return {
