@@ -33,6 +33,10 @@ export const MarkdownView = memo(function MarkdownView({
         skipHtml
         disallowedElements={["script", "iframe", "object", "embed"]}
         components={{
+          // react-markdown 默认把 fenced code 包成 <pre><code>, 外层 <pre> 落在 .not-prose 之外
+          // 会吃上 prose 默认的 rgba(0,0,0,.5) 黑底, 与 CodeBlock 内部 wrapper 形成两层
+          // 这里让 <pre> 透传, 由 code 分支的 CodeBlock 独占包装
+          pre: ({ children }) => <>{children}</>,
           a: ({ href, children, ...rest }) => (
             <a
               href={href}
