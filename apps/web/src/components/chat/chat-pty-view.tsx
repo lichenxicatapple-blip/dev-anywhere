@@ -204,7 +204,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 overflow-auto bg-[#1E1E1E] pt-2 will-change-scroll"
+        className="flex-1 min-h-0 overflow-auto bg-[#1E1E1E] pt-2"
         data-slot="pty-terminal"
       />
       {showConnectingOverlay && !subscribeExhausted && (
