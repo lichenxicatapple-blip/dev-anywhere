@@ -117,6 +117,62 @@ const claudeSessionIds = new Map<string, string>();
 
 // ---------- Worker 管理 ----------
 
+// 将 worker 的 claude stream-json 事件路由为类型化 envelope / control message
+// 对齐 Claude CLI stream-json 输出: {type: "assistant"|"result"|"system"|"user", ...}
+// assistant 事件: 提取 content[] 中 text blocks 发 assistant_message; thinking 单独发 thinking envelope
+// tool_use content block 不在此路由, 审批请求走 worker_approval_request 分支
+// result 事件: 发 turn_result control, 客户端据此 markTurnComplete
+// system/user/其他: 忽略 (无 UI 影响)
+function forwardWorkerEvent(
+  relayConnection: RelayConnection,
+  sessionId: string,
+  seq: number,
+  event: Record<string, unknown>,
+): void {
+  const type = event.type;
+  if (type === "assistant") {
+    const message = event.message as { content?: Array<Record<string, unknown>> } | undefined;
+    const content = message?.content ?? [];
+    const text = content
+      .filter((c) => c.type === "text")
+      .map((c) => (c.text as string | undefined) ?? "")
+      .join("");
+    if (text) {
+      relayConnection.sendEnvelope(
+        buildMessage(
+          "assistant_message",
+          sessionId,
+          seq,
+          { text, isPartial: true },
+          "proxy",
+        ),
+      );
+    }
+    const thinkingBlock = content.find((c) => c.type === "thinking");
+    if (thinkingBlock) {
+      const thinkingText = (thinkingBlock.thinking as string | undefined) ?? "";
+      if (thinkingText) {
+        relayConnection.sendEnvelope(
+          buildMessage("thinking", sessionId, seq, { text: thinkingText }, "proxy"),
+        );
+      }
+    }
+    return;
+  }
+  if (type === "result") {
+    relayConnection.sendRaw(
+      JSON.stringify({
+        type: "turn_result",
+        sessionId,
+        success: event.subtype === "success",
+        isError: Boolean(event.is_error),
+      }),
+    );
+    return;
+  }
+  // system / user / rate_limit_event 等当前不投给 client
+}
+
 function connectToWorker(
   sessionId: string,
   sockPath: string,
@@ -147,17 +203,11 @@ function connectToWorker(
                 );
               }
             }
-            // 将 worker 事件转发到 relay
+            // 将 worker 事件按 stream-json 语义路由到类型化 envelope / control message
+            // event 结构参考 claude CLI stream-json: assistant / result / system / user
             if (relayConnection) {
               try {
-                const envelope = buildMessage(
-                  "assistant_message",
-                  sessionId,
-                  msg.seq,
-                  { text: JSON.stringify(msg.event), isPartial: true },
-                  "proxy",
-                );
-                relayConnection.sendEnvelope(envelope);
+                forwardWorkerEvent(relayConnection, sessionId, msg.seq, msg.event);
               } catch (err) {
                 logger.debug({ sessionId, error: String(err) }, "Failed to forward event to relay");
               }

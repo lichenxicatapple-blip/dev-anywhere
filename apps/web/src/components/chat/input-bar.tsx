@@ -6,7 +6,6 @@ import { useCallback, useEffect, useRef } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
-import { useTextareaAutosize } from "@/hooks/use-textarea-autosize";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
@@ -50,6 +49,8 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
   const setInputDraft = useChatStore((s) => s.setInputDraft);
+  const addUserMessage = useChatStore((s) => s.addUserMessage);
+  const setWorking = useChatStore((s) => s.setWorking);
   const moveCursor = useChatStore((s) => s.moveInputHistoryCursor);
   const resetCursor = useChatStore((s) => s.resetInputHistoryCursor);
   const bottomOffset = useVisualViewportBottomOffset();
@@ -58,8 +59,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   const isWorking = slice.isWorking;
   const pendingApprovals = slice.pendingApprovals;
   const cursor = slice.inputHistoryCursor;
-
-  useTextareaAutosize(textareaRef, value);
 
   const pickerMode = detectPickerMode(value);
   const sendDisabled = computeSendDisabled(mode, isWorking, pendingApprovals);
@@ -88,12 +87,23 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     if (!trimmed) return;
     const relay = relayClientRef;
     if (!relay) return;
+    const now = Date.now();
+    // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
+    addUserMessage(sessionId, {
+      id: `${sessionId}-user-${now}`,
+      role: "user",
+      text: trimmed,
+      isPartial: false,
+      timestamp: now,
+      toolCalls: [],
+    });
+    setWorking(sessionId, true);
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
       payload: { text: trimmed },
       seq: 0,
-      timestamp: Date.now(),
+      timestamp: now,
       source: "client",
       version: "1",
     });
@@ -102,7 +112,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     savePersistedHistory(sessionId, nextHistory);
     setInputDraft(sessionId, "");
     resetCursor(sessionId);
-  }, [value, sessionId, setInputDraft, resetCursor]);
+  }, [value, sessionId, setInputDraft, resetCursor, addUserMessage, setWorking]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -169,7 +179,8 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
           e.preventDefault();
           send();
         }}
-        className="flex items-end gap-2"
+        data-slot="input-card"
+        className="flex items-center w-full rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30"
       >
         <Textarea
           ref={textareaRef}
@@ -177,18 +188,20 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
           onChange={(e) => setInputDraft(sessionId, e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
-          className="flex-1 resize-none font-normal"
+          className="flex-1 resize-none font-normal border-0 bg-transparent shadow-none rounded-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent min-h-0 max-h-60"
           rows={1}
           aria-label={mode === "json" ? "输入聊天消息" : "输入 PTY 命令"}
         />
-        <InputMenu sessionId={sessionId} mode={mode} />
-        <SendButton
-          sessionId={sessionId}
-          mode={mode}
-          isWorking={isWorking}
-          canSend={canSend}
-          onSend={send}
-        />
+        <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
+          <InputMenu sessionId={sessionId} mode={mode} />
+          <SendButton
+            sessionId={sessionId}
+            mode={mode}
+            isWorking={isWorking}
+            canSend={canSend}
+            onSend={send}
+          />
+        </div>
       </form>
     </div>
   );

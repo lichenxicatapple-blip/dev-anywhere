@@ -61,7 +61,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       </div>
       <QuotePreviewBar sessionId={id} />
       <div
-        className="p-2 border-t border-border"
+        className="p-2"
         data-slot="input-bar-region"
       >
         <InputBar sessionId={id} mode={mode} />

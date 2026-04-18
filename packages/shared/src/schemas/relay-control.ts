@@ -183,6 +183,14 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
   z.object({ type: z.literal("session_worker_abort"), sessionId: z.string() }),
 
+  // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件
+  z.object({
+    type: z.literal("turn_result"),
+    sessionId: z.string(),
+    success: z.boolean(),
+    isError: z.boolean(),
+  }),
+
   // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
   // CONTEXT Addendum D-21：方案 A 新增的唯一跨包 envelope 类型
   z.object({

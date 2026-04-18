@@ -21,6 +21,7 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "session_history_response",
   "session_list",
   "session_snapshot",
+  "turn_result",
 ]);
 
 // 扩展 WebSocket 实例存储代理元数据

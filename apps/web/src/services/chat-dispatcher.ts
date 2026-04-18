@@ -1,9 +1,9 @@
 // Chat 模式消息 dispatcher.
 // 订阅 relayClient.onMessage, 按 MessageEnvelopeSchema / RelayControlSchema 的真实 type literal 分发.
-// sessionId 统一来自 envelope/control 字段, 传入 per-session chat-store action.
+// proxy 已完成 stream-json 解析, 客户端只接收类型化 envelope (assistant_message.text 就是助手说的话)
 // 真实 type literals (见 packages/shared/src/schemas/envelope.ts + relay-control.ts):
 //   Envelope 层: assistant_message / tool_use_request / tool_result / thinking / user_input
-//   Control 层: pending_approvals_push / session_history_messages (均含 sessionId 字段)
+//   Control 层: pending_approvals_push / session_history_messages / turn_result
 import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useChatStore } from "@/stores/chat-store";
@@ -14,13 +14,13 @@ function handleAssistantMessage(
   env: Extract<MessageEnvelope, { type: "assistant_message" }>,
 ) {
   const store = useChatStore.getState();
-  if (env.payload.isPartial) {
+  if (env.payload.text.length > 0) {
     store.appendAssistantText(env.sessionId, env.payload.text);
+  }
+  // isPartial=false 仅在 proxy 兜底场景 (如历史聚合纯文本) 出现
+  if (env.payload.isPartial) {
     store.setWorking(env.sessionId, true);
   } else {
-    if (env.payload.text.length > 0) {
-      store.appendAssistantText(env.sessionId, env.payload.text);
-    }
     store.markTurnComplete(env.sessionId);
   }
 }
@@ -72,6 +72,13 @@ function handleSessionHistoryMessages(
   store.loadHistory(msg.sessionId, msg.messages);
 }
 
+function handleTurnResult(
+  msg: Extract<RelayControlMessage, { type: "turn_result" }>,
+) {
+  const store = useChatStore.getState();
+  store.markTurnComplete(msg.sessionId);
+}
+
 export function registerChatDispatcher(): () => void {
   const relay = relayClientRef;
   if (!relay) {
@@ -93,15 +100,19 @@ export function registerChatDispatcher(): () => void {
         handleToolResult(msg);
         break;
       case "thinking":
+        // thinking envelope 携带模型思考文本, 当前 UI 暂不展示, 后续可接入 workingToolName 指示
         break;
       case "user_input":
-        // Echo: 本端已乐观入 store (10-04b), 此处不重复追加
+        // Echo: 本端已乐观入 store, 此处不重复追加
         break;
       case "pending_approvals_push":
         handlePendingApprovalsPush(msg);
         break;
       case "session_history_messages":
         handleSessionHistoryMessages(msg);
+        break;
+      case "turn_result":
+        handleTurnResult(msg);
         break;
       default:
         break;

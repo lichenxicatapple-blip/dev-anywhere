@@ -56,7 +56,7 @@ export function SessionList({ layout }: SessionListProps) {
       <div className="flex flex-col h-full">
         <div className="flex-1">
           <EmptyState
-            variant={hasProxy ? "no-session" : "no-proxy-selected"}
+            variant={hasProxy ? "no-session" : "no-proxy"}
             action={
               hasProxy ? (
                 <Button onClick={() => setCreateOpen(true)}>
@@ -131,7 +131,7 @@ export function CreateSessionButton() {
     <Button
       variant="outline"
       className={cn(
-        "w-full justify-start gap-2 h-10",
+        "w-full justify-start gap-2 h-10 border-border",
         !hasProxy && "opacity-50 hover:bg-background",
       )}
       aria-disabled={!hasProxy}

@@ -13,6 +13,11 @@ export type AppPhase =
 
 export type PermissionMode = "default" | "auto_accept" | "plan";
 
+export interface PendingToast {
+  kind: "error" | "info" | "success";
+  message: string;
+}
+
 interface AppStoreState {
   phase: AppPhase;
   phaseBeforeDisconnect: AppPhase | null;
@@ -24,6 +29,8 @@ interface AppStoreState {
   clientId: string;
   relayUrl: string;
   permissionMode: PermissionMode;
+  // 模块级代码 (phase-machine) 想弹 toast 但 Sonner 可能还没订阅就绪时, 经由此处暂存, 等 AppShell mount 后消费
+  pendingToast: PendingToast | null;
 
   setConnected: (connected: boolean) => void;
   setProxy: (proxyId: string | null, proxyName: string | null) => void;
@@ -32,6 +39,7 @@ interface AppStoreState {
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
   setPermissionMode: (mode: PermissionMode) => void;
+  setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
 
@@ -68,8 +76,10 @@ export const useAppStore = create<AppStoreState>()(
       clientId: loadClientId(),
       relayUrl: "",
       permissionMode: "default",
+      pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
+      setPendingToast: (toast) => set({ pendingToast: toast }),
       setProxy: (proxyId, proxyName) =>
         set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
       setProxyOnline: (online) => set({ proxyOnline: online }),

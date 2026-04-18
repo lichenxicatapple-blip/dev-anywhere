@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
+import { useAppStore } from "@/stores/app-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
@@ -21,18 +22,21 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
+  const connected = useAppStore((s) => s.connected);
+  const proxyOnline = useAppStore((s) => s.proxyOnline);
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
 
-  // mount 时订阅 session 并拉取已持久化的历史消息
+  // 订阅 session + 拉取历史消息: 必须等 WS 连接 + proxy 已绑定 (relay NOT_BOUND 会丢请求)
+  // 直接 URL 进入 /chat/:id 时, 本 effect 会在 connected/proxyOnline 变 true 后重放
   useEffect(() => {
     const ws = wsManagerRef;
-    if (!ws || !sessionId) return;
+    if (!ws || !sessionId || !connected || !proxyOnline) return;
     ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
     ws.send(JSON.stringify({ type: "session_messages_request", sessionId }));
-  }, [sessionId]);
+  }, [sessionId, connected, proxyOnline]);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
