@@ -90,6 +90,14 @@ body {
   30% { transform: translateY(-6px); opacity: 1; }
 }
 
+/* hljs github-dark 自带 background:#0d1117 会盖掉外层容器色, 显得与气泡脱节
+   这里只要 token 配色, 背景交给外层 <div class="bg-popover"> 控制 */
+code.hljs,
+.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
 /* 前庭敏感/系统降级偏好: 统一关停循环动画与过渡, 保留即时状态切换 */
 @media (prefers-reduced-motion: reduce) {
   *,

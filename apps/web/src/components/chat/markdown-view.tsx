@@ -10,11 +10,15 @@ interface MarkdownViewProps {
   text: string;
 }
 
+// 代码块: 与表格同策略, 外包 not-prose + overflow-x-auto 容器承担滚动
+// 直接在 <pre> 上加 overflow-x 会被 prose / highlight.js 注入样式干扰, 分层更稳
 function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   return (
-    <pre className="my-3 rounded-md bg-muted p-3 overflow-x-auto text-[13px]">
-      <code {...rest}>{children}</code>
-    </pre>
+    <div className="not-prose my-3 overflow-x-auto rounded-md bg-popover">
+      <pre className="p-3 text-[13px]">
+        <code {...rest}>{children}</code>
+      </pre>
+    </div>
   );
 }
 
