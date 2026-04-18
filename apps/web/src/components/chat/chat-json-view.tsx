@@ -7,6 +7,7 @@ import { useAppStore } from "@/stores/app-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
+import { ThinkingIndicator } from "./thinking-indicator";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { EmptyState } from "@/components/shell/empty-state";
 import { wsManagerRef } from "@/hooks/use-relay-setup";
@@ -21,6 +22,9 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   );
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
+  );
+  const isWorking = useChatStore(
+    (s) => s.bySessionId[sessionId]?.isWorking ?? EMPTY_SLICE.isWorking,
   );
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
@@ -94,6 +98,12 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
 
   const pendingApproval = pendingApprovals.find((a) => a.status === "pending");
 
+  // Thinking spinner 只在 "请求已发、还没 streaming" 的 gap 段显示:
+  // streaming 中 message-bubble 末尾的光标已经是"正在生成"的信号, 叠加会冗余
+  const lastIsAssistantPartial =
+    lastMsg?.role === "assistant" && lastMsg?.isPartial === true;
+  const showThinking = isWorking && !lastIsAssistantPartial;
+
   if (messages.length === 0 && !pendingApproval) {
     return (
       <div className="h-full">
@@ -142,6 +152,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                   </div>
                 ))}
               </div>
+              {showThinking && <ThinkingIndicator />}
             </div>
           )}
         </div>

@@ -32,14 +32,14 @@ export function EmptyState({ variant, action }: EmptyStateProps) {
 
   if (isMinimal) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
+      <div className="flex h-full w-full items-center justify-center animate-in fade-in-0 duration-200 motion-reduce:animate-none">
         <p className="text-sm text-muted-foreground">{heading}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-6 px-6 text-center">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-6 px-6 text-center animate-in fade-in-0 duration-200 motion-reduce:animate-none">
       <h2 className="text-2xl font-semibold">{heading}</h2>
       {body && <p className="max-w-md text-sm text-muted-foreground">{body}</p>}
       {action && <div>{action}</div>}

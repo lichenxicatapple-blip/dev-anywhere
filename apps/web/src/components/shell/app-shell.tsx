@@ -48,7 +48,13 @@ export function AppShell() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar className="hidden md:flex" />
         <main className="flex-1 overflow-hidden" role="main">
-          <Outlet />
+          {/* 路由切换 fade-in: key 绑 pathname, 切会话 (chat/a → chat/b) 也会轻量重放 */}
+          <div
+            key={location.pathname}
+            className="h-full animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+          >
+            <Outlet />
+          </div>
         </main>
       </div>
 

@@ -1,4 +1,11 @@
-/* Chat panel 顶部 4px 状态色带，颜色+动画双编码会话状态 */
+/* Chat panel 顶部 4px 状态色带，颜色+流动/呼吸承载 5 态会话状态
+   方案 B "注意力梯度":
+     idle              — 绿色 + 慢速低强度 sweep (待命)
+     working           — 蓝色 + 中速 sweep (干活)
+     waiting_approval  — 橙色 + 快速 sweep + 呼吸叠加 (召唤)
+     disconnected     — 红色 + 呼吸 (异常搏动)
+     terminated        — 灰色静态 (已结束)
+*/
 
 .cc-status-line {
   height: 4px;
@@ -31,17 +38,43 @@
   animation: cc-status-breathe 1.5s ease-in-out infinite;
 }
 
+/* sweep 基类: 绝对定位覆盖色带, 白色渐变带水平位移
+   不同 intensity 通过 alpha / duration 差异化 */
 .cc-status-line-sweep {
   position: absolute;
   inset: 0;
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+}
+
+.cc-status-line-sweep-idle {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  animation: cc-status-sweep 3s linear infinite;
+}
+
+.cc-status-line-sweep-working {
   background: linear-gradient(
     90deg,
     transparent 0%,
     rgba(255, 255, 255, 0.4) 50%,
     transparent 100%
   );
-  background-size: 50% 100%;
   animation: cc-status-sweep 1.5s linear infinite;
+}
+
+.cc-status-line-sweep-waiting {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+  animation: cc-status-sweep 1.2s linear infinite;
 }
 
 @keyframes cc-status-sweep {
