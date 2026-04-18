@@ -83,6 +83,9 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   }, [cursor]);
 
   const send = useCallback(() => {
+    // 统一闸门: Enter 快捷键曾绕开 canSend 直调 send, working 中按 Enter 仍会发出
+    // 放这里所有入口 (form submit / Enter / SendButton 点击) 都受保护
+    if (!canSend) return;
     const trimmed = value.trim();
     if (!trimmed) return;
     const relay = relayClientRef;
@@ -112,7 +115,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     savePersistedHistory(sessionId, nextHistory);
     setInputDraft(sessionId, "");
     resetCursor(sessionId);
-  }, [value, sessionId, setInputDraft, resetCursor, addUserMessage, setWorking]);
+  }, [canSend, value, sessionId, setInputDraft, resetCursor, addUserMessage, setWorking]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
