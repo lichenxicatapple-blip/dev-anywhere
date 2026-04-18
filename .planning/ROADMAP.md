@@ -90,7 +90,7 @@ Plans:
 - [x] **Phase 7: Project Scaffold + Design Tokens** - Vite + React + Tailwind + shadcn/ui project with design tokens and dev tooling
 - [ ] **Phase 8: Business Logic Adaptation** - Migrate state machine, stores, and WebSocket layer to browser-native APIs
 - [ ] **Phase 9: PTY Pipeline Full Chain** - EventStore persistence, binary WebSocket frames, relay passthrough, xterm.js rendering
-- [ ] **Phase 10: Pages + Components Migration** - All three pages and 17 custom components migrated to HTML + Tailwind + shadcn/ui
+- [x] **Phase 10: Pages + Components Migration** - All three pages and 17 custom components migrated to HTML + Tailwind + shadcn/ui (completed 2026-04-18)
 - [ ] **Phase 11: PTY Resilience** - Client reconnection with snapshot replay, multi-client broadcast, session history playback
 - [ ] **Phase 12: Deployment + PWA Basics** - Relay serves static files, PWA manifest, app icons, offline shell
 - [ ] **Phase 13: PWA Advanced Features** - Screen Wake Lock, voice input, voice readback
@@ -158,7 +158,7 @@ Plans:
   3. Chat page renders JSON mode (chat bubbles, Markdown, tool approval cards) and PTY mode (xterm.js terminal) correctly
   4. All shared UI components (InputBar, Toast, Modal, StatusLine, BackToBottom, etc.) work with shadcn/ui replacements
   5. App shell provides safe area handling, navigation header, and responsive layout across mobile/tablet/desktop breakpoints
-**Plans:** 7/8 plans executed
+**Plans:** 8/8 plans complete
 **UI hint**: yes
 
 Plans:
@@ -169,7 +169,7 @@ Plans:
 - [x] 10-04a-PLAN.md — Chat JSON core rendering (virtualized messages + Markdown + ToolApprovalCard + BackToBottom + StatusLine + chat-dispatcher wiring)
 - [x] 10-04b-PLAN.md — Chat JSON input half + ChatHeader + SemanticActionPanel (JSON+PTY routes) + shared FilePathPicker (refactors CreateSessionDialog CWD field)
 - [x] 10-05-PLAN.md — Chat PTY primitives (createXterm factory + ChatPtyView self-contained + remote_input_raw envelope + ansi-keys 5 constants + proxy serve.ts branch)
-- [ ] 10-06-PLAN.md — chat-store per-session rewrite (retires CustomEvent bridge; SplitPane dual-chat 已按 D-52 降级至 backlog)
+- [x] 10-06-PLAN.md — chat-store per-session rewrite (retires CustomEvent bridge; SplitPane dual-chat 已按 D-52 降级至 backlog)
 
 ### Phase 11: PTY Resilience
 **Goal**: PTY sessions survive disconnections, support multiple viewers, and can be replayed from history
@@ -260,7 +260,7 @@ Phase 7 --+-- Phase 8 ----------+
 | 7. Project Scaffold + Design Tokens | v2.0 | 2/2 | Complete | 2026-04-15 |
 | 8. Business Logic Adaptation | v2.0 | 0/3 | Planned | - |
 | 9. PTY Pipeline Full Chain | v2.0 | 4/4 | Complete | 2026-04-16 |
-| 10. Pages + Components Migration | v2.0 | 7/8 | In Progress|  |
+| 10. Pages + Components Migration | v2.0 | 8/8 | Complete   | 2026-04-18 |
 | 11. PTY Resilience | v2.0 | 0/2 | Not started | - |
 | 12. Deployment + PWA Basics | v2.0 | 0/2 | Not started | - |
 | 13. PWA Advanced Features | v2.0 | 0/2 | Not started | - |
