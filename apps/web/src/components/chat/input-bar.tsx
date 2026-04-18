@@ -119,6 +119,9 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      // IME 组合输入中 (中日韩输入法候选栏), Enter 语义是"确认候选", 让输入法消化
+      // 不拦截, 也不 preventDefault, 避免把候选残留在 textarea 里同时又发送
+      if (e.nativeEvent.isComposing) return;
       if (pickerMode === "none") {
         e.preventDefault();
         send();
