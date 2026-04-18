@@ -1,6 +1,4 @@
-// 虚拟列表 follow-output 状态, 用户滚到底部时自动追随; 滚离底部后冻结
-// 接收 HTMLElement (来自 state-backed callback ref), 避免 ref 对象稳定、
-// useEffect 捕获 null 后永不重绑 listener 的问题
+// 虚拟列表 follow-output 状态: 用户滚到底部时自动追随, 离底后冻结
 import { useEffect, useRef, useState } from "react";
 
 interface Options {
@@ -12,7 +10,8 @@ export function useFollowOutput(
   opts: Options = {},
 ): { isAtBottom: boolean; scrollToBottom: () => void } {
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const thresholdRef = useRef(opts.threshold ?? 50);
+  // 8px 吸收 subpixel rounding 与 virtualizer 重测量噪音, 任何更大回拉即出按钮
+  const thresholdRef = useRef(opts.threshold ?? 8);
 
   useEffect(() => {
     if (!el) return;

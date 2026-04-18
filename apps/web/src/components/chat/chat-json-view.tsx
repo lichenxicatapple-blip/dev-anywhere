@@ -21,8 +21,6 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const pendingApprovals = useChatStore((s) => s.pendingApprovals);
   const isWorking = useChatStore((s) => s.isWorking);
 
-  // 用 state 持有滚动容器 DOM, 让 useEffect 依赖跟随元素挂载/卸载
-  // 避免 ref 对象稳定但 current 首帧为 null 时 effect 捕获 null 后永不重绑 scroll listener
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
@@ -76,7 +74,6 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 滚动区 wrapper: 提供 relative 定位上下文给 BackToBottom, 让按钮不跟滚动位移 */}
       <div className="flex-1 relative min-h-0">
         <div
           ref={setScrollEl}
