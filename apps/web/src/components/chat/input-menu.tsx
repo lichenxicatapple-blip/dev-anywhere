@@ -1,5 +1,5 @@
 // InputBar 的"更多功能"菜单壳：桌面走 Popover、移动走 BottomSheet
-// 10-08 首版只放占位项 "更多功能即将加入"；后续 plan 往这里塞 Resume / 清屏 / 字号等
+// PTY 专属项: 切换权限模式 (Shift+Tab 循环) / 终端字号自适应; JSON 当前只有占位
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,13 +18,20 @@ import {
 } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useAppStore } from "@/stores/app-store";
+import { relayClientRef } from "@/hooks/use-relay-setup";
 
 interface InputMenuProps {
   sessionId: string;
   mode: "json" | "pty";
 }
 
-function MenuBody({ mode }: { mode: "json" | "pty" }) {
+interface MenuBodyProps {
+  mode: "json" | "pty";
+  sessionId: string;
+  onAfterAction: () => void;
+}
+
+function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
   const setPtyAutoscale = useAppStore((s) => s.setPtyAutoscale);
 
@@ -34,6 +41,23 @@ function MenuBody({ mode }: { mode: "json" | "pty" }) {
         className="flex flex-col gap-1 p-2"
         data-slot="input-menu-content"
       >
+        <button
+          type="button"
+          onClick={() => {
+            // Claude CLI 仅支持 Shift+Tab 循环 default → auto-accept → plan
+            // mode 字段保留在 schema 里但不携带真实目标档, 由 proxy 触发循环键
+            relayClientRef?.sendControl({
+              type: "permission_mode_change",
+              mode: "default",
+              sessionId,
+            });
+            onAfterAction();
+          }}
+          className="flex items-center gap-3 rounded-sm px-2 py-2 text-sm text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-slot="input-menu-permission-cycle"
+        >
+          <span className="flex-1 text-left">切换权限模式</span>
+        </button>
         <button
           type="button"
           onClick={() => setPtyAutoscale(!ptyAutoscale)}
@@ -78,9 +102,10 @@ function MenuBody({ mode }: { mode: "json" | "pty" }) {
 
 // Radix asChild 会把 onClick / ref 透传到直接 child element，如果再包一层函数组件
 // 而不 forwardRef + 不 spread props，就会把透传吞掉，点击无效。这里直接内联 Button
-export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
+export function InputMenu({ sessionId, mode }: InputMenuProps) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
 
   if (isDesktop) {
     return (
@@ -97,7 +122,7 @@ export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-60 p-0">
-          <MenuBody mode={mode} />
+          <MenuBody mode={mode} sessionId={sessionId} onAfterAction={close} />
         </PopoverContent>
       </Popover>
     );
@@ -120,7 +145,7 @@ export function InputMenu({ sessionId: _sessionId, mode }: InputMenuProps) {
         <SheetHeader>
           <SheetTitle>更多功能</SheetTitle>
         </SheetHeader>
-        <MenuBody mode={mode} />
+        <MenuBody mode={mode} sessionId={sessionId} onAfterAction={close} />
       </SheetContent>
     </Sheet>
   );

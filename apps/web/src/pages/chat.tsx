@@ -30,21 +30,21 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const session = useSessionStore((s) =>
     s.sessions.find((x) => x.sessionId === id),
   );
-  const isWorking = useChatStore(
-    (s) => s.bySessionId[id]?.isWorking ?? EMPTY_SLICE.isWorking,
-  );
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
 
+  // 单一权威信号: session.state（proxy 的 session_status envelope + pty_state 都写到这个字段）
+  // pendingApprovals 与 session.state === "waiting_approval" 作 OR：审批推送可能比 session_status 早到
   const statusState: StatusLineState =
     !connected || !proxyOnline
       ? "disconnected"
-      : pendingApprovals.some((a) => a.status === "pending")
+      : pendingApprovals.some((a) => a.status === "pending") ||
+          session?.state === "waiting_approval"
         ? "waiting_approval"
         : session?.state === "terminated"
           ? "terminated"
-          : isWorking
+          : session?.state === "working"
             ? "working"
             : "idle";
 

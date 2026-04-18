@@ -13,7 +13,12 @@ interface SessionStoreState {
   setCurrentSession: (sessionId: string | null, mode: "pty" | "json" | null) => void;
   addSession: (session: SessionInfo) => void;
   removeSession: (sessionId: string) => void;
-  updateSessionState: (sessionId: string, state: SessionInfo["state"]) => void;
+  // lastActive 可选：PTY 控制消息 pty_state 无此字段，envelope session_status 则会一并写入
+  updateSessionState: (
+    sessionId: string,
+    state: SessionInfo["state"],
+    lastActive?: number,
+  ) => void;
   updateSessionName: (sessionId: string, name: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
 }
@@ -41,10 +46,16 @@ export const useSessionStore = create<SessionStoreState>()(
             currentSessionId === sessionId ? null : state.currentSessionMode,
         }));
       },
-      updateSessionState: (sessionId, newState) =>
+      updateSessionState: (sessionId, newState, lastActive) =>
         set((state) => ({
           sessions: state.sessions.map((s) =>
-            s.sessionId === sessionId ? { ...s, state: newState } : s,
+            s.sessionId === sessionId
+              ? {
+                  ...s,
+                  state: newState,
+                  ...(lastActive !== undefined ? { lastActive } : {}),
+                }
+              : s,
           ),
         })),
       updateSessionName: (sessionId, name) =>

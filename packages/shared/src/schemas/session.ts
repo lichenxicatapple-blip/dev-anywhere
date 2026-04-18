@@ -51,9 +51,11 @@ export type SessionTerminatePayload = z.infer<
 >;
 
 // 会话状态变更
+// lastActive: 触发本次状态迁移的时间戳 (ms)，用于列表相对时间显示；proxy 侧总会填，留 optional 为兼容旧 payload
 export const SessionStatusPayloadSchema = z.object({
   sessionId: z.string(),
   state: z.enum(sessionStateValues),
+  lastActive: z.number().optional(),
 });
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;

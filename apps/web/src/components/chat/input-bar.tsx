@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
+import { useSessionStore } from "@/stores/session-store";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
@@ -50,13 +51,17 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
-  const setWorking = useChatStore((s) => s.setWorking);
   const moveCursor = useChatStore((s) => s.moveInputHistoryCursor);
   const resetCursor = useChatStore((s) => s.resetInputHistoryCursor);
+  // 发送按钮的 working 态直接读 session.state（proxy 推的单一权威信号）
+  const sessionState = useSessionStore(
+    (s) => s.sessions.find((x) => x.sessionId === sessionId)?.state,
+  );
+  const updateSessionState = useSessionStore((s) => s.updateSessionState);
   const bottomOffset = useVisualViewportBottomOffset();
 
   const value = slice.inputDraft;
-  const isWorking = slice.isWorking;
+  const isWorking = sessionState === "working";
   const pendingApprovals = slice.pendingApprovals;
   const cursor = slice.inputHistoryCursor;
 
@@ -100,7 +105,8 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
       timestamp: now,
       toolCalls: [],
     });
-    setWorking(sessionId, true);
+    // 乐观翻 session.state="working"：proxy 20~50ms 内会回 session_status 覆写（包括万一没被接受的降级态）
+    updateSessionState(sessionId, "working", now);
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
@@ -115,7 +121,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     savePersistedHistory(sessionId, nextHistory);
     setInputDraft(sessionId, "");
     resetCursor(sessionId);
-  }, [canSend, value, sessionId, setInputDraft, resetCursor, addUserMessage, setWorking]);
+  }, [canSend, value, sessionId, setInputDraft, resetCursor, addUserMessage, updateSessionState]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {

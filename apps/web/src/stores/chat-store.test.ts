@@ -71,7 +71,6 @@ describe("chat-store per-session", () => {
 
   it("EMPTY_SLICE constant has expected shape", () => {
     expect(EMPTY_SLICE.messages).toEqual([]);
-    expect(EMPTY_SLICE.isWorking).toBe(false);
     expect(EMPTY_SLICE.pendingApprovals).toEqual([]);
     expect(EMPTY_SLICE.inputDraft).toBe("");
     expect(EMPTY_SLICE.inputHistoryCursor).toBe(-1);

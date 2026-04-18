@@ -4,7 +4,7 @@
 //
 // sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径（SessionList + CreateSessionButton 两个 export）
 // 本 Plan 只替换 body；新增 export 或改 props 签名会破坏与 10-02 的 W3 并行，禁止
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Plus } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
@@ -28,6 +28,12 @@ export function SessionList({ layout }: SessionListProps) {
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  // 每分钟推一次 now，让 SessionRow 里的 "N 分钟前" 跟着走；store 不动也能滚
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   function handleRowClick(sessionId: string, mode: "pty" | "json" | undefined) {
     const resolvedMode = mode ?? "json";
@@ -79,6 +85,7 @@ export function SessionList({ layout }: SessionListProps) {
           key={s.sessionId}
           session={s}
           selected={s.sessionId === currentSessionId}
+          now={now}
           onClick={() => handleRowClick(s.sessionId, s.mode)}
           onTerminate={() => handleTerminate(s.sessionId)}
         />

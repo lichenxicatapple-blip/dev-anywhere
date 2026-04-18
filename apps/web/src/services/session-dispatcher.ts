@@ -27,7 +27,13 @@ function handleSessionList(
 function handleSessionStatus(
   env: Extract<MessageEnvelope, { type: "session_status" }>,
 ): void {
-  useSessionStore.getState().updateSessionState(env.payload.sessionId, env.payload.state);
+  useSessionStore
+    .getState()
+    .updateSessionState(
+      env.payload.sessionId,
+      env.payload.state,
+      env.payload.lastActive,
+    );
 }
 
 function handlePtyState(

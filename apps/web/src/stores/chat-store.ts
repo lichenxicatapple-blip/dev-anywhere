@@ -33,7 +33,7 @@ export interface ChatMessage {
 
 export interface ChatSessionSlice {
   messages: ChatMessage[];
-  isWorking: boolean;
+  // workingToolName 保留：session.state 只到 working 粒度，承载不了具体工具名
   workingToolName: string;
   pendingApprovals: ToolApprovalRequest[];
   quotedMessage: QuotedMessage | null;
@@ -44,7 +44,6 @@ export interface ChatSessionSlice {
 
 export const EMPTY_SLICE: ChatSessionSlice = {
   messages: [],
-  isWorking: false,
   workingToolName: "",
   pendingApprovals: [],
   quotedMessage: null,
@@ -63,7 +62,6 @@ interface ChatStoreState {
   toggleToolCollapse: (sessionId: string, messageId: string, toolIndex: number) => void;
   addApprovalRequest: (sessionId: string, request: ToolApprovalRequest) => void;
   updateApprovalStatus: (sessionId: string, requestId: string, status: "approved" | "denied") => void;
-  setWorking: (sessionId: string, isWorking: boolean) => void;
   setWorkingTool: (sessionId: string, toolName: string) => void;
   setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
   setInputDraft: (sessionId: string, draft: string) => void;
@@ -129,7 +127,6 @@ export const useChatStore = create<ChatStoreState>()(
             messages: slice.messages.map((m) =>
               m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
             ),
-            isWorking: false,
             workingToolName: "",
             pendingApprovals: [],
           })),
@@ -194,15 +191,6 @@ export const useChatStore = create<ChatStoreState>()(
             pendingApprovals: slice.pendingApprovals.map((a) =>
               a.requestId === requestId ? { ...a, status } : a,
             ),
-          })),
-        ),
-
-      setWorking: (sessionId, isWorking) =>
-        set((state) =>
-          updateSlice(state, sessionId, (slice) => ({
-            ...slice,
-            isWorking,
-            workingToolName: isWorking ? slice.workingToolName : "",
           })),
         ),
 

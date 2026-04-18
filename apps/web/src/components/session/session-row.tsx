@@ -1,10 +1,9 @@
 // 会话列表单行：selected 时带 amber 左边条 + amber/8 背景
-// mode badge 走 shadcn Badge variant="secondary"
+// meta 行所有 pill (mode / 状态 / 相对时间) 统一 h-5 text-xs 对齐，避免 shadcn Badge rounded-full 跟裸 span 撞不齐的锯齿感
 // 状态点走 UI-SPEC --color-status-* tokens
 // 操作菜单（终止会话等）走 shadcn DropdownMenu —— 不移植 Feishu 的 swipe-to-terminate 手势
 import { MoreHorizontal } from "lucide-react";
 import type { SessionInfo } from "@cc-anywhere/shared";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,32 +18,57 @@ import { formatSessionName } from "@/lib/format-session-name";
 interface SessionRowProps {
   session: SessionInfo;
   selected: boolean;
+  // 由父层每 60s 推进的参考 now，驱动 "N 分钟前" 自刷新；省略时 formatRelativeTime 回退到 Date.now()
+  now?: number;
   onClick: () => void;
   onTerminate?: () => void;
 }
 
+// state → { dot bg-class, text color-class, 中文文案 }
+// idle 走 success token（绿, 与"正常空闲"语义一致），terminated 用静音灰
+const STATE_STYLE: Record<
+  SessionInfo["state"],
+  { dot: string; text: string; label: string }
+> = {
+  idle: {
+    dot: "bg-[var(--color-status-success)]",
+    text: "text-[var(--color-status-success)]",
+    label: "空闲",
+  },
+  working: {
+    dot: "bg-[var(--color-status-working)] animate-pulse",
+    text: "text-[var(--color-status-working)]",
+    label: "工作中",
+  },
+  waiting_approval: {
+    dot: "bg-[var(--color-status-warning)]",
+    text: "text-[var(--color-status-warning)]",
+    label: "等待审批",
+  },
+  error: {
+    dot: "bg-[var(--color-status-error)]",
+    text: "text-[var(--color-status-error)]",
+    label: "出错",
+  },
+  terminated: {
+    dot: "bg-muted-foreground",
+    text: "text-muted-foreground",
+    label: "已终止",
+  },
+};
+
 function StateDot({ state }: { state: SessionInfo["state"] }) {
-  // SessionInfo.state 枚举：idle | working | waiting_approval | error | terminated
-  const colorClass =
-    state === "working"
-      ? "bg-[var(--color-status-working)] animate-pulse"
-      : state === "waiting_approval"
-        ? "bg-[var(--color-status-warning)]"
-        : state === "error"
-          ? "bg-[var(--color-status-error)]"
-          : state === "terminated"
-            ? "bg-muted-foreground"
-            : "bg-[var(--color-status-success)]"; // idle
+  const style = STATE_STYLE[state];
   return (
     <span
-      className={cn("inline-block size-2 rounded-full shrink-0", colorClass)}
+      className={cn("inline-block size-2 rounded-full shrink-0", style.dot)}
       aria-label={`Session state: ${state}`}
       role="status"
     />
   );
 }
 
-export function SessionRow({ session, selected, onClick, onTerminate }: SessionRowProps) {
+export function SessionRow({ session, selected, now, onClick, onTerminate }: SessionRowProps) {
   const lastActive = session.lastActive;
   const displayName =
     formatSessionName(session.name) === "New Session"
@@ -80,16 +104,25 @@ export function SessionRow({ session, selected, onClick, onTerminate }: SessionR
           <span className="text-sm font-normal truncate flex-1">{displayName}</span>
         </span>
         {hasMeta && (
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
             {session.mode && (
-              <Badge variant="secondary" className="font-mono text-xs uppercase shrink-0">
+              <span className="font-mono uppercase text-muted-foreground shrink-0">
                 {session.mode}
-              </Badge>
-            )}
-            {lastActive !== undefined && (
-              <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                {formatRelativeTime(lastActive)}
               </span>
+            )}
+            {session.mode && (
+              <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">·</span>
+            )}
+            <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
+              {STATE_STYLE[session.state].label}
+            </span>
+            {lastActive !== undefined && (
+              <>
+                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">·</span>
+                <span className="text-muted-foreground shrink-0 tabular-nums">
+                  {formatRelativeTime(lastActive, now)}
+                </span>
+              </>
             )}
           </span>
         )}

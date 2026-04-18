@@ -17,10 +17,8 @@ function handleAssistantMessage(
   if (env.payload.text.length > 0) {
     store.appendAssistantText(env.sessionId, env.payload.text);
   }
-  // isPartial=false 仅在 proxy 兜底场景 (如历史聚合纯文本) 出现
-  if (env.payload.isPartial) {
-    store.setWorking(env.sessionId, true);
-  } else {
+  // isPartial=false 仅在 proxy 兜底场景 (如历史聚合纯文本) 出现；session.state 由 proxy session_status 推送维护
+  if (!env.payload.isPartial) {
     store.markTurnComplete(env.sessionId);
   }
 }
@@ -36,7 +34,6 @@ function handleToolUseRequest(
     input: env.payload.parameters,
     status: "pending",
   });
-  store.setWorking(env.sessionId, true);
 }
 
 function handleToolResult(

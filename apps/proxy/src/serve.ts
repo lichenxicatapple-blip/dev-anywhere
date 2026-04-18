@@ -53,6 +53,49 @@ function toSessionListPayload(s: import("./session-manager.js").SessionInfo) {
   };
 }
 
+// 推一条 session_status envelope 给 relay → client
+// relay 对 envelope 透传（不走 PROXY_TO_CLIENT_TYPES 白名单）；payload 包含 lastActive 让列表相对时间跟着跳
+function pushSessionStatus(
+  relay: RelayConnection | null,
+  sessionManager: SessionManager,
+  sessionId: string,
+): void {
+  if (!relay) return;
+  const session = sessionManager.getSession(sessionId);
+  if (!session) return;
+  try {
+    const envelope = buildMessage(
+      "session_status",
+      session.id,
+      Date.now(),
+      { sessionId: session.id, state: session.state, lastActive: session.updatedAt },
+      "proxy",
+    );
+    relay.sendEnvelope(envelope);
+  } catch (err) {
+    logger.debug({ sessionId, error: String(err) }, "Failed to push session_status");
+  }
+}
+
+// 状态迁移 + 推 envelope 的一体化入口；same-state 或非法转移时静默 no-op，避免调用方遍地 try/catch
+function changeSessionState(
+  sessionManager: SessionManager,
+  relay: RelayConnection | null,
+  sessionId: string,
+  next: SessionState,
+): boolean {
+  const session = sessionManager.getSession(sessionId);
+  if (!session || session.state === next) return false;
+  try {
+    sessionManager.updateState(sessionId, next);
+  } catch (err) {
+    logger.debug({ sessionId, from: session.state, to: next, error: String(err) }, "updateState rejected");
+    return false;
+  }
+  pushSessionStatus(relay, sessionManager, sessionId);
+  return true;
+}
+
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
     const s = connect(sockPath);
@@ -125,6 +168,7 @@ const claudeSessionIds = new Map<string, string>();
 // system/user/其他: 忽略 (无 UI 影响)
 function forwardWorkerEvent(
   relayConnection: RelayConnection,
+  sessionManager: SessionManager,
   sessionId: string,
   seq: number,
   event: Record<string, unknown>,
@@ -168,6 +212,8 @@ function forwardWorkerEvent(
         isError: Boolean(event.is_error),
       }),
     );
+    // turn 结束 = JSON 会话回 IDLE；changeSessionState 内部会推 session_status envelope
+    changeSessionState(sessionManager, relayConnection, sessionId, SessionState.IDLE);
     return;
   }
   // system / user / rate_limit_event 等当前不投给 client
@@ -192,22 +238,13 @@ function connectToWorker(
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
           case "worker_event":
-            for (const [, terminalSocket] of terminalSockets) {
-              if (terminalSocket.writable) {
-                terminalSocket.write(
-                  serializeIpc({
-                    type: "session_status_update",
-                    sessionId,
-                    state: SessionState.WORKING,
-                  }),
-                );
-              }
-            }
+            // JSON 会话进入 WORKING；changeSessionState 在真正发生迁移时推 session_status envelope 给客户端
+            changeSessionState(sessionManager, relayConnection, sessionId, SessionState.WORKING);
             // 将 worker 事件按 stream-json 语义路由到类型化 envelope / control message
             // event 结构参考 claude CLI stream-json: assistant / result / system / user
             if (relayConnection) {
               try {
-                forwardWorkerEvent(relayConnection, sessionId, msg.seq, msg.event);
+                forwardWorkerEvent(relayConnection, sessionManager, sessionId, msg.seq, msg.event);
               } catch (err) {
                 logger.debug({ sessionId, error: String(err) }, "Failed to forward event to relay");
               }
@@ -354,11 +391,7 @@ async function reconnectWorkers(
         workerSockets.delete(sessionId);
         continue;
       }
-      try {
-        sessionManager.updateState(sessionId, SessionState.IDLE);
-      } catch {
-        // 会话状态更新失败不影响重连流程
-      }
+      changeSessionState(sessionManager, relayConnection, sessionId, SessionState.IDLE);
       logger.info({ sessionId }, "Reconnected to existing worker");
     } else {
       try { unlinkSync(paths.workerSock); } catch {
@@ -386,9 +419,7 @@ function handleTerminalConnection(
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
           const session = existing ?? sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
           if (existing) {
-            try { sessionManager.updateState(session.id, SessionState.IDLE); } catch {
-              // 已存在的 PTY 会话状态更新失败不阻断创建流程
-            }
+            changeSessionState(sessionManager, relayConnection, session.id, SessionState.IDLE);
             sessionManager.setPid(session.id, msg.pid);
           }
           socket.write(
@@ -503,9 +534,7 @@ function handleTerminalConnection(
         };
         const sessionState = stateMap[msg.state];
         if (sessionState) {
-          try { sessionManager.updateState(msg.sessionId, sessionState); } catch {
-            // session 可能已被清理
-          }
+          changeSessionState(sessionManager, relayConnection, msg.sessionId, sessionState);
         }
         if (relayConnection) {
           relayConnection.sendRaw(JSON.stringify({
@@ -555,11 +584,7 @@ function handleTerminalConnection(
       }
 
       case "pty_register": {
-        try {
-          sessionManager.updateState(msg.sessionId, SessionState.IDLE);
-        } catch {
-          // 会话可能尚未注册，状态更新失败可忽略
-        }
+        changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
         sessionManager.setPid(msg.sessionId, msg.pid);
         terminalSockets.set(msg.sessionId, socket);
         // 通知 relay 该 session 存在，并推送会话列表给客户端
@@ -635,11 +660,7 @@ function handleTerminalConnection(
       }
 
       case "session_status_update": {
-        try {
-          sessionManager.updateState(msg.sessionId, msg.state as SessionState);
-        } catch (err) {
-          logger.warn({ sessionId: msg.sessionId, error: String(err) }, "Failed to update session state");
-        }
+        changeSessionState(sessionManager, relayConnection, msg.sessionId, msg.state as SessionState);
         break;
       }
 
@@ -1058,16 +1079,17 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           if (sid) {
             const session = sessionManager.getSession(sid);
             if (session?.mode === "pty") {
-              // PTY 会话：发 Tab ANSI 到 terminal，让 claude CLI 内部切换 permission mode
+              // PTY 会话：发 Shift+Tab (CSI Z) 让 claude CLI 循环 permission mode
+              // mode 字段当前保留但不使用 —— Claude CLI 仅支持循环键，无法一键直选档位
               const ts = terminalSockets.get(sid);
               if (ts?.writable) {
-                ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\t" }));
-                logger.info({ sessionId: sid, mode }, "Permission mode change: Tab ANSI sent to PTY");
+                ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x1b[Z" }));
+                logger.info({ sessionId: sid, mode }, "Permission mode cycle: Shift+Tab sent to PTY");
               } else {
-                logger.warn({ sessionId: sid }, "Permission mode change: PTY terminal socket unavailable");
+                logger.warn({ sessionId: sid }, "Permission mode cycle: PTY terminal socket unavailable");
               }
             } else {
-              logger.info({ sessionId: sid, mode }, "Permission mode change received for JSON session");
+              logger.info({ sessionId: sid, mode }, "Permission mode change received for JSON session (no-op, not supported)");
             }
           } else {
             logger.info({ mode }, "Permission mode change received via relay (global, no sessionId)");

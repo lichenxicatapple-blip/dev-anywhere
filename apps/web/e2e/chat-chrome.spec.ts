@@ -65,13 +65,13 @@ test.describe("ChatHeader — D-51 三件套", () => {
     await expect(sidebarToggle).toHaveCount(0);
   });
 
-  test("overflow menu contains Permission mode + Rename + Duplicate + Terminate(destructive)", async ({
+  test("overflow menu contains Rename + Duplicate + Terminate(destructive)", async ({
     page,
   }) => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     const menu = page.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible();
-    await expect(menu.getByText("Permission mode")).toBeVisible();
+    await expect(menu.getByText("Permission mode")).toHaveCount(0);
     await expect(menu.getByText("Rename")).toBeVisible();
     await expect(menu.getByText("Duplicate")).toBeVisible();
     const terminate = page.locator('[data-slot="chat-terminate-item"]');

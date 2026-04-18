@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
+import { useSessionStore } from "@/stores/session-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
@@ -23,8 +24,9 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
-  const isWorking = useChatStore(
-    (s) => s.bySessionId[sessionId]?.isWorking ?? EMPTY_SLICE.isWorking,
+  // thinking indicator 的 working 态 = session.state === "working"
+  const isWorking = useSessionStore(
+    (s) => s.sessions.find((x) => x.sessionId === sessionId)?.state === "working",
   );
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
