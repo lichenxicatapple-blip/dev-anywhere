@@ -11,6 +11,8 @@ export type AppPhase =
   | "session_browsing"
   | "chatting";
 
+export type PermissionMode = "default" | "auto_accept" | "plan";
+
 interface AppStoreState {
   phase: AppPhase;
   phaseBeforeDisconnect: AppPhase | null;
@@ -21,6 +23,7 @@ interface AppStoreState {
   proxies: ProxyInfo[];
   clientId: string;
   relayUrl: string;
+  permissionMode: PermissionMode;
 
   setConnected: (connected: boolean) => void;
   setProxy: (proxyId: string | null, proxyName: string | null) => void;
@@ -28,6 +31,7 @@ interface AppStoreState {
   setRelayUrl: (url: string) => void;
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
+  setPermissionMode: (mode: PermissionMode) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
 
@@ -63,12 +67,14 @@ export const useAppStore = create<AppStoreState>()(
       proxies: [],
       clientId: loadClientId(),
       relayUrl: "",
+      permissionMode: "default",
 
       setConnected: (connected) => set({ connected }),
       setProxy: (proxyId, proxyName) =>
         set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
+      setPermissionMode: (mode) => set({ permissionMode: mode }),
       setPhase: (phase) => {
         const phaseBeforeDisconnect =
           phase === "reconnecting"
