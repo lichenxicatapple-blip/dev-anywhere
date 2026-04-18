@@ -36,7 +36,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
 
   function changePermission(mode: PermissionMode) {
     useAppStore.getState().setPermissionMode(mode);
-    relayClientRef?.sendControl({ type: "permission_mode_change", mode });
+    relayClientRef?.sendControl({ type: "permission_mode_change", mode, sessionId });
   }
 
   function handleRename() {

@@ -43,6 +43,16 @@ const __dirname = dirname(__filename);
 
 // ---------- 基础工具函数 ----------
 
+function toSessionListPayload(s: import("./session-manager.js").SessionInfo) {
+  return {
+    sessionId: s.id,
+    mode: s.mode,
+    state: s.state,
+    lastActive: s.updatedAt,
+    ...(s.name !== undefined ? { name: s.name } : {}),
+  };
+}
+
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
     const s = connect(sockPath);
@@ -520,14 +530,7 @@ function handleTerminalConnection(
             source: "proxy",
             version: "1",
             payload: {
-              sessions: allSessions.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                state: s.state,
-                sessionId: s.id,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-              })),
+              sessions: allSessions.map(toSessionListPayload),
             },
           }));
         }
@@ -559,14 +562,7 @@ function handleTerminalConnection(
             source: "proxy",
             version: "1",
             payload: {
-              sessions: remaining.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                state: s.state,
-                sessionId: s.id,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-              })),
+              sessions: remaining.map(toSessionListPayload),
             },
           }));
         }
@@ -664,14 +660,7 @@ function handleTerminalConnection(
             source: "proxy",
             version: "1",
             payload: {
-              sessions: remaining.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                state: s.state,
-                sessionId: s.id,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-              })),
+              sessions: remaining.map(toSessionListPayload),
             },
           }));
         }
@@ -890,7 +879,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
                     timestamp: Date.now(),
                     source: "proxy",
                     version: "1",
-                    payload: { sessions },
+                    payload: { sessions: sessions.map(toSessionListPayload) },
                   }));
                 }
               } else if (attempt < maxRetries) {
@@ -972,8 +961,32 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               timestamp: Date.now(),
               source: "proxy",
               version: "1",
-              payload: { sessions },
+              payload: { sessions: sessions.map(toSessionListPayload) },
             }));
+          }
+        } else if (parsed.type === "session_worker_abort") {
+          const sid = parsed.sessionId as string;
+          const session = sessionManager.getSession(sid);
+          if (!session) {
+            logger.warn({ sessionId: sid }, "session_worker_abort: session not found");
+          } else if (session.state === SessionState.TERMINATED) {
+            logger.info({ sessionId: sid }, "session_worker_abort: already terminated, dropping");
+          } else if (session.mode === "pty") {
+            // PTY 会话直接把 Ctrl+C 写入 PTY stdin，避免杀掉 terminal wrapper 进程
+            const ts = terminalSockets.get(sid);
+            if (ts?.writable) {
+              ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x03" }));
+              logger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to PTY");
+            } else {
+              logger.warn({ sessionId: sid }, "session_worker_abort: PTY terminal socket unavailable");
+            }
+          } else {
+            try {
+              process.kill(session.pid, "SIGINT");
+              logger.info({ sessionId: sid, pid: session.pid }, "session_worker_abort: SIGINT sent to worker");
+            } catch (err) {
+              logger.warn({ sessionId: sid, pid: session.pid, error: String(err) }, "session_worker_abort: kill failed");
+            }
           }
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
@@ -986,20 +999,29 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             timestamp: Date.now(),
             source: "proxy",
             version: "1",
-            payload: {
-              sessions: sessions.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                state: s.state,
-                sessionId: s.id,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-              })),
-            },
+            payload: { sessions: sessions.map(toSessionListPayload) },
           }));
           logger.info("Session list sent via relay");
         } else if (parsed.type === "permission_mode_change") {
-          logger.info({ mode: parsed.mode }, "Permission mode change received via relay");
+          const sid = (parsed as { sessionId?: string }).sessionId;
+          const mode = parsed.mode;
+          if (sid) {
+            const session = sessionManager.getSession(sid);
+            if (session?.mode === "pty") {
+              // PTY 会话：发 Tab ANSI 到 terminal，让 claude CLI 内部切换 permission mode
+              const ts = terminalSockets.get(sid);
+              if (ts?.writable) {
+                ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\t" }));
+                logger.info({ sessionId: sid, mode }, "Permission mode change: Tab ANSI sent to PTY");
+              } else {
+                logger.warn({ sessionId: sid }, "Permission mode change: PTY terminal socket unavailable");
+              }
+            } else {
+              logger.info({ sessionId: sid, mode }, "Permission mode change received for JSON session");
+            }
+          } else {
+            logger.info({ mode }, "Permission mode change received via relay (global, no sessionId)");
+          }
         } else if (parsed.type === "session_subscribe" && parsed.sessionId) {
           const sid = parsed.sessionId as string;
           const ts = terminalSockets.get(sid);

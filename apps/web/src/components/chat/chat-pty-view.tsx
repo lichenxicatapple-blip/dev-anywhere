@@ -123,12 +123,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
           </div>
         </div>
       )}
-      <div
-        className="h-7 px-3 flex items-center text-xs text-muted-foreground border-t border-border bg-card"
-        data-slot="pty-status-line"
-      >
-        {ready ? "就绪" : "PTY 正在连接..."}
-      </div>
     </div>
   );
 }

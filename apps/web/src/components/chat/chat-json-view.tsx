@@ -1,15 +1,11 @@
-// JSON 模式主视图: 虚拟滚动消息列表 + 内联 ToolApprovalCard + StatusLine
-// InputBar + SemanticActionPanel + QuotePreviewBar 随视图一起渲染, 不由 chat.tsx 拼装
+// JSON 模式主视图: 虚拟滚动消息列表 + 内联 ToolApprovalCard
+// StatusLine / QuotePreviewBar / InputBar 由 chat.tsx 统一承载，此文件只负责消息区
 import { useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
-import { StatusLine } from "./status-line";
-import { InputBar } from "./input-bar";
-import { SemanticActionPanel } from "./semantic-action-panel";
-import { QuotePreviewBar } from "./quote-preview-bar";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { EmptyState } from "@/components/shell/empty-state";
 import { wsManagerRef } from "@/hooks/use-relay-setup";
@@ -24,9 +20,6 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   );
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
-  );
-  const isWorking = useChatStore(
-    (s) => s.bySessionId[sessionId]?.isWorking ?? EMPTY_SLICE.isWorking,
   );
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
@@ -68,32 +61,10 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
 
   const pendingApproval = pendingApprovals.find((a) => a.status === "pending");
 
-  function renderInputRegion() {
-    return (
-      <>
-        <QuotePreviewBar sessionId={sessionId} />
-        <div
-          className="flex items-end gap-2 p-2 border-t border-border"
-          data-slot="input-bar-region"
-        >
-          <InputBar sessionId={sessionId} mode="json" />
-          <SemanticActionPanel sessionId={sessionId} mode="json" />
-        </div>
-      </>
-    );
-  }
-
   if (messages.length === 0 && !pendingApproval) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1">
-          <EmptyState variant="no-messages" />
-        </div>
-        <StatusLine
-          state={isWorking ? "working" : "idle"}
-          message={isWorking ? "Claude 正在响应..." : undefined}
-        />
-        {renderInputRegion()}
+      <div className="h-full">
+        <EmptyState variant="no-messages" />
       </div>
     );
   }
@@ -159,11 +130,6 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
           />
         </div>
       )}
-      <StatusLine
-        state={isWorking ? "working" : "idle"}
-        message={isWorking ? "Claude 正在响应..." : undefined}
-      />
-      {renderInputRegion()}
     </div>
   );
 }

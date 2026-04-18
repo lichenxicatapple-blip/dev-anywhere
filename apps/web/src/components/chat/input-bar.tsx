@@ -1,9 +1,8 @@
 // InputBar: JSON + PTY 统一输入栏, 1-8 行自撑, 斜杠/@/历史/iOS 键盘适配
-// PTY raw-key capture 已放弃 (CONTEXT Addendum D-21), 语义控制走 SemanticActionPanel
-// draft + history cursor 为 per-session, 通过 chat-store 跨组件共享 (SemanticActionPanel 写, 此组件读)
+// PTY raw-key capture 已放弃 (CONTEXT Addendum D-21), 语义控制走 InputMenu / ChatHeader overflow
+// draft + history cursor 为 per-session, 通过 chat-store 跨组件共享
+// ArrowUp/Down 历史召回仅 PTY 启用 (JSON 直接点消息气泡引用/复制更直观)
 import { useCallback, useEffect, useRef } from "react";
-import { Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
@@ -12,6 +11,8 @@ import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
+import { InputMenu } from "./input-menu";
+import { SendButton } from "./send-button";
 
 const MAX_HISTORY = 100;
 
@@ -62,15 +63,15 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
 
   const pickerMode = detectPickerMode(value);
   const sendDisabled = computeSendDisabled(mode, isWorking, pendingApprovals);
+  const canSend = !sendDisabled && value.trim() !== "";
 
   // localStorage 持久化的用户消息历史 (按 session key)
-  // 与 slice.messages.filter(role=user) 的区别: 历史条目是"曾经发送过的 draft 文本", 不依赖 messages 是否被 clear
   const historyRef = useRef<string[]>([]);
   useEffect(() => {
     historyRef.current = loadPersistedHistory(sessionId);
   }, [sessionId]);
 
-  // cursor 变化 -> 同步 draft 为对应历史条目; cursor=-1 不动 draft (由 resetCursor 的调用方自行清空)
+  // cursor 变化 -> 同步 draft 为对应历史条目
   useEffect(() => {
     if (cursor < 0) return;
     const history = historyRef.current;
@@ -79,7 +80,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     if (typeof recalled === "string") {
       setInputDraft(sessionId, recalled);
     }
-    // 故意只依赖 cursor; sessionId 变化时上面的 effect 会刷新 historyRef
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cursor]);
 
@@ -88,7 +88,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     if (!trimmed) return;
     const relay = relayClientRef;
     if (!relay) return;
-    // user_input 是完整 MessageEnvelope (非 RelayControl), 需补 seq/timestamp/source/version
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
@@ -111,10 +110,10 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
         e.preventDefault();
         send();
       }
-    } else if (e.key === "ArrowUp" && value === "" && mode === "json") {
+    } else if (e.key === "ArrowUp" && value === "" && mode === "pty") {
       e.preventDefault();
       moveCursor(sessionId, +1);
-    } else if (e.key === "ArrowDown" && mode === "json") {
+    } else if (e.key === "ArrowDown" && mode === "pty") {
       if (cursor > 0) {
         e.preventDefault();
         moveCursor(sessionId, -1);
@@ -141,7 +140,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
 
   return (
     <div
-      className="flex-1 relative"
+      className="relative w-full"
       style={{ transform: `translateY(-${bottomOffset}px)` }}
       data-slot="input-bar"
       data-mode={mode}
@@ -182,15 +181,14 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
           rows={1}
           aria-label={mode === "json" ? "输入聊天消息" : "输入 PTY 命令"}
         />
-        <Button
-          type="submit"
-          size="icon"
-          disabled={sendDisabled || value.trim() === ""}
-          aria-label="发送"
-          data-slot="send-button"
-        >
-          <Send aria-hidden="true" />
-        </Button>
+        <InputMenu sessionId={sessionId} mode={mode} />
+        <SendButton
+          sessionId={sessionId}
+          mode={mode}
+          isWorking={isWorking}
+          canSend={canSend}
+          onSend={send}
+        />
       </form>
     </div>
   );

@@ -1,29 +1,36 @@
-// 状态条, 占位 24px 高, 映射 working/reconnecting/error 四态颜色
-import { cn } from "@/lib/utils";
+// Chat panel 顶部 4px 状态色带，颜色+动画承载 5 态会话状态
+// 聚合信号优先级：disconnected > waiting_approval > terminated > working > idle
+import "./status-line.css";
+
+export type StatusLineState =
+  | "idle"
+  | "working"
+  | "waiting_approval"
+  | "terminated"
+  | "disconnected";
 
 interface StatusLineProps {
-  state: "idle" | "working" | "reconnecting" | "error";
-  message?: string;
+  state: StatusLineState;
 }
 
-const STATE_COLOR: Record<StatusLineProps["state"], string> = {
-  idle: "text-muted-foreground",
-  working: "text-[var(--color-status-working)]",
-  reconnecting: "text-[var(--color-status-warning)]",
-  error: "text-[var(--color-status-error)]",
+const ARIA_LABEL: Record<StatusLineState, string> = {
+  idle: "会话空闲",
+  working: "Claude 正在响应",
+  waiting_approval: "等待工具审批",
+  terminated: "会话已终止",
+  disconnected: "连接已断开",
 };
 
-export function StatusLine({ state, message }: StatusLineProps) {
-  if (state === "idle" && !message) return null;
+export function StatusLine({ state }: StatusLineProps) {
   return (
     <div
-      className="h-6 px-4 flex items-center text-xs border-t border-border"
+      className={`cc-status-line cc-status-line-${state}`}
       data-slot="status-line"
       data-state={state}
+      role="status"
+      aria-label={ARIA_LABEL[state]}
     >
-      <span className={cn("font-mono", STATE_COLOR[state])}>
-        {message ?? state}
-      </span>
+      {state === "working" && <div className="cc-status-line-sweep" />}
     </div>
   );
 }

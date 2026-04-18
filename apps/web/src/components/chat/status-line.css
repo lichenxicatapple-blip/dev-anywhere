@@ -1,0 +1,64 @@
+/* Chat panel 顶部 4px 状态色带，颜色+动画双编码会话状态 */
+
+.cc-status-line {
+  height: 4px;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.cc-status-line-idle {
+  background-color: var(--color-status-success);
+}
+
+.cc-status-line-working {
+  background-color: var(--color-status-working);
+}
+
+.cc-status-line-waiting_approval {
+  background-color: var(--color-status-warning);
+  animation: cc-status-breathe 2s ease-in-out infinite;
+}
+
+.cc-status-line-terminated {
+  background-color: var(--muted-foreground);
+}
+
+.cc-status-line-disconnected {
+  background-color: var(--destructive);
+  animation: cc-status-breathe 1.5s ease-in-out infinite;
+}
+
+.cc-status-line-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  background-size: 50% 100%;
+  animation: cc-status-sweep 1.5s linear infinite;
+}
+
+@keyframes cc-status-sweep {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes cc-status-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
