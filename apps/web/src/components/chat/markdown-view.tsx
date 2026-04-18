@@ -66,7 +66,7 @@ export const MarkdownView = memo(function MarkdownView({
           // not-prose 禁用 prose 对 table/th/td 的默认规则, 避免与自定义冲突
           // th/td 用 whitespace-nowrap 让宽度按内容撑开, 超过 bubble 宽度时外层滚动
           table: ({ children, ...rest }) => (
-            <div className="not-prose my-3 overflow-x-auto rounded-md border border-border/60">
+            <div className="not-prose my-3 w-fit max-w-full overflow-x-auto rounded-md border border-border/60">
               <table className="border-collapse text-[13px]" {...rest}>
                 {children}
               </table>
