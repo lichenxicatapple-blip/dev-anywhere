@@ -75,41 +75,44 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   }
 
   return (
-    <div className="flex flex-col h-full relative">
-      <div
-        ref={setScrollEl}
-        className="flex-1 overflow-auto relative"
-        data-slot="message-list"
-      >
-        {scrollEl && (
-          <div
-            style={{
-              height: virtualizer.getTotalSize(),
-              position: "relative",
-              width: "100%",
-            }}
-          >
-            {virtualizer.getVirtualItems().map((vi) => (
-              <div
-                key={vi.key}
-                data-index={vi.index}
-                ref={virtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${vi.start}px)`,
-                }}
-              >
-                <MessageBubble
-                  message={messages[vi.index]}
-                  sessionId={sessionId}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+    <div className="flex flex-col h-full">
+      {/* 滚动区 wrapper: 提供 relative 定位上下文给 BackToBottom, 让按钮不跟滚动位移 */}
+      <div className="flex-1 relative min-h-0">
+        <div
+          ref={setScrollEl}
+          className="absolute inset-0 overflow-auto"
+          data-slot="message-list"
+        >
+          {scrollEl && (
+            <div
+              style={{
+                height: virtualizer.getTotalSize(),
+                position: "relative",
+                width: "100%",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((vi) => (
+                <div
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  <MessageBubble
+                    message={messages[vi.index]}
+                    sessionId={sessionId}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <BackToBottom
           visible={!isAtBottom}
           hasNewMessages={newMsgsWhileAway}

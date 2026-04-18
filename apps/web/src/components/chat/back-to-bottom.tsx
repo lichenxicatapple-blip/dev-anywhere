@@ -20,7 +20,7 @@ export function BackToBottom({
       size="icon"
       variant="outline"
       onClick={onClick}
-      className="absolute bottom-20 right-4 rounded-full shadow-md"
+      className="absolute bottom-4 right-4 rounded-full shadow-md z-10"
       aria-label="回到底部"
       data-slot="back-to-bottom"
     >
