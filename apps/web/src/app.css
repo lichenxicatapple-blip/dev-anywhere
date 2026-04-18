@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 
 :root {
   --background: #1E1E1E;
@@ -96,6 +97,28 @@ code.hljs,
 .hljs {
   background: transparent !important;
   padding: 0 !important;
+}
+
+/* Tailwind Typography 默认行为与我们气泡主题的对齐:
+   1. inline code 前后自动加反引号 `` 是冗余 (自定义 <code> 已有 bg+padding 标识)
+   2. prose-invert 默认链接色白, 与正文无区分, 改品牌 primary
+   3. blockquote 默认前景色偏白, 引用语义应弱化
+   4. task list checkbox 原生控件在 dark 下丑, 用 accent-color 套品牌色 */
+.prose :where(code):not(:where([class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}
+.prose-invert :where(a):not(:where([class~="not-prose"] *)) {
+  color: var(--primary);
+}
+.prose-invert :where(a):not(:where([class~="not-prose"] *)):hover {
+  color: color-mix(in srgb, var(--primary) 85%, white);
+}
+.prose-invert :where(blockquote):not(:where([class~="not-prose"] *)) {
+  color: var(--muted-foreground);
+}
+.prose input[type="checkbox"] {
+  accent-color: var(--primary);
 }
 
 /* 前庭敏感/系统降级偏好: 统一关停循环动画与过渡, 保留即时状态切换 */
