@@ -1,7 +1,7 @@
 // JSON 模式主视图: 虚拟滚动消息列表 + 内联 ToolApprovalCard + StatusLine
 // InputBar + SemanticActionPanel + QuotePreviewBar 在 Plan 10-04b 接入
 // 占位 slot data-slot="input-bar-slot" 保留给 10-04b 替换
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useChatStore } from "@/stores/chat-store";
 import { MessageBubble } from "./message-bubble";
@@ -21,14 +21,15 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const pendingApprovals = useChatStore((s) => s.pendingApprovals);
   const isWorking = useChatStore((s) => s.isWorking);
 
-  const parentRef = useRef<HTMLDivElement | null>(null);
-  const [scrollReady, setScrollReady] = useState(false);
-  const { isAtBottom, scrollToBottom } = useFollowOutput(parentRef);
+  // 用 state 持有滚动容器 DOM, 让 useEffect 依赖跟随元素挂载/卸载
+  // 避免 ref 对象稳定但 current 首帧为 null 时 effect 捕获 null 后永不重绑 scroll listener
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => scrollEl,
     estimateSize: () => 120,
     overscan: 5,
   });
@@ -76,14 +77,11 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   return (
     <div className="flex flex-col h-full relative">
       <div
-        ref={(el) => {
-          parentRef.current = el;
-          if (el && !scrollReady) setScrollReady(true);
-        }}
+        ref={setScrollEl}
         className="flex-1 overflow-auto relative"
         data-slot="message-list"
       >
-        {scrollReady && (
+        {scrollEl && (
           <div
             style={{
               height: virtualizer.getTotalSize(),

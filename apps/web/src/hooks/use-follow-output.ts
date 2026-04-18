@@ -1,19 +1,20 @@
 // 虚拟列表 follow-output 状态, 用户滚到底部时自动追随; 滚离底部后冻结
-import { useEffect, useRef, useState, type RefObject } from "react";
+// 接收 HTMLElement (来自 state-backed callback ref), 避免 ref 对象稳定、
+// useEffect 捕获 null 后永不重绑 listener 的问题
+import { useEffect, useRef, useState } from "react";
 
 interface Options {
   threshold?: number;
 }
 
 export function useFollowOutput(
-  scrollRef: RefObject<HTMLElement | null>,
+  el: HTMLElement | null,
   opts: Options = {},
 ): { isAtBottom: boolean; scrollToBottom: () => void } {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const thresholdRef = useRef(opts.threshold ?? 50);
 
   useEffect(() => {
-    const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
       const threshold = thresholdRef.current;
@@ -24,10 +25,9 @@ export function useFollowOutput(
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollRef]);
+  }, [el]);
 
   const scrollToBottom = () => {
-    const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   };
