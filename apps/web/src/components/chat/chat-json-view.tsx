@@ -10,6 +10,7 @@ import { BackToBottom } from "./back-to-bottom";
 import { StatusLine } from "./status-line";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { EmptyState } from "@/components/shell/empty-state";
+import { wsManagerRef } from "@/hooks/use-relay-setup";
 
 interface ChatJsonViewProps {
   sessionId: string;
@@ -24,6 +25,14 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
+
+  // mount 时订阅 session 并拉取已持久化的历史消息
+  useEffect(() => {
+    const ws = wsManagerRef;
+    if (!ws || !sessionId) return;
+    ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
+    ws.send(JSON.stringify({ type: "session_messages_request", sessionId }));
+  }, [sessionId]);
 
   const virtualizer = useVirtualizer({
     count: messages.length,
