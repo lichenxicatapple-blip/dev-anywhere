@@ -1,35 +1,34 @@
+// ChatPage: 根据 ?mode= 渲染 JSON 或 PTY 视图
+// PTY 视图由 Plan 10-05 填充; ChatHeader + InputBar + SemanticActionPanel 由 Plan 10-04b 填充
 import { useParams, useSearchParams } from "react-router";
-import { useAppStore } from "@/stores/app-store";
-import { useSessionStore } from "@/stores/session-store";
-import { useChatStore } from "@/stores/chat-store";
+import { ChatJsonView } from "@/components/chat/chat-json-view";
+import { EmptyState } from "@/components/shell/empty-state";
 
 export function ChatPage() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode");
 
-  const { phase, connected, proxyOnline } = useAppStore();
-  const { currentSessionId } = useSessionStore();
-  const { messages, isWorking, workingToolName, pendingApprovals } = useChatStore();
+  if (!id) {
+    return <EmptyState variant="no-session" />;
+  }
 
   return (
-    <div className="flex flex-col h-screen bg-[var(--background)]">
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-4 h-12 bg-[var(--card)] border-b border-[var(--border)]">
-        <span className="text-sm font-medium text-[var(--foreground)]">
-          Chat (/chat/:id)
-        </span>
+    <div className="flex flex-col h-full">
+      <div
+        data-slot="chat-header-placeholder"
+        className="h-12 px-3 flex items-center border-b border-border text-sm text-muted-foreground"
+      >
+        Chat: {id}
       </div>
-      <div className="flex-1 overflow-auto p-4 space-y-2 text-sm text-[var(--foreground)]">
-        <div>Params.id: <span className="font-mono text-[var(--primary)]">{id ?? "(none)"}</span></div>
-        <div>SearchParams.mode: <span className="font-mono">{mode ?? "(none)"}</span></div>
-        <div>Phase: <span className="font-mono text-[var(--primary)]">{phase}</span></div>
-        <div>Connected: <span className="font-mono">{String(connected)}</span></div>
-        <div>ProxyOnline: <span className="font-mono">{String(proxyOnline)}</span></div>
-        <div>CurrentSessionId: <span className="font-mono">{currentSessionId ?? "(none)"}</span></div>
-        <div>Messages: <span className="font-mono">{messages.length}</span></div>
-        <div>IsWorking: <span className="font-mono">{String(isWorking)}</span></div>
-        <div>WorkingToolName: <span className="font-mono">{workingToolName || "(none)"}</span></div>
-        <div>PendingApprovals: <span className="font-mono">{pendingApprovals.length}</span></div>
+      <div className="flex-1 min-h-0">
+        {mode === "pty" ? (
+          <div className="flex items-center justify-center h-full text-muted-foreground">
+            PTY 模式待 Plan 10-05 集成
+          </div>
+        ) : (
+          <ChatJsonView sessionId={id} />
+        )}
       </div>
     </div>
   );

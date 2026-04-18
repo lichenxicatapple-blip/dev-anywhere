@@ -8,6 +8,7 @@ import {
   handleRelayMessage,
 } from "@/services/phase-machine";
 import type { Timers } from "@/services/phase-machine";
+import { registerChatDispatcher } from "@/services/chat-dispatcher";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 export let wsManagerRef: WebSocketManager | null = null;
@@ -49,6 +50,10 @@ export function useRelaySetup(): void {
       );
     });
 
+    // Chat 模式消息 dispatcher: 订阅 MessageEnvelope + RelayControl chat 类 type, 写 chat-store.
+    // 必须在 relayClientRef 赋值后注册 (上方 L35), 否则 registerChatDispatcher 会 no-op 并警告.
+    const unregisterChat = registerChatDispatcher();
+
     // D-08: 页面从后台恢复时自动重连
     const handleVisibility = () => {
       if (
@@ -66,6 +71,7 @@ export function useRelaySetup(): void {
     return () => {
       unsubStatus();
       unsubRelay();
+      unregisterChat();
       document.removeEventListener("visibilitychange", handleVisibility);
       ws.close();
       wsManagerRef = null;
