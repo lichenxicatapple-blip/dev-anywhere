@@ -114,7 +114,16 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
 
       unsubSnapshot = relay.onMessage((msg) => {
         const m = msg as Record<string, unknown>;
-        if (m.type !== "session_snapshot" || m.sessionId !== sessionId) return;
+        if (m.sessionId !== sessionId) return;
+        // 本地 iTerm 尺寸变化 -> Claude CLI SIGWINCH -> proxy 广播 terminal_resize
+        // 客户端 xterm.resize 对齐新尺寸, 并重订阅拉新 snapshot 避免已渲染内容按旧 CUP 坐标堆叠
+        if (m.type === "terminal_resize") {
+          terminalRef.current?.resize(m.cols as number, m.rows as number);
+          snapshotApplied = false;
+          ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
+          return;
+        }
+        if (m.type !== "session_snapshot") return;
         const term = terminalRef.current;
         if (!term) return;
         clearRetry();
@@ -148,14 +157,31 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   }, [sessionId, connected, proxyOnline, retryNonce]);
 
   // autoscale off 时 xterm 高度 > 容器会出现垂直溢出, 外层 overflow-auto 承担滚动.
-  // 用 ResizeObserver pin 到底: scrollHeight 任何一次变化都重新滚到最底,
-  // 保证首屏看到 Claude Code 的输入行 + 状态栏 (xterm WebGL atlas 初始化可能晚于 snapshot)
+  // pin 到"最后非空行"而不是 scrollHeight: 竖屏 rows 远大于 Claude UI 占据行数时,
+  // Claude 把 UI 画在画布中段 (row 50~105), 画布最底几十行是空行, pinBottom 到
+  // scrollHeight 会盯着空行. 扫 buffer 取 lastNonEmpty 行底部对齐容器底
   useEffect(() => {
     if (!ready) return;
     const el = containerRef.current;
     if (!el) return;
     const pinBottom = (): void => {
-      el.scrollTop = el.scrollHeight;
+      const term = terminalRef.current;
+      const screen = el.querySelector<HTMLElement>(".xterm-screen");
+      if (!term || !screen || term.rows === 0) {
+        el.scrollTop = el.scrollHeight;
+        return;
+      }
+      const buffer = term.buffer.active;
+      let lastNonEmpty = 0;
+      for (let y = buffer.length - 1; y >= 0; y--) {
+        const line = buffer.getLine(y);
+        if (line && line.translateToString(true).trim() !== "") {
+          lastNonEmpty = y;
+          break;
+        }
+      }
+      const cellH = screen.clientHeight / term.rows;
+      el.scrollTop = Math.max(0, (lastNonEmpty + 1) * cellH - el.clientHeight);
     };
     pinBottom();
     const ro = new ResizeObserver(pinBottom);
