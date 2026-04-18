@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Terminal } from "@xterm/xterm";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { WebglAddon } from "@xterm/addon-webgl";
-import "@xterm/xterm/css/xterm.css";
+import type { Terminal } from "@xterm/xterm";
 import { Button } from "@/components/ui/button";
-import { xtermTheme } from "@/lib/xterm-theme";
+import { createXtermTerminal } from "@/lib/create-xterm";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 
@@ -25,46 +20,20 @@ export function PtyTest() {
 
   // xterm.js 终端初始化
   useEffect(() => {
-    let terminal: Terminal | null = null;
+    let disposeFn: (() => void) | null = null;
+    let cancelled = false;
 
     const init = async () => {
-      await document.fonts.ready;
-
-      terminal = new Terminal({
-        scrollback: 5000,
-        fontFamily: '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-        fontSize: 14,
-        cursorBlink: false,
-        cursorInactiveStyle: "none",
-        disableStdin: true,
-        theme: xtermTheme,
-        allowProposedApi: true,
-      });
-
-      const serializeAddon = new SerializeAddon();
-      const webLinksAddon = new WebLinksAddon();
-      const unicodeAddon = new UnicodeGraphemesAddon();
-
-      terminal.loadAddon(serializeAddon);
-      terminal.loadAddon(webLinksAddon);
-      terminal.loadAddon(unicodeAddon);
-
-      if (containerRef.current) {
-        containerRef.current.replaceChildren();
-        terminal.open(containerRef.current);
+      const container = containerRef.current;
+      if (!container) return;
+      const result = await createXtermTerminal(container);
+      if (cancelled) {
+        result.dispose();
+        return;
       }
-
-      // 必须在 terminal.open() 之后加载，WebGL renderer 按 cell 坐标直接绘制字符，
-      // 不依赖 DOM letter-spacing 补偿，避免 CJK/box-drawing 错位
-      try {
-        const webglAddon = new WebglAddon();
-        terminal.loadAddon(webglAddon);
-      } catch (err) {
-        console.warn("WebGL addon failed, fallback to DOM renderer", err);
-      }
-
-      terminalRef.current = terminal;
-      (window as unknown as Record<string, unknown>).__xterm = terminal;
+      terminalRef.current = result.terminal;
+      disposeFn = result.dispose;
+      (window as unknown as Record<string, unknown>).__xterm = result.terminal;
     };
 
     init();
@@ -72,7 +41,8 @@ export function PtyTest() {
     document.title = "PTY Test -- CC Anywhere";
 
     return () => {
-      terminal?.dispose();
+      cancelled = true;
+      disposeFn?.();
       terminalRef.current = null;
       delete (window as unknown as Record<string, unknown>).__xterm;
     };
