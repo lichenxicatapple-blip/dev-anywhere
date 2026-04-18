@@ -2,7 +2,7 @@
 // InputBar + SemanticActionPanel + QuotePreviewBar 随视图一起渲染, 不由 chat.tsx 拼装
 import { useEffect, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useChatStore } from "@/stores/chat-store";
+import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
@@ -19,10 +19,15 @@ interface ChatJsonViewProps {
 }
 
 export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
-  // Plan 10-06 将此选择器改为 s.bySessionId[sessionId]?.messages ?? []
-  const messages = useChatStore((s) => s.messages);
-  const pendingApprovals = useChatStore((s) => s.pendingApprovals);
-  const isWorking = useChatStore((s) => s.isWorking);
+  const messages = useChatStore(
+    (s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages,
+  );
+  const pendingApprovals = useChatStore(
+    (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
+  );
+  const isWorking = useChatStore(
+    (s) => s.bySessionId[sessionId]?.isWorking ?? EMPTY_SLICE.isWorking,
+  );
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);

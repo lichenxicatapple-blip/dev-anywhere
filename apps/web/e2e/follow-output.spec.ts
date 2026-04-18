@@ -11,9 +11,11 @@ async function seedMessages(page: Page, count: number): Promise<void> {
         useChatStore: { getState: () => Record<string, unknown> };
       }
     ).useChatStore.getState();
+    const sid = "fo-sess";
     for (let i = 0; i < n; i++) {
       (
         store.addUserMessage as (
+          sessionId: string,
           m: {
             id: string;
             role: "user";
@@ -23,7 +25,7 @@ async function seedMessages(page: Page, count: number): Promise<void> {
             toolCalls: unknown[];
           },
         ) => void
-      )({
+      )(sid, {
         id: `u-${i}`,
         role: "user",
         text: `User message ${i}`,
@@ -31,8 +33,11 @@ async function seedMessages(page: Page, count: number): Promise<void> {
         timestamp: Date.now() + i,
         toolCalls: [],
       });
-      (store.appendAssistantText as (s: string) => void)(`\nAsst ${i}\n`);
-      (store.markTurnComplete as () => void)();
+      (store.appendAssistantText as (sessionId: string, s: string) => void)(
+        sid,
+        `\nAsst ${i}\n`,
+      );
+      (store.markTurnComplete as (sessionId: string) => void)(sid);
     }
   }, count);
 }
@@ -164,15 +169,18 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
         }
       ).useChatStore.getState();
       (
-        store.addUserMessage as (m: {
-          id: string;
-          role: "user";
-          text: string;
-          isPartial: false;
-          timestamp: number;
-          toolCalls: unknown[];
-        }) => void
-      )({
+        store.addUserMessage as (
+          sessionId: string,
+          m: {
+            id: string;
+            role: "user";
+            text: string;
+            isPartial: false;
+            timestamp: number;
+            toolCalls: unknown[];
+          },
+        ) => void
+      )("fo-sess", {
         id: "new-while-away",
         role: "user",
         text: "new message arrived",
@@ -199,10 +207,11 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
           useChatStore: { getState: () => Record<string, unknown> };
         }
       ).useChatStore.getState();
-      (store.appendAssistantText as (s: string) => void)(
+      (store.appendAssistantText as (sessionId: string, s: string) => void)(
+        "fo-sess",
         "\ntail streamed text\n",
       );
-      (store.markTurnComplete as () => void)();
+      (store.markTurnComplete as (sessionId: string) => void)("fo-sess");
     });
     await page.waitForTimeout(300);
 

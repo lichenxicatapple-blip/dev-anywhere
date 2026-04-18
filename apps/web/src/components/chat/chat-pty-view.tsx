@@ -10,7 +10,7 @@ import type { Terminal } from "@xterm/xterm";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
-import { useChatStore } from "@/stores/chat-store";
+import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 
 interface ChatPtyViewProps {
   sessionId: string;
@@ -21,7 +21,9 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const terminalRef = useRef<Terminal | null>(null);
   const serializeRef = useRef<SerializeAddon | null>(null);
   const [ready, setReady] = useState(false);
-  const pendingApprovals = useChatStore((s) => s.pendingApprovals);
+  const pendingApprovals = useChatStore(
+    (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
+  );
   const pending = pendingApprovals.find((a) => a.status === "pending");
 
   useEffect(() => {

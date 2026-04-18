@@ -1,6 +1,5 @@
 // 语义功能面板 (CONTEXT Addendum D-21): 5 个按钮跨 JSON/PTY 统一呈现
-// PTY 模式通过 sendSemanticAction 发 remote_input_raw; JSON 模式走 RelayControl 或 window CustomEvent
-// CustomEvent 桥接是 Plan 10-04b 的临时措施, Plan 10-06 Task 1 会迁移到 per-session chat-store
+// PTY 模式通过 sendSemanticAction 发 remote_input_raw; JSON 模式直接调用 per-session chat-store action
 import { Square, Settings2, ArrowUp, ArrowDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { relayClientRef } from "@/hooks/use-relay-setup";
@@ -45,9 +44,8 @@ export function SemanticActionPanel({ sessionId, mode }: SemanticActionPanelProp
       sendSemanticAction(sessionId, "history_prev");
       return;
     }
-    window.dispatchEvent(
-      new CustomEvent("cc:input-history-prev", { detail: { sessionId } }),
-    );
+    // JSON 模式: delta +1 向更早的历史; InputBar 的 effect 监听 cursor 同步 draft
+    useChatStore.getState().moveInputHistoryCursor(sessionId, +1);
   }
 
   function historyNext() {
@@ -55,9 +53,7 @@ export function SemanticActionPanel({ sessionId, mode }: SemanticActionPanelProp
       sendSemanticAction(sessionId, "history_next");
       return;
     }
-    window.dispatchEvent(
-      new CustomEvent("cc:input-history-next", { detail: { sessionId } }),
-    );
+    useChatStore.getState().moveInputHistoryCursor(sessionId, -1);
   }
 
   function cancel() {
@@ -65,10 +61,10 @@ export function SemanticActionPanel({ sessionId, mode }: SemanticActionPanelProp
       sendSemanticAction(sessionId, "cancel");
       return;
     }
-    useChatStore.getState().clearQuote();
-    window.dispatchEvent(
-      new CustomEvent("cc:input-cancel", { detail: { sessionId } }),
-    );
+    const store = useChatStore.getState();
+    store.setQuotedMessage(sessionId, null);
+    store.setInputDraft(sessionId, "");
+    store.resetInputHistoryCursor(sessionId);
   }
 
   return (

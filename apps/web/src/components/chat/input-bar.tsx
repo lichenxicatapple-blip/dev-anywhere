@@ -1,72 +1,87 @@
 // InputBar: JSON + PTY 统一输入栏, 1-8 行自撑, 斜杠/@/历史/iOS 键盘适配
 // PTY raw-key capture 已放弃 (CONTEXT Addendum D-21), 语义控制走 SemanticActionPanel
-// 跨组件 history/cancel 用 window CustomEvent 桥接, Plan 10-06 Task 1 会迁到 per-session store
-import { useCallback, useEffect, useRef, useState } from "react";
+// draft + history cursor 为 per-session, 通过 chat-store 跨组件共享 (SemanticActionPanel 写, 此组件读)
+import { useCallback, useEffect, useRef } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { useChatStore } from "@/stores/chat-store";
-import { useInputHistory } from "@/hooks/use-input-history";
+import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useTextareaAutosize } from "@/hooks/use-textarea-autosize";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
 
+const MAX_HISTORY = 100;
+
 interface InputBarProps {
   sessionId: string;
   mode: "json" | "pty";
 }
 
-interface CustomEventDetail {
-  sessionId: string;
+function inputHistoryKey(sessionId: string): string {
+  return `cc_inputHistory:${sessionId}`;
+}
+
+function loadPersistedHistory(sessionId: string): string[] {
+  try {
+    const raw = localStorage.getItem(inputHistoryKey(sessionId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((e): e is string => typeof e === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePersistedHistory(sessionId: string, history: string[]): void {
+  try {
+    localStorage.setItem(inputHistoryKey(sessionId), JSON.stringify(history));
+  } catch {
+    // 存储配额用尽时静默失败, 不阻止发送
+  }
 }
 
 export function InputBar({ sessionId, mode }: InputBarProps) {
-  const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isWorking = useChatStore((s) => s.isWorking);
-  const pendingApprovals = useChatStore((s) => s.pendingApprovals);
-  const history = useInputHistory(sessionId);
+  const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
+  const setInputDraft = useChatStore((s) => s.setInputDraft);
+  const moveCursor = useChatStore((s) => s.moveInputHistoryCursor);
+  const resetCursor = useChatStore((s) => s.resetInputHistoryCursor);
   const bottomOffset = useVisualViewportBottomOffset();
+
+  const value = slice.inputDraft;
+  const isWorking = slice.isWorking;
+  const pendingApprovals = slice.pendingApprovals;
+  const cursor = slice.inputHistoryCursor;
 
   useTextareaAutosize(textareaRef, value);
 
   const pickerMode = detectPickerMode(value);
   const sendDisabled = computeSendDisabled(mode, isWorking, pendingApprovals);
 
-  // SemanticActionPanel 通过 custom event 控制 history/cancel
-  // Plan 10-06 Task 1 会把 history cursor state 搬到 per-session chat-store 并移除此桥接
+  // localStorage 持久化的用户消息历史 (按 session key)
+  // 与 slice.messages.filter(role=user) 的区别: 历史条目是"曾经发送过的 draft 文本", 不依赖 messages 是否被 clear
+  const historyRef = useRef<string[]>([]);
   useEffect(() => {
-    const onPrev = (e: Event) => {
-      const detail = (e as CustomEvent<CustomEventDetail>).detail;
-      if (detail?.sessionId !== sessionId) return;
-      if (value !== "") return;
-      const prev = history.recallPrev();
-      if (prev != null) setValue(prev);
-    };
-    const onNext = (e: Event) => {
-      const detail = (e as CustomEvent<CustomEventDetail>).detail;
-      if (detail?.sessionId !== sessionId) return;
-      const nx = history.recallNext();
-      if (nx != null) setValue(nx);
-    };
-    const onCancel = (e: Event) => {
-      const detail = (e as CustomEvent<CustomEventDetail>).detail;
-      if (detail?.sessionId !== sessionId) return;
-      setValue("");
-      history.reset();
-    };
-    window.addEventListener("cc:input-history-prev", onPrev);
-    window.addEventListener("cc:input-history-next", onNext);
-    window.addEventListener("cc:input-cancel", onCancel);
-    return () => {
-      window.removeEventListener("cc:input-history-prev", onPrev);
-      window.removeEventListener("cc:input-history-next", onNext);
-      window.removeEventListener("cc:input-cancel", onCancel);
-    };
-  }, [sessionId, value, history]);
+    historyRef.current = loadPersistedHistory(sessionId);
+  }, [sessionId]);
+
+  // cursor 变化 -> 同步 draft 为对应历史条目; cursor=-1 不动 draft (由 resetCursor 的调用方自行清空)
+  useEffect(() => {
+    if (cursor < 0) return;
+    const history = historyRef.current;
+    if (history.length === 0) return;
+    const recalled = history[history.length - 1 - cursor];
+    if (typeof recalled === "string") {
+      setInputDraft(sessionId, recalled);
+    }
+    // 故意只依赖 cursor; sessionId 变化时上面的 effect 会刷新 historyRef
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor]);
 
   const send = useCallback(() => {
     const trimmed = value.trim();
@@ -83,9 +98,12 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
       source: "client",
       version: "1",
     });
-    history.push(trimmed);
-    setValue("");
-  }, [value, sessionId, history]);
+    const nextHistory = [...historyRef.current, trimmed].slice(-MAX_HISTORY);
+    historyRef.current = nextHistory;
+    savePersistedHistory(sessionId, nextHistory);
+    setInputDraft(sessionId, "");
+    resetCursor(sessionId);
+  }, [value, sessionId, setInputDraft, resetCursor]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
@@ -95,18 +113,23 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
       }
     } else if (e.key === "ArrowUp" && value === "" && mode === "json") {
       e.preventDefault();
-      const prev = history.recallPrev();
-      if (prev != null) setValue(prev);
+      moveCursor(sessionId, +1);
     } else if (e.key === "ArrowDown" && mode === "json") {
-      const nx = history.recallNext();
-      if (nx != null) {
+      if (cursor > 0) {
         e.preventDefault();
-        setValue(nx);
+        moveCursor(sessionId, -1);
+      } else if (cursor === 0) {
+        e.preventDefault();
+        resetCursor(sessionId);
+        setInputDraft(sessionId, "");
       }
     } else if (e.key === "Escape") {
       if (pickerMode !== "none") {
         e.preventDefault();
-        setValue(value.replace(/\/\S*$/, "").replace(/@\S*$/, ""));
+        setInputDraft(
+          sessionId,
+          value.replace(/\/\S*$/, "").replace(/@\S*$/, ""),
+        );
       }
     }
   };
@@ -127,7 +150,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
         <SlashCommandPicker
           filter={value.slice(value.lastIndexOf("/"))}
           onSelect={(name) => {
-            setValue(value.replace(/\/[^\s]*$/, `/${name} `));
+            setInputDraft(sessionId, value.replace(/\/[^\s]*$/, `/${name} `));
             textareaRef.current?.focus();
           }}
         />
@@ -137,7 +160,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
           mode="insert"
           filter={value.slice(value.lastIndexOf("@"))}
           onSelect={(path) => {
-            setValue(value.replace(/@[^\s]*$/, `@${path} `));
+            setInputDraft(sessionId, value.replace(/@[^\s]*$/, `@${path} `));
             textareaRef.current?.focus();
           }}
         />
@@ -152,7 +175,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
         <Textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => setInputDraft(sessionId, e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           className="flex-1 resize-none font-normal"
