@@ -175,6 +175,14 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   // 远程终止 JSON 会话，client -> proxy
   z.object({ type: z.literal("session_terminate"), sessionId: z.string() }),
 
+  // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
+  // CONTEXT Addendum D-21：方案 A 新增的唯一跨包 envelope 类型
+  z.object({
+    type: z.literal("remote_input_raw"),
+    sessionId: z.string().min(1),
+    data: z.string(),
+  }),
+
   // 远程创建 JSON 会话，client -> proxy -> response
   z.object({ type: z.literal("session_create"), cwd: z.string(), resumeSessionId: z.string().optional() }),
   z.object({

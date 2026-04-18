@@ -775,6 +775,26 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               logger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: PTY terminal socket not available");
             }
           }
+        } else if (parsed.type === "remote_input_raw" && parsed.sessionId) {
+          // 远程语义动作面板发来的原始 ANSI 字节，直接写入 PTY stdin，不追加 \r
+          // CONTEXT Addendum D-21 方案 A：复用 pty_input IPC 类型，不修改 ipc-protocol.ts 与 terminal.ts
+          const ts = terminalSockets.get(parsed.sessionId);
+          if (ts?.writable) {
+            ts.write(serializeIpc({
+              type: "pty_input",
+              sessionId: parsed.sessionId,
+              data: parsed.data,
+            }));
+            logger.info(
+              { sessionId: parsed.sessionId, bytes: parsed.data.length },
+              "Raw PTY input forwarded",
+            );
+          } else {
+            logger.warn(
+              { sessionId: parsed.sessionId },
+              "Raw PTY input dropped: terminal socket unavailable",
+            );
+          }
         } else if (parsed.type === "tool_approve" && parsed.sessionId) {
           const toolId = parsed.payload?.toolId as string | undefined;
           const whitelistTool = parsed.payload?.whitelistTool as boolean | undefined;
