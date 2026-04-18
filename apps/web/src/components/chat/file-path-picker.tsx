@@ -59,13 +59,12 @@ export function FilePathPicker({
     }
   }, [currentPath, tree]);
 
-  const allEntries = tree.get(currentPath) ?? [];
   const filteredEntries = useMemo(() => {
-    let entries = allEntries;
+    let entries = tree.get(currentPath) ?? [];
     if (dirsOnly) entries = entries.filter((e) => e.isDir);
     if (query) entries = entries.filter((e) => e.name.toLowerCase().includes(query));
     return entries;
-  }, [allEntries, query, dirsOnly]);
+  }, [tree, currentPath, query, dirsOnly]);
 
   const containerClass =
     mode === "insert"
