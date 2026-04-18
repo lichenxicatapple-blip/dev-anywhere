@@ -1,4 +1,4 @@
-// 聊天消息状态管理：消息列表、流式状态、工具审批队列
+// 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿/历史游标
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 
@@ -31,150 +31,237 @@ export interface ChatMessage {
   quotedMessage?: QuotedMessage;
 }
 
-interface ChatStoreState {
+export interface ChatSessionSlice {
   messages: ChatMessage[];
   isWorking: boolean;
   workingToolName: string;
   pendingApprovals: ToolApprovalRequest[];
   quotedMessage: QuotedMessage | null;
+  inputDraft: string;
+  // 游标范围 [-1, historyLen - 1]; -1 表示未激活历史回溯
+  inputHistoryCursor: number;
+}
 
-  appendAssistantText: (text: string) => void;
-  addUserMessage: (message: ChatMessage) => void;
-  markTurnComplete: () => void;
-  addToolCall: (messageId: string, toolCall: ToolCallInfo) => void;
-  updateToolResult: (messageId: string, toolIndex: number, output: string) => void;
-  toggleToolCollapse: (messageId: string, toolIndex: number) => void;
-  addApprovalRequest: (request: ToolApprovalRequest) => void;
-  updateApprovalStatus: (requestId: string, status: "approved" | "denied") => void;
-  setWorking: (isWorking: boolean) => void;
-  setWorkingTool: (toolName: string) => void;
-  clearMessages: () => void;
-  setQuote: (quote: QuotedMessage) => void;
-  clearQuote: () => void;
-  loadHistory: (messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>) => void;
+export const EMPTY_SLICE: ChatSessionSlice = {
+  messages: [],
+  isWorking: false,
+  workingToolName: "",
+  pendingApprovals: [],
+  quotedMessage: null,
+  inputDraft: "",
+  inputHistoryCursor: -1,
+};
+
+interface ChatStoreState {
+  bySessionId: Record<string, ChatSessionSlice>;
+
+  appendAssistantText: (sessionId: string, text: string) => void;
+  addUserMessage: (sessionId: string, message: ChatMessage) => void;
+  markTurnComplete: (sessionId: string) => void;
+  addToolCall: (sessionId: string, messageId: string, toolCall: ToolCallInfo) => void;
+  updateToolResult: (sessionId: string, messageId: string, toolIndex: number, output: string) => void;
+  toggleToolCollapse: (sessionId: string, messageId: string, toolIndex: number) => void;
+  addApprovalRequest: (sessionId: string, request: ToolApprovalRequest) => void;
+  updateApprovalStatus: (sessionId: string, requestId: string, status: "approved" | "denied") => void;
+  setWorking: (sessionId: string, isWorking: boolean) => void;
+  setWorkingTool: (sessionId: string, toolName: string) => void;
+  setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
+  setInputDraft: (sessionId: string, draft: string) => void;
+  // delta > 0 向更早的历史, delta < 0 向更新; clamp 在 [-1, historyLen - 1]
+  moveInputHistoryCursor: (sessionId: string, delta: number) => void;
+  resetInputHistoryCursor: (sessionId: string) => void;
+  loadHistory: (
+    sessionId: string,
+    messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>,
+  ) => void;
+  clearSession: (sessionId: string) => void;
+  clearAllSessions: () => void;
+}
+
+// 读取 slice 并应用 updater, 返回新的 bySessionId 增量
+function updateSlice(
+  state: ChatStoreState,
+  sessionId: string,
+  updater: (slice: ChatSessionSlice) => ChatSessionSlice,
+): Partial<ChatStoreState> {
+  const current = state.bySessionId[sessionId] ?? EMPTY_SLICE;
+  const next = updater(current);
+  return { bySessionId: { ...state.bySessionId, [sessionId]: next } };
 }
 
 export const useChatStore = create<ChatStoreState>()(
   devtools(
-    (set, get) => ({
-      messages: [],
-      isWorking: false,
-      workingToolName: "",
-      pendingApprovals: [],
-      quotedMessage: null,
+    (set) => ({
+      bySessionId: {},
 
-      appendAssistantText: (text) => {
-        const { messages } = get();
-        const lastMsg = messages[messages.length - 1];
-        if (lastMsg && lastMsg.role === "assistant" && lastMsg.isPartial) {
-          set({
-            messages: messages.map((m, i) =>
-              i === messages.length - 1 ? { ...m, text: m.text + text } : m,
-            ),
-          });
-        } else {
-          const newMsg: ChatMessage = {
-            id: `assistant-${Date.now()}`,
-            role: "assistant",
-            text,
-            isPartial: true,
-            timestamp: Date.now(),
-            toolCalls: [],
-          };
-          set({ messages: [...messages, newMsg] });
-        }
-      },
-
-      addUserMessage: (message) =>
-        set((state) => ({ messages: [...state.messages, message] })),
-
-      markTurnComplete: () =>
-        set((state) => ({
-          messages: state.messages.map((m) =>
-            m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
-          ),
-          isWorking: false,
-          workingToolName: "",
-          pendingApprovals: [],
-        })),
-
-      addToolCall: (messageId, toolCall) =>
-        set((state) => ({
-          messages: state.messages.map((m) =>
-            m.id === messageId
-              ? { ...m, toolCalls: [...m.toolCalls, toolCall] }
-              : m,
-          ),
-        })),
-
-      updateToolResult: (messageId, toolIndex, output) =>
-        set((state) => ({
-          messages: state.messages.map((m) =>
-            m.id === messageId
-              ? {
-                  ...m,
-                  toolCalls: m.toolCalls.map((tc, i) =>
-                    i === toolIndex ? { ...tc, output } : tc,
-                  ),
-                }
-              : m,
-          ),
-        })),
-
-      toggleToolCollapse: (messageId, toolIndex) =>
-        set((state) => ({
-          messages: state.messages.map((m) =>
-            m.id === messageId
-              ? {
-                  ...m,
-                  toolCalls: m.toolCalls.map((tc, i) =>
-                    i === toolIndex ? { ...tc, collapsed: !tc.collapsed } : tc,
-                  ),
-                }
-              : m,
-          ),
-        })),
-
-      addApprovalRequest: (request) =>
-        set((state) => ({
-          pendingApprovals: [...state.pendingApprovals, request],
-        })),
-
-      updateApprovalStatus: (requestId, status) =>
-        set((state) => ({
-          pendingApprovals: state.pendingApprovals.map((a) =>
-            a.requestId === requestId ? { ...a, status } : a,
-          ),
-        })),
-
-      setWorking: (isWorking) =>
-        set((state) => ({
-          isWorking,
-          workingToolName: isWorking ? state.workingToolName : "",
-        })),
-
-      setWorkingTool: (toolName) => set({ workingToolName: toolName }),
-
-      clearMessages: () => set({ messages: [], pendingApprovals: [] }),
-
-      setQuote: (quote) => set({ quotedMessage: quote }),
-
-      clearQuote: () => set({ quotedMessage: null }),
-
-      loadHistory: (historyMessages) =>
-        set((state) => ({
-          messages: [
-            ...historyMessages.map((m, i) => ({
-              id: `history-${i}`,
-              role: m.role,
-              text: m.text,
-              isPartial: false,
-              timestamp: m.timestamp || 0,
+      appendAssistantText: (sessionId, text) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const last = slice.messages[slice.messages.length - 1];
+            if (last && last.role === "assistant" && last.isPartial) {
+              const updated = { ...last, text: last.text + text };
+              return { ...slice, messages: [...slice.messages.slice(0, -1), updated] };
+            }
+            const newMsg: ChatMessage = {
+              id: `${sessionId}-assistant-${Date.now()}`,
+              role: "assistant",
+              text,
+              isPartial: true,
+              timestamp: Date.now(),
               toolCalls: [],
-            })),
-            ...state.messages,
-          ],
-        })),
+            };
+            return { ...slice, messages: [...slice.messages, newMsg] };
+          }),
+        ),
+
+      addUserMessage: (sessionId, message) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: [...slice.messages, message],
+          })),
+        ),
+
+      markTurnComplete: (sessionId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: slice.messages.map((m) =>
+              m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
+            ),
+            isWorking: false,
+            workingToolName: "",
+            pendingApprovals: [],
+          })),
+        ),
+
+      addToolCall: (sessionId, messageId, toolCall) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: slice.messages.map((m) =>
+              m.id === messageId ? { ...m, toolCalls: [...m.toolCalls, toolCall] } : m,
+            ),
+          })),
+        ),
+
+      updateToolResult: (sessionId, messageId, toolIndex, output) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: slice.messages.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    toolCalls: m.toolCalls.map((tc, i) =>
+                      i === toolIndex ? { ...tc, output } : tc,
+                    ),
+                  }
+                : m,
+            ),
+          })),
+        ),
+
+      toggleToolCollapse: (sessionId, messageId, toolIndex) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: slice.messages.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    toolCalls: m.toolCalls.map((tc, i) =>
+                      i === toolIndex ? { ...tc, collapsed: !tc.collapsed } : tc,
+                    ),
+                  }
+                : m,
+            ),
+          })),
+        ),
+
+      addApprovalRequest: (sessionId, request) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            pendingApprovals: [...slice.pendingApprovals, request],
+          })),
+        ),
+
+      updateApprovalStatus: (sessionId, requestId, status) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            pendingApprovals: slice.pendingApprovals.map((a) =>
+              a.requestId === requestId ? { ...a, status } : a,
+            ),
+          })),
+        ),
+
+      setWorking: (sessionId, isWorking) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            isWorking,
+            workingToolName: isWorking ? slice.workingToolName : "",
+          })),
+        ),
+
+      setWorkingTool: (sessionId, toolName) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, workingToolName: toolName })),
+        ),
+
+      setQuotedMessage: (sessionId, quote) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, quotedMessage: quote })),
+        ),
+
+      setInputDraft: (sessionId, draft) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft })),
+        ),
+
+      moveInputHistoryCursor: (sessionId, delta) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const historyLen = slice.messages.filter((m) => m.role === "user").length;
+            const raw = slice.inputHistoryCursor + delta;
+            const clamped = Math.max(-1, Math.min(raw, historyLen - 1));
+            return { ...slice, inputHistoryCursor: clamped };
+          }),
+        ),
+
+      resetInputHistoryCursor: (sessionId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, inputHistoryCursor: -1 })),
+        ),
+
+      loadHistory: (sessionId, historyMessages) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: [
+              ...historyMessages.map((m, i) => ({
+                id: `history-${sessionId}-${i}`,
+                role: m.role,
+                text: m.text,
+                isPartial: false,
+                timestamp: m.timestamp || 0,
+                toolCalls: [],
+              })),
+              ...slice.messages,
+            ],
+          })),
+        ),
+
+      clearSession: (sessionId) =>
+        set((state) => {
+          const next = { ...state.bySessionId };
+          delete next[sessionId];
+          return { bySessionId: next };
+        }),
+
+      clearAllSessions: () => set({ bySessionId: {} }),
     }),
     { name: "chat-store" },
   ),
