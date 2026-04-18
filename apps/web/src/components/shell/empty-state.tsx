@@ -1,13 +1,10 @@
-// 统一空状态容器，variant 决定标题/正文/可选 CTA 的组合
-// 文案源自 10-UI-SPEC.md Copywriting Contract，不允许本组件自由发挥
+// 统一空状态容器, 桌面主 panel 的"入场类"空态走 BrandHero, 这里只保留边缘/下钻场景:
+//   no-proxy     — 移动端 ProxySwitcher layout=page 列表空
+//   no-session   — ChatPage 未拿到 :id 的 fallback (异常导航)
+//   no-messages  — 会话内消息为空
 import type { ReactNode } from "react";
 
-type Variant =
-  | "no-proxy"
-  | "no-proxy-selected"
-  | "no-session-yet"
-  | "no-session"
-  | "no-messages";
+type Variant = "no-proxy" | "no-session" | "no-messages";
 
 interface EmptyStateProps {
   variant: Variant;
@@ -17,19 +14,11 @@ interface EmptyStateProps {
 const COPY: Record<Variant, { heading: string; body: string }> = {
   "no-proxy": {
     heading: "尚未连接 Proxy",
-    body: "在本地运行 cc-anywhere 后，它会出现在这里。查看安装指引 →",
-  },
-  "no-proxy-selected": {
-    heading: "请先选择 Proxy",
-    body: "从左上角选择一个本地代理后，再创建或查看会话。",
-  },
-  "no-session-yet": {
-    heading: "暂无会话",
-    body: "本地启动 cc-anywhere，或远程新建会话。",
+    body: "在电脑上启动 cc-anywhere。",
   },
   "no-session": {
-    heading: "选择一个会话",
-    body: "从左侧列表点击一项进入对话。",
+    heading: "没有选中的会话",
+    body: "",
   },
   "no-messages": {
     heading: "开始对话",

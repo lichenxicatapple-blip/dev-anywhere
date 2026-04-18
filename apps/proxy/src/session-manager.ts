@@ -9,6 +9,7 @@ export interface SessionInfo {
   mode: "pty" | "json";
   state: SessionState;
   createdAt: number;
+  updatedAt: number;
   name?: string;
   cwd: string;
   claudeSessionId?: string;
@@ -61,11 +62,13 @@ export class SessionManager {
   }
 
   createSession(mode: "pty" | "json", cwd: string, pid: number, name?: string, id?: string): SessionInfo {
+    const now = Date.now();
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
       state: SessionState.IDLE,
-      createdAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       cwd,
       pid,
       ...(name !== undefined ? { name } : {}),
@@ -99,6 +102,7 @@ export class SessionManager {
     }
     const oldState = session.state;
     session.state = newState;
+    session.updatedAt = Date.now();
     this.save();
     logger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");
   }
@@ -220,6 +224,9 @@ export class SessionManager {
     }
     for (const item of parsed) {
       const info = item as SessionInfo;
+      if (info.updatedAt === undefined) {
+        info.updatedAt = info.createdAt;
+      }
       if (info.state === SessionState.TERMINATED) {
         this.onSessionRemoved?.(info.id);
         continue;

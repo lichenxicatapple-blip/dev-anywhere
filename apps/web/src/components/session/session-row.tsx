@@ -14,10 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
-
-// SessionInfo 可选字段扩展：部分来源（如本地新建）会提供 lastActive 时间戳
-// shared schema 当前不含 lastActive，但 row 侧必须防御式读取
-type SessionWithLastActive = SessionInfo & { lastActive?: number };
+import { formatSessionName } from "@/lib/format-session-name";
 
 interface SessionRowProps {
   session: SessionInfo;
@@ -48,12 +45,17 @@ function StateDot({ state }: { state: SessionInfo["state"] }) {
 }
 
 export function SessionRow({ session, selected, onClick, onTerminate }: SessionRowProps) {
-  const lastActive = (session as SessionWithLastActive).lastActive;
+  const lastActive = session.lastActive;
+  const displayName =
+    formatSessionName(session.name) === "New Session"
+      ? session.sessionId.slice(0, 8)
+      : formatSessionName(session.name);
+  const hasMeta = !!session.mode || lastActive !== undefined;
   return (
     <li
       className={cn(
-        "relative flex items-center gap-2 px-3 w-full min-w-0 transition-colors",
-        "min-h-[44px] md:h-9 md:min-h-0",
+        "relative flex items-center gap-2 px-4 py-2 w-full min-w-0 transition-colors",
+        "min-h-[44px]",
         "hover:bg-accent",
         selected && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
       )}
@@ -70,21 +72,25 @@ export function SessionRow({ session, selected, onClick, onTerminate }: SessionR
       <button
         type="button"
         onClick={onClick}
-        className="flex items-center gap-2 flex-1 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+        className="flex flex-col gap-1 flex-1 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
         aria-pressed={selected}
       >
-        <StateDot state={session.state} />
-        <span className="text-sm font-normal truncate flex-1">
-          {session.name || session.sessionId.slice(0, 8)}
+        <span className="flex items-center gap-2 min-w-0">
+          <StateDot state={session.state} />
+          <span className="text-sm font-normal truncate flex-1">{displayName}</span>
         </span>
-        {session.mode && (
-          <Badge variant="secondary" className="font-mono text-xs uppercase shrink-0">
-            {session.mode}
-          </Badge>
-        )}
-        {lastActive !== undefined && (
-          <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-            {formatRelativeTime(lastActive)}
+        {hasMeta && (
+          <span className="flex items-center gap-2">
+            {session.mode && (
+              <Badge variant="secondary" className="font-mono text-xs uppercase shrink-0">
+                {session.mode}
+              </Badge>
+            )}
+            {lastActive !== undefined && (
+              <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
+                {formatRelativeTime(lastActive)}
+              </span>
+            )}
           </span>
         )}
       </button>
