@@ -1,5 +1,4 @@
-// InputBar 纯辅助函数, 从 apps/feishu/src/components/input-bar/index.tsx L15-L69 移植
-// 无 UI 依赖, 仅字符串状态机与布尔判断
+// InputBar 纯辅助函数: 字符串状态机与布尔判断, 无 UI 依赖
 
 export type PickerMode = "none" | "slash" | "file";
 

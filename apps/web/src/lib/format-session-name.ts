@@ -1,4 +1,4 @@
-// 格式化 session 名称：将长路径截断为易读的短路径 (移植自 feishu/src/utils/format-session-name)
+// 格式化 session 名称：将长路径截断为易读的短路径
 // ~/workspace/cc_anywhere/apps/proxy → ~/…/apps/proxy
 // ~/my-project → ~/my-project
 // /tmp/test → /tmp/test

@@ -1,4 +1,4 @@
-// 品牌打字机动画 (移植自 feishu/src/components/typewriter)
+// 品牌打字机动画
 // 状态机: typing -> paused -> deleting -> waiting -> typing(下一条)
 import { useEffect, useRef, useState } from "react";
 

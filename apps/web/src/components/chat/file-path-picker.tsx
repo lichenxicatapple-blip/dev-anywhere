@@ -48,7 +48,7 @@ function extractPath(filter: string, mode: "insert" | "select"): string {
   return lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : "";
 }
 
-// 相对路径 (./, apps/, apps/feishu/) + cwd 拼成绝对路径
+// 相对路径 (./, apps/, apps/web/) + cwd 拼成绝对路径
 // 绝对路径 (/Users/...) 直接用, 避免 select 模式被错误拼到 cwd 下
 // 空 / "./" → cwd; 末尾清斜杠避免 // 双斜杠; 前缀 "./" 清掉
 function toAbsolutePath(cwd: string, relPath: string): string {
