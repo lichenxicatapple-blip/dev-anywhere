@@ -14,6 +14,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
+import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +36,8 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
+  // iOS/Android 软键盘高度: 用 paddingBottom 把整个 flex-col 列上挤, flex-1 min-h-0 的 PTY/JSON 区会同步缩短, 底部气泡/PTY 尾行自动跟 InputBar 一起挪到键盘之上
+  const kbOffset = useVisualViewportBottomOffset();
 
   // 会话资源 (slash 命令列表 + @ 文件树) 按 session 请求:
   // proxy 侧按 session.cwd 推 command_list_push + file_tree_push, 不请求就拿不到数据
@@ -60,7 +63,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             : "idle";
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="flex flex-col h-full"
+      style={{ paddingBottom: kbOffset }}
+      data-keyboard-offset={kbOffset}
+    >
       <ChatHeader sessionId={id} />
       <StatusLine state={statusState} />
       <div className="flex-1 min-h-0">

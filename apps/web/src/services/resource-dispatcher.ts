@@ -52,6 +52,9 @@ export function registerResourceDispatcher(): () => void {
       case "file_tree_push":
         handleFileTreePush(msg);
         break;
+      case "proxy_info":
+        useFileStore.getState().setHomePath(msg.homePath);
+        break;
       default:
         break;
     }

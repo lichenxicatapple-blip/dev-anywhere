@@ -10,7 +10,6 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import {
   cleanupDeletedToken,
   computeSendDisabled,
@@ -68,7 +67,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     (s) => s.sessions.find((x) => x.sessionId === sessionId)?.state,
   );
   const updateSessionState = useSessionStore((s) => s.updateSessionState);
-  const bottomOffset = useVisualViewportBottomOffset();
   // 桌面 placeholder 带物理键盘快捷键提示, 手机软键盘上没 Shift / 方向键, 且 320px 会折两行
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
@@ -244,7 +242,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   return (
     <div
       className="relative w-full"
-      style={{ transform: `translateY(-${bottomOffset}px)` }}
       data-slot="input-bar"
       data-mode={mode}
     >

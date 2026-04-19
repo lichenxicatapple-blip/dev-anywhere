@@ -24,6 +24,8 @@ interface AppStoreState {
   selectedProxyId: string | null;
   selectedProxyName: string | null;
   proxies: ProxyInfo[];
+  // 首次 proxy_list_response 到达前为 false; WS 断开回退 false, 区分"加载中"与"真的没有 proxy"
+  proxyListLoaded: boolean;
   clientId: string;
   relayUrl: string;
   // PTY 终端 xterm 字号自适应容器：缩字号铺满视口 vs 保 14 字号允许滚动
@@ -37,6 +39,7 @@ interface AppStoreState {
   setRelayUrl: (url: string) => void;
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
+  resetProxyListLoaded: () => void;
   setPtyAutoscale: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
@@ -72,6 +75,7 @@ export const useAppStore = create<AppStoreState>()(
       selectedProxyId: null,
       selectedProxyName: null,
       proxies: [],
+      proxyListLoaded: false,
       clientId: loadClientId(),
       relayUrl: "",
       ptyAutoscale: localStorage.getItem("cc_ptyAutoscale") === "on",
@@ -94,7 +98,8 @@ export const useAppStore = create<AppStoreState>()(
             : get().phaseBeforeDisconnect;
         set({ phase, phaseBeforeDisconnect });
       },
-      setProxies: (proxies) => set({ proxies }),
+      setProxies: (proxies) => set({ proxies, proxyListLoaded: true }),
+      resetProxyListLoaded: () => set({ proxyListLoaded: false }),
       transitionToPhase: (next) => {
         const prev = get().phase;
         cleanStorageForPhaseTransition(prev, next);

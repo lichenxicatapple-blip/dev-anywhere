@@ -204,6 +204,14 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     data: z.string(),
   }),
 
+  // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
+  // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
+  z.object({ type: z.literal("proxy_info_request") }),
+  z.object({
+    type: z.literal("proxy_info"),
+    homePath: z.string(),
+  }),
+
   // 远程创建 JSON 会话，client -> proxy -> response
   z.object({ type: z.literal("session_create"), cwd: z.string(), resumeSessionId: z.string().optional() }),
   z.object({

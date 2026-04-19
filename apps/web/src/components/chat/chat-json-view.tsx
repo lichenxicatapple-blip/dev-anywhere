@@ -10,6 +10,7 @@ import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { useFollowOutput } from "@/hooks/use-follow-output";
+import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { EmptyState } from "@/components/shell/empty-state";
 import { wsManagerRef } from "@/hooks/use-relay-setup";
 
@@ -34,6 +35,20 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
+  // 键盘弹起/收起会改变滚动容器 clientHeight, 若用户本来就在底部则自动继续贴底; 离底阅读旧消息时不打断
+  const kbOffset = useVisualViewportBottomOffset();
+  const isAtBottomSnapshot = useRef(isAtBottom);
+  useEffect(() => {
+    isAtBottomSnapshot.current = isAtBottom;
+  }, [isAtBottom]);
+  useEffect(() => {
+    if (!scrollEl || !isAtBottomSnapshot.current) return;
+    // 等布局完成再 pin: paddingBottom change -> flex-1 收缩 -> scrollHeight 更新在同一帧末, 延后一拍
+    const raf = requestAnimationFrame(() => {
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [kbOffset, scrollEl]);
 
   // 订阅 session + 拉取历史消息: 必须等 WS 连接 + proxy 已绑定 (relay NOT_BOUND 会丢请求)
   // 直接 URL 进入 /chat/:id 时, 本 effect 会在 connected/proxyOnline 变 true 后重放

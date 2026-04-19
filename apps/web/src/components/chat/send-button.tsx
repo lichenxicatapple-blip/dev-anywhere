@@ -33,6 +33,7 @@ export function SendButton({
       <Button
         type="button"
         size="icon"
+        variant="secondary"
         onClick={handleStop}
         aria-label="停止响应"
         data-slot="send-button"

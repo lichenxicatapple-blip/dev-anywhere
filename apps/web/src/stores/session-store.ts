@@ -5,6 +5,8 @@ import type { SessionInfo, HistorySession } from "@cc-anywhere/shared";
 
 interface SessionStoreState {
   sessions: SessionInfo[];
+  // 首次 session_list envelope 到达前为 false; WS 断开或切换 proxy 时回退 false, 区分"加载中"与"真的没有会话"
+  sessionListLoaded: boolean;
   historySessions: HistorySession[];
   currentSessionId: string | null;
   currentSessionMode: "pty" | "json" | null;
@@ -31,12 +33,13 @@ export const useSessionStore = create<SessionStoreState>()(
   devtools(
     (set, get) => ({
       sessions: [],
+      sessionListLoaded: false,
       historySessions: [],
       currentSessionId: null,
       currentSessionMode: null,
       ptyTitles: {},
 
-      setSessions: (sessions) => set({ sessions }),
+      setSessions: (sessions) => set({ sessions, sessionListLoaded: true }),
       setCurrentSession: (sessionId, mode) =>
         set({ currentSessionId: sessionId, currentSessionMode: mode }),
       addSession: (session) =>

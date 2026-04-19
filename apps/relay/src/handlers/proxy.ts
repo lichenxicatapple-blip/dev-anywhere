@@ -8,6 +8,7 @@ const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
 
 // proxy → client 透传的控制消息类型，relay 不处理内容，直接转发
 export const PROXY_TO_CLIENT_TYPES = new Set([
+  "proxy_info",
   "terminal_title",
   "terminal_resize",
   "pty_state",

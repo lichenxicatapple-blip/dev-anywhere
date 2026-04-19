@@ -12,6 +12,7 @@ describe("PROXY_TO_CLIENT_TYPES completeness", () => {
   // proxy 侧所有通过 relayConnection.sendRaw 发出的 control 消息类型
   // terminal_frame 已移除：PTY 数据通过 binary 帧传输，不再走 JSON control 消息
   const EXPECTED_TYPES = [
+    "proxy_info",
     "terminal_title",
     "terminal_resize",
     "dir_list_response",

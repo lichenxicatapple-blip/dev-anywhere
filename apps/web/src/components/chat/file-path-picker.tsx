@@ -66,14 +66,18 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
     ref,
   ) {
     const tree = useFileStore((s) => s.tree);
-    const cwd = useFileStore((s) => s.cwd);
+    const sessionCwd = useFileStore((s) => s.cwd);
+    const homePath = useFileStore((s) => s.homePath);
+    // insert 模式在 Chat 页, 锚到 session cwd (@ 后的相对路径拼在 session cwd 下)
+    // select 模式给新建会话用, 那会儿还没有 session, 锚到 $HOME
+    const baseCwd = mode === "insert" ? sessionCwd : (sessionCwd || homePath);
     const currentPath = useMemo(
       () => extractPath(filter, mode) || "./",
       [filter, mode],
     );
     const absolutePath = useMemo(
-      () => toAbsolutePath(cwd, currentPath),
-      [cwd, currentPath],
+      () => toAbsolutePath(baseCwd, currentPath),
+      [baseCwd, currentPath],
     );
     const query = useMemo(() => extractQuery(filter, mode), [filter, mode]);
 

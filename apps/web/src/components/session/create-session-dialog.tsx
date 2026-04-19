@@ -1,4 +1,5 @@
-// 新建会话 Dialog, 字段: name (可选) / mode (JSON|PTY) / CWD
+// 新建会话 Dialog, 字段: name (可选) / CWD
+// 只能创建 JSON 会话; PTY 需要本地真实终端宿主, Web 无法远程创建
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
 // 不包含 permission mode / resume —— CONTEXT D-30 移到 Chat 会话设置菜单
 import { useEffect, useState } from "react";
@@ -6,6 +7,7 @@ import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
+import { useFileStore } from "@/stores/file-store";
 import { showErrorToast } from "@/components/toast";
 import {
   Dialog,
@@ -24,10 +26,18 @@ interface CreateSessionDialogProps {
 
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"json" | "pty">("json");
   const [cwd, setCwd] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const homePath = useFileStore((s) => s.homePath);
+  const mode = "json" as const;
+
+  // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
+  useEffect(() => {
+    if (open && !cwd && homePath) {
+      setCwd(homePath);
+    }
+  }, [open, homePath, cwd]);
 
   // 只在提交态订阅 session_create_response，避免跨实例竞争
   // 卸载时强制清理订阅，防止对话框多次打开/关闭泄漏 handler
@@ -101,31 +111,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               placeholder="自动生成"
             />
           </label>
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm">模式</legend>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 text-sm font-normal cursor-pointer">
-                <input
-                  type="radio"
-                  name="mode"
-                  value="json"
-                  checked={mode === "json"}
-                  onChange={() => setMode("json")}
-                />
-                JSON
-              </label>
-              <label className="flex items-center gap-2 text-sm font-normal cursor-pointer">
-                <input
-                  type="radio"
-                  name="mode"
-                  value="pty"
-                  checked={mode === "pty"}
-                  onChange={() => setMode("pty")}
-                />
-                PTY
-              </label>
-            </div>
-          </fieldset>
           <label className="flex flex-col gap-2">
             <span className="text-sm">工作目录</span>
             <input

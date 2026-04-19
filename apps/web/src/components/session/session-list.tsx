@@ -6,7 +6,7 @@
 // 本 Plan 只替换 body；新增 export 或改 props 签名会破坏与 10-02 的 W3 并行，禁止
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,12 @@ interface SessionListProps {
 
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
+  const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+  const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
+  // 冷启动刷新时, proxy_list / session_list envelope 均未到, 显示 spinner 避免 no-proxy / no-session 一闪而过
+  const isLoading = !proxyListLoaded || (hasProxy && !sessionListLoaded);
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   // 每分钟推一次 now，让 SessionRow 里的 "N 分钟前" 跟着走；store 不动也能滚
@@ -52,10 +56,18 @@ export function SessionList({ layout }: SessionListProps) {
       return (
         <>
           <div className="px-4 py-3 text-sm text-muted-foreground/70">
-            {hasProxy ? "暂无会话" : "请先选择 Proxy"}
+            {isLoading ? "连接中..." : hasProxy ? "暂无会话" : "请先选择 Proxy"}
           </div>
           <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         </>
+      );
+    }
+    if (isLoading) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          <p className="text-sm">连接中...</p>
+        </div>
       );
     }
     return (

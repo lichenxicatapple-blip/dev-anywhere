@@ -28,18 +28,26 @@ function loadFontCSS(relayUrl: string): void {
   document.head.appendChild(link);
 }
 
+// 将用户配置的 relayUrl 规整为 /client WebSocket 端点:
+// 同域部署默认取 window.location.origin (https://...), 需要转 ws scheme 并补 /client 路径
+function toClientWsUrl(relayUrl: string): string {
+  const withWsScheme = relayUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const trimmed = withWsScheme.replace(/\/$/, "");
+  if (/\/client$/.test(trimmed)) return trimmed;
+  return `${trimmed.replace(/\/proxy$/, "")}/client`;
+}
+
 export function useRelaySetup(): void {
   const wsRef = useRef<WebSocketManager | null>(null);
   const relayRef = useRef<RelayClient | null>(null);
   const timersRef = useRef<Timers | null>(null);
 
   useEffect(() => {
-    // D-18: relay URL 按优先级解析 localStorage > VITE_RELAY_URL > window.location.origin
-    const stored = localStorage.getItem("cc_relayUrl");
-    const envUrl = import.meta.env.VITE_RELAY_URL as string | undefined;
-    const relayUrl = stored || envUrl || window.location.origin;
+    // dev 经 vite.config.ts server.proxy 把 /client /fonts 反代到 localhost:3100, prod 同域部署走 nginx 分流
+    const relayUrl = window.location.origin;
     useAppStore.getState().setRelayUrl(relayUrl);
     loadFontCSS(relayUrl);
+    const wsUrl = toClientWsUrl(relayUrl);
 
     const ws = new WebSocketManager();
     wsRef.current = ws;
@@ -80,12 +88,12 @@ export function useRelaySetup(): void {
         wsRef.current &&
         !wsRef.current.isConnected()
       ) {
-        wsRef.current.connect(relayUrl);
+        wsRef.current.connect(wsUrl);
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
 
-    ws.connect(relayUrl);
+    ws.connect(wsUrl);
 
     return () => {
       unsubStatus();

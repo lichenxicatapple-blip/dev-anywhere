@@ -6,6 +6,7 @@ import { parseMessage, routeClientMessage, handleReplayRequest } from "../router
 
 // client → proxy 透传的控制消息类型，relay 不处理内容，直接转发
 const CLIENT_TO_PROXY_TYPES = new Set([
+  "proxy_info_request",
   "dir_list_request",
   "dir_create_request",
   "session_create",

@@ -238,8 +238,10 @@ function connectToWorker(
             logger.info({ sessionId, pid: msg.pid }, "Worker ready");
             break;
           case "worker_event":
-            // JSON 会话进入 WORKING；changeSessionState 在真正发生迁移时推 session_status envelope 给客户端
-            changeSessionState(sessionManager, relayConnection, sessionId, SessionState.WORKING);
+            // 不在此处改 session.state:
+            // Claude CLI 会在启动/连接阶段发 system init 之类的非 turn 事件,
+            // 若无条件转 WORKING 会导致新建会话立刻显示"停止"按钮并一直卡住.
+            // WORKING 的真正入口是 user_input (见下方 L812); result 事件由 forwardWorkerEvent 负责转 IDLE.
             // 将 worker 事件按 stream-json 语义路由到类型化 envelope / control message
             // event 结构参考 claude CLI stream-json: assistant / result / system / user
             if (relayConnection) {
@@ -816,6 +818,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           } else if (session.mode === "json") {
             const ws = workerSockets.get(parsed.sessionId);
             if (ws?.writable) {
+              // user_input 是 JSON turn 的唯一入口, 此刻就推 WORKING, 不再依赖 worker_event 的副作用
+              changeSessionState(sessionManager, relayConnection, parsed.sessionId, SessionState.WORKING);
               ws.write(serializeWorkerMsg({
                 type: "worker_input",
                 content: parsed.payload?.text ?? "",
@@ -892,7 +896,12 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           }
         }
         // 控制消息：dir_list_request, session_history_request, terminal_scroll_request
-        else if (parsed.type === "dir_list_request") {
+        else if (parsed.type === "proxy_info_request") {
+          relaySend!(JSON.stringify({
+            type: "proxy_info",
+            homePath: process.env.HOME || "/",
+          }));
+        } else if (parsed.type === "dir_list_request") {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "dir_create_request") {
           controlHandlers.handleDirCreateRequest({ path: parsed.path ?? "" });

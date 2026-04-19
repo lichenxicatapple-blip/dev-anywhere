@@ -6,7 +6,7 @@
 // 新增 export 或改 props 签名会破坏 sidebar.tsx 与 10-03 并行, 禁止
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { showErrorToast } from "@/components/toast";
@@ -24,6 +24,7 @@ interface ProxySwitcherProps {
 
 export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   const proxies = useAppStore((s) => s.proxies);
+  const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -57,6 +58,15 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   }
 
   if (layout === "page") {
+    // 冷启动/重连期间 WS 未回 proxy_list_response 前, proxies=[] 但不是"真的没有", 显示加载态避免空态一闪而过
+    if (!proxyListLoaded) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          <p className="text-sm">连接中...</p>
+        </div>
+      );
+    }
     if (proxies.length === 0) {
       return <EmptyState variant="no-proxy" />;
     }
