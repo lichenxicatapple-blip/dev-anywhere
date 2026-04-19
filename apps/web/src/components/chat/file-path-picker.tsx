@@ -102,7 +102,12 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
     }, [filteredEntries.length, index]);
 
     const listRef = useRef<HTMLUListElement>(null);
+    // 只有键盘 ↑↓ 改 index 时才滚动; 鼠标 hover 改 index 不滚,
+    // 否则贴边 item 被 hover 时会触发 scrollIntoView("nearest") 抖一下
+    const shouldScrollOnIndexChange = useRef(false);
     useEffect(() => {
+      if (!shouldScrollOnIndexChange.current) return;
+      shouldScrollOnIndexChange.current = false;
       const btn = listRef.current?.querySelector<HTMLElement>(
         `[data-entry-index="${index}"]`,
       );
@@ -115,10 +120,12 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
         handleKey(e) {
           if (filteredEntries.length === 0) return false;
           if (e.key === "ArrowDown") {
+            shouldScrollOnIndexChange.current = true;
             setIndex((i) => Math.min(filteredEntries.length - 1, i + 1));
             return true;
           }
           if (e.key === "ArrowUp") {
+            shouldScrollOnIndexChange.current = true;
             setIndex((i) => Math.max(0, i - 1));
             return true;
           }

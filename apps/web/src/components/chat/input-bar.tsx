@@ -270,11 +270,17 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
           mode="insert"
           filter={value.slice(value.lastIndexOf("@"))}
           onSelect={(path) => {
+            // 目录以 "/" 结尾: 不加空格, 让 picker 保持打开继续挑下一级
+            // 文件: 加空格关闭 picker, 并把最终 token 记入 insertedTokens 用于整 token 退格
+            const isDir = path.endsWith("/");
             const token = `@${path}`;
-            const newVal = value.replace(/@[^\s]*$/, `${token} `);
+            const newVal = value.replace(
+              /@[^\s]*$/,
+              isDir ? token : `${token} `,
+            );
             setInputDraft(sessionId, newVal);
             prevTextRef.current = newVal;
-            setInsertedTokens((prev) => [...prev, token]);
+            if (!isDir) setInsertedTokens((prev) => [...prev, token]);
             textareaRef.current?.focus();
           }}
         />
