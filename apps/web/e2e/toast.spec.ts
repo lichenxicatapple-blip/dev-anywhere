@@ -12,9 +12,10 @@ test.describe("Sonner toast — 挂载持久化", () => {
   // Sonner v2 延迟挂载 portal：触发一次 toast 后才会注入 [data-sonner-toaster] 节点。
   // 验证策略：beforeEach 触发一次 toast 以物化 portal；然后断言其始终存在。
   test.beforeEach(async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import("/src/components/toast.tsx");
-      mod.showToast("e2e-mount");
+    await page.evaluate(() => {
+      const hooks = window.__ccTest;
+      if (!hooks) throw new Error("window.__ccTest 未安装");
+      hooks.toast("e2e-mount");
     });
     await expect(
       page.locator("[data-sonner-toaster], section[aria-label^='Notifications']"),

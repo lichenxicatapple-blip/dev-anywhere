@@ -3,29 +3,14 @@ import type { Page } from "@playwright/test";
 import { BASE_URL, resetLocalState } from "./helpers";
 
 // 向 chat-store 注入 N 条消息, 使消息列表能触发滚动
+// 依赖 main.tsx 在 dev build 装的 window.__ccTest 钩子, 无需动态 import 源码
 async function seedMessages(page: Page, count: number): Promise<void> {
-  await page.evaluate(async (n: number) => {
-    const mod = await import("/src/stores/chat-store.ts");
-    const store = (
-      mod as unknown as {
-        useChatStore: { getState: () => Record<string, unknown> };
-      }
-    ).useChatStore.getState();
+  await page.evaluate((n: number) => {
+    const hooks = window.__ccTest;
+    if (!hooks) throw new Error("window.__ccTest 未安装, 检查 dev build 是否启用 installTestHooks");
     const sid = "fo-sess";
     for (let i = 0; i < n; i++) {
-      (
-        store.addUserMessage as (
-          sessionId: string,
-          m: {
-            id: string;
-            role: "user";
-            text: string;
-            isPartial: false;
-            timestamp: number;
-            toolCalls: unknown[];
-          },
-        ) => void
-      )(sid, {
+      hooks.chat.addUserMessage(sid, {
         id: `u-${i}`,
         role: "user",
         text: `User message ${i}`,
@@ -33,11 +18,8 @@ async function seedMessages(page: Page, count: number): Promise<void> {
         timestamp: Date.now() + i,
         toolCalls: [],
       });
-      (store.appendAssistantText as (sessionId: string, s: string) => void)(
-        sid,
-        `\nAsst ${i}\n`,
-      );
-      (store.markTurnComplete as (sessionId: string) => void)(sid);
+      hooks.chat.appendAssistantText(sid, `\nAsst ${i}\n`);
+      hooks.chat.markTurnComplete(sid);
     }
   }, count);
 }
@@ -161,26 +143,10 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
 
     // 追加新消息, 不 auto-follow (因为 isAtBottom=false)
-    await page.evaluate(async () => {
-      const mod = await import("/src/stores/chat-store.ts");
-      const store = (
-        mod as unknown as {
-          useChatStore: { getState: () => Record<string, unknown> };
-        }
-      ).useChatStore.getState();
-      (
-        store.addUserMessage as (
-          sessionId: string,
-          m: {
-            id: string;
-            role: "user";
-            text: string;
-            isPartial: false;
-            timestamp: number;
-            toolCalls: unknown[];
-          },
-        ) => void
-      )("fo-sess", {
+    await page.evaluate(() => {
+      const hooks = window.__ccTest;
+      if (!hooks) throw new Error("window.__ccTest 未安装");
+      hooks.chat.addUserMessage("fo-sess", {
         id: "new-while-away",
         role: "user",
         text: "new message arrived",
@@ -200,18 +166,11 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
   }) => {
     await scrollToBottom(page);
 
-    await page.evaluate(async () => {
-      const mod = await import("/src/stores/chat-store.ts");
-      const store = (
-        mod as unknown as {
-          useChatStore: { getState: () => Record<string, unknown> };
-        }
-      ).useChatStore.getState();
-      (store.appendAssistantText as (sessionId: string, s: string) => void)(
-        "fo-sess",
-        "\ntail streamed text\n",
-      );
-      (store.markTurnComplete as (sessionId: string) => void)("fo-sess");
+    await page.evaluate(() => {
+      const hooks = window.__ccTest;
+      if (!hooks) throw new Error("window.__ccTest 未安装");
+      hooks.chat.appendAssistantText("fo-sess", "\ntail streamed text\n");
+      hooks.chat.markTurnComplete("fo-sess");
     });
     await page.waitForTimeout(300);
 
