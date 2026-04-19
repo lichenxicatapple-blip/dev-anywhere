@@ -4,17 +4,20 @@
 //
 // sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径（SessionList + CreateSessionButton 两个 export）
 // 本 Plan 只替换 body；新增 export 或改 props 签名会破坏与 10-02 的 W3 并行，禁止
+//
+// 历史会话区 (HistoryList) 渲染在活跃列表下方, 即使无活跃会话但有历史时也可见,
+// 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useState } from "react";
 import { useNavigate, useMatch } from "react-router";
 import { Plus, Loader2 } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
 import { SessionRow } from "./session-row";
+import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 
@@ -25,6 +28,7 @@ interface SessionListProps {
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
+  const historyCount = useSessionStore((s) => s.historySessions.length);
   // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
   const chatMatch = useMatch("/chat/:id");
   const activeSessionId = chatMatch?.params.id ?? null;
@@ -52,7 +56,11 @@ export function SessionList({ layout }: SessionListProps) {
     relay?.sendControl({ type: "session_terminate", sessionId });
   }
 
-  if (sessions.length === 0) {
+  const hasActive = sessions.length > 0;
+  const hasHistory = historyCount > 0;
+
+  // 活跃 + 历史均为空: sidebar 给文案, page 给 EmptyState
+  if (!hasActive && !hasHistory) {
     if (layout === "sidebar") {
       return (
         <>
@@ -91,7 +99,7 @@ export function SessionList({ layout }: SessionListProps) {
     );
   }
 
-  const listElement = (
+  const activeListElement = hasActive ? (
     <ul role="list" className="flex flex-col w-full min-w-0">
       {sessions.map((s) => (
         <SessionRow
@@ -104,12 +112,19 @@ export function SessionList({ layout }: SessionListProps) {
         />
       ))}
     </ul>
-  );
+  ) : null;
+
+  const historyElement = hasHistory ? <HistoryList now={now} /> : null;
 
   if (layout === "page") {
     return (
       <div className="flex flex-col h-full">
-        <ScrollArea className="flex-1">{listElement}</ScrollArea>
+        {/* 用原生 overflow-y-auto 而不是 radix ScrollArea: 后者内部 `display:table` wrapper */}
+        {/* 会把 history 行按内容宽度撑到 800+px, 使 `truncate` 完全失效 */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+          {activeListElement}
+          {historyElement}
+        </div>
         <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] border-t border-border">
           <Button className="w-full" onClick={() => setCreateOpen(true)}>
             <Plus aria-hidden="true" />
@@ -125,7 +140,10 @@ export function SessionList({ layout }: SessionListProps) {
   // 直接用 overflow-y-auto 而非 ScrollArea，避免 radix ScrollArea 内部 table-wrapper 打破 truncate 链路
   return (
     <>
-      <div className="h-full overflow-y-auto">{listElement}</div>
+      <div className="h-full overflow-y-auto">
+        {activeListElement}
+        {historyElement}
+      </div>
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
