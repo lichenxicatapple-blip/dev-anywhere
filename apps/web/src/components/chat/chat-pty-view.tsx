@@ -1,10 +1,8 @@
-// PTY 模式 Chat 视图：自包含 xterm + 内联 status 条 + 浮层 ToolApproval 占位
-// 输入条和语义功能面板由 Plan 10-04b 在 chat.tsx 作为 sibling 组合，不在此处引入
-// xterm 配置通过 createXtermTerminal 与 /pty-test 保持一致（Phase 9 锁定）
-//
-// 说明：正式版 StatusLine 与 ToolApprovalCard 由 Plan 10-04 创建，
-// 本文件在 Wave 4 暂用内联 minimal 实现以避免跨 Plan 构造顺序耦合；
-// Plan 10-04b 接入 chat.tsx 时可选择替换为正式组件。
+// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条 + 浮层 ToolApproval 占位
+// 滚动交由浏览器原生: 外层 .pty-terminal (overflow-auto) 做 scrollable, spacer 撑出 buffer.length*cellH,
+// xterm 挂在 position:sticky 的 host. scroll 事件 -> term.scrollToLine(ydisp), term.onScroll -> 同步 scrollTop.
+// canvas 比容器高时 (autoscale off 手机竖屏常见), sticky release 阶段自然暴露 canvas 底部, 代替老 pinBottom.
+// 好处: touch/wheel/fling/momentum/edge bounce 全部走浏览器合成线程, 无 JS jank, 和原生 app 手感一致.
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { SerializeAddon } from "@xterm/addon-serialize";
@@ -19,15 +17,13 @@ interface ChatPtyViewProps {
 
 export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const serializeRef = useRef<SerializeAddon | null>(null);
   const [ready, setReady] = useState(false);
-  // "PTY 正在连接..." overlay 延迟 300ms 才展示：HMR remount 或快速重连通常 50~100ms 就拿到 snapshot，
-  // 不延迟会让每次热更新都闪一下遮罩
   const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
-  // subscribe 后持续 timeout 未收到 snapshot 即进入穷尽态：露出错误 + 手动重试按钮
   const [subscribeExhausted, setSubscribeExhausted] = useState(false);
-  // 手动重试触发器：点重试按钮 +1 让订阅 effect 重跑
   const [retryNonce, setRetryNonce] = useState(0);
   useEffect(() => {
     if (ready) {
@@ -37,9 +33,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     const t = setTimeout(() => setShowConnectingOverlay(true), 300);
     return () => clearTimeout(t);
   }, [ready]);
-  // 订阅 / 创建 xterm 必须等 WS 连接 + proxy 已绑定：
-  // useEffect 按 deepest-first 跑，子组件 effect 早于 App 的 useRelaySetup，
-  // 依赖 connected/proxyOnline 变 true 后重跑，否则 refs 为 null 会 early return 再也不重订阅
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
@@ -50,8 +43,8 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
 
   useEffect(() => {
     if (!connected || !proxyOnline) return;
-    const container = containerRef.current;
-    if (!container) return;
+    const host = xtermHostRef.current;
+    if (!host) return;
     let disposeFn: (() => void) | null = null;
     let unsubBinary: (() => void) | null = null;
     let unsubSnapshot: (() => void) | null = null;
@@ -59,7 +52,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     let cancelled = false;
 
     (async () => {
-      const result = await createXtermTerminal(container);
+      const result = await createXtermTerminal(host);
       if (cancelled) {
         result.dispose();
         return;
@@ -68,7 +61,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       serializeRef.current = result.serializeAddon;
       disposeFn = result.dispose;
 
-      // snapshot 到达前的 binary 帧先入 buffer，snapshot 还原后一次性 flush
       let snapshotApplied = false;
       const frameBuffer: Uint8Array[] = [];
 
@@ -84,7 +76,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         terminalRef.current?.write(data);
       });
 
-      // 订阅 snapshot 超时自愈：subscribe 发出后 3s 内没回 snapshot 就重发，最多重试 3 次
       const RETRY_DELAY_MS = 3000;
       const MAX_RETRIES = 3;
       let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,8 +106,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       unsubSnapshot = relay.onMessage((msg) => {
         const m = msg as Record<string, unknown>;
         if (m.sessionId !== sessionId) return;
-        // 本地 iTerm 尺寸变化 -> Claude CLI SIGWINCH -> proxy 广播 terminal_resize
-        // 客户端 xterm.resize 对齐新尺寸, 并重订阅拉新 snapshot 避免已渲染内容按旧 CUP 坐标堆叠
         if (m.type === "terminal_resize") {
           terminalRef.current?.resize(m.cols as number, m.rows as number);
           snapshotApplied = false;
@@ -156,48 +145,134 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     };
   }, [sessionId, connected, proxyOnline, retryNonce]);
 
-  // autoscale off 时 xterm 高度 > 容器会出现垂直溢出, 外层 overflow-auto 承担滚动.
-  // pin 到"最后非空行"而不是 scrollHeight: 竖屏 rows 远大于 Claude UI 占据行数时,
-  // Claude 把 UI 画在画布中段 (row 50~105), 画布最底几十行是空行, pinBottom 到
-  // scrollHeight 会盯着空行. 扫 buffer 取 lastNonEmpty 行底部对齐容器底
-  useEffect(() => {
-    if (!ready) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const pinBottom = (): void => {
-      const term = terminalRef.current;
-      const screen = el.querySelector<HTMLElement>(".xterm-screen");
-      if (!term || !screen || term.rows === 0) {
-        el.scrollTop = el.scrollHeight;
-        return;
-      }
-      const buffer = term.buffer.active;
-      let lastNonEmpty = 0;
-      for (let y = buffer.length - 1; y >= 0; y--) {
-        const line = buffer.getLine(y);
-        if (line && line.translateToString(true).trim() !== "") {
-          lastNonEmpty = y;
-          break;
-        }
-      }
-      const cellH = screen.clientHeight / term.rows;
-      el.scrollTop = Math.max(0, (lastNonEmpty + 1) * cellH - el.clientHeight);
-    };
-    pinBottom();
-    const ro = new ResizeObserver(pinBottom);
-    ro.observe(el);
-    for (const child of Array.from(el.children)) ro.observe(child);
-    return () => ro.disconnect();
-  }, [ready, ptyAutoscale]);
-
-  // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
-  // cols/rows 保持 snapshot 给的原值, CUP 坐标系与 proxy 1:1 不动.
-  // 关闭时复位字号 14, 由外层 overflow-auto 承担滚动
+  // 同步 spacer 尺寸 + scroll 双向绑定 + 初始 pin-bottom.
+  // 用一个 effect 统一管理生命周期, 避免多个 effect 各自持有 syncing 标志时互相打架.
   useEffect(() => {
     if (!ready) return;
     const container = containerRef.current;
+    const spacer = spacerRef.current;
+    const host = xtermHostRef.current;
     const term = terminalRef.current;
-    if (!container || !term) return;
+    if (!container || !spacer || !host || !term) return;
+
+    const getDims = (): { cellH: number; cellW: number } => {
+      const screen = host.querySelector<HTMLElement>(".xterm-screen");
+      if (!screen || term.rows === 0 || term.cols === 0) return { cellH: 0, cellW: 0 };
+      return {
+        cellH: screen.clientHeight / term.rows,
+        cellW: screen.clientWidth / term.cols,
+      };
+    };
+
+    // syncing 旗标: container.scroll -> term.scrollToLine 会触发 term.onScroll, 反向同步
+    // 需要抑制避免 feedback loop. ref 包起来让两边 handler 共享.
+    const syncing = { external: false, internal: false };
+
+    const updateSpacer = (): void => {
+      const { cellH, cellW } = getDims();
+      if (cellH === 0 || cellW === 0) return;
+      const buffer = term.buffer.active;
+      // H = buffer.length * cellH 恰好 = (buffer.length - rows) * cellH (scrollback) + rows * cellH (active buffer).
+      // 当 host 高于容器 (canvas 溢出), max scrollTop > release threshold, 后段 scrollTop 自然走 sticky release 暴露 canvas 底部.
+      spacer.style.height = `${buffer.length * cellH}px`;
+      // host 不在 flex 容器里, 需要显式 width/height 才能正确 sticky + 让 canvas 不被压扁
+      host.style.width = `${term.cols * cellW}px`;
+      host.style.height = `${term.rows * cellH}px`;
+      spacer.style.width = host.style.width;
+    };
+
+    const ydispToScrollTop = (ydisp: number): number => {
+      const { cellH } = getDims();
+      return ydisp * cellH;
+    };
+
+    const scrollToYdisp = (ydisp: number): void => {
+      syncing.internal = true;
+      try {
+        term.scrollToLine(ydisp);
+      } finally {
+        syncing.internal = false;
+      }
+    };
+
+    // scrollback 阶段 (sticky pinned) ydisp 只能整行切换, 每 cellH 才动一次像素粒度明显.
+    // 在 xterm 根 .xterm 上挂亚像素 translate 补偿 scrollTop 未满一行的残余, 满一行再 flush ydisp.
+    // target 选 .xterm (xterm-host 的第一级子): xterm 内部只动 .xterm 下面的 .xterm-screen, 不碰 .xterm 自己, 不会冲突.
+    // release 阶段 ydisp 已饱和, canvas 整体位移由浏览器做 sticky release, 无需 subpixel.
+    const applySubpixel = (px: number): void => {
+      const xtermRoot = host.querySelector<HTMLElement>(".xterm");
+      if (!xtermRoot) return;
+      xtermRoot.style.transform = px !== 0 ? `translate3d(0,${-px}px,0)` : "";
+    };
+
+    const onContainerScroll = (): void => {
+      if (syncing.external) return;
+      const { cellH } = getDims();
+      if (cellH === 0) return;
+      const buffer = term.buffer.active;
+      const maxYdisp = Math.max(0, buffer.length - term.rows);
+      const pinnedMaxScrollTop = maxYdisp * cellH;
+      let wantYdisp: number;
+      let subpixel: number;
+      if (container.scrollTop >= pinnedMaxScrollTop) {
+        // sticky release 阶段: ydisp 已饱和, 不做 subpixel
+        wantYdisp = maxYdisp;
+        subpixel = 0;
+      } else {
+        wantYdisp = Math.floor(container.scrollTop / cellH);
+        subpixel = container.scrollTop - wantYdisp * cellH;
+      }
+      applySubpixel(subpixel);
+      if (wantYdisp !== buffer.viewportY) {
+        scrollToYdisp(wantYdisp);
+      }
+    };
+
+    const onTermScroll = (): void => {
+      if (syncing.internal) return;
+      syncing.external = true;
+      try {
+        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY);
+        // 反向同步后清空 subpixel, 避免遗留
+        applySubpixel(0);
+      } finally {
+        syncing.external = false;
+      }
+    };
+
+    // 新数据到来时 buffer 可能增长, spacer 需要跟着长; xterm onRender 在每次渲染后触发
+    const onRender = (): void => {
+      updateSpacer();
+    };
+
+    updateSpacer();
+    // 初始 pin 到底: scrollTop = max 让 sticky release 同时把 canvas 底部 + active buffer 一起显露
+    container.scrollTop = container.scrollHeight;
+
+    container.addEventListener("scroll", onContainerScroll, { passive: true });
+    const dispScroll = term.onScroll(onTermScroll);
+    const dispRender = term.onRender(onRender);
+    // 容器尺寸变化 (侧栏开合 / 键盘弹起) 也要重算 spacer
+    const ro = new ResizeObserver(updateSpacer);
+    ro.observe(container);
+    ro.observe(host);
+
+    return () => {
+      container.removeEventListener("scroll", onContainerScroll);
+      dispScroll.dispose();
+      dispRender.dispose();
+      ro.disconnect();
+    };
+  }, [ready, ptyAutoscale]);
+
+  // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
+  // cols/rows 保持 snapshot 原值, 字号变会带动 cellH 变, 驱动 spacer 重算.
+  useEffect(() => {
+    if (!ready) return;
+    const host = xtermHostRef.current;
+    const container = containerRef.current;
+    const term = terminalRef.current;
+    if (!host || !container || !term) return;
 
     if (!ptyAutoscale) {
       if (term.options.fontSize !== 14) {
@@ -211,7 +286,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       const h = container.clientHeight;
       const { cols, rows } = term;
       if (!w || !h || !cols || !rows) return;
-      // monospace 经验常数: cell_w ≈ fontSize * 0.6, cell_h ≈ fontSize * 1.2
       const byWidth = w / cols / 0.6;
       const byHeight = h / rows / 1.2;
       const next = Math.max(8, Math.min(16, Math.floor(Math.min(byWidth, byHeight))));
@@ -230,9 +304,25 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 overflow-auto bg-[#1E1E1E] pt-2"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E]"
         data-slot="pty-terminal"
-      />
+      >
+        <div
+          ref={spacerRef}
+          style={{ position: "relative" }}
+          data-slot="pty-spacer"
+        >
+          <div
+            ref={xtermHostRef}
+            style={{
+              position: "sticky",
+              top: 0,
+              left: 0,
+            }}
+            data-slot="pty-host"
+          />
+        </div>
+      </div>
       {showConnectingOverlay && !subscribeExhausted && (
         <div
           className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-card/60 text-xs text-muted-foreground"
