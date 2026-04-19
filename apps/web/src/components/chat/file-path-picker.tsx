@@ -165,9 +165,6 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
 
     return (
       <div className={containerClass} data-slot="file-path-picker" data-mode={mode}>
-        <div className="text-xs text-muted-foreground px-3 py-1 border-b border-border font-mono">
-          {currentPath}
-        </div>
         <div className="max-h-60 overflow-y-auto overscroll-contain">
           {filteredEntries.length === 0 ? (
             <div className="px-3 py-2 text-xs text-muted-foreground">

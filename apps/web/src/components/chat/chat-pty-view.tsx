@@ -1,4 +1,5 @@
-// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条 + 浮层 ToolApproval 占位
+// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条
+// 工具审批: PTY 模式不做结构化审批 UI (xterm 原生 TUI 已完成交互), 仅由 chat.tsx 顶部 hint bar 提示
 // 滚动交由浏览器原生: 外层 .pty-terminal (overflow-auto) 做 scrollable, spacer 撑出 buffer.length*cellH,
 // xterm 挂在 position:sticky 的 host. scroll 事件 -> term.scrollToLine(ydisp), term.onScroll -> 同步 scrollTop.
 // canvas 比容器高时 (autoscale off 手机竖屏常见), sticky release 阶段自然暴露 canvas 底部, 代替老 pinBottom.
@@ -9,7 +10,6 @@ import type { SerializeAddon } from "@xterm/addon-serialize";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
-import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 
 interface ChatPtyViewProps {
   sessionId: string;
@@ -36,11 +36,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
-  const pendingApprovals = useChatStore(
-    (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
-  );
-  const pending = pendingApprovals.find((a) => a.status === "pending");
-
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     const host = xtermHostRef.current;
@@ -349,24 +344,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
           >
             重试
           </button>
-        </div>
-      )}
-      {pending && (
-        <div
-          className="absolute bottom-4 right-4 z-20 w-80 rounded-md border border-border bg-card shadow-lg p-3 text-sm"
-          data-slot="pty-tool-approval-floating"
-          role="dialog"
-          aria-label={`工具审批：${pending.toolName}`}
-        >
-          <div className="font-medium text-foreground">
-            {pending.toolName}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground truncate">
-            {JSON.stringify(pending.input).slice(0, 120)}
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            正式审批按钮由 Plan 10-04 的 ToolApprovalCard 提供
-          </div>
         </div>
       )}
     </div>
