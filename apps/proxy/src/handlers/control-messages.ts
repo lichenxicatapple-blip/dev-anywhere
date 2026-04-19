@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
@@ -49,33 +50,50 @@ async function listDirectory(dirPath: string): Promise<Array<{ name: string; isD
     });
 }
 
-// 获取 2 层深度的文件树
-async function getFileTree(rootPath: string): Promise<Array<{ name: string; isDir: boolean }>> {
-  const result: Array<{ name: string; isDir: boolean }> = [];
+// 预热 cwd + 直接子目录两层, 按目录分组返回, 前端写入 tree[path] 后逐层 picker 直接命中
+interface FileTreeGroup {
+  path: string;
+  entries: Array<{ name: string; isDir: boolean }>;
+}
 
+async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
+  const groups: FileTreeGroup[] = [];
+
+  let level1: Dirent[];
   try {
-    const level1 = await readdir(rootPath, { withFileTypes: true });
-    for (const entry of level1) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      result.push({ name: entry.name, isDir: entry.isDirectory() });
-
-      if (entry.isDirectory()) {
-        try {
-          const level2 = await readdir(join(rootPath, entry.name), { withFileTypes: true });
-          for (const sub of level2) {
-            if (sub.name.startsWith(".")) continue;
-            result.push({ name: `${entry.name}/${sub.name}`, isDir: sub.isDirectory() });
-          }
-        } catch {
-          // 无法读取子目录，跳过
-        }
-      }
-    }
+    level1 = await readdir(rootPath, { withFileTypes: true });
   } catch {
-    // 无法读取根目录
+    return groups;
   }
 
-  return result;
+  const rootEntries = level1
+    .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
+    .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+    .sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  groups.push({ path: rootPath, entries: rootEntries });
+
+  for (const sub of rootEntries) {
+    if (!sub.isDir) continue;
+    const subPath = join(rootPath, sub.name);
+    try {
+      const level2 = await readdir(subPath, { withFileTypes: true });
+      const subEntries = level2
+        .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
+        .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+        .sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+      groups.push({ path: subPath, entries: subEntries });
+    } catch {
+      // 无法读取子目录, 跳过这一层分组 (picker 会在点击时触发 dir_list_request 补齐)
+    }
+  }
+
+  return groups;
 }
 
 
@@ -213,13 +231,15 @@ export function createControlMessageHandlers(
       resources.fileTreeWorkDir = workDir;
 
       try {
-        const entries = await getFileTree(workDir);
+        const groups = await getFileTree(workDir);
         send(JSON.stringify({
           type: "file_tree_push",
-          path: workDir,
-          entries,
+          groups,
         }));
-        logger.debug({ sessionId, path: workDir, count: entries.length }, "File tree pushed");
+        logger.debug(
+          { sessionId, path: workDir, groupCount: groups.length },
+          "File tree pushed",
+        );
       } catch (err) {
         logger.warn({ sessionId, error: String(err) }, "File tree push failed");
       }
@@ -253,11 +273,10 @@ export function createControlMessageHandlers(
               type: "command_list_push",
               commands,
             }));
-            const entries = await getFileTree(workDir);
+            const groups = await getFileTree(workDir);
             send(JSON.stringify({
               type: "file_tree_push",
-              path: workDir,
-              entries,
+              groups,
             }));
             logger.info({ sessionId: session.id }, "Reinitialized control data after reconnect");
           } catch (err) {

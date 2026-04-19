@@ -138,13 +138,14 @@ describe("Phase 6 Integration: Message Routing", () => {
     const msgPromise = waitForMessage(client);
     proxy.send(JSON.stringify({
       type: "file_tree_push",
-      path: "/src",
-      entries: [{ name: "index.ts", isDir: false }],
+      groups: [
+        { path: "/src", entries: [{ name: "index.ts", isDir: false }] },
+      ],
     }));
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("file_tree_push");
-    expect(received.entries[0].name).toBe("index.ts");
+    expect(received.groups[0].entries[0].name).toBe("index.ts");
   });
 
   // ==========================================================

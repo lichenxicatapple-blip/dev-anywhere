@@ -193,7 +193,7 @@ describe("control-messages: command list push", () => {
 });
 
 describe("control-messages: file tree push", () => {
-  it("sends file_tree_push with 2-level tree", async () => {
+  it("sends file_tree_push with grouped 2-level tree", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-tree-"));
     await mkdir(join(tmpDir, "src"));
     await writeFile(join(tmpDir, "src", "index.ts"), "export {}");
@@ -207,12 +207,18 @@ describe("control-messages: file tree push", () => {
 
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("file_tree_push");
-    expect(response.path).toBe(tmpDir);
-    // 应包含 src/ 目录和 package.json 以及 src/index.ts
-    const names = response.entries.map((e: { name: string }) => e.name);
-    expect(names).toContain("src");
-    expect(names).toContain("package.json");
-    expect(names).toContain("src/index.ts");
+    const groups = response.groups as Array<{
+      path: string;
+      entries: Array<{ name: string; isDir: boolean }>;
+    }>;
+    expect(groups[0].path).toBe(tmpDir);
+    const rootNames = groups[0].entries.map((e) => e.name);
+    expect(rootNames).toEqual(expect.arrayContaining(["src", "package.json"]));
+    expect(rootNames).not.toContain("src/index.ts");
+
+    const srcGroup = groups.find((g) => g.path === join(tmpDir, "src"));
+    expect(srcGroup).toBeDefined();
+    expect(srcGroup!.entries.map((e) => e.name)).toContain("index.ts");
 
     await rm(tmpDir, { recursive: true, force: true });
   });
@@ -231,10 +237,16 @@ describe("control-messages: file tree push", () => {
     await handlers.pushFileTree("sess-1", tmpDir);
 
     const response = JSON.parse(sent[0]);
-    const names = response.entries.map((e: { name: string }) => e.name);
-    expect(names).not.toContain("node_modules");
-    expect(names).not.toContain(".git");
-    expect(names).toContain("visible.ts");
+    const rootNames = (response.groups[0].entries as Array<{ name: string }>).map(
+      (e) => e.name,
+    );
+    expect(rootNames).not.toContain("node_modules");
+    expect(rootNames).not.toContain(".git");
+    expect(rootNames).toContain("visible.ts");
+    // node_modules / .git 被跳过, 不应产生子目录分组
+    const groupPaths = (response.groups as Array<{ path: string }>).map((g) => g.path);
+    expect(groupPaths).not.toContain(join(tmpDir, "node_modules"));
+    expect(groupPaths).not.toContain(join(tmpDir, ".git"));
 
     await rm(tmpDir, { recursive: true, force: true });
   });

@@ -132,11 +132,16 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     commands: z.array(CommandEntrySchema),
   }),
 
-  // 文件树推送
+  // 文件树推送: 按目录分组, 首组 path 即为 session cwd
+  // 前端直接把每组写入 tree[path], 与 dir_list_response 共享 cache slot
   z.object({
     type: z.literal("file_tree_push"),
-    path: z.string(),
-    entries: z.array(DirEntrySchema),
+    groups: z.array(
+      z.object({
+        path: z.string(),
+        entries: z.array(DirEntrySchema),
+      }),
+    ),
   }),
 
   // 会话列表请求与权限模式变更

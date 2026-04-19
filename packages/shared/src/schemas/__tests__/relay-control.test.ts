@@ -143,15 +143,19 @@ describe("RelayControlSchema", () => {
     }
   });
 
-  it("parses file_tree_push with path and entries", () => {
+  it("parses file_tree_push with grouped entries per directory", () => {
     const result = RelayControlSchema.parse({
       type: "file_tree_push",
-      path: "/project/src",
-      entries: [{ name: "index.ts", isDir: false }],
+      groups: [
+        { path: "/project", entries: [{ name: "src", isDir: true }] },
+        { path: "/project/src", entries: [{ name: "index.ts", isDir: false }] },
+      ],
     });
     expect(result.type).toBe("file_tree_push");
     if (result.type === "file_tree_push") {
-      expect(result.entries[0].name).toBe("index.ts");
+      expect(result.groups).toHaveLength(2);
+      expect(result.groups[0].path).toBe("/project");
+      expect(result.groups[1].entries[0].name).toBe("index.ts");
     }
   });
 
