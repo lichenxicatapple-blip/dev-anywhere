@@ -3,7 +3,7 @@ set -euo pipefail
 
 # CC Anywhere deployment script (relay + web SPA + nginx)
 # Usage: ./deploy.sh <ssh-host> <domain>
-# Example: ./deploy.sh ubuntu@1.2.3.4 vita-tools.top
+# Example: ./deploy.sh ubuntu@1.2.3.4 relay.example.com
 
 SSH_HOST="${1:?Usage: ./deploy.sh <ssh-host> <domain>}"
 DOMAIN="${2:?Usage: ./deploy.sh <ssh-host> <domain>}"
@@ -134,39 +134,36 @@ else
   echo "  WARN: $LOCAL_FONTS_DIR not found, skipping font sync (web will miss CJK fonts)"
 fi
 
-# Step 6: 写入 .env (含 token) + 指向数据卷
+# Step 6: 写入 .env (含 token)
 echo "[6/8] Writing .env..."
 ssh "$SSH_HOST" "cat > $REMOTE_DIR/.env <<EOF
 RELAY_PROXY_TOKEN=$TOKEN
 EOF
 chmod 600 $REMOTE_DIR/.env"
 
-# docker-compose 里 relay 的 DATA_DIR 指 /data, 我们把本地 fonts 目录挂进去
-# 修改 docker-compose.yml 的 relay-data volume 为 bind mount (让字体能看见)
-# 这一步只在首次部署时做
+# 同步字体到 relay-data named volume, 映射到容器 /data/fonts 供 relay 的 /fonts 端点服务
+# volume 不存在时跳过, compose up 创建后再补 (下方 Step 7 之后)
 ssh "$SSH_HOST" "
-  cd $REMOTE_DIR
-  # 确保 named volume 的字体数据存在 (把同步的 fonts 拷进去)
   VOL_MOUNT=\$(${SUDO} docker volume inspect relay_relay-data --format '{{.Mountpoint}}' 2>/dev/null || echo '')
-  if [ -z \"\$VOL_MOUNT\" ]; then
-    # 卷不存在, compose up 时会自动创建, 字体拷贝延后到启动后做
-    true
-  else
+  if [ -n \"\$VOL_MOUNT\" ] && [ -d $REMOTE_DATA_DIR/fonts ]; then
     ${SUDO} mkdir -p \$VOL_MOUNT/fonts
     ${SUDO} cp -rn $REMOTE_DATA_DIR/fonts/* \$VOL_MOUNT/fonts/ 2>/dev/null || true
   fi
 "
 
 # Step 7: 构建并启动
+# 预拉 base image: daemon.json 的 registry-mirrors 对 pull 生效, 对 buildkit load metadata 无效
 echo "[7/8] Building and starting services..."
 ssh "$SSH_HOST" "
   cd $REMOTE_DIR
+  ${SUDO} docker pull node:22-alpine
+  ${SUDO} docker pull nginx:alpine
   ${SUDO} docker compose --env-file .env -f apps/relay/docker-compose.yml down 2>/dev/null || true
-  ${SUDO} docker compose --env-file .env -f apps/relay/docker-compose.yml build --no-cache
+  ${SUDO} docker compose --env-file .env -f apps/relay/docker-compose.yml build
   ${SUDO} docker compose --env-file .env -f apps/relay/docker-compose.yml up -d
 "
 
-# 启动后再保证字体进入 volume (处理首次部署 volume 刚创建的情况)
+# 启动后同步字体到 volume (首次部署 volume 刚由 compose up 创建时用)
 ssh "$SSH_HOST" "
   VOL_MOUNT=\$(${SUDO} docker volume inspect relay_relay-data --format '{{.Mountpoint}}' 2>/dev/null || echo '')
   if [ -n \"\$VOL_MOUNT\" ] && [ -d $REMOTE_DATA_DIR/fonts ]; then
@@ -176,29 +173,41 @@ ssh "$SSH_HOST" "
 "
 
 # Step 8: 公网连通性验证
+# --noproxy 绕过本机 HTTP_PROXY; WS 用 --http1.1 (HTTP/2 协议层不支持 Upgrade 头)
 echo "[8/8] Verifying deployment..."
 sleep 5
 
+CURL_COMMON=(--noproxy '*' --max-time 10)
+WS_HEADERS=(-H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==")
+
 PASS=0; FAIL=0
-check() {
-  local label="$1"; shift
-  if "$@" >/dev/null 2>&1; then
-    echo "  [OK]   $label"
+# 对比 %{http_code} 判定成功, curl 退出码被 `|| true` 吃掉 (WS 101 后 --max-time 会触发非 0)
+# 空数组展开用 ${arr[@]+...} 条件形式, 避免 set -u 报 unbound variable
+check_http() {
+  local label="$1" expect="$2" url="$3" http_ver="${4:-}"
+  local version_flag=()
+  [ -n "$http_ver" ] && version_flag=("--$http_ver")
+  local code
+  code=$(curl -sS -o /dev/null -w '%{http_code}' \
+    "${CURL_COMMON[@]}" \
+    ${version_flag[@]+"${version_flag[@]}"} \
+    "${@:5}" \
+    "$url" 2>/dev/null || true)
+  if [ "$code" = "$expect" ]; then
+    echo "  [OK]   $label ($code)"
     PASS=$((PASS+1))
   else
-    echo "  [FAIL] $label"
+    echo "  [FAIL] $label (got $code, want $expect) [$url]"
     FAIL=$((FAIL+1))
   fi
 }
 
-check "HTTPS health endpoint"      curl -fsS "https://$DOMAIN/health"
-check "HTTPS web index returns 200" curl -fsSI "https://$DOMAIN/"
-check "HTTP -> HTTPS redirect"     sh -c "curl -s -o /dev/null -w '%{http_code}' http://$DOMAIN/ | grep -q 301"
-check "WSS /client handshake"      sh -c "curl -sS -o /dev/null -w '%{http_code}' --include -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'https://$DOMAIN/client' | grep -q 101"
-check "WSS /proxy rejects without token" \
-  sh -c "curl -sS -o /dev/null -w '%{http_code}' --include -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'https://$DOMAIN/proxy' | grep -q 401"
-check "WSS /proxy accepts with token" \
-  sh -c "curl -sS -o /dev/null -w '%{http_code}' --include -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'https://$DOMAIN/proxy?token=$TOKEN' | grep -q 101"
+check_http "HTTPS health endpoint"          200 "https://$DOMAIN/health"
+check_http "HTTPS web index returns 200"    200 "https://$DOMAIN/"
+check_http "HTTP -> HTTPS redirect"         301 "http://$DOMAIN/"
+check_http "WSS /client handshake"          101 "https://$DOMAIN/client"           http1.1 "${WS_HEADERS[@]}"
+check_http "WSS /proxy rejects without token" 401 "https://$DOMAIN/proxy"           http1.1 "${WS_HEADERS[@]}"
+check_http "WSS /proxy accepts with token"  101 "https://$DOMAIN/proxy?token=$TOKEN" http1.1 "${WS_HEADERS[@]}"
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
