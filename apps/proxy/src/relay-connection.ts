@@ -36,6 +36,8 @@ export interface RelayConnectionOptions {
   proxyIdPath?: string;
   // proxy 显示名称，注册时发送给 relay
   name?: string;
+  // 公网 relay 的 /proxy 端点预共享 token, relay 侧 RELAY_PROXY_TOKEN 对应
+  token?: string;
 }
 
 // 管理代理到中转服务器的出站 WebSocket 连接，支持自动重连和消息队列
@@ -48,12 +50,14 @@ export class RelayConnection extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private connectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED;
   private name?: string;
+  private token?: string;
 
   constructor(relayUrl: string, options?: RelayConnectionOptions) {
     super();
     this.relayUrl = relayUrl;
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
+    this.token = options?.token;
   }
 
   private transition(to: RelayConnectionState): void {
@@ -89,7 +93,8 @@ export class RelayConnection extends EventEmitter {
   // 实际建立 WebSocket 连接的内部方法
   private doConnect(): void {
     try {
-      const url = this.relayUrl.replace(/\/$/, "") + "/proxy";
+      const base = this.relayUrl.replace(/\/$/, "") + "/proxy";
+      const url = this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
       this.ws = new WebSocket(url);
 
       this.ws.on("open", () => {

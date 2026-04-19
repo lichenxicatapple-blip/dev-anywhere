@@ -790,14 +790,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   const { loadConfig } = await import("./config.js");
-  const relayUrl = options?.relayUrl ?? loadConfig().relayUrl;
+  const proxyConfig = loadConfig();
+  const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
+  const relayToken = proxyConfig.relayToken;
   let relayConnection: RelayConnection | null = null;
 
   if (relayUrl) {
-    relayConnection = new RelayConnection(relayUrl, { name: proxyName });
+    relayConnection = new RelayConnection(relayUrl, { name: proxyName, token: relayToken });
     relaySend = (data) => relayConnection!.sendRaw(data);
     relayConnection.connect();
-    logger.info({ relayUrl, proxyName }, "Connecting to relay server");
+    logger.info({ relayUrl, proxyName, tokenSet: !!relayToken }, "Connecting to relay server");
 
     // 重连时 RelayConnection 自动 flush 离线队列，不需要本地回放
 

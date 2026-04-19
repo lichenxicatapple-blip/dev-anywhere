@@ -13,6 +13,8 @@ export interface RelayServerOptions {
   heartbeatInterval?: number;
   logger: Logger;
   dataDir?: string;
+  // proxy 注册预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
+  proxyToken?: string;
 }
 
 export interface RelayServer {
@@ -23,7 +25,11 @@ export interface RelayServer {
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
-  const { heartbeatInterval = 30000, logger, dataDir } = options;
+  const { heartbeatInterval = 30000, logger, dataDir, proxyToken } = options;
+  const proxyTokenRequired = typeof proxyToken === "string" && proxyToken.length > 0;
+  if (!proxyTokenRequired) {
+    logger.warn("proxy auth token not set, /proxy endpoint is open — ok for dev, not for public relay");
+  }
 
   const registry = new RelayRegistry();
   const app = express();
@@ -47,9 +53,19 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const clientWss = new WebSocketServer({ noServer: true });
 
   httpServer.on("upgrade", (request, socket, head) => {
-    const { pathname } = new URL(request.url ?? "/", "http://localhost");
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const { pathname } = url;
 
     if (pathname === "/proxy") {
+      if (proxyTokenRequired) {
+        const token = url.searchParams.get("token");
+        if (token !== proxyToken) {
+          logger.warn({ ip: request.socket.remoteAddress }, "rejected /proxy upgrade: invalid token");
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      }
       proxyWss.handleUpgrade(request, socket, head, (ws) => {
         proxyWss.emit("connection", ws, request);
       });

@@ -10,6 +10,7 @@ services:
       - LOG_LEVEL=info
       - DATA_DIR=/data
       - HEARTBEAT_INTERVAL=30000
+      - RELAY_PROXY_TOKEN=${RELAY_PROXY_TOKEN:-}
     volumes:
       - relay-data:/data
     expose:
@@ -21,14 +22,17 @@ services:
       retries: 3
 
   nginx:
-    image: nginx:alpine
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
     container_name: cc-anywhere-nginx
     restart: unless-stopped
     ports:
+      - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       relay:
         condition: service_healthy

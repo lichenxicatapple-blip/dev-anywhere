@@ -165,6 +165,26 @@ pnpm --filter @cc-anywhere/web test:e2e     # Playwright E2E（需要 relay + pr
 
 模拟手机分辨率：Chrome DevTools 中按 `Cmd+Shift+M` 打开设备工具栏，设置 390x844。
 
+### 云端部署 (relay + web + nginx)
+
+`apps/relay/deploy.sh` 一键部署到 SSH 目标机，用 docker compose 起 relay + nginx (nginx 镜像内含 apps/web 构建产物)：
+
+```bash
+./apps/relay/deploy.sh <ssh-host> <domain>
+# 例: ./apps/relay/deploy.sh ubuntu@1.2.3.4 vita-tools.top
+```
+
+脚本做的事: 装 Docker → certbot 申 SSL → 同步源码 → 同步本机 `~/.cc-anywhere/relay-data/fonts/` 到服务器 → 生成 `/opt/cc-anywhere/.env` (含 `RELAY_PROXY_TOKEN`, 已有则复用) → docker compose up → 公网连通性验证 (health / WSS 握手 / proxy token 正反例)。
+
+**路径分流** (nginx.conf): `/proxy`, `/client` → relay WS; `/fonts`, `/health`, `/status`, `/api/*` → relay HTTP; 其他 → web SPA (hash 路由, SPA fallback 回 `index.html`)。
+
+**鉴权**: `/proxy` 需要 `?token=<RELAY_PROXY_TOKEN>`, `/client` 开放。deploy.sh 首次部署时生成 token, 之后复用。
+
+**本地 proxy 连云端 relay**:
+```bash
+RELAY_URL='wss://vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter @cc-anywhere/proxy run serve
+```
+
 <!-- GSD:workflow-start source:GSD defaults -->
 ## GSD Workflow Enforcement
 
