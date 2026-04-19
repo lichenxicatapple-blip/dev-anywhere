@@ -226,20 +226,25 @@ export const useChatStore = create<ChatStoreState>()(
 
       loadHistory: (sessionId, historyMessages) =>
         set((state) =>
-          updateSlice(state, sessionId, (slice) => ({
-            ...slice,
-            messages: [
-              ...historyMessages.map((m, i) => ({
-                id: `history-${sessionId}-${i}`,
-                role: m.role,
-                text: m.text,
-                isPartial: false,
-                timestamp: m.timestamp || 0,
-                toolCalls: [],
-              })),
-              ...slice.messages,
-            ],
-          })),
+          updateSlice(state, sessionId, (slice) => {
+            // proxy 每次订阅都重发全量 history, 必须替换而非 append, 否则刷新一次就翻倍
+            const historyPrefix = `history-${sessionId}-`;
+            const liveMessages = slice.messages.filter((m) => !m.id.startsWith(historyPrefix));
+            return {
+              ...slice,
+              messages: [
+                ...historyMessages.map((m, i) => ({
+                  id: `${historyPrefix}${i}`,
+                  role: m.role,
+                  text: m.text,
+                  isPartial: false,
+                  timestamp: m.timestamp || 0,
+                  toolCalls: [],
+                })),
+                ...liveMessages,
+              ],
+            };
+          }),
         ),
 
       clearSession: (sessionId) =>

@@ -347,7 +347,7 @@ function connectToWorker(
   });
 }
 
-function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string }): number {
+function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string; permissionMode?: string }): number {
   const isDev = __filename.endsWith(".ts");
   const workerPath = join(__dirname, isDev ? "session-worker.ts" : "session-worker.js");
   const paths = sessionPaths(sessionId);
@@ -355,6 +355,8 @@ function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionI
   const workerArgs = [workerPath, sessionId, paths.workerSock];
   if (options?.cwd) workerArgs.push("--cwd", options.cwd);
   if (options?.resumeSessionId) workerArgs.push("--resume", options.resumeSessionId);
+  // 远程场景默认走 default (每工具审批), 覆盖用户全局 claude settings 的 defaultMode
+  workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
   workerArgs.push("--");
 
   const child = spawn(isDev ? "tsx" : process.execPath, workerArgs, {
@@ -908,10 +910,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "session_create" && parsed.cwd) {
           const cwd = parsed.cwd as string;
           const resumeSessionId = parsed.resumeSessionId as string | undefined;
+          const permissionMode = parsed.permissionMode as string | undefined;
           const name = cwd.replace(process.env.HOME || "", "~");
           // 先生成 ID 和启动 worker，连接成功后再注册 session
           const pendingId = nanoid();
-          const workerPid = spawnWorker(pendingId, { cwd, resumeSessionId });
+          const workerPid = spawnWorker(pendingId, { cwd, resumeSessionId, permissionMode });
 
           const paths = sessionPaths(pendingId);
           let attempt = 0;

@@ -213,7 +213,15 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   }),
 
   // 远程创建 JSON 会话，client -> proxy -> response
-  z.object({ type: z.literal("session_create"), cwd: z.string(), resumeSessionId: z.string().optional() }),
+  z.object({
+    type: z.literal("session_create"),
+    cwd: z.string(),
+    resumeSessionId: z.string().optional(),
+    // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
+    permissionMode: z
+      .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+      .optional(),
+  }),
   z.object({
     type: z.literal("session_create_response"),
     sessionId: z.string(),

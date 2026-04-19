@@ -21,6 +21,14 @@ export type ApprovalStrategy = (
   input: Record<string, unknown>,
 ) => Promise<{ behavior: "allow" | "deny"; message?: string }>;
 
+export type ClaudePermissionMode =
+  | "default"
+  | "auto"
+  | "acceptEdits"
+  | "plan"
+  | "bypassPermissions"
+  | "dontAsk";
+
 export interface JsonSessionOptions {
   workDir?: string;
   claudeArgs?: string[];
@@ -29,6 +37,7 @@ export interface JsonSessionOptions {
   onExit?: (code: number) => void;
   cwd?: string;
   resumeSessionId?: string;
+  permissionMode?: ClaudePermissionMode;
 }
 
 // 默认拒绝所有工具调用，远程审批未配置前的安全兜底
@@ -83,6 +92,7 @@ export function buildClaudeArgs(options: {
   outputFormat?: string;
   inputFormat?: string;
   permissionPromptTool?: string;
+  permissionMode?: ClaudePermissionMode;
   forkSession?: boolean;
   resumeSessionId?: string;
   verbose?: boolean;
@@ -91,6 +101,7 @@ export function buildClaudeArgs(options: {
   if (options.outputFormat) args.push("--output-format", options.outputFormat);
   if (options.inputFormat) args.push("--input-format", options.inputFormat);
   args.push("--permission-prompt-tool", options.permissionPromptTool ?? "stdio");
+  args.push("--permission-mode", options.permissionMode ?? "default");
   if (options.verbose) args.push("--verbose");
   if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
   if (options.forkSession !== false) args.push("--fork-session");
@@ -108,6 +119,7 @@ export class JsonSession {
   private readonly onEvent?: (event: StreamJsonEvent) => void;
   private readonly onExitCb?: (code: number) => void;
   private readonly resumeSessionId?: string;
+  private readonly permissionMode?: ClaudePermissionMode;
 
   constructor(options: JsonSessionOptions = {}) {
     this.workDir = options.cwd ?? options.workDir ?? process.cwd();
@@ -116,6 +128,7 @@ export class JsonSession {
     this.onEvent = options.onEvent;
     this.onExitCb = options.onExit;
     this.resumeSessionId = options.resumeSessionId;
+    this.permissionMode = options.permissionMode;
   }
 
   getClaudeSessionId(): string | null {
@@ -127,6 +140,7 @@ export class JsonSession {
       outputFormat: "stream-json",
       inputFormat: "stream-json",
       permissionPromptTool: "stdio",
+      permissionMode: this.permissionMode,
       verbose: true,
       forkSession: true,
       resumeSessionId: this.resumeSessionId,

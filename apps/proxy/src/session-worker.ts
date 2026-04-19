@@ -5,6 +5,7 @@ import {
   ToolWhitelist,
   createRelayApprovalStrategy,
   type StreamJsonEvent,
+  type ClaudePermissionMode,
 } from "./json-session.js";
 import { SeqCounter } from "./seq-counter.js";
 import {
@@ -27,6 +28,7 @@ function getArg(name: string): string | undefined {
 }
 const workerCwd = getArg("--cwd");
 const workerResume = getArg("--resume");
+const workerPermissionMode = getArg("--permission-mode") as ClaudePermissionMode | undefined;
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
@@ -69,6 +71,7 @@ const session = new JsonSession({
   claudeArgs,
   cwd: workerCwd,
   resumeSessionId: workerResume,
+  permissionMode: workerPermissionMode,
   approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
   onEvent: (event: StreamJsonEvent) => {
     // 从 system 事件中捕获 Claude 会话 ID 并通知 serve

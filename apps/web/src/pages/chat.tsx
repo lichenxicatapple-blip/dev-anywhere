@@ -70,6 +70,17 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     >
       <ChatHeader sessionId={id} />
       <StatusLine state={statusState} />
+      {mode === "pty" && statusState === "waiting_approval" && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-slot="pty-approval-hint"
+          className="flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-[var(--color-status-warning)]/10 text-[var(--color-status-warning)] border-b border-[var(--color-status-warning)]/30"
+        >
+          <span aria-hidden="true">⏸</span>
+          <span>等待审批</span>
+        </div>
+      )}
       <div className="flex-1 min-h-0">
         {mode === "pty" ? (
           <ChatPtyView sessionId={id} />

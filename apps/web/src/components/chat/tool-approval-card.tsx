@@ -1,5 +1,4 @@
-// 工具审批卡, 紧凑态三按钮 + 详情展开 + 会话白名单记忆
-// y/n/a 快捷键仅在卡片聚焦时响应, 防止污染全局输入
+// 工具审批卡, 完整 input 可见 + 三动作主次分明 + 会话白名单记忆
 // 发送审批结果走 MessageEnvelope tool_approve / tool_deny (见 packages/shared/src/schemas/tool.ts):
 //   relayClientRef.sendEnvelope({
 //     seq, sessionId, timestamp, source: "client", version,
@@ -7,13 +6,42 @@
 //   })
 //   或 type: "tool_deny", payload: { toolId, reason? }
 // 注意: 这些是 envelope 不是 RelayControl, sendEnvelope 而非 sendControl.
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
-import type { ToolApprovalRequest } from "@/stores/chat-store";
+import { useRef, useState, type ComponentType } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  FilePen,
+  Globe,
+  Search,
+  Terminal,
+  Wrench,
+} from "lucide-react";
+import { useChatStore, type ToolApprovalRequest } from "@/stores/chat-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { Button } from "@/components/ui/button";
 import { summarizeToolInput } from "@/utils/summarize-tool-input";
 import { cn } from "@/lib/utils";
+
+// 工具名到图标的映射, 未知工具兜底 Wrench
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  Write: FilePen,
+  Edit: FilePen,
+  MultiEdit: FilePen,
+  NotebookEdit: FilePen,
+  Read: Eye,
+  NotebookRead: Eye,
+  Bash: Terminal,
+  BashOutput: Terminal,
+  Grep: Search,
+  Glob: Search,
+  WebFetch: Globe,
+  WebSearch: Globe,
+};
+
+function toolIcon(toolName: string): ComponentType<{ className?: string }> {
+  return TOOL_ICONS[toolName] ?? Wrench;
+}
 
 interface ToolApprovalCardProps {
   approval: ToolApprovalRequest;
@@ -59,12 +87,13 @@ export function ToolApprovalCard({
   sessionId,
   container,
 }: ToolApprovalCardProps) {
-  const [expanded, setExpanded] = useState(false);
   const [acted, setActed] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const summary = summarizeToolInput(approval.toolName, approval.input);
   const isResolved = approval.status !== "pending";
+  const Icon = toolIcon(approval.toolName);
 
   function send(decision: "allow" | "deny", whitelistTool = false) {
     if (acted || isResolved) return;
@@ -86,32 +115,16 @@ export function ToolApprovalCard({
         payload: { toolId: approval.requestId },
       });
     }
+    // 乐观更新 status, 卡片立即从 pending 列表消失。服务端后续 tool_result 也走同一 setter, 幂等
+    // 拒绝不会回 tool_result, 这里也是唯一把 "denied" 写回 store 的地方
+    useChatStore
+      .getState()
+      .updateApprovalStatus(
+        sessionId,
+        approval.requestId,
+        decision === "allow" ? "approved" : "denied",
+      );
   }
-
-  // 键盘快捷键: y=allow, n=deny, a=always; 仅卡片内元素聚焦时响应
-  useEffect(() => {
-    const card = cardRef.current;
-    if (!card) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!card.contains(document.activeElement)) return;
-      if (acted || isResolved) return;
-      const key = e.key.toLowerCase();
-      if (key === "y") {
-        e.preventDefault();
-        send("allow");
-      } else if (key === "n") {
-        e.preventDefault();
-        send("deny");
-      } else if (key === "a") {
-        e.preventDefault();
-        send("allow", true);
-      }
-    };
-    card.addEventListener("keydown", onKey);
-    return () => card.removeEventListener("keydown", onKey);
-    // send 闭包依赖 acted/isResolved, approval 变化时也应重绑
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acted, isResolved, approval.requestId]);
 
   if (isResolved) {
     const color =
@@ -143,61 +156,63 @@ export function ToolApprovalCard({
       data-slot="tool-approval-card"
       data-status="pending"
       className={cn(
-        "rounded-md border border-border bg-card p-3 flex flex-col gap-2",
+        "rounded-md border border-border bg-card p-3 flex flex-col gap-3 ring-2 ring-ring/40",
         container === "floating" &&
           "fixed bottom-4 right-4 w-[360px] max-w-[90vw] shadow-lg z-20",
       )}
       role="region"
       aria-label={`工具审批: ${approval.toolName}`}
     >
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-xs text-[var(--color-status-warning)]">
-          {approval.toolName}
-        </span>
-        <span className="text-xs text-muted-foreground flex-1 truncate">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? "收起详情" : "展开详情"}
+        className="flex items-center gap-2 min-w-0 text-left -m-1 p-1 rounded hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Icon
+          className="size-4 shrink-0 text-[var(--color-status-warning)]"
+          aria-hidden="true"
+        />
+        <span className="font-semibold text-sm">{approval.toolName}</span>
+        <span className="text-xs text-muted-foreground flex-1 truncate font-mono">
           {summary.summary}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => setExpanded((v) => !v)}
-          aria-label={expanded ? "收起详情" : "展开详情"}
-        >
-          {expanded ? (
-            <ChevronUp aria-hidden="true" />
-          ) : (
-            <ChevronDown aria-hidden="true" />
-          )}
-        </Button>
-      </div>
+        {expanded ? (
+          <ChevronUp className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        ) : (
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        )}
+      </button>
       {expanded && (
-        <pre className="text-xs bg-muted rounded p-2 overflow-x-auto font-mono max-h-48">
+        <pre className="text-xs bg-muted rounded p-2 overflow-auto font-mono max-h-[50vh] whitespace-pre-wrap break-words">
           {JSON.stringify(approval.input, null, 2)}
         </pre>
       )}
-      <div className="flex gap-2 justify-end">
+      <div className="flex items-center justify-between gap-2">
         <Button
-          variant="destructive"
+          variant="ghost"
           size="sm"
-          onClick={() => send("deny")}
-          data-action="deny"
-        >
-          拒绝
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
+          className="text-muted-foreground"
           onClick={() => send("allow", true)}
           data-action="always"
         >
-          总是允许此工具
+          始终允许
         </Button>
-        <Button size="sm" onClick={() => send("allow")} data-action="allow">
-          允许
-        </Button>
-      </div>
-      <div className="text-[10px] text-muted-foreground">
-        快捷键: y=允许 / n=拒绝 / a=总是允许 (卡片聚焦时)
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => send("deny")}
+            data-action="deny"
+          >
+            拒绝
+          </Button>
+          <Button size="sm" onClick={() => send("allow")} data-action="allow">
+            允许
+          </Button>
+        </div>
       </div>
     </div>
   );

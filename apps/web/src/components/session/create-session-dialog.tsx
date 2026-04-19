@@ -17,7 +17,39 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
+
+type PermissionMode =
+  | "default"
+  | "auto"
+  | "acceptEdits"
+  | "plan"
+  | "bypassPermissions";
+
+const PERMISSION_MODE_OPTIONS: {
+  value: PermissionMode;
+  label: string;
+  hint: string;
+  danger?: boolean;
+}[] = [
+  { value: "default", label: "严格审批", hint: "每个工具调用都弹审批（推荐）" },
+  { value: "auto", label: "自动判定", hint: "Claude 内置规则决定是否放行" },
+  { value: "acceptEdits", label: "自动接受编辑", hint: "文件编辑直接放行，其他仍审批" },
+  { value: "plan", label: "只读规划", hint: "只做只读操作，不执行 side-effect 工具" },
+  {
+    value: "bypassPermissions",
+    label: "跳过全部审批（危险）",
+    hint: "所有工具直接放行，仅限可信会话",
+    danger: true,
+  },
+];
 
 interface CreateSessionDialogProps {
   open: boolean;
@@ -27,10 +59,14 @@ interface CreateSessionDialogProps {
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const mode = "json" as const;
+  const currentPermissionOption = PERMISSION_MODE_OPTIONS.find(
+    (o) => o.value === permissionMode,
+  );
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -67,6 +103,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       onOpenChange(false);
       setName("");
       setCwd("");
+      setPermissionMode("default");
       navigate(`/chat/${ctrl.sessionId}?mode=${mode}`);
     });
 
@@ -84,7 +121,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       return;
     }
     setSubmitting(true);
-    relay.sendControl({ type: "session_create", cwd: cwd.trim() });
+    relay.sendControl({ type: "session_create", cwd: cwd.trim(), permissionMode });
   }
 
   return (
@@ -125,6 +162,33 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               filter={cwd}
               onSelect={(path) => setCwd(path)}
             />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm">权限模式</span>
+            <Select
+              value={permissionMode}
+              onValueChange={(v) => setPermissionMode(v as PermissionMode)}
+            >
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PERMISSION_MODE_OPTIONS.map((opt) => (
+                  <SelectItem
+                    key={opt.value}
+                    value={opt.value}
+                    className={opt.danger ? "text-destructive focus:text-destructive" : undefined}
+                  >
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span
+              className={`text-xs ${currentPermissionOption?.danger ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {currentPermissionOption?.hint}
+            </span>
           </label>
           <DialogFooter>
             <Button
