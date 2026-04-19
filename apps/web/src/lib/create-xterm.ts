@@ -1,12 +1,11 @@
-// xterm 工厂: DOM renderer 固定方案
-// WebGL addon 在 snapshot 大批量 write 时只重绘 dirty set 里的 row, scrollback 推走的
-// row 留在 framebuffer 为黑底 (mobile 窄视口尤其显眼). DOM renderer 走 _renderRows()
-// 整 viewport 重绘, 稳定且 CJK/box-drawing 对齐目视无误差. Sarasa Fixed SC 随产品分发,
-// 不依赖用户系统字体
+// xterm 工厂: WebGL renderer
+// WebGL 按 cell 坐标直接绘制, 不依赖 DOM letter-spacing 补偿, CJK/box-drawing 对齐稳定.
+// Sarasa Fixed SC 随产品分发, 不依赖用户系统字体
 import { Terminal } from "@xterm/xterm";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { xtermTheme } from "@/lib/xterm-theme";
 
@@ -42,6 +41,13 @@ export async function createXtermTerminal(container: HTMLDivElement): Promise<Cr
 
   container.replaceChildren();
   terminal.open(container);
+
+  // WebGL 必须在 terminal.open() 之后加载, 否则拿不到 canvas context
+  try {
+    terminal.loadAddon(new WebglAddon());
+  } catch (err) {
+    console.warn("WebGL addon failed, fallback to DOM renderer", err);
+  }
 
   return {
     terminal,
