@@ -171,7 +171,7 @@ pnpm --filter @cc-anywhere/web test:e2e     # Playwright E2E（需要 relay + pr
 
 ```bash
 ./apps/relay/deploy.sh <ssh-host> <domain>
-# 例: ./apps/relay/deploy.sh ubuntu@1.2.3.4 vita-tools.top
+# 例: ./apps/relay/deploy.sh vita relay.vita-tools.top
 ```
 
 脚本做的事: 装 Docker → certbot 申 SSL → 同步源码 → 同步本机 `~/.cc-anywhere/relay-data/fonts/` 到服务器 → 生成 `/opt/cc-anywhere/.env` (含 `RELAY_PROXY_TOKEN`, 已有则复用) → docker compose up → 公网连通性验证 (health / WSS 握手 / proxy token 正反例)。
@@ -182,7 +182,7 @@ pnpm --filter @cc-anywhere/web test:e2e     # Playwright E2E（需要 relay + pr
 
 **本地 proxy 连云端 relay**:
 ```bash
-RELAY_URL='wss://vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter @cc-anywhere/proxy run serve
+RELAY_URL='wss://relay.vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter @cc-anywhere/proxy run serve
 ```
 
 <!-- GSD:workflow-start source:GSD defaults -->
