@@ -72,8 +72,8 @@ test.describe("ChatHeader — D-51 三件套", () => {
     const menu = page.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible();
     await expect(menu.getByText("Permission mode")).toHaveCount(0);
-    await expect(menu.getByText("Rename")).toBeVisible();
-    await expect(menu.getByText("Duplicate")).toBeVisible();
+    await expect(menu.getByText("重命名")).toBeVisible();
+    await expect(menu.getByText("复制会话")).toBeVisible();
     const terminate = page.locator('[data-slot="chat-terminate-item"]');
     await expect(terminate).toBeVisible();
     await expect(terminate).toHaveClass(/text-destructive/);

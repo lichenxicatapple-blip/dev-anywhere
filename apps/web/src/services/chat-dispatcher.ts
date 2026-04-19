@@ -7,6 +7,7 @@
 import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useChatStore } from "@/stores/chat-store";
+import { useSessionStore } from "@/stores/session-store";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
 
@@ -76,6 +77,13 @@ function handleTurnResult(
   store.markTurnComplete(msg.sessionId);
 }
 
+function handleTerminalTitle(
+  msg: Extract<RelayControlMessage, { type: "terminal_title" }>,
+) {
+  // proxy 抽 OSC 0 后推送, chat-header 为 PTY 模式优先用这个值
+  useSessionStore.getState().setPtyTitle(msg.sessionId, msg.title);
+}
+
 export function registerChatDispatcher(): () => void {
   const relay = relayClientRef;
   if (!relay) {
@@ -110,6 +118,9 @@ export function registerChatDispatcher(): () => void {
         break;
       case "turn_result":
         handleTurnResult(msg);
+        break;
+      case "terminal_title":
+        handleTerminalTitle(msg);
         break;
       default:
         break;

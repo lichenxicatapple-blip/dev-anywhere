@@ -106,7 +106,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
         {hasMeta && (
           <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
             {session.mode && (
-              <span className="font-mono uppercase text-muted-foreground shrink-0">
+              <span className="font-mono uppercase text-muted-foreground shrink-0 inline-block min-w-[4ch]">
                 {session.mode}
               </span>
             )}

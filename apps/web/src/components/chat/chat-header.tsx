@@ -4,7 +4,6 @@
 import { ArrowLeft, MoreVertical } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,10 +24,13 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
   const session = useSessionStore((s) =>
     s.sessions.find((x) => x.sessionId === sessionId),
   );
+  // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
+  // proxy 转发为 terminal_title, dispatcher 写到 ptyTitles, 这里优先展示
+  const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
 
   function handleRename() {
     // session_rename 控制消息未在 shared schema 定义, 占位 toast, 真正接入另起 phase
-    toast.info("Rename coming soon");
+    toast.info("重命名功能即将加入");
   }
 
   function handleDuplicate() {
@@ -50,7 +52,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
 
   return (
     <div
-      className="flex items-center gap-2 h-12 px-3 border-b border-border bg-card shrink-0"
+      className="grid grid-cols-[auto_1fr_auto] items-center h-12 px-3 border-b border-border bg-card shrink-0"
       data-slot="chat-header"
     >
       <Button
@@ -62,22 +64,15 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
       >
         <ArrowLeft aria-hidden="true" />
       </Button>
-      <div className="flex-1 min-w-0 flex items-center gap-2">
-        <span
-          className="text-sm font-semibold truncate"
-          data-slot="chat-session-title"
-        >
-          {session?.name ?? sessionId.slice(0, 8)}
-        </span>
-        {session?.mode && (
-          <Badge
-            variant="secondary"
-            className="font-mono text-xs uppercase shrink-0"
-          >
-            {session.mode}
-          </Badge>
-        )}
-      </div>
+      {/* 中间列 text-center + truncate: 长标题省略号, 短标题居中 */}
+      <span
+        className="text-sm font-semibold truncate text-center px-2"
+        data-slot="chat-session-title"
+      >
+        {(session?.mode === "pty" && ptyTitle) ||
+          session?.name ||
+          sessionId.slice(0, 8)}
+      </span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -90,8 +85,8 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" data-slot="chat-overflow-menu">
-          <DropdownMenuItem onClick={handleRename}>Rename</DropdownMenuItem>
-          <DropdownMenuItem onClick={handleDuplicate}>Duplicate</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleRename}>重命名</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDuplicate}>复制会话</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"

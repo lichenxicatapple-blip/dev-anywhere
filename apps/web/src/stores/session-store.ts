@@ -8,6 +8,9 @@ interface SessionStoreState {
   historySessions: HistorySession[];
   currentSessionId: string | null;
   currentSessionMode: "pty" | "json" | null;
+  // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
+  // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
+  ptyTitles: Record<string, string>;
 
   setSessions: (sessions: SessionInfo[]) => void;
   setCurrentSession: (sessionId: string | null, mode: "pty" | "json" | null) => void;
@@ -20,6 +23,7 @@ interface SessionStoreState {
     lastActive?: number,
   ) => void;
   updateSessionName: (sessionId: string, name: string) => void;
+  setPtyTitle: (sessionId: string, title: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
 }
 
@@ -30,6 +34,7 @@ export const useSessionStore = create<SessionStoreState>()(
       historySessions: [],
       currentSessionId: null,
       currentSessionMode: null,
+      ptyTitles: {},
 
       setSessions: (sessions) => set({ sessions }),
       setCurrentSession: (sessionId, mode) =>
@@ -63,6 +68,10 @@ export const useSessionStore = create<SessionStoreState>()(
           sessions: state.sessions.map((s) =>
             s.sessionId === sessionId ? { ...s, name } : s,
           ),
+        })),
+      setPtyTitle: (sessionId, title) =>
+        set((state) => ({
+          ptyTitles: { ...state.ptyTitles, [sessionId]: title },
         })),
       setHistorySessions: (sessions) => set({ historySessions: sessions }),
     }),
