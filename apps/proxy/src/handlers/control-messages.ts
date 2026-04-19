@@ -1,4 +1,3 @@
-import type { Dirent } from "node:fs";
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";

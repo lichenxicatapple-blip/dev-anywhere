@@ -5,6 +5,7 @@
 // 滚动: Radix ScrollArea 在 max-h-only 父容器下 Viewport 拿不到高度约束, 这里用原生 overflow-y-auto
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -84,6 +85,10 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
       }
     }, [absolutePath, tree]);
 
+    // tree.has vs tree.get 分两档:
+    // - 没 key: dir_list_request 飞行中, 显示 "加载中" 别误导成 "没有匹配"
+    // - 有 key 但过滤后空: 才是 "没有匹配的路径"
+    const isLoading = !tree.has(absolutePath);
     const filteredEntries = useMemo(() => {
       let entries = tree.get(absolutePath) ?? [];
       if (dirsOnly) entries = entries.filter((e) => e.isDir);
@@ -116,10 +121,13 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
 
     // insert 模式下 "./" 只是 picker 内部的 cwd fallback 显示, 不该泄漏到插入文本;
     // select 模式保持原语义 (CreateSessionDialog 依赖 "./xxx" 表达相对路径)
-    const emitPath = (entry: { name: string; isDir: boolean }): string => {
-      const raw = currentPath + entry.name + (entry.isDir ? "/" : "");
-      return mode === "insert" ? raw.replace(/^\.\//, "") : raw;
-    };
+    const emitPath = useCallback(
+      (entry: { name: string; isDir: boolean }): string => {
+        const raw = currentPath + entry.name + (entry.isDir ? "/" : "");
+        return mode === "insert" ? raw.replace(/^\.\//, "") : raw;
+      },
+      [currentPath, mode],
+    );
 
     useImperativeHandle(
       ref,
@@ -143,7 +151,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
           return false;
         },
       }),
-      [filteredEntries, index, mode, currentPath, onSelect],
+      [filteredEntries, index, emitPath, onSelect],
     );
 
     const containerClass =
@@ -159,7 +167,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
         <div className="max-h-60 overflow-y-auto overscroll-contain">
           {filteredEntries.length === 0 ? (
             <div className="px-3 py-2 text-xs text-muted-foreground">
-              没有匹配的路径
+              {isLoading ? "加载中..." : "没有匹配的路径"}
             </div>
           ) : (
             <ul ref={listRef} role="list" className="flex flex-col">
