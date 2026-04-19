@@ -1,7 +1,8 @@
-// InputBar 的"更多功能"菜单壳：桌面走 Popover、移动走 BottomSheet
-// PTY 专属项: 切换权限模式 (Shift+Tab 循环) / 终端字号自适应; JSON 当前只有占位
+// InputBar 的菜单壳: 桌面 Popover, 移动 BottomSheet
+// Sheet 版用 drag handle 代替大标题, toggle 提亮 off 态避免暗背景下不可见
 import { useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
+import { VisuallyHidden } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,6 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
@@ -28,19 +28,21 @@ interface InputMenuProps {
 interface MenuBodyProps {
   mode: "json" | "pty";
   sessionId: string;
+  variant: "popover" | "sheet";
   onAfterAction: () => void;
 }
 
-function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
+function MenuBody({ mode, sessionId, variant, onAfterAction }: MenuBodyProps) {
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
   const setPtyAutoscale = useAppStore((s) => s.setPtyAutoscale);
 
+  // sheet 项偏大 touch-friendly, popover 保持紧凑
+  const itemH = variant === "sheet" ? "h-12" : "h-9";
+  const itemPad = variant === "sheet" ? "px-4" : "px-2";
+
   if (mode === "pty") {
     return (
-      <div
-        className="flex flex-col gap-1 p-2"
-        data-slot="input-menu-content"
-      >
+      <div className="flex flex-col" data-slot="input-menu-content">
         <button
           type="button"
           onClick={() => {
@@ -53,7 +55,11 @@ function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
             });
             onAfterAction();
           }}
-          className="flex items-center gap-3 rounded-sm px-2 py-2 text-sm text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "flex items-center gap-3 text-sm text-foreground hover:bg-accent active:bg-accent/80 focus-visible:outline-none focus-visible:bg-accent transition-colors",
+            itemH,
+            itemPad,
+          )}
           data-slot="input-menu-permission-cycle"
         >
           <span className="flex-1 text-left">切换权限模式</span>
@@ -61,7 +67,11 @@ function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
         <button
           type="button"
           onClick={() => setPtyAutoscale(!ptyAutoscale)}
-          className="flex items-center justify-between gap-3 rounded-sm px-2 py-2 text-sm text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "flex items-center justify-between gap-3 text-sm text-foreground hover:bg-accent active:bg-accent/80 focus-visible:outline-none focus-visible:bg-accent transition-colors",
+            itemH,
+            itemPad,
+          )}
           role="switch"
           aria-checked={ptyAutoscale}
         >
@@ -69,14 +79,18 @@ function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
           <span
             aria-hidden="true"
             className={cn(
-              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-              ptyAutoscale ? "bg-primary" : "bg-muted",
+              "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors",
+              ptyAutoscale
+                ? "bg-primary border-primary"
+                : "bg-input border-border",
             )}
           >
             <span
               className={cn(
-                "absolute h-4 w-4 rounded-full bg-background shadow transition-transform",
-                ptyAutoscale ? "translate-x-[18px]" : "translate-x-[2px]",
+                "absolute h-4 w-4 rounded-full shadow-sm transition-transform",
+                ptyAutoscale
+                  ? "bg-primary-foreground translate-x-[22px]"
+                  : "bg-foreground translate-x-[3px]",
               )}
             />
           </span>
@@ -87,15 +101,15 @@ function MenuBody({ mode, sessionId, onAfterAction }: MenuBodyProps) {
 
   return (
     <div
-      className="flex flex-col gap-1 p-2"
+      className={cn(
+        "flex items-center text-sm text-muted-foreground",
+        itemH,
+        itemPad,
+      )}
+      aria-disabled="true"
       data-slot="input-menu-content"
     >
-      <div
-        className="flex items-center px-2 py-2 text-sm text-muted-foreground opacity-50 cursor-not-allowed"
-        aria-disabled="true"
-      >
-        更多功能即将加入
-      </div>
+      更多功能即将加入
     </div>
   );
 }
@@ -118,11 +132,16 @@ export function InputMenu({ sessionId, mode }: InputMenuProps) {
             aria-label="更多"
             data-slot="input-menu-trigger"
           >
-            <MoreHorizontal aria-hidden="true" />
+            <SlidersHorizontal aria-hidden="true" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-60 p-0">
-          <MenuBody mode={mode} sessionId={sessionId} onAfterAction={close} />
+        <PopoverContent align="end" className="w-60 p-1">
+          <MenuBody
+            mode={mode}
+            sessionId={sessionId}
+            variant="popover"
+            onAfterAction={close}
+          />
         </PopoverContent>
       </Popover>
     );
@@ -138,14 +157,29 @@ export function InputMenu({ sessionId, mode }: InputMenuProps) {
           aria-label="更多"
           data-slot="input-menu-trigger"
         >
-          <MoreHorizontal aria-hidden="true" />
+          <SlidersHorizontal aria-hidden="true" />
         </Button>
       </SheetTrigger>
-      <SheetContent side="bottom" className="h-auto">
-        <SheetHeader>
-          <SheetTitle>更多功能</SheetTitle>
-        </SheetHeader>
-        <MenuBody mode={mode} sessionId={sessionId} onAfterAction={close} />
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
+        className="h-auto gap-0 rounded-t-xl bg-popover pt-2 pb-[max(theme(spacing.2),env(safe-area-inset-bottom))] border-t-0"
+      >
+        {/* sr-only title 给 Radix Dialog a11y, 视觉上交给 drag handle */}
+        <VisuallyHidden.Root>
+          <SheetTitle>会话控制</SheetTitle>
+        </VisuallyHidden.Root>
+        <div
+          aria-hidden="true"
+          className="mx-auto mb-1 h-1 w-10 rounded-full bg-border"
+          data-slot="sheet-drag-handle"
+        />
+        <MenuBody
+          mode={mode}
+          sessionId={sessionId}
+          variant="sheet"
+          onAfterAction={close}
+        />
       </SheetContent>
     </Sheet>
   );
