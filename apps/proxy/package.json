@@ -13,6 +13,7 @@
     "build": "tsup",
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "vitest": "^4.1.2"
   }
 }
