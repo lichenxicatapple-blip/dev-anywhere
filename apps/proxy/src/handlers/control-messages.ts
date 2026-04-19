@@ -34,20 +34,25 @@ function isPathSafe(path: string): boolean {
   return true;
 }
 
-// 列出目录内容
-async function listDirectory(dirPath: string): Promise<Array<{ name: string; isDir: boolean }>> {
+// picker 展示忽略规则: dotfile + node_modules
+// listDirectory (按需) 与 getFileTree (预热) 必须共用, 否则逐层下钻会暴露 node_modules
+const HIDDEN_ENTRY_NAMES = new Set(["node_modules"]);
+function isPickerVisible(name: string): boolean {
+  return !name.startsWith(".") && !HIDDEN_ENTRY_NAMES.has(name);
+}
+
+// 目录优先 + 字母序, picker 侧依赖这个顺序做键盘导航默认选中
+function sortEntries(a: { isDir: boolean; name: string }, b: { isDir: boolean; name: string }): number {
+  if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+  return a.name.localeCompare(b.name);
+}
+
+async function scanDir(dirPath: string): Promise<Array<{ name: string; isDir: boolean }>> {
   const entries = await readdir(dirPath, { withFileTypes: true });
   return entries
-    .filter((e) => !e.name.startsWith("."))
-    .map((e) => ({
-      name: e.name,
-      isDir: e.isDirectory(),
-    }))
-    .sort((a, b) => {
-      // 目录排前面
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+    .filter((e) => isPickerVisible(e.name))
+    .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+    .sort(sortEntries);
 }
 
 // 预热 cwd + 直接子目录两层, 按目录分组返回, 前端写入 tree[path] 后逐层 picker 直接命中
@@ -59,34 +64,19 @@ interface FileTreeGroup {
 async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
   const groups: FileTreeGroup[] = [];
 
-  let level1: Dirent[];
+  let rootEntries: Array<{ name: string; isDir: boolean }>;
   try {
-    level1 = await readdir(rootPath, { withFileTypes: true });
+    rootEntries = await scanDir(rootPath);
   } catch {
     return groups;
   }
-
-  const rootEntries = level1
-    .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
-    .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
-    .sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
   groups.push({ path: rootPath, entries: rootEntries });
 
   for (const sub of rootEntries) {
     if (!sub.isDir) continue;
     const subPath = join(rootPath, sub.name);
     try {
-      const level2 = await readdir(subPath, { withFileTypes: true });
-      const subEntries = level2
-        .filter((e) => !e.name.startsWith(".") && e.name !== "node_modules")
-        .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
-        .sort((a, b) => {
-          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
+      const subEntries = await scanDir(subPath);
       groups.push({ path: subPath, entries: subEntries });
     } catch {
       // 无法读取子目录, 跳过这一层分组 (picker 会在点击时触发 dir_list_request 补齐)
@@ -128,7 +118,7 @@ export function createControlMessageHandlers(
       }
 
       try {
-        const entries = await listDirectory(msg.path);
+        const entries = await scanDir(msg.path);
         send(JSON.stringify({
           type: "dir_list_response",
           path: msg.path,

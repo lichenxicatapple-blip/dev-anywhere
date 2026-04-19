@@ -114,6 +114,13 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
       btn?.scrollIntoView({ block: "nearest" });
     }, [index]);
 
+    // insert 模式下 "./" 只是 picker 内部的 cwd fallback 显示, 不该泄漏到插入文本;
+    // select 模式保持原语义 (CreateSessionDialog 依赖 "./xxx" 表达相对路径)
+    const emitPath = (entry: { name: string; isDir: boolean }): string => {
+      const raw = currentPath + entry.name + (entry.isDir ? "/" : "");
+      return mode === "insert" ? raw.replace(/^\.\//, "") : raw;
+    };
+
     useImperativeHandle(
       ref,
       () => ({
@@ -130,14 +137,13 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
             return true;
           }
           if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-            const entry = filteredEntries[index];
-            onSelect(currentPath + entry.name + (entry.isDir ? "/" : ""));
+            onSelect(emitPath(filteredEntries[index]));
             return true;
           }
           return false;
         },
       }),
-      [filteredEntries, index, currentPath, onSelect],
+      [filteredEntries, index, mode, currentPath, onSelect],
     );
 
     const containerClass =
@@ -161,9 +167,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
                 <li key={e.name}>
                   <button
                     type="button"
-                    onClick={() =>
-                      onSelect(currentPath + e.name + (e.isDir ? "/" : ""))
-                    }
+                    onClick={() => onSelect(emitPath(e))}
                     onMouseEnter={() => setIndex(i)}
                     className={cn(
                       "w-full flex items-center gap-2 px-3 h-9 text-sm text-left transition-colors",
