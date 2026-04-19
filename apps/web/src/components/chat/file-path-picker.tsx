@@ -160,7 +160,10 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
                     onMouseEnter={() => setIndex(i)}
                     className={cn(
                       "w-full flex items-center gap-2 px-3 h-9 text-sm text-left transition-colors",
-                      i === index && "bg-accent",
+                      // --accent 和 --popover 同为 #2D2D2D, bg-accent 在 picker 里跟底色撞;
+                      // 用 primary 15% 混透明色凑对比, 同时沿用品牌色语言
+                      i === index &&
+                        "bg-[color-mix(in_srgb,var(--primary)_15%,transparent)]",
                       e.isDir && "font-semibold",
                     )}
                     data-slot="file-entry"

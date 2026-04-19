@@ -74,6 +74,9 @@ export const SlashCommandPicker = forwardRef<PickerHandle, SlashCommandPickerPro
                 key={cmd.name}
                 value={cmd.name}
                 onSelect={() => onSelect(cmd)}
+                // --accent 和 --popover 同为 #2D2D2D, 默认 data-[selected=true]:bg-accent
+                // 在 picker 底色上不可见; 用 primary 15% 混色保持跟 file picker 一致
+                className="data-[selected=true]:bg-[color-mix(in_srgb,var(--primary)_15%,transparent)]"
               >
                 <span className="font-mono text-sm whitespace-nowrap shrink-0">
                   {cmd.name}
