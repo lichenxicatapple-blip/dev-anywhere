@@ -62,6 +62,7 @@
 html,
 body {
   @apply bg-background text-foreground;
+  font-family: var(--font-sans);
 }
 
 /* 流式光标: 方波闪烁, 节奏向真终端靠拢 (pulse 的渐变对"打字中"语义偏弱) */
