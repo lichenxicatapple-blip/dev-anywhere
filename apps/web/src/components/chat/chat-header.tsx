@@ -52,7 +52,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
 
   return (
     <div
-      className="grid grid-cols-[auto_1fr_auto] items-center h-12 px-3 border-b border-border bg-card shrink-0"
+      className="grid grid-cols-[auto_1fr_auto] items-center min-h-12 px-3 pt-[env(safe-area-inset-top)] border-b border-border bg-card shrink-0"
       data-slot="chat-header"
     >
       <Button

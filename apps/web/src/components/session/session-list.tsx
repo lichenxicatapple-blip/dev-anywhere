@@ -5,7 +5,7 @@
 // sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径（SessionList + CreateSessionButton 两个 export）
 // 本 Plan 只替换 body；新增 export 或改 props 签名会破坏与 10-02 的 W3 并行，禁止
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useMatch } from "react-router";
 import { Plus, Loader2 } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
@@ -25,7 +25,9 @@ interface SessionListProps {
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
+  const chatMatch = useMatch("/chat/:id");
+  const activeSessionId = chatMatch?.params.id ?? null;
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   // 冷启动刷新时, proxy_list / session_list envelope 均未到, 显示 spinner 避免 no-proxy / no-session 一闪而过
@@ -41,7 +43,6 @@ export function SessionList({ layout }: SessionListProps) {
 
   function handleRowClick(sessionId: string, mode: "pty" | "json" | undefined) {
     const resolvedMode = mode ?? "json";
-    useSessionStore.getState().setCurrentSession(sessionId, resolvedMode);
     // D-15: URL 更新但不触发页面级 transition（AppShell 是父路由，Outlet 内直接切换）
     navigate(`/chat/${sessionId}?mode=${resolvedMode}`, { replace: false });
   }
@@ -96,7 +97,7 @@ export function SessionList({ layout }: SessionListProps) {
         <SessionRow
           key={s.sessionId}
           session={s}
-          selected={s.sessionId === currentSessionId}
+          selected={s.sessionId === activeSessionId}
           now={now}
           onClick={() => handleRowClick(s.sessionId, s.mode)}
           onTerminate={() => handleTerminate(s.sessionId)}
@@ -109,7 +110,7 @@ export function SessionList({ layout }: SessionListProps) {
     return (
       <div className="flex flex-col h-full">
         <ScrollArea className="flex-1">{listElement}</ScrollArea>
-        <div className="p-4 border-t border-border">
+        <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] border-t border-border">
           <Button className="w-full" onClick={() => setCreateOpen(true)}>
             <Plus aria-hidden="true" />
             新建会话

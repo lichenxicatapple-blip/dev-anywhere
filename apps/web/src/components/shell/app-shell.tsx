@@ -4,9 +4,13 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router";
 import { Settings } from "lucide-react";
 import { Sidebar } from "./sidebar";
+import { Typewriter } from "@/components/brand/typewriter";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/stores/app-store";
+
+// 移动端顶栏品牌: 打字机 loop, 挂在 AppShell header (Outlet 之外) 保证 `/` 与 `/sessions` 间切换不重挂
+const BRAND_TEXTS = ["CC Anywhere", "/unlimited @anytime"];
 
 export function AppShell() {
   const location = useLocation();
@@ -26,11 +30,15 @@ export function AppShell() {
     <div className="flex flex-col h-dvh bg-background text-foreground">
       {!isChatRoute && (
         <header
-          className="sticky top-0 z-10 flex items-center gap-2 px-4 h-12 bg-card border-b border-border"
+          className="sticky top-0 z-10 flex items-center gap-2 px-4 min-h-12 pt-[env(safe-area-inset-top)] bg-card border-b border-border"
           role="banner"
           data-slot="app-shell-header"
         >
-          <span className="text-sm font-semibold">CC Anywhere</span>
+          <Typewriter
+            texts={BRAND_TEXTS}
+            className="text-sm font-semibold md:hidden"
+          />
+          <span className="hidden md:inline text-sm font-semibold">CC Anywhere</span>
           <div className="ml-auto">
             <Button
               variant="ghost"

@@ -65,7 +65,7 @@ export function Typewriter({ texts, className }: TypewriterProps) {
 
   return (
     <div
-      className={`font-mono text-2xl md:text-3xl font-bold leading-tight select-none ${className ?? ""}`}
+      className={`font-mono leading-tight select-none ${className ?? ""}`}
       data-slot="brand-typewriter"
     >
       <span className="text-green-500">&gt; </span>

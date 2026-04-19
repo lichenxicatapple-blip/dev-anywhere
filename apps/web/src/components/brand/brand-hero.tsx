@@ -13,7 +13,7 @@ interface Props {
 export function BrandHero({ subtitle, action }: Props) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-6 px-6 text-center">
-      <Typewriter texts={BRAND_TEXTS} />
+      <Typewriter texts={BRAND_TEXTS} className="text-2xl md:text-3xl font-bold" />
       <p className="max-w-md text-sm text-muted-foreground">{subtitle}</p>
       {action && <div>{action}</div>}
     </div>

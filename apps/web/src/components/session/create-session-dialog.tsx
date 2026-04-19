@@ -64,7 +64,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         mode,
       };
       useSessionStore.getState().addSession(newSession);
-      useSessionStore.getState().setCurrentSession(ctrl.sessionId, mode);
       onOpenChange(false);
       setName("");
       setCwd("");

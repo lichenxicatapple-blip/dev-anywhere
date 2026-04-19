@@ -65,7 +65,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   return (
     <div
       className="flex flex-col h-full"
-      style={{ paddingBottom: kbOffset }}
+      style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
       data-keyboard-offset={kbOffset}
     >
       <ChatHeader sessionId={id} />

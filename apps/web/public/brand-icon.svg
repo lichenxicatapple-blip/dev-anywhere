@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg-glow" cx="50%" cy="52%" r="58%">
+      <stop offset="0%" stop-color="#2A2118"/>
+      <stop offset="100%" stop-color="#1A1A1A"/>
+    </radialGradient>
+    <linearGradient id="amber-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F0C48A"/>
+      <stop offset="100%" stop-color="#B8925C"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg-glow)"/>
+
+  <rect
+    x="72" y="132" width="368" height="248" rx="20"
+    fill="none" stroke="#D4A574" stroke-width="4" stroke-opacity="0.35"
+  />
+  <circle cx="100" cy="158" r="5" fill="#D4A574" opacity="0.55"/>
+  <circle cx="118" cy="158" r="5" fill="#D4A574" opacity="0.35"/>
+  <circle cx="136" cy="158" r="5" fill="#D4A574" opacity="0.25"/>
+
+  <path
+    d="M164 216 L244 278 L164 340"
+    fill="none"
+    stroke="url(#amber-grad)"
+    stroke-width="34"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <rect x="280" y="316" width="88" height="26" rx="6" fill="url(#amber-grad)"/>
+
+  <rect x="190" y="398" width="132" height="4" rx="2" fill="#D4A574" opacity="0.55"/>
+</svg>
