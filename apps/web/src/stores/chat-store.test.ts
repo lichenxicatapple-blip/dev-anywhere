@@ -76,39 +76,17 @@ describe("chat-store per-session", () => {
     expect(EMPTY_SLICE.inputHistoryCursor).toBe(-1);
   });
 
-  it("setInputDraft + moveInputHistoryCursor scoped by session", () => {
-    useChatStore.getState().addUserMessage("s1", {
-      id: "u1",
-      role: "user",
-      text: "first",
-      isPartial: false,
-      timestamp: 0,
-      toolCalls: [],
-    });
-    useChatStore.getState().addUserMessage("s1", {
-      id: "u2",
-      role: "user",
-      text: "second",
-      isPartial: false,
-      timestamp: 0,
-      toolCalls: [],
-    });
+  it("setInputDraft + setInputHistoryCursor scoped by session", () => {
     useChatStore.getState().setInputDraft("s1", "draft1");
     useChatStore.getState().setInputDraft("s2", "draft2");
     expect(useChatStore.getState().bySessionId["s1"].inputDraft).toBe("draft1");
     expect(useChatStore.getState().bySessionId["s2"].inputDraft).toBe("draft2");
 
-    // cursor 从 -1 起, +1 → 0 (最新一条), +1 → 1 (上一条), clamp 在 historyLen-1
-    useChatStore.getState().moveInputHistoryCursor("s1", +1);
+    // setInputHistoryCursor 设绝对值, clamp 由调用方 (InputBar) 基于 localStorage 历史长度负责
+    useChatStore.getState().setInputHistoryCursor("s1", 0);
     expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(0);
-    useChatStore.getState().moveInputHistoryCursor("s1", +1);
+    useChatStore.getState().setInputHistoryCursor("s1", 1);
     expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(1);
-    useChatStore.getState().moveInputHistoryCursor("s1", +5);
-    expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(1);
-
-    // s2 无 user message, historyLen=0, clamp 到 -1
-    useChatStore.getState().moveInputHistoryCursor("s2", +1);
-    expect(useChatStore.getState().bySessionId["s2"].inputHistoryCursor).toBe(-1);
 
     useChatStore.getState().resetInputHistoryCursor("s1");
     expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(-1);

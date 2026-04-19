@@ -1,6 +1,7 @@
 // ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + QuotePreviewBar + InputBar
 // statusState 按优先级聚合 connection/approval/terminated/working/idle，StatusLine 放 Header 正下方
 // InputBar 统一承载 JSON 与 PTY 两种模式；右侧不再有 SemanticActionPanel 侧栏
+import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatJsonView } from "@/components/chat/chat-json-view";
@@ -9,6 +10,7 @@ import { InputBar } from "@/components/chat/input-bar";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine, type StatusLineState } from "@/components/chat/status-line";
 import { EmptyState } from "@/components/shell/empty-state";
+import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
@@ -33,6 +35,15 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
+
+  // 会话资源 (slash 命令列表 + @ 文件树) 按 session 请求:
+  // proxy 侧按 session.cwd 推 command_list_push + file_tree_push, 不请求就拿不到数据
+  useEffect(() => {
+    if (!connected || !proxyOnline) return;
+    const relay = relayClientRef;
+    if (!relay) return;
+    relay.sendControl({ type: "session_resources_request", sessionId: id });
+  }, [id, connected, proxyOnline]);
 
   // 单一权威信号: session.state（proxy 的 session_status envelope + pty_state 都写到这个字段）
   // pendingApprovals 与 session.state === "waiting_approval" 作 OR：审批推送可能比 session_status 早到

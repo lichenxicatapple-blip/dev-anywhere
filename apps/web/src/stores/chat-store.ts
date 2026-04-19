@@ -66,7 +66,9 @@ interface ChatStoreState {
   setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
   setInputDraft: (sessionId: string, draft: string) => void;
   // delta > 0 向更早的历史, delta < 0 向更新; clamp 在 [-1, historyLen - 1]
-  moveInputHistoryCursor: (sessionId: string, delta: number) => void;
+  // 历史游标由 InputBar 的 localStorage historyRef 决定长度, 直接 set 绝对值,
+  // 避免原 moveInputHistoryCursor 用 slice.messages 长度 clamp 导致 PTY 模式失效
+  setInputHistoryCursor: (sessionId: string, cursor: number) => void;
   resetInputHistoryCursor: (sessionId: string) => void;
   loadHistory: (
     sessionId: string,
@@ -209,14 +211,12 @@ export const useChatStore = create<ChatStoreState>()(
           updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft })),
         ),
 
-      moveInputHistoryCursor: (sessionId, delta) =>
+      setInputHistoryCursor: (sessionId, cursor) =>
         set((state) =>
-          updateSlice(state, sessionId, (slice) => {
-            const historyLen = slice.messages.filter((m) => m.role === "user").length;
-            const raw = slice.inputHistoryCursor + delta;
-            const clamped = Math.max(-1, Math.min(raw, historyLen - 1));
-            return { ...slice, inputHistoryCursor: clamped };
-          }),
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            inputHistoryCursor: cursor,
+          })),
         ),
 
       resetInputHistoryCursor: (sessionId) =>

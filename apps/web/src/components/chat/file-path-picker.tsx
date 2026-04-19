@@ -1,12 +1,20 @@
 // FilePathPicker: 订阅 useFileStore.tree + cache-miss 触发 dir_list_request
 // 共享给 InputBar (mode="insert") 与 CreateSessionDialog (mode="select", dirsOnly)
-// "insert" 从 "@query" 提取当前路径与过滤词
-// "select" 直接把 filter 视作绝对/相对路径输入
-import { useEffect, useMemo } from "react";
+// "insert" 从 "@query" 提取当前路径与过滤词; "select" 直接把 filter 视作绝对/相对路径
+// 键盘: InputBar 通过 ref.handleKey 转发 ↑↓/Enter; 选中项用 scrollIntoView 跟随
+// 滚动: Radix ScrollArea 在 max-h-only 父容器下 Viewport 拿不到高度约束, 这里用原生 overflow-y-auto
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import type { PickerHandle } from "./picker-handle";
 
 interface FilePathPickerProps {
   filter: string;
@@ -39,74 +47,137 @@ function extractPath(filter: string, mode: "insert" | "select"): string {
   return lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : "";
 }
 
-export function FilePathPicker({
-  filter,
-  onSelect,
-  mode = "insert",
-  dirsOnly = false,
-}: FilePathPickerProps) {
-  const tree = useFileStore((s) => s.tree);
-  const currentPath = useMemo(
-    () => extractPath(filter, mode) || "./",
-    [filter, mode],
-  );
-  const query = useMemo(() => extractQuery(filter, mode), [filter, mode]);
-
-  useEffect(() => {
-    if (!tree.get(currentPath)) {
-      const relay = relayClientRef;
-      relay?.sendControl({ type: "dir_list_request", path: currentPath });
-    }
-  }, [currentPath, tree]);
-
-  const filteredEntries = useMemo(() => {
-    let entries = tree.get(currentPath) ?? [];
-    if (dirsOnly) entries = entries.filter((e) => e.isDir);
-    if (query) entries = entries.filter((e) => e.name.toLowerCase().includes(query));
-    return entries;
-  }, [tree, currentPath, query, dirsOnly]);
-
-  const containerClass =
-    mode === "insert"
-      ? "absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-md shadow-lg max-h-60 z-10 overflow-hidden"
-      : "bg-popover border border-border rounded-md shadow-sm max-h-48 overflow-hidden";
-
-  return (
-    <div className={containerClass} data-slot="file-path-picker" data-mode={mode}>
-      <div className="text-xs text-muted-foreground px-3 py-1 border-b border-border font-mono">
-        {currentPath}
-      </div>
-      <ScrollArea className="max-h-48">
-        {filteredEntries.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">
-            没有匹配的路径
-          </div>
-        ) : (
-          <ul role="list" className="flex flex-col">
-            {filteredEntries.map((e) => (
-              <li key={e.name}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onSelect(currentPath + e.name + (e.isDir ? "/" : ""))
-                  }
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 h-9 text-sm hover:bg-accent text-left",
-                    e.isDir && "font-semibold",
-                  )}
-                  data-slot="file-entry"
-                  data-entry-type={e.isDir ? "dir" : "file"}
-                >
-                  <span className="font-mono text-[13px]">
-                    {e.name}
-                    {e.isDir ? "/" : ""}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </ScrollArea>
-    </div>
-  );
+// 相对路径 (./, apps/, apps/feishu/) + cwd 拼成绝对路径
+// 绝对路径 (/Users/...) 直接用, 避免 select 模式被错误拼到 cwd 下
+// 空 / "./" → cwd; 末尾清斜杠避免 // 双斜杠; 前缀 "./" 清掉
+function toAbsolutePath(cwd: string, relPath: string): string {
+  if (relPath.startsWith("/")) {
+    return relPath.replace(/\/+$/, "") || "/";
+  }
+  if (!cwd) return "";
+  const cleaned = relPath.replace(/^\.\//, "").replace(/\/+$/, "");
+  return cleaned ? `${cwd}/${cleaned}` : cwd;
 }
+
+export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(
+  function FilePathPicker(
+    { filter, onSelect, mode = "insert", dirsOnly = false },
+    ref,
+  ) {
+    const tree = useFileStore((s) => s.tree);
+    const cwd = useFileStore((s) => s.cwd);
+    const currentPath = useMemo(
+      () => extractPath(filter, mode) || "./",
+      [filter, mode],
+    );
+    const absolutePath = useMemo(
+      () => toAbsolutePath(cwd, currentPath),
+      [cwd, currentPath],
+    );
+    const query = useMemo(() => extractQuery(filter, mode), [filter, mode]);
+
+    useEffect(() => {
+      if (!absolutePath) return;
+      if (!tree.get(absolutePath)) {
+        const relay = relayClientRef;
+        relay?.sendControl({ type: "dir_list_request", path: absolutePath });
+      }
+    }, [absolutePath, tree]);
+
+    const filteredEntries = useMemo(() => {
+      let entries = tree.get(absolutePath) ?? [];
+      if (dirsOnly) entries = entries.filter((e) => e.isDir);
+      if (query)
+        entries = entries.filter((e) => e.name.toLowerCase().includes(query));
+      return entries;
+    }, [tree, absolutePath, query, dirsOnly]);
+
+    const [index, setIndex] = useState(0);
+    // filter 或所在目录变化时重置高亮到首项
+    useEffect(() => setIndex(0), [currentPath, query]);
+    useEffect(() => {
+      if (index >= filteredEntries.length && filteredEntries.length > 0) {
+        setIndex(filteredEntries.length - 1);
+      }
+    }, [filteredEntries.length, index]);
+
+    const listRef = useRef<HTMLUListElement>(null);
+    useEffect(() => {
+      const btn = listRef.current?.querySelector<HTMLElement>(
+        `[data-entry-index="${index}"]`,
+      );
+      btn?.scrollIntoView({ block: "nearest" });
+    }, [index]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        handleKey(e) {
+          if (filteredEntries.length === 0) return false;
+          if (e.key === "ArrowDown") {
+            setIndex((i) => Math.min(filteredEntries.length - 1, i + 1));
+            return true;
+          }
+          if (e.key === "ArrowUp") {
+            setIndex((i) => Math.max(0, i - 1));
+            return true;
+          }
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            const entry = filteredEntries[index];
+            onSelect(currentPath + entry.name + (entry.isDir ? "/" : ""));
+            return true;
+          }
+          return false;
+        },
+      }),
+      [filteredEntries, index, currentPath, onSelect],
+    );
+
+    const containerClass =
+      mode === "insert"
+        ? "absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-md shadow-lg z-10 overflow-hidden"
+        : "bg-popover border border-border rounded-md shadow-sm overflow-hidden";
+
+    return (
+      <div className={containerClass} data-slot="file-path-picker" data-mode={mode}>
+        <div className="text-xs text-muted-foreground px-3 py-1 border-b border-border font-mono">
+          {currentPath}
+        </div>
+        <div className="max-h-60 overflow-y-auto overscroll-contain">
+          {filteredEntries.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              没有匹配的路径
+            </div>
+          ) : (
+            <ul ref={listRef} role="list" className="flex flex-col">
+              {filteredEntries.map((e, i) => (
+                <li key={e.name}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onSelect(currentPath + e.name + (e.isDir ? "/" : ""))
+                    }
+                    onMouseEnter={() => setIndex(i)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 h-9 text-sm text-left transition-colors",
+                      i === index && "bg-accent",
+                      e.isDir && "font-semibold",
+                    )}
+                    data-slot="file-entry"
+                    data-entry-type={e.isDir ? "dir" : "file"}
+                    data-entry-index={i}
+                  >
+                    <span className="font-mono text-[13px]">
+                      {e.name}
+                      {e.isDir ? "/" : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    );
+  },
+);

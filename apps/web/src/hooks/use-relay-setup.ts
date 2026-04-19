@@ -10,10 +10,23 @@ import {
 import type { Timers } from "@/services/phase-machine";
 import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
+import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 export let wsManagerRef: WebSocketManager | null = null;
 export let relayClientRef: RelayClient | null = null;
+
+// Sarasa Fixed SC 按 cn-font-split 分片托管在 relay, 按 unicode-range 按需下载
+// relay 静态目录 ~/.cc-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 CJK font hosting 预生成
+function loadFontCSS(relayUrl: string): void {
+  const base = relayUrl.replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/(proxy|client)$/, "");
+  const href = `${base}/fonts/sarasa-fixed-sc/result.css`;
+  if (document.querySelector(`link[href="${href}"]`)) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
 
 export function useRelaySetup(): void {
   const wsRef = useRef<WebSocketManager | null>(null);
@@ -26,6 +39,7 @@ export function useRelaySetup(): void {
     const envUrl = import.meta.env.VITE_RELAY_URL as string | undefined;
     const relayUrl = stored || envUrl || window.location.origin;
     useAppStore.getState().setRelayUrl(relayUrl);
+    loadFontCSS(relayUrl);
 
     const ws = new WebSocketManager();
     wsRef.current = ws;
@@ -56,6 +70,8 @@ export function useRelaySetup(): void {
     const unregisterChat = registerChatDispatcher();
     // Session 生命周期 dispatcher: session_list / session_status / pty_state / session_history_response → session-store
     const unregisterSession = registerSessionDispatcher();
+    // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
+    const unregisterResource = registerResourceDispatcher();
 
     // D-08: 页面从后台恢复时自动重连
     const handleVisibility = () => {
@@ -76,6 +92,7 @@ export function useRelaySetup(): void {
       unsubRelay();
       unregisterChat();
       unregisterSession();
+      unregisterResource();
       document.removeEventListener("visibilitychange", handleVisibility);
       ws.close();
       wsManagerRef = null;
