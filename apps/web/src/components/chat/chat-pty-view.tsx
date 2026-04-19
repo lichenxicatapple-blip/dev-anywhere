@@ -1,22 +1,34 @@
-// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条
+// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条 + follow-to-bottom
 // 工具审批: PTY 模式不做结构化审批 UI (xterm 原生 TUI 已完成交互), 仅由 chat.tsx 顶部 hint bar 提示
 // 滚动交由浏览器原生: 外层 .pty-terminal (overflow-auto) 做 scrollable, spacer 撑出 buffer.length*cellH,
 // xterm 挂在 position:sticky 的 host. scroll 事件 -> term.scrollToLine(ydisp), term.onScroll -> 同步 scrollTop.
 // canvas 比容器高时 (autoscale off 手机竖屏常见), sticky release 阶段自然暴露 canvas 底部, 代替老 pinBottom.
 // 好处: touch/wheel/fling/momentum/edge bounce 全部走浏览器合成线程, 无 JS jank, 和原生 app 手感一致.
+//
+// 冷启动贴底: Claude Code TUI 纯 append 模式, 启动初期只画前 N 行, canvas 下半是 PTY 空白行.
+// updateSpacer 扫出 canvasLastY, 给 host paddingTop = (rows-1-canvasLastY)*cellH 把 canvas 推到 host 底部,
+// host overflow:hidden 裁掉 canvas 超出 host 底的空白部分. host.height 保持 rows*cellH 让 sticky release 机制照常工作.
+// scrollTop=max 时 sticky release → host 底贴 container 底 → canvas 有效内容贴 container 底.
+// 累积到 canvasLastY=rows-1 后 paddingTop=0, 回到原状态无任何视觉影响.
+//
+// follow 语义与 JSON 模式对齐: 在底时 onRender 自动 scrollTop=scrollHeight 追随;
+// 离底时置 newFramesWhileAway 红点, 用户点按钮或自然滚回即清零.
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
+import { useFollowOutput } from "@/hooks/use-follow-output";
+import { BackToBottom } from "./back-to-bottom";
 
 interface ChatPtyViewProps {
   sessionId: string;
 }
 
 export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // containerEl 用 state 是为了让 useFollowOutput 在 DOM 挂载后拿到 el
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -25,6 +37,21 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
   const [subscribeExhausted, setSubscribeExhausted] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [newFramesWhileAway, setNewFramesWhileAway] = useState(false);
+  const { isAtBottom, scrollToBottom } = useFollowOutput(containerEl);
+  const isAtBottomRef = useRef(isAtBottom);
+  useEffect(() => {
+    isAtBottomRef.current = isAtBottom;
+    if (isAtBottom) setNewFramesWhileAway(false);
+  }, [isAtBottom]);
+  const newFramesWhileAwayRef = useRef(newFramesWhileAway);
+  useEffect(() => {
+    newFramesWhileAwayRef.current = newFramesWhileAway;
+  }, [newFramesWhileAway]);
+  // xterm.onRender 会在用户 scroll 触发 ydisp 变化时也跑 (canvas 重绘),
+  // 不做来源区分会把"scroll 触发的 render"误判为"新帧到达" → 红点虚亮 / scroll 被 follow 拉回.
+  // 用 ref flag 标记 "真的有新帧到达", subscribeBinary 收到数据时 set, onRender 消费后清零.
+  const pendingNewFrameRef = useRef(false);
   useEffect(() => {
     if (ready) {
       setShowConnectingOverlay(false);
@@ -69,6 +96,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
           return;
         }
         terminalRef.current?.write(data);
+        pendingNewFrameRef.current = true;
       });
 
       const RETRY_DELAY_MS = 3000;
@@ -144,7 +172,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   // 用一个 effect 统一管理生命周期, 避免多个 effect 各自持有 syncing 标志时互相打架.
   useEffect(() => {
     if (!ready) return;
-    const container = containerRef.current;
+    const container = containerEl;
     const spacer = spacerRef.current;
     const host = xtermHostRef.current;
     const term = terminalRef.current;
@@ -174,6 +202,23 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       host.style.width = `${term.cols * cellW}px`;
       host.style.height = `${term.rows * cellH}px`;
       spacer.style.width = host.style.width;
+
+      // 扫 canvas 视口 (buffer[viewportY..viewportY+rows]) 找最后一个非空行, 只看 rows 行不随 scrollback 增长
+      // 冷启动 TUI 只画前 N 行时, 用 paddingTop = (rows-1-canvasLastY)*cellH 把 canvas 内容推到 host 底部 (N+1)*cellH 内,
+      // host overflow:hidden 裁掉 canvas 超出 host 底的空白行. host height 保持 rows*cellH → sticky release 照常工作.
+      // 累积 canvasLastY=rows-1 时 paddingTop=0, 和原状态无视觉差异.
+      let canvasLastY = -1;
+      for (let ry = term.rows - 1; ry >= 0; ry--) {
+        const absY = buffer.viewportY + ry;
+        if (absY < 0 || absY >= buffer.length) continue;
+        const line = buffer.getLine(absY);
+        if (line && line.translateToString(true).trimEnd().length > 0) {
+          canvasLastY = ry;
+          break;
+        }
+      }
+      const blankRows = canvasLastY < 0 ? term.rows - 1 : term.rows - 1 - canvasLastY;
+      host.style.paddingTop = `${blankRows * cellH}px`;
     };
 
     const ydispToScrollTop = (ydisp: number): number => {
@@ -236,8 +281,17 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     };
 
     // 新数据到来时 buffer 可能增长, spacer 需要跟着长; xterm onRender 在每次渲染后触发
+    // follow 语义对齐 JSON 模式: 新帧且在底时自动追随, 新帧且离底时置 newFramesWhileAway 红点
+    // pendingNewFrameRef guard 必要: user scroll 导致的 canvas 重绘也会触发 onRender, 不 guard 会误红点
     const onRender = (): void => {
       updateSpacer();
+      if (!pendingNewFrameRef.current) return;
+      pendingNewFrameRef.current = false;
+      if (isAtBottomRef.current) {
+        container.scrollTop = container.scrollHeight;
+      } else if (!newFramesWhileAwayRef.current) {
+        setNewFramesWhileAway(true);
+      }
     };
 
     updateSpacer();
@@ -258,14 +312,14 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       dispRender.dispose();
       ro.disconnect();
     };
-  }, [ready, ptyAutoscale]);
+  }, [ready, ptyAutoscale, containerEl]);
 
   // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
   // cols/rows 保持 snapshot 原值, 字号变会带动 cellH 变, 驱动 spacer 重算.
   useEffect(() => {
     if (!ready) return;
     const host = xtermHostRef.current;
-    const container = containerRef.current;
+    const container = containerEl;
     const term = terminalRef.current;
     if (!host || !container || !term) return;
 
@@ -293,12 +347,12 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     const ro = new ResizeObserver(fit);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [ready, ptyAutoscale]);
+  }, [ready, ptyAutoscale, containerEl]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
-        ref={containerRef}
+        ref={setContainerEl}
         className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E]"
         data-slot="pty-terminal"
       >
@@ -313,11 +367,21 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
               position: "sticky",
               top: 0,
               left: 0,
+              overflow: "hidden",
+              boxSizing: "border-box",
             }}
             data-slot="pty-host"
           />
         </div>
       </div>
+      <BackToBottom
+        visible={!isAtBottom}
+        hasNewMessages={newFramesWhileAway}
+        onClick={() => {
+          scrollToBottom();
+          setNewFramesWhileAway(false);
+        }}
+      />
       {showConnectingOverlay && !subscribeExhausted && (
         <div
           className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-card/60 text-xs text-muted-foreground"
