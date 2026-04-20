@@ -35,8 +35,8 @@ const IDLE_THRESHOLD_MS = 3_000;
 // serve 连接断开后的重连重试参数
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
-// 连续 spawn 失败 N 次后停止自动 spawn，降级为被动 tryConnect 轮询。
-// 避免环境坏（port 占用、install 坏、权限）时持续刷短命子进程。
+// 连续 spawn 失败到达阈值后停止自动 spawn，降为被动 tryConnect 轮询。
+// 作用：环境异常（端口占用、依赖缺失、权限不足）时避免反复拉起短命子进程把日志刷爆。
 const SPAWN_FAILURE_THRESHOLD = 3;
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
@@ -222,8 +222,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   async function reconnectToServe(): Promise<void> {
     log.info("Serve connection lost, starting reconnection");
 
-    // STOPPED=true（用户 cc-anywhere stop）与 spawn 反复失败（环境坏）两种路径都不该 spawn。
-    // consecutiveSpawnFailures 跨过阈值后进入 degraded，只做 tryConnect 被动等待用户修复或手动拉起。
+    // 两条路径都不该再继续 spawn daemon：
+    //   - STOPPED=true：用户主动 cc-anywhere stop，不要对抗用户意图。
+    //   - consecutiveSpawnFailures 跨过阈值：说明环境有持续性问题，spawn 再多也白搭。
+    // 进入 passive 后仅做 tryConnect 等待，daemon 起来或用户 cc-anywhere start 后自动恢复。
     let consecutiveSpawnFailures = 0;
 
     for (let i = 0; ; i++) {
@@ -238,10 +240,10 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
         if (!newSocket) continue;
 
-        // 成功连上：若之前在 degraded，打恢复 banner + 重置 counter
+        // 之前在 degraded 模式下恢复：打 banner 让用户知道 daemon 起来了
         if (degraded) {
           process.stderr.write(
-            "\n\x1b[32m[cc-anywhere] serve daemon 已恢复，自动重连已继续\x1b[0m\n",
+            "\n\x1b[32m[cc-anywhere] serve daemon reachable, reconnected\x1b[0m\n",
           );
         }
         consecutiveSpawnFailures = 0;
@@ -276,12 +278,12 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
         return;
       } catch (err) {
-        // passive 模式不该触发 catch（tryConnect 返回 null 不抛）；这里只处理 ensureService 的 spawn 失败
+        // passive 模式下路径是 tryConnect，失败返回 null 而非 throw，这里只能是 ensureService spawn 失败
         if (!passive) {
           consecutiveSpawnFailures++;
           if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
             process.stderr.write(
-              `\n\x1b[33m[cc-anywhere] serve daemon 连续启动失败 ${SPAWN_FAILURE_THRESHOLD} 次，停止自动拉起；请检查环境或手动运行 cc-anywhere start\x1b[0m\n`,
+              `\n\x1b[33m[cc-anywhere] serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'cc-anywhere start'\x1b[0m\n`,
             );
           }
         }
