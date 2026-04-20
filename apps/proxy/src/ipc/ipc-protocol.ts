@@ -299,14 +299,16 @@ export function serializeIpc(msg: IpcMessage): string {
   return JSON.stringify(msg) + "\n";
 }
 
-// 混合协议 IPC 读取器，支持 NDJSON 控制消息和 binary PTY 帧
-// binary 帧以 0x00 开头，NDJSON 行以 '{' 开头，通过首字节区分
+// 混合协议 IPC 读取器，支持 NDJSON 控制消息和 binary PTY 帧。
+// binary 帧以 0x00 开头，NDJSON 行以 '{' 开头，通过首字节区分。
+// 返回 dispose 函数用于摘掉 'data' 监听，长连接可以忽略，一次性等待（如 waitForMessage）必须调用避免累积 listener 重复解析每条消息。
 export function createIpcReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: IpcMessage) => void,
   onBinaryFrame?: (sessionId: string, data: Buffer) => void,
-): void {
+): () => void {
   let buf = Buffer.alloc(0);
+  let disposed = false;
 
   // 解析状态机：不断消费 buf 中的完整消息
   function drain(): void {
@@ -360,9 +362,17 @@ export function createIpcReader(
     }
   }
 
-  stream.on("data", (chunk: Buffer | string) => {
+  function onData(chunk: Buffer | string): void {
+    if (disposed) return;
     const incoming = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     buf = Buffer.concat([buf, incoming]);
     drain();
-  });
+  }
+
+  stream.on("data", onData);
+
+  return () => {
+    disposed = true;
+    stream.off("data", onData);
+  };
 }
