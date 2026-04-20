@@ -57,47 +57,50 @@ export function SessionList({ layout }: SessionListProps) {
   }
 
   const hasActive = sessions.length > 0;
-  const hasHistory = historyCount > 0;
 
-  // 活跃 + 历史均为空: sidebar 给文案, page 给 EmptyState
-  if (!hasActive && !hasHistory) {
-    if (layout === "sidebar") {
-      return (
-        <>
-          <div className="px-4 py-3 text-sm text-muted-foreground/70">
-            {isLoading ? "连接中..." : hasProxy ? "暂无会话" : "请先选择 Proxy"}
-          </div>
-          <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
-        </>
-      );
-    }
-    if (isLoading) {
-      return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-          <p className="text-sm">连接中...</p>
+  // 加载中 / 无 proxy: 两个 layout 分别走各自的空态; 其他情况统一渲染 active + history 两个 section,
+  // 各自内部做 "暂无..." 提示, 而不是 short-circuit 出一个大 EmptyState
+  if (layout === "sidebar" && (isLoading || !hasProxy)) {
+    return (
+      <>
+        <div className="px-4 py-3 text-sm text-muted-foreground/70">
+          {isLoading ? "连接中..." : "请先选择 Proxy"}
         </div>
-      );
-    }
+        <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
+      </>
+    );
+  }
+  if (layout === "page" && isLoading) {
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+        <p className="text-sm">连接中...</p>
+      </div>
+    );
+  }
+  if (layout === "page" && !hasProxy) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex-1">
-          <EmptyState
-            variant={hasProxy ? "no-session" : "no-proxy"}
-            action={
-              hasProxy ? (
-                <Button onClick={() => setCreateOpen(true)}>
-                  <Plus aria-hidden="true" />
-                  新建会话
-                </Button>
-              ) : undefined
-            }
-          />
+          <EmptyState variant="no-proxy" />
         </div>
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
       </div>
     );
   }
+
+  // page 布局里 sidebar 外层没有 "活跃会话" 标签, 所以在这里补一个 inline header
+  const pageActiveHeader =
+    layout === "page" ? (
+      <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
+        活跃会话
+        {hasActive ? (
+          <span className="ml-1 text-muted-foreground/70 font-normal">
+            · {sessions.length}
+          </span>
+        ) : null}
+      </h3>
+    ) : null;
 
   const activeListElement = hasActive ? (
     <ul role="list" className="flex flex-col w-full min-w-0">
@@ -112,9 +115,17 @@ export function SessionList({ layout }: SessionListProps) {
         />
       ))}
     </ul>
-  ) : null;
+  ) : (
+    <div
+      className="px-4 py-3 text-sm text-muted-foreground/70"
+      data-slot="active-empty"
+    >
+      暂无活跃会话
+    </div>
+  );
 
-  const historyElement = hasHistory ? <HistoryList now={now} /> : null;
+  // HistoryList 自己处理空态 (header + "暂无全部会话" 提示), 这里无条件渲染
+  const historyElement = <HistoryList now={now} />;
 
   if (layout === "page") {
     return (
@@ -122,6 +133,7 @@ export function SessionList({ layout }: SessionListProps) {
         {/* 用原生 overflow-y-auto 而不是 radix ScrollArea: 后者内部 `display:table` wrapper */}
         {/* 会把 history 行按内容宽度撑到 800+px, 使 `truncate` 完全失效 */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+          {pageActiveHeader}
           {activeListElement}
           {historyElement}
         </div>
@@ -137,6 +149,7 @@ export function SessionList({ layout }: SessionListProps) {
   }
 
   // layout === "sidebar": 列表占据 Sidebar 中段；底部 CTA 由 CreateSessionButton 承载
+  // "活跃会话" section 标签由 sidebar.tsx 外层提供, 这里只渲染行列表 / 空态 + HistoryList
   // 直接用 overflow-y-auto 而非 ScrollArea，避免 radix ScrollArea 内部 table-wrapper 打破 truncate 链路
   return (
     <>

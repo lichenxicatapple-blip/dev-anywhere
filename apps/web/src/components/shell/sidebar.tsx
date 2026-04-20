@@ -37,7 +37,7 @@ export function Sidebar({ className }: SidebarProps) {
       {/* Session list section —— section label 用 text-sm semibold foreground，与空态文案拉开层级 */}
       <div className="flex flex-col flex-1 overflow-hidden" data-slot="sidebar-session-list">
         <div className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
-          会话{sessionCount > 0 ? ` · ${sessionCount}` : ""}
+          活跃会话{sessionCount > 0 ? ` · ${sessionCount}` : ""}
         </div>
         <div className="flex-1 overflow-auto">
           <SessionList layout="sidebar" />
