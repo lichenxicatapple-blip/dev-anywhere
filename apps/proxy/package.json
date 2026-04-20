@@ -42,6 +42,7 @@
     "serve": "tsx src/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
