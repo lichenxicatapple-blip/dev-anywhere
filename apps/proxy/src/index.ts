@@ -172,6 +172,17 @@ const serve = new Command("serve")
   });
 
 serve
+  .command("start")
+  .description("Start the background service")
+  .action(async () => {
+    if (!isInitialized()) {
+      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      process.exit(1);
+    }
+    await startDaemon();
+  });
+
+serve
   .command("status")
   .description("Show service status and active sessions")
   .option("-w, --watch", "Continuous monitoring mode")

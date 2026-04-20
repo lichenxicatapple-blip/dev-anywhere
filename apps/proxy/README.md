@@ -13,16 +13,16 @@ Requires Node.js >= 20 and [Claude Code CLI](https://code.claude.com/) installed
 ## Quick start
 
 ```bash
-# 1. Configure relay server
-cc-anywhere config init
-# Edit ~/.cc-anywhere/config.json and set:
-#   "relayUrl": "wss://your-relay.example.com"
-#   "relayToken": "<token>"
+# 1. Initialize workspace (creates ~/.cc-anywhere/config.json)
+cc-anywhere init
 
-# 2. Start background daemon
+# 2. Edit ~/.cc-anywhere/config.json:
+#   { "relayUrl": "wss://your-relay.example.com", "relayToken": "<token>" }
+
+# 3. Start background daemon
 cc-anywhere serve start
 
-# 3. Open the web SPA served by your relay, pick your proxy, create a session
+# 4. Open the web SPA served by your relay, pick your proxy, create a session
 ```
 
 ## Commands
