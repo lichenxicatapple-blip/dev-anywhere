@@ -17,6 +17,7 @@ import {
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
+import { createFSM } from "./common/state-machine.js";
 
 // serve daemon 自动拉起的连接重试参数
 const ENSURE_SERVICE_MAX_RETRIES = 20;
@@ -45,6 +46,17 @@ const TerminalState = {
   EXITED: "exited",
 } as const;
 type TerminalState = (typeof TerminalState)[keyof typeof TerminalState];
+
+// 允许的状态转换。CREATING_SESSION/RUNNING 下可被 socket close 打断进入 RECONNECTING；
+// 任意非终态都可能被 PTY 退出或 SIGTERM 打断进入 EXITED。
+const TERMINAL_TRANSITIONS: Record<TerminalState, readonly TerminalState[]> = {
+  init: ["connecting_service"],
+  connecting_service: ["creating_session", "exited"],
+  creating_session: ["running", "reconnecting", "exited"],
+  running: ["reconnecting", "exited"],
+  reconnecting: ["creating_session", "running", "exited"],
+  exited: [],
+};
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -121,8 +133,12 @@ function waitForMessage(socket: Socket, messageType: string): Promise<IpcMessage
 
 export async function startTerminal(claudeArgs: string[]): Promise<void> {
   log.info("Terminal starting");
-  let terminalState: TerminalState = TerminalState.INIT;
-  terminalState = TerminalState.CONNECTING_SERVICE;
+  const fsm = createFSM<TerminalState>({
+    initial: TerminalState.INIT,
+    transitions: TERMINAL_TRANSITIONS,
+    onTransition: (from, to) => log.info({ from, to }, "Terminal state transition"),
+  });
+  fsm.transitionTo(TerminalState.CONNECTING_SERVICE);
   let socket = await ensureService();
   let sessionId: string | null = null;
   let ptyManager: PtyManager | null = null;
@@ -181,8 +197,8 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
     socket.on("close", () => {
       log.info("Serve socket closed");
-      if (terminalState !== TerminalState.RECONNECTING && terminalState !== TerminalState.EXITED) {
-        terminalState = TerminalState.RECONNECTING;
+      if (!fsm.isIn([TerminalState.RECONNECTING, TerminalState.EXITED])) {
+        fsm.transitionTo(TerminalState.RECONNECTING);
         reconnectToServe();
       }
     });
@@ -224,7 +240,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         setupSocketHandlers();
 
         if (sessionId) {
-          terminalState = TerminalState.CREATING_SESSION;
+          fsm.transitionTo(TerminalState.CREATING_SESSION);
           socket.write(
             serializeIpc({
               type: "session_create_request",
@@ -239,11 +255,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
           if (resp.type === "session_create_response" && !resp.error) {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
-            terminalState = TerminalState.RUNNING;
+            fsm.transitionTo(TerminalState.RUNNING);
             log.info({ sessionId }, "Session re-registered after reconnect");
           }
         } else {
-          terminalState = TerminalState.RUNNING;
+          fsm.transitionTo(TerminalState.RUNNING);
         }
 
         return;
@@ -258,7 +274,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   }
 
   // 请求创建 PTY 会话
-  terminalState = TerminalState.CREATING_SESSION;
+  fsm.transitionTo(TerminalState.CREATING_SESSION);
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
     serializeIpc({
@@ -331,7 +347,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     },
     onSessionExit: (code: number) => {
-      terminalState = TerminalState.EXITED;
+      fsm.transitionTo(TerminalState.EXITED);
       log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
       if (idleCheckTimer) clearInterval(idleCheckTimer);
       // pty_deregister 通知 serve 做 session 清理（数据目录、relay 通知等）
@@ -350,12 +366,15 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   log.info({ sessionId }, "PTY started with headless terminal");
 
   socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
-  terminalState = TerminalState.RUNNING;
+  fsm.transitionTo(TerminalState.RUNNING);
 
   setupIdleCheck();
 
   process.on("SIGTERM", () => {
     log.info({ sessionId }, "SIGTERM received, shutting down");
+    // Ctrl+C 两连击或 onSessionExit 已经走过 EXITED 时，不再重复转换（会触发非法转换抛错）
+    if (fsm.is(TerminalState.EXITED)) return;
+    fsm.transitionTo(TerminalState.EXITED);
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     if (socket.writable && sessionId) {
       const msg = serializeIpc({ type: "pty_deregister", sessionId });
