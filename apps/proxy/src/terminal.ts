@@ -33,9 +33,11 @@ const IDLE_CHECK_INTERVAL_MS = 3_000;
 const IDLE_THRESHOLD_MS = 3_000;
 
 // serve 连接断开后的重连重试参数
-const RECONNECT_MAX_RETRIES = 60;
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
+// 连续 spawn 失败 N 次后停止自动 spawn，降级为被动 tryConnect 轮询。
+// 避免环境坏（port 占用、install 坏、权限）时持续刷短命子进程。
+const SPAWN_FAILURE_THRESHOLD = 3;
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -220,13 +222,30 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   async function reconnectToServe(): Promise<void> {
     log.info("Serve connection lost, starting reconnection");
 
-    for (let i = 0; i < RECONNECT_MAX_RETRIES; i++) {
+    // STOPPED=true（用户 cc-anywhere stop）与 spawn 反复失败（环境坏）两种路径都不该 spawn。
+    // consecutiveSpawnFailures 跨过阈值后进入 degraded，只做 tryConnect 被动等待用户修复或手动拉起。
+    let consecutiveSpawnFailures = 0;
+
+    for (let i = 0; ; i++) {
       await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
+
+      const stopped = existsSync(STOPPED_PATH);
+      const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
+      const passive = stopped || degraded;
+
       try {
-        const stopped = existsSync(STOPPED_PATH);
-        log.debug({ attempt: i + 1, stopped }, "Reconnect attempt");
-        const newSocket = stopped ? await tryConnect(SOCK_PATH) : await ensureService();
+        log.debug({ attempt: i + 1, stopped, degraded }, "Reconnect attempt");
+        const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
         if (!newSocket) continue;
+
+        // 成功连上：若之前在 degraded，打恢复 banner + 重置 counter
+        if (degraded) {
+          process.stderr.write(
+            "\n\x1b[32m[cc-anywhere] serve daemon 已恢复，自动重连已继续\x1b[0m\n",
+          );
+        }
+        consecutiveSpawnFailures = 0;
+
         socket = newSocket;
         log.info({ attempt: i + 1, sessionId }, "Reconnected to serve");
 
@@ -257,13 +276,21 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
         return;
       } catch (err) {
+        // passive 模式不该触发 catch（tryConnect 返回 null 不抛）；这里只处理 ensureService 的 spawn 失败
+        if (!passive) {
+          consecutiveSpawnFailures++;
+          if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
+            process.stderr.write(
+              `\n\x1b[33m[cc-anywhere] serve daemon 连续启动失败 ${SPAWN_FAILURE_THRESHOLD} 次，停止自动拉起；请检查环境或手动运行 cc-anywhere start\x1b[0m\n`,
+            );
+          }
+        }
         log.debug(
-          { err: err instanceof Error ? err.message : err, attempt: i + 1 },
+          { err: err instanceof Error ? err.message : err, attempt: i + 1, degraded },
           "Reconnect attempt failed",
         );
       }
     }
-    log.error({ maxRetries: RECONNECT_MAX_RETRIES }, "Reconnection exhausted");
   }
 
   // 请求创建 PTY 会话
