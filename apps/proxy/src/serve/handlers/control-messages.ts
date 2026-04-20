@@ -41,7 +41,10 @@ function isPickerVisible(name: string): boolean {
 }
 
 // 目录优先 + 字母序, picker 侧依赖这个顺序做键盘导航默认选中
-function sortEntries(a: { isDir: boolean; name: string }, b: { isDir: boolean; name: string }): number {
+function sortEntries(
+  a: { isDir: boolean; name: string },
+  b: { isDir: boolean; name: string },
+): number {
   if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
   return a.name.localeCompare(b.name);
 }
@@ -85,7 +88,6 @@ async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
   return groups;
 }
 
-
 export function createControlMessageHandlers(
   send: (data: string) => void,
   sessionManager: SessionManager,
@@ -102,66 +104,77 @@ export function createControlMessageHandlers(
   }
 
   return {
-
     async handleDirListRequest(msg: { path: string }): Promise<void> {
       // T-06-13: 路径遍历防御
       if (!isPathSafe(msg.path)) {
-        send(JSON.stringify({
-          type: "dir_list_response",
-          path: msg.path,
-          entries: [],
-          error: "Invalid path: must be absolute and must not contain path traversal",
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_list_response",
+            path: msg.path,
+            entries: [],
+            error: "Invalid path: must be absolute and must not contain path traversal",
+          }),
+        );
         serviceLogger.warn({ path: msg.path }, "Rejected dir_list_request: unsafe path");
         return;
       }
 
       try {
         const entries = await scanDir(msg.path);
-        send(JSON.stringify({
-          type: "dir_list_response",
-          path: msg.path,
-          entries,
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_list_response",
+            path: msg.path,
+            entries,
+          }),
+        );
         serviceLogger.debug({ path: msg.path, count: entries.length }, "Dir list response sent");
       } catch (err) {
-        send(JSON.stringify({
-          type: "dir_list_response",
-          path: msg.path,
-          entries: [],
-          error: String(err),
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_list_response",
+            path: msg.path,
+            entries: [],
+            error: String(err),
+          }),
+        );
         serviceLogger.warn({ path: msg.path, error: String(err) }, "Dir list request failed");
       }
     },
 
     async handleDirCreateRequest(msg: { path: string }): Promise<void> {
       if (!isPathSafe(msg.path)) {
-        send(JSON.stringify({
-          type: "dir_create_response",
-          path: msg.path,
-          success: false,
-          error: "Invalid path: must be absolute and must not contain path traversal",
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_create_response",
+            path: msg.path,
+            success: false,
+            error: "Invalid path: must be absolute and must not contain path traversal",
+          }),
+        );
         serviceLogger.warn({ path: msg.path }, "Rejected dir_create_request: unsafe path");
         return;
       }
 
       try {
         await mkdir(msg.path, { recursive: true });
-        send(JSON.stringify({
-          type: "dir_create_response",
-          path: msg.path,
-          success: true,
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_create_response",
+            path: msg.path,
+            success: true,
+          }),
+        );
         serviceLogger.info({ path: msg.path }, "Directory created");
       } catch (err) {
-        send(JSON.stringify({
-          type: "dir_create_response",
-          path: msg.path,
-          success: false,
-          error: String(err),
-        }));
+        send(
+          JSON.stringify({
+            type: "dir_create_response",
+            path: msg.path,
+            success: false,
+            error: String(err),
+          }),
+        );
         serviceLogger.warn({ path: msg.path, error: String(err) }, "Dir create failed");
       }
     },
@@ -169,16 +182,20 @@ export function createControlMessageHandlers(
     async handleSessionHistoryRequest(): Promise<void> {
       try {
         const sessions = await scanSessionHistory();
-        send(JSON.stringify({
-          type: "session_history_response",
-          sessions,
-        }));
+        send(
+          JSON.stringify({
+            type: "session_history_response",
+            sessions,
+          }),
+        );
         serviceLogger.debug({ count: sessions.length }, "Session history response sent");
       } catch (err) {
-        send(JSON.stringify({
-          type: "session_history_response",
-          sessions: [],
-        }));
+        send(
+          JSON.stringify({
+            type: "session_history_response",
+            sessions: [],
+          }),
+        );
         serviceLogger.warn({ error: String(err) }, "Session history scan failed");
       }
     },
@@ -188,10 +205,12 @@ export function createControlMessageHandlers(
 
       try {
         const commands = await discoverCommands(workDir);
-        send(JSON.stringify({
-          type: "command_list_push",
-          commands,
-        }));
+        send(
+          JSON.stringify({
+            type: "command_list_push",
+            commands,
+          }),
+        );
         serviceLogger.info({ sessionId, count: commands.length, workDir }, "Command list pushed");
       } catch (err) {
         serviceLogger.warn({ sessionId, error: String(err) }, "Command discovery failed");
@@ -204,10 +223,12 @@ export function createControlMessageHandlers(
       resources.commandRefreshTimer = setInterval(async () => {
         try {
           const commands = await discoverCommands(workDir);
-          send(JSON.stringify({
-            type: "command_list_push",
-            commands,
-          }));
+          send(
+            JSON.stringify({
+              type: "command_list_push",
+              commands,
+            }),
+          );
           serviceLogger.debug({ sessionId, count: commands.length }, "Command list refreshed");
         } catch (err) {
           serviceLogger.warn({ sessionId, error: String(err) }, "Command refresh failed");
@@ -221,10 +242,12 @@ export function createControlMessageHandlers(
 
       try {
         const groups = await getFileTree(workDir);
-        send(JSON.stringify({
-          type: "file_tree_push",
-          groups,
-        }));
+        send(
+          JSON.stringify({
+            type: "file_tree_push",
+            groups,
+          }),
+        );
         serviceLogger.debug(
           { sessionId, path: workDir, groupCount: groups.length },
           "File tree pushed",
@@ -236,19 +259,20 @@ export function createControlMessageHandlers(
 
     // relay 重连时同步 session 列表并重新推送控制数据
     async reinitializeOnReconnect(): Promise<void> {
-      const activeSessions = sessionManager.listSessions()
-        .filter((s) => s.state !== "terminated");
+      const activeSessions = sessionManager.listSessions().filter((s) => s.state !== "terminated");
 
       // 先同步 session 列表，relay 据此建立 proxy-session 关联
       if (activeSessions.length > 0) {
-        send(JSON.stringify({
-          type: "session_sync",
-          sessions: activeSessions.map((s) => ({
-            id: s.id,
-            mode: s.mode,
-            state: s.state,
-          })),
-        }));
+        send(
+          JSON.stringify({
+            type: "session_sync",
+            sessions: activeSessions.map((s) => ({
+              id: s.id,
+              mode: s.mode,
+              state: s.state,
+            })),
+          }),
+        );
         serviceLogger.info({ count: activeSessions.length }, "Session list synced to relay");
       }
 
@@ -258,18 +282,28 @@ export function createControlMessageHandlers(
         if (workDir) {
           try {
             const commands = await discoverCommands(workDir);
-            send(JSON.stringify({
-              type: "command_list_push",
-              commands,
-            }));
+            send(
+              JSON.stringify({
+                type: "command_list_push",
+                commands,
+              }),
+            );
             const groups = await getFileTree(workDir);
-            send(JSON.stringify({
-              type: "file_tree_push",
-              groups,
-            }));
-            serviceLogger.info({ sessionId: session.id }, "Reinitialized control data after reconnect");
+            send(
+              JSON.stringify({
+                type: "file_tree_push",
+                groups,
+              }),
+            );
+            serviceLogger.info(
+              { sessionId: session.id },
+              "Reinitialized control data after reconnect",
+            );
           } catch (err) {
-            serviceLogger.warn({ sessionId: session.id, error: String(err) }, "Reinitialize failed");
+            serviceLogger.warn(
+              { sessionId: session.id, error: String(err) },
+              "Reinitialize failed",
+            );
           }
         }
       }

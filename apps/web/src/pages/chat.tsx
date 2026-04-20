@@ -30,9 +30,7 @@ export function ChatPage() {
 function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
-  const session = useSessionStore((s) =>
-    s.sessions.find((x) => x.sessionId === id),
-  );
+  const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
@@ -82,17 +80,10 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         </div>
       )}
       <div className="flex-1 min-h-0">
-        {mode === "pty" ? (
-          <ChatPtyView sessionId={id} />
-        ) : (
-          <ChatJsonView sessionId={id} />
-        )}
+        {mode === "pty" ? <ChatPtyView sessionId={id} /> : <ChatJsonView sessionId={id} />}
       </div>
       <QuotePreviewBar sessionId={id} />
-      <div
-        className="p-2"
-        data-slot="input-bar-region"
-      >
+      <div className="p-2" data-slot="input-bar-region">
         <InputBar sessionId={id} mode={mode} />
       </div>
     </div>

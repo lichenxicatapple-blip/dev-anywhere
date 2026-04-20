@@ -4,11 +4,7 @@
 // eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
-export type PtySemanticState =
-  | "working"
-  | "turn_complete"
-  | "approval_wait"
-  | "mid_pause";
+export type PtySemanticState = "working" | "turn_complete" | "approval_wait" | "mid_pause";
 
 interface PtyStateEvent {
   state: PtySemanticState;

@@ -61,12 +61,21 @@ export class RelayClient {
   }
 
   // 请求代理列表并返回 Promise，等待 proxy_list_response 响应
-  requestProxyList(): Promise<Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>> {
+  requestProxyList(): Promise<
+    Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>
+  > {
     return new Promise((resolve) => {
       const unsub = this.onMessage((msg) => {
         if ("type" in msg && (msg as Record<string, unknown>).type === "proxy_list_response") {
           unsub();
-          resolve((msg as Record<string, unknown>).proxies as Array<{ proxyId: string; name?: string; online: boolean; sessions?: string[] }>);
+          resolve(
+            (msg as Record<string, unknown>).proxies as Array<{
+              proxyId: string;
+              name?: string;
+              online: boolean;
+              sessions?: string[];
+            }>,
+          );
         }
       });
       this.ws.send(JSON.stringify({ type: "proxy_list_request" }));

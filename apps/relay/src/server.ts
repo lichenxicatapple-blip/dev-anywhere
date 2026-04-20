@@ -28,21 +28,29 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const { heartbeatInterval = 30000, logger, dataDir, proxyToken } = options;
   const proxyTokenRequired = typeof proxyToken === "string" && proxyToken.length > 0;
   if (!proxyTokenRequired) {
-    logger.warn("proxy auth token not set, /proxy endpoint is open — ok for dev, not for public relay");
+    logger.warn(
+      "proxy auth token not set, /proxy endpoint is open — ok for dev, not for public relay",
+    );
   }
 
   const registry = new RelayRegistry();
   const app = express();
 
   // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.cc-anywhere/relay-data/fonts 提供
-  const fontsDir = dataDir ? `${dataDir}/fonts` : `${process.env.HOME}/.cc-anywhere/relay-data/fonts`;
-  app.use("/fonts", (req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    next();
-  }, express.static(fontsDir, {
-    maxAge: "30d",
-    immutable: true,
-  }));
+  const fontsDir = dataDir
+    ? `${dataDir}/fonts`
+    : `${process.env.HOME}/.cc-anywhere/relay-data/fonts`;
+  app.use(
+    "/fonts",
+    (req, res, next) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      next();
+    },
+    express.static(fontsDir, {
+      maxAge: "30d",
+      immutable: true,
+    }),
+  );
 
   app.use(healthRouter(registry));
 
@@ -60,7 +68,10 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       if (proxyTokenRequired) {
         const token = url.searchParams.get("token");
         if (token !== proxyToken) {
-          logger.warn({ ip: request.socket.remoteAddress }, "rejected /proxy upgrade: invalid token");
+          logger.warn(
+            { ip: request.socket.remoteAddress },
+            "rejected /proxy upgrade: invalid token",
+          );
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           socket.destroy();
           return;

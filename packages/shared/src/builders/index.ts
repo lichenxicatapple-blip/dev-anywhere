@@ -19,8 +19,5 @@ export function buildMessage<T extends MessageEnvelope["type"]>(
     source,
     version: "1.0",
   };
-  return MessageEnvelopeSchema.parse(envelope) as Extract<
-    MessageEnvelope,
-    { type: T }
-  >;
+  return MessageEnvelopeSchema.parse(envelope) as Extract<MessageEnvelope, { type: T }>;
 }

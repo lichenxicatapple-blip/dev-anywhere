@@ -1,10 +1,13 @@
 import { z } from "zod";
-import {
-  PtyStatePayloadSchema,
-} from "./session.js";
+import { PtyStatePayloadSchema } from "./session.js";
 
 // 控制消息中复用的子类型
-export const ProxyInfoSchema = z.object({ proxyId: z.string(), name: z.string().optional(), online: z.boolean(), sessions: z.array(z.string()).optional() });
+export const ProxyInfoSchema = z.object({
+  proxyId: z.string(),
+  name: z.string().optional(),
+  online: z.boolean(),
+  sessions: z.array(z.string()).optional(),
+});
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
@@ -28,7 +31,11 @@ export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 export const RelayControlSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("proxy_register"), proxyId: z.string().min(1), name: z.string().optional() }),
+  z.object({
+    type: z.literal("proxy_register"),
+    proxyId: z.string().min(1),
+    name: z.string().optional(),
+  }),
   z.object({
     type: z.literal("proxy_register_response"),
     status: z.enum(["new", "reconnected"]),
@@ -110,7 +117,11 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   }),
 
   // 目录列表请求与响应
-  z.object({ type: z.literal("dir_list_request"), proxyId: z.string().min(1).optional(), path: z.string() }),
+  z.object({
+    type: z.literal("dir_list_request"),
+    proxyId: z.string().min(1).optional(),
+    path: z.string(),
+  }),
   z.object({
     type: z.literal("dir_list_response"),
     entries: z.array(DirEntrySchema),
@@ -238,32 +249,38 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pending_approvals_push"),
     sessionId: z.string(),
-    approvals: z.array(z.object({
-      requestId: z.string(),
-      toolName: z.string(),
-      input: z.record(z.string(), z.unknown()),
-    })),
+    approvals: z.array(
+      z.object({
+        requestId: z.string(),
+        toolName: z.string(),
+        input: z.record(z.string(), z.unknown()),
+      }),
+    ),
   }),
 
   // 恢复会话时推送历史消息，proxy -> client
   z.object({
     type: z.literal("session_history_messages"),
     sessionId: z.string(),
-    messages: z.array(z.object({
-      role: z.enum(["user", "assistant"]),
-      text: z.string(),
-      timestamp: z.number().optional(),
-    })),
+    messages: z.array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        text: z.string(),
+        timestamp: z.number().optional(),
+      }),
+    ),
   }),
 
   // proxy 重连后同步活跃 session 列表给 relay
   z.object({
     type: z.literal("session_sync"),
-    sessions: z.array(z.object({
-      id: z.string(),
-      mode: z.enum(["pty", "json"]),
-      state: z.string(),
-    })),
+    sessions: z.array(
+      z.object({
+        id: z.string(),
+        mode: z.enum(["pty", "json"]),
+        state: z.string(),
+      }),
+    ),
   }),
 
   // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态

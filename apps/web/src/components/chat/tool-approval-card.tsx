@@ -65,10 +65,7 @@ function readWhitelist(sessionId: string): string[] {
 function addToWhitelist(sessionId: string, toolName: string): void {
   const current = readWhitelist(sessionId);
   if (current.includes(toolName)) return;
-  localStorage.setItem(
-    whitelistKey(sessionId),
-    JSON.stringify([...current, toolName]),
-  );
+  localStorage.setItem(whitelistKey(sessionId), JSON.stringify([...current, toolName]));
 }
 
 // 构造一个满足 MessageEnvelope BaseEnvelopeFields 的工具函数, 由本组件消费
@@ -82,11 +79,7 @@ function buildEnvelopeBase(sessionId: string) {
   };
 }
 
-export function ToolApprovalCard({
-  approval,
-  sessionId,
-  container,
-}: ToolApprovalCardProps) {
+export function ToolApprovalCard({ approval, sessionId, container }: ToolApprovalCardProps) {
   const [acted, setActed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -128,17 +121,14 @@ export function ToolApprovalCard({
 
   if (isResolved) {
     const color =
-      approval.status === "approved"
-        ? "text-[var(--color-status-success)]"
-        : "text-destructive";
+      approval.status === "approved" ? "text-[var(--color-status-success)]" : "text-destructive";
     return (
       <div
         data-slot="tool-approval-card"
         data-status={approval.status}
         className={cn(
           "rounded-md border border-border bg-card px-3 py-2 text-xs",
-          container === "floating" &&
-            "fixed bottom-4 right-4 max-w-[360px] shadow-lg",
+          container === "floating" && "fixed bottom-4 right-4 max-w-[360px] shadow-lg",
         )}
       >
         <span className={cn("font-mono", color)}>{approval.toolName}</span>
@@ -157,8 +147,7 @@ export function ToolApprovalCard({
       data-status="pending"
       className={cn(
         "rounded-md border border-border bg-card p-3 flex flex-col gap-3 ring-2 ring-ring/40",
-        container === "floating" &&
-          "fixed bottom-4 right-4 w-[360px] max-w-[90vw] shadow-lg z-20",
+        container === "floating" && "fixed bottom-4 right-4 w-[360px] max-w-[90vw] shadow-lg z-20",
       )}
       role="region"
       aria-label={`工具审批: ${approval.toolName}`}
@@ -170,10 +159,7 @@ export function ToolApprovalCard({
         aria-label={expanded ? "收起详情" : "展开详情"}
         className="flex items-center gap-2 min-w-0 text-left -m-1 p-1 rounded hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Icon
-          className="size-4 shrink-0 text-[var(--color-status-warning)]"
-          aria-hidden="true"
-        />
+        <Icon className="size-4 shrink-0 text-[var(--color-status-warning)]" aria-hidden="true" />
         <span className="font-semibold text-sm">{approval.toolName}</span>
         <span className="text-xs text-muted-foreground flex-1 truncate font-mono">
           {summary.summary}

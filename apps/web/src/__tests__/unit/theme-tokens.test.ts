@@ -13,11 +13,11 @@ const sonnerSrc = readFileSync(resolve(webRoot, "src/components/ui/sonner.tsx"),
 
 describe("Phase 10-01a theme tokens (UI-SPEC D-02/D-03 + Deviation Log)", () => {
   it("app.css: --primary 锁定为琥珀 #D4A574", () => {
-    expect(appCss).toMatch(/--primary:\s*#D4A574;/);
+    expect(appCss).toMatch(/--primary:\s*#D4A574;/i);
   });
 
   it("app.css: --ring 与 --primary 同步为 #D4A574", () => {
-    expect(appCss).toMatch(/--ring:\s*#D4A574;/);
+    expect(appCss).toMatch(/--ring:\s*#D4A574;/i);
   });
 
   it("app.css: --radius 收到 0.375rem", () => {
@@ -25,11 +25,11 @@ describe("Phase 10-01a theme tokens (UI-SPEC D-02/D-03 + Deviation Log)", () => 
   });
 
   it("app.css: --color-status-success 保持 teal #00D4AA (Deviation Log 保留项)", () => {
-    expect(appCss).toMatch(/--color-status-success:\s*#00D4AA;/);
+    expect(appCss).toMatch(/--color-status-success:\s*#00D4AA;/i);
   });
 
   it("app.css: 不再存在 --primary: #00D4AA teal 旧值", () => {
-    expect(appCss).not.toMatch(/--primary:\s*#00D4AA;/);
+    expect(appCss).not.toMatch(/--primary:\s*#00D4AA;/i);
   });
 });
 

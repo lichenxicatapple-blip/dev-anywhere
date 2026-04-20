@@ -21,9 +21,7 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ sessionId }: ChatHeaderProps) {
   const navigate = useNavigate();
-  const session = useSessionStore((s) =>
-    s.sessions.find((x) => x.sessionId === sessionId),
-  );
+  const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
   // proxy 转发为 terminal_title, dispatcher 写到 ptyTitles, 这里优先展示
   const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
@@ -69,9 +67,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
         className="text-sm font-semibold truncate text-center px-2"
         data-slot="chat-session-title"
       >
-        {(session?.mode === "pty" && ptyTitle) ||
-          session?.name ||
-          sessionId.slice(0, 8)}
+        {(session?.mode === "pty" && ptyTitle) || session?.name || sessionId.slice(0, 8)}
       </span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

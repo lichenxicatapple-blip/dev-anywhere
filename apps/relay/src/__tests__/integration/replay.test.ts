@@ -40,12 +40,14 @@ describe("replay_request protocol", () => {
     await waitForOpen(client);
 
     const replayMsg = waitForMessage(client);
-    client.send(JSON.stringify({
-      type: "replay_request",
-      sessionId: "s1",
-      fromSeq: 2,
-      toSeq: 4,
-    }));
+    client.send(
+      JSON.stringify({
+        type: "replay_request",
+        sessionId: "s1",
+        fromSeq: 2,
+        toSeq: 4,
+      }),
+    );
 
     const response = JSON.parse(await replayMsg);
     expect(response.type).toBe("gap_unrecoverable");
@@ -59,12 +61,14 @@ describe("replay_request protocol", () => {
     await waitForOpen(client);
 
     const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      type: "replay_request",
-      sessionId: "nonexistent-session",
-      fromSeq: 1,
-      toSeq: 10,
-    }));
+    client.send(
+      JSON.stringify({
+        type: "replay_request",
+        sessionId: "nonexistent-session",
+        fromSeq: 1,
+        toSeq: 10,
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("gap_unrecoverable");
@@ -78,12 +82,14 @@ describe("replay_request protocol", () => {
     await waitForOpen(client);
 
     const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      type: "replay_request",
-      sessionId: "s1",
-      fromSeq: 10,
-      toSeq: 5,
-    }));
+    client.send(
+      JSON.stringify({
+        type: "replay_request",
+        sessionId: "s1",
+        fromSeq: 10,
+        toSeq: 5,
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("relay_error");

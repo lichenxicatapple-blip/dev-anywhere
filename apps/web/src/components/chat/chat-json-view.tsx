@@ -19,9 +19,7 @@ interface ChatJsonViewProps {
 }
 
 export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
-  const messages = useChatStore(
-    (s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages,
-  );
+  const messages = useChatStore((s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
@@ -117,8 +115,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
 
   // Thinking spinner 只在 "请求已发、还没 streaming" 的 gap 段显示:
   // streaming 中 message-bubble 末尾的光标已经是"正在生成"的信号, 叠加会冗余
-  const lastIsAssistantPartial =
-    lastMsg?.role === "assistant" && lastMsg?.isPartial === true;
+  const lastIsAssistantPartial = lastMsg?.role === "assistant" && lastMsg?.isPartial === true;
   const showThinking = isWorking && !lastIsAssistantPartial;
 
   if (messages.length === 0 && !pendingApproval) {
@@ -132,11 +129,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 relative min-h-0">
-        <div
-          ref={setScrollEl}
-          className="absolute inset-0 overflow-auto"
-          data-slot="message-list"
-        >
+        <div ref={setScrollEl} className="absolute inset-0 overflow-auto" data-slot="message-list">
           {scrollEl && (
             // min-h-full + flex-1 filler 让 totalSize<clientHeight 时内容贴底显示,
             // 溢出时 filler basis=0 shrink→0, virtualizer 从顶部开始正常滚动
@@ -162,10 +155,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                       transform: `translateY(${vi.start}px)`,
                     }}
                   >
-                    <MessageBubble
-                      message={messages[vi.index]}
-                      sessionId={sessionId}
-                    />
+                    <MessageBubble message={messages[vi.index]} sessionId={sessionId} />
                   </div>
                 ))}
               </div>
@@ -189,11 +179,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
       </div>
       {pendingApproval && (
         <div className="px-4 py-2" aria-live="polite">
-          <ToolApprovalCard
-            approval={pendingApproval}
-            sessionId={sessionId}
-            container="inline"
-          />
+          <ToolApprovalCard approval={pendingApproval} sessionId={sessionId} container="inline" />
         </div>
       )}
     </div>

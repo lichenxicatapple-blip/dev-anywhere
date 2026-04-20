@@ -120,20 +120,24 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   // 服务端响应增强版服务状态
   z.object({
     type: z.literal("service_status_response"),
-    relay: z.object({
-      connected: z.boolean(),
-      proxyId: z.string(),
-      reconnectAttempt: z.number(),
-      queueDepth: z.number(),
-    }).nullable(),
-    sessions: z.array(z.object({
-      id: z.string(),
-      mode: z.enum(["pty", "json"]),
-      state: z.enum(sessionStateValues),
-      createdAt: z.string(),
-      name: z.string().optional(),
-      hasWorker: z.boolean(),
-    })),
+    relay: z
+      .object({
+        connected: z.boolean(),
+        proxyId: z.string(),
+        reconnectAttempt: z.number(),
+        queueDepth: z.number(),
+      })
+      .nullable(),
+    sessions: z.array(
+      z.object({
+        id: z.string(),
+        mode: z.enum(["pty", "json"]),
+        state: z.enum(sessionStateValues),
+        createdAt: z.string(),
+        name: z.string().optional(),
+        hasWorker: z.boolean(),
+      }),
+    ),
   }),
 
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
@@ -307,7 +311,9 @@ export function createIpcReader(
         // 解析 payload: [1B sessionId_len][sessionId][pty data]
         const payloadStart = 5;
         const sessionIdLen = buf[payloadStart];
-        const sessionId = buf.subarray(payloadStart + 1, payloadStart + 1 + sessionIdLen).toString("utf-8");
+        const sessionId = buf
+          .subarray(payloadStart + 1, payloadStart + 1 + sessionIdLen)
+          .toString("utf-8");
         const ptyData = Buffer.from(buf.subarray(payloadStart + 1 + sessionIdLen, totalFrameLen));
 
         if (onBinaryFrame) {

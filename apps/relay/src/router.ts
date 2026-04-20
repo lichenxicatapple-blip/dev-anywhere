@@ -1,7 +1,4 @@
-import {
-  MessageEnvelopeSchema,
-  RelayControlSchema,
-} from "@cc-anywhere/shared";
+import { MessageEnvelopeSchema, RelayControlSchema } from "@cc-anywhere/shared";
 import type { RelayControlMessage } from "@cc-anywhere/shared";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
@@ -84,21 +81,28 @@ export function handleReplayRequest(
   const effectiveToSeq = toSeq ?? 0;
 
   if (fromSeq > effectiveToSeq && effectiveToSeq > 0) {
-    clientWs.send(JSON.stringify({
-      type: "relay_error",
-      code: "INVALID_RANGE",
-      message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${effectiveToSeq}`,
-    }));
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_error",
+        code: "INVALID_RANGE",
+        message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${effectiveToSeq}`,
+      }),
+    );
     return;
   }
 
-  clientWs.send(JSON.stringify({
-    type: "gap_unrecoverable",
-    sessionId,
-    fromSeq,
-    toSeq: effectiveToSeq,
-  }));
-  logger.info({ sessionId, fromSeq, toSeq: effectiveToSeq }, "Replay request: relay is stateless, no buffer");
+  clientWs.send(
+    JSON.stringify({
+      type: "gap_unrecoverable",
+      sessionId,
+      fromSeq,
+      toSeq: effectiveToSeq,
+    }),
+  );
+  logger.info(
+    { sessionId, fromSeq, toSeq: effectiveToSeq },
+    "Replay request: relay is stateless, no buffer",
+  );
 }
 
 // 将 client 发来的 MessageEnvelope 转发给绑定的 proxy
@@ -125,11 +129,13 @@ export function routeClientMessage(
 
   const proxyWs = registry.getProxy(proxyId);
   if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
-    clientWs.send(JSON.stringify({
-      type: "relay_error",
-      code: "PROXY_OFFLINE",
-      message: `Proxy ${proxyId} is not available`,
-    }));
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_error",
+        code: "PROXY_OFFLINE",
+        message: `Proxy ${proxyId} is not available`,
+      }),
+    );
     return;
   }
 

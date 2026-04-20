@@ -11,7 +11,11 @@ const surfaceColors = [
 
 const accentColors = [
   { name: "primary", cssVar: "--primary", className: "bg-primary" },
-  { name: "primary-foreground", cssVar: "--primary-foreground", className: "bg-primary-foreground text-primary" },
+  {
+    name: "primary-foreground",
+    cssVar: "--primary-foreground",
+    className: "bg-primary-foreground text-primary",
+  },
   { name: "destructive", cssVar: "--destructive", className: "bg-destructive" },
   { name: "muted", cssVar: "--muted", className: "bg-muted" },
 ] as const;
@@ -40,7 +44,10 @@ const typographySamples = [
   { className: "text-3xl font-bold", label: "Heading 3XL (30px) -- font-sans" },
   { className: "text-2xl font-semibold", label: "Heading 2XL (24px) -- font-sans" },
   { className: "text-xl font-medium", label: "Heading XL (20px) -- font-sans" },
-  { className: "text-base", label: "Body text (16px) -- The quick brown fox jumps over the lazy dog. -- font-sans" },
+  {
+    className: "text-base",
+    label: "Body text (16px) -- The quick brown fox jumps over the lazy dog. -- font-sans",
+  },
   { className: "text-sm text-muted-foreground", label: "Small muted text (14px) -- font-sans" },
 ] as const;
 
@@ -63,20 +70,10 @@ const radiusSteps = [
 ] as const;
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-xl font-semibold border-b border-border pb-2">
-      {children}
-    </h2>
-  );
+  return <h2 className="text-xl font-semibold border-b border-border pb-2">{children}</h2>;
 }
 
-function ColorSwatch({
-  className,
-  label,
-}: {
-  className: string;
-  label: string;
-}) {
+function ColorSwatch({ className, label }: { className: string; label: string }) {
   return (
     <div>
       <div className={`h-20 rounded-md border border-border ${className}`} />
@@ -130,9 +127,7 @@ export function TokenShowcase() {
             ))}
             <div>
               <div className="h-20 rounded-md border border-border bg-background flex items-center justify-center">
-                <span className="text-muted-foreground">
-                  {vars["--muted-foreground"] ?? "—"}
-                </span>
+                <span className="text-muted-foreground">{vars["--muted-foreground"] ?? "—"}</span>
               </div>
               <p className="text-sm text-muted-foreground mt-1">
                 {vars["--muted-foreground"] ?? "—"} / muted-foreground
@@ -172,12 +167,8 @@ export function TokenShowcase() {
             Monospace (Sarasa Fixed SC)
           </h3>
           <div className="space-y-2 bg-card p-3 rounded-md border border-border">
-            <p className="text-base font-mono">
-              {"const greeting = 'Hello'; // Sarasa Fixed SC"}
-            </p>
-            <p className="text-base font-mono">
-              {"const msg = '----'; // CJK alignment test"}
-            </p>
+            <p className="text-base font-mono">{"const greeting = 'Hello'; // Sarasa Fixed SC"}</p>
+            <p className="text-base font-mono">{"const msg = '----'; // CJK alignment test"}</p>
           </div>
         </section>
 
@@ -200,9 +191,7 @@ export function TokenShowcase() {
           <div className="flex flex-wrap gap-4">
             {radiusSteps.map((r) => (
               <div key={r.label} className="text-center">
-                <div
-                  className={`w-16 h-16 bg-card border border-border ${r.className}`}
-                />
+                <div className={`w-16 h-16 bg-card border border-border ${r.className}`} />
                 <p className="text-xs text-muted-foreground mt-1">{r.label}</p>
               </div>
             ))}
@@ -230,7 +219,9 @@ export function TokenShowcase() {
             <Button size="sm">Small</Button>
             <Button size="default">Default</Button>
             <Button size="lg">Large</Button>
-            <Button size="icon"><span>+</span></Button>
+            <Button size="icon">
+              <span>+</span>
+            </Button>
           </div>
         </section>
       </div>

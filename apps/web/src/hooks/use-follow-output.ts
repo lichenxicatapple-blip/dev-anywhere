@@ -17,9 +17,7 @@ export function useFollowOutput(
     if (!el) return;
     const compute = () => {
       const threshold = thresholdRef.current;
-      setIsAtBottom(
-        el.scrollTop + el.clientHeight >= el.scrollHeight - threshold,
-      );
+      setIsAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - threshold);
     };
     compute();
     el.addEventListener("scroll", compute, { passive: true });

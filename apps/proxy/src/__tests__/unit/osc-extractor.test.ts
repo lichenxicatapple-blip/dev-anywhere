@@ -35,10 +35,7 @@ describe("extractOscSignals", () => {
   });
 
   it("prioritizes OSC 9 over OSC 0 when both present", () => {
-    const data =
-      "\x1b]0;some title\x07" +
-      "some output" +
-      "\x1b]9;waiting for your input\x07";
+    const data = "\x1b]0;some title\x07" + "some output" + "\x1b]9;waiting for your input\x07";
     const result = extractOscSignals(data);
     expect(result).toEqual({ state: "turn_complete" });
   });

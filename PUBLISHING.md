@@ -4,12 +4,12 @@
 
 A single `vX.Y.Z` git tag produces four artifacts:
 
-| Kind   | Name                                           | What it's for                                         |
-|--------|------------------------------------------------|-------------------------------------------------------|
-| npm    | `@lichenxi.cat/cc-anywhere`                    | Local proxy CLI end-users install on their laptop     |
-| npm    | `@lichenxi.cat/cc-anywhere-relay`              | Standalone relay binary for local/dev use             |
-| Docker | `ghcr.io/<owner>/cc-anywhere-relay:<tag>`      | Production relay container                            |
-| Docker | `ghcr.io/<owner>/cc-anywhere-web:<tag>`        | Nginx + web SPA container (reverse-proxies the relay) |
+| Kind   | Name                                      | What it's for                                         |
+| ------ | ----------------------------------------- | ----------------------------------------------------- |
+| npm    | `@lichenxi.cat/cc-anywhere`               | Local proxy CLI end-users install on their laptop     |
+| npm    | `@lichenxi.cat/cc-anywhere-relay`         | Standalone relay binary for local/dev use             |
+| Docker | `ghcr.io/<owner>/cc-anywhere-relay:<tag>` | Production relay container                            |
+| Docker | `ghcr.io/<owner>/cc-anywhere-web:<tag>`   | Nginx + web SPA container (reverse-proxies the relay) |
 
 `@cc-anywhere/shared` stays `private: true` and is bundled into both npm packages via tsup `noExternal`.
 

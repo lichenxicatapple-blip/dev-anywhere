@@ -21,15 +21,11 @@ describe("UserInputPayloadSchema", () => {
 
 describe("AssistantMessagePayloadSchema", () => {
   it("rejects missing isPartial", () => {
-    expect(() =>
-      AssistantMessagePayloadSchema.parse({ text: "hello" }),
-    ).toThrow();
+    expect(() => AssistantMessagePayloadSchema.parse({ text: "hello" })).toThrow();
   });
 
   it("rejects missing text", () => {
-    expect(() =>
-      AssistantMessagePayloadSchema.parse({ isPartial: false }),
-    ).toThrow();
+    expect(() => AssistantMessagePayloadSchema.parse({ isPartial: false })).toThrow();
   });
 });
 

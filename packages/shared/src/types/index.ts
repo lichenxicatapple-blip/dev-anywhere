@@ -1,9 +1,5 @@
 // 从 schema 推导的类型统一导出
-export type {
-  MessageEnvelope,
-  MessageType,
-  MessageSource,
-} from "../schemas/envelope.js";
+export type { MessageEnvelope, MessageType, MessageSource } from "../schemas/envelope.js";
 export type {
   UserInputPayload,
   AssistantMessagePayload,

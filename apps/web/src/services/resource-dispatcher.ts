@@ -20,9 +20,7 @@ function handleDirListResponse(
   useFileStore.getState().setDirEntries(msg.path, msg.entries);
 }
 
-function handleFileTreePush(
-  msg: Extract<RelayControlMessage, { type: "file_tree_push" }>,
-): void {
+function handleFileTreePush(msg: Extract<RelayControlMessage, { type: "file_tree_push" }>): void {
   const store = useFileStore.getState();
   if (msg.groups.length === 0) return;
   // proxy 约定 groups[0] 即 session cwd; 其余为 cwd 下直接子目录, 作为第二层预热
@@ -35,9 +33,7 @@ function handleFileTreePush(
 export function registerResourceDispatcher(): () => void {
   const relay = relayClientRef;
   if (!relay) {
-    console.warn(
-      "registerResourceDispatcher called before relayClient bound; skipping",
-    );
+    console.warn("registerResourceDispatcher called before relayClient bound; skipping");
     return () => {};
   }
 

@@ -24,22 +24,22 @@ RELAY_PROXY_TOKEN="$(openssl rand -hex 24)" PORT=3100 cc-anywhere-relay
 
 ## Endpoints
 
-| Path      | Purpose                                         |
-|-----------|-------------------------------------------------|
-| `/health` | HTTP GET — health probe                         |
-| `/status` | HTTP GET — proxy/client counts                  |
-| `/proxy`  | WS — proxy daemon connection (requires token)   |
-| `/client` | WS — web SPA / mobile client connection (open)  |
+| Path      | Purpose                                        |
+| --------- | ---------------------------------------------- |
+| `/health` | HTTP GET — health probe                        |
+| `/status` | HTTP GET — proxy/client counts                 |
+| `/proxy`  | WS — proxy daemon connection (requires token)  |
+| `/client` | WS — web SPA / mobile client connection (open) |
 
 ## Environment variables
 
-| Variable              | Default                           | Notes                                               |
-|-----------------------|-----------------------------------|-----------------------------------------------------|
-| `PORT`                | `3100`                            | HTTP + WSS listen port                              |
-| `DATA_DIR`            | `~/.cc-anywhere/relay-data`       | Persistent state. Set to empty string to disable.   |
-| `HEARTBEAT_INTERVAL`  | `30000` (ms)                      | WS ping cadence                                     |
-| `RELAY_PROXY_TOKEN`   | unset (open `/proxy` endpoint)    | When set, `/proxy` rejects connections without it   |
-| `LOG_LEVEL`           | `info`                            | pino log level                                      |
+| Variable             | Default                        | Notes                                             |
+| -------------------- | ------------------------------ | ------------------------------------------------- |
+| `PORT`               | `3100`                         | HTTP + WSS listen port                            |
+| `DATA_DIR`           | `~/.cc-anywhere/relay-data`    | Persistent state. Set to empty string to disable. |
+| `HEARTBEAT_INTERVAL` | `30000` (ms)                   | WS ping cadence                                   |
+| `RELAY_PROXY_TOKEN`  | unset (open `/proxy` endpoint) | When set, `/proxy` rejects connections without it |
+| `LOG_LEVEL`          | `info`                         | pino log level                                    |
 
 **Production warning:** always set `RELAY_PROXY_TOKEN`. Without it, anyone can register as a proxy.
 

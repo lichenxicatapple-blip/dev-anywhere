@@ -26,12 +26,7 @@ import {
 } from "@/components/ui/select";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
 
-type PermissionMode =
-  | "default"
-  | "auto"
-  | "acceptEdits"
-  | "plan"
-  | "bypassPermissions";
+type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const PERMISSION_MODE_OPTIONS: {
   value: PermissionMode;
@@ -64,9 +59,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const mode = "json" as const;
-  const currentPermissionOption = PERMISSION_MODE_OPTIONS.find(
-    (o) => o.value === permissionMode,
-  );
+  const currentPermissionOption = PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode);
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -156,12 +149,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               placeholder="输入或选择绝对路径"
               className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <FilePathPicker
-              mode="select"
-              dirsOnly
-              filter={cwd}
-              onSelect={(path) => setCwd(path)}
-            />
+            <FilePathPicker mode="select" dirsOnly filter={cwd} onSelect={(path) => setCwd(path)} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-sm">权限模式</span>

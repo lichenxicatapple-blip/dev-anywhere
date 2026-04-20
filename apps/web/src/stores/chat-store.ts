@@ -58,10 +58,19 @@ interface ChatStoreState {
   addUserMessage: (sessionId: string, message: ChatMessage) => void;
   markTurnComplete: (sessionId: string) => void;
   addToolCall: (sessionId: string, messageId: string, toolCall: ToolCallInfo) => void;
-  updateToolResult: (sessionId: string, messageId: string, toolIndex: number, output: string) => void;
+  updateToolResult: (
+    sessionId: string,
+    messageId: string,
+    toolIndex: number,
+    output: string,
+  ) => void;
   toggleToolCollapse: (sessionId: string, messageId: string, toolIndex: number) => void;
   addApprovalRequest: (sessionId: string, request: ToolApprovalRequest) => void;
-  updateApprovalStatus: (sessionId: string, requestId: string, status: "approved" | "denied") => void;
+  updateApprovalStatus: (
+    sessionId: string,
+    requestId: string,
+    status: "approved" | "denied",
+  ) => void;
   setWorkingTool: (sessionId: string, toolName: string) => void;
   setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
   setInputDraft: (sessionId: string, draft: string) => void;
@@ -207,9 +216,7 @@ export const useChatStore = create<ChatStoreState>()(
         ),
 
       setInputDraft: (sessionId, draft) =>
-        set((state) =>
-          updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft })),
-        ),
+        set((state) => updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft }))),
 
       setInputHistoryCursor: (sessionId, cursor) =>
         set((state) =>

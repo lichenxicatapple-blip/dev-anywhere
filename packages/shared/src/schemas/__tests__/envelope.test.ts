@@ -7,11 +7,7 @@ import {
 } from "../session.js";
 
 // 辅助函数：创建一个基础的 envelope 结构
-function makeEnvelope(
-  type: string,
-  payload: unknown,
-  overrides: Record<string, unknown> = {},
-) {
+function makeEnvelope(type: string, payload: unknown, overrides: Record<string, unknown> = {}) {
   return {
     seq: 0,
     sessionId: "test-session",
@@ -64,9 +60,7 @@ describe("MessageEnvelopeSchema", () => {
 
     it("rejects invalid source", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("heartbeat", {}, { source: "invalid" }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("heartbeat", {}, { source: "invalid" })),
       ).toThrow();
     });
 
@@ -103,9 +97,7 @@ describe("MessageEnvelopeSchema", () => {
     });
 
     it("rejects invalid state value", () => {
-      expect(() =>
-        PtyStatePayloadSchema.parse({ state: "invalid_state" }),
-      ).toThrow();
+      expect(() => PtyStatePayloadSchema.parse({ state: "invalid_state" })).toThrow();
     });
   });
 
@@ -140,25 +132,19 @@ describe("MessageEnvelopeSchema", () => {
   describe("removed envelope types", () => {
     it("rejects pty_snapshot (removed from envelope)", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("pty_snapshot", { data: "base64data" }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("pty_snapshot", { data: "base64data" })),
       ).toThrow();
     });
 
     it("rejects terminal_frame (moved to Control)", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("terminal_frame", { lines: [[{ text: "x" }]] }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("terminal_frame", { lines: [[{ text: "x" }]] })),
       ).toThrow();
     });
 
     it("rejects pty_state (moved to Control)", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("pty_state", { state: "working" }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("pty_state", { state: "working" })),
       ).toThrow();
     });
   });
@@ -166,17 +152,13 @@ describe("MessageEnvelopeSchema", () => {
   describe("invalid messages", () => {
     it("rejects unknown message type", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("unknown_type", { data: 1 }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("unknown_type", { data: 1 })),
       ).toThrow();
     });
 
     it("rejects mismatched payload for type", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(
-          makeEnvelope("user_input", { wrong: "field" }),
-        ),
+        MessageEnvelopeSchema.parse(makeEnvelope("user_input", { wrong: "field" })),
       ).toThrow();
     });
   });

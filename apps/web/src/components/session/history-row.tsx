@@ -17,13 +17,7 @@ interface HistoryRowProps {
   onClick: () => void;
 }
 
-export function HistoryRow({
-  session,
-  now,
-  disabled,
-  loading,
-  onClick,
-}: HistoryRowProps) {
+export function HistoryRow({ session, now, disabled, loading, onClick }: HistoryRowProps) {
   return (
     <li>
       <button
@@ -41,9 +35,7 @@ export function HistoryRow({
         )}
         aria-label={`恢复会话: ${session.title}`}
       >
-        <span className="text-sm font-normal truncate flex-1 min-w-0">
-          {session.title}
-        </span>
+        <span className="text-sm font-normal truncate flex-1 min-w-0">{session.title}</span>
         <span className="text-xs text-muted-foreground tabular-nums shrink-0">
           {formatRelativeTime(session.updatedAt, now)}
         </span>

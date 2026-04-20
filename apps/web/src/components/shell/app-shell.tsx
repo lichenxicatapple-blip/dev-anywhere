@@ -34,10 +34,7 @@ export function AppShell() {
           role="banner"
           data-slot="app-shell-header"
         >
-          <Typewriter
-            texts={BRAND_TEXTS}
-            className="text-sm font-semibold md:hidden"
-          />
+          <Typewriter texts={BRAND_TEXTS} className="text-sm font-semibold md:hidden" />
           <span className="hidden md:inline text-sm font-semibold">CC Anywhere</span>
           <div className="ml-auto">
             <Button

@@ -261,8 +261,18 @@ describe("RelayRegistry", () => {
 
       const details = registry.getClientDetails();
       expect(details).toHaveLength(2);
-      expect(details[0]).toEqual({ clientId: "c1", proxyId: "p1", online: true, connectionState: "bound" });
-      expect(details[1]).toEqual({ clientId: "c2", proxyId: "p1", online: true, connectionState: "bound" });
+      expect(details[0]).toEqual({
+        clientId: "c1",
+        proxyId: "p1",
+        online: true,
+        connectionState: "bound",
+      });
+      expect(details[1]).toEqual({
+        clientId: "c2",
+        proxyId: "p1",
+        online: true,
+        connectionState: "bound",
+      });
     });
 
     it("shows offline status for unbound clients", () => {

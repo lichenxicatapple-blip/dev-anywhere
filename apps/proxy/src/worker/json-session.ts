@@ -66,7 +66,10 @@ export class ToolWhitelist {
 // 创建中继转发审批策略，先检查白名单再转发到 relay
 export function createRelayApprovalStrategy(
   whitelist: ToolWhitelist,
-  forwardToRelay: (toolName: string, input: Record<string, unknown>) => Promise<{ behavior: "allow" | "deny"; message?: string }>,
+  forwardToRelay: (
+    toolName: string,
+    input: Record<string, unknown>,
+  ) => Promise<{ behavior: "allow" | "deny"; message?: string }>,
 ): ApprovalStrategy {
   return async (toolName, input) => {
     if (whitelist.has(toolName)) {
@@ -256,38 +259,34 @@ export class JsonSession {
       input: Record<string, unknown>;
     };
 
-    this.approvalStrategy(request.tool_name, request.input).then(
-      (decision) => {
-        const response =
-          decision.behavior === "deny"
-            ? {
-                type: "control_response",
+    this.approvalStrategy(request.tool_name, request.input).then((decision) => {
+      const response =
+        decision.behavior === "deny"
+          ? {
+              type: "control_response",
+              response: {
+                subtype: "success",
+                request_id: requestId,
                 response: {
-                  subtype: "success",
-                  request_id: requestId,
-                  response: {
-                    behavior: "deny",
-                    message:
-                      decision.message ??
-                      "Tool use denied by default policy.",
-                  },
+                  behavior: "deny",
+                  message: decision.message ?? "Tool use denied by default policy.",
                 },
-              }
-            : {
-                type: "control_response",
+              },
+            }
+          : {
+              type: "control_response",
+              response: {
+                subtype: "success",
+                request_id: requestId,
                 response: {
-                  subtype: "success",
-                  request_id: requestId,
-                  response: {
-                    behavior: "allow",
-                    updatedInput: {},
-                  },
+                  behavior: "allow",
+                  updatedInput: {},
                 },
-              };
+              },
+            };
 
-        this.writeToStdin(JSON.stringify(response));
-      },
-    );
+      this.writeToStdin(JSON.stringify(response));
+    });
   }
 
   private writeToStdin(data: string): void {

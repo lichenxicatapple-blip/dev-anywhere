@@ -31,11 +31,7 @@ export function loadConfig(): ProxyConfig {
   serviceLogger.info(
     {
       relayUrl: config.relayUrl ?? "(unset)",
-      relayUrlSource: process.env.RELAY_URL
-        ? "env"
-        : fromFile.relayUrl
-          ? "file"
-          : "none",
+      relayUrlSource: process.env.RELAY_URL ? "env" : fromFile.relayUrl ? "file" : "none",
       relayTokenSource: process.env.RELAY_PROXY_TOKEN
         ? "env"
         : fromFile.relayToken

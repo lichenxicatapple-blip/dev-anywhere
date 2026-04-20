@@ -22,9 +22,7 @@ function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   );
 }
 
-export const MarkdownView = memo(function MarkdownView({
-  text,
-}: MarkdownViewProps) {
+export const MarkdownView = memo(function MarkdownView({ text }: MarkdownViewProps) {
   return (
     <div className="prose prose-invert prose-sm max-w-none">
       <Markdown
@@ -38,18 +36,12 @@ export const MarkdownView = memo(function MarkdownView({
           // 这里让 <pre> 透传, 由 code 分支的 CodeBlock 独占包装
           pre: ({ children }) => <>{children}</>,
           a: ({ href, children, ...rest }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              {...rest}
-            >
+            <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
               {children}
             </a>
           ),
           code: ({ className, children, ...rest }) => {
-            const isBlock =
-              typeof className === "string" && className.includes("language-");
+            const isBlock = typeof className === "string" && className.includes("language-");
             if (isBlock) {
               return (
                 <CodeBlock {...rest}>
@@ -58,10 +50,7 @@ export const MarkdownView = memo(function MarkdownView({
               );
             }
             return (
-              <code
-                className="rounded bg-muted px-1 py-0.5 text-[0.9em]"
-                {...rest}
-              >
+              <code className="rounded bg-muted px-1 py-0.5 text-[0.9em]" {...rest}>
                 {children}
               </code>
             );

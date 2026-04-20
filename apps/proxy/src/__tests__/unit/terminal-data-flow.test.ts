@@ -21,7 +21,12 @@ describe("headless terminal write + serialize", () => {
   let serializeAddon: SerializeAddon;
 
   beforeEach(() => {
-    terminal = new HeadlessTerminal({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true });
+    terminal = new HeadlessTerminal({
+      cols: 80,
+      rows: 24,
+      scrollback: 5000,
+      allowProposedApi: true,
+    });
     serializeAddon = new SerializeAddon();
     terminal.loadAddon(serializeAddon);
   });

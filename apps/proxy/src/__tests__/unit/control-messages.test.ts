@@ -5,14 +5,17 @@ import { tmpdir } from "node:os";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import { createControlMessageHandlers } from "#src/serve/handlers/control-messages.js";
 
-function createMockSessionManager(sessions: Array<{ id: string; state: string }> = []): SessionManager {
+function createMockSessionManager(
+  sessions: Array<{ id: string; state: string }> = [],
+): SessionManager {
   return {
-    listSessions: () => sessions.map((s) => ({
-      id: s.id,
-      mode: "pty" as const,
-      state: s.state,
-      createdAt: new Date().toISOString(),
-    })),
+    listSessions: () =>
+      sessions.map((s) => ({
+        id: s.id,
+        mode: "pty" as const,
+        state: s.state,
+        createdAt: new Date().toISOString(),
+      })),
   } as unknown as SessionManager;
 }
 
@@ -96,7 +99,6 @@ describe("control-messages: path traversal defense", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 });
-
 
 describe("control-messages: dir_create", () => {
   let sent: string[];
@@ -237,9 +239,7 @@ describe("control-messages: file tree push", () => {
     await handlers.pushFileTree("sess-1", tmpDir);
 
     const response = JSON.parse(sent[0]);
-    const rootNames = (response.groups[0].entries as Array<{ name: string }>).map(
-      (e) => e.name,
-    );
+    const rootNames = (response.groups[0].entries as Array<{ name: string }>).map((e) => e.name);
     expect(rootNames).not.toContain("node_modules");
     expect(rootNames).not.toContain(".git");
     expect(rootNames).toContain("visible.ts");

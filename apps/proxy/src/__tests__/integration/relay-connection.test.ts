@@ -69,7 +69,13 @@ describe("RelayConnection", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const envelope = buildMessage("assistant_message", "test-session", 1, { text: "hello", isPartial: false }, "proxy");
+    const envelope = buildMessage(
+      "assistant_message",
+      "test-session",
+      1,
+      { text: "hello", isPartial: false },
+      "proxy",
+    );
 
     // send 不应抛异常
     expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
@@ -223,7 +229,13 @@ describe("RelayConnection", () => {
     await disconnected;
 
     // 在断开状态下发送消息，不应抛异常
-    const envelope = buildMessage("assistant_message", "test-session", 1, { text: "queued", isPartial: false }, "proxy");
+    const envelope = buildMessage(
+      "assistant_message",
+      "test-session",
+      1,
+      { text: "queued", isPartial: false },
+      "proxy",
+    );
     expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
   });
 
@@ -234,7 +246,9 @@ describe("RelayConnection", () => {
     conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
 
     let connectedCount = 0;
-    conn.on("connected", () => { connectedCount++; });
+    conn.on("connected", () => {
+      connectedCount++;
+    });
 
     const firstConnected = new Promise<void>((resolve) => {
       conn!.once("connected", () => resolve());
@@ -275,7 +289,9 @@ describe("RelayConnection", () => {
     await waitForRegistration();
 
     let disconnectedEmitted = false;
-    conn.on("disconnected", () => { disconnectedEmitted = true; });
+    conn.on("disconnected", () => {
+      disconnectedEmitted = true;
+    });
 
     conn.close();
 
@@ -310,7 +326,13 @@ describe("RelayConnection", () => {
     await disconnected;
 
     // 在离线时发送消息
-    const envelope = buildMessage("assistant_message", "sess-1", 1, { text: "buffered-msg", isPartial: false }, "proxy");
+    const envelope = buildMessage(
+      "assistant_message",
+      "sess-1",
+      1,
+      { text: "buffered-msg", isPartial: false },
+      "proxy",
+    );
     conn.sendEnvelope(envelope);
 
     // 等待重连

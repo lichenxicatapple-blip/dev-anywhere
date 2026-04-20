@@ -68,7 +68,10 @@ export function spawnScript(
       // 子进程结束时 buf 里可能还有不带 \n 的残段（比如 stderr 最后一行无换行就退出），
       // 这里 flush 一次保证捕获 100% 行内容，不被"没等到下一个 \n"吞掉。
       child.stderr.on("end", () => {
-        if (buf) { emit(buf); buf = ""; }
+        if (buf) {
+          emit(buf);
+          buf = "";
+        }
       });
     }
     child.once("error", (err) => {

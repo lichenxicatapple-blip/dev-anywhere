@@ -33,13 +33,7 @@ describe("SessionListPayloadSchema", () => {
   });
 
   it("accepts all valid session states", () => {
-    const states = [
-      "idle",
-      "working",
-      "waiting_approval",
-      "error",
-      "terminated",
-    ] as const;
+    const states = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
     for (const state of states) {
       const result = SessionListPayloadSchema.parse({
         sessions: [{ sessionId: "s1", state }],
@@ -76,8 +70,6 @@ describe("SessionStatusPayloadSchema", () => {
   });
 
   it("rejects missing state", () => {
-    expect(() =>
-      SessionStatusPayloadSchema.parse({ sessionId: "s1" }),
-    ).toThrow();
+    expect(() => SessionStatusPayloadSchema.parse({ sessionId: "s1" })).toThrow();
   });
 });

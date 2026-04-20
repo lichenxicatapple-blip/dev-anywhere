@@ -5,17 +5,8 @@ import { SlidersHorizontal } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Sheet,
-  SheetContent,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
@@ -80,9 +71,7 @@ function MenuBody({ mode, sessionId, variant, onAfterAction }: MenuBodyProps) {
             aria-hidden="true"
             className={cn(
               "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors",
-              ptyAutoscale
-                ? "bg-primary border-primary"
-                : "bg-input border-border",
+              ptyAutoscale ? "bg-primary border-primary" : "bg-input border-border",
             )}
           >
             <span
@@ -101,11 +90,7 @@ function MenuBody({ mode, sessionId, variant, onAfterAction }: MenuBodyProps) {
 
   return (
     <div
-      className={cn(
-        "flex items-center text-sm text-muted-foreground",
-        itemH,
-        itemPad,
-      )}
+      className={cn("flex items-center text-sm text-muted-foreground", itemH, itemPad)}
       aria-disabled="true"
       data-slot="input-menu-content"
     >
@@ -136,12 +121,7 @@ export function InputMenu({ sessionId, mode }: InputMenuProps) {
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-60 p-1">
-          <MenuBody
-            mode={mode}
-            sessionId={sessionId}
-            variant="popover"
-            onAfterAction={close}
-          />
+          <MenuBody mode={mode} sessionId={sessionId} variant="popover" onAfterAction={close} />
         </PopoverContent>
       </Popover>
     );
@@ -174,12 +154,7 @@ export function InputMenu({ sessionId, mode }: InputMenuProps) {
           className="mx-auto mb-1 h-1 w-10 rounded-full bg-border"
           data-slot="sheet-drag-handle"
         />
-        <MenuBody
-          mode={mode}
-          sessionId={sessionId}
-          variant="sheet"
-          onAfterAction={close}
-        />
+        <MenuBody mode={mode} sessionId={sessionId} variant="sheet" onAfterAction={close} />
       </SheetContent>
     </Sheet>
   );

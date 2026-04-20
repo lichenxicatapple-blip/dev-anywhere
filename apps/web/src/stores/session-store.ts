@@ -17,11 +17,7 @@ interface SessionStoreState {
   addSession: (session: SessionInfo) => void;
   removeSession: (sessionId: string) => void;
   // lastActive 可选：PTY 控制消息 pty_state 无此字段，envelope session_status 则会一并写入
-  updateSessionState: (
-    sessionId: string,
-    state: SessionInfo["state"],
-    lastActive?: number,
-  ) => void;
+  updateSessionState: (sessionId: string, state: SessionInfo["state"], lastActive?: number) => void;
   updateSessionName: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
@@ -36,8 +32,7 @@ export const useSessionStore = create<SessionStoreState>()(
       ptyTitles: {},
 
       setSessions: (sessions) => set({ sessions, sessionListLoaded: true }),
-      addSession: (session) =>
-        set((state) => ({ sessions: [...state.sessions, session] })),
+      addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
       removeSession: (sessionId) =>
         set((state) => ({
           sessions: state.sessions.filter((s) => s.sessionId !== sessionId),
@@ -56,9 +51,7 @@ export const useSessionStore = create<SessionStoreState>()(
         })),
       updateSessionName: (sessionId, name) =>
         set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.sessionId === sessionId ? { ...s, name } : s,
-          ),
+          sessions: state.sessions.map((s) => (s.sessionId === sessionId ? { ...s, name } : s)),
         })),
       setPtyTitle: (sessionId, title) =>
         set((state) => ({

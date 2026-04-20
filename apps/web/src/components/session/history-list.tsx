@@ -160,10 +160,7 @@ export function HistoryList({ now }: HistoryListProps) {
         ) : null}
       </button>
       {!hasHistory && (
-        <div
-          className="px-4 py-3 text-sm text-muted-foreground/70"
-          data-slot="history-empty"
-        >
+        <div className="px-4 py-3 text-sm text-muted-foreground/70" data-slot="history-empty">
           暂无会话记录
         </div>
       )}
@@ -185,10 +182,7 @@ export function HistoryList({ now }: HistoryListProps) {
                     "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                   )}
                 >
-                  <span
-                    className="text-sm font-mono truncate flex-1 min-w-0"
-                    title={g.dir}
-                  >
+                  <span className="text-sm font-mono truncate flex-1 min-w-0" title={g.dir}>
                     {g.shortDir}
                   </span>
                   <span className="text-xs text-muted-foreground/80 tabular-nums shrink-0">

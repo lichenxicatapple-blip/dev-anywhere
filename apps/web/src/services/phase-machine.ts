@@ -18,11 +18,7 @@ function extractSessionIdFromHash(): string | null {
   return match?.[1] ?? null;
 }
 
-export function handleWsStatusChange(
-  connected: boolean,
-  timers: Timers,
-  relay: RelayClient,
-): void {
+export function handleWsStatusChange(connected: boolean, timers: Timers, relay: RelayClient): void {
   useAppStore.getState().setConnected(connected);
   const s = useAppStore.getState();
   if (connected) {
@@ -145,7 +141,8 @@ export async function handleRelayMessage(
           relay.sendControl({ type: "session_history_request" });
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const currentHash = window.location.hash;
-          const sessionStillExists = savedSessionId && proxyInfo?.sessions?.includes(savedSessionId);
+          const sessionStillExists =
+            savedSessionId && proxyInfo?.sessions?.includes(savedSessionId);
           if (savedSessionId && sessionStillExists) {
             const mode = localStorage.getItem("cc_sessionMode") || "json";
             useAppStore.getState().setPhase("chatting");

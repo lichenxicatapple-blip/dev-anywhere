@@ -73,7 +73,9 @@ export class RelayRegistry {
       throw new Error(`Proxy not found: ${proxyId}`);
     }
     if (state.connectionState !== from) {
-      throw new Error(`Proxy ${proxyId} state mismatch: expected ${from}, actual ${state.connectionState}`);
+      throw new Error(
+        `Proxy ${proxyId} state mismatch: expected ${from}, actual ${state.connectionState}`,
+      );
     }
     state.connectionState = to;
     if (to === "offline") {
@@ -92,7 +94,9 @@ export class RelayRegistry {
       throw new Error(`Client not found: ${clientId}`);
     }
     if (binding.connectionState !== from) {
-      throw new Error(`Client ${clientId} state mismatch: expected ${from}, actual ${binding.connectionState}`);
+      throw new Error(
+        `Client ${clientId} state mismatch: expected ${from}, actual ${binding.connectionState}`,
+      );
     }
     binding.connectionState = to;
   }
@@ -253,9 +257,17 @@ export class RelayRegistry {
     return clients;
   }
 
-
   // 获取单个 proxy 的详细状态信息
-  getProxyDetail(proxyId: string): { proxyId: string; name?: string; online: boolean; connectionState: ProxyConnectionState; sessions: string[]; disconnectedAt: number | null } | undefined {
+  getProxyDetail(proxyId: string):
+    | {
+        proxyId: string;
+        name?: string;
+        online: boolean;
+        connectionState: ProxyConnectionState;
+        sessions: string[];
+        disconnectedAt: number | null;
+      }
+    | undefined {
     const state = this.proxyStates.get(proxyId);
     if (!state) return undefined;
     return {
@@ -269,17 +281,29 @@ export class RelayRegistry {
   }
 
   // 获取所有客户端绑定的详细信息
-  getClientDetails(): Array<{ clientId: string; proxyId: string; online: boolean; connectionState: ClientConnectionState }> {
-    const details: Array<{ clientId: string; proxyId: string; online: boolean; connectionState: ClientConnectionState }> = [];
+  getClientDetails(): Array<{
+    clientId: string;
+    proxyId: string;
+    online: boolean;
+    connectionState: ClientConnectionState;
+  }> {
+    const details: Array<{
+      clientId: string;
+      proxyId: string;
+      online: boolean;
+      connectionState: ClientConnectionState;
+    }> = [];
     for (const [clientId, binding] of this.clientBindings) {
       details.push({
         clientId,
         proxyId: binding.proxyId,
-        online: binding.ws !== null && binding.ws !== undefined && binding.ws.readyState === WebSocket.OPEN,
+        online:
+          binding.ws !== null &&
+          binding.ws !== undefined &&
+          binding.ws.readyState === WebSocket.OPEN,
         connectionState: binding.connectionState,
       });
     }
     return details;
   }
-
 }

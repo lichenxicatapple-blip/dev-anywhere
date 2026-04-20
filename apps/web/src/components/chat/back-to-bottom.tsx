@@ -10,11 +10,7 @@ interface BackToBottomProps {
   onClick: () => void;
 }
 
-export function BackToBottom({
-  visible,
-  hasNewMessages,
-  onClick,
-}: BackToBottomProps) {
+export function BackToBottom({ visible, hasNewMessages, onClick }: BackToBottomProps) {
   return (
     <Button
       size="icon"

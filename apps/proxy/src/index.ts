@@ -17,7 +17,9 @@ import { spawnScript } from "./common/env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string };
+const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as {
+  version: string;
+};
 
 function stopService(): boolean {
   if (!existsSync(PID_PATH)) {
@@ -40,7 +42,10 @@ function stopService(): boolean {
 function showStatus(): Promise<number> {
   return new Promise((resolve) => {
     let lines = 0;
-    const log = (s: string) => { console.log(s); lines++; };
+    const log = (s: string) => {
+      console.log(s);
+      lines++;
+    };
 
     if (!existsSync(PID_PATH)) {
       log("Service: not running");
@@ -80,9 +85,13 @@ function showStatus(): Promise<number> {
             log("Relay:   not configured");
           } else if (relay.connected) {
             log(`Relay:   connected (proxy: ${relay.proxyId})`);
-            log(`         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`);
+            log(
+              `         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`,
+            );
           } else {
-            log(`Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`);
+            log(
+              `Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`,
+            );
           }
           log("");
 
@@ -128,7 +137,10 @@ async function waitForServeReady(timeoutMs: number): Promise<boolean> {
   while (Date.now() < deadline) {
     const connected = await new Promise<boolean>((resolve) => {
       const sock = connect(SOCK_PATH);
-      sock.once("connect", () => { sock.destroy(); resolve(true); });
+      sock.once("connect", () => {
+        sock.destroy();
+        resolve(true);
+      });
       sock.once("error", () => resolve(false));
     });
     if (connected) return true;
@@ -170,8 +182,8 @@ async function startDaemon(): Promise<void> {
     | { kind: "timeout" }
     | { kind: "exited"; code: number | null; signal: NodeJS.Signals | null };
 
-  const readyOutcome: Promise<Outcome> = waitForServeReady(DAEMON_STARTUP_TIMEOUT_MS).then(
-    (ok) => (ok ? { kind: "ready" as const } : { kind: "timeout" as const }),
+  const readyOutcome: Promise<Outcome> = waitForServeReady(DAEMON_STARTUP_TIMEOUT_MS).then((ok) =>
+    ok ? { kind: "ready" as const } : { kind: "timeout" as const },
   );
   const exitOutcome: Promise<Outcome> = new Promise((resolve) => {
     // 设 listener 前已经 exit 的边界：Node 记在 exitCode 上
@@ -195,12 +207,12 @@ async function startDaemon(): Promise<void> {
   // 失败路径：timeout 或 exited
   const stderrOutput = Buffer.concat(stderrChunks).toString("utf-8").trim();
   if (result.kind === "exited") {
-    console.error(
-      `Service exited during startup (code=${result.code}, signal=${result.signal}).`,
-    );
+    console.error(`Service exited during startup (code=${result.code}, signal=${result.signal}).`);
   } else {
     console.error(`Service failed to become ready within ${DAEMON_STARTUP_TIMEOUT_MS / 1000}s.`);
-    try { process.kill(child.pid!, "SIGTERM"); } catch {
+    try {
+      process.kill(child.pid!, "SIGTERM");
+    } catch {
       // 子进程可能已自己退出，kill 失败不影响后续退出码
     }
   }

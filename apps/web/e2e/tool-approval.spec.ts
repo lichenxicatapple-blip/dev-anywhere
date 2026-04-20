@@ -9,9 +9,7 @@ test.describe("ToolApprovalCard — keyboard shortcuts", () => {
     await resetLocalState(page);
   });
 
-  test("card shows three buttons with exact copy when approval seeded", async ({
-    page,
-  }) => {
+  test("card shows three buttons with exact copy when approval seeded", async ({ page }) => {
     // 依赖 window.__CHAT_STORE__ dev hook 暴露 store (当前未暴露, 测试自动 skip).
     // Plan 10-04b 接入 InputBar 前会扩展 hook, 届时本测试转为硬性断言.
     await page.goto(`${BASE_URL}/#/chat/ta-sess?mode=json`);

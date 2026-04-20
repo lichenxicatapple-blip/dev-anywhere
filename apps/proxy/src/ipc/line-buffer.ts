@@ -5,11 +5,7 @@ import { Transform, type TransformCallback } from "node:stream";
 export class LineBuffer extends Transform {
   private buffer = "";
 
-  _transform(
-    chunk: Buffer | string,
-    _encoding: BufferEncoding,
-    callback: TransformCallback,
-  ): void {
+  _transform(chunk: Buffer | string, _encoding: BufferEncoding, callback: TransformCallback): void {
     this.buffer += typeof chunk === "string" ? chunk : chunk.toString();
     const segments = this.buffer.split("\n");
     // 最后一段可能是不完整行，保留到 buffer

@@ -11,9 +11,7 @@ import { useSessionStore } from "@/stores/session-store";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
 
-function handleAssistantMessage(
-  env: Extract<MessageEnvelope, { type: "assistant_message" }>,
-) {
+function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant_message" }>) {
   const store = useChatStore.getState();
   if (env.payload.text.length > 0) {
     store.appendAssistantText(env.sessionId, env.payload.text);
@@ -24,9 +22,7 @@ function handleAssistantMessage(
   }
 }
 
-function handleToolUseRequest(
-  env: Extract<MessageEnvelope, { type: "tool_use_request" }>,
-) {
+function handleToolUseRequest(env: Extract<MessageEnvelope, { type: "tool_use_request" }>) {
   const store = useChatStore.getState();
   // 审批 ID = toolId (ToolUseRequestPayloadSchema)
   store.addApprovalRequest(env.sessionId, {
@@ -37,9 +33,7 @@ function handleToolUseRequest(
   });
 }
 
-function handleToolResult(
-  env: Extract<MessageEnvelope, { type: "tool_result" }>,
-) {
+function handleToolResult(env: Extract<MessageEnvelope, { type: "tool_result" }>) {
   // 工具结果到达 => 对应 approval 已执行完成, 标记为 approved (被拒绝的不会有 tool_result)
   const store = useChatStore.getState();
   store.updateApprovalStatus(env.sessionId, env.payload.toolId, "approved");
@@ -70,16 +64,12 @@ function handleSessionHistoryMessages(
   store.loadHistory(msg.sessionId, msg.messages);
 }
 
-function handleTurnResult(
-  msg: Extract<RelayControlMessage, { type: "turn_result" }>,
-) {
+function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result" }>) {
   const store = useChatStore.getState();
   store.markTurnComplete(msg.sessionId);
 }
 
-function handleTerminalTitle(
-  msg: Extract<RelayControlMessage, { type: "terminal_title" }>,
-) {
+function handleTerminalTitle(msg: Extract<RelayControlMessage, { type: "terminal_title" }>) {
   // proxy 抽 OSC 0 后推送, chat-header 为 PTY 模式优先用这个值
   useSessionStore.getState().setPtyTitle(msg.sessionId, msg.title);
 }
@@ -87,9 +77,7 @@ function handleTerminalTitle(
 export function registerChatDispatcher(): () => void {
   const relay = relayClientRef;
   if (!relay) {
-    console.warn(
-      "registerChatDispatcher called before relayClient bound; skipping",
-    );
+    console.warn("registerChatDispatcher called before relayClient bound; skipping");
     return () => {};
   }
 

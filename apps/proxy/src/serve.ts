@@ -34,7 +34,10 @@ import {
   type WorkerMessage,
 } from "./ipc/ipc-protocol.js";
 import { nanoid } from "nanoid";
-import { createControlMessageHandlers, type ControlMessageHandlers } from "./serve/handlers/control-messages.js";
+import {
+  createControlMessageHandlers,
+  type ControlMessageHandlers,
+} from "./serve/handlers/control-messages.js";
 import { readSessionMessages } from "./serve/session-history.js";
 
 // ---------- 基础工具函数 ----------
@@ -85,7 +88,10 @@ function changeSessionState(
   try {
     sessionManager.updateState(sessionId, next);
   } catch (err) {
-    serviceLogger.debug({ sessionId, from: session.state, to: next, error: String(err) }, "updateState rejected");
+    serviceLogger.debug(
+      { sessionId, from: session.state, to: next, error: String(err) },
+      "updateState rejected",
+    );
     return false;
   }
   pushSessionStatus(relay, sessionManager, sessionId);
@@ -179,13 +185,7 @@ function forwardWorkerEvent(
       .join("");
     if (text) {
       relayConnection.sendEnvelope(
-        buildMessage(
-          "assistant_message",
-          sessionId,
-          seq,
-          { text, isPartial: true },
-          "proxy",
-        ),
+        buildMessage("assistant_message", sessionId, seq, { text, isPartial: true }, "proxy"),
       );
     }
     const thinkingBlock = content.find((c) => c.type === "thinking");
@@ -244,13 +244,19 @@ function connectToWorker(
               try {
                 forwardWorkerEvent(relayConnection, sessionManager, sessionId, msg.seq, msg.event);
               } catch (err) {
-                serviceLogger.debug({ sessionId, error: String(err) }, "Failed to forward event to relay");
+                serviceLogger.debug(
+                  { sessionId, error: String(err) },
+                  "Failed to forward event to relay",
+                );
               }
             }
             serviceLogger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
             break;
           case "worker_replay_done":
-            serviceLogger.info({ sessionId, replayedCount: msg.replayedCount }, "Worker event replay complete");
+            serviceLogger.info(
+              { sessionId, replayedCount: msg.replayedCount },
+              "Worker event replay complete",
+            );
             break;
           case "worker_exit":
             sessionManager.terminateSession(sessionId);
@@ -259,7 +265,10 @@ function connectToWorker(
             break;
           case "worker_approval_request":
             if (relayConnection) {
-              serviceLogger.info({ sessionId, toolName: msg.toolName, requestId: msg.requestId }, "Tool approval forwarding to relay");
+              serviceLogger.info(
+                { sessionId, toolName: msg.toolName, requestId: msg.requestId },
+                "Tool approval forwarding to relay",
+              );
               try {
                 const seqCounter = new SeqCounter(sessionId);
                 const approvalSeq = seqCounter.next();
@@ -281,37 +290,52 @@ function connectToWorker(
                   input: msg.input,
                   workerSocket: sock,
                   resolve: (response) => {
-                    sock.write(serializeWorkerMsg({
-                      type: "worker_approval_response",
-                      requestId: msg.requestId,
-                      behavior: response.behavior,
-                      message: response.message,
-                    }));
+                    sock.write(
+                      serializeWorkerMsg({
+                        type: "worker_approval_response",
+                        requestId: msg.requestId,
+                        behavior: response.behavior,
+                        message: response.message,
+                      }),
+                    );
                   },
                 });
               } catch (err) {
-                serviceLogger.warn({ sessionId, error: String(err) }, "Failed to forward tool approval to relay, denying");
-                sock.write(serializeWorkerMsg({
+                serviceLogger.warn(
+                  { sessionId, error: String(err) },
+                  "Failed to forward tool approval to relay, denying",
+                );
+                sock.write(
+                  serializeWorkerMsg({
+                    type: "worker_approval_response",
+                    requestId: msg.requestId,
+                    behavior: "deny",
+                    message: "Failed to forward approval request to relay.",
+                  }),
+                );
+              }
+            } else {
+              serviceLogger.info(
+                { sessionId, toolName: msg.toolName },
+                "Tool approval denied (no relay connection)",
+              );
+              sock.write(
+                serializeWorkerMsg({
                   type: "worker_approval_response",
                   requestId: msg.requestId,
                   behavior: "deny",
-                  message: "Failed to forward approval request to relay.",
-                }));
-              }
-            } else {
-              serviceLogger.info({ sessionId, toolName: msg.toolName }, "Tool approval denied (no relay connection)");
-              sock.write(serializeWorkerMsg({
-                type: "worker_approval_response",
-                requestId: msg.requestId,
-                behavior: "deny",
-                message: "No relay connection available for remote approval.",
-              }));
+                  message: "No relay connection available for remote approval.",
+                }),
+              );
             }
             break;
           case "worker_claude_session_id":
             claudeSessionIds.set(sessionId, msg.sessionId);
             sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
-            serviceLogger.info({ sessionId, claudeSessionId: msg.sessionId }, "Claude session ID captured");
+            serviceLogger.info(
+              { sessionId, claudeSessionId: msg.sessionId },
+              "Claude session ID captured",
+            );
             break;
         }
       });
@@ -322,7 +346,10 @@ function connectToWorker(
           if (pending.sessionId === sessionId) {
             pending.resolve({ behavior: "deny", message: "Worker disconnected" });
             pendingToolApprovals.delete(requestId);
-            serviceLogger.info({ sessionId, requestId }, "Pending tool approval denied on worker disconnect");
+            serviceLogger.info(
+              { sessionId, requestId },
+              "Pending tool approval denied on worker disconnect",
+            );
           }
         }
       });
@@ -332,7 +359,10 @@ function connectToWorker(
           if (pending.sessionId === sessionId) {
             pending.resolve({ behavior: "deny", message: "Worker disconnected" });
             pendingToolApprovals.delete(requestId);
-            serviceLogger.info({ sessionId, requestId }, "Pending tool approval denied on worker error");
+            serviceLogger.info(
+              { sessionId, requestId },
+              "Pending tool approval denied on worker error",
+            );
           }
         }
       });
@@ -343,7 +373,10 @@ function connectToWorker(
   });
 }
 
-function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string; permissionMode?: string }): number {
+function spawnWorker(
+  sessionId: string,
+  options?: { cwd?: string; resumeSessionId?: string; permissionMode?: string },
+): number {
   const paths = sessionPaths(sessionId);
 
   const workerArgs: string[] = [sessionId, paths.workerSock];
@@ -353,9 +386,14 @@ function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionI
   workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
   workerArgs.push("--");
 
-  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs, { logger: serviceLogger });
+  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs, {
+    logger: serviceLogger,
+  });
   const workerPid = child.pid!;
-  serviceLogger.info({ sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
+  serviceLogger.info(
+    { sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId },
+    "Worker process spawned",
+  );
   return workerPid;
 }
 
@@ -367,8 +405,7 @@ async function reconnectWorkers(
 ): Promise<void> {
   if (!existsSync(DATA_DIR)) return;
 
-  const dirs = readdirSync(DATA_DIR, { withFileTypes: true })
-    .filter((d) => d.isDirectory());
+  const dirs = readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
 
   for (const dir of dirs) {
     const sessionId = dir.name;
@@ -376,11 +413,19 @@ async function reconnectWorkers(
     if (!existsSync(paths.workerSock)) continue;
 
     const sock = await connectToWorker(
-      sessionId, paths.workerSock, sessionManager, workerSockets, terminalSockets, relayConnection,
+      sessionId,
+      paths.workerSock,
+      sessionManager,
+      workerSockets,
+      terminalSockets,
+      relayConnection,
     );
     if (sock) {
       if (!sessionManager.getSession(sessionId)) {
-        serviceLogger.warn({ sessionId }, "Orphaned worker found without session data, terminating");
+        serviceLogger.warn(
+          { sessionId },
+          "Orphaned worker found without session data, terminating",
+        );
         sock.end();
         workerSockets.delete(sessionId);
         continue;
@@ -388,7 +433,9 @@ async function reconnectWorkers(
       changeSessionState(sessionManager, relayConnection, sessionId, SessionState.IDLE);
       serviceLogger.info({ sessionId }, "Reconnected to existing worker");
     } else {
-      try { unlinkSync(paths.workerSock); } catch {
+      try {
+        unlinkSync(paths.workerSock);
+      } catch {
         // socket 文件可能已被删除
       }
       serviceLogger.info({ sessionId }, "Cleaned up stale worker socket");
@@ -406,289 +453,337 @@ function handleTerminalConnection(
   relayConnection: RelayConnection | null = null,
   controlHandlers?: ControlMessageHandlers,
 ): void {
-  createIpcReader(socket, (msg: IpcMessage) => {
-    switch (msg.type) {
-      case "session_create_request": {
-        if (msg.mode === "pty") {
-          const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
-          const session = existing ?? sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
-          if (existing) {
-            changeSessionState(sessionManager, relayConnection, session.id, SessionState.IDLE);
-            sessionManager.setPid(session.id, msg.pid);
+  createIpcReader(
+    socket,
+    (msg: IpcMessage) => {
+      switch (msg.type) {
+        case "session_create_request": {
+          if (msg.mode === "pty") {
+            const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
+            const session =
+              existing ??
+              sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
+            if (existing) {
+              changeSessionState(sessionManager, relayConnection, session.id, SessionState.IDLE);
+              sessionManager.setPid(session.id, msg.pid);
+            }
+            socket.write(
+              serializeIpc({
+                type: "session_create_response",
+                sessionId: session.id,
+              }),
+            );
+            serviceLogger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
+          } else {
+            const pendingId = nanoid();
+            const workerPid = spawnWorker(pendingId);
+            const session = sessionManager.createSession(
+              "json",
+              msg.cwd,
+              workerPid,
+              msg.name,
+              pendingId,
+            );
+
+            const paths = sessionPaths(session.id);
+            let attempt = 0;
+            const maxRetries = 20;
+            const tryConnectWorker = () => {
+              attempt++;
+              connectToWorker(
+                session.id,
+                paths.workerSock,
+                sessionManager,
+                workerSockets,
+                terminalSockets,
+                relayConnection,
+              ).then((sock) => {
+                if (sock) {
+                  socket.write(
+                    serializeIpc({
+                      type: "session_create_response",
+                      sessionId: session.id,
+                    }),
+                  );
+                  serviceLogger.info(
+                    { sessionId: session.id, mode: "json" },
+                    "JSON session created via worker",
+                  );
+                  if (relayConnection) {
+                    relayConnection.sendRaw(
+                      JSON.stringify({
+                        type: "session_sync",
+                        sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+                      }),
+                    );
+                  }
+                } else if (attempt < maxRetries) {
+                  setTimeout(tryConnectWorker, Math.min(100 * attempt, 2000));
+                } else {
+                  socket.write(
+                    serializeIpc({
+                      type: "session_create_response",
+                      sessionId: session.id,
+                      error: "Worker failed to start",
+                    }),
+                  );
+                  serviceLogger.error({ sessionId: session.id }, "Worker connection timeout");
+                }
+              });
+            };
+            setTimeout(tryConnectWorker, 100);
           }
+          break;
+        }
+
+        case "session_list_request": {
+          const sessions = sessionManager.listSessions();
           socket.write(
             serializeIpc({
-              type: "session_create_response",
-              sessionId: session.id,
+              type: "session_list_response",
+              sessions: sessions.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+              })),
             }),
           );
-          serviceLogger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
-        } else {
-          const pendingId = nanoid();
-          const workerPid = spawnWorker(pendingId);
-          const session = sessionManager.createSession("json", msg.cwd, workerPid, msg.name, pendingId);
-
-          const paths = sessionPaths(session.id);
-          let attempt = 0;
-          const maxRetries = 20;
-          const tryConnectWorker = () => {
-            attempt++;
-            connectToWorker(
-              session.id, paths.workerSock, sessionManager,
-              workerSockets, terminalSockets, relayConnection,
-            ).then((sock) => {
-              if (sock) {
-                socket.write(
-                  serializeIpc({
-                    type: "session_create_response",
-                    sessionId: session.id,
-                  }),
-                );
-                serviceLogger.info({ sessionId: session.id, mode: "json" }, "JSON session created via worker");
-                if (relayConnection) {
-                  relayConnection.sendRaw(JSON.stringify({
-                    type: "session_sync",
-                    sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-                  }));
-                }
-              } else if (attempt < maxRetries) {
-                setTimeout(tryConnectWorker, Math.min(100 * attempt, 2000));
-              } else {
-                socket.write(
-                  serializeIpc({
-                    type: "session_create_response",
-                    sessionId: session.id,
-                    error: "Worker failed to start",
-                  }),
-                );
-                serviceLogger.error({ sessionId: session.id }, "Worker connection timeout");
-              }
-            });
-          };
-          setTimeout(tryConnectWorker, 100);
+          break;
         }
-        break;
-      }
 
-      case "session_list_request": {
-        const sessions = sessionManager.listSessions();
-        socket.write(
-          serializeIpc({
-            type: "session_list_response",
-            sessions: sessions.map((s) => ({
-              id: s.id,
-              mode: s.mode,
-              state: s.state,
-              createdAt: new Date(s.createdAt).toISOString(),
-              ...(s.name !== undefined ? { name: s.name } : {}),
-            })),
-          }),
-        );
-        break;
-      }
-
-      case "service_status_request": {
-        const relayStatus = relayConnection?.getStatus() ?? null;
-        const sessions = sessionManager.listSessions();
-        socket.write(
-          serializeIpc({
-            type: "service_status_response",
-            relay: relayStatus,
-            sessions: sessions.map((s) => ({
-              id: s.id,
-              mode: s.mode,
-              state: s.state,
-              createdAt: new Date(s.createdAt).toISOString(),
-              ...(s.name !== undefined ? { name: s.name } : {}),
-              hasWorker: workerSockets.has(s.id),
-            })),
-          }),
-        );
-        break;
-      }
-
-      case "pty_title_change": {
-        // terminal → serve → relay：转发终端标题变化
-        if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "terminal_title",
-            sessionId: msg.sessionId,
-            title: msg.title,
-          }));
-        }
-        break;
-      }
-
-      case "pty_state_push": {
-        // terminal → serve → relay：PTY 语义状态变化
-        const stateMap: Record<string, SessionState> = {
-          working: SessionState.WORKING,
-          turn_complete: SessionState.IDLE,
-          approval_wait: SessionState.WAITING_APPROVAL,
-        };
-        const sessionState = stateMap[msg.state];
-        if (sessionState) {
-          changeSessionState(sessionManager, relayConnection, msg.sessionId, sessionState);
-        }
-        if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "pty_state",
-            sessionId: msg.sessionId,
-            payload: {
-              state: msg.state,
-              ...(msg.title !== undefined ? { title: msg.title } : {}),
-              ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
-            },
-          }));
-        }
-        break;
-      }
-
-      case "pty_resize": {
-        // terminal → serve → relay：转发终端尺寸变化
-        if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "terminal_resize",
-            sessionId: msg.sessionId,
-            cols: msg.cols,
-            rows: msg.rows,
-          }));
-        }
-        break;
-      }
-
-      case "session_terminate_request": {
-        const result = sessionManager.terminateSession(msg.sessionId);
-        const ws = workerSockets.get(msg.sessionId);
-        if (ws?.writable) {
-          ws.write(serializeWorkerMsg({ type: "worker_stop" }));
-        }
-        workerSockets.delete(msg.sessionId);
-
-        controlHandlers?.cleanup(msg.sessionId);
-        socket.write(
-          serializeIpc({
-            type: "session_terminate_response",
-            sessionId: msg.sessionId,
-            success: result.success,
-          }),
-        );
-        serviceLogger.info({ sessionId: msg.sessionId, success: result.success }, "Session terminated");
-        break;
-      }
-
-      case "pty_register": {
-        changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
-        sessionManager.setPid(msg.sessionId, msg.pid);
-        terminalSockets.set(msg.sessionId, socket);
-        // 通知 relay 该 session 存在，并推送会话列表给客户端
-        if (relayConnection) {
-          const session = sessionManager.getSession(msg.sessionId);
-          if (session) {
-            relayConnection.sendRaw(JSON.stringify({
-              type: "session_sync",
-              sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-            }));
-          }
-          const allSessions = sessionManager.listSessions();
-          relayConnection.sendRaw(JSON.stringify({
-            type: "session_list",
-            sessionId: "",
-            seq: 0,
-            timestamp: Date.now(),
-            source: "proxy",
-            version: "1",
-            payload: {
-              sessions: allSessions.map(toSessionListPayload),
-            },
-          }));
-        }
-        serviceLogger.info({ sessionId: msg.sessionId }, "PTY session registered");
-        break;
-      }
-
-      case "pty_deregister": {
-        // 先通知客户端状态变更，再清理 session
-        if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "pty_state",
-            sessionId: msg.sessionId,
-            payload: { state: "turn_complete" },
-          }));
-        }
-        sessionManager.terminateSession(msg.sessionId);
-        terminalSockets.delete(msg.sessionId);
-
-        controlHandlers?.cleanup(msg.sessionId);
-        // 推送更新后的会话列表给客户端
-        if (relayConnection) {
-          const remaining = sessionManager.listSessions();
-          relayConnection.sendRaw(JSON.stringify({
-            type: "session_list",
-            sessionId: "",
-            seq: 0,
-            timestamp: Date.now(),
-            source: "proxy",
-            version: "1",
-            payload: {
-              sessions: remaining.map(toSessionListPayload),
-            },
-          }));
-        }
-        serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
-        break;
-      }
-
-      case "pty_input": {
-        const targetSocket = terminalSockets.get(msg.sessionId);
-        if (targetSocket?.writable) {
-          targetSocket.write(
+        case "service_status_request": {
+          const relayStatus = relayConnection?.getStatus() ?? null;
+          const sessions = sessionManager.listSessions();
+          socket.write(
             serializeIpc({
-              type: "pty_input",
-              sessionId: msg.sessionId,
-              data: msg.data,
+              type: "service_status_response",
+              relay: relayStatus,
+              sessions: sessions.map((s) => ({
+                id: s.id,
+                mode: s.mode,
+                state: s.state,
+                createdAt: new Date(s.createdAt).toISOString(),
+                ...(s.name !== undefined ? { name: s.name } : {}),
+                hasWorker: workerSockets.has(s.id),
+              })),
             }),
           );
+          break;
         }
-        break;
-      }
 
-      case "session_status_update": {
-        changeSessionState(sessionManager, relayConnection, msg.sessionId, msg.state as SessionState);
-        break;
-      }
-
-      case "pty_snapshot": {
-        // terminal serialize() 结果转发给 relay → client
-        if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "session_snapshot",
-            sessionId: msg.sessionId,
-            cols: msg.cols,
-            rows: msg.rows,
-            data: msg.data,
-          }));
-          serviceLogger.info({ sessionId: msg.sessionId, cols: msg.cols, rows: msg.rows }, "Session snapshot forwarded to relay");
+        case "pty_title_change": {
+          // terminal → serve → relay：转发终端标题变化
+          if (relayConnection) {
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "terminal_title",
+                sessionId: msg.sessionId,
+                title: msg.title,
+              }),
+            );
+          }
+          break;
         }
-        break;
-      }
 
-      default: {
-        serviceLogger.warn({ type: (msg as IpcMessage).type }, "Unhandled IPC message type");
+        case "pty_state_push": {
+          // terminal → serve → relay：PTY 语义状态变化
+          const stateMap: Record<string, SessionState> = {
+            working: SessionState.WORKING,
+            turn_complete: SessionState.IDLE,
+            approval_wait: SessionState.WAITING_APPROVAL,
+          };
+          const sessionState = stateMap[msg.state];
+          if (sessionState) {
+            changeSessionState(sessionManager, relayConnection, msg.sessionId, sessionState);
+          }
+          if (relayConnection) {
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "pty_state",
+                sessionId: msg.sessionId,
+                payload: {
+                  state: msg.state,
+                  ...(msg.title !== undefined ? { title: msg.title } : {}),
+                  ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
+                },
+              }),
+            );
+          }
+          break;
+        }
+
+        case "pty_resize": {
+          // terminal → serve → relay：转发终端尺寸变化
+          if (relayConnection) {
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "terminal_resize",
+                sessionId: msg.sessionId,
+                cols: msg.cols,
+                rows: msg.rows,
+              }),
+            );
+          }
+          break;
+        }
+
+        case "session_terminate_request": {
+          const result = sessionManager.terminateSession(msg.sessionId);
+          const ws = workerSockets.get(msg.sessionId);
+          if (ws?.writable) {
+            ws.write(serializeWorkerMsg({ type: "worker_stop" }));
+          }
+          workerSockets.delete(msg.sessionId);
+
+          controlHandlers?.cleanup(msg.sessionId);
+          socket.write(
+            serializeIpc({
+              type: "session_terminate_response",
+              sessionId: msg.sessionId,
+              success: result.success,
+            }),
+          );
+          serviceLogger.info(
+            { sessionId: msg.sessionId, success: result.success },
+            "Session terminated",
+          );
+          break;
+        }
+
+        case "pty_register": {
+          changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
+          sessionManager.setPid(msg.sessionId, msg.pid);
+          terminalSockets.set(msg.sessionId, socket);
+          // 通知 relay 该 session 存在，并推送会话列表给客户端
+          if (relayConnection) {
+            const session = sessionManager.getSession(msg.sessionId);
+            if (session) {
+              relayConnection.sendRaw(
+                JSON.stringify({
+                  type: "session_sync",
+                  sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+                }),
+              );
+            }
+            const allSessions = sessionManager.listSessions();
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "session_list",
+                sessionId: "",
+                seq: 0,
+                timestamp: Date.now(),
+                source: "proxy",
+                version: "1",
+                payload: {
+                  sessions: allSessions.map(toSessionListPayload),
+                },
+              }),
+            );
+          }
+          serviceLogger.info({ sessionId: msg.sessionId }, "PTY session registered");
+          break;
+        }
+
+        case "pty_deregister": {
+          // 先通知客户端状态变更，再清理 session
+          if (relayConnection) {
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "pty_state",
+                sessionId: msg.sessionId,
+                payload: { state: "turn_complete" },
+              }),
+            );
+          }
+          sessionManager.terminateSession(msg.sessionId);
+          terminalSockets.delete(msg.sessionId);
+
+          controlHandlers?.cleanup(msg.sessionId);
+          // 推送更新后的会话列表给客户端
+          if (relayConnection) {
+            const remaining = sessionManager.listSessions();
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "session_list",
+                sessionId: "",
+                seq: 0,
+                timestamp: Date.now(),
+                source: "proxy",
+                version: "1",
+                payload: {
+                  sessions: remaining.map(toSessionListPayload),
+                },
+              }),
+            );
+          }
+          serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
+          break;
+        }
+
+        case "pty_input": {
+          const targetSocket = terminalSockets.get(msg.sessionId);
+          if (targetSocket?.writable) {
+            targetSocket.write(
+              serializeIpc({
+                type: "pty_input",
+                sessionId: msg.sessionId,
+                data: msg.data,
+              }),
+            );
+          }
+          break;
+        }
+
+        case "session_status_update": {
+          changeSessionState(
+            sessionManager,
+            relayConnection,
+            msg.sessionId,
+            msg.state as SessionState,
+          );
+          break;
+        }
+
+        case "pty_snapshot": {
+          // terminal serialize() 结果转发给 relay → client
+          if (relayConnection) {
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "session_snapshot",
+                sessionId: msg.sessionId,
+                cols: msg.cols,
+                rows: msg.rows,
+                data: msg.data,
+              }),
+            );
+            serviceLogger.info(
+              { sessionId: msg.sessionId, cols: msg.cols, rows: msg.rows },
+              "Session snapshot forwarded to relay",
+            );
+          }
+          break;
+        }
+
+        default: {
+          serviceLogger.warn({ type: (msg as IpcMessage).type }, "Unhandled IPC message type");
+        }
       }
-    }
-  }, (sessionId, data) => {
-    // D-06: binary PTY 数据从 terminal 进程转发到 relay
-    // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][PTY data]
-    if (relayConnection) {
-      const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + data.length);
-      wsFrame[0] = sessionIdBuf.length;
-      sessionIdBuf.copy(wsFrame, 1);
-      data.copy(wsFrame, 1 + sessionIdBuf.length);
-      relayConnection.sendBinary(wsFrame);
-    }
-  });
+    },
+    (sessionId, data) => {
+      // D-06: binary PTY 数据从 terminal 进程转发到 relay
+      // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][PTY data]
+      if (relayConnection) {
+        const sessionIdBuf = Buffer.from(sessionId, "utf-8");
+        const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + data.length);
+        wsFrame[0] = sessionIdBuf.length;
+        sessionIdBuf.copy(wsFrame, 1);
+        data.copy(wsFrame, 1 + sessionIdBuf.length);
+        relayConnection.sendBinary(wsFrame);
+      }
+    },
+  );
 
   socket.on("close", () => {
     for (const [sessionId, terminalSocket] of terminalSockets) {
@@ -702,34 +797,44 @@ function handleTerminalConnection(
         }
         if (session.mode === "pty" && session.pid && isProcessAlive(session.pid)) {
           // terminal 进程仍存活，serve 正在重启，不做清理
-          serviceLogger.info({ sessionId, pid: session.pid }, "Terminal socket closed but process alive, skipping cleanup");
+          serviceLogger.info(
+            { sessionId, pid: session.pid },
+            "Terminal socket closed but process alive, skipping cleanup",
+          );
           continue;
         }
         // terminal 进程已死（crash），执行完整清理
         if (relayConnection) {
-          relayConnection.sendRaw(JSON.stringify({
-            type: "pty_state",
-            sessionId,
-            payload: { state: "turn_complete" },
-          }));
+          relayConnection.sendRaw(
+            JSON.stringify({
+              type: "pty_state",
+              sessionId,
+              payload: { state: "turn_complete" },
+            }),
+          );
         }
         sessionManager.terminateSession(sessionId);
         controlHandlers?.cleanup(sessionId);
         if (relayConnection) {
           const remaining = sessionManager.listSessions();
-          relayConnection.sendRaw(JSON.stringify({
-            type: "session_list",
-            sessionId: "",
-            seq: 0,
-            timestamp: Date.now(),
-            source: "proxy",
-            version: "1",
-            payload: {
-              sessions: remaining.map(toSessionListPayload),
-            },
-          }));
+          relayConnection.sendRaw(
+            JSON.stringify({
+              type: "session_list",
+              sessionId: "",
+              seq: 0,
+              timestamp: Date.now(),
+              source: "proxy",
+              version: "1",
+              payload: {
+                sessions: remaining.map(toSessionListPayload),
+              },
+            }),
+          );
         }
-        serviceLogger.info({ sessionId }, "PTY session cleaned up on socket close (crash fallback)");
+        serviceLogger.info(
+          { sessionId },
+          "PTY session cleaned up on socket close (crash fallback)",
+        );
       }
     }
   });
@@ -747,7 +852,9 @@ export interface ServiceOptions {
 
 export async function startService(options?: ServiceOptions): Promise<void> {
   await cleanupStaleResources();
-  try { unlinkSync(STOPPED_PATH); } catch {
+  try {
+    unlinkSync(STOPPED_PATH);
+  } catch {
     // STOPPED 文件不存在时忽略
   }
 
@@ -755,7 +862,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
       const paths = sessionPaths(id);
-      try { rmSync(paths.dir, { recursive: true, force: true }); } catch {
+      try {
+        rmSync(paths.dir, { recursive: true, force: true });
+      } catch {
         // 会话目录清理失败不影响主流程
       }
     },
@@ -769,7 +878,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   function getComputerName(): string | null {
     try {
-      return execSync("scutil --get ComputerName", { stdio: ["pipe", "pipe", "ignore"] }).toString().trim() || null;
+      return (
+        execSync("scutil --get ComputerName", { stdio: ["pipe", "pipe", "ignore"] })
+          .toString()
+          .trim() || null
+      );
     } catch {
       return null;
     }
@@ -777,10 +890,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   // 创建 handler 模块实例（在 relay 连接建立前创建，send 函数延迟绑定）
   let relaySend: ((data: string) => void) | null = null;
-  const controlHandlers = createControlMessageHandlers(
-    (data) => { if (relaySend) relaySend(data); },
-    sessionManager,
-  );
+  const controlHandlers = createControlMessageHandlers((data) => {
+    if (relaySend) relaySend(data);
+  }, sessionManager);
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   const proxyConfig = loadConfig();
@@ -792,7 +904,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection = new RelayConnection(relayUrl, { name: proxyName, token: relayToken });
     relaySend = (data) => relayConnection!.sendRaw(data);
     relayConnection.connect();
-    serviceLogger.info({ relayUrl, proxyName, tokenSet: !!relayToken }, "Connecting to relay server");
+    serviceLogger.info(
+      { relayUrl, proxyName, tokenSet: !!relayToken },
+      "Connecting to relay server",
+    );
 
     // 重连时 RelayConnection 自动 flush 离线队列，不需要本地回放
 
@@ -805,31 +920,55 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         if (parsed.type === "user_input" && parsed.sessionId) {
           const session = sessionManager.getSession(parsed.sessionId);
           if (!session) {
-            serviceLogger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: session not found");
+            serviceLogger.warn(
+              { sessionId: parsed.sessionId },
+              "Remote input dropped: session not found",
+            );
           } else if (session.mode === "json") {
             const ws = workerSockets.get(parsed.sessionId);
             if (ws?.writable) {
               // user_input 是 JSON turn 的唯一入口, 此刻就推 WORKING, 不再依赖 worker_event 的副作用
-              changeSessionState(sessionManager, relayConnection, parsed.sessionId, SessionState.WORKING);
-              ws.write(serializeWorkerMsg({
-                type: "worker_input",
-                content: parsed.payload?.text ?? "",
-              }));
-              serviceLogger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to JSON worker");
+              changeSessionState(
+                sessionManager,
+                relayConnection,
+                parsed.sessionId,
+                SessionState.WORKING,
+              );
+              ws.write(
+                serializeWorkerMsg({
+                  type: "worker_input",
+                  content: parsed.payload?.text ?? "",
+                }),
+              );
+              serviceLogger.info(
+                { sessionId: parsed.sessionId },
+                "Remote input forwarded to JSON worker",
+              );
             } else {
-              serviceLogger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: JSON worker socket not available");
+              serviceLogger.warn(
+                { sessionId: parsed.sessionId },
+                "Remote input dropped: JSON worker socket not available",
+              );
             }
           } else {
             const ts = terminalSockets.get(parsed.sessionId);
             if (ts?.writable) {
-              ts.write(serializeIpc({
-                type: "pty_input",
-                sessionId: parsed.sessionId,
-                data: (parsed.payload?.text ?? "") + "\r",
-              }));
-              serviceLogger.info({ sessionId: parsed.sessionId }, "Remote input forwarded to PTY terminal");
+              ts.write(
+                serializeIpc({
+                  type: "pty_input",
+                  sessionId: parsed.sessionId,
+                  data: (parsed.payload?.text ?? "") + "\r",
+                }),
+              );
+              serviceLogger.info(
+                { sessionId: parsed.sessionId },
+                "Remote input forwarded to PTY terminal",
+              );
             } else {
-              serviceLogger.warn({ sessionId: parsed.sessionId }, "Remote input dropped: PTY terminal socket not available");
+              serviceLogger.warn(
+                { sessionId: parsed.sessionId },
+                "Remote input dropped: PTY terminal socket not available",
+              );
             }
           }
         } else if (parsed.type === "remote_input_raw" && parsed.sessionId) {
@@ -837,11 +976,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           // CONTEXT Addendum D-21 方案 A：复用 pty_input IPC 类型，不修改 ipc-protocol.ts 与 terminal.ts
           const ts = terminalSockets.get(parsed.sessionId);
           if (ts?.writable) {
-            ts.write(serializeIpc({
-              type: "pty_input",
-              sessionId: parsed.sessionId,
-              data: parsed.data,
-            }));
+            ts.write(
+              serializeIpc({
+                type: "pty_input",
+                sessionId: parsed.sessionId,
+                data: parsed.data,
+              }),
+            );
             serviceLogger.info(
               { sessionId: parsed.sessionId, bytes: parsed.data.length },
               "Raw PTY input forwarded",
@@ -864,14 +1005,22 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               if (whitelistTool) {
                 const toolName = (parsed.payload?.toolName as string) ?? "";
                 if (toolName && pending.workerSocket.writable) {
-                  pending.workerSocket.write(serializeWorkerMsg({
-                    type: "worker_whitelist_add",
-                    toolName,
-                  }));
-                  serviceLogger.info({ sessionId: pending.sessionId, toolName }, "Tool added to session whitelist via relay");
+                  pending.workerSocket.write(
+                    serializeWorkerMsg({
+                      type: "worker_whitelist_add",
+                      toolName,
+                    }),
+                  );
+                  serviceLogger.info(
+                    { sessionId: pending.sessionId, toolName },
+                    "Tool added to session whitelist via relay",
+                  );
                 }
               }
-              serviceLogger.info({ sessionId: parsed.sessionId, toolId, whitelistTool }, "Tool approved via relay");
+              serviceLogger.info(
+                { sessionId: parsed.sessionId, toolId, whitelistTool },
+                "Tool approved via relay",
+              );
             }
           }
         } else if (parsed.type === "tool_deny" && parsed.sessionId) {
@@ -888,10 +1037,12 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         }
         // 控制消息：dir_list_request, session_history_request, terminal_scroll_request
         else if (parsed.type === "proxy_info_request") {
-          relaySend!(JSON.stringify({
-            type: "proxy_info",
-            homePath: process.env.HOME || "/",
-          }));
+          relaySend!(
+            JSON.stringify({
+              type: "proxy_info",
+              homePath: process.env.HOME || "/",
+            }),
+          );
         } else if (parsed.type === "dir_list_request") {
           controlHandlers.handleDirListRequest({ path: parsed.path ?? "" });
         } else if (parsed.type === "dir_create_request") {
@@ -911,60 +1062,94 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const tryConnect = () => {
             attempt++;
             connectToWorker(
-              pendingId, paths.workerSock, sessionManager,
-              workerSockets, terminalSockets, relayConnection,
+              pendingId,
+              paths.workerSock,
+              sessionManager,
+              workerSockets,
+              terminalSockets,
+              relayConnection,
             ).then((sock) => {
               if (sock) {
                 // worker 连接成功，正式注册 session
-                const session = sessionManager.createSession("json", cwd, workerPid, name, pendingId);
+                const session = sessionManager.createSession(
+                  "json",
+                  cwd,
+                  workerPid,
+                  name,
+                  pendingId,
+                );
                 if (resumeSessionId) {
                   sessionManager.setClaudeSessionId(session.id, resumeSessionId);
                 }
-                relaySend!(JSON.stringify({
-                  type: "session_create_response",
-                  sessionId: session.id,
-                }));
+                relaySend!(
+                  JSON.stringify({
+                    type: "session_create_response",
+                    sessionId: session.id,
+                  }),
+                );
                 if (resumeSessionId) {
-                  readSessionMessages(resumeSessionId).then((messages) => {
-                    if (messages.length > 0) {
-                      relaySend!(JSON.stringify({
-                        type: "session_history_messages",
-                        sessionId: session.id,
-                        messages,
-                      }));
-                      serviceLogger.info({ sessionId: session.id, resumeSessionId, messageCount: messages.length }, "History messages sent for resumed session");
-                    }
-                  }).catch((err) => {
-                    serviceLogger.warn({ sessionId: session.id, error: String(err) }, "Failed to read session history messages");
-                  });
+                  readSessionMessages(resumeSessionId)
+                    .then((messages) => {
+                      if (messages.length > 0) {
+                        relaySend!(
+                          JSON.stringify({
+                            type: "session_history_messages",
+                            sessionId: session.id,
+                            messages,
+                          }),
+                        );
+                        serviceLogger.info(
+                          { sessionId: session.id, resumeSessionId, messageCount: messages.length },
+                          "History messages sent for resumed session",
+                        );
+                      }
+                    })
+                    .catch((err) => {
+                      serviceLogger.warn(
+                        { sessionId: session.id, error: String(err) },
+                        "Failed to read session history messages",
+                      );
+                    });
                 }
-                serviceLogger.info({ sessionId: session.id, cwd }, "JSON session created via relay");
+                serviceLogger.info(
+                  { sessionId: session.id, cwd },
+                  "JSON session created via relay",
+                );
                 controlHandlers.pushCommandList(session.id, cwd);
                 if (relayConnection) {
-                  relayConnection.sendRaw(JSON.stringify({
-                    type: "session_sync",
-                    sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-                  }));
+                  relayConnection.sendRaw(
+                    JSON.stringify({
+                      type: "session_sync",
+                      sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+                    }),
+                  );
                   const sessions = sessionManager.listSessions();
-                  relayConnection.sendRaw(JSON.stringify({
-                    type: "session_list",
-                    sessionId: "",
-                    seq: 0,
-                    timestamp: Date.now(),
-                    source: "proxy",
-                    version: "1",
-                    payload: { sessions: sessions.map(toSessionListPayload) },
-                  }));
+                  relayConnection.sendRaw(
+                    JSON.stringify({
+                      type: "session_list",
+                      sessionId: "",
+                      seq: 0,
+                      timestamp: Date.now(),
+                      source: "proxy",
+                      version: "1",
+                      payload: { sessions: sessions.map(toSessionListPayload) },
+                    }),
+                  );
                 }
               } else if (attempt < maxRetries) {
                 setTimeout(tryConnect, Math.min(100 * attempt, 2000));
               } else {
-                relaySend!(JSON.stringify({
-                  type: "session_create_response",
-                  sessionId: pendingId,
-                  error: "Worker failed to start",
-                }));
-                serviceLogger.error({ sessionId: pendingId }, "Worker connection timeout via relay");
+                relaySend!(
+                  JSON.stringify({
+                    type: "session_create_response",
+                    sessionId: pendingId,
+                    error: "Worker failed to start",
+                  }),
+                );
+                serviceLogger.error(
+                  { sessionId: pendingId },
+                  "Worker connection timeout via relay",
+                );
               }
             });
           };
@@ -973,36 +1158,63 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const sid = parsed.sessionId as string;
           const session = sessionManager.getSession(sid);
           if (session?.claudeSessionId) {
-            readSessionMessages(session.claudeSessionId).then((messages) => {
-              if (relaySend) {
-                relaySend(JSON.stringify({
-                  type: "session_history_messages",
-                  sessionId: sid,
-                  messages,
-                }));
-                serviceLogger.info({ sessionId: sid, messageCount: messages.length }, "History messages sent on request");
-              }
-            }).catch((err) => {
-              serviceLogger.warn({ sessionId: sid, error: String(err) }, "Failed to read session history messages on request");
-              if (relaySend) {
-                relaySend(JSON.stringify({ type: "session_history_messages", sessionId: sid, messages: [] }));
-              }
-            });
+            readSessionMessages(session.claudeSessionId)
+              .then((messages) => {
+                if (relaySend) {
+                  relaySend(
+                    JSON.stringify({
+                      type: "session_history_messages",
+                      sessionId: sid,
+                      messages,
+                    }),
+                  );
+                  serviceLogger.info(
+                    { sessionId: sid, messageCount: messages.length },
+                    "History messages sent on request",
+                  );
+                }
+              })
+              .catch((err) => {
+                serviceLogger.warn(
+                  { sessionId: sid, error: String(err) },
+                  "Failed to read session history messages on request",
+                );
+                if (relaySend) {
+                  relaySend(
+                    JSON.stringify({
+                      type: "session_history_messages",
+                      sessionId: sid,
+                      messages: [],
+                    }),
+                  );
+                }
+              });
           } else if (relaySend) {
             // 非 resume 会话，没有历史消息，回空列表解除 loading
-            relaySend(JSON.stringify({ type: "session_history_messages", sessionId: sid, messages: [] }));
+            relaySend(
+              JSON.stringify({ type: "session_history_messages", sessionId: sid, messages: [] }),
+            );
           }
           // 推送该 session 当前 pending 的工具审批
           if (relaySend) {
-            const approvals: Array<{ requestId: string; toolName: string; input: Record<string, unknown> }> = [];
+            const approvals: Array<{
+              requestId: string;
+              toolName: string;
+              input: Record<string, unknown>;
+            }> = [];
             for (const [requestId, pending] of pendingToolApprovals) {
               if (pending.sessionId === sid) {
                 approvals.push({ requestId, toolName: pending.toolName, input: pending.input });
               }
             }
             if (approvals.length > 0) {
-              relaySend(JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }));
-              serviceLogger.info({ sessionId: sid, count: approvals.length }, "Pending approvals pushed");
+              relaySend(
+                JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),
+              );
+              serviceLogger.info(
+                { sessionId: sid, count: approvals.length },
+                "Pending approvals pushed",
+              );
             }
           }
         } else if (parsed.type === "session_resources_request") {
@@ -1024,19 +1236,24 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           }
           workerSockets.delete(sid);
           controlHandlers.cleanup(sid);
-          serviceLogger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");
+          serviceLogger.info(
+            { sessionId: sid, success: result.success },
+            "Session terminated via relay",
+          );
           // 推送更新后的 session 列表
           if (relayConnection) {
             const sessions = sessionManager.listSessions();
-            relayConnection.sendRaw(JSON.stringify({
-              type: "session_list",
-              sessionId: "",
-              seq: 0,
-              timestamp: Date.now(),
-              source: "proxy",
-              version: "1",
-              payload: { sessions: sessions.map(toSessionListPayload) },
-            }));
+            relayConnection.sendRaw(
+              JSON.stringify({
+                type: "session_list",
+                sessionId: "",
+                seq: 0,
+                timestamp: Date.now(),
+                source: "proxy",
+                version: "1",
+                payload: { sessions: sessions.map(toSessionListPayload) },
+              }),
+            );
           }
         } else if (parsed.type === "session_worker_abort") {
           const sid = parsed.sessionId as string;
@@ -1044,7 +1261,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           if (!session) {
             serviceLogger.warn({ sessionId: sid }, "session_worker_abort: session not found");
           } else if (session.state === SessionState.TERMINATED) {
-            serviceLogger.info({ sessionId: sid }, "session_worker_abort: already terminated, dropping");
+            serviceLogger.info(
+              { sessionId: sid },
+              "session_worker_abort: already terminated, dropping",
+            );
           } else if (session.mode === "pty") {
             // PTY 会话直接把 Ctrl+C 写入 PTY stdin，避免杀掉 terminal wrapper 进程
             const ts = terminalSockets.get(sid);
@@ -1052,29 +1272,40 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x03" }));
               serviceLogger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to PTY");
             } else {
-              serviceLogger.warn({ sessionId: sid }, "session_worker_abort: PTY terminal socket unavailable");
+              serviceLogger.warn(
+                { sessionId: sid },
+                "session_worker_abort: PTY terminal socket unavailable",
+              );
             }
           } else {
             try {
               process.kill(session.pid, "SIGINT");
-              serviceLogger.info({ sessionId: sid, pid: session.pid }, "session_worker_abort: SIGINT sent to worker");
+              serviceLogger.info(
+                { sessionId: sid, pid: session.pid },
+                "session_worker_abort: SIGINT sent to worker",
+              );
             } catch (err) {
-              serviceLogger.warn({ sessionId: sid, pid: session.pid, error: String(err) }, "session_worker_abort: kill failed");
+              serviceLogger.warn(
+                { sessionId: sid, pid: session.pid, error: String(err) },
+                "session_worker_abort: kill failed",
+              );
             }
           }
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
         } else if (parsed.type === "session_list") {
           const sessions = sessionManager.listSessions();
-          relaySend!(JSON.stringify({
-            type: "session_list",
-            sessionId: "",
-            seq: 0,
-            timestamp: Date.now(),
-            source: "proxy",
-            version: "1",
-            payload: { sessions: sessions.map(toSessionListPayload) },
-          }));
+          relaySend!(
+            JSON.stringify({
+              type: "session_list",
+              sessionId: "",
+              seq: 0,
+              timestamp: Date.now(),
+              source: "proxy",
+              version: "1",
+              payload: { sessions: sessions.map(toSessionListPayload) },
+            }),
+          );
           serviceLogger.info("Session list sent via relay");
         } else if (parsed.type === "permission_mode_change") {
           const sid = (parsed as { sessionId?: string }).sessionId;
@@ -1087,15 +1318,27 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               const ts = terminalSockets.get(sid);
               if (ts?.writable) {
                 ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x1b[Z" }));
-                serviceLogger.info({ sessionId: sid, mode }, "Permission mode cycle: Shift+Tab sent to PTY");
+                serviceLogger.info(
+                  { sessionId: sid, mode },
+                  "Permission mode cycle: Shift+Tab sent to PTY",
+                );
               } else {
-                serviceLogger.warn({ sessionId: sid }, "Permission mode cycle: PTY terminal socket unavailable");
+                serviceLogger.warn(
+                  { sessionId: sid },
+                  "Permission mode cycle: PTY terminal socket unavailable",
+                );
               }
             } else {
-              serviceLogger.info({ sessionId: sid, mode }, "Permission mode change received for JSON session (no-op, not supported)");
+              serviceLogger.info(
+                { sessionId: sid, mode },
+                "Permission mode change received for JSON session (no-op, not supported)",
+              );
             }
           } else {
-            serviceLogger.info({ mode }, "Permission mode change received via relay (global, no sessionId)");
+            serviceLogger.info(
+              { mode },
+              "Permission mode change received via relay (global, no sessionId)",
+            );
           }
         } else if (parsed.type === "session_subscribe" && parsed.sessionId) {
           const sid = parsed.sessionId as string;
@@ -1104,13 +1347,22 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid }));
             serviceLogger.info({ sessionId: sid }, "Subscribe forwarded to terminal");
           } else {
-            serviceLogger.warn({ sessionId: sid }, "Subscribe failed: terminal socket not available");
+            serviceLogger.warn(
+              { sessionId: sid },
+              "Subscribe failed: terminal socket not available",
+            );
           }
         } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          serviceLogger.debug({ sessionId: parsed.sessionId }, "terminal_frame_request ignored (v2 binary pipeline)");
+          serviceLogger.debug(
+            { sessionId: parsed.sessionId },
+            "terminal_frame_request ignored (v2 binary pipeline)",
+          );
         } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
           // Phase 9: 滚动由客户端 xterm.js scrollback 直接处理
-          serviceLogger.debug({ sessionId: parsed.sessionId }, "terminal_scroll_request ignored (client-side xterm.js scrollback)");
+          serviceLogger.debug(
+            { sessionId: parsed.sessionId },
+            "terminal_scroll_request ignored (client-side xterm.js scrollback)",
+          );
         }
       } catch (err) {
         serviceLogger.warn({ error: String(err) }, "Failed to parse relay message");
@@ -1128,7 +1380,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
 
   const server = createServer((socket) => {
-    handleTerminalConnection(socket, sessionManager, workerSockets, terminalSockets, relayConnection, controlHandlers);
+    handleTerminalConnection(
+      socket,
+      sessionManager,
+      workerSockets,
+      terminalSockets,
+      relayConnection,
+      controlHandlers,
+    );
   });
 
   server.listen(SOCK_PATH, () => {
@@ -1136,7 +1395,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     chmodSync(SOCK_PATH, 0o600);
     serviceLogger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
   });
-
 
   async function shutdown(): Promise<void> {
     serviceLogger.info("Shutting down service");
@@ -1149,23 +1407,29 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     }
     workerSockets.clear();
     server.close();
-    try { unlinkSync(SOCK_PATH); } catch {
+    try {
+      unlinkSync(SOCK_PATH);
+    } catch {
       // 关闭时 socket 文件可能已被删除
     }
-    try { unlinkSync(PID_PATH); } catch {
+    try {
+      unlinkSync(PID_PATH);
+    } catch {
       // 关闭时 PID 文件可能已被删除
     }
     process.exit(0);
   }
 
-  process.on("SIGTERM", () => { shutdown(); });
-  process.on("SIGINT", () => { shutdown(); });
+  process.on("SIGTERM", () => {
+    shutdown();
+  });
+  process.on("SIGINT", () => {
+    shutdown();
+  });
 }
 
 const isMainModule =
-  process.argv[1] &&
-  (process.argv[1].endsWith("serve.js") ||
-    process.argv[1].endsWith("serve.ts"));
+  process.argv[1] && (process.argv[1].endsWith("serve.js") || process.argv[1].endsWith("serve.ts"));
 
 if (isMainModule) {
   startService();

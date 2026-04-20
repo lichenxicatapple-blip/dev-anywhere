@@ -3,13 +3,7 @@ import { buildMessage } from "../index.js";
 
 describe("buildMessage", () => {
   it("builds a valid user_input envelope with provided seq", () => {
-    const msg = buildMessage(
-      "user_input",
-      "sess-1",
-      1,
-      { text: "hello" },
-      "client",
-    );
+    const msg = buildMessage("user_input", "sess-1", 1, { text: "hello" }, "client");
     expect(msg.type).toBe("user_input");
     expect(msg.payload).toEqual({ text: "hello" });
     expect(msg.sessionId).toBe("sess-1");
@@ -34,13 +28,7 @@ describe("buildMessage", () => {
   });
 
   it("builds a valid error envelope", () => {
-    const msg = buildMessage(
-      "error",
-      "sess-1",
-      10,
-      { code: "UNKNOWN", message: "fail" },
-      "proxy",
-    );
+    const msg = buildMessage("error", "sess-1", 10, { code: "UNKNOWN", message: "fail" }, "proxy");
     expect(msg.type).toBe("error");
     expect(msg.payload).toEqual({ code: "UNKNOWN", message: "fail" });
   });
@@ -53,9 +41,7 @@ describe("buildMessage", () => {
   });
 
   it("throws on invalid payload", () => {
-    expect(() =>
-      buildMessage("user_input", "sess-1", 1, { text: "" }, "client"),
-    ).toThrow();
+    expect(() => buildMessage("user_input", "sess-1", 1, { text: "" }, "client")).toThrow();
   });
 
   it("sets timestamp close to current time", () => {

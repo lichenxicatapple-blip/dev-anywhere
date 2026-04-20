@@ -12,9 +12,11 @@ test.describe("AppShell layout — mobile (< md)", () => {
   test("sidebar is hidden on mobile viewport", async ({ page }) => {
     // Sidebar 带 hidden md:flex，在 390px 宽度下 computed display 应为 none
     const nav = page.locator("nav[aria-label='Sidebar navigation']");
-    await expect(nav).toHaveCount(0).catch(async () => {
-      await expect(nav).not.toBeVisible();
-    });
+    await expect(nav)
+      .toHaveCount(0)
+      .catch(async () => {
+        await expect(nav).not.toBeVisible();
+      });
   });
 
   test("main content renders at /", async ({ page }) => {
@@ -47,4 +49,3 @@ test.describe("AppShell layout — desktop (≥ md)", () => {
     expect(box?.height).toBe(48);
   });
 });
-

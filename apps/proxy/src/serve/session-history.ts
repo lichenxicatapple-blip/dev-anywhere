@@ -95,7 +95,10 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
 
     const messages: SessionMessage[] = [];
     return new Promise((resolve) => {
-      const rl = createInterface({ input: createReadStream(filePath, { encoding: "utf-8" }), crlfDelay: Infinity });
+      const rl = createInterface({
+        input: createReadStream(filePath, { encoding: "utf-8" }),
+        crlfDelay: Infinity,
+      });
 
       rl.on("line", (line) => {
         if (!line.trim()) return;
@@ -105,14 +108,18 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
             if (obj.isMeta) return;
             const text = extractMessageText(obj.message);
             if (!text) return;
-            const ts = typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
+            const ts =
+              typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
             messages.push({ role: "user", text, timestamp: ts });
           } else if (obj.type === "assistant") {
             const text = extractMessageText(obj.message);
-            const ts = typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
+            const ts =
+              typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
             if (text) messages.push({ role: "assistant", text, timestamp: ts });
           }
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       });
 
       rl.on("close", () => resolve(messages));
@@ -150,7 +157,9 @@ function extractMessageText(msg: unknown): string | null {
     }
     if (Array.isArray(content)) {
       const texts = content
-        .filter((b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string")
+        .filter(
+          (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
+        )
         .map((b: { text: string }) => b.text);
       const joined = texts.join("\n").trim();
       if (joined && !joined.startsWith("<")) return joined;
@@ -159,7 +168,9 @@ function extractMessageText(msg: unknown): string | null {
 
   if (Array.isArray(msg)) {
     const texts = msg
-      .filter((b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string")
+      .filter(
+        (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
+      )
       .map((b: { text: string }) => b.text);
     const joined = texts.join("\n").trim();
     if (joined && !joined.startsWith("<")) return joined;
@@ -170,9 +181,14 @@ function extractMessageText(msg: unknown): string | null {
 
 // 从 JSONL 文件头部提取 cwd 和第一条有效用户文本消息作为标题
 // cwd 从任意行的 cwd 字段获取，title 从第一条 user 消息获取
-async function extractTitleAndCwd(filePath: string): Promise<{ title: string | null; cwd: string | null }> {
+async function extractTitleAndCwd(
+  filePath: string,
+): Promise<{ title: string | null; cwd: string | null }> {
   return new Promise((resolve) => {
-    const rl = createInterface({ input: createReadStream(filePath, { encoding: "utf-8" }), crlfDelay: Infinity });
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
     let resolved = false;
     let cwd: string | null = null;
     let title: string | null = null;
@@ -189,7 +205,11 @@ async function extractTitleAndCwd(filePath: string): Promise<{ title: string | n
         if (!title && obj.type === "user" && !obj.isMeta) {
           const text = extractMessageText(obj.message);
           // 跳过重置/管理类命令，它们不代表会话主题
-          if (text && text.length >= 2 && !/^\/(clear|model|compact|help|config|logout)(\s|$)/.test(text)) {
+          if (
+            text &&
+            text.length >= 2 &&
+            !/^\/(clear|model|compact|help|config|logout)(\s|$)/.test(text)
+          ) {
             title = text.slice(0, 80);
           }
         }
@@ -197,11 +217,15 @@ async function extractTitleAndCwd(filePath: string): Promise<{ title: string | n
           resolved = true;
           rl.close();
         }
-      } catch { /* skip malformed lines */ }
+      } catch {
+        /* skip malformed lines */
+      }
     });
 
-    rl.on("close", () => { if (!resolved) resolve({ title, cwd }); else resolve({ title, cwd }); });
+    rl.on("close", () => {
+      if (!resolved) resolve({ title, cwd });
+      else resolve({ title, cwd });
+    });
     rl.on("error", () => resolve({ title, cwd }));
   });
 }
-

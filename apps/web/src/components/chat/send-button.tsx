@@ -13,13 +13,7 @@ interface SendButtonProps {
   onSend: () => void;
 }
 
-export function SendButton({
-  sessionId,
-  mode,
-  isWorking,
-  canSend,
-  onSend,
-}: SendButtonProps) {
+export function SendButton({ sessionId, mode, isWorking, canSend, onSend }: SendButtonProps) {
   function handleStop() {
     if (mode === "pty") {
       sendRemoteInputRaw(sessionId, "\x03");

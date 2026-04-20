@@ -94,9 +94,7 @@ export function SessionList({ layout }: SessionListProps) {
       <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
         活跃会话
         {hasActive ? (
-          <span className="ml-1 text-muted-foreground/70 font-normal">
-            · {sessions.length}
-          </span>
+          <span className="ml-1 text-muted-foreground/70 font-normal">· {sessions.length}</span>
         ) : null}
       </h3>
     ) : null;
@@ -115,10 +113,7 @@ export function SessionList({ layout }: SessionListProps) {
       ))}
     </ul>
   ) : (
-    <div
-      className="px-4 py-3 text-sm text-muted-foreground/70"
-      data-slot="active-empty"
-    >
+    <div className="px-4 py-3 text-sm text-muted-foreground/70" data-slot="active-empty">
       暂无活跃会话
     </div>
   );

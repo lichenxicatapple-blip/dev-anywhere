@@ -56,7 +56,11 @@ describe("IPC Protocol", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(messages).toHaveLength(2);
-      expect(messages[0]).toEqual({ type: "session_status_update", sessionId: "s1", state: "idle" });
+      expect(messages[0]).toEqual({
+        type: "session_status_update",
+        sessionId: "s1",
+        state: "idle",
+      });
       expect(messages[1]).toEqual({
         type: "session_create_request",
         name: "test",
@@ -74,7 +78,8 @@ describe("IPC Protocol", () => {
       createIpcReader(stream, (msg) => messages.push(msg));
 
       // Split a single message across two writes
-      const fullMsg = JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n";
+      const fullMsg =
+        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n";
       const splitPoint = Math.floor(fullMsg.length / 2);
       stream.write(fullMsg.slice(0, splitPoint));
       stream.write(fullMsg.slice(splitPoint));
@@ -83,7 +88,11 @@ describe("IPC Protocol", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual({ type: "session_status_update", sessionId: "s1", state: "idle" });
+      expect(messages[0]).toEqual({
+        type: "session_status_update",
+        sessionId: "s1",
+        state: "idle",
+      });
     });
 
     it("skips empty lines", async () => {
@@ -93,9 +102,18 @@ describe("IPC Protocol", () => {
 
       createIpcReader(stream, (msg) => messages.push(msg));
 
-      stream.write(JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n");
+      stream.write(
+        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+      );
       stream.write("\n");
-      stream.write(JSON.stringify({ type: "session_create_request", mode: "pty", cwd: "/tmp/test", pid: 12345 }) + "\n");
+      stream.write(
+        JSON.stringify({
+          type: "session_create_request",
+          mode: "pty",
+          cwd: "/tmp/test",
+          pid: 12345,
+        }) + "\n",
+      );
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));
@@ -112,7 +130,9 @@ describe("IPC Protocol", () => {
       createIpcReader(stream, (msg) => messages.push(msg));
 
       stream.write("not-valid-json\n");
-      stream.write(JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n");
+      stream.write(
+        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+      );
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));
@@ -265,7 +285,11 @@ describe("IPC Protocol", () => {
       );
 
       // Concatenate JSON line and binary frame into a single write
-      const jsonLine = serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" });
+      const jsonLine = serializeIpc({
+        type: "session_status_update",
+        sessionId: "s1",
+        state: "idle",
+      });
       const binaryFrame = encodeBinaryIpcFrame("s1", Buffer.from("combined"));
       const combined = Buffer.concat([Buffer.from(jsonLine), binaryFrame]);
       stream.write(combined);
@@ -335,8 +359,21 @@ describe("Worker Protocol", () => {
       createWorkerReader(stream, (msg) => messages.push(msg));
 
       stream.write(serializeWorkerMsg({ type: "worker_ready", pid: 12345 }));
-      stream.write(serializeWorkerMsg({ type: "worker_event", seq: 1, event: { kind: "text", content: "hello" } }));
-      stream.write(serializeWorkerMsg({ type: "worker_approval_request", requestId: "r1", toolName: "bash", input: { cmd: "ls" } }));
+      stream.write(
+        serializeWorkerMsg({
+          type: "worker_event",
+          seq: 1,
+          event: { kind: "text", content: "hello" },
+        }),
+      );
+      stream.write(
+        serializeWorkerMsg({
+          type: "worker_approval_request",
+          requestId: "r1",
+          toolName: "bash",
+          input: { cmd: "ls" },
+        }),
+      );
       stream.write(serializeWorkerMsg({ type: "worker_exit", code: 0 }));
       stream.end();
 
@@ -344,8 +381,17 @@ describe("Worker Protocol", () => {
 
       expect(messages).toHaveLength(4);
       expect(messages[0]).toEqual({ type: "worker_ready", pid: 12345 });
-      expect(messages[1]).toEqual({ type: "worker_event", seq: 1, event: { kind: "text", content: "hello" } });
-      expect(messages[2]).toEqual({ type: "worker_approval_request", requestId: "r1", toolName: "bash", input: { cmd: "ls" } });
+      expect(messages[1]).toEqual({
+        type: "worker_event",
+        seq: 1,
+        event: { kind: "text", content: "hello" },
+      });
+      expect(messages[2]).toEqual({
+        type: "worker_approval_request",
+        requestId: "r1",
+        toolName: "bash",
+        input: { cmd: "ls" },
+      });
       expect(messages[3]).toEqual({ type: "worker_exit", code: 0 });
     });
 
@@ -390,25 +436,39 @@ describe("Worker Protocol", () => {
     const WORKER_MESSAGE_SAMPLES: Array<{ type: string; payload: Record<string, unknown> }> = [
       { type: "worker_input", payload: { type: "worker_input", content: "test" } },
       { type: "worker_stop", payload: { type: "worker_stop" } },
-      { type: "worker_approval_response", payload: { type: "worker_approval_response", requestId: "r1", behavior: "allow" } },
+      {
+        type: "worker_approval_response",
+        payload: { type: "worker_approval_response", requestId: "r1", behavior: "allow" },
+      },
       { type: "worker_replay", payload: { type: "worker_replay", lastSeq: 42 } },
-      { type: "worker_event", payload: { type: "worker_event", seq: 1, event: { kind: "text", data: { nested: true } } } },
+      {
+        type: "worker_event",
+        payload: { type: "worker_event", seq: 1, event: { kind: "text", data: { nested: true } } },
+      },
       { type: "worker_exit", payload: { type: "worker_exit", code: 0 } },
-      { type: "worker_approval_request", payload: { type: "worker_approval_request", requestId: "r2", toolName: "bash", input: { cmd: "ls", args: ["-la"] } } },
+      {
+        type: "worker_approval_request",
+        payload: {
+          type: "worker_approval_request",
+          requestId: "r2",
+          toolName: "bash",
+          input: { cmd: "ls", args: ["-la"] },
+        },
+      },
       { type: "worker_ready", payload: { type: "worker_ready", pid: 999 } },
       { type: "worker_replay_done", payload: { type: "worker_replay_done", replayedCount: 10 } },
-      { type: "worker_claude_session_id", payload: { type: "worker_claude_session_id", sessionId: "cs-123" } },
+      {
+        type: "worker_claude_session_id",
+        payload: { type: "worker_claude_session_id", sessionId: "cs-123" },
+      },
       { type: "worker_whitelist_add", payload: { type: "worker_whitelist_add", toolName: "read" } },
     ];
 
-    it.each(WORKER_MESSAGE_SAMPLES)(
-      "accepts valid $type message",
-      async ({ payload }) => {
-        const { WorkerMessageSchema } = await importIpc();
-        const result = WorkerMessageSchema.safeParse(payload);
-        expect(result.success).toBe(true);
-      },
-    );
+    it.each(WORKER_MESSAGE_SAMPLES)("accepts valid $type message", async ({ payload }) => {
+      const { WorkerMessageSchema } = await importIpc();
+      const result = WorkerMessageSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+    });
 
     it("rejects unknown worker message type", async () => {
       const { WorkerMessageSchema } = await importIpc();

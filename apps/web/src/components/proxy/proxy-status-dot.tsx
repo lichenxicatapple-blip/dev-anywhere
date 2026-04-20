@@ -16,11 +16,7 @@ const DOT_CLASS: Record<ProxyStatusDotProps["status"], string> = {
 export function ProxyStatusDot({ status, className }: ProxyStatusDotProps) {
   return (
     <span
-      className={cn(
-        "inline-block w-2 h-2 rounded-full shrink-0",
-        DOT_CLASS[status],
-        className,
-      )}
+      className={cn("inline-block w-2 h-2 rounded-full shrink-0", DOT_CLASS[status], className)}
       role="status"
       aria-label={`Proxy status: ${status}`}
     />

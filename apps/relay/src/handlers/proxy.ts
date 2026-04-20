@@ -52,7 +52,7 @@ function notifyClientsProxyOnline(proxyId: string, registry: RelayRegistry, logg
 // proxy 上线或下线时，将最新的 proxy 列表推送给所有已连接的 client。
 // 复用 proxy_list_response 消息类型，client 端已有对应处理逻辑，无需额外适配。
 function broadcastProxyList(registry: RelayRegistry): void {
-  const proxies = registry.listProxiesWithName().map(p => ({
+  const proxies = registry.listProxiesWithName().map((p) => ({
     ...p,
     sessions: registry.getSessionsForProxy(p.proxyId),
   }));
@@ -84,7 +84,10 @@ export function handleProxyConnection(
       }
       const sessionIdLen = data[0];
       if (sessionIdLen === 0 || sessionIdLen > 255 || data.length < 1 + sessionIdLen) {
-        logger.warn({ sessionIdLen, dataLen: data.length }, "Binary frame rejected: malformed sessionId prefix");
+        logger.warn(
+          { sessionIdLen, dataLen: data.length },
+          "Binary frame rejected: malformed sessionId prefix",
+        );
         return;
       }
       if (!proxyWs.proxyId) {
@@ -113,11 +116,13 @@ export function handleProxyConnection(
 
       // 回传注册结果和 per-session 数据水位，proxy 据此决定是否需要 EventStore 回放
       const sessions = status === "reconnected" ? registry.getSessionSeqMap(proxyId) : undefined;
-      proxyWs.send(JSON.stringify({
-        type: "proxy_register_response",
-        status,
-        sessions,
-      }));
+      proxyWs.send(
+        JSON.stringify({
+          type: "proxy_register_response",
+          status,
+          sessions,
+        }),
+      );
 
       if (status === "reconnected") {
         notifyClientsProxyOnline(proxyId, registry, logger);
@@ -155,11 +160,13 @@ export function handleProxyConnection(
     if (result.kind === "control") {
       if (PROXY_TO_CLIENT_TYPES.has(result.message.type)) {
         if (!proxyWs.proxyId) {
-          proxyWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "NOT_REGISTERED",
-            message: "Proxy must register before sending messages",
-          }));
+          proxyWs.send(
+            JSON.stringify({
+              type: "relay_error",
+              code: "NOT_REGISTERED",
+              message: "Proxy must register before sending messages",
+            }),
+          );
           return;
         }
         const clients = registry.getClientsForProxy(proxyWs.proxyId);
@@ -168,7 +175,10 @@ export function handleProxyConnection(
             clientWs.send(raw);
           }
         }
-        logger.info({ proxyId: proxyWs.proxyId, type: result.message.type, clientCount: clients.length }, "Forwarded control message from proxy to clients");
+        logger.info(
+          { proxyId: proxyWs.proxyId, type: result.message.type, clientCount: clients.length },
+          "Forwarded control message from proxy to clients",
+        );
         return;
       }
       // 其他控制消息代理端不应发送
@@ -178,11 +188,13 @@ export function handleProxyConnection(
 
     if (result.kind === "envelope") {
       if (!proxyWs.proxyId) {
-        proxyWs.send(JSON.stringify({
-          type: "relay_error",
-          code: "NOT_REGISTERED",
-          message: "Proxy must register before sending messages",
-        }));
+        proxyWs.send(
+          JSON.stringify({
+            type: "relay_error",
+            code: "NOT_REGISTERED",
+            message: "Proxy must register before sending messages",
+          }),
+        );
         return;
       }
       routeProxyMessage(raw, proxyWs.proxyId, registry, logger);
@@ -191,11 +203,13 @@ export function handleProxyConnection(
 
     if (result.kind === "invalid") {
       logger.error({ error: result.error, raw: raw.slice(0, 200) }, "Invalid message from proxy");
-      proxyWs.send(JSON.stringify({
-        type: "relay_error",
-        code: "INVALID_MESSAGE",
-        message: `${result.error} | raw: ${raw.slice(0, 200)}`,
-      }));
+      proxyWs.send(
+        JSON.stringify({
+          type: "relay_error",
+          code: "INVALID_MESSAGE",
+          message: `${result.error} | raw: ${raw.slice(0, 200)}`,
+        }),
+      );
       return;
     }
   });
@@ -210,7 +224,10 @@ export function handleProxyConnection(
       } catch {
         // proxy 已被 proxy_disconnect 清理或已离线，跳过
       }
-      logger.info({ proxyId: proxyWs.proxyId }, "Proxy disconnected, state preserved for reconnect");
+      logger.info(
+        { proxyId: proxyWs.proxyId },
+        "Proxy disconnected, state preserved for reconnect",
+      );
       broadcastProxyList(registry);
     }
   });
@@ -219,4 +236,3 @@ export function handleProxyConnection(
     logger.error({ err, proxyId: proxyWs.proxyId }, "Proxy WebSocket error");
   });
 }
-

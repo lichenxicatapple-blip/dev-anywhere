@@ -40,10 +40,12 @@ function handleClientRegister(
   const binding = registry.getClientBinding(clientId);
 
   if (!binding) {
-    clientWs.send(JSON.stringify({
-      type: "client_register_response",
-      status: "new",
-    }));
+    clientWs.send(
+      JSON.stringify({
+        type: "client_register_response",
+        status: "new",
+      }),
+    );
     logger.info({ clientId, status: "new" }, "Client registered");
     return;
   }
@@ -55,23 +57,27 @@ function handleClientRegister(
   const sessionSeqMap = registry.getSessionSeqMap(proxyId);
 
   if (!registry.isProxyOnline(proxyId)) {
-    clientWs.send(JSON.stringify({
-      type: "client_register_response",
-      status: "proxy_offline",
-      proxyId,
-      sessions: sessionSeqMap,
-    }));
+    clientWs.send(
+      JSON.stringify({
+        type: "client_register_response",
+        status: "proxy_offline",
+        proxyId,
+        sessions: sessionSeqMap,
+      }),
+    );
     logger.info({ clientId, proxyId, status: "proxy_offline" }, "Client registered");
     return;
   }
 
   // proxy 在线，恢复绑定（relay 无状态，不做增量回放）
-  clientWs.send(JSON.stringify({
-    type: "client_register_response",
-    status: "restored",
-    proxyId,
-    sessions: sessionSeqMap,
-  }));
+  clientWs.send(
+    JSON.stringify({
+      type: "client_register_response",
+      status: "restored",
+      proxyId,
+      sessions: sessionSeqMap,
+    }),
+  );
 
   logger.info({ clientId, proxyId, status: "restored", sessions }, "Client registered");
 }
@@ -101,7 +107,10 @@ export function handleClientConnection(
 
     if (result.kind === "control") {
       const msg = result.message;
-      logger.info({ type: msg.type, clientId: clientWs.clientId, bound: clientWs.boundProxyId }, "Client message received");
+      logger.info(
+        { type: msg.type, clientId: clientWs.clientId, bound: clientWs.boundProxyId },
+        "Client message received",
+      );
 
       if (msg.type === "client_register") {
         handleClientRegister(msg.clientId, msg.sessions, clientWs, registry, logger);
@@ -114,44 +123,57 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_list_request") {
-        const proxies = registry.listProxiesWithName().map(p => ({
+        const proxies = registry.listProxiesWithName().map((p) => ({
           ...p,
           sessions: registry.getSessionsForProxy(p.proxyId),
         }));
-        clientWs.send(JSON.stringify({
-          type: "proxy_list_response",
-          proxies,
-        }));
+        clientWs.send(
+          JSON.stringify({
+            type: "proxy_list_response",
+            proxies,
+          }),
+        );
         return;
       }
 
       // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy
       if (CLIENT_TO_PROXY_TYPES.has(msg.type)) {
-        const targetProxyId = ("proxyId" in msg ? msg.proxyId as string : undefined) || clientWs.boundProxyId;
+        const targetProxyId =
+          ("proxyId" in msg ? (msg.proxyId as string) : undefined) || clientWs.boundProxyId;
         if (!targetProxyId) {
-          clientWs.send(JSON.stringify({ type: "relay_error", code: "NOT_BOUND", message: "Client is not bound to any proxy" }));
+          clientWs.send(
+            JSON.stringify({
+              type: "relay_error",
+              code: "NOT_BOUND",
+              message: "Client is not bound to any proxy",
+            }),
+          );
           return;
         }
         const proxyWs = registry.getProxy(targetProxyId);
         if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
           proxyWs.send(raw);
         } else {
-          clientWs.send(JSON.stringify({
-            type: "relay_error",
-            code: "PROXY_OFFLINE",
-            message: `Proxy ${targetProxyId} is not available`,
-          }));
+          clientWs.send(
+            JSON.stringify({
+              type: "relay_error",
+              code: "PROXY_OFFLINE",
+              message: `Proxy ${targetProxyId} is not available`,
+            }),
+          );
         }
         return;
       }
 
       if (msg.type === "proxy_select") {
         if (!registry.isProxyOnline(msg.proxyId)) {
-          clientWs.send(JSON.stringify({
-            type: "proxy_select_response",
-            success: false,
-            error: `Proxy not online: ${msg.proxyId}`,
-          }));
+          clientWs.send(
+            JSON.stringify({
+              type: "proxy_select_response",
+              success: false,
+              error: `Proxy not online: ${msg.proxyId}`,
+            }),
+          );
           return;
         }
         // 没有 clientId 时自动分配，统一通过 clientId 绑定
@@ -160,38 +182,46 @@ export function handleClientConnection(
         }
         const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         if (!bound) {
-          clientWs.send(JSON.stringify({
-            type: "proxy_select_response",
-            success: false,
-            error: `Proxy not online: ${msg.proxyId}`,
-          }));
+          clientWs.send(
+            JSON.stringify({
+              type: "proxy_select_response",
+              success: false,
+              error: `Proxy not online: ${msg.proxyId}`,
+            }),
+          );
           return;
         }
         clientWs.boundProxyId = msg.proxyId;
-        clientWs.send(JSON.stringify({
-          type: "proxy_select_response",
-          success: true,
-          proxyId: msg.proxyId,
-        }));
+        clientWs.send(
+          JSON.stringify({
+            type: "proxy_select_response",
+            success: true,
+            proxyId: msg.proxyId,
+          }),
+        );
         logger.info({ proxyId: msg.proxyId, clientId: clientWs.clientId }, "Client bound to proxy");
         return;
       }
 
-      clientWs.send(JSON.stringify({
-        type: "relay_error",
-        code: "UNSUPPORTED",
-        message: `Unsupported control message: ${msg.type}`,
-      }));
+      clientWs.send(
+        JSON.stringify({
+          type: "relay_error",
+          code: "UNSUPPORTED",
+          message: `Unsupported control message: ${msg.type}`,
+        }),
+      );
       return;
     }
 
     if (result.kind === "envelope") {
       if (!clientWs.boundProxyId) {
-        clientWs.send(JSON.stringify({
-          type: "relay_error",
-          code: "NOT_BOUND",
-          message: "Client is not bound to any proxy",
-        }));
+        clientWs.send(
+          JSON.stringify({
+            type: "relay_error",
+            code: "NOT_BOUND",
+            message: "Client is not bound to any proxy",
+          }),
+        );
         return;
       }
       routeClientMessage(raw, clientWs.boundProxyId, clientWs, registry, logger);
@@ -199,11 +229,13 @@ export function handleClientConnection(
     }
 
     logger.error({ error: result.error, raw: raw.slice(0, 200) }, "Invalid message from client");
-    clientWs.send(JSON.stringify({
-      type: "relay_error",
-      code: "INVALID_MESSAGE",
-      message: `${result.error} | raw: ${raw.slice(0, 200)}`,
-    }));
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_error",
+        code: "INVALID_MESSAGE",
+        message: `${result.error} | raw: ${raw.slice(0, 200)}`,
+      }),
+    );
   });
 
   clientWs.on("close", () => {
@@ -215,4 +247,3 @@ export function handleClientConnection(
     logger.error({ err }, "Client WebSocket error");
   });
 }
-

@@ -101,11 +101,13 @@ export class RelayConnection extends EventEmitter {
         this.reconnectAttempt = 0;
         this.transition(RelayConnectionState.REGISTERING);
         serviceLogger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
-        this.ws!.send(JSON.stringify({
-          type: "proxy_register",
-          proxyId: this.proxyId,
-          ...(this.name ? { name: this.name } : {}),
-        }));
+        this.ws!.send(
+          JSON.stringify({
+            type: "proxy_register",
+            proxyId: this.proxyId,
+            ...(this.name ? { name: this.name } : {}),
+          }),
+        );
       });
 
       this.ws.on("message", (data) => {
@@ -115,7 +117,10 @@ export class RelayConnection extends EventEmitter {
           if (parsed.type === "proxy_register_response") {
             const status: string = parsed.status;
             const sessions: Record<string, number> | undefined = parsed.sessions;
-            serviceLogger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
+            serviceLogger.info(
+              { status, sessionCount: sessions ? Object.keys(sessions).length : 0 },
+              "Received register response",
+            );
             this.transition(RelayConnectionState.SYNCED);
             // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
             this.emit("sync", { status, sessions: sessions ?? {} });
@@ -162,7 +167,9 @@ export class RelayConnection extends EventEmitter {
 
   // 计算全抖动指数退避延迟并调度重连
   private scheduleReconnect(): void {
-    const backoff = Math.random() * Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempt));
+    const backoff =
+      Math.random() *
+      Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempt));
     serviceLogger.info(
       { attempt: this.reconnectAttempt + 1, backoffMs: Math.round(backoff) },
       "Scheduling reconnect",
@@ -181,7 +188,10 @@ export class RelayConnection extends EventEmitter {
 
   // D-46: 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
   sendBinary(data: Buffer): void {
-    if (this.connectionState === RelayConnectionState.SYNCED && this.ws?.readyState === WebSocket.OPEN) {
+    if (
+      this.connectionState === RelayConnectionState.SYNCED &&
+      this.ws?.readyState === WebSocket.OPEN
+    ) {
       this.ws.send(data);
     }
     // binary 帧无队列，断线丢弃
@@ -189,14 +199,20 @@ export class RelayConnection extends EventEmitter {
 
   // 发送原始 JSON 字符串到 relay，根据 connectionState 决定直发、入队或丢弃
   sendRaw(raw: string): void {
-    if (this.connectionState === RelayConnectionState.SYNCED && this.ws?.readyState === WebSocket.OPEN) {
+    if (
+      this.connectionState === RelayConnectionState.SYNCED &&
+      this.ws?.readyState === WebSocket.OPEN
+    ) {
       this.ws.send(raw);
     } else if (this.connectionState === RelayConnectionState.CLOSED) {
       serviceLogger.warn("Message discarded: connection is closed");
     } else {
       if (this.queue.size() >= MAX_QUEUE_SIZE) {
         this.queue.dropOldest();
-        serviceLogger.warn({ maxSize: MAX_QUEUE_SIZE }, "Message queue overflow, oldest message dropped");
+        serviceLogger.warn(
+          { maxSize: MAX_QUEUE_SIZE },
+          "Message queue overflow, oldest message dropped",
+        );
       }
       this.queue.enqueue(raw);
       serviceLogger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
@@ -225,7 +241,13 @@ export class RelayConnection extends EventEmitter {
   }
 
   // 获取连接状态摘要，用于 CLI status 输出
-  getStatus(): { connected: boolean; connectionState: RelayConnectionState; proxyId: string; reconnectAttempt: number; queueDepth: number } {
+  getStatus(): {
+    connected: boolean;
+    connectionState: RelayConnectionState;
+    proxyId: string;
+    reconnectAttempt: number;
+    queueDepth: number;
+  } {
     return {
       connected: this.connectionState === RelayConnectionState.SYNCED,
       connectionState: this.connectionState,

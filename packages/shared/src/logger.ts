@@ -29,9 +29,7 @@ export function createLogger(options: CreateLoggerOptions): pino.Logger {
   mkdirSync(logDir, { recursive: true });
 
   const filePath = `${logDir}/${name}.log`;
-  const streams: pino.StreamEntry[] = [
-    { stream: pino.destination(filePath) },
-  ];
+  const streams: pino.StreamEntry[] = [{ stream: pino.destination(filePath) }];
 
   if (stdout) {
     streams.unshift({ stream: process.stdout });

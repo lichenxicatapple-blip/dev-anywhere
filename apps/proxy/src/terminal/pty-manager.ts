@@ -9,7 +9,9 @@ function resolveClaudePath(): string {
   try {
     return execFileSync("which", ["claude"], { encoding: "utf8" }).trim();
   } catch {
-    throw new Error("claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download");
+    throw new Error(
+      "claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download",
+    );
   }
 }
 

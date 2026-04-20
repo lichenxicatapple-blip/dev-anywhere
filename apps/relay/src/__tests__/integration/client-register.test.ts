@@ -2,7 +2,14 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@cc-anywhere/shared";
-import { waitForOpen, waitForMessage, waitForMessageType, collectMessages, getPort, settle } from "../helpers.js";
+import {
+  waitForOpen,
+  waitForMessage,
+  waitForMessageType,
+  collectMessages,
+  getPort,
+  settle,
+} from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
 
@@ -46,11 +53,13 @@ describe("client_register protocol", () => {
     await waitForOpen(client);
 
     const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      type: "client_register",
-      clientId: "fresh-client",
-      sessions: {},
-    }));
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "fresh-client",
+        sessions: {},
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
@@ -68,11 +77,13 @@ describe("client_register protocol", () => {
     // 第一个客户端连接并绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: {},
-    }));
+    client1.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: {},
+      }),
+    );
     // 新 client 没有绑定，收到 new
     const newResponse = JSON.parse(await waitForMessage(client1));
     expect(newResponse.status).toBe("new");
@@ -91,11 +102,13 @@ describe("client_register protocol", () => {
     connections.push(client2);
 
     const msgPromise = waitForMessage(client2);
-    client2.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: {},
-    }));
+    client2.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: {},
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
@@ -113,11 +126,13 @@ describe("client_register protocol", () => {
     // 客户端连接、注册并绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: {},
-    }));
+    client1.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: {},
+      }),
+    );
     await waitForMessage(client1); // new response
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client1); // consume proxy_select_response ACK
@@ -152,11 +167,13 @@ describe("client_register protocol", () => {
     // 注册重放只包含 session_status 类型，assistant_message 不重放
     // 会话内容由客户端通过 session_messages_request 获取
     const allMessages = collectMessages(client2, 1);
-    client2.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: { s1: 1 },
-    }));
+    client2.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: { s1: 1 },
+      }),
+    );
 
     const received = await allMessages;
     expect(received.length).toBe(1);
@@ -176,11 +193,13 @@ describe("client_register protocol", () => {
     // 客户端绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: {},
-    }));
+    client1.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: {},
+      }),
+    );
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client1); // consume proxy_select_response ACK
@@ -197,11 +216,13 @@ describe("client_register protocol", () => {
     connections.push(client2);
 
     const msgPromise = waitForMessage(client2);
-    client2.send(JSON.stringify({
-      type: "client_register",
-      clientId: "c1",
-      sessions: {},
-    }));
+    client2.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c1",
+        sessions: {},
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
@@ -228,15 +249,17 @@ describe("client_register protocol", () => {
 
     // 客户端发送 envelope
     const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      seq: 1,
-      sessionId: "s1",
-      timestamp: Date.now(),
-      source: "client" as const,
-      version: "1.0",
-      type: "user_input" as const,
-      payload: { text: "hello" },
-    }));
+    client.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "client" as const,
+        version: "1.0",
+        type: "user_input" as const,
+        payload: { text: "hello" },
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("relay_error");
@@ -352,10 +375,15 @@ describe("client_register protocol", () => {
     await settle();
 
     // proxy 发送 session_sync 注册 session
-    proxy.send(JSON.stringify({
-      type: "session_sync",
-      sessions: [{ id: "s1", mode: "pty", state: "idle" }, { id: "s2", mode: "json", state: "working" }],
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "session_sync",
+        sessions: [
+          { id: "s1", mode: "pty", state: "idle" },
+          { id: "s2", mode: "json", state: "working" },
+        ],
+      }),
+    );
     await settle();
 
     const client = connectClient();
@@ -387,15 +415,17 @@ describe("client_register protocol", () => {
 
     // proxy -> client 应该工作
     const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      seq: 1,
-      sessionId: "s1",
-      timestamp: Date.now(),
-      source: "proxy" as const,
-      version: "1.0",
-      type: "assistant_message" as const,
-      payload: { text: "hello", isPartial: false },
-    }));
+    proxy.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "proxy" as const,
+        version: "1.0",
+        type: "assistant_message" as const,
+        payload: { text: "hello", isPartial: false },
+      }),
+    );
 
     const msg = JSON.parse(await msgPromise);
     expect(msg.type).toBe("assistant_message");

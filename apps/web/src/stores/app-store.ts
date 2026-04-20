@@ -93,9 +93,7 @@ export const useAppStore = create<AppStoreState>()(
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =
-          phase === "reconnecting"
-            ? get().phase
-            : get().phaseBeforeDisconnect;
+          phase === "reconnecting" ? get().phase : get().phaseBeforeDisconnect;
         set({ phase, phaseBeforeDisconnect });
       },
       setProxies: (proxies) => set({ proxies, proxyListLoaded: true }),
@@ -103,8 +101,7 @@ export const useAppStore = create<AppStoreState>()(
       transitionToPhase: (next) => {
         const prev = get().phase;
         cleanStorageForPhaseTransition(prev, next);
-        const phaseBeforeDisconnect =
-          next === "reconnecting" ? prev : get().phaseBeforeDisconnect;
+        const phaseBeforeDisconnect = next === "reconnecting" ? prev : get().phaseBeforeDisconnect;
         set({ phase: next, phaseBeforeDisconnect });
       },
     }),

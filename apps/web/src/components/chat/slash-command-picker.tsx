@@ -1,19 +1,8 @@
 // SlashCommandPicker: 订阅 useCommandStore (动态源, 非硬编码)
 // 键盘: InputBar 通过 ref.handleKey 转发 ↑↓/Enter; cmdk 的 `value` prop 控制高亮 + 自动 scroll into view
 // CSS 绝对定位贴在 InputBar 上方, 与 InputBar 同 stacking context (RESEARCH Q10)
-import {
-  forwardRef,
-  useImperativeHandle,
-  useMemo,
-  useState,
-  useEffect,
-} from "react";
-import {
-  Command,
-  CommandList,
-  CommandItem,
-  CommandEmpty,
-} from "@/components/ui/command";
+import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
+import { Command, CommandList, CommandItem, CommandEmpty } from "@/components/ui/command";
 import { useCommandStore } from "@/stores/command-store";
 import type { CommandEntry } from "@cc-anywhere/shared";
 import type { PickerHandle } from "./picker-handle";
@@ -40,24 +29,28 @@ export const SlashCommandPicker = forwardRef<PickerHandle, SlashCommandPickerPro
       if (index >= filtered.length && filtered.length > 0) setIndex(filtered.length - 1);
     }, [filtered.length, index]);
 
-    useImperativeHandle(ref, () => ({
-      handleKey(e) {
-        if (filtered.length === 0) return false;
-        if (e.key === "ArrowDown") {
-          setIndex((i) => Math.min(filtered.length - 1, i + 1));
-          return true;
-        }
-        if (e.key === "ArrowUp") {
-          setIndex((i) => Math.max(0, i - 1));
-          return true;
-        }
-        if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-          onSelect(filtered[index]);
-          return true;
-        }
-        return false;
-      },
-    }), [filtered, index, onSelect]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        handleKey(e) {
+          if (filtered.length === 0) return false;
+          if (e.key === "ArrowDown") {
+            setIndex((i) => Math.min(filtered.length - 1, i + 1));
+            return true;
+          }
+          if (e.key === "ArrowUp") {
+            setIndex((i) => Math.max(0, i - 1));
+            return true;
+          }
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            onSelect(filtered[index]);
+            return true;
+          }
+          return false;
+        },
+      }),
+      [filtered, index, onSelect],
+    );
 
     const selectedValue = filtered[index]?.name;
 
@@ -78,9 +71,7 @@ export const SlashCommandPicker = forwardRef<PickerHandle, SlashCommandPickerPro
                 // 在 picker 底色上不可见; 用 primary 15% 混色保持跟 file picker 一致
                 className="data-[selected=true]:bg-[color-mix(in_srgb,var(--primary)_15%,transparent)]"
               >
-                <span className="font-mono text-sm whitespace-nowrap shrink-0">
-                  {cmd.name}
-                </span>
+                <span className="font-mono text-sm whitespace-nowrap shrink-0">{cmd.name}</span>
                 {cmd.description && (
                   <span className="ml-auto min-w-0 text-xs text-muted-foreground truncate">
                     {cmd.description}

@@ -20,9 +20,7 @@ describe("HeartbeatPayloadSchema", () => {
 
 describe("ErrorPayloadSchema", () => {
   it("rejects missing code", () => {
-    expect(() =>
-      ErrorPayloadSchema.parse({ message: "something" }),
-    ).toThrow();
+    expect(() => ErrorPayloadSchema.parse({ message: "something" })).toThrow();
   });
 
   it("rejects missing message", () => {

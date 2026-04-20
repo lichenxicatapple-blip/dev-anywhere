@@ -10,11 +10,7 @@ import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@/components/ui/popover";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { EmptyState } from "@/components/shell/empty-state";
 import { ProxyStatusDot } from "./proxy-status-dot";
 
@@ -29,10 +25,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  async function handleSelect(
-    proxyId: string,
-    proxyName: string | undefined,
-  ): Promise<void> {
+  async function handleSelect(proxyId: string, proxyName: string | undefined): Promise<void> {
     const relay = relayClientRef;
     if (!relay) {
       toast.error("Relay client not available");
@@ -93,9 +86,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                 <span className="text-sm font-normal flex-1 truncate min-w-0">
                   {p.name ?? p.proxyId}
                 </span>
-                {!p.online && (
-                  <span className="text-xs text-muted-foreground shrink-0">离线</span>
-                )}
+                {!p.online && <span className="text-xs text-muted-foreground shrink-0">离线</span>}
               </button>
             </li>
           ))}
@@ -128,9 +119,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[260px] p-1">
         {proxies.length === 0 ? (
-          <div className="text-xs text-muted-foreground p-2">
-            没有可用 Proxy
-          </div>
+          <div className="text-xs text-muted-foreground p-2">没有可用 Proxy</div>
         ) : (
           <ul role="list" className="flex flex-col">
             {proxies.map((p) => (

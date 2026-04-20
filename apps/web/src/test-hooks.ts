@@ -28,14 +28,14 @@ export function installTestHooks(): void {
   window.__ccTest = {
     chat: {
       addUserMessage: (sid, msg) => useChatStore.getState().addUserMessage(sid, msg),
-      appendAssistantText: (sid, text) =>
-        useChatStore.getState().appendAssistantText(sid, text),
+      appendAssistantText: (sid, text) => useChatStore.getState().appendAssistantText(sid, text),
       markTurnComplete: (sid) => useChatStore.getState().markTurnComplete(sid),
     },
     session: {
-      setPtyTitle: (sid, title) =>
-        useSessionStore.getState().setPtyTitle(sid, title),
+      setPtyTitle: (sid, title) => useSessionStore.getState().setPtyTitle(sid, title),
     },
-    toast: (msg) => { toast(msg); },
+    toast: (msg) => {
+      toast(msg);
+    },
   };
 }

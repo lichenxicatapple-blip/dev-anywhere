@@ -3,27 +3,19 @@ import { RelayControlSchema } from "../relay-control.js";
 
 describe("RelayControlSchema", () => {
   it("rejects proxy_register with empty proxyId", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "proxy_register", proxyId: "" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "proxy_register", proxyId: "" })).toThrow();
   });
 
   it("rejects unknown type", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "unknown_type" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "unknown_type" })).toThrow();
   });
 
   it("rejects proxy_select with empty proxyId", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "proxy_select", proxyId: "" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "proxy_select", proxyId: "" })).toThrow();
   });
 
   it("rejects client_register with empty clientId", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "client_register", clientId: "" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "client_register", clientId: "" })).toThrow();
   });
 
   it("rejects client_register_response with unknown status", () => {
@@ -45,9 +37,7 @@ describe("RelayControlSchema", () => {
   });
 
   it("rejects proxy_offline with missing proxyId", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "proxy_offline" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "proxy_offline" })).toThrow();
   });
 
   it("rejects terminal_scroll_request (removed from schema)", () => {
@@ -132,9 +122,7 @@ describe("RelayControlSchema", () => {
   it("parses session_history_response with sessions array", () => {
     const result = RelayControlSchema.parse({
       type: "session_history_response",
-      sessions: [
-        { id: "s1", title: "Fix bug", projectDir: "/project", updatedAt: 1700000000 },
-      ],
+      sessions: [{ id: "s1", title: "Fix bug", projectDir: "/project", updatedAt: 1700000000 }],
     });
     expect(result.type).toBe("session_history_response");
     if (result.type === "session_history_response") {
@@ -201,9 +189,7 @@ describe("RelayControlSchema", () => {
   });
 
   it("rejects bind_by_session type (removed from schema)", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "bind_by_session", sessionId: "s1" }),
-    ).toThrow();
+    expect(() => RelayControlSchema.parse({ type: "bind_by_session", sessionId: "s1" })).toThrow();
   });
 
   it("rejects bind_by_session_response type (removed from schema)", () => {

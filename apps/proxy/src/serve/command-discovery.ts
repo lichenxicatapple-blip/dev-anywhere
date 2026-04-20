@@ -13,7 +13,12 @@ const REPL_BUILTINS: CommandEntry[] = [
   { name: "/status", description: "Show session status", source: "builtin" },
   { name: "/cost", description: "Show token usage and cost", source: "builtin" },
   { name: "/clear", description: "Clear conversation history", source: "builtin" },
-  { name: "/model", description: "Switch AI model", argumentHint: "model name (e.g., Haiku, Sonnet)", source: "builtin" },
+  {
+    name: "/model",
+    description: "Switch AI model",
+    argumentHint: "model name (e.g., Haiku, Sonnet)",
+    source: "builtin",
+  },
   { name: "/help", description: "Show available commands", source: "builtin" },
   { name: "/memory", description: "Edit CLAUDE.md memory", source: "builtin" },
   { name: "/review", description: "Review diff of changes", source: "builtin" },
@@ -21,7 +26,12 @@ const REPL_BUILTINS: CommandEntry[] = [
   { name: "/terminal-setup", description: "Configure terminal integration", source: "builtin" },
   { name: "/permissions", description: "View and manage permissions", source: "builtin" },
   { name: "/allowed-tools", description: "View allowed tools", source: "builtin" },
-  { name: "/add-dir", description: "Add working directory", argumentHint: "directory path", source: "builtin" },
+  {
+    name: "/add-dir",
+    description: "Add working directory",
+    argumentHint: "directory path",
+    source: "builtin",
+  },
   { name: "/init", description: "Initialize CLAUDE.md in project", source: "builtin" },
   { name: "/listen", description: "Listen for multi-turn responses", source: "builtin" },
   { name: "/pr-comments", description: "View PR comments", source: "builtin" },
@@ -30,10 +40,23 @@ const REPL_BUILTINS: CommandEntry[] = [
 ];
 
 const COMMAND_BLACKLIST = new Set([
-  "/login", "/logout", "/config", "/plugin", "/mcp",
-  "/install", "/setup-token", "/doctor", "/update", "/upgrade",
-  "/memory", "/vim", "/terminal-setup", "/permissions", "/allowed-tools",
-  "/ide", "/listen",
+  "/login",
+  "/logout",
+  "/config",
+  "/plugin",
+  "/mcp",
+  "/install",
+  "/setup-token",
+  "/doctor",
+  "/update",
+  "/upgrade",
+  "/memory",
+  "/vim",
+  "/terminal-setup",
+  "/permissions",
+  "/allowed-tools",
+  "/ide",
+  "/listen",
 ]);
 
 interface DiscoverOptions {
@@ -104,8 +127,7 @@ function scanSkillsDir(dirPath: string, source: string): CommandEntry[] {
 function scanCommandsDir(dirPath: string, source: string): CommandEntry[] {
   let entries: string[];
   try {
-    entries = readdirSync(dirPath)
-      .filter((f) => f.endsWith(".md"));
+    entries = readdirSync(dirPath).filter((f) => f.endsWith(".md"));
   } catch {
     return [];
   }

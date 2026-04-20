@@ -13,9 +13,7 @@ export const AssistantMessagePayloadSchema = z.object({
   isPartial: z.boolean(),
 });
 
-export type AssistantMessagePayload = z.infer<
-  typeof AssistantMessagePayloadSchema
->;
+export type AssistantMessagePayload = z.infer<typeof AssistantMessagePayloadSchema>;
 
 // 思考过程消息
 export const ThinkingPayloadSchema = z.object({

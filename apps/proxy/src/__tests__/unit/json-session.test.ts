@@ -76,9 +76,12 @@ describe("JsonSession", () => {
       expect(spawn).toHaveBeenCalledWith(
         "claude",
         expect.arrayContaining([
-          "--output-format", "stream-json",
-          "--input-format", "stream-json",
-          "--permission-prompt-tool", "stdio",
+          "--output-format",
+          "stream-json",
+          "--input-format",
+          "stream-json",
+          "--permission-prompt-tool",
+          "stdio",
           "--verbose",
         ]),
         expect.objectContaining({
@@ -189,7 +192,9 @@ describe("JsonSession", () => {
       session.start();
 
       mockChild.mockStdout.write("verbose debug output here\n");
-      mockChild.mockStdout.write(JSON.stringify({ type: "result", result: "ok", session_id: "s1" }) + "\n");
+      mockChild.mockStdout.write(
+        JSON.stringify({ type: "result", result: "ok", session_id: "s1" }) + "\n",
+      );
 
       await new Promise((r) => setTimeout(r, 50));
       expect(events).toHaveLength(1);
@@ -310,7 +315,10 @@ describe("JsonSession", () => {
 
       // 读取所有写入
       const allData = mockChild.mockStdin.read();
-      const lines = allData.toString().split("\n").filter((l: string) => l.trim());
+      const lines = allData
+        .toString()
+        .split("\n")
+        .filter((l: string) => l.trim());
       expect(lines).toHaveLength(2);
 
       const msg1 = JSON.parse(lines[0]);

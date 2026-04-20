@@ -10,11 +10,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import {
-  cleanupDeletedToken,
-  computeSendDisabled,
-  detectPickerMode,
-} from "./input-bar-utils";
+import { cleanupDeletedToken, computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
 import { InputMenu } from "./input-menu";
@@ -37,9 +33,7 @@ function loadPersistedHistory(sessionId: string): string[] {
     const raw = localStorage.getItem(inputHistoryKey(sessionId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((e): e is string => typeof e === "string")
-      : [];
+    return Array.isArray(parsed) ? parsed.filter((e): e is string => typeof e === "string") : [];
   } catch {
     return [];
   }
@@ -158,16 +152,21 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     prevTextRef.current = "";
     clearTrackingState();
     resetCursor(sessionId);
-  }, [canSend, value, sessionId, setInputDraft, resetCursor, addUserMessage, updateSessionState, clearTrackingState]);
+  }, [
+    canSend,
+    value,
+    sessionId,
+    setInputDraft,
+    resetCursor,
+    addUserMessage,
+    updateSessionState,
+    clearTrackingState,
+  ]);
 
   // onChange 拦截: backspace 删到 token 片段时整体清除, 维护 insertedTokens
   const handleValueChange = (nextVal: string) => {
     const prev = prevTextRef.current;
-    const { cleaned, removedToken } = cleanupDeletedToken(
-      nextVal,
-      prev,
-      insertedTokens,
-    );
+    const { cleaned, removedToken } = cleanupDeletedToken(nextVal, prev, insertedTokens);
     if (removedToken) {
       setInsertedTokens((tokens) => tokens.filter((t) => t !== removedToken));
       // 删掉的是 slash 命令 (以 "/" 开头), 参数提示也同步清空
@@ -183,8 +182,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // picker 打开时优先把 ↑↓/Enter 转给 picker, 未消费再走默认流程
     if (pickerMode !== "none") {
-      const picker =
-        pickerMode === "slash" ? slashPickerRef.current : filePickerRef.current;
+      const picker = pickerMode === "slash" ? slashPickerRef.current : filePickerRef.current;
       if (picker?.handleKey(e)) {
         e.preventDefault();
         return;
@@ -240,11 +238,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
       : "输入命令...";
 
   return (
-    <div
-      className="relative w-full"
-      data-slot="input-bar"
-      data-mode={mode}
-    >
+    <div className="relative w-full" data-slot="input-bar" data-mode={mode}>
       {pickerMode === "slash" && (
         <SlashCommandPicker
           ref={slashPickerRef}
@@ -271,10 +265,7 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
             // 文件: 加空格关闭 picker, 并把最终 token 记入 insertedTokens 用于整 token 退格
             const isDir = path.endsWith("/");
             const token = `@${path}`;
-            const newVal = value.replace(
-              /@[^\s]*$/,
-              isDir ? token : `${token} `,
-            );
+            const newVal = value.replace(/@[^\s]*$/, isDir ? token : `${token} `);
             setInputDraft(sessionId, newVal);
             prevTextRef.current = newVal;
             if (!isDir) setInsertedTokens((prev) => [...prev, token]);

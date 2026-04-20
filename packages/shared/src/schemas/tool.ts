@@ -7,9 +7,7 @@ export const ToolUseRequestPayloadSchema = z.object({
   parameters: z.record(z.string(), z.unknown()),
 });
 
-export type ToolUseRequestPayload = z.infer<
-  typeof ToolUseRequestPayloadSchema
->;
+export type ToolUseRequestPayload = z.infer<typeof ToolUseRequestPayloadSchema>;
 
 // 工具调用批准，whitelistTool 为 true 时将该工具加入会话级白名单自动审批
 export const ToolApprovePayloadSchema = z.object({

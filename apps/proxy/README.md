@@ -64,6 +64,7 @@ Config file: `~/.cc-anywhere/config.json`
 ```
 
 Environment variables override config:
+
 - `RELAY_URL` — relay WebSocket URL
 - `RELAY_PROXY_TOKEN` — auth token
 

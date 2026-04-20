@@ -81,10 +81,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
   });
 
   for (let i = 0; i < ENSURE_SERVICE_MAX_RETRIES; i++) {
-    const delay = Math.min(
-      ENSURE_SERVICE_INITIAL_DELAY_MS * (i + 1),
-      ENSURE_SERVICE_MAX_DELAY_MS,
-    );
+    const delay = Math.min(ENSURE_SERVICE_INITIAL_DELAY_MS * (i + 1), ENSURE_SERVICE_MAX_DELAY_MS);
     await sleep(delay);
 
     if (childExited) {
@@ -101,19 +98,13 @@ async function ensureService(autoStart = true): Promise<Socket> {
     }
   }
 
-  log.error(
-    { maxRetries: ENSURE_SERVICE_MAX_RETRIES },
-    "Failed to connect to service",
-  );
+  log.error({ maxRetries: ENSURE_SERVICE_MAX_RETRIES }, "Failed to connect to service");
   throw new Error(
     `Failed to connect to cc-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${SERVICE_LOG_PATH} for details.`,
   );
 }
 
-function waitForMessage(
-  socket: Socket,
-  messageType: string,
-): Promise<IpcMessage> {
+function waitForMessage(socket: Socket, messageType: string): Promise<IpcMessage> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error(`Timeout waiting for ${messageType}`));
@@ -144,18 +135,17 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   let serializeAddon: SerializeAddon | null = null;
 
-  function sendPtyState(
-    state: PtySemanticState,
-    meta?: { title?: string; tool?: string },
-  ): void {
+  function sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {
     if (!socket.writable || !sessionId) return;
-    socket.write(serializeIpc({
-      type: "pty_state_push",
-      sessionId,
-      state,
-      ...(meta?.title !== undefined ? { title: meta.title } : {}),
-      ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
-    }));
+    socket.write(
+      serializeIpc({
+        type: "pty_state_push",
+        sessionId,
+        state,
+        ...(meta?.title !== undefined ? { title: meta.title } : {}),
+        ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
+      }),
+    );
     log.info({ sessionId, state, title: meta?.title, tool: meta?.tool }, "PTY state pushed");
   }
 
@@ -167,14 +157,24 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       } else if (msg.type === "pty_subscribe" && msg.sessionId === sessionId) {
         if (serializeAddon && headlessTerminal) {
           const data = serializeAddon.serialize();
-          socket.write(serializeIpc({
-            type: "pty_snapshot",
-            sessionId: msg.sessionId,
-            cols: headlessTerminal.cols,
-            rows: headlessTerminal.rows,
-            data,
-          }));
-          log.info({ sessionId, cols: headlessTerminal.cols, rows: headlessTerminal.rows, bytes: data.length }, "Snapshot sent via IPC");
+          socket.write(
+            serializeIpc({
+              type: "pty_snapshot",
+              sessionId: msg.sessionId,
+              cols: headlessTerminal.cols,
+              rows: headlessTerminal.rows,
+              data,
+            }),
+          );
+          log.info(
+            {
+              sessionId,
+              cols: headlessTerminal.cols,
+              rows: headlessTerminal.rows,
+              bytes: data.length,
+            },
+            "Snapshot sent via IPC",
+          );
         }
       }
     });
@@ -212,18 +212,11 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     log.info("Serve connection lost, starting reconnection");
 
     for (let i = 0; i < RECONNECT_MAX_RETRIES; i++) {
-      await sleep(
-        Math.min(
-          RECONNECT_INITIAL_DELAY_MS * (i + 1),
-          RECONNECT_MAX_DELAY_MS,
-        ),
-      );
+      await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
       try {
         const stopped = existsSync(STOPPED_PATH);
         log.debug({ attempt: i + 1, stopped }, "Reconnect attempt");
-        const newSocket = stopped
-          ? await tryConnect(SOCK_PATH)
-          : await ensureService();
+        const newSocket = stopped ? await tryConnect(SOCK_PATH) : await ensureService();
         if (!newSocket) continue;
         socket = newSocket;
         log.info({ attempt: i + 1, sessionId }, "Reconnected to serve");
@@ -233,7 +226,14 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         if (sessionId) {
           terminalState = TerminalState.CREATING_SESSION;
           socket.write(
-            serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), pid: process.pid, sessionId }),
+            serializeIpc({
+              type: "session_create_request",
+              mode: "pty",
+              cwd: sessionCwd,
+              name: sessionCwd.replace(process.env.HOME || "", "~"),
+              pid: process.pid,
+              sessionId,
+            }),
           );
           const resp = await waitForMessage(socket, "session_create_response");
           if (resp.type === "session_create_response" && !resp.error) {
@@ -254,17 +254,20 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         );
       }
     }
-    log.error(
-      { maxRetries: RECONNECT_MAX_RETRIES },
-      "Reconnection exhausted",
-    );
+    log.error({ maxRetries: RECONNECT_MAX_RETRIES }, "Reconnection exhausted");
   }
 
   // 请求创建 PTY 会话
   terminalState = TerminalState.CREATING_SESSION;
   const responsePromise = waitForMessage(socket, "session_create_response");
   socket.write(
-    serializeIpc({ type: "session_create_request", mode: "pty", cwd: sessionCwd, name: sessionCwd.replace(process.env.HOME || "", "~"), pid: process.pid }),
+    serializeIpc({
+      type: "session_create_request",
+      mode: "pty",
+      cwd: sessionCwd,
+      name: sessionCwd.replace(process.env.HOME || "", "~"),
+      pid: process.pid,
+    }),
   );
 
   const response = await responsePromise;

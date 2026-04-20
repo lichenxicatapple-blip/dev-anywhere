@@ -12,10 +12,7 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "..." : s;
 }
 
-export function summarizeToolInput(
-  toolName: string,
-  input: Record<string, unknown>,
-): ToolSummary {
+export function summarizeToolInput(toolName: string, input: Record<string, unknown>): ToolSummary {
   const name = toolName.toLowerCase();
 
   if (name === "edit" || name === "edit_file") {

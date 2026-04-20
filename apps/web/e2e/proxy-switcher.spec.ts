@@ -44,18 +44,12 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
   });
 
   test("renders inside sidebar dropdown slot", async ({ page }) => {
-    const switcherTrigger = page.locator(
-      'button[data-slot="proxy-switcher-trigger"]',
-    );
+    const switcherTrigger = page.locator('button[data-slot="proxy-switcher-trigger"]');
     await expect(switcherTrigger).toBeVisible();
   });
 
-  test("clicking trigger opens Popover with proxy list or empty state", async ({
-    page,
-  }) => {
-    const switcherTrigger = page.locator(
-      'button[data-slot="proxy-switcher-trigger"]',
-    );
+  test("clicking trigger opens Popover with proxy list or empty state", async ({ page }) => {
+    const switcherTrigger = page.locator('button[data-slot="proxy-switcher-trigger"]');
     await switcherTrigger.click();
     // Popover content 落到 portal, Radix 用 data-slot="popover-content"
     const popoverContent = page.locator('[data-slot="popover-content"]');

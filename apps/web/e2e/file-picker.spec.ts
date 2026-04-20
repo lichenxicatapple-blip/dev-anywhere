@@ -14,9 +14,7 @@ test.describe("FilePathPicker @ trigger (InputBar mode=insert)", () => {
     const input = page.locator('[data-slot="input-bar"] textarea');
     await input.click();
     await input.fill("@");
-    const picker = page.locator(
-      '[data-slot="file-path-picker"][data-mode="insert"]',
-    );
+    const picker = page.locator('[data-slot="file-path-picker"][data-mode="insert"]');
     await expect(picker).toBeVisible();
   });
 });
@@ -30,13 +28,12 @@ test.describe("FilePathPicker in CreateSessionDialog (mode=select, dirsOnly)", (
     await page.goto(`${BASE_URL}/#/sessions`);
   });
 
-  test("CreateSessionDialog renders FilePathPicker (select mode)", async ({
-    page,
-  }) => {
-    await page.getByRole("button", { name: /新建会话/ }).first().click();
-    const picker = page.locator(
-      '[data-slot="file-path-picker"][data-mode="select"]',
-    );
+  test("CreateSessionDialog renders FilePathPicker (select mode)", async ({ page }) => {
+    await page
+      .getByRole("button", { name: /新建会话/ })
+      .first()
+      .click();
+    const picker = page.locator('[data-slot="file-path-picker"][data-mode="select"]');
     await expect(picker).toBeVisible();
   });
 });

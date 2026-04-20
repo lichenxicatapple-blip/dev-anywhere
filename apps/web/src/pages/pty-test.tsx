@@ -97,17 +97,22 @@ export function PtyTest() {
     });
 
     // 发送订阅请求，触发 terminal serialize()
-    wsManagerRef.send(JSON.stringify({
-      type: "session_subscribe",
-      sessionId,
-    }));
+    wsManagerRef.send(
+      JSON.stringify({
+        type: "session_subscribe",
+        sessionId,
+      }),
+    );
 
     setSubscribed(true);
   }, [subscribed, sessionId]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") handleSubscribe();
-  }, [handleSubscribe]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") handleSubscribe();
+    },
+    [handleSubscribe],
+  );
 
   const statusDotClass = connected
     ? "bg-[var(--color-status-success)]"
@@ -155,20 +160,13 @@ export function PtyTest() {
           }}
         />
 
-        <Button
-          onClick={handleSubscribe}
-          disabled={!connected || !sessionId.trim()}
-          size="sm"
-        >
+        <Button onClick={handleSubscribe} disabled={!connected || !sessionId.trim()} size="sm">
           {subscribed ? "Unsubscribe" : "Subscribe"}
         </Button>
       </div>
 
       <div className="flex-1 overflow-auto" style={{ backgroundColor: "#1E1E1E" }}>
-        <div
-          ref={containerRef}
-          style={{ minHeight: "100%" }}
-        />
+        <div ref={containerRef} style={{ minHeight: "100%" }} />
       </div>
     </div>
   );

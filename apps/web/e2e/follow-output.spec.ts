@@ -28,8 +28,7 @@ async function scrollBy(page: Page, pxFromBottom: number): Promise<void> {
   await page.evaluate((amount: number) => {
     const el = document.querySelector('[data-slot="message-list"]');
     if (!el) return;
-    (el as HTMLElement).scrollTop =
-      el.scrollHeight - (el as HTMLElement).clientHeight - amount;
+    (el as HTMLElement).scrollTop = el.scrollHeight - (el as HTMLElement).clientHeight - amount;
     el.dispatchEvent(new Event("scroll"));
   }, pxFromBottom);
   await page.waitForTimeout(200);
@@ -59,9 +58,7 @@ test.describe("ChatJsonView — follow-output baseline", () => {
     await expect(btb).toHaveCount(0);
   });
 
-  test("input-bar-region present (InputBar + SemanticActionPanel wired)", async ({
-    page,
-  }) => {
+  test("input-bar-region present (InputBar + SemanticActionPanel wired)", async ({ page }) => {
     const region = page.locator('[data-slot="input-bar-region"]');
     await expect(region).toBeVisible();
   });
@@ -95,9 +92,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await expect(btb).toBeVisible();
   });
 
-  test("button position is sticky; does not scroll with content", async ({
-    page,
-  }) => {
+  test("button position is sticky; does not scroll with content", async ({ page }) => {
     await scrollBy(page, 200);
     const btb = page.locator('[data-slot="back-to-bottom"]');
     const first = await btb.boundingBox();
@@ -126,9 +121,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await page.waitForTimeout(500);
     await expect(btb).toHaveCount(0);
     const gap = await page.evaluate(() => {
-      const el = document.querySelector(
-        '[data-slot="message-list"]',
-      ) as HTMLElement | null;
+      const el = document.querySelector('[data-slot="message-list"]') as HTMLElement | null;
       if (!el) return null;
       return el.scrollHeight - (el.scrollTop + el.clientHeight);
     });
@@ -136,9 +129,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     expect(gap!).toBeLessThanOrEqual(8);
   });
 
-  test("new message while scrolled up shows has-new-messages indicator", async ({
-    page,
-  }) => {
+  test("new message while scrolled up shows has-new-messages indicator", async ({ page }) => {
     await scrollBy(page, 300);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
 
@@ -161,9 +152,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await expect(hasNewIndicator).toBeVisible();
   });
 
-  test("at-bottom new message auto-follows (isAtBottom sticky)", async ({
-    page,
-  }) => {
+  test("at-bottom new message auto-follows (isAtBottom sticky)", async ({ page }) => {
     await scrollToBottom(page);
 
     await page.evaluate(() => {
@@ -175,9 +164,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await page.waitForTimeout(300);
 
     const gap = await page.evaluate(() => {
-      const el = document.querySelector(
-        '[data-slot="message-list"]',
-      ) as HTMLElement | null;
+      const el = document.querySelector('[data-slot="message-list"]') as HTMLElement | null;
       if (!el) return null;
       return el.scrollHeight - (el.scrollTop + el.clientHeight);
     });

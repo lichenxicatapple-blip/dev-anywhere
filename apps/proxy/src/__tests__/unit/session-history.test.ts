@@ -85,9 +85,7 @@ describe("scanSessionHistory", () => {
   });
 
   it("skips non-jsonl files", async () => {
-    writeSession("-test-proj", "valid", [
-      JSON.stringify({ type: "user", message: "Hello" }),
-    ]);
+    writeSession("-test-proj", "valid", [JSON.stringify({ type: "user", message: "Hello" })]);
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     writeFileSync(join(projectDir, "notes.txt"), "not a session");
     writeFileSync(join(projectDir, "readme.md"), "# readme");
@@ -98,9 +96,7 @@ describe("scanSessionHistory", () => {
   });
 
   it("handles malformed JSONL gracefully", async () => {
-    writeSession("-test-proj", "good", [
-      JSON.stringify({ type: "user", message: "Good session" }),
-    ]);
+    writeSession("-test-proj", "good", [JSON.stringify({ type: "user", message: "Good session" })]);
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     writeFileSync(join(projectDir, "bad.jsonl"), "{ not valid json }}}\n");
 
@@ -111,13 +107,9 @@ describe("scanSessionHistory", () => {
   });
 
   it("sorts results by updatedAt descending", async () => {
-    writeSession("-test-proj", "older", [
-      JSON.stringify({ type: "user", message: "Older" }),
-    ]);
+    writeSession("-test-proj", "older", [JSON.stringify({ type: "user", message: "Older" })]);
     await new Promise((r) => setTimeout(r, 50));
-    writeSession("-test-proj", "newer", [
-      JSON.stringify({ type: "user", message: "Newer" }),
-    ]);
+    writeSession("-test-proj", "newer", [JSON.stringify({ type: "user", message: "Newer" })]);
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(2);
@@ -138,8 +130,14 @@ describe("scanSessionHistory", () => {
   it("extracts slash command from XML tags, skips pure XML noise and /clear", async () => {
     writeSession("-test-proj", "skip", [
       JSON.stringify({ type: "user", message: "<some-xml>noise</some-xml>" }),
-      JSON.stringify({ type: "user", message: "<command-name>/clear</command-name><command-args></command-args>" }),
-      JSON.stringify({ type: "user", message: "<command-name>/gsd-progress</command-name><command-args>2</command-args>" }),
+      JSON.stringify({
+        type: "user",
+        message: "<command-name>/clear</command-name><command-args></command-args>",
+      }),
+      JSON.stringify({
+        type: "user",
+        message: "<command-name>/gsd-progress</command-name><command-args>2</command-args>",
+      }),
       JSON.stringify({ type: "user", message: { role: "user", content: "Real question" } }),
     ]);
 
@@ -151,20 +149,41 @@ describe("scanSessionHistory", () => {
   it("reads cwd from JSONL instead of decoding directory name", async () => {
     // 模拟 Claude Code 的编码：下划线和路径分隔符都变成连字符
     writeSession("-Users-admin-workspace-bmo_intraday_statement-airflow_dags_sbl", "sess1", [
-      JSON.stringify({ type: "progress", cwd: "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl", sessionId: "sess1" }),
+      JSON.stringify({
+        type: "progress",
+        cwd: "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl",
+        sessionId: "sess1",
+      }),
       JSON.stringify({ type: "user", message: { role: "user", content: "Check the DAG" } }),
     ]);
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
-    expect(result[0].projectDir).toBe("/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl");
+    expect(result[0].projectDir).toBe(
+      "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl",
+    );
     expect(result[0].title).toBe("Check the DAG");
   });
 
   it("skips isMeta user messages for title extraction", async () => {
     writeSession("-test-proj", "meta1", [
-      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /Users/admin/.claude/skills/gsd" }] } }),
-      JSON.stringify({ type: "user", message: { role: "user", content: "What is this project about?" } }),
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Base directory for this skill: /Users/admin/.claude/skills/gsd",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "What is this project about?" },
+      }),
     ]);
 
     const result = await scanSessionHistory();
@@ -192,13 +211,35 @@ describe("scanSessionHistory", () => {
   it("does NOT dedup when all user messages are isMeta and titles fall back to unique session IDs", async () => {
     // 模拟 MaoGe 场景：所有 user 消息都是 isMeta，title 回退到 sessionId 前缀
     writeSession("-test-proj", "aaaaaaaa-1111", [
-      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: "<command-name>/clear</command-name>" } }),
-      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill" }] } }),
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: { role: "user", content: "<command-name>/clear</command-name>" },
+      }),
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Base directory for this skill" }],
+        },
+      }),
     ]);
     await new Promise((r) => setTimeout(r, 50));
     writeSession("-test-proj", "bbbbbbbb-2222", [
-      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: "<command-name>/clear</command-name>" } }),
-      JSON.stringify({ type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill" }] } }),
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: { role: "user", content: "<command-name>/clear</command-name>" },
+      }),
+      JSON.stringify({
+        type: "user",
+        isMeta: true,
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Base directory for this skill" }],
+        },
+      }),
     ]);
 
     const result = await scanSessionHistory();

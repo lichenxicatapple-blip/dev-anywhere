@@ -31,43 +31,31 @@ test.describe("ChatHeader — D-51 三件套", () => {
     await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
   });
 
-  test("has three direct children: back button + title + overflow", async ({
-    page,
-  }) => {
+  test("has three direct children: back button + title + overflow", async ({ page }) => {
     const header = page.locator('[data-slot="chat-header"]');
     await expect(header).toBeVisible();
     await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-session-title"]')).toBeVisible();
-    await expect(
-      page.locator('[data-slot="chat-overflow-trigger"]'),
-    ).toBeVisible();
+    await expect(page.locator('[data-slot="chat-overflow-trigger"]')).toBeVisible();
   });
 
-  test("back button is visible at ALL viewports (no md:hidden)", async ({
-    page,
-  }) => {
+  test("back button is visible at ALL viewports (no md:hidden)", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 800 });
     await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
   });
 
-  test("no standalone permission-mode button or sidebar-toggle", async ({
-    page,
-  }) => {
+  test("no standalone permission-mode button or sidebar-toggle", async ({ page }) => {
     const permissionBtn = page.locator(
       '[data-slot="chat-header"] button:has-text("默认"), [data-slot="chat-header"] button:has-text("自动允许"), [data-slot="chat-header"] button:has-text("规划模式")',
     );
     await expect(permissionBtn).toHaveCount(0);
-    const sidebarToggle = page.locator(
-      '[data-slot="chat-header"] [aria-label*="侧栏"]',
-    );
+    const sidebarToggle = page.locator('[data-slot="chat-header"] [aria-label*="侧栏"]');
     await expect(sidebarToggle).toHaveCount(0);
   });
 
-  test("overflow menu contains Rename + Duplicate + Terminate(destructive)", async ({
-    page,
-  }) => {
+  test("overflow menu contains Rename + Duplicate + Terminate(destructive)", async ({ page }) => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     const menu = page.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible();

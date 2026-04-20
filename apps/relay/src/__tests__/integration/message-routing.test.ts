@@ -71,11 +71,17 @@ describe("Phase 6 Integration: Message Routing", () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(), source: "proxy", version: "1.0",
-      type: "assistant_message",
-      payload: { text: "hello", isPartial: false },
-    }));
+    proxy.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "proxy",
+        version: "1.0",
+        type: "assistant_message",
+        payload: { text: "hello", isPartial: false },
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("assistant_message");
@@ -86,11 +92,17 @@ describe("Phase 6 Integration: Message Routing", () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(proxy);
-    client.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(), source: "client", version: "1.0",
-      type: "tool_approve",
-      payload: { toolId: "t1", whitelistTool: true },
-    }));
+    client.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "client",
+        version: "1.0",
+        type: "tool_approve",
+        payload: { toolId: "t1", whitelistTool: true },
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("tool_approve");
@@ -106,11 +118,13 @@ describe("Phase 6 Integration: Message Routing", () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "pty_state",
-      sessionId: "s1",
-      payload: { state: "approval_wait", tool: "Bash" },
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "pty_state",
+        sessionId: "s1",
+        payload: { state: "approval_wait", tool: "Bash" },
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("pty_state");
@@ -122,10 +136,12 @@ describe("Phase 6 Integration: Message Routing", () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "command_list_push",
-      commands: [{ name: "/compact", description: "Compact", source: "builtin" }],
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "command_list_push",
+        commands: [{ name: "/compact", description: "Compact", source: "builtin" }],
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("command_list_push");
@@ -136,12 +152,12 @@ describe("Phase 6 Integration: Message Routing", () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "file_tree_push",
-      groups: [
-        { path: "/src", entries: [{ name: "index.ts", isDir: false }] },
-      ],
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "file_tree_push",
+        groups: [{ path: "/src", entries: [{ name: "index.ts", isDir: false }] }],
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("file_tree_push");
@@ -162,11 +178,13 @@ describe("Phase 6 Integration: Message Routing", () => {
     expect(proxyReceived.type).toBe("dir_list_request");
 
     const clientMsgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "dir_list_response",
-      path: "/home",
-      entries: [{ name: "src", isDir: true }],
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "dir_list_response",
+        path: "/home",
+        entries: [{ name: "src", isDir: true }],
+      }),
+    );
 
     const clientReceived = JSON.parse(await clientMsgPromise);
     expect(clientReceived.type).toBe("dir_list_response");
@@ -183,16 +201,17 @@ describe("Phase 6 Integration: Message Routing", () => {
     expect(proxyReceived.type).toBe("session_history_request");
 
     const clientMsgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "session_history_response",
-      sessions: [{ id: "s1", title: "test", projectDir: "/proj", updatedAt: 123 }],
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        sessions: [{ id: "s1", title: "test", projectDir: "/proj", updatedAt: 123 }],
+      }),
+    );
 
     const clientReceived = JSON.parse(await clientMsgPromise);
     expect(clientReceived.type).toBe("session_history_response");
     expect(clientReceived.sessions[0].id).toBe("s1");
   });
-
 
   // ==========================================================
   // 4. proxy_list_response 包含 name
@@ -212,7 +231,9 @@ describe("Phase 6 Integration: Message Routing", () => {
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1", name: "My MacBook", online: true, sessions: [] }]);
+    expect(response.proxies).toEqual([
+      { proxyId: "p1", name: "My MacBook", online: true, sessions: [] },
+    ]);
   });
 
   // ==========================================================
@@ -278,17 +299,22 @@ describe("Phase 6 Integration: Message Routing", () => {
     await waitForOpen(client);
     // 不 bind，直接发 envelope
     const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({
-      seq: 1, sessionId: "s1", timestamp: Date.now(), source: "client", version: "1.0",
-      type: "user_input",
-      payload: { text: "hello" },
-    }));
+    client.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "client",
+        version: "1.0",
+        type: "user_input",
+        payload: { text: "hello" },
+      }),
+    );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("relay_error");
     expect(received.code).toBe("NOT_BOUND");
   });
-
 
   // ==========================================================
   // 多消息连续路由
@@ -299,10 +325,13 @@ describe("Phase 6 Integration: Message Routing", () => {
 
     // 先发一个 JSON control 消息
     const jsonMsgPromise = waitForMessage(client);
-    proxy.send(JSON.stringify({
-      type: "pty_state", sessionId: "s1",
-      payload: { state: "working", title: "Running tests" },
-    }));
+    proxy.send(
+      JSON.stringify({
+        type: "pty_state",
+        sessionId: "s1",
+        payload: { state: "working", title: "Running tests" },
+      }),
+    );
     const jsonReceived = JSON.parse(await jsonMsgPromise);
     expect(jsonReceived.type).toBe("pty_state");
 

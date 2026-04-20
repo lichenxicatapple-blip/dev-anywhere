@@ -108,7 +108,12 @@ export function makeEnvelope(
     user_input: { text: `input-${seq}` },
   };
   return {
-    seq, sessionId, timestamp: Date.now(), source, version: "1.0", type,
+    seq,
+    sessionId,
+    timestamp: Date.now(),
+    source,
+    version: "1.0",
+    type,
     payload: payloads[type] ?? { text: `msg-${seq}`, isPartial: false },
   };
 }

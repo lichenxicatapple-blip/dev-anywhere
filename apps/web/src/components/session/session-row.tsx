@@ -26,10 +26,7 @@ interface SessionRowProps {
 
 // state → { dot bg-class, text color-class, 中文文案 }
 // idle 走 success token（绿, 与"正常空闲"语义一致），terminated 用静音灰
-const STATE_STYLE: Record<
-  SessionInfo["state"],
-  { dot: string; text: string; label: string }
-> = {
+const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; label: string }> = {
   idle: {
     dot: "bg-[var(--color-status-success)]",
     text: "text-[var(--color-status-success)]",
@@ -88,10 +85,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
       data-selected={selected}
     >
       {selected && (
-        <span
-          className="absolute left-0 top-0 bottom-0 w-[2px] bg-primary"
-          aria-hidden="true"
-        />
+        <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-primary" aria-hidden="true" />
       )}
       <button
         type="button"
@@ -111,14 +105,18 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
               </span>
             )}
             {session.mode && (
-              <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">·</span>
+              <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+                ·
+              </span>
             )}
             <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
               {STATE_STYLE[session.state].label}
             </span>
             {lastActive !== undefined && (
               <>
-                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">·</span>
+                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+                  ·
+                </span>
                 <span className="text-muted-foreground shrink-0 tabular-nums">
                   {formatRelativeTime(lastActive, now)}
                 </span>

@@ -8,11 +8,7 @@ import {
   type ClaudePermissionMode,
 } from "./worker/json-session.js";
 import { SeqCounter } from "./common/seq-counter.js";
-import {
-  createWorkerReader,
-  serializeWorkerMsg,
-  type WorkerMessage,
-} from "./ipc/ipc-protocol.js";
+import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
 
 // 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
 const sessionId = process.argv[2];
@@ -41,7 +37,11 @@ const whitelist = new ToolWhitelist();
 
 const pendingApprovals = new Map<
   string,
-  { resolve: (decision: { behavior: "allow" | "deny"; message?: string }) => void; toolName: string; input: Record<string, unknown> }
+  {
+    resolve: (decision: { behavior: "allow" | "deny"; message?: string }) => void;
+    toolName: string;
+    input: Record<string, unknown>;
+  }
 >();
 
 function sendToServe(msg: WorkerMessage): void {
@@ -131,8 +131,12 @@ function handleServeConnection(socket: Socket): void {
     }
   });
 
-  socket.on("close", () => { serveSocket = null; });
-  socket.on("error", () => { serveSocket = null; });
+  socket.on("close", () => {
+    serveSocket = null;
+  });
+  socket.on("error", () => {
+    serveSocket = null;
+  });
 }
 
 const sockDir = sockPath.substring(0, sockPath.lastIndexOf("/"));
@@ -148,7 +152,9 @@ const server = createServer((socket) => {
 
 function cleanup(): void {
   server.close();
-  try { unlinkSync(sockPath); } catch {
+  try {
+    unlinkSync(sockPath);
+  } catch {
     // socket 文件可能已被删除
   }
 }

@@ -51,41 +51,65 @@ export default tseslint.config(
   {
     files: ["apps/proxy/src/terminal/**/*.ts", "apps/proxy/src/terminal.ts"],
     rules: {
-      "no-restricted-imports": ["error", {
-        patterns: [
-          { group: ["**/serve/**", "**/worker/**"], message: "terminal 进程不可导入 serve/worker 私有代码" },
-        ],
-      }],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/serve/**", "**/worker/**"],
+              message: "terminal 进程不可导入 serve/worker 私有代码",
+            },
+          ],
+        },
+      ],
     },
   },
   {
     files: ["apps/proxy/src/serve/**/*.ts", "apps/proxy/src/serve.ts"],
     rules: {
-      "no-restricted-imports": ["error", {
-        patterns: [
-          { group: ["**/terminal/**", "**/worker/**"], message: "serve 进程不可导入 terminal/worker 私有代码" },
-        ],
-      }],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/terminal/**", "**/worker/**"],
+              message: "serve 进程不可导入 terminal/worker 私有代码",
+            },
+          ],
+        },
+      ],
     },
   },
   {
     files: ["apps/proxy/src/worker/**/*.ts", "apps/proxy/src/session-worker.ts"],
     rules: {
-      "no-restricted-imports": ["error", {
-        patterns: [
-          { group: ["**/terminal/**", "**/serve/**"], message: "worker 进程不可导入 terminal/serve 私有代码" },
-        ],
-      }],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/terminal/**", "**/serve/**"],
+              message: "worker 进程不可导入 terminal/serve 私有代码",
+            },
+          ],
+        },
+      ],
     },
   },
   {
     files: ["apps/proxy/src/common/**/*.ts", "apps/proxy/src/ipc/**/*.ts"],
     rules: {
-      "no-restricted-imports": ["error", {
-        patterns: [
-          { group: ["**/terminal/**", "**/serve/**", "**/worker/**"], message: "common/ipc 层不可依赖任何进程私有代码" },
-        ],
-      }],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/terminal/**", "**/serve/**", "**/worker/**"],
+              message: "common/ipc 层不可依赖任何进程私有代码",
+            },
+          ],
+        },
+      ],
     },
   },
 );

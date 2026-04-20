@@ -34,9 +34,7 @@ export async function ensureBinding(
   // 只有 sessionId 没有 proxyId：通过 proxy_list 匹配
   if (!targetProxyId && context.sessionId) {
     const proxies = await relay.requestProxyList();
-    const match = proxies.find(p =>
-      p.sessions?.includes(context.sessionId!)
-    );
+    const match = proxies.find((p) => p.sessions?.includes(context.sessionId!));
     if (!match) {
       return { error: `Session ${context.sessionId} not found on any proxy` };
     }

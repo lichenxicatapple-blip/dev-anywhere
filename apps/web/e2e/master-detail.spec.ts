@@ -42,9 +42,7 @@ test.describe("Master-detail — 桌面端即时会话切换", () => {
     // performance navigation type 校验：同文档切换不是 reload
     const navType = await page.evaluate(() => {
       const entries = performance.getEntriesByType("navigation");
-      return entries.length > 0
-        ? (entries[0] as PerformanceNavigationTiming).type
-        : "unknown";
+      return entries.length > 0 ? (entries[0] as PerformanceNavigationTiming).type : "unknown";
     });
     expect(navType).not.toBe("reload");
   });

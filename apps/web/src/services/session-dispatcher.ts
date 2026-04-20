@@ -17,28 +17,18 @@ const PTY_STATE_MAP: Record<string, SessionInfo["state"]> = {
   approval_wait: "waiting_approval",
 };
 
-function handleSessionList(
-  env: Extract<MessageEnvelope, { type: "session_list" }>,
-): void {
+function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" }>): void {
   if (!useAppStore.getState().selectedProxyId) return;
   useSessionStore.getState().setSessions(env.payload.sessions);
 }
 
-function handleSessionStatus(
-  env: Extract<MessageEnvelope, { type: "session_status" }>,
-): void {
+function handleSessionStatus(env: Extract<MessageEnvelope, { type: "session_status" }>): void {
   useSessionStore
     .getState()
-    .updateSessionState(
-      env.payload.sessionId,
-      env.payload.state,
-      env.payload.lastActive,
-    );
+    .updateSessionState(env.payload.sessionId, env.payload.state, env.payload.lastActive);
 }
 
-function handlePtyState(
-  msg: Extract<RelayControlMessage, { type: "pty_state" }>,
-): void {
+function handlePtyState(msg: Extract<RelayControlMessage, { type: "pty_state" }>): void {
   const mapped = PTY_STATE_MAP[msg.payload.state];
   if (!mapped) return;
   useSessionStore.getState().updateSessionState(msg.sessionId, mapped);

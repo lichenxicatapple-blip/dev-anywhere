@@ -13,9 +13,7 @@ interface MockPty {
 
 let mockPty: MockPty;
 let onDataCallback: ((data: string) => void) | null = null;
-let onExitCallback:
-  | ((e: { exitCode: number; signal?: number }) => void)
-  | null = null;
+let onExitCallback: ((e: { exitCode: number; signal?: number }) => void) | null = null;
 
 vi.mock("node-pty", () => ({
   spawn: vi.fn(() => {
@@ -27,12 +25,10 @@ vi.mock("node-pty", () => ({
         onDataCallback = cb;
         return { dispose: vi.fn() };
       }),
-      onExit: vi.fn(
-        (cb: (e: { exitCode: number; signal?: number }) => void) => {
-          onExitCallback = cb;
-          return { dispose: vi.fn() };
-        },
-      ),
+      onExit: vi.fn((cb: (e: { exitCode: number; signal?: number }) => void) => {
+        onExitCallback = cb;
+        return { dispose: vi.fn() };
+      }),
       pid: 12345,
     };
     return mockPty;
@@ -81,10 +77,7 @@ describe("PtyManager", () => {
     const pty = await import("node-pty");
 
     const stdin = createMockStdin(overrides.isTTY ?? true);
-    const stdout = createMockStdout(
-      overrides.cols ?? 120,
-      overrides.rows ?? 40,
-    );
+    const stdout = createMockStdout(overrides.cols ?? 120, overrides.rows ?? 40);
     const tap = overrides.tap ?? vi.fn();
 
     const manager = new PtyManager({

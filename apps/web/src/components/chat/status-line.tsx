@@ -30,12 +30,8 @@ export function StatusLine({ state }: StatusLineProps) {
       role="status"
       aria-label={ARIA_LABEL[state]}
     >
-      {state === "idle" && (
-        <div className="cc-status-line-sweep cc-status-line-sweep-idle" />
-      )}
-      {state === "working" && (
-        <div className="cc-status-line-sweep cc-status-line-sweep-working" />
-      )}
+      {state === "idle" && <div className="cc-status-line-sweep cc-status-line-sweep-idle" />}
+      {state === "working" && <div className="cc-status-line-sweep cc-status-line-sweep-working" />}
       {state === "waiting_approval" && (
         <div className="cc-status-line-sweep cc-status-line-sweep-waiting" />
       )}

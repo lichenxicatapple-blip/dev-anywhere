@@ -1,12 +1,6 @@
 import { z } from "zod";
 
-const sessionStateValues = [
-  "idle",
-  "working",
-  "waiting_approval",
-  "error",
-  "terminated",
-] as const;
+const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
 
 // 会话信息，用于会话列表展示
 // lastActive: 最近一次状态变更/消息时间戳 (ms), 用于列表"N 分钟前"显示, 可选
@@ -46,9 +40,7 @@ export const SessionTerminatePayloadSchema = z.object({
   sessionId: z.string(),
 });
 
-export type SessionTerminatePayload = z.infer<
-  typeof SessionTerminatePayloadSchema
->;
+export type SessionTerminatePayload = z.infer<typeof SessionTerminatePayloadSchema>;
 
 // 会话状态变更
 // lastActive: 触发本次状态迁移的时间戳 (ms)，用于列表相对时间显示；proxy 侧总会填，留 optional 为兼容旧 payload
@@ -67,4 +59,3 @@ export const PtyStatePayloadSchema = z.object({
   tool: z.string().optional(),
 });
 export type PtyStatePayload = z.infer<typeof PtyStatePayloadSchema>;
-

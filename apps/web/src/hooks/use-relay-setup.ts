@@ -3,10 +3,7 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { WebSocketManager } from "@/services/websocket";
 import { RelayClient } from "@/services/relay-client";
-import {
-  handleWsStatusChange,
-  handleRelayMessage,
-} from "@/services/phase-machine";
+import { handleWsStatusChange, handleRelayMessage } from "@/services/phase-machine";
 import type { Timers } from "@/services/phase-machine";
 import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
@@ -19,7 +16,10 @@ export let relayClientRef: RelayClient | null = null;
 // Sarasa Fixed SC 按 cn-font-split 分片托管在 relay, 按 unicode-range 按需下载
 // relay 静态目录 ~/.cc-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 CJK font hosting 预生成
 function loadFontCSS(relayUrl: string): void {
-  const base = relayUrl.replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/(proxy|client)$/, "");
+  const base = relayUrl
+    .replace(/^ws:/, "http:")
+    .replace(/^wss:/, "https:")
+    .replace(/\/(proxy|client)$/, "");
   const href = `${base}/fonts/sarasa-fixed-sc/result.css`;
   if (document.querySelector(`link[href="${href}"]`)) return;
   const link = document.createElement("link");
@@ -83,11 +83,7 @@ export function useRelaySetup(): void {
 
     // D-08: 页面从后台恢复时自动重连
     const handleVisibility = () => {
-      if (
-        document.visibilityState === "visible" &&
-        wsRef.current &&
-        !wsRef.current.isConnected()
-      ) {
+      if (document.visibilityState === "visible" && wsRef.current && !wsRef.current.isConnected()) {
         wsRef.current.connect(wsUrl);
       }
     };

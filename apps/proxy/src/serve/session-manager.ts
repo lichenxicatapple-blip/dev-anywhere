@@ -26,11 +26,7 @@ interface SessionManagerOptions {
 // terminated 是终态，不允许任何转出
 // error 只能转到 terminated
 const VALID_TRANSITIONS: Record<SessionState, Set<SessionState>> = {
-  [SessionState.IDLE]: new Set([
-    SessionState.WORKING,
-    SessionState.ERROR,
-    SessionState.TERMINATED,
-  ]),
+  [SessionState.IDLE]: new Set([SessionState.WORKING, SessionState.ERROR, SessionState.TERMINATED]),
   [SessionState.WORKING]: new Set([
     SessionState.IDLE,
     SessionState.WAITING_APPROVAL,
@@ -61,7 +57,13 @@ export class SessionManager {
     this.load();
   }
 
-  createSession(mode: "pty" | "json", cwd: string, pid: number, name?: string, id?: string): SessionInfo {
+  createSession(
+    mode: "pty" | "json",
+    cwd: string,
+    pid: number,
+    name?: string,
+    id?: string,
+  ): SessionInfo {
     const now = Date.now();
     const info: SessionInfo = {
       id: id ?? nanoid(),
@@ -80,9 +82,7 @@ export class SessionManager {
   }
 
   listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).sort(
-      (a, b) => b.createdAt - a.createdAt,
-    );
+    return Array.from(this.sessions.values()).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   getSession(id: string): SessionInfo | undefined {
@@ -96,9 +96,7 @@ export class SessionManager {
     }
     const allowed = VALID_TRANSITIONS[session.state];
     if (!allowed.has(newState)) {
-      throw new Error(
-        `Invalid state transition: ${session.state} -> ${newState}`,
-      );
+      throw new Error(`Invalid state transition: ${session.state} -> ${newState}`);
     }
     const oldState = session.state;
     session.state = newState;
@@ -107,9 +105,7 @@ export class SessionManager {
     serviceLogger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");
   }
 
-  terminateSession(
-    id: string,
-  ): { success: boolean; pid?: number } {
+  terminateSession(id: string): { success: boolean; pid?: number } {
     const session = this.sessions.get(id);
     if (!session) {
       return { success: false };
@@ -155,7 +151,6 @@ export class SessionManager {
     this.save();
   }
 
-
   startReaper(intervalMs: number = this.reaperIntervalMs): void {
     this.stopReaper();
     this.reaperTimer = setInterval(() => this.reap(), intervalMs);
@@ -173,7 +168,11 @@ export class SessionManager {
     // 检查 JSON 会话的子进程是否存活
     // PTY 会话的生命周期由 IPC socket close 事件管理，不需要 reaper 参与
     for (const session of this.sessions.values()) {
-      if (session.mode === "json" && session.pid !== undefined && session.state !== SessionState.TERMINATED) {
+      if (
+        session.mode === "json" &&
+        session.pid !== undefined &&
+        session.state !== SessionState.TERMINATED
+      ) {
         if (!this.isProcessAlive(session.pid)) {
           toRemove.push({ id: session.id, reason: `JSON worker process ${session.pid} is dead` });
         }
@@ -212,10 +211,9 @@ export class SessionManager {
     try {
       parsed = JSON.parse(raw);
     } catch (err) {
-      throw new Error(
-        `Failed to parse session persistence file at ${this.persistPath}`,
-        { cause: err },
-      );
+      throw new Error(`Failed to parse session persistence file at ${this.persistPath}`, {
+        cause: err,
+      });
     }
     if (!Array.isArray(parsed)) {
       throw new Error(
@@ -234,11 +232,17 @@ export class SessionManager {
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
-          serviceLogger.info({ sessionId: info.id, pid: info.pid }, "PTY session skipped on load, terminal alive");
+          serviceLogger.info(
+            { sessionId: info.id, pid: info.pid },
+            "PTY session skipped on load, terminal alive",
+          );
         } else {
           // terminal 进程已死，清理数据
           this.onSessionRemoved?.(info.id);
-          serviceLogger.info({ sessionId: info.id, pid: info.pid }, "PTY session cleaned on load, terminal dead");
+          serviceLogger.info(
+            { sessionId: info.id, pid: info.pid },
+            "PTY session cleaned on load, terminal dead",
+          );
         }
         continue;
       }
@@ -251,7 +255,10 @@ export class SessionManager {
         this.sessions.set(info.id, info);
       } else {
         this.onSessionRemoved?.(info.id);
-        serviceLogger.info({ sessionId: info.id, pid: info.pid }, "JSON session cleaned on load, worker dead");
+        serviceLogger.info(
+          { sessionId: info.id, pid: info.pid },
+          "JSON session cleaned on load, worker dead",
+        );
       }
     }
     // 清理后回写磁盘，避免已清理的会话在下次启动时重复处理
