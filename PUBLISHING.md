@@ -6,8 +6,8 @@ A single `vX.Y.Z` git tag produces four artifacts:
 
 | Kind   | Name                                           | What it's for                                         |
 |--------|------------------------------------------------|-------------------------------------------------------|
-| npm    | `cc-anywhere`                                  | Local proxy CLI end-users install on their laptop     |
-| npm    | `cc-anywhere-relay`                            | Standalone relay binary for local/dev use             |
+| npm    | `@lichenxi.cat/cc-anywhere`                    | Local proxy CLI end-users install on their laptop     |
+| npm    | `@lichenxi.cat/cc-anywhere-relay`              | Standalone relay binary for local/dev use             |
 | Docker | `ghcr.io/<owner>/cc-anywhere-relay:<tag>`      | Production relay container                            |
 | Docker | `ghcr.io/<owner>/cc-anywhere-web:<tag>`        | Nginx + web SPA container (reverse-proxies the relay) |
 
@@ -79,7 +79,7 @@ docker buildx build -f apps/web/Dockerfile   -t cc-anywhere-web:dry   .
 ### Local proxy CLI (end-user laptop)
 
 ```bash
-npm install -g cc-anywhere
+npm install -g @lichenxi.cat/cc-anywhere
 cc-anywhere init
 # edit ~/.cc-anywhere/config.json: { "relayUrl": "wss://...", "relayToken": "..." }
 cc-anywhere serve start
@@ -107,6 +107,6 @@ cd /opt/cc-anywhere && docker compose pull && docker compose up -d
 ### Standalone relay without TLS (dev)
 
 ```bash
-npm install -g cc-anywhere-relay
+npm install -g @lichenxi.cat/cc-anywhere-relay
 RELAY_PROXY_TOKEN=$(openssl rand -hex 24) PORT=3100 cc-anywhere-relay
 ```

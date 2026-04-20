@@ -176,7 +176,7 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo "  Client:  wss://$DOMAIN/client"
   echo
   echo "Next, on your local machine:"
-  echo "  npm install -g cc-anywhere"
+  echo "  npm install -g @lichenxi.cat/cc-anywhere"
   echo "  cc-anywhere init"
   echo "  # edit ~/.cc-anywhere/config.json:"
   echo "  #   { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$TOKEN\" }"

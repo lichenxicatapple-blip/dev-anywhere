@@ -5,8 +5,10 @@ Transparent local proxy for Claude Code that bridges sessions to a mobile/web SP
 ## Install
 
 ```bash
-npm install -g cc-anywhere
+npm install -g @lichenxi.cat/cc-anywhere
 ```
+
+This installs the `cc-anywhere` command globally.
 
 Requires Node.js >= 20 and [Claude Code CLI](https://code.claude.com/) installed locally.
 
@@ -32,7 +34,7 @@ cc-anywhere serve start      # start background daemon
 cc-anywhere serve stop       # stop daemon
 cc-anywhere serve restart    # restart daemon
 cc-anywhere serve status     # show daemon status
-cc-anywhere config init      # create default config at ~/.cc-anywhere/config.json
+cc-anywhere init             # create default config at ~/.cc-anywhere/config.json
 cc-anywhere --help
 ```
 
@@ -40,11 +42,11 @@ The daemon connects to the relay server over WebSocket and manages local Claude 
 
 ## Relay server
 
-You need a relay server reachable from both your local machine and your mobile/web client. Deploy your own with [`cc-anywhere-relay`](https://www.npmjs.com/package/cc-anywhere-relay):
+You need a relay server reachable from both your local machine and your mobile/web client. Deploy your own with [`@lichenxi.cat/cc-anywhere-relay`](https://www.npmjs.com/package/@lichenxi.cat/cc-anywhere-relay):
 
 ```bash
 # On any VPS with ports 80/443 reachable:
-npm install -g cc-anywhere-relay
+npm install -g @lichenxi.cat/cc-anywhere-relay
 cc-anywhere-relay --port 3100
 ```
 

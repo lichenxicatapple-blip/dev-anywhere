@@ -1,12 +1,14 @@
-# cc-anywhere-relay
+# @lichenxi.cat/cc-anywhere-relay
 
-Relay server for [cc-anywhere](https://www.npmjs.com/package/cc-anywhere) — bridges local Claude Code proxies to remote web clients via WebSocket.
+Relay server for [`@lichenxi.cat/cc-anywhere`](https://www.npmjs.com/package/@lichenxi.cat/cc-anywhere) — bridges local Claude Code proxies to remote web clients via WebSocket.
 
 ## Install
 
 ```bash
-npm install -g cc-anywhere-relay
+npm install -g @lichenxi.cat/cc-anywhere-relay
 ```
+
+This installs the `cc-anywhere-relay` command globally.
 
 Requires Node.js >= 20.
 
@@ -48,7 +50,7 @@ This package serves plain HTTP + WS. For production, put it behind nginx / Caddy
 ## Using the embedded server programmatically
 
 ```ts
-import { createRelayServer } from "cc-anywhere-relay/server";
+import { createRelayServer } from "@lichenxi.cat/cc-anywhere-relay/server";
 import pino from "pino";
 
 const relay = createRelayServer({

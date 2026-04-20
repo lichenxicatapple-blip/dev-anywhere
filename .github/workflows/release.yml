@@ -86,12 +86,12 @@ jobs:
 
       - run: pnpm -r build
 
-      - name: Publish cc-anywhere
-        run: pnpm --filter cc-anywhere publish --no-git-checks --access public
+      - name: Publish @lichenxi.cat/cc-anywhere
+        run: pnpm --filter @lichenxi.cat/cc-anywhere publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish cc-anywhere-relay
-        run: pnpm --filter cc-anywhere-relay publish --no-git-checks --access public
+      - name: Publish @lichenxi.cat/cc-anywhere-relay
+        run: pnpm --filter @lichenxi.cat/cc-anywhere-relay publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

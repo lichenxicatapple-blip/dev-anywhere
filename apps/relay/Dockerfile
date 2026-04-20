@@ -10,14 +10,14 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/relay/package.json apps/relay/
 
-RUN pnpm install --frozen-lockfile --filter @cc-anywhere/shared --filter cc-anywhere-relay
+RUN pnpm install --frozen-lockfile --filter @cc-anywhere/shared --filter @lichenxi.cat/cc-anywhere-relay
 
 # 拷贝源码并构建
 COPY packages/shared/ packages/shared/
 COPY apps/relay/ apps/relay/
 
 RUN pnpm --filter @cc-anywhere/shared build
-RUN pnpm --filter cc-anywhere-relay build
+RUN pnpm --filter @lichenxi.cat/cc-anywhere-relay build
 
 # 生产阶段：只拷贝运行时需要的文件
 FROM node:22-alpine AS runner
