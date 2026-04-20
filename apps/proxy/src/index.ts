@@ -143,6 +143,8 @@ const program = new Command("cc-anywhere")
       console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
       process.exit(1);
     }
+    // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
+    // tsup 基于 dynamic import 自动代码分裂，避免所有命令都为 terminal 付出 14KB 额外启动成本。
     const { startTerminal } = await import("./terminal.js");
     await startTerminal(cliArgs);
   });
@@ -159,6 +161,7 @@ const serve = new Command("serve")
     if (opts.daemon) {
       await startDaemon();
     } else {
+      // 延迟导入 serve: daemon 模式只需要 startDaemon（纯 spawn），不需要加载 70KB 的 serve bundle
       const { startService } = await import("./serve.js");
       await startService();
     }

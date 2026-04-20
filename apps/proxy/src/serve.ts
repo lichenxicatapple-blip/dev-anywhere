@@ -26,6 +26,7 @@ import {
   sessionPaths,
 } from "./common/paths.js";
 import { spawnBundled } from "./common/env.js";
+import { loadConfig } from "./common/config.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -786,7 +787,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   );
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
-  const { loadConfig } = await import("./common/config.js");
   const proxyConfig = loadConfig();
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-
-const CONFIG_PATH = `${process.env.HOME}/.cc-anywhere/config.json`;
+import { CONFIG_PATH } from "./paths.js";
+import { logger } from "./logger.js";
 
 export interface ProxyConfig {
   relayUrl?: string;
@@ -9,17 +9,41 @@ export interface ProxyConfig {
 }
 
 export function loadConfig(): ProxyConfig {
-  const fromFile: ProxyConfig = existsSync(CONFIG_PATH)
-    ? (() => {
-        try {
-          return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as ProxyConfig;
-        } catch {
-          return {};
-        }
-      })()
-    : {};
-  return {
+  let fromFile: ProxyConfig = {};
+  if (existsSync(CONFIG_PATH)) {
+    try {
+      fromFile = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as ProxyConfig;
+    } catch (err) {
+      logger.warn(
+        { path: CONFIG_PATH, err: err instanceof Error ? err.message : String(err) },
+        "Failed to parse config file, falling back to env-only",
+      );
+    }
+  } else {
+    logger.debug({ path: CONFIG_PATH }, "Config file not found, using env-only");
+  }
+
+  const config: ProxyConfig = {
     relayUrl: process.env.RELAY_URL ?? fromFile.relayUrl,
     relayToken: process.env.RELAY_PROXY_TOKEN ?? fromFile.relayToken,
   };
+
+  logger.info(
+    {
+      relayUrl: config.relayUrl ?? "(unset)",
+      relayUrlSource: process.env.RELAY_URL
+        ? "env"
+        : fromFile.relayUrl
+          ? "file"
+          : "none",
+      relayTokenSource: process.env.RELAY_PROXY_TOKEN
+        ? "env"
+        : fromFile.relayToken
+          ? "file"
+          : "none",
+    },
+    "Config loaded",
+  );
+
+  return config;
 }
