@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import type { DataTap } from "./tap.js";
+import { readTtySize, type DataTap } from "./tap.js";
 
 function resolveClaudePath(): string {
   const custom = process.env.CLAUDE_BIN;
@@ -43,8 +43,7 @@ export class PtyManager {
   }
 
   start(): void {
-    const cols = this.stdout.columns ?? 80;
-    const rows = this.stdout.rows ?? 24;
+    const { cols, rows } = readTtySize(this.stdout);
 
     const claudePath = resolveClaudePath();
     const child = pty.spawn(claudePath, this.claudeArgs, {
@@ -76,8 +75,7 @@ export class PtyManager {
     this.stdout.on("resize", () => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        const newCols = this.stdout.columns ?? 80;
-        const newRows = this.stdout.rows ?? 24;
+        const { cols: newCols, rows: newRows } = readTtySize(this.stdout);
         child.resize(newCols, newRows);
         this.onResize?.(newCols, newRows);
       }, 50);

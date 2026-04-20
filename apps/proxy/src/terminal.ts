@@ -1,7 +1,7 @@
 import { connect, type Socket } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { DataTap } from "./terminal/tap.js";
+import { readTtySize, type DataTap } from "./terminal/tap.js";
 import { PtyManager } from "./terminal/pty-manager.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
@@ -317,8 +317,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   }
   sessionId = response.sessionId;
 
-  const cols = process.stdout.columns ?? 80;
-  const rows = process.stdout.rows ?? 24;
+  const { cols, rows } = readTtySize(process.stdout);
   log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal");
 
   headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
