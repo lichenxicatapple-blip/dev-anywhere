@@ -12,7 +12,7 @@ import {
   isInitialized,
   initWorkspace,
 } from "./common/paths.js";
-import { spawnBundled } from "./common/env.js";
+import { spawnScript } from "./common/env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -129,7 +129,7 @@ async function startDaemon(): Promise<void> {
     }
   }
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
-  const child = spawnBundled("serve", __dirname);
+  const child = spawnScript(new URL("./serve", import.meta.url));
   console.log(`Service started in background (PID ${child.pid})`);
 }
 

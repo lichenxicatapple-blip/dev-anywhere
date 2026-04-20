@@ -1,6 +1,4 @@
 import { createServer, connect, type Socket } from "node:net";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
 import {
@@ -25,7 +23,7 @@ import {
   DATA_DIR,
   sessionPaths,
 } from "./common/paths.js";
-import { spawnBundled } from "./common/env.js";
+import { spawnScript } from "./common/env.js";
 import { loadConfig } from "./common/config.js";
 import {
   createIpcReader,
@@ -38,8 +36,6 @@ import {
 import { nanoid } from "nanoid";
 import { createControlMessageHandlers, type ControlMessageHandlers } from "./serve/handlers/control-messages.js";
 import { readSessionMessages } from "./serve/session-history.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------- 基础工具函数 ----------
 
@@ -357,7 +353,7 @@ function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionI
   workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
   workerArgs.push("--");
 
-  const child = spawnBundled("session-worker", __dirname, workerArgs);
+  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs);
   const workerPid = child.pid!;
   logger.info({ sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
   return workerPid;

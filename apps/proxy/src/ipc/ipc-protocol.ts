@@ -143,8 +143,8 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     title: z.string(),
   }),
 
-  // terminal → serve：PTY 语义状态变化，由 OSC 信号提取器检测
-  // state 枚举与 PtySemanticState 保持一致（osc-extractor.ts）
+  // terminal → serve：PTY 语义状态变化，由 OSC 信号提取器检测。
+  // 下面 state 枚举必须与 src/terminal/osc-extractor.ts 的 PtySemanticState 保持一致。
   z.object({
     type: z.literal("pty_state_push"),
     sessionId: z.string(),

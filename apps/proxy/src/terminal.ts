@@ -1,7 +1,5 @@
 import { connect, type Socket } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { DataTap } from "./terminal/tap.js";
 import { PtyManager } from "./terminal/pty-manager.js";
@@ -11,7 +9,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./common/paths.js";
-import { spawnBundled } from "./common/env.js";
+import { spawnScript } from "./common/env.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -19,8 +17,6 @@ import {
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // serve daemon 自动拉起的连接重试参数
 const ENSURE_SERVICE_MAX_RETRIES = 20;
@@ -70,7 +66,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
   log.info("Auto-starting serve daemon");
-  spawnBundled("serve", __dirname);
+  spawnScript(new URL("./serve", import.meta.url));
 
   for (let i = 0; i < ENSURE_SERVICE_MAX_RETRIES; i++) {
     const delay = Math.min(

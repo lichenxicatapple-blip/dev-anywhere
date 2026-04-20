@@ -8,12 +8,22 @@ export const CONFIG_PATH = `${CC_DIR}/config.json`;
 const RUN_DIR = `${CC_DIR}/run`;
 export const SOCK_PATH = `${RUN_DIR}/cc-anywhere.sock`;
 export const PID_PATH = `${RUN_DIR}/cc-anywhere.pid`;
-// STOPPED_PATH: 布尔标记文件（存在即为真），用于表达"用户主动停 daemon"这一意图。
-// 不变量：文件存在时，terminal 必须 NOT 自动 spawn serve。文件不存在时，terminal 可以自动 spawn。
-// 写入：stopService (index.ts) —— kill 完 daemon 后创建。
-// 删除：startDaemon (index.ts)、ensureService (terminal.ts)、startService (serve.ts)。
-// 读取：reconnectToServe (terminal.ts) —— 决定重连时只 tryConnect 还是 ensureService。
-// 任何新增的 daemon 启停入口都必须维护此不变量，否则"用户 stop 之后被意外拉活"的回归会复现。
+// 停机标记文件。用户执行 `cc-anywhere stop` 时创建，其它时候不存在。文件内容无意义。
+// 作用：告诉 terminal 不要在此期间自动重启 daemon。
+//
+// 背景：terminal 在与 serve 的连接断开时，默认会 spawn 新 daemon 把连接修复。
+// 这个默认行为与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会
+// 立即把它重新拉起。解决办法是 stop 落下此标记，terminal 重连逻辑检查此标记：
+// 存在则仅 tryConnect，不 spawn 新 daemon。
+//
+// 维护此标记的代码位置：
+//   写：index.ts   stopService
+//   删：index.ts   startDaemon
+//   删：terminal.ts ensureService
+//   删：serve.ts   startService
+//   读：terminal.ts reconnectToServe
+//
+// 新增 daemon 启停入口时必须在对应位置维护此标记。
 export const STOPPED_PATH = `${RUN_DIR}/stopped`;
 
 // 持久化状态
