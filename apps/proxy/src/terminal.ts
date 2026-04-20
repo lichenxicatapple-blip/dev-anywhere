@@ -1,8 +1,8 @@
 import { connect, type Socket } from "node:net";
-import { spawn } from "node:child_process";
 import { existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { DataTap } from "./tap.js";
 import { PtyManager } from "./pty-manager.js";
 import pkg from "@xterm/headless";
@@ -11,6 +11,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
 import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
+import { spawnBundled } from "./env.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -19,8 +20,24 @@ import {
 } from "./ipc-protocol.js";
 import { terminalLogger as log } from "./logger.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// serve daemon 自动拉起的连接重试参数
+const ENSURE_SERVICE_MAX_RETRIES = 20;
+const ENSURE_SERVICE_INITIAL_DELAY_MS = 100;
+const ENSURE_SERVICE_MAX_DELAY_MS = 2_000;
+
+// 等待特定类型 IPC 消息的默认超时
+const WAIT_FOR_MESSAGE_TIMEOUT_MS = 10_000;
+
+// idle 检测：超过 IDLE_THRESHOLD_MS 无输出则翻转 working -> turn_complete
+const IDLE_CHECK_INTERVAL_MS = 3_000;
+const IDLE_THRESHOLD_MS = 3_000;
+
+// serve 连接断开后的重连重试参数
+const RECONNECT_MAX_RETRIES = 60;
+const RECONNECT_INITIAL_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 5_000;
 
 // terminal 进程生命周期状态
 const TerminalState = {
@@ -41,10 +58,6 @@ function tryConnect(sockPath: string): Promise<Socket | null> {
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function ensureService(autoStart = true): Promise<Socket> {
   const existing = await tryConnect(SOCK_PATH);
   if (existing) {
@@ -56,18 +69,14 @@ async function ensureService(autoStart = true): Promise<Socket> {
 
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
-  const isDev = __filename.endsWith(".ts");
-  const servePath = join(__dirname, isDev ? "serve.ts" : "serve.js");
-  log.info({ servePath, isDev }, "Auto-starting serve daemon");
-  const child = spawn(isDev ? "tsx" : process.execPath, [servePath], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  log.info("Auto-starting serve daemon");
+  spawnBundled("serve", __dirname);
 
-  const maxRetries = 20;
-  for (let i = 0; i < maxRetries; i++) {
-    const delay = Math.min(100 * (i + 1), 2000);
+  for (let i = 0; i < ENSURE_SERVICE_MAX_RETRIES; i++) {
+    const delay = Math.min(
+      ENSURE_SERVICE_INITIAL_DELAY_MS * (i + 1),
+      ENSURE_SERVICE_MAX_DELAY_MS,
+    );
     await sleep(delay);
     const socket = await tryConnect(SOCK_PATH);
     if (socket) {
@@ -76,9 +85,12 @@ async function ensureService(autoStart = true): Promise<Socket> {
     }
   }
 
-  log.error({ maxRetries }, "Failed to connect to service");
+  log.error(
+    { maxRetries: ENSURE_SERVICE_MAX_RETRIES },
+    "Failed to connect to service",
+  );
   throw new Error(
-    `Failed to connect to cc-anywhere service after ${maxRetries} retries. Check ${LOG_PATH} for details.`,
+    `Failed to connect to cc-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${LOG_PATH} for details.`,
   );
 }
 
@@ -89,7 +101,7 @@ function waitForMessage(
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error(`Timeout waiting for ${messageType}`));
-    }, 10000);
+    }, WAIT_FOR_MESSAGE_TIMEOUT_MS);
 
     createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === messageType) {
@@ -116,16 +128,19 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   let serializeAddon: SerializeAddon | null = null;
 
-  function sendPtyState(state: "working" | "turn_complete" | "approval_wait", title?: string, tool?: string): void {
+  function sendPtyState(
+    state: PtySemanticState,
+    meta?: { title?: string; tool?: string },
+  ): void {
     if (!socket.writable || !sessionId) return;
     socket.write(serializeIpc({
       type: "pty_state_push",
       sessionId,
       state,
-      ...(title !== undefined ? { title } : {}),
-      ...(tool !== undefined ? { tool } : {}),
+      ...(meta?.title !== undefined ? { title: meta.title } : {}),
+      ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
     }));
-    log.info({ sessionId, state, title, tool }, "PTY state pushed");
+    log.info({ sessionId, state, title: meta?.title, tool: meta?.tool }, "PTY state pushed");
   }
 
   function setupSocketHandlers(): void {
@@ -156,29 +171,37 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     });
 
-    socket.on("error", () => {});
+    // socket error 通常和 close 事件成对出现，这里记 warn 避免静默吞错，
+    // 实际的重连仍由 close handler 触发。
+    socket.on("error", (err) => {
+      log.warn({ err: err.message }, "Serve socket error");
+    });
   }
 
-  // idle/working 检测：3 秒无数据输出则从 working 转为 turn_complete
+  // idle/working 检测：超过 IDLE_THRESHOLD_MS 无输出则从 working 转为 turn_complete
   function setupIdleCheck(): void {
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     idleCheckTimer = setInterval(() => {
-      if (lastOutputTime > 0 && Date.now() - lastOutputTime > 3000) {
+      if (lastOutputTime > 0 && Date.now() - lastOutputTime > IDLE_THRESHOLD_MS) {
         lastOutputTime = 0;
         if (currentPtyState === "working") {
           currentPtyState = "turn_complete";
           sendPtyState("turn_complete");
         }
       }
-    }, 3000);
+    }, IDLE_CHECK_INTERVAL_MS);
   }
 
   async function reconnectToServe(): Promise<void> {
     log.info("Serve connection lost, starting reconnection");
 
-    const maxRetries = 60;
-    for (let i = 0; i < maxRetries; i++) {
-      await sleep(Math.min(1000 * (i + 1), 5000));
+    for (let i = 0; i < RECONNECT_MAX_RETRIES; i++) {
+      await sleep(
+        Math.min(
+          RECONNECT_INITIAL_DELAY_MS * (i + 1),
+          RECONNECT_MAX_DELAY_MS,
+        ),
+      );
       try {
         const stopped = existsSync(STOPPED_PATH);
         log.debug({ attempt: i + 1, stopped }, "Reconnect attempt");
@@ -208,11 +231,17 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         }
 
         return;
-      } catch {
-        // 继续重试
+      } catch (err) {
+        log.debug(
+          { err: err instanceof Error ? err.message : err, attempt: i + 1 },
+          "Reconnect attempt failed",
+        );
       }
     }
-    log.error({ maxRetries }, "Reconnection exhausted");
+    log.error(
+      { maxRetries: RECONNECT_MAX_RETRIES },
+      "Reconnection exhausted",
+    );
   }
 
   // 请求创建 PTY 会话
@@ -265,7 +294,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
     const signal = extractOscSignals(data);
     if (signal?.state === "approval_wait") {
       currentPtyState = "approval_wait";
-      sendPtyState("approval_wait", signal.title, signal.tool);
+      sendPtyState("approval_wait", { title: signal.title, tool: signal.tool });
     }
   };
 

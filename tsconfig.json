@@ -4,7 +4,6 @@
     { "path": "packages/shared" },
     { "path": "apps/proxy" },
     { "path": "apps/relay" },
-    { "path": "apps/feishu" },
     { "path": "apps/web" }
   ]
 }

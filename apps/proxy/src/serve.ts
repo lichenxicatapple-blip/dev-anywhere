@@ -1,7 +1,6 @@
 import { createServer, connect, type Socket } from "node:net";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
 import {
@@ -26,6 +25,7 @@ import {
   DATA_DIR,
   sessionPaths,
 } from "./paths.js";
+import { spawnBundled } from "./env.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -38,8 +38,7 @@ import { nanoid } from "nanoid";
 import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
 import { readSessionMessages } from "./session-history.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------- 基础工具函数 ----------
 
@@ -348,22 +347,16 @@ function connectToWorker(
 }
 
 function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionId?: string; permissionMode?: string }): number {
-  const isDev = __filename.endsWith(".ts");
-  const workerPath = join(__dirname, isDev ? "session-worker.ts" : "session-worker.js");
   const paths = sessionPaths(sessionId);
 
-  const workerArgs = [workerPath, sessionId, paths.workerSock];
+  const workerArgs: string[] = [sessionId, paths.workerSock];
   if (options?.cwd) workerArgs.push("--cwd", options.cwd);
   if (options?.resumeSessionId) workerArgs.push("--resume", options.resumeSessionId);
   // 远程场景默认走 default (每工具审批), 覆盖用户全局 claude settings 的 defaultMode
   workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
   workerArgs.push("--");
 
-  const child = spawn(isDev ? "tsx" : process.execPath, workerArgs, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  const child = spawnBundled("session-worker", __dirname, workerArgs);
   const workerPid = child.pid!;
   logger.info({ sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
   return workerPid;

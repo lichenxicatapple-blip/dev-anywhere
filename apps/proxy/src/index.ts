@@ -1,5 +1,4 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -13,10 +12,10 @@ import {
   isInitialized,
   initWorkspace,
 } from "./paths.js";
+import { spawnBundled } from "./env.js";
 import { createIpcReader, serializeIpc } from "./ipc-protocol.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string };
 
 function stopService(): boolean {
@@ -130,13 +129,7 @@ async function startDaemon(): Promise<void> {
     }
   }
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
-  const isDev = __filename.endsWith(".ts");
-  const servePath = join(__dirname, isDev ? "serve.ts" : "serve.js");
-  const child = spawn(isDev ? "tsx" : process.execPath, [servePath], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  const child = spawnBundled("serve", __dirname);
   console.log(`Service started in background (PID ${child.pid})`);
 }
 

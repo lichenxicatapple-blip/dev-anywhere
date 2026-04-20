@@ -11,6 +11,11 @@ export default defineConfig({
   sourcemap: true,
   target: "node20",
   noExternal: ["@cc-anywhere/shared"],
+  // 构建期将 process.env.NODE_ENV 替换为 "production"，
+  // 让 paths.ts 里的 IS_DEV 静态折叠为 false，dev 分支被 DCE 删除。
+  define: {
+    "process.env.NODE_ENV": '"production"',
+  },
   banner: {
     js: "#!/usr/bin/env node",
   },
