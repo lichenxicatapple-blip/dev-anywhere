@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { readTtySize, type DataTap } from "./tap.js";
+import { readTtySize } from "./tty.js";
 
 function resolveClaudePath(): string {
   const custom = process.env.CLAUDE_BIN;
@@ -17,7 +17,7 @@ function resolveClaudePath(): string {
 
 interface PtyManagerOptions {
   claudeArgs: string[];
-  tap: DataTap;
+  tap: (data: string) => void;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   onSessionExit?: (code: number) => void | Promise<void>;
@@ -27,7 +27,7 @@ interface PtyManagerOptions {
 export class PtyManager {
   private child: IPty | null = null;
   private readonly claudeArgs: string[];
-  private readonly tap: DataTap;
+  private readonly tap: (data: string) => void;
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
   private readonly onSessionExit?: (code: number) => void;
