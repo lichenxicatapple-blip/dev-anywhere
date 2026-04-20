@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractOscSignals } from "#src/osc-extractor.js";
+import { extractOscSignals } from "#src/terminal/osc-extractor.js";
 
 describe("extractOscSignals", () => {
   it("returns turn_complete for OSC 9 'waiting for your input'", () => {

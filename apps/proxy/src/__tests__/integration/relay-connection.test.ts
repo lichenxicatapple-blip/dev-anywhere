@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createLogger } from "@cc-anywhere/shared";
 import { createRelayServer, type RelayServer } from "@lichenxi.cat/cc-anywhere-relay/server";
 import { buildMessage } from "@cc-anywhere/shared";
-import { RelayConnection } from "#src/relay-connection.js";
+import { RelayConnection } from "#src/serve/relay-connection.js";
 
 const relayLogger = createLogger({ name: "test", silent: true });
 

@@ -11,9 +11,9 @@ import {
   CONFIG_PATH,
   isInitialized,
   initWorkspace,
-} from "./paths.js";
-import { spawnBundled } from "./env.js";
-import { createIpcReader, serializeIpc } from "./ipc-protocol.js";
+} from "./common/paths.js";
+import { spawnBundled } from "./common/env.js";
+import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string };

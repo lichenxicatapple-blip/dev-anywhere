@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { SessionManager } from "#src/session-manager.js";
-import { createControlMessageHandlers } from "#src/handlers/control-messages.js";
+import type { SessionManager } from "#src/serve/session-manager.js";
+import { createControlMessageHandlers } from "#src/serve/handlers/control-messages.js";
 
 function createMockSessionManager(sessions: Array<{ id: string; state: string }> = []): SessionManager {
   return {

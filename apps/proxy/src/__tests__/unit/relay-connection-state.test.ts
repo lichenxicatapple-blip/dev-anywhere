@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // RelayConnectionState 需要从 relay-connection.ts 导出
-import { RelayConnection, RelayConnectionState } from "#src/relay-connection.js";
+import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
 
 // mock ws 模块，避免实际 WebSocket 连接
 vi.mock("ws", () => {

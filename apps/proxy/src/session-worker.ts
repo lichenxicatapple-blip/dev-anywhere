@@ -6,13 +6,13 @@ import {
   createRelayApprovalStrategy,
   type StreamJsonEvent,
   type ClaudePermissionMode,
-} from "./json-session.js";
-import { SeqCounter } from "./seq-counter.js";
+} from "./worker/json-session.js";
+import { SeqCounter } from "./common/seq-counter.js";
 import {
   createWorkerReader,
   serializeWorkerMsg,
   type WorkerMessage,
-} from "./ipc-protocol.js";
+} from "./ipc/ipc-protocol.js";
 
 // 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
 const sessionId = process.argv[2];

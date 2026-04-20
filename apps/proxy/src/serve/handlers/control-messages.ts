@@ -3,7 +3,7 @@ import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
-import { logger } from "../logger.js";
+import { logger } from "../../common/logger.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;

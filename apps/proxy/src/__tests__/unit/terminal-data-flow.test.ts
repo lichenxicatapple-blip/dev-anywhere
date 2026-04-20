@@ -68,7 +68,7 @@ describe("headless terminal write + serialize", () => {
 
 describe("SeqCounter integration smoke test", () => {
   it("SeqCounter can be imported and used", async () => {
-    const { SeqCounter } = await import("#src/seq-counter.js");
+    const { SeqCounter } = await import("#src/common/seq-counter.js");
     const { mkdirSync, rmSync } = await import("node:fs");
     const { join } = await import("node:path");
 

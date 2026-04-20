@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { scanSessionHistory } from "#src/session-history.js";
+import { scanSessionHistory } from "#src/serve/session-history.js";
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 实际结构: ~/.claude/projects/<encoded-path>/<session-id>.jsonl

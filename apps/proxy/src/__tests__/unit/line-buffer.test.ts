@@ -15,7 +15,7 @@ function collectOutput(stream: Transform): Promise<string[]> {
 
 describe("LineBuffer", () => {
   async function importLineBuffer() {
-    const mod = await import("#src/line-buffer.js");
+    const mod = await import("#src/ipc/line-buffer.js");
     return mod.LineBuffer;
   }
 

@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 
 describe("IPC Protocol", () => {
   async function importIpc() {
-    return await import("#src/ipc-protocol.js");
+    return await import("#src/ipc/ipc-protocol.js");
   }
 
   describe("serializeIpc", () => {
@@ -300,7 +300,7 @@ describe("IPC Protocol", () => {
 // === Phase 3d: Worker message path tests ===
 describe("Worker Protocol", () => {
   async function importIpc() {
-    return await import("#src/ipc-protocol.js");
+    return await import("#src/ipc/ipc-protocol.js");
   }
 
   describe("serializeWorkerMsg", () => {

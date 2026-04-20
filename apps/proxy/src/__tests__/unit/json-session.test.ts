@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
-import type { StreamJsonEvent, ApprovalStrategy } from "#src/json-session.js";
+import type { StreamJsonEvent, ApprovalStrategy } from "#src/worker/json-session.js";
 
 // 模拟 child_process.spawn 返回的子进程
 function createMockChild(): ChildProcess & {
@@ -53,13 +53,13 @@ vi.mock("node:child_process", () => ({
 }));
 
 describe("JsonSession", () => {
-  let JsonSession: typeof import("#src/json-session.js").JsonSession;
+  let JsonSession: typeof import("#src/worker/json-session.js").JsonSession;
 
   beforeEach(async () => {
     mockChild = createMockChild();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
-    const mod = await import("#src/json-session.js");
+    const mod = await import("#src/worker/json-session.js");
     JsonSession = mod.JsonSession;
   });
 

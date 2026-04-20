@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { LineBuffer } from "./line-buffer.js";
+import { LineBuffer } from "../ipc/line-buffer.js";
 
 // stream-json 事件类型定义，基于 cc-connect 验证的结构
 export type StreamJsonEventType =

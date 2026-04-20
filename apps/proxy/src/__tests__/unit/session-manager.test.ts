@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { SessionManager } from "#src/session-manager.js";
+import { SessionManager } from "#src/serve/session-manager.js";
 import { SessionState } from "@cc-anywhere/shared";
 
 function makeTmpDir(): string {

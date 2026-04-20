@@ -3,22 +3,22 @@ import { existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { DataTap } from "./tap.js";
-import { PtyManager } from "./pty-manager.js";
+import type { DataTap } from "./terminal/tap.js";
+import { PtyManager } from "./terminal/pty-manager.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { extractOscSignals, type PtySemanticState } from "./osc-extractor.js";
-import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./paths.js";
-import { spawnBundled } from "./env.js";
+import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
+import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./common/paths.js";
+import { spawnBundled } from "./common/env.js";
 import {
   createIpcReader,
   serializeIpc,
   encodeBinaryIpcFrame,
   type IpcMessage,
-} from "./ipc-protocol.js";
-import { terminalLogger as log } from "./logger.js";
+} from "./ipc/ipc-protocol.js";
+import { terminalLogger as log } from "./common/logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

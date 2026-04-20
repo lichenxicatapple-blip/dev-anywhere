@@ -13,10 +13,10 @@ import {
   rmSync,
 } from "node:fs";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
-import { logger } from "./logger.js";
-import { SessionManager } from "./session-manager.js";
-import { RelayConnection } from "./relay-connection.js";
-import { SeqCounter } from "./seq-counter.js";
+import { logger } from "./common/logger.js";
+import { SessionManager } from "./serve/session-manager.js";
+import { RelayConnection } from "./serve/relay-connection.js";
+import { SeqCounter } from "./common/seq-counter.js";
 import {
   SOCK_PATH,
   PID_PATH,
@@ -24,8 +24,8 @@ import {
   SESSIONS_PATH,
   DATA_DIR,
   sessionPaths,
-} from "./paths.js";
-import { spawnBundled } from "./env.js";
+} from "./common/paths.js";
+import { spawnBundled } from "./common/env.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -33,16 +33,16 @@ import {
   serializeWorkerMsg,
   type IpcMessage,
   type WorkerMessage,
-} from "./ipc-protocol.js";
+} from "./ipc/ipc-protocol.js";
 import { nanoid } from "nanoid";
-import { createControlMessageHandlers, type ControlMessageHandlers } from "./handlers/control-messages.js";
-import { readSessionMessages } from "./session-history.js";
+import { createControlMessageHandlers, type ControlMessageHandlers } from "./serve/handlers/control-messages.js";
+import { readSessionMessages } from "./serve/session-history.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---------- 基础工具函数 ----------
 
-function toSessionListPayload(s: import("./session-manager.js").SessionInfo) {
+function toSessionListPayload(s: import("./serve/session-manager.js").SessionInfo) {
   return {
     sessionId: s.id,
     mode: s.mode,
@@ -786,7 +786,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   );
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
-  const { loadConfig } = await import("./config.js");
+  const { loadConfig } = await import("./common/config.js");
   const proxyConfig = loadConfig();
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;

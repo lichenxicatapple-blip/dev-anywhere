@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
-import { logger } from "./logger.js";
+import { logger } from "../common/logger.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径

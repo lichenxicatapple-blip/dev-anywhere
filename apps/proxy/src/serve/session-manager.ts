@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { SessionState } from "@cc-anywhere/shared";
-import { logger } from "./logger.js";
+import { logger } from "../common/logger.js";
 
 export interface SessionInfo {
   id: string;
