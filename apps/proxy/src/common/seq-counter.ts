@@ -28,17 +28,13 @@ export class SeqCounter {
   }
 
   private load(): void {
-    try {
-      if (existsSync(this.filePath)) {
-        const content = readFileSync(this.filePath, "utf-8").trim();
-        const parsed = parseInt(content, 10);
-        if (!isNaN(parsed) && parsed >= 0) {
-          this.seq = parsed;
-        }
-      }
-    } catch {
-      // 文件损坏或不可读，从 0 开始
+    if (!existsSync(this.filePath)) return;
+    const content = readFileSync(this.filePath, "utf-8").trim();
+    const parsed = parseInt(content, 10);
+    if (isNaN(parsed) || parsed < 0) {
+      throw new Error(`Corrupt seq file: ${this.filePath} contains "${content}"`);
     }
+    this.seq = parsed;
   }
 
   private save(): void {

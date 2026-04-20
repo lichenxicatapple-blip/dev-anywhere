@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { PassThrough } from "node:stream";
 
 describe("IPC Protocol", () => {
@@ -121,11 +121,12 @@ describe("IPC Protocol", () => {
       expect(messages).toHaveLength(2);
     });
 
-    it("logs warning for invalid JSON instead of throwing", async () => {
+    it("emits error on stream for invalid JSON, continues processing valid messages", async () => {
       const { createIpcReader } = await importIpc();
       const stream = new PassThrough();
       const messages: unknown[] = [];
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errors: Error[] = [];
+      stream.on("error", (err) => errors.push(err));
 
       createIpcReader(stream, (msg) => messages.push(msg));
 
@@ -138,8 +139,8 @@ describe("IPC Protocol", () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(messages).toHaveLength(1);
-      expect(warnSpy).toHaveBeenCalled();
-      warnSpy.mockRestore();
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/IPC message parse error/);
     });
   });
 
@@ -414,10 +415,12 @@ describe("Worker Protocol", () => {
       expect(messages[0]).toEqual({ type: "worker_stop" });
     });
 
-    it("skips invalid JSON without crashing, continues processing", async () => {
+    it("emits error on stream for invalid JSON, continues processing valid messages", async () => {
       const { createWorkerReader, serializeWorkerMsg } = await importIpc();
       const stream = new PassThrough();
       const messages: unknown[] = [];
+      const errors: Error[] = [];
+      stream.on("error", (err) => errors.push(err));
 
       createWorkerReader(stream, (msg) => messages.push(msg));
 
@@ -429,6 +432,8 @@ describe("Worker Protocol", () => {
 
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({ type: "worker_stop" });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/Worker message parse error/);
     });
   });
 

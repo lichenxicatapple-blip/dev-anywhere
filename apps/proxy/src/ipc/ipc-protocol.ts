@@ -273,9 +273,14 @@ export function createWorkerReader(
       const result = WorkerMessageSchema.safeParse(raw);
       if (result.success) {
         onMessage(result.data);
+      } else {
+        stream.emit(
+          "error",
+          new Error(`Worker message validation failed: ${result.error.message}`),
+        );
       }
-    } catch {
-      // JSON 解析失败的行直接丢弃，不中断流处理
+    } catch (err) {
+      stream.emit("error", new Error("Worker message parse error", { cause: err }));
     }
   });
   (stream as NodeJS.ReadableStream).pipe(lineBuffer);
@@ -337,10 +342,13 @@ export function createIpcReader(
           if (result.success) {
             onMessage(result.data);
           } else {
-            console.warn("IPC message validation failed:", result.error);
+            stream.emit(
+              "error",
+              new Error(`IPC message validation failed: ${result.error.message}`),
+            );
           }
         } catch (err) {
-          console.warn("IPC message parse error:", err);
+          stream.emit("error", new Error("IPC message parse error", { cause: err }));
         }
       }
     }
