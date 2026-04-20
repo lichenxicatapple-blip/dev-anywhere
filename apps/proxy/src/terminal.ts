@@ -8,7 +8,7 @@ const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
-import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH } from "./common/paths.js";
+import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import {
   createIpcReader,
@@ -230,7 +230,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
               type: "session_create_request",
               mode: "pty",
               cwd: sessionCwd,
-              name: sessionCwd.replace(process.env.HOME || "", "~"),
+              name: tildify(sessionCwd),
               pid: process.pid,
               sessionId,
             }),
@@ -265,7 +265,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       type: "session_create_request",
       mode: "pty",
       cwd: sessionCwd,
-      name: sessionCwd.replace(process.env.HOME || "", "~"),
+      name: tildify(sessionCwd),
       pid: process.pid,
     }),
   );

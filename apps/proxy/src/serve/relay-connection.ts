@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
@@ -8,11 +9,7 @@ import { serviceLogger } from "../common/logger.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
-const DEFAULT_PROXY_ID_PATH = join(
-  process.env.HOME ?? process.env.USERPROFILE ?? ".",
-  ".cc-anywhere",
-  "proxy-id",
-);
+const DEFAULT_PROXY_ID_PATH = join(homedir(), ".cc-anywhere", "proxy-id");
 
 // 指数退避上限 30 秒
 const MAX_BACKOFF_MS = 30000;

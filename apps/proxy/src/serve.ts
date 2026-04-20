@@ -15,6 +15,7 @@ import { serviceLogger } from "./common/logger.js";
 import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
 import { SeqCounter } from "./common/seq-counter.js";
+import { homedir } from "node:os";
 import {
   SOCK_PATH,
   PID_PATH,
@@ -22,6 +23,7 @@ import {
   SESSIONS_PATH,
   DATA_DIR,
   sessionPaths,
+  tildify,
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import { loadConfig } from "./common/config.js";
@@ -1040,7 +1042,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           relaySend!(
             JSON.stringify({
               type: "proxy_info",
-              homePath: process.env.HOME || "/",
+              homePath: homedir() || "/",
             }),
           );
         } else if (parsed.type === "dir_list_request") {
@@ -1051,7 +1053,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const cwd = parsed.cwd as string;
           const resumeSessionId = parsed.resumeSessionId as string | undefined;
           const permissionMode = parsed.permissionMode as string | undefined;
-          const name = cwd.replace(process.env.HOME || "", "~");
+          const name = tildify(cwd);
           // 先生成 ID 和启动 worker，连接成功后再注册 session
           const pendingId = nanoid();
           const workerPid = spawnWorker(pendingId, { cwd, resumeSessionId, permissionMode });

@@ -1,7 +1,16 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 // 所有 cc-anywhere 文件路径的集中定义
-const CC_DIR = `${process.env.HOME}/.cc-anywhere`;
+// 使用 os.homedir()：POSIX 走 HOME，Windows 走 USERPROFILE；未设置时回退到 getpwuid。
+// 相比 process.env.HOME，不会在缺失环境变量时构造出 "undefined/.cc-anywhere"。
+const HOME = homedir();
+const CC_DIR = `${HOME}/.cc-anywhere`;
+
+// 把 cwd 前缀替换为 ~，HOME 为空时原样返回（避免 replace("", "~") 把 ~ 前缀到所有路径）
+export function tildify(cwd: string): string {
+  return HOME ? cwd.replace(HOME, "~") : cwd;
+}
 export const CONFIG_PATH = `${CC_DIR}/config.json`;
 
 // 运行时文件

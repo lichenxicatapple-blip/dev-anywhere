@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 interface CommandEntry {
@@ -188,7 +189,7 @@ export async function discoverCommands(
   workDir: string,
   options?: DiscoverOptions,
 ): Promise<CommandEntry[]> {
-  const homeDir = options?.homeDir ?? process.env.HOME ?? "";
+  const homeDir = options?.homeDir ?? homedir();
 
   const builtins = REPL_BUILTINS.filter((c) => !COMMAND_BLACKLIST.has(c.name));
   const userSkills = scanSkillsDir(join(homeDir, ".claude", "skills"), "user-skill");

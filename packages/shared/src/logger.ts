@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import pino from "pino";
 
 export type { Logger } from "pino";
@@ -11,7 +12,7 @@ export interface CreateLoggerOptions {
   silent?: boolean;
 }
 
-const DEFAULT_LOG_DIR = `${process.env.HOME}/.cc-anywhere/logs`;
+const DEFAULT_LOG_DIR = `${homedir()}/.cc-anywhere/logs`;
 
 export function createLogger(options: CreateLoggerOptions): pino.Logger {
   const {
