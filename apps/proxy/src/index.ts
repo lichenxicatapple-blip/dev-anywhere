@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
@@ -117,6 +118,25 @@ function showStatus(): Promise<number> {
   });
 }
 
+const DAEMON_STARTUP_TIMEOUT_MS = 30_000;
+const DAEMON_STARTUP_POLL_MS = 200;
+
+// 轮询 SOCK_PATH 直到可连接，作为 serve 的 readiness 信号。
+// serve.ts 里 server.listen(SOCK_PATH) 是启动序列的最后一步，连上即代表 ready。
+async function waitForServeReady(timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const connected = await new Promise<boolean>((resolve) => {
+      const sock = connect(SOCK_PATH);
+      sock.once("connect", () => { sock.destroy(); resolve(true); });
+      sock.once("error", () => resolve(false));
+    });
+    if (connected) return true;
+    await sleep(DAEMON_STARTUP_POLL_MS);
+  }
+  return false;
+}
+
 async function startDaemon(): Promise<void> {
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
@@ -129,8 +149,66 @@ async function startDaemon(): Promise<void> {
     }
   }
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
-  const child = spawnScript(new URL("./serve", import.meta.url));
-  console.log(`Service started in background (PID ${child.pid})`);
+
+  // stderr 走 pipe 由父 CLI 订阅：子进程 ready 前（pino logger 未接管）的启动错误
+  // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。
+  // unref: false 保持父对子的 refcount，让父进程在 readiness handshake 期间不会提前退。
+  const child = spawnScript(new URL("./serve", import.meta.url), [], {
+    stdio: ["ignore", "ignore", "pipe"],
+    unref: false,
+  });
+
+  const stderrChunks: Buffer[] = [];
+  child.stderr!.on("data", (chunk: Buffer) => {
+    stderrChunks.push(chunk);
+  });
+
+  // race: readiness handshake vs. 子进程先挂。子进程 ready 前就 exit 说明启动硬失败，
+  // 不必再等到 30s 超时才报错。
+  type Outcome =
+    | { kind: "ready" }
+    | { kind: "timeout" }
+    | { kind: "exited"; code: number | null; signal: NodeJS.Signals | null };
+
+  const readyOutcome: Promise<Outcome> = waitForServeReady(DAEMON_STARTUP_TIMEOUT_MS).then(
+    (ok) => (ok ? { kind: "ready" as const } : { kind: "timeout" as const }),
+  );
+  const exitOutcome: Promise<Outcome> = new Promise((resolve) => {
+    // 设 listener 前已经 exit 的边界：Node 记在 exitCode 上
+    if (child.exitCode !== null) {
+      resolve({ kind: "exited", code: child.exitCode, signal: child.signalCode });
+      return;
+    }
+    child.once("exit", (code, signal) => resolve({ kind: "exited", code, signal }));
+  });
+
+  const result = await Promise.race([readyOutcome, exitOutcome]);
+
+  if (result.kind === "ready") {
+    console.log(`Service started in background (PID ${child.pid})`);
+    // ready 后 detach：摘 stderr 订阅，unref 让父 CLI 正常退出。pino 已接管输出。
+    child.stderr!.removeAllListeners("data");
+    child.unref();
+    return;
+  }
+
+  // 失败路径：timeout 或 exited
+  const stderrOutput = Buffer.concat(stderrChunks).toString("utf-8").trim();
+  if (result.kind === "exited") {
+    console.error(
+      `Service exited during startup (code=${result.code}, signal=${result.signal}).`,
+    );
+  } else {
+    console.error(`Service failed to become ready within ${DAEMON_STARTUP_TIMEOUT_MS / 1000}s.`);
+    try { process.kill(child.pid!, "SIGTERM"); } catch {
+      // 子进程可能已自己退出，kill 失败不影响后续退出码
+    }
+  }
+  if (stderrOutput) {
+    console.error("--- child stderr ---");
+    console.error(stderrOutput);
+  }
+  process.exit(1);
 }
 
 const program = new Command("cc-anywhere")

@@ -353,7 +353,7 @@ function spawnWorker(sessionId: string, options?: { cwd?: string; resumeSessionI
   workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
   workerArgs.push("--");
 
-  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs);
+  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs, { logger });
   const workerPid = child.pid!;
   logger.info({ sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId }, "Worker process spawned");
   return workerPid;

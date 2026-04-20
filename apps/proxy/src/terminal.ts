@@ -66,7 +66,19 @@ async function ensureService(autoStart = true): Promise<Socket> {
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
   log.info("Auto-starting serve daemon");
-  spawnScript(new URL("./serve", import.meta.url));
+  const child = spawnScript(new URL("./serve", import.meta.url), [], { logger: log });
+
+  // 挂个独立 exit 监听，让 retry 循环能快速短路。
+  // spawnScript 的 logger handler 已经另装了 once("exit") 管日志，这两个 listener 互不影响。
+  // 用扁平 flag 变量而非对象，绕开 TS 对 callback 内 let 赋值的窄化缺陷。
+  let childExited = false;
+  let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
+  child.once("exit", (code, signal) => {
+    childExited = true;
+    exitCode = code;
+    exitSignal = signal;
+  });
 
   for (let i = 0; i < ENSURE_SERVICE_MAX_RETRIES; i++) {
     const delay = Math.min(
@@ -74,6 +86,14 @@ async function ensureService(autoStart = true): Promise<Socket> {
       ENSURE_SERVICE_MAX_DELAY_MS,
     );
     await sleep(delay);
+
+    if (childExited) {
+      log.error({ code: exitCode, signal: exitSignal }, "Serve daemon exited during startup");
+      throw new Error(
+        `Serve daemon exited during startup (code=${exitCode}, signal=${exitSignal}). Check ${LOG_PATH} for details.`,
+      );
+    }
+
     const socket = await tryConnect(SOCK_PATH);
     if (socket) {
       log.info({ attempt: i + 1 }, "Connected to service after retry");
