@@ -347,19 +347,8 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     },
     onSessionExit: (code: number) => {
-      fsm.transitionTo(TerminalState.EXITED);
       log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
-      if (idleCheckTimer) clearInterval(idleCheckTimer);
-      // pty_deregister 通知 serve 做 session 清理（数据目录、relay 通知等）
-      // terminal 的 fd 会随进程退出被 OS 关闭，serve 负责删除数据目录
-      if (socket.writable && sessionId) {
-        const msg = serializeIpc({ type: "pty_deregister", sessionId });
-        socket.end(msg, () => {
-          process.exit(code);
-        });
-      } else {
-        process.exit(code);
-      }
+      cleanupAndExit(code);
     },
   });
   ptyManager.start();
@@ -370,19 +359,25 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   setupIdleCheck();
 
-  process.on("SIGTERM", () => {
-    log.info({ sessionId }, "SIGTERM received, shutting down");
-    // Ctrl+C 两连击或 onSessionExit 已经走过 EXITED 时，不再重复转换（会触发非法转换抛错）
+  // 统一收尾：转 EXITED → 停 idle 定时器 → 给 serve 发 pty_deregister → 退进程。
+  // pty_deregister 通知 serve 做 session 清理（数据目录、relay 通知等）；
+  // terminal fd 随进程退出由 OS 关闭，serve 负责删数据目录。
+  function cleanupAndExit(code: number): void {
+    // Ctrl+C 两连击或 onSessionExit 与 SIGTERM 竞争时，第二次调用直接短路
     if (fsm.is(TerminalState.EXITED)) return;
     fsm.transitionTo(TerminalState.EXITED);
     if (idleCheckTimer) clearInterval(idleCheckTimer);
     if (socket.writable && sessionId) {
-      const msg = serializeIpc({ type: "pty_deregister", sessionId });
-      socket.end(msg, () => {
-        process.exit(143);
+      socket.end(serializeIpc({ type: "pty_deregister", sessionId }), () => {
+        process.exit(code);
       });
     } else {
-      process.exit(143);
+      process.exit(code);
     }
+  }
+
+  process.on("SIGTERM", () => {
+    log.info({ sessionId }, "SIGTERM received, shutting down");
+    cleanupAndExit(143);
   });
 }
