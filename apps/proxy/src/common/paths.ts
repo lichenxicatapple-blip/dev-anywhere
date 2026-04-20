@@ -12,18 +12,8 @@ export const PID_PATH = `${RUN_DIR}/cc-anywhere.pid`;
 // 作用：告诉 terminal 不要在此期间自动重启 daemon。
 //
 // 背景：terminal 在与 serve 的连接断开时，默认会 spawn 新 daemon 把连接修复。
-// 这个默认行为与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会
-// 立即把它重新拉起。解决办法是 stop 落下此标记，terminal 重连逻辑检查此标记：
-// 存在则仅 tryConnect，不 spawn 新 daemon。
-//
-// 维护此标记的代码位置：
-//   写：index.ts   stopService
-//   删：index.ts   startDaemon
-//   删：terminal.ts ensureService
-//   删：serve.ts   startService
-//   读：terminal.ts reconnectToServe
-//
-// 新增 daemon 启停入口时必须在对应位置维护此标记。
+// 这与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会立即把它重新拉起。
+// 解决办法是 stop 落下此标记，terminal 重连逻辑先检查标记：存在则仅 tryConnect，不 spawn。
 export const STOPPED_PATH = `${RUN_DIR}/stopped`;
 
 // 持久化状态
