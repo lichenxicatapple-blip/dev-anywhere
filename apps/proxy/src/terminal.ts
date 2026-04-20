@@ -129,76 +129,196 @@ function waitForMessage<T extends IpcMessage["type"]>(
   });
 }
 
-export async function startTerminal(claudeArgs: string[]): Promise<void> {
-  log.info("Terminal starting");
-  const fsm = createFSM<TerminalState>({
+class TerminalSession {
+  private readonly fsm = createFSM<TerminalState>({
     initial: TerminalState.INIT,
     transitions: TERMINAL_TRANSITIONS,
     onTransition: (from, to) => log.info({ from, to }, "Terminal state transition"),
   });
-  fsm.transitionTo(TerminalState.CONNECTING_SERVICE);
-  let socket = await ensureService();
-  let sessionId: string | null = null;
-  let ptyManager: PtyManager | null = null;
-  let lastOutputTime = 0;
-  let idleCheckTimer: NodeJS.Timeout | null = null;
-  const sessionCwd = process.env.INIT_CWD || process.cwd();
-  let currentPtyState: PtySemanticState = "turn_complete";
+  private readonly sessionCwd = process.env.INIT_CWD || process.cwd();
+  // socket 在 run() 中连上 serve 后首次赋值；reconnect 会重新赋值为新实例
+  private socket!: Socket;
+  private sessionId: string | null = null;
+  private ptyManager: PtyManager | null = null;
+  private lastOutputTime = 0;
+  private idleCheckTimer: NodeJS.Timeout | null = null;
+  private currentPtyState: PtySemanticState = "turn_complete";
+  // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
+  private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
+  private serializeAddon: SerializeAddon | null = null;
+  // 记录上次 bridge 状态避免重连抖动导致 banner 连刷；初值 null 让首次状态（无论真假）都打，启动时提示 remote viewing 是否就绪
+  private lastBridgeConnected: boolean | null = null;
+  // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
+  private cleanupAndExit!: (code: number) => void;
 
-  // headless terminal 在 terminal.ts 进程内维护，用于按需 serialize() 给远程 client
-  let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
-  let serializeAddon: SerializeAddon | null = null;
+  constructor(private readonly claudeArgs: string[]) {}
 
-  // 记住上一次 bridge 状态避免重连期间 connected/disconnected 快速抖动打多行 banner，
-  // 初值 null 保证首个状态（无论真假）都会打，方便用户在启动就看到 remote viewing 是否就绪
-  let lastBridgeConnected: boolean | null = null;
-  function handleBridgeStatus(connected: boolean): void {
-    if (lastBridgeConnected === connected) return;
-    lastBridgeConnected = connected;
+  async run(): Promise<void> {
+    log.info("Terminal starting");
+    this.fsm.transitionTo(TerminalState.CONNECTING_SERVICE);
+    this.socket = await ensureService();
+
+    await this.createSession();
+    this.initHeadlessTerminal();
+    this.cleanupAndExit = createExitHandler({
+      fsm: this.fsm,
+      getSocket: () => this.socket,
+      getSessionId: () => this.sessionId,
+      getIdleCheckTimer: () => this.idleCheckTimer,
+    });
+
+    this.setupSocketHandlers();
+    this.startPtyManager();
+
+    this.socket.write(
+      serializeIpc({ type: "pty_register", sessionId: this.sessionId!, pid: process.pid }),
+    );
+    this.fsm.transitionTo(TerminalState.RUNNING);
+    this.setupIdleCheck();
+
+    process.on("SIGTERM", () => {
+      log.info({ sessionId: this.sessionId }, "SIGTERM received, shutting down");
+      this.cleanupAndExit(143);
+    });
+  }
+
+  private async createSession(): Promise<void> {
+    this.fsm.transitionTo(TerminalState.CREATING_SESSION);
+    const responsePromise = waitForMessage(this.socket, "session_create_response");
+    this.socket.write(
+      serializeIpc({
+        type: "session_create_request",
+        mode: "pty",
+        cwd: this.sessionCwd,
+        name: tildify(this.sessionCwd),
+        pid: process.pid,
+      }),
+    );
+    const response = await responsePromise;
+    if (response.error) {
+      throw new Error(`Failed to create session: ${response.error}`);
+    }
+    this.sessionId = response.sessionId;
+  }
+
+  private initHeadlessTerminal(): void {
+    const { cols, rows } = readTtySize(process.stdout);
+    log.info(
+      { sessionId: this.sessionId, cols, rows },
+      "Session created, initializing headless terminal",
+    );
+    this.headlessTerminal = new HeadlessTerminal({
+      cols,
+      rows,
+      scrollback: 5000,
+      allowProposedApi: true,
+    });
+    this.serializeAddon = new SerializeAddon();
+    // UnicodeGraphemesAddon activate() 里会设置 activeVersion = '15-graphemes'
+    this.headlessTerminal.loadAddon(this.serializeAddon);
+    this.headlessTerminal.loadAddon(new UnicodeGraphemesAddon());
+  }
+
+  private startPtyManager(): void {
+    this.ptyManager = new PtyManager({
+      claudeArgs: this.claudeArgs,
+      tap: (data) => this.handlePtyData(data),
+      stdin: process.stdin,
+      stdout: process.stdout,
+      onResize: (newCols, newRows) => {
+        if (this.headlessTerminal) this.headlessTerminal.resize(newCols, newRows);
+        if (this.socket.writable && this.sessionId) {
+          this.socket.write(
+            serializeIpc({
+              type: "pty_resize",
+              sessionId: this.sessionId,
+              cols: newCols,
+              rows: newRows,
+            }),
+          );
+        }
+      },
+      onSessionExit: (code: number) => {
+        log.info({ sessionId: this.sessionId, exitCode: code }, "PTY exited, cleaning up");
+        this.cleanupAndExit(code);
+      },
+    });
+    this.ptyManager.start();
+    log.info({ sessionId: this.sessionId }, "PTY started with headless terminal");
+  }
+
+  // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、跟 working/approval_wait 状态变化
+  private handlePtyData(data: string): void {
+    this.lastOutputTime = Date.now();
+
+    if (this.headlessTerminal) this.headlessTerminal.write(data);
+
+    if (this.socket.writable && this.sessionId) {
+      this.socket.write(encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8")));
+    }
+
+    if (this.currentPtyState !== "working") {
+      this.currentPtyState = "working";
+      this.sendPtyState("working");
+    }
+
+    const signal = extractOscSignals(data);
+    if (signal?.state === "approval_wait") {
+      this.currentPtyState = "approval_wait";
+      this.sendPtyState("approval_wait", { title: signal.title, tool: signal.tool });
+    }
+  }
+
+  private sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {
+    if (!this.socket.writable || !this.sessionId) return;
+    this.socket.write(
+      serializeIpc({
+        type: "pty_state_push",
+        sessionId: this.sessionId,
+        state,
+        ...(meta?.title !== undefined ? { title: meta.title } : {}),
+        ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
+      }),
+    );
+    log.info(
+      { sessionId: this.sessionId, state, title: meta?.title, tool: meta?.tool },
+      "PTY state pushed",
+    );
+  }
+
+  private handleBridgeStatus(connected: boolean): void {
+    if (this.lastBridgeConnected === connected) return;
+    this.lastBridgeConnected = connected;
     const banner = connected
       ? "\n\x1b[32m[cc-anywhere] relay online\x1b[0m\n"
       : "\n\x1b[33m[cc-anywhere] relay offline — remote viewing unavailable\x1b[0m\n";
     process.stderr.write(banner);
   }
 
-  function sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {
-    if (!socket.writable || !sessionId) return;
-    socket.write(
-      serializeIpc({
-        type: "pty_state_push",
-        sessionId,
-        state,
-        ...(meta?.title !== undefined ? { title: meta.title } : {}),
-        ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
-      }),
-    );
-    log.info({ sessionId, state, title: meta?.title, tool: meta?.tool }, "PTY state pushed");
-  }
-
-  function setupSocketHandlers(): void {
-    createIpcReader(socket, (msg: IpcMessage) => {
-      if (msg.type === "pty_input" && msg.sessionId === sessionId) {
-        log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
-        ptyManager?.write(msg.data);
+  private setupSocketHandlers(): void {
+    createIpcReader(this.socket, (msg: IpcMessage) => {
+      if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
+        log.debug({ sessionId: this.sessionId, bytes: msg.data.length }, "Remote input received");
+        this.ptyManager?.write(msg.data);
       } else if (msg.type === "bridge_status") {
-        handleBridgeStatus(msg.connected);
-      } else if (msg.type === "pty_subscribe" && msg.sessionId === sessionId) {
-        if (serializeAddon && headlessTerminal) {
-          const data = serializeAddon.serialize();
-          socket.write(
+        this.handleBridgeStatus(msg.connected);
+      } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
+        if (this.serializeAddon && this.headlessTerminal) {
+          const data = this.serializeAddon.serialize();
+          this.socket.write(
             serializeIpc({
               type: "pty_snapshot",
               sessionId: msg.sessionId,
-              cols: headlessTerminal.cols,
-              rows: headlessTerminal.rows,
+              cols: this.headlessTerminal.cols,
+              rows: this.headlessTerminal.rows,
               data,
             }),
           );
           log.info(
             {
-              sessionId,
-              cols: headlessTerminal.cols,
-              rows: headlessTerminal.rows,
+              sessionId: this.sessionId,
+              cols: this.headlessTerminal.cols,
+              rows: this.headlessTerminal.rows,
               bytes: data.length,
             },
             "Snapshot sent via IPC",
@@ -207,36 +327,35 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     });
 
-    socket.on("close", () => {
+    this.socket.on("close", () => {
       log.info("Serve socket closed");
-      if (!fsm.isIn([TerminalState.RECONNECTING, TerminalState.EXITED])) {
-        fsm.transitionTo(TerminalState.RECONNECTING);
-        reconnectToServe();
+      if (!this.fsm.isIn([TerminalState.RECONNECTING, TerminalState.EXITED])) {
+        this.fsm.transitionTo(TerminalState.RECONNECTING);
+        this.reconnectToServe();
       }
     });
 
-    // socket error 通常和 close 事件成对出现，这里记 warn 避免静默吞错，
-    // 实际的重连仍由 close handler 触发。
-    socket.on("error", (err) => {
+    // socket error 通常和 close 成对出现；这里只记 warn 避免静默吞错，重连仍由 close handler 触发
+    this.socket.on("error", (err) => {
       log.warn({ err: err.message }, "Serve socket error");
     });
   }
 
-  // idle/working 检测：超过 IDLE_THRESHOLD_MS 无输出则从 working 转为 turn_complete
-  function setupIdleCheck(): void {
-    if (idleCheckTimer) clearInterval(idleCheckTimer);
-    idleCheckTimer = setInterval(() => {
-      if (lastOutputTime > 0 && Date.now() - lastOutputTime > IDLE_THRESHOLD_MS) {
-        lastOutputTime = 0;
-        if (currentPtyState === "working") {
-          currentPtyState = "turn_complete";
-          sendPtyState("turn_complete");
+  // 超过 IDLE_THRESHOLD_MS 无 PTY 输出则从 working 翻回 turn_complete
+  private setupIdleCheck(): void {
+    if (this.idleCheckTimer) clearInterval(this.idleCheckTimer);
+    this.idleCheckTimer = setInterval(() => {
+      if (this.lastOutputTime > 0 && Date.now() - this.lastOutputTime > IDLE_THRESHOLD_MS) {
+        this.lastOutputTime = 0;
+        if (this.currentPtyState === "working") {
+          this.currentPtyState = "turn_complete";
+          this.sendPtyState("turn_complete");
         }
       }
     }, IDLE_CHECK_INTERVAL_MS);
   }
 
-  async function reconnectToServe(): Promise<void> {
+  private async reconnectToServe(): Promise<void> {
     log.info("Serve connection lost, starting reconnection");
 
     // 两条路径都不该再继续 spawn daemon：
@@ -257,7 +376,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
         if (!newSocket) continue;
 
-        // 之前在 degraded 模式下恢复：打 banner 让用户知道 daemon 起来了
         if (degraded) {
           process.stderr.write(
             "\n\x1b[32m[cc-anywhere] serve daemon reachable, reconnected\x1b[0m\n",
@@ -265,37 +383,39 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
         }
         consecutiveSpawnFailures = 0;
 
-        socket = newSocket;
-        log.info({ attempt: i + 1, sessionId }, "Reconnected to serve");
+        this.socket = newSocket;
+        log.info({ attempt: i + 1, sessionId: this.sessionId }, "Reconnected to serve");
 
-        setupSocketHandlers();
+        this.setupSocketHandlers();
 
-        if (sessionId) {
-          fsm.transitionTo(TerminalState.CREATING_SESSION);
-          socket.write(
+        if (this.sessionId) {
+          this.fsm.transitionTo(TerminalState.CREATING_SESSION);
+          this.socket.write(
             serializeIpc({
               type: "session_create_request",
               mode: "pty",
-              cwd: sessionCwd,
-              name: tildify(sessionCwd),
+              cwd: this.sessionCwd,
+              name: tildify(this.sessionCwd),
               pid: process.pid,
-              sessionId,
+              sessionId: this.sessionId,
             }),
           );
-          const resp = await waitForMessage(socket, "session_create_response");
+          const resp = await waitForMessage(this.socket, "session_create_response");
           if (!resp.error) {
-            sessionId = resp.sessionId;
-            socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
-            fsm.transitionTo(TerminalState.RUNNING);
-            log.info({ sessionId }, "Session re-registered after reconnect");
+            this.sessionId = resp.sessionId;
+            this.socket.write(
+              serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
+            );
+            this.fsm.transitionTo(TerminalState.RUNNING);
+            log.info({ sessionId: this.sessionId }, "Session re-registered after reconnect");
           }
         } else {
-          fsm.transitionTo(TerminalState.RUNNING);
+          this.fsm.transitionTo(TerminalState.RUNNING);
         }
 
         return;
       } catch (err) {
-        // passive 模式下路径是 tryConnect，失败返回 null 而非 throw，这里只能是 ensureService spawn 失败
+        // passive 模式走 tryConnect，失败返回 null 不抛；这里只可能是 ensureService spawn 失败
         if (!passive) {
           consecutiveSpawnFailures++;
           if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
@@ -311,100 +431,8 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       }
     }
   }
+}
 
-  // 请求创建 PTY 会话
-  fsm.transitionTo(TerminalState.CREATING_SESSION);
-  const responsePromise = waitForMessage(socket, "session_create_response");
-  socket.write(
-    serializeIpc({
-      type: "session_create_request",
-      mode: "pty",
-      cwd: sessionCwd,
-      name: tildify(sessionCwd),
-      pid: process.pid,
-    }),
-  );
-
-  const response = await responsePromise;
-  if (response.error) {
-    throw new Error(`Failed to create session: ${response.error}`);
-  }
-  sessionId = response.sessionId;
-
-  const { cols, rows } = readTtySize(process.stdout);
-  log.info({ sessionId, cols, rows }, "Session created, initializing headless terminal");
-
-  headlessTerminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
-  serializeAddon = new SerializeAddon();
-  const unicodeAddon = new UnicodeGraphemesAddon();
-  headlessTerminal.loadAddon(serializeAddon);
-  headlessTerminal.loadAddon(unicodeAddon);
-  // addon activate() 里已经设置 activeVersion = '15-graphemes'
-
-  const tap = (data: string) => {
-    lastOutputTime = Date.now();
-
-    // headless terminal 状态追踪
-    if (headlessTerminal) {
-      headlessTerminal.write(data);
-    }
-
-    // binary IPC 帧推送到 serve
-    if (socket.writable && sessionId) {
-      socket.write(encodeBinaryIpcFrame(sessionId, Buffer.from(data, "utf-8")));
-    }
-
-    // 有数据输出即为 working
-    if (currentPtyState !== "working") {
-      currentPtyState = "working";
-      sendPtyState("working");
-    }
-
-    // OSC 信号检测 approval_wait
-    const signal = extractOscSignals(data);
-    if (signal?.state === "approval_wait") {
-      currentPtyState = "approval_wait";
-      sendPtyState("approval_wait", { title: signal.title, tool: signal.tool });
-    }
-  };
-
-  setupSocketHandlers();
-
-  // pty_deregister 由 serve 负责 session 清理（数据目录、relay 通知等），
-  // terminal fd 随进程退出由 OS 关闭。收尾逻辑与 SIGTERM 共享同一实例避免重复。
-  const cleanupAndExit = createExitHandler({
-    fsm,
-    getSocket: () => socket,
-    getSessionId: () => sessionId,
-    getIdleCheckTimer: () => idleCheckTimer,
-  });
-
-  ptyManager = new PtyManager({
-    claudeArgs,
-    tap,
-    stdin: process.stdin,
-    stdout: process.stdout,
-    onResize: (newCols, newRows) => {
-      if (headlessTerminal) headlessTerminal.resize(newCols, newRows);
-      if (socket.writable && sessionId) {
-        socket.write(serializeIpc({ type: "pty_resize", sessionId, cols: newCols, rows: newRows }));
-      }
-    },
-    onSessionExit: (code: number) => {
-      log.info({ sessionId, exitCode: code }, "PTY exited, cleaning up");
-      cleanupAndExit(code);
-    },
-  });
-  ptyManager.start();
-  log.info({ sessionId }, "PTY started with headless terminal");
-
-  socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
-  fsm.transitionTo(TerminalState.RUNNING);
-
-  setupIdleCheck();
-
-  process.on("SIGTERM", () => {
-    log.info({ sessionId }, "SIGTERM received, shutting down");
-    cleanupAndExit(143);
-  });
+export async function startTerminal(claudeArgs: string[]): Promise<void> {
+  await new TerminalSession(claudeArgs).run();
 }
