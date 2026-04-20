@@ -289,6 +289,7 @@ class TerminalSession {
   private handleBridgeStatus(connected: boolean): void {
     if (this.lastBridgeConnected === connected) return;
     this.lastBridgeConnected = connected;
+    log.info({ connected }, "Bridge status changed, notifying user");
     notifyUser(connected ? "relay online" : "relay offline — remote viewing unavailable");
   }
 
