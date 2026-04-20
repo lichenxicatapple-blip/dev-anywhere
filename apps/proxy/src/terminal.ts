@@ -61,26 +61,38 @@ async function ensureService(autoStart = true): Promise<Socket> {
   log.info("Auto-starting serve daemon");
   const child = spawnScript(new URL("./serve", import.meta.url), [], { logger: log });
 
-  // 监听 daemon 退出，让下面的 tryConnect 轮询能在 daemon 启动时就崩的场景下
-  // 立刻抛出带 exit code/signal 的诊断，而不是一路干轮询到 20 次超时。
-  // spawnScript 内部另装了一个 once("exit") 只负责日志，跟这里互不影响。
-  let childExited = false;
+  // 监听 daemon 失败信号，让下面的 tryConnect 轮询能在 daemon 启动时就崩的场景下立刻抛诊断。
+  // - 'exit'：进程启动成功后又退出（配置错误、端口占用、内部崩溃），带 code/signal。
+  // - 'error'：spawn 本身失败（ENOENT 找不到 tsx/node 等），Node 文档说此时 'exit' may or may not 跟着 fire，
+  //   所以显式监听补完备性。spawnScript 内部另装了一对只管日志的监听器，跟这里互不影响。
+  let childFailed = false;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
+  let spawnError: Error | null = null;
   child.once("exit", (code, signal) => {
-    childExited = true;
+    childFailed = true;
     exitCode = code;
     exitSignal = signal;
+  });
+  child.once("error", (err) => {
+    childFailed = true;
+    spawnError = err;
   });
 
   for (let i = 0; i < ENSURE_SERVICE_MAX_RETRIES; i++) {
     const delay = Math.min(ENSURE_SERVICE_INITIAL_DELAY_MS * (i + 1), ENSURE_SERVICE_MAX_DELAY_MS);
     await sleep(delay);
 
-    if (childExited) {
-      log.error({ code: exitCode, signal: exitSignal }, "Serve daemon exited during startup");
+    if (childFailed) {
+      log.error(
+        { code: exitCode, signal: exitSignal, err: spawnError && String(spawnError) },
+        "Serve daemon failed to start",
+      );
+      const detail = spawnError
+        ? `spawn error=${String(spawnError)}`
+        : `code=${exitCode}, signal=${exitSignal}`;
       throw new Error(
-        `Serve daemon exited during startup (code=${exitCode}, signal=${exitSignal}). Check ${SERVICE_LOG_PATH} for details.`,
+        `Serve daemon failed to start (${detail}). Check ${SERVICE_LOG_PATH} for details.`,
       );
     }
 
