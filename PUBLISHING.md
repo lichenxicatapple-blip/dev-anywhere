@@ -84,10 +84,13 @@ cc-anywhere serve start
 
 ### Self-hosted relay (VPS)
 
-Turnkey via `scripts/install-relay.sh` (docker + nginx + Let's Encrypt):
+Turnkey via `scripts/install-relay.sh` (docker + nginx + Let's Encrypt). Two modes:
 
 ```bash
-# On the VPS, as root:
+# A) 从本地执行, 脚本自动 SSH 到 VPS 部署 (推荐, 不用手动登录):
+./scripts/install-relay.sh --ssh user@vps-host  relay.example.com
+
+# B) 已经在 VPS 上:
 curl -fsSL https://raw.githubusercontent.com/catli/cc-anywhere/main/scripts/install-relay.sh \
   | sudo bash -s -- relay.example.com
 ```

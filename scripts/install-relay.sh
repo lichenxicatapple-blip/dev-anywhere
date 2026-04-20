@@ -1,27 +1,49 @@
 #!/usr/bin/env bash
-# 一键在当前 VPS 上部署 cc-anywhere-relay (docker + nginx + Let's Encrypt TLS)
-# 与 apps/relay/deploy.sh 区别: 后者是"本地 SSH 到远程", 本脚本是"已经在 VPS 上直接跑"
+# 一键部署 cc-anywhere-relay (docker + nginx + Let's Encrypt TLS)
+# 支持两种运行方式:
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/catli/cc-anywhere/main/scripts/install-relay.sh | sudo bash -s -- <domain> [token]
+#   1) 本地跑, 自动 SSH 到远程 VPS 部署 (推荐, 不用登录 VPS):
+#        ./install-relay.sh --ssh user@vps-host  cc-anywhere.example.com
+#        本机只需 ssh-key 能登上远程且远程用户有 sudo 权限
 #
-# 或下载后:
-#   sudo ./install-relay.sh <domain> [token]
+#   2) 已经在 VPS 上跑:
+#        sudo ./install-relay.sh cc-anywhere.example.com
+#      或
+#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- cc-anywhere.example.com
 #
 # 参数:
-#   domain — 公网域名, 需已 A 记录到本机 IP
+#   domain — 公网域名, 需已 A 记录到 VPS IP
 #   token  — 可选; 不传则随机生成, 部署完打印出来
 #
-# 产物:
-#   /opt/cc-anywhere-relay/         工作目录
+# 产物 (在 VPS 上):
+#   /opt/cc-anywhere-relay/
 #     ├─ docker-compose.yml
 #     ├─ nginx.conf
-#     ├─ Dockerfile                 (拉 npm cc-anywhere-relay@latest 起容器)
+#     ├─ Dockerfile                 (npm i -g cc-anywhere-relay@latest 起容器)
 #     └─ .env                       (含 RELAY_PROXY_TOKEN, chmod 600)
 #
 set -euo pipefail
 
-DOMAIN="${1:?Usage: install-relay.sh <domain> [token]}"
+# --- 远程模式: 本地执行, 把脚本自身喂给远程 bash ---------------------------
+# 检测到 --ssh 时先走这个分支, 然后把原脚本从 stdin 喂过去; 远程执行时不会命中本分支
+if [ "${1:-}" = "--ssh" ]; then
+  shift
+  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain> [token]}"
+  DOMAIN_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain> [token]}"
+  TOKEN_ARG="${3:-}"
+  SELF_PATH="${BASH_SOURCE[0]}"
+  if [ ! -f "$SELF_PATH" ]; then
+    echo "error: --ssh mode requires script file on disk (can't pipe from curl)" >&2
+    exit 1
+  fi
+  echo "==> deploying to $SSH_HOST (domain: $DOMAIN_ARG)"
+  # -t 分配 tty 让远程 sudo 能交互拿密码 (如果需要); stdin 喂脚本内容
+  ssh -t "$SSH_HOST" "sudo bash -s -- '$DOMAIN_ARG' '$TOKEN_ARG'" < "$SELF_PATH"
+  exit $?
+fi
+
+# --- 本地 VPS 模式: 所有重头戏从这里开始 ------------------------------------
+DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  或  install-relay.sh --ssh <host> <domain>}"
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/cc-anywhere-relay"
 CERT_NAME="cc-anywhere-relay"
