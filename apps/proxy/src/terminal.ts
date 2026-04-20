@@ -97,14 +97,17 @@ async function ensureService(autoStart = true): Promise<Socket> {
   );
 }
 
-function waitForMessage(socket: Socket, messageType: string): Promise<IpcMessage> {
+function waitForMessage<T extends IpcMessage["type"]>(
+  socket: Socket,
+  messageType: T,
+): Promise<Extract<IpcMessage, { type: T }>> {
   return new Promise((resolve, reject) => {
     let timeout: NodeJS.Timeout | null = null;
     const dispose = createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === messageType) {
         if (timeout) clearTimeout(timeout);
         dispose();
-        resolve(msg);
+        resolve(msg as Extract<IpcMessage, { type: T }>);
       }
     });
     timeout = setTimeout(() => {
@@ -268,7 +271,7 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
             }),
           );
           const resp = await waitForMessage(socket, "session_create_response");
-          if (resp.type === "session_create_response" && !resp.error) {
+          if (!resp.error) {
             sessionId = resp.sessionId;
             socket.write(serializeIpc({ type: "pty_register", sessionId, pid: process.pid }));
             fsm.transitionTo(TerminalState.RUNNING);
@@ -311,9 +314,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   );
 
   const response = await responsePromise;
-  if (response.type !== "session_create_response") {
-    throw new Error("Unexpected response type");
-  }
   if (response.error) {
     throw new Error(`Failed to create session: ${response.error}`);
   }
