@@ -198,8 +198,11 @@ async function startDaemon(): Promise<void> {
 
   if (result.kind === "ready") {
     console.log(`Service started in background (PID ${child.pid})`);
-    // ready 后 detach：摘 stderr 订阅，unref 让父 CLI 正常退出。pino 已接管输出。
+    // ready 后 detach：摘 stderr 订阅 + destroy pipe + unref 子进程。
+    // 单独 child.unref() 不够，父侧的 stderr pipe fd 还在事件循环里会让父 CLI 永不退出；
+    // 必须 destroy 掉 pipe 才能真正释放 refcount。pino 已接管子进程的输出到 service.log。
     child.stderr!.removeAllListeners("data");
+    child.stderr!.destroy();
     child.unref();
     return;
   }
