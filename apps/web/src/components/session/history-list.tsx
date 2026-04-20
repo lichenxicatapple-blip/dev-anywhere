@@ -11,7 +11,7 @@ import { ChevronRight, RefreshCw } from "lucide-react";
 import type { HistorySession, RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { showErrorToast } from "@/components/toast";
+import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import { formatSessionName } from "@/lib/format-session-name";
 import { HistoryRow } from "./history-row";
@@ -53,7 +53,7 @@ export function HistoryList({ now }: HistoryListProps) {
       unsub();
       setResumingId(null);
       if (ctrl.error || !ctrl.sessionId) {
-        showErrorToast(`恢复失败: ${ctrl.error ?? "unknown"}`);
+        toast.error(`恢复失败: ${ctrl.error ?? "unknown"}`);
         return;
       }
       const newSession: SessionInfo = {
@@ -71,7 +71,7 @@ export function HistoryList({ now }: HistoryListProps) {
     if (resumingId) return;
     const relay = relayClientRef;
     if (!relay) {
-      showErrorToast("Relay 客户端未就绪");
+      toast.error("Relay 客户端未就绪");
       return;
     }
     setResumingId(h.id);

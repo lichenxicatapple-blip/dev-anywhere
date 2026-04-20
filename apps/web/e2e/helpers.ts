@@ -11,17 +11,3 @@ export async function resetLocalState(page: Page): Promise<void> {
   });
   await page.reload();
 }
-
-// 读取 store 暴露在 window.__APP_STORE__ 的 proxy 列表，返回第一个 online proxyId
-// 注：__APP_STORE__ 的 window 暴露由 Plan 10-01b 的 dev 钩子添加；当前 helper 若读不到返回 null
-export async function getOnlineProxyId(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
-    const w = window as unknown as {
-      __APP_STORE__?: {
-        getState: () => { proxies: Array<{ proxyId: string; online: boolean }> };
-      };
-    };
-    const proxies = w.__APP_STORE__?.getState().proxies ?? [];
-    return proxies.find((p) => p.online)?.proxyId ?? null;
-  });
-}

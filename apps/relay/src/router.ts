@@ -9,7 +9,7 @@ import type { Logger } from "@cc-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
-export type ParseResult =
+type ParseResult =
   | { kind: "control"; message: RelayControlMessage }
   | { kind: "envelope"; message: MessageEnvelope; raw: string }
   | { kind: "invalid"; error: string };

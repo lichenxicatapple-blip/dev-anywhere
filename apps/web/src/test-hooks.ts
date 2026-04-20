@@ -3,9 +3,9 @@
 // production build 时 import.meta.env.DEV 为 false, 整个函数空跑, 不会污染线上
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
-import { showToast } from "@/components/toast";
+import { toast } from "@/components/toast";
 
-export interface CCTestHooks {
+interface CCTestHooks {
   chat: {
     addUserMessage: (sessionId: string, message: ChatMessage) => void;
     appendAssistantText: (sessionId: string, text: string) => void;
@@ -36,6 +36,6 @@ export function installTestHooks(): void {
       setPtyTitle: (sid, title) =>
         useSessionStore.getState().setPtyTitle(sid, title),
     },
-    toast: showToast,
+    toast: (msg) => { toast(msg); },
   };
 }

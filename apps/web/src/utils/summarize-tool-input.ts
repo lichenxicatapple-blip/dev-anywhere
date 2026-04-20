@@ -1,6 +1,6 @@
 // 工具调用参数摘要，用于 ToolApprovalCard 和 ToolCallCard 的参数预览
 
-export interface ToolSummary {
+interface ToolSummary {
   type: "edit" | "bash" | "write" | "generic";
   summary: string;
   details: unknown;

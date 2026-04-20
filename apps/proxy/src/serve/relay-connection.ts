@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
-import { logger } from "../common/logger.js";
+import { serviceLogger } from "../common/logger.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
@@ -31,7 +31,7 @@ export const RelayConnectionState = {
 } as const;
 export type RelayConnectionState = (typeof RelayConnectionState)[keyof typeof RelayConnectionState];
 
-export interface RelayConnectionOptions {
+interface RelayConnectionOptions {
   // 自定义 proxyId 文件路径，测试时使用临时目录
   proxyIdPath?: string;
   // proxy 显示名称，注册时发送给 relay
@@ -63,7 +63,7 @@ export class RelayConnection extends EventEmitter {
   private transition(to: RelayConnectionState): void {
     const from = this.connectionState;
     this.connectionState = to;
-    logger.info({ from, to }, "RelayConnection state transition");
+    serviceLogger.info({ from, to }, "RelayConnection state transition");
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -100,7 +100,7 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("open", () => {
         this.reconnectAttempt = 0;
         this.transition(RelayConnectionState.REGISTERING);
-        logger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
+        serviceLogger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
         this.ws!.send(JSON.stringify({
           type: "proxy_register",
           proxyId: this.proxyId,
@@ -115,7 +115,7 @@ export class RelayConnection extends EventEmitter {
           if (parsed.type === "proxy_register_response") {
             const status: string = parsed.status;
             const sessions: Record<string, number> | undefined = parsed.sessions;
-            logger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
+            serviceLogger.info({ status, sessionCount: sessions ? Object.keys(sessions).length : 0 }, "Received register response");
             this.transition(RelayConnectionState.SYNCED);
             // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
             this.emit("sync", { status, sessions: sessions ?? {} });
@@ -133,19 +133,19 @@ export class RelayConnection extends EventEmitter {
         this.ws = null;
         if (this.connectionState !== RelayConnectionState.CLOSED) {
           this.transition(RelayConnectionState.WAITING_RECONNECT);
-          logger.info("Relay connection closed unexpectedly");
+          serviceLogger.info("Relay connection closed unexpectedly");
           this.emit("disconnected");
           this.scheduleReconnect();
         } else {
-          logger.info("Relay connection closed");
+          serviceLogger.info("Relay connection closed");
         }
       });
 
       this.ws.on("error", (err) => {
-        logger.error({ error: String(err) }, "Relay connection error");
+        serviceLogger.error({ error: String(err) }, "Relay connection error");
       });
     } catch (err) {
-      logger.error({ error: String(err) }, "Failed to create relay connection");
+      serviceLogger.error({ error: String(err) }, "Failed to create relay connection");
       if (this.connectionState !== RelayConnectionState.CLOSED) {
         this.transition(RelayConnectionState.WAITING_RECONNECT);
         this.scheduleReconnect();
@@ -163,7 +163,7 @@ export class RelayConnection extends EventEmitter {
   // 计算全抖动指数退避延迟并调度重连
   private scheduleReconnect(): void {
     const backoff = Math.random() * Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempt));
-    logger.info(
+    serviceLogger.info(
       { attempt: this.reconnectAttempt + 1, backoffMs: Math.round(backoff) },
       "Scheduling reconnect",
     );
@@ -192,14 +192,14 @@ export class RelayConnection extends EventEmitter {
     if (this.connectionState === RelayConnectionState.SYNCED && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
     } else if (this.connectionState === RelayConnectionState.CLOSED) {
-      logger.warn("Message discarded: connection is closed");
+      serviceLogger.warn("Message discarded: connection is closed");
     } else {
       if (this.queue.size() >= MAX_QUEUE_SIZE) {
         this.queue.dropOldest();
-        logger.warn({ maxSize: MAX_QUEUE_SIZE }, "Message queue overflow, oldest message dropped");
+        serviceLogger.warn({ maxSize: MAX_QUEUE_SIZE }, "Message queue overflow, oldest message dropped");
       }
       this.queue.enqueue(raw);
-      logger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
+      serviceLogger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");
     }
   }
 

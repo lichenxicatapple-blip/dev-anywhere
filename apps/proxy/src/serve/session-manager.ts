@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { SessionState } from "@cc-anywhere/shared";
-import { logger } from "../common/logger.js";
+import { serviceLogger } from "../common/logger.js";
 
 export interface SessionInfo {
   id: string;
@@ -16,7 +16,7 @@ export interface SessionInfo {
   pid: number;
 }
 
-export interface SessionManagerOptions {
+interface SessionManagerOptions {
   persistPath: string;
   reaperIntervalMs?: number;
   onSessionRemoved?: (id: string) => void;
@@ -75,7 +75,7 @@ export class SessionManager {
     };
     this.sessions.set(info.id, info);
     this.save();
-    logger.info({ sessionId: info.id, mode, name }, "Session created");
+    serviceLogger.info({ sessionId: info.id, mode, name }, "Session created");
     return info;
   }
 
@@ -104,7 +104,7 @@ export class SessionManager {
     session.state = newState;
     session.updatedAt = Date.now();
     this.save();
-    logger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");
+    serviceLogger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");
   }
 
   terminateSession(
@@ -117,7 +117,7 @@ export class SessionManager {
     const pid = session.pid;
     this.sessions.delete(id);
     this.save();
-    logger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
+    serviceLogger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
     this.onSessionRemoved?.(id);
     return { success: true, pid };
   }
@@ -180,7 +180,7 @@ export class SessionManager {
       }
     }
     for (const { id, reason } of toRemove) {
-      logger.warn({ sessionId: id, reason }, "Reaping stale session");
+      serviceLogger.warn({ sessionId: id, reason }, "Reaping stale session");
       this.terminateSession(id);
     }
   }
@@ -234,11 +234,11 @@ export class SessionManager {
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
-          logger.info({ sessionId: info.id, pid: info.pid }, "PTY session skipped on load, terminal alive");
+          serviceLogger.info({ sessionId: info.id, pid: info.pid }, "PTY session skipped on load, terminal alive");
         } else {
           // terminal 进程已死，清理数据
           this.onSessionRemoved?.(info.id);
-          logger.info({ sessionId: info.id, pid: info.pid }, "PTY session cleaned on load, terminal dead");
+          serviceLogger.info({ sessionId: info.id, pid: info.pid }, "PTY session cleaned on load, terminal dead");
         }
         continue;
       }
@@ -246,18 +246,18 @@ export class SessionManager {
       if (info.pid && this.isProcessAlive(info.pid)) {
         if (info.state === SessionState.WAITING_APPROVAL) {
           info.state = SessionState.IDLE;
-          logger.info({ sessionId: info.id }, "Reset WAITING_APPROVAL to IDLE on load");
+          serviceLogger.info({ sessionId: info.id }, "Reset WAITING_APPROVAL to IDLE on load");
         }
         this.sessions.set(info.id, info);
       } else {
         this.onSessionRemoved?.(info.id);
-        logger.info({ sessionId: info.id, pid: info.pid }, "JSON session cleaned on load, worker dead");
+        serviceLogger.info({ sessionId: info.id, pid: info.pid }, "JSON session cleaned on load, worker dead");
       }
     }
     // 清理后回写磁盘，避免已清理的会话在下次启动时重复处理
     this.save();
     if (this.sessions.size > 0) {
-      logger.info({ count: this.sessions.size }, "Sessions restored from persistence");
+      serviceLogger.info({ count: this.sessions.size }, "Sessions restored from persistence");
     }
   }
 }

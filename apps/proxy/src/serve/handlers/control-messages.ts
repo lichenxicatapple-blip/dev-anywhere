@@ -3,7 +3,7 @@ import { join, isAbsolute, normalize } from "node:path";
 import type { SessionManager } from "../session-manager.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
-import { logger } from "../../common/logger.js";
+import { serviceLogger } from "../../common/logger.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string }): Promise<void>;
@@ -112,7 +112,7 @@ export function createControlMessageHandlers(
           entries: [],
           error: "Invalid path: must be absolute and must not contain path traversal",
         }));
-        logger.warn({ path: msg.path }, "Rejected dir_list_request: unsafe path");
+        serviceLogger.warn({ path: msg.path }, "Rejected dir_list_request: unsafe path");
         return;
       }
 
@@ -123,7 +123,7 @@ export function createControlMessageHandlers(
           path: msg.path,
           entries,
         }));
-        logger.debug({ path: msg.path, count: entries.length }, "Dir list response sent");
+        serviceLogger.debug({ path: msg.path, count: entries.length }, "Dir list response sent");
       } catch (err) {
         send(JSON.stringify({
           type: "dir_list_response",
@@ -131,7 +131,7 @@ export function createControlMessageHandlers(
           entries: [],
           error: String(err),
         }));
-        logger.warn({ path: msg.path, error: String(err) }, "Dir list request failed");
+        serviceLogger.warn({ path: msg.path, error: String(err) }, "Dir list request failed");
       }
     },
 
@@ -143,7 +143,7 @@ export function createControlMessageHandlers(
           success: false,
           error: "Invalid path: must be absolute and must not contain path traversal",
         }));
-        logger.warn({ path: msg.path }, "Rejected dir_create_request: unsafe path");
+        serviceLogger.warn({ path: msg.path }, "Rejected dir_create_request: unsafe path");
         return;
       }
 
@@ -154,7 +154,7 @@ export function createControlMessageHandlers(
           path: msg.path,
           success: true,
         }));
-        logger.info({ path: msg.path }, "Directory created");
+        serviceLogger.info({ path: msg.path }, "Directory created");
       } catch (err) {
         send(JSON.stringify({
           type: "dir_create_response",
@@ -162,7 +162,7 @@ export function createControlMessageHandlers(
           success: false,
           error: String(err),
         }));
-        logger.warn({ path: msg.path, error: String(err) }, "Dir create failed");
+        serviceLogger.warn({ path: msg.path, error: String(err) }, "Dir create failed");
       }
     },
 
@@ -173,13 +173,13 @@ export function createControlMessageHandlers(
           type: "session_history_response",
           sessions,
         }));
-        logger.debug({ count: sessions.length }, "Session history response sent");
+        serviceLogger.debug({ count: sessions.length }, "Session history response sent");
       } catch (err) {
         send(JSON.stringify({
           type: "session_history_response",
           sessions: [],
         }));
-        logger.warn({ error: String(err) }, "Session history scan failed");
+        serviceLogger.warn({ error: String(err) }, "Session history scan failed");
       }
     },
 
@@ -192,9 +192,9 @@ export function createControlMessageHandlers(
           type: "command_list_push",
           commands,
         }));
-        logger.info({ sessionId, count: commands.length, workDir }, "Command list pushed");
+        serviceLogger.info({ sessionId, count: commands.length, workDir }, "Command list pushed");
       } catch (err) {
-        logger.warn({ sessionId, error: String(err) }, "Command discovery failed");
+        serviceLogger.warn({ sessionId, error: String(err) }, "Command discovery failed");
       }
 
       // 6 小时定时刷新
@@ -208,9 +208,9 @@ export function createControlMessageHandlers(
             type: "command_list_push",
             commands,
           }));
-          logger.debug({ sessionId, count: commands.length }, "Command list refreshed");
+          serviceLogger.debug({ sessionId, count: commands.length }, "Command list refreshed");
         } catch (err) {
-          logger.warn({ sessionId, error: String(err) }, "Command refresh failed");
+          serviceLogger.warn({ sessionId, error: String(err) }, "Command refresh failed");
         }
       }, COMMAND_REFRESH_MS);
     },
@@ -225,12 +225,12 @@ export function createControlMessageHandlers(
           type: "file_tree_push",
           groups,
         }));
-        logger.debug(
+        serviceLogger.debug(
           { sessionId, path: workDir, groupCount: groups.length },
           "File tree pushed",
         );
       } catch (err) {
-        logger.warn({ sessionId, error: String(err) }, "File tree push failed");
+        serviceLogger.warn({ sessionId, error: String(err) }, "File tree push failed");
       }
     },
 
@@ -249,7 +249,7 @@ export function createControlMessageHandlers(
             state: s.state,
           })),
         }));
-        logger.info({ count: activeSessions.length }, "Session list synced to relay");
+        serviceLogger.info({ count: activeSessions.length }, "Session list synced to relay");
       }
 
       for (const session of activeSessions) {
@@ -267,9 +267,9 @@ export function createControlMessageHandlers(
               type: "file_tree_push",
               groups,
             }));
-            logger.info({ sessionId: session.id }, "Reinitialized control data after reconnect");
+            serviceLogger.info({ sessionId: session.id }, "Reinitialized control data after reconnect");
           } catch (err) {
-            logger.warn({ sessionId: session.id, error: String(err) }, "Reinitialize failed");
+            serviceLogger.warn({ sessionId: session.id, error: String(err) }, "Reinitialize failed");
           }
         }
       }

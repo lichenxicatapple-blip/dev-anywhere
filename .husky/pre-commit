@@ -1,3 +1,4 @@
 #!/bin/sh
 pnpm lint
 pnpm -r run typecheck
+pnpm knip

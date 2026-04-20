@@ -10,7 +10,7 @@ export type PtySemanticState =
   | "approval_wait"
   | "mid_pause";
 
-export interface PtyStateEvent {
+interface PtyStateEvent {
   state: PtySemanticState;
   title?: string;
   tool?: string;

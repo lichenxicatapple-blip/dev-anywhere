@@ -8,7 +8,7 @@ import {
   PID_PATH,
   SOCK_PATH,
   STOPPED_PATH,
-  LOG_PATH,
+  SERVICE_LOG_PATH,
   CONFIG_PATH,
   isInitialized,
   initWorkspace,
@@ -64,7 +64,7 @@ function showStatus(): Promise<number> {
 
     log(`Service: running (PID ${pid})`);
     log(`Socket:  ${SOCK_PATH}`);
-    log(`Log:     ${LOG_PATH}`);
+    log(`Log:     ${SERVICE_LOG_PATH}`);
 
     const sock = connect(SOCK_PATH);
     sock.on("error", () => {

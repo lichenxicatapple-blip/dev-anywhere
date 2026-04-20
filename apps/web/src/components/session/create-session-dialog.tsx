@@ -8,7 +8,7 @@ import type { RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
-import { showErrorToast } from "@/components/toast";
+import { toast } from "@/components/toast";
 import {
   Dialog,
   DialogContent,
@@ -89,7 +89,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       setSubmitting(false);
 
       if (ctrl.error || !ctrl.sessionId) {
-        showErrorToast(`创建失败: ${ctrl.error ?? "unknown"}`);
+        toast.error(`创建失败: ${ctrl.error ?? "unknown"}`);
         return;
       }
 
@@ -112,12 +112,12 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
 
   function handleSubmit() {
     if (!cwd.trim()) {
-      showErrorToast("请输入工作目录");
+      toast.error("请输入工作目录");
       return;
     }
     const relay = relayClientRef;
     if (!relay) {
-      showErrorToast("Relay 客户端未就绪");
+      toast.error("Relay 客户端未就绪");
       return;
     }
     setSubmitting(true);

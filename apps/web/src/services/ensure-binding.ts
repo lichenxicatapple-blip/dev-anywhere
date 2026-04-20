@@ -1,19 +1,19 @@
 import type { RelayClient } from "./relay-client";
 
-export interface BindingContext {
+interface BindingContext {
   proxyId?: string;
   sessionId?: string;
 }
 
-export interface BindingSuccess {
+interface BindingSuccess {
   proxyId: string;
 }
 
-export interface BindingError {
+interface BindingError {
   error: string;
 }
 
-export type BindingResult = BindingSuccess | BindingError;
+type BindingResult = BindingSuccess | BindingError;
 
 export function isBindingError(result: BindingResult): result is BindingError {
   return "error" in result;

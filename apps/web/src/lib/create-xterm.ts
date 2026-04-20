@@ -9,7 +9,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { xtermTheme } from "@/lib/xterm-theme";
 
-export interface CreateXtermResult {
+interface CreateXtermResult {
   terminal: Terminal;
   serializeAddon: SerializeAddon;
   dispose: () => void;

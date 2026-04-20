@@ -1,10 +1,10 @@
 import { WebSocket } from "ws";
 
 // 显式代理连接状态，取代 ws null 检查
-export type ProxyConnectionState = "online" | "offline";
+type ProxyConnectionState = "online" | "offline";
 
 // 显式客户端连接状态，跟踪注册和绑定
-export type ClientConnectionState = "registered" | "bound";
+type ClientConnectionState = "registered" | "bound";
 
 // 代理连接状态，跟踪 ws、会话集合、离线时间、显示名称
 interface ProxyState {

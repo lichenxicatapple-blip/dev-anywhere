@@ -25,9 +25,9 @@ export const DATA_DIR = `${CC_DIR}/data`;
 
 // 日志
 export const LOG_DIR = `${CC_DIR}/logs`;
-export const LOG_PATH = `${LOG_DIR}/service.log`;
+export const SERVICE_LOG_PATH = `${LOG_DIR}/service.log`;
 
-export function sessionDir(sessionId: string): string {
+function sessionDir(sessionId: string): string {
   return `${DATA_DIR}/${sessionId}`;
 }
 
@@ -35,7 +35,6 @@ export function sessionPaths(sessionId: string) {
   const dir = sessionDir(sessionId);
   return {
     dir,
-    events: `${dir}/events.bin`,
     workerSock: `${dir}/worker.sock`,
   };
 }
@@ -57,11 +56,4 @@ export function initWorkspace(): void {
   if (!existsSync(CONFIG_PATH)) {
     writeFileSync(CONFIG_PATH, DEFAULT_CONFIG);
   }
-}
-
-export function ensureDirectories(): void {
-  mkdirSync(RUN_DIR, { recursive: true });
-  mkdirSync(STATE_DIR, { recursive: true });
-  mkdirSync(DATA_DIR, { recursive: true });
-  mkdirSync(LOG_DIR, { recursive: true });
 }

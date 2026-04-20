@@ -29,7 +29,7 @@ export type ClaudePermissionMode =
   | "bypassPermissions"
   | "dontAsk";
 
-export interface JsonSessionOptions {
+interface JsonSessionOptions {
   workDir?: string;
   claudeArgs?: string[];
   approvalStrategy?: ApprovalStrategy;

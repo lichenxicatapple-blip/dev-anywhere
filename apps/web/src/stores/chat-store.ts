@@ -31,7 +31,7 @@ export interface ChatMessage {
   quotedMessage?: QuotedMessage;
 }
 
-export interface ChatSessionSlice {
+interface ChatSessionSlice {
   messages: ChatMessage[];
   // workingToolName 保留：session.state 只到 working 粒度，承载不了具体工具名
   workingToolName: string;

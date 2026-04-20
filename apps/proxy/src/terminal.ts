@@ -8,7 +8,7 @@ const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
-import { SOCK_PATH, STOPPED_PATH, LOG_PATH } from "./common/paths.js";
+import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import {
   createIpcReader,
@@ -90,7 +90,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
     if (childExited) {
       log.error({ code: exitCode, signal: exitSignal }, "Serve daemon exited during startup");
       throw new Error(
-        `Serve daemon exited during startup (code=${exitCode}, signal=${exitSignal}). Check ${LOG_PATH} for details.`,
+        `Serve daemon exited during startup (code=${exitCode}, signal=${exitSignal}). Check ${SERVICE_LOG_PATH} for details.`,
       );
     }
 
@@ -106,7 +106,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
     "Failed to connect to service",
   );
   throw new Error(
-    `Failed to connect to cc-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${LOG_PATH} for details.`,
+    `Failed to connect to cc-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${SERVICE_LOG_PATH} for details.`,
   );
 }
 

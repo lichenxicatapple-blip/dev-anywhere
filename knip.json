@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/relay": {
+      "entry": ["scripts/verify-relay.ts"]
+    },
+    "apps/web": {
+      "entry": ["pwa-assets.config.ts", "e2e/**/*.{ts,d.ts}"],
+      "ignore": ["src/components/ui/**"]
+    }
+  }
+}

@@ -13,7 +13,7 @@ function resolveClaudePath(): string {
   }
 }
 
-export interface PtyManagerOptions {
+interface PtyManagerOptions {
   claudeArgs: string[];
   tap: DataTap;
   stdin: NodeJS.ReadStream;

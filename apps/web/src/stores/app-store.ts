@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import type { ProxyInfo } from "@cc-anywhere/shared";
 
-export type AppPhase =
+type AppPhase =
   | "connecting"
   | "registering"
   | "reconnecting"
@@ -11,7 +11,7 @@ export type AppPhase =
   | "session_browsing"
   | "chatting";
 
-export interface PendingToast {
+interface PendingToast {
   kind: "error" | "info" | "success";
   message: string;
 }

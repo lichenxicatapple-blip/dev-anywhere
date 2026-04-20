@@ -5,9 +5,9 @@ import type { Logger } from "pino";
 // 运行环境判断。tsup 打包时通过 define 把 process.env.NODE_ENV 替换为 "production"，
 // IS_DEV 随之静态折叠为 false，dev 分支被 dead-code elimination 删除。
 // tsx 跑源码时 NODE_ENV 通常未设置，默认 "development"，IS_DEV 为 true。
-export const IS_DEV = (process.env.NODE_ENV ?? "development") !== "production";
+const IS_DEV = (process.env.NODE_ENV ?? "development") !== "production";
 
-export interface SpawnScriptOptions extends Omit<SpawnOptions, "detached"> {
+interface SpawnScriptOptions extends Omit<SpawnOptions, "detached"> {
   // 默认 true。设为 false 时父进程退出会把子进程一并带走。
   unref?: boolean;
   // 传入后启用"现场记录"：子进程 stderr 按行 pipe 进 logger.warn（stderr 原文语义模糊，

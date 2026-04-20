@@ -1,6 +1,6 @@
 // InputBar 纯辅助函数: 字符串状态机与布尔判断, 无 UI 依赖
 
-export type PickerMode = "none" | "slash" | "file";
+type PickerMode = "none" | "slash" | "file";
 
 export function computeSendDisabled(
   mode: "pty" | "json",
@@ -14,7 +14,7 @@ export function computeSendDisabled(
 }
 
 // @ 触发的判定: @ 在句首或前一个字符是空格, 且 @ 后不含空格
-export function hasValidAt(val: string): boolean {
+function hasValidAt(val: string): boolean {
   const idx = val.lastIndexOf("@");
   if (idx < 0) return false;
   if (idx > 0 && val[idx - 1] !== " ") return false;

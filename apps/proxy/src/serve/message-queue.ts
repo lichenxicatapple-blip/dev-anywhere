@@ -1,5 +1,5 @@
 // 消息队列接口，Phase 5 用内存实现，接口预留持久化扩展
-export interface MessageQueue {
+interface MessageQueue {
   enqueue(raw: string): void;
   drain(): string[];
   size(): number;

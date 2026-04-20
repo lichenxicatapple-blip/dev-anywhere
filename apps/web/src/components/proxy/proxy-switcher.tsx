@@ -9,7 +9,7 @@ import { useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { showErrorToast } from "@/components/toast";
+import { toast } from "@/components/toast";
 import {
   Popover,
   PopoverTrigger,
@@ -35,13 +35,13 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   ): Promise<void> {
     const relay = relayClientRef;
     if (!relay) {
-      showErrorToast("Relay client not available");
+      toast.error("Relay client not available");
       return;
     }
     const displayName = proxyName ?? proxyId;
     const result = await relay.selectProxy(proxyId);
     if (!result.success) {
-      showErrorToast(`选择 ${displayName} 失败：${result.error ?? "unknown"}`);
+      toast.error(`选择 ${displayName} 失败：${result.error ?? "unknown"}`);
       return;
     }
     localStorage.setItem("cc_proxyId", proxyId);

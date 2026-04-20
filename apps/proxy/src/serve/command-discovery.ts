@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export interface CommandEntry {
+interface CommandEntry {
   name: string;
   description: string;
   argumentHint?: string;
@@ -36,7 +36,7 @@ const COMMAND_BLACKLIST = new Set([
   "/ide", "/listen",
 ]);
 
-export interface DiscoverOptions {
+interface DiscoverOptions {
   homeDir?: string;
 }
 

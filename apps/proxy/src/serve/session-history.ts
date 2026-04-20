@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 
-export interface SessionHistoryEntry {
+interface SessionHistoryEntry {
   id: string;
   title: string;
   projectDir: string;
@@ -68,7 +68,7 @@ export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
   return deduped.slice(0, 50);
 }
 
-export interface SessionMessage {
+interface SessionMessage {
   role: "user" | "assistant";
   text: string;
   timestamp?: number;

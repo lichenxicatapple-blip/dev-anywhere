@@ -1,7 +1,7 @@
 import { createLogger } from "@cc-anywhere/shared";
 import { LOG_DIR } from "./paths.js";
 
-export const logger = createLogger({
+export const serviceLogger = createLogger({
   name: "service",
   logDir: LOG_DIR,
   silent: !!process.env.VITEST,
