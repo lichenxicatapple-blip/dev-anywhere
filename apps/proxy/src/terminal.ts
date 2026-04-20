@@ -61,9 +61,9 @@ async function ensureService(autoStart = true): Promise<Socket> {
   log.info("Auto-starting serve daemon");
   const child = spawnScript(new URL("./serve", import.meta.url), [], { logger: log });
 
-  // 挂个独立 exit 监听，让 retry 循环能快速短路。
-  // spawnScript 的 logger handler 已经另装了 once("exit") 管日志，这两个 listener 互不影响。
-  // 用扁平 flag 变量而非对象，绕开 TS 对 callback 内 let 赋值的窄化缺陷。
+  // 监听 daemon 退出，让下面的 tryConnect 轮询能在 daemon 启动时就崩的场景下
+  // 立刻抛出带 exit code/signal 的诊断，而不是一路干轮询到 20 次超时。
+  // spawnScript 内部另装了一个 once("exit") 只负责日志，跟这里互不影响。
   let childExited = false;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
@@ -99,16 +99,18 @@ async function ensureService(autoStart = true): Promise<Socket> {
 
 function waitForMessage(socket: Socket, messageType: string): Promise<IpcMessage> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Timeout waiting for ${messageType}`));
-    }, WAIT_FOR_MESSAGE_TIMEOUT_MS);
-
-    createIpcReader(socket, (msg: IpcMessage) => {
+    let timeout: NodeJS.Timeout | null = null;
+    const dispose = createIpcReader(socket, (msg: IpcMessage) => {
       if (msg.type === messageType) {
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
+        dispose();
         resolve(msg);
       }
     });
+    timeout = setTimeout(() => {
+      dispose();
+      reject(new Error(`Timeout waiting for ${messageType}`));
+    }, WAIT_FOR_MESSAGE_TIMEOUT_MS);
   });
 }
 
