@@ -28,7 +28,6 @@ interface SessionListProps {
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
-  const historyCount = useSessionStore((s) => s.historySessions.length);
   // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
   const chatMatch = useMatch("/chat/:id");
   const activeSessionId = chatMatch?.params.id ?? null;
