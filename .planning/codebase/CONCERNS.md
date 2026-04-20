@@ -180,6 +180,45 @@ Scope: monorepo `apps/proxy`, `apps/relay`, `apps/web`, `packages/shared`. Findi
 - Impact: If `claude` CLI crashes mid-turn (OOM, segfault in stream-json parser), the JSON session disappears. The remote client sees `session_status` terminated and must recreate. There is no automatic respawn with the captured `claudeSessionId` (which IS persisted; see `sessionManager.setClaudeSessionId` at serve.ts:317). So the data for resume exists but is never used to auto-heal.
 - Fix approach: On crash detection, attempt to respawn worker with `--resume=claudeSessionId` at least once before terminating.
 
+**`ensureService` does not observe the spawned child's lifecycle**
+- Severity: **MED**
+- File: `apps/proxy/src/terminal.ts:48-83` (`ensureService`), also `apps/proxy/src/index.ts:121-140` (`startDaemon`)
+- Evidence: Spawn uses `stdio: "ignore"` and `child.unref()` immediately, then the parent polls `tryConnect(SOCK_PATH)` up to 20 times with growing delay (~35s total). If the child exits immediately (import error, config error, port conflict, missing dep), the parent never learns — it just keeps polling the socket until timeout, then throws a generic `"Failed to connect"` with no diagnostic information. `stderr` is discarded entirely.
+- Combined with `reconnectToServe` (`terminal.ts:176-216`) looping 60 times, this means in the worst case the parent can spawn 60 short-lived failed children and emit no actionable diagnostic. The detached children are reaped by init (not true zombies), but the waste and opacity are real.
+- Impact: Any genuine environment breakage (broken install, permission error, port taken) manifests as "connection timeout" with no root cause, making it maximally hard to debug.
+- Fix approach:
+  1. Change spawn stdio to `["ignore", "ignore", "pipe"]`, capture stderr into a buffer.
+  2. Race `pollSocketReady` against `once(child, "exit")` — whoever fires first wins. On child exit, throw with `exitCode + stderr` included.
+  3. Only call `child.unref()` after socket is confirmed ready.
+  4. Add a persistent `consecutiveSpawnFailures` counter in `reconnectToServe`. After 3 consecutive spawn deaths, stop spawning and only `tryConnect` (wait for user to repair environment). Reset on first successful connect.
+- Related: "Retry budget semantics conflated between two recovery paths" below.
+
+**Terminal reconnect retry budget does not match intent across two recovery paths**
+- Severity: **HIGH** (surfaced during walk 2026-04-20 in response to user question)
+- File: `apps/proxy/src/terminal.ts:176-216` (`reconnectToServe`)
+- Evidence: The same `maxRetries = 60` with the same backoff formula is used regardless of whether `STOPPED_PATH` is set. The two paths have fundamentally different semantics:
+  - `STOPPED=false` (serve crashed unexpectedly): spawning keeps failing → after N tries it IS legitimately broken → should surface diagnostic and give up or enter a degraded mode
+  - `STOPPED=true` (user ran `cc-anywhere stop`): user intent is clear; they may manually restart the daemon at any time → should poll forever (or very long) with simple `tryConnect`, no spawn
+- Combined with silent exhaustion at L215 (`log.error` but no user-facing signal), after ~5 minutes the terminal silently transitions to "PTY local-only, no remote bridge" — user keeps typing without knowing messages never leave.
+- Impact: Users experience "phantom offline" state. Terminal appears functional but the remote bridge is dead. No recovery mechanism unless user notices from outside.
+- Fix approach:
+  1. Separate the two retry policies. `STOPPED=true`: unbounded poll loop with 5s cap, no spawn. `STOPPED=false`: bounded (3-10 attempts) with structured diagnostic on exhaustion.
+  2. Introduce a "bridge state" concept exposed to user — terminal needs a way to display "remote bridge offline" (status line, terminal title prefix, or stderr banner). Current three-state enum (`running/reconnecting/exited`) does not model "running-but-disconnected-and-stopped-retrying".
+  3. Depend on "No structured user-facing signaling for bridge state" concern (see below).
+- Architecture-level root: Codebase lacks a **bridge state model**. terminal does not know whether web client is connected; web does not know whether terminal state is stale. Each side assumes best case until an error surfaces.
+
+**STOPPED_PATH mechanism is undocumented across its 6 touch-points in 4 files**
+- Severity: **MED**
+- Files: `apps/proxy/src/paths.ts:11` (definition), `apps/proxy/src/index.ts:36` (write), `apps/proxy/src/index.ts:132` (delete), `apps/proxy/src/terminal.ts:57` (delete), `apps/proxy/src/terminal.ts:183` (read), `apps/proxy/src/serve.ts:760` (delete)
+- Evidence: Only one comment exists (`serve.ts:761`), and it only explains the catch-ignore on unlinkSync, not the protocol. The semantic — "user-intent flag to suppress terminal auto-spawn of serve daemon" — is not documented anywhere.
+- Impact: Any refactor touching service lifecycle must reverse-engineer the mechanism by cross-referencing 4 files. A new contributor (or Claude) adding a new entry point can easily forget to maintain the invariant.
+- Fix approach: One block comment at the definition site (`paths.ts:11`) stating:
+  - What it is (boolean flag file, presence = stopped)
+  - Who writes (stopService)
+  - Who deletes (startDaemon, ensureService, startService)
+  - Who reads (reconnectToServe)
+  - The invariant: "if file exists, terminal MUST NOT auto-spawn serve"
+
 **No structured shutdown of outstanding tool approvals on serve.ts restart**
 - Severity: **MED**
 - File: `apps/proxy/src/serve.ts:1152-1173` (`shutdown`)
@@ -272,6 +311,48 @@ Scope: monorepo `apps/proxy`, `apps/relay`, `apps/web`, `packages/shared`. Findi
 - Impact: Bandwidth waste, client re-renders entire list on every session state change.
 - Fix approach: One `broadcastSessionList()` helper; consider per-session delta (`session_status` already covers state changes).
 
+**`apps/proxy/src/` is a flat directory mixing 3 distinct processes' code**
+- Severity: **HIGH** (architectural; enables other concerns)
+- Files: all 22 files directly under `apps/proxy/src/` — entries for terminal / serve / worker / shared utilities are mixed together with no visible separation
+- Evidence:
+  - Three entry points per `apps/proxy/tsup.config.ts:7` (`index.ts`, `serve.ts`, `session-worker.ts`) but they share a single flat src directory.
+  - No ESLint `no-restricted-imports` rules; no sub-directory structure; no process-level boundary enforcement at the type system or linter level.
+  - `terminal.ts` importing `./session-manager.js` (serve-only) would compile fine; nothing catches it.
+- Impact:
+  - Dead code (`file-watcher.ts`, `dir-lister.ts` in "Dead Code" section) is partly attributable here — nobody could tell at a glance which process was supposed to own them.
+  - Any future contributor (or Claude) must grep to find "which process uses this file" before editing.
+  - Bundle bloat risk: an inadvertent import pulls serve-side deps into the terminal bundle.
+- Fix approach (architectural mini-phase, NOT drive-by):
+  1. Introduce sub-directories: `ipc/` (shared wire protocol), `common/` (shared utilities like paths, logger, config), `terminal/` (terminal process files), `serve/` (daemon files + handlers), `worker/` (session-worker files).
+  2. Move files and update relative imports (mechanical).
+  3. Add ESLint rules restricting cross-process imports (e.g. `terminal/` can only import from `ipc/`, `common/`, or its own subtree).
+  4. Coordinate with IPC correlation mini-phase to avoid duplicate churn — **do file moves FIRST**, then do protocol refactors inside the new structure.
+- Related: "IPC correlation pattern missing" (see below). Both fixes should be sequenced: move files → refactor IPC.
+
+**No shared FSM discipline — every state machine is ad-hoc direct assignment**
+- Severity: **MED**
+- Known state machines (non-exhaustive):
+  - `apps/proxy/src/terminal.ts:25-34` — `TerminalState` (init/connecting_service/creating_session/running/reconnecting/exited). Direct assignment at 8 sites; zero transition validation; per-site guards; no unified log; no external observer.
+  - `packages/shared/src/constants/` — `SessionState` enum exists. Used across proxy/relay/web via raw string comparison and direct assignment.
+  - Worker lifecycle (session-worker.ts + serve.ts coordination) has implicit states not modeled.
+- Consequences:
+  - Invalid transitions (e.g. `EXITED → RUNNING`) compile and run fine
+  - Transition side effects (clearInterval, socket.end, PTY cleanup) are duplicated across call sites (terminal.ts's `onSessionExit` and SIGTERM handler are copy-paste)
+  - State is unobservable from outside — blocks features like "display bridge status in terminal"
+- Fix approach (mini-phase after walk):
+  1. Write `apps/proxy/src/common/state-machine.ts` — ~80-120 lines, API: `createFSM({ initial, transitions, onTransition })` returning `{ current, transitionTo, canTransitionTo, on }`. Not XState — too heavy for the scope.
+  2. Migrate `TerminalState` first (proves API on real use case)
+  3. After chapter 1-2 walk of serve.ts: migrate SessionState + worker states if shapes align. If they need actor-like concurrency, reconsider XState then.
+- Why not drive-by: the API shape depends on downstream use cases (SessionState, worker). Designing only from TerminalState risks an API that doesn't fit the second user.
+- Related: "Missing bridge state model" below — FSM discipline is a prerequisite for exposing observable state to the terminal UI surface.
+
+**Missing bridge state model — no concept of "local PTY alive but remote bridge dead"**
+- Severity: **HIGH** (architectural; surfaced during walk 2026-04-20)
+- Symptom: terminal has states `running/reconnecting/exited` but lacks "running-but-disconnected-from-relay". Result: after reconnect exhaustion, terminal is functional (PTY alive) but remote silently dropped — user has no indication.
+- Root cause: No cross-process state model. terminal doesn't know whether web client is connected. web doesn't know whether terminal state is stale. Each side assumes best case until a user-visible symptom surfaces.
+- Fix approach: After FSM discipline lands, extend terminal state with a separate `bridgeState: "online" | "offline" | "unknown"` dimension with its own transitions. Expose via status line / terminal title / stderr banner. Related work: the same concept applies to session-state ownership on the relay side.
+- Dependency: requires FSM mini-phase first (observable state requires the FSM infrastructure).
+
 ## Protocol Drift
 
 **Stack doc claims Zod `^3.24`; reality is Zod `^4.3.6`**
@@ -358,6 +439,29 @@ Scope: monorepo `apps/proxy`, `apps/relay`, `apps/web`, `packages/shared`. Findi
 - Severity: **MED**
 - Evidence: Test files listed at `apps/web/src/**/*.test.{ts,tsx}` — message-bubble, markdown-view, ansi-keys, theme-tokens, chat-store. Zero for dispatchers or phase-machine.
 - Impact: The state machine at `phase-machine.ts:21-204` encodes 6 phases × N events = many transitions. All untested.
+
+## Platform Support
+
+**No Windows support; Unix assumptions scattered across codebase (user confirmed requirement 2026-04-20 — user plans to use Windows)**
+- Severity: **HIGH**
+- Files (zero `process.platform` / `win32` branches exist anywhere in the repo — verified via `grep -rn "process\.platform\|win32" apps/`):
+  - `apps/proxy/src/paths.ts:4, 9` — `${process.env.HOME}/.cc-anywhere/.../cc-anywhere.sock`. Unix socket file path; Windows needs named pipe (`\\.\pipe\name`).
+  - `apps/proxy/src/paths.ts` — hardcoded `/` in template strings instead of `path.join`.
+  - `apps/proxy/src/terminal.ts:62` — `spawn("tsx", ..., { detached: true, stdio: "ignore" })`. Windows detached semantics differ from Unix `setsid`.
+  - `apps/proxy/src/terminal.ts:112, 222`, `apps/proxy/src/serve.ts:914` — `process.env.HOME` and `cwd.replace(HOME, "~")`. Windows uses `USERPROFILE`.
+  - Scripts (deploy.sh, install-relay.sh) and Dockerfile assume POSIX shell.
+- Root cause: Platform assumptions were not abstracted behind a layer. Every Unix-ism is embedded directly in business code — same architectural failure mode as the protocol layer (assumptions not explicit).
+- Impact: Project cannot run on Windows. Adding support now requires touching every `process.env.HOME`, every `.sock` literal, every hardcoded path separator — a global rewrite instead of a local one.
+- node-pty status: Supports Windows via ConPTY (Win10 1809+). Not a blocker.
+- Fix approach (dedicated phase, not drive-by):
+  1. Create `apps/proxy/src/platform.ts` — `getIpcEndpoint()`, `getHomeDir()` wrapping `os.homedir()`, `getRunDir()`, `getConfigDir()`, `spawnDetached()` helpers
+  2. Refactor all current Unix-ism call sites to go through platform.ts (no behaviour change on macOS/Linux)
+  3. Implement Windows branch inside platform.ts (named pipes, `USERPROFILE`, `path.join`, Windows detached spawn)
+  4. Add Windows CI job (GitHub Actions `windows-latest`)
+  5. Manual smoke test on real Windows
+  6. Update README with Windows setup
+- Subsumes the `process.env.HOME` entry in "Config/Env Sprawl" — fix together.
+- Walk-time aggregation: every Unix assumption discovered during the ongoing codebase walk will be appended to this entry so the future phase has a ready-made enumeration.
 
 ## Other Concerns (from the hot-file analysis)
 
