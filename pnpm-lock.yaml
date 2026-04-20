@@ -103,9 +103,15 @@ importers:
       nanoid:
         specifier: ^5.1.7
         version: 5.1.7
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
       ws:
         specifier: ^8.20.0
         version: 8.20.0
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@cc-anywhere/shared':
         specifier: workspace:*

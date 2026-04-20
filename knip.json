@@ -2,7 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     "apps/relay": {
-      "entry": ["scripts/verify-relay.ts"]
+      "entry": ["scripts/verify-relay.ts"],
+      "ignoreDependencies": ["pino", "zod"]
     },
     "apps/web": {
       "entry": ["pwa-assets.config.ts", "e2e/**/*.{ts,d.ts}"],

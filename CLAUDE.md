@@ -208,23 +208,39 @@ pnpm --filter @cc-anywhere/web test:e2e     # Playwright E2E（需要 relay + pr
 
 ### 云端部署 (relay + web + nginx)
 
-`apps/relay/deploy.sh` 一键部署到 SSH 目标机，用 docker compose 起 relay + nginx (nginx 镜像内含 apps/web 构建产物)：
+现行部署路径是 **tag-release + GHCR 预构建镜像**，`scripts/install-relay.sh --ssh` 到 VPS 秒起容器。`apps/relay/deploy.sh` 是老的 rsync + 远端构建方式，保留但不用。
+
+**发版**：
 
 ```bash
-./apps/relay/deploy.sh <ssh-host> <domain>
-# 例: ./apps/relay/deploy.sh vita relay.vita-tools.top
+# 1. bump 两个包的 version（apps/proxy/package.json + apps/relay/package.json）
+# 2. commit + tag + push，触发 .github/workflows/release.yml
+git tag v0.0.X && git push origin main v0.0.X
 ```
 
-脚本做的事: 装 Docker → certbot 申 SSL → 同步源码 → 同步本机 `~/.cc-anywhere/relay-data/fonts/` 到服务器 → 生成 `/opt/cc-anywhere/.env` (含 `RELAY_PROXY_TOKEN`, 已有则复用) → docker compose up → 公网连通性验证 (health / WSS 握手 / proxy token 正反例)。
+Workflow 会构建 `cc-anywhere-relay` 和 `cc-anywhere-web` 双镜像推 GHCR（`ghcr.io/lichenxicatapple-blip/`），同时发 npm。
+
+**部署到 VPS**：
+
+```bash
+# SSH alias 'vita' 对应生产 VPS (cc-anywhere.vita-tools.top)
+IMAGE_TAG=0.0.X ./scripts/install-relay.sh --ssh vita cc-anywhere.vita-tools.top
+```
+
+脚本做的事: 装 Docker → certbot 申 SSL（`/etc/letsencrypt/live/relay`）→ 写 `/opt/cc-anywhere/docker-compose.yml` + `.env`（`RELAY_PROXY_TOKEN` 复用已有）→ `docker compose pull && up` → 公网连通性验证。
+
+**国内 VPS 加速**：默认拉 `ghcr.io/lichenxicatapple-blip/`，国内偶尔慢但能通。Aliyun ACR 镜像（`REGISTRY_BASE=registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip`）理论更快但**需要 VPS 端先 `docker login` ACR 提供凭证**，一次性手工登录后持久化到 `~/.docker/config.json`。GHA workflow 会双推 GHCR + ACR（前提是 `ACR_USERNAME/NAMESPACE/REGISTRY/PASSWORD` 四个 secrets 都配了）。
 
 **路径分流** (nginx.conf): `/proxy`, `/client` → relay WS; `/fonts`, `/health`, `/status`, `/api/*` → relay HTTP; 其他 → web SPA (hash 路由, SPA fallback 回 `index.html`)。
 
-**鉴权**: `/proxy` 需要 `?token=<RELAY_PROXY_TOKEN>`, `/client` 开放。deploy.sh 首次部署时生成 token, 之后复用。
+**鉴权**: `/proxy` 需要 `?token=<RELAY_PROXY_TOKEN>`, `/client` 开放。install-relay.sh 首次部署时生成 token, 之后复用 `/opt/cc-anywhere/.env` 里的。
 
-**本地 proxy 连云端 relay**:
+**本地 proxy 连云端 relay**（手动切配置）：
 
 ```bash
-RELAY_URL='wss://cc-anywhere.vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter @lichenxi.cat/cc-anywhere run serve
+# ~/.cc-anywhere/config.json:
+# {"relayUrl": "wss://cc-anywhere.vita-tools.top", "relayToken": "<token-from-vps-env>"}
+pnpm --filter @lichenxi.cat/cc-anywhere run serve restart
 ```
 
 <!-- GSD:workflow-start source:GSD defaults -->

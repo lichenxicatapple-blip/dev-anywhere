@@ -1,6 +1,6 @@
 {
   "name": "@lichenxi.cat/cc-anywhere-relay",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Relay server for cc-anywhere — bridges local Claude Code proxies to remote web clients via WebSocket.",
   "keywords": [
     "claude-code",
@@ -51,7 +51,9 @@
   "dependencies": {
     "express": "^5.1.0",
     "nanoid": "^5.1.7",
-    "ws": "^8.20.0"
+    "pino": "^10.3.1",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@cc-anywhere/shared": "workspace:*",
