@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@cc-anywhere/shared";
-import { createRelayServer, type RelayServer } from "@cc-anywhere/relay/server";
+import { createRelayServer, type RelayServer } from "cc-anywhere-relay/server";
 import { buildMessage } from "@cc-anywhere/shared";
 import { RelayConnection } from "#src/relay-connection.js";
 

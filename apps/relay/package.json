@@ -1,8 +1,37 @@
 {
-  "name": "@cc-anywhere/relay",
-  "version": "0.0.0",
-  "private": true,
+  "name": "cc-anywhere-relay",
+  "version": "0.1.0",
+  "description": "Relay server for cc-anywhere — bridges local Claude Code proxies to remote web clients via WebSocket.",
+  "keywords": [
+    "claude-code",
+    "relay",
+    "websocket",
+    "server",
+    "cc-anywhere"
+  ],
+  "license": "MIT",
+  "author": "catli <catli@futunn.com>",
+  "homepage": "https://github.com/catli/cc-anywhere",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catli/cc-anywhere.git",
+    "directory": "apps/relay"
+  },
+  "bugs": {
+    "url": "https://github.com/catli/cc-anywhere/issues"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "cc-anywhere-relay": "./dist/index.js"
+  },
   "exports": {
     "./server": {
       "types": "./dist/server.d.ts",
@@ -16,18 +45,21 @@
     "build": "tsup && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@cc-anywhere/shared": "workspace:*",
-    "ws": "^8.20.0",
     "express": "^5.1.0",
-    "nanoid": "^5.1.7"
+    "nanoid": "^5.1.7",
+    "pino": "^10.3.1",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1",
+    "@cc-anywhere/shared": "workspace:*",
     "@types/express": "^5.0.2",
     "@types/node": "^22.15.30",
+    "@types/ws": "^8.18.1",
     "vitest": "^4.1.2"
   }
 }

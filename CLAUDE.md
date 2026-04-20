@@ -182,7 +182,7 @@ pnpm --filter @cc-anywhere/web test:e2e     # Playwright E2E（需要 relay + pr
 
 **本地 proxy 连云端 relay**:
 ```bash
-RELAY_URL='wss://relay.vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter @cc-anywhere/proxy run serve
+RELAY_URL='wss://cc-anywhere.vita-tools.top' RELAY_PROXY_TOKEN='<token>' pnpm --filter cc-anywhere run serve
 ```
 
 <!-- GSD:workflow-start source:GSD defaults -->

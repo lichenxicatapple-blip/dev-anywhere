@@ -16,7 +16,7 @@ const include =
 export default defineConfig({
   resolve: {
     alias: {
-      "@cc-anywhere/relay/server": resolve(__dirname, "../relay/src/server.ts"),
+      "cc-anywhere-relay/server": resolve(__dirname, "../relay/src/server.ts"),
     },
   },
   test: {

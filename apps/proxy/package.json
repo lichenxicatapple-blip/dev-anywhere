@@ -1,34 +1,63 @@
 {
-  "name": "@cc-anywhere/proxy",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "imports": {
-    "#src/*": "./src/*"
+  "name": "cc-anywhere",
+  "version": "0.1.0",
+  "description": "Transparent local proxy for Claude Code that bridges sessions to a mobile/web SPA via a relay server — interact with your Claude Code sessions from anywhere.",
+  "keywords": [
+    "claude-code",
+    "cli",
+    "proxy",
+    "remote",
+    "mobile",
+    "pty",
+    "websocket"
+  ],
+  "license": "MIT",
+  "author": "catli <catli@futunn.com>",
+  "homepage": "https://github.com/catli/cc-anywhere",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/catli/cc-anywhere.git"
   },
+  "bugs": {
+    "url": "https://github.com/catli/cc-anywhere/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "cc-anywhere": "./dist/index.js"
+  },
+  "imports": {
+    "#src/*": "./src/*"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@cc-anywhere/relay": "workspace:*",
-    "@cc-anywhere/shared": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode-graphemes": "^0.4.0",
     "@xterm/headless": "^6.0.0",
     "commander": "^14.0.3",
     "nanoid": "^5.1.7",
     "node-pty": "^1.1.0",
+    "pino": "^10.3.1",
     "ws": "^8.20.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@cc-anywhere/shared": "workspace:*",
+    "cc-anywhere-relay": "workspace:*",
     "@types/node": "^25.5.2",
     "@types/ws": "^8.18.1",
     "vitest": "^4.1.2"
