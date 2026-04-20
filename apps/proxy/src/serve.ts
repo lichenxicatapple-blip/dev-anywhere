@@ -658,6 +658,15 @@ function handleTerminalConnection(
           changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
           sessionManager.setPid(msg.sessionId, msg.pid);
           terminalSockets.set(msg.sessionId, socket);
+          // 注册即告知当前 bridge 状态，避免新接入的终端要等下次状态翻转才知道
+          if (relayConnection) {
+            socket.write(
+              serializeIpc({
+                type: "bridge_status",
+                connected: relayConnection.getStatus().connected,
+              }),
+            );
+          }
           // 通知 relay 该 session 存在，并推送会话列表给客户端
           if (relayConnection) {
             const session = sessionManager.getSession(msg.sessionId);
@@ -1374,9 +1383,21 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     // relay 重连时重新推送控制数据
     relayConnection.on("connected", () => {
       controlHandlers.reinitializeOnReconnect();
+      broadcastBridgeStatus(true);
+    });
+    relayConnection.on("disconnected", () => {
+      broadcastBridgeStatus(false);
     });
   } else {
     serviceLogger.info("No RELAY_URL configured, relay connection disabled");
+  }
+
+  // 把 relay 连接状态广播给所有已注册的 terminal，终端进程会 stderr 打 banner 提示用户
+  function broadcastBridgeStatus(connected: boolean): void {
+    const msg = serializeIpc({ type: "bridge_status", connected });
+    for (const [, sock] of terminalSockets) {
+      if (sock.writable) sock.write(msg);
+    }
   }
 
   await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);

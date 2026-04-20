@@ -179,6 +179,12 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     rows: z.number(),
     data: z.string(),
   }),
+
+  // serve → terminal：relay 连接状态变更，供终端给用户显示 remote viewing 是否通畅
+  z.object({
+    type: z.literal("bridge_status"),
+    connected: z.boolean(),
+  }),
 ]);
 
 // serve 与 session-worker 之间的通信协议

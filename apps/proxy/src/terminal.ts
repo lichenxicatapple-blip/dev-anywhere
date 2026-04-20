@@ -130,6 +130,18 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   let headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   let serializeAddon: SerializeAddon | null = null;
 
+  // 记住上一次 bridge 状态避免重连期间 connected/disconnected 快速抖动打多行 banner，
+  // 初值 null 保证首个状态（无论真假）都会打，方便用户在启动就看到 remote viewing 是否就绪
+  let lastBridgeConnected: boolean | null = null;
+  function handleBridgeStatus(connected: boolean): void {
+    if (lastBridgeConnected === connected) return;
+    lastBridgeConnected = connected;
+    const banner = connected
+      ? "\n\x1b[32m[cc-anywhere] relay online\x1b[0m\n"
+      : "\n\x1b[33m[cc-anywhere] relay offline — remote viewing unavailable\x1b[0m\n";
+    process.stderr.write(banner);
+  }
+
   function sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {
     if (!socket.writable || !sessionId) return;
     socket.write(
@@ -149,6 +161,8 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
       if (msg.type === "pty_input" && msg.sessionId === sessionId) {
         log.debug({ sessionId, bytes: msg.data.length }, "Remote input received");
         ptyManager?.write(msg.data);
+      } else if (msg.type === "bridge_status") {
+        handleBridgeStatus(msg.connected);
       } else if (msg.type === "pty_subscribe" && msg.sessionId === sessionId) {
         if (serializeAddon && headlessTerminal) {
           const data = serializeAddon.serialize();
