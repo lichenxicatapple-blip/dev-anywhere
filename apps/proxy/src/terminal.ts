@@ -1,7 +1,7 @@
 import { connect, type Socket } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { readTtySize } from "./terminal/tty.js";
+import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
@@ -289,10 +289,7 @@ class TerminalSession {
   private handleBridgeStatus(connected: boolean): void {
     if (this.lastBridgeConnected === connected) return;
     this.lastBridgeConnected = connected;
-    const banner = connected
-      ? "\n\x1b[32m[cc-anywhere] relay online\x1b[0m\n"
-      : "\n\x1b[33m[cc-anywhere] relay offline — remote viewing unavailable\x1b[0m\n";
-    process.stderr.write(banner);
+    notifyUser(connected ? "relay online" : "relay offline — remote viewing unavailable");
   }
 
   private setupSocketHandlers(): void {
@@ -376,11 +373,7 @@ class TerminalSession {
         const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
         if (!newSocket) continue;
 
-        if (degraded) {
-          process.stderr.write(
-            "\n\x1b[32m[cc-anywhere] serve daemon reachable, reconnected\x1b[0m\n",
-          );
-        }
+        if (degraded) notifyUser("serve daemon reachable, reconnected");
         consecutiveSpawnFailures = 0;
 
         this.socket = newSocket;
@@ -419,8 +412,8 @@ class TerminalSession {
         if (!passive) {
           consecutiveSpawnFailures++;
           if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
-            process.stderr.write(
-              `\n\x1b[33m[cc-anywhere] serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'cc-anywhere start'\x1b[0m\n`,
+            notifyUser(
+              `serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'cc-anywhere start'`,
             );
           }
         }
