@@ -19,8 +19,13 @@
 # Environment overrides:
 #   REGISTRY_BASE — registry + namespace prefix for the images
 #                   (default: ghcr.io/lichenxicatapple-blip).
-#                   For China VPSes use an Aliyun ACR mirror, e.g.
-#                   registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip
+#                   For China VPSes use the Aliyun ACR personal instance
+#                   bound to this project (personal instances have a unique
+#                   instance-id prefix and require `docker login` on the VPS):
+#                   crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
+#                   Verify the exact URL in Aliyun console → Container Registry
+#                   → 实例 → 访问凭证; don't assume cn-hangzhou or the shared
+#                   `registry.cn-*.aliyuncs.com` URL — personal ACR is different.
 #   IMAGE_TAG     — image tag to pull (default: latest).
 #
 # Layout created on the VPS:
@@ -55,9 +60,9 @@ DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/cc-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
-# REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from a
-# faster mirror — e.g. Aliyun ACR for China VPSes:
-#   REGISTRY_BASE=registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip
+# REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from the
+# Aliyun ACR personal instance (requires `docker login` on the VPS first):
+#   REGISTRY_BASE=crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
 REGISTRY_BASE="${REGISTRY_BASE:-ghcr.io/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 RELAY_IMAGE="${REGISTRY_BASE}/cc-anywhere-relay:${IMAGE_TAG}"

@@ -229,7 +229,15 @@ IMAGE_TAG=0.0.X ./scripts/install-relay.sh --ssh vita cc-anywhere.vita-tools.top
 
 脚本做的事: 装 Docker → certbot 申 SSL（`/etc/letsencrypt/live/relay`）→ 写 `/opt/cc-anywhere/docker-compose.yml` + `.env`（`RELAY_PROXY_TOKEN` 复用已有）→ `docker compose pull && up` → 公网连通性验证。
 
-**国内 VPS 加速**：默认拉 `ghcr.io/lichenxicatapple-blip/`，国内偶尔慢但能通。Aliyun ACR 镜像（`REGISTRY_BASE=registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip`）理论更快但**需要 VPS 端先 `docker login` ACR 提供凭证**，一次性手工登录后持久化到 `~/.docker/config.json`。GHA workflow 会双推 GHCR + ACR（前提是 `ACR_USERNAME/NAMESPACE/REGISTRY/PASSWORD` 四个 secrets 都配了）。
+**国内 VPS 加速**：默认拉 `ghcr.io/lichenxicatapple-blip/`，国内经常慢到超时。Aliyun ACR **个人实例** 才是当前项目真正的 ACR 地址：
+
+```
+REGISTRY_BASE='crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip'
+```
+
+注意：**不是** `registry.cn-*.aliyuncs.com`——个人版 ACR 每个账户有独立实例 ID 前缀 `crpi-xxx`，和共享域名 ACR 完全不同。实际地址在 Aliyun 控制台 `容器镜像服务 → 实例 → 访问凭证` 里看。
+
+VPS 端需要先 `sudo docker login crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com` 一次（凭证进 `~/.docker/config.json` 持久化）。GHA workflow 双推 GHCR + ACR（要配齐 `ACR_USERNAME/NAMESPACE/REGISTRY/PASSWORD` 四个 secrets）。
 
 **路径分流** (nginx.conf): `/proxy`, `/client` → relay WS; `/fonts`, `/health`, `/status`, `/api/*` → relay HTTP; 其他 → web SPA (hash 路由, SPA fallback 回 `index.html`)。
 
