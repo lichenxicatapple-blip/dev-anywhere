@@ -48,7 +48,7 @@ npm install -g cc-anywhere-relay
 cc-anywhere-relay --port 3100
 ```
 
-For a turnkey setup with TLS and nginx, see the `install-relay.sh` script in the [repo](https://github.com/catli/cc-anywhere).
+For a turnkey setup with TLS and nginx, see the `install-relay.sh` script in the [repo](https://github.com/lichenxicatapple-blip/cc-anywhere).
 
 ## Configuration
 

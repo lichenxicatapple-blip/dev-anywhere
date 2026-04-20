@@ -11,14 +11,14 @@
   ],
   "license": "MIT",
   "author": "catli <catli@futunn.com>",
-  "homepage": "https://github.com/catli/cc-anywhere",
+  "homepage": "https://github.com/lichenxicatapple-blip/cc-anywhere",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/catli/cc-anywhere.git",
+    "url": "git+https://github.com/lichenxicatapple-blip/cc-anywhere.git",
     "directory": "apps/relay"
   },
   "bugs": {
-    "url": "https://github.com/catli/cc-anywhere/issues"
+    "url": "https://github.com/lichenxicatapple-blip/cc-anywhere/issues"
   },
   "type": "module",
   "engines": {

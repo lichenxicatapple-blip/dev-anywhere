@@ -17,7 +17,7 @@
 #   token  — optional; a fresh RELAY_PROXY_TOKEN is generated when omitted.
 #
 # Environment overrides:
-#   GHCR_NAMESPACE — GitHub owner that publishes the images (default: catli).
+#   GHCR_NAMESPACE — GitHub owner that publishes the images (default: lichenxicatapple-blip).
 #   IMAGE_TAG      — image tag to pull (default: latest).
 #
 # Layout created on the VPS:
@@ -51,7 +51,7 @@ DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/cc-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
-GHCR_NAMESPACE="${GHCR_NAMESPACE:-catli}"
+GHCR_NAMESPACE="${GHCR_NAMESPACE:-lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 RELAY_IMAGE="ghcr.io/${GHCR_NAMESPACE}/cc-anywhere-relay:${IMAGE_TAG}"
 WEB_IMAGE="ghcr.io/${GHCR_NAMESPACE}/cc-anywhere-web:${IMAGE_TAG}"

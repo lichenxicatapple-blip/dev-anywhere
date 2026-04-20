@@ -43,7 +43,7 @@ RELAY_PROXY_TOKEN="$(openssl rand -hex 24)" PORT=3100 cc-anywhere-relay
 
 ## TLS
 
-This package serves plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare with a TLS termination. One-liner turnkey setup (docker compose + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/catli/cc-anywhere).
+This package serves plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare with a TLS termination. One-liner turnkey setup (docker compose + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/cc-anywhere).
 
 ## Using the embedded server programmatically
 
