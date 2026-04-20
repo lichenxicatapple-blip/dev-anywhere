@@ -1,6 +1,6 @@
 {
   "name": "@lichenxi.cat/cc-anywhere",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Transparent local proxy for Claude Code that bridges sessions to a mobile/web SPA via a relay server — interact with your Claude Code sessions from anywhere.",
   "keywords": [
     "claude-code",

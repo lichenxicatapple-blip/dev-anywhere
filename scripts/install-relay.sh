@@ -17,8 +17,11 @@
 #   token  — optional; a fresh RELAY_PROXY_TOKEN is generated when omitted.
 #
 # Environment overrides:
-#   GHCR_NAMESPACE — GitHub owner that publishes the images (default: lichenxicatapple-blip).
-#   IMAGE_TAG      — image tag to pull (default: latest).
+#   REGISTRY_BASE — registry + namespace prefix for the images
+#                   (default: ghcr.io/lichenxicatapple-blip).
+#                   For China VPSes use an Aliyun ACR mirror, e.g.
+#                   registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip
+#   IMAGE_TAG     — image tag to pull (default: latest).
 #
 # Layout created on the VPS:
 #   /opt/cc-anywhere/
@@ -51,10 +54,13 @@ DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/cc-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
-GHCR_NAMESPACE="${GHCR_NAMESPACE:-lichenxicatapple-blip}"
+# REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from a
+# faster mirror — e.g. Aliyun ACR for China VPSes:
+#   REGISTRY_BASE=registry.cn-hangzhou.aliyuncs.com/lichenxicatapple-blip
+REGISTRY_BASE="${REGISTRY_BASE:-ghcr.io/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-RELAY_IMAGE="ghcr.io/${GHCR_NAMESPACE}/cc-anywhere-relay:${IMAGE_TAG}"
-WEB_IMAGE="ghcr.io/${GHCR_NAMESPACE}/cc-anywhere-web:${IMAGE_TAG}"
+RELAY_IMAGE="${REGISTRY_BASE}/cc-anywhere-relay:${IMAGE_TAG}"
+WEB_IMAGE="${REGISTRY_BASE}/cc-anywhere-web:${IMAGE_TAG}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: must run as root (use sudo)" >&2
