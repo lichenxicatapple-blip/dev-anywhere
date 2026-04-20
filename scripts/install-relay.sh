@@ -46,7 +46,8 @@ if [ "${1:-}" = "--ssh" ]; then
     exit 1
   fi
   echo "==> deploying to $SSH_HOST (domain: $DOMAIN_ARG)"
-  ssh -t "$SSH_HOST" "sudo bash -s -- '$DOMAIN_ARG' '$TOKEN_ARG'" < "$SELF_PATH"
+  # sudo strips env vars; use `sudo env VAR=val` to thread REGISTRY_BASE / IMAGE_TAG through
+  ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' bash -s -- '$DOMAIN_ARG' '$TOKEN_ARG'" < "$SELF_PATH"
   exit $?
 fi
 
@@ -166,6 +167,12 @@ EOF
 chmod 600 .env
 
 # Step 6: pull images and start the stack.
+# Remove any pre-existing containers with the same names (e.g. from a previous
+# source-build deployment). `docker compose down` alone won't catch them when
+# the old stack was created under a different project name.
+docker compose down --remove-orphans 2>/dev/null || true
+docker rm -f cc-anywhere-relay cc-anywhere-nginx 2>/dev/null || true
+
 echo "==> pulling images"
 docker compose pull
 echo "==> starting containers"
