@@ -8,6 +8,7 @@ const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
+import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import {
@@ -35,28 +36,6 @@ const IDLE_THRESHOLD_MS = 3_000;
 const RECONNECT_MAX_RETRIES = 60;
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
-
-// terminal 进程生命周期状态
-const TerminalState = {
-  INIT: "init",
-  CONNECTING_SERVICE: "connecting_service",
-  CREATING_SESSION: "creating_session",
-  RUNNING: "running",
-  RECONNECTING: "reconnecting",
-  EXITED: "exited",
-} as const;
-type TerminalState = (typeof TerminalState)[keyof typeof TerminalState];
-
-// 允许的状态转换。CREATING_SESSION/RUNNING 下可被 socket close 打断进入 RECONNECTING；
-// 任意非终态都可能被 PTY 退出或 SIGTERM 打断进入 EXITED。
-const TERMINAL_TRANSITIONS: Record<TerminalState, readonly TerminalState[]> = {
-  init: ["connecting_service"],
-  connecting_service: ["creating_session", "exited"],
-  creating_session: ["running", "reconnecting", "exited"],
-  running: ["reconnecting", "exited"],
-  reconnecting: ["creating_session", "running", "exited"],
-  exited: [],
-};
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -335,6 +314,15 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
 
   setupSocketHandlers();
 
+  // pty_deregister 由 serve 负责 session 清理（数据目录、relay 通知等），
+  // terminal fd 随进程退出由 OS 关闭。收尾逻辑与 SIGTERM 共享同一实例避免重复。
+  const cleanupAndExit = createExitHandler({
+    fsm,
+    getSocket: () => socket,
+    getSessionId: () => sessionId,
+    getIdleCheckTimer: () => idleCheckTimer,
+  });
+
   ptyManager = new PtyManager({
     claudeArgs,
     tap,
@@ -358,23 +346,6 @@ export async function startTerminal(claudeArgs: string[]): Promise<void> {
   fsm.transitionTo(TerminalState.RUNNING);
 
   setupIdleCheck();
-
-  // 统一收尾：转 EXITED → 停 idle 定时器 → 给 serve 发 pty_deregister → 退进程。
-  // pty_deregister 通知 serve 做 session 清理（数据目录、relay 通知等）；
-  // terminal fd 随进程退出由 OS 关闭，serve 负责删数据目录。
-  function cleanupAndExit(code: number): void {
-    // Ctrl+C 两连击或 onSessionExit 与 SIGTERM 竞争时，第二次调用直接短路
-    if (fsm.is(TerminalState.EXITED)) return;
-    fsm.transitionTo(TerminalState.EXITED);
-    if (idleCheckTimer) clearInterval(idleCheckTimer);
-    if (socket.writable && sessionId) {
-      socket.end(serializeIpc({ type: "pty_deregister", sessionId }), () => {
-        process.exit(code);
-      });
-    } else {
-      process.exit(code);
-    }
-  }
 
   process.on("SIGTERM", () => {
     log.info({ sessionId }, "SIGTERM received, shutting down");
