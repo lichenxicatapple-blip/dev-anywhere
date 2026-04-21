@@ -13,6 +13,8 @@ export interface SessionInfo {
   updatedAt: number;
   name?: string;
   cwd: string;
+  // Claude CLI 自己生成的 session ID，和上面 id 字段无关
+  // 用途：定位 ~/.claude/projects/<encoded-cwd>/<claudeSessionId>.jsonl 历史文件 / 支持 --resume
   claudeSessionId?: string;
   pid: number;
 }

@@ -215,7 +215,8 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     pid: z.number(),
   }),
 
-  // worker → serve: Claude 会话 ID，从 system 事件捕获用于后续 resume
+  // worker → serve: 从 stream-json 的 system.init 事件捕获 Claude CLI 侧的 session ID
+  // proxy 拿它来读 ~/.claude/projects/.../<id>.jsonl 历史或后续 --resume
   z.object({
     type: z.literal("worker_claude_session_id"),
     sessionId: z.string(),
