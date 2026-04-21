@@ -1,39 +1,26 @@
 import { createServer, connect, type Socket } from "node:net";
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
-import {
-  unlinkSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  readdirSync,
-  chmodSync,
-  rmSync,
-} from "node:fs";
+import { unlinkSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
-import { SeqCounter } from "./common/seq-counter.js";
 import { homedir } from "node:os";
 import {
   SOCK_PATH,
   PID_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
-  DATA_DIR,
   sessionPaths,
   tildify,
 } from "./common/paths.js";
-import { spawnScript } from "./common/env.js";
 import { loadConfig } from "./common/config.js";
 import {
   createIpcReader,
   serializeIpc,
-  createWorkerReader,
   serializeWorkerMsg,
   type IpcMessage,
-  type WorkerMessage,
 } from "./ipc/ipc-protocol.js";
 import { nanoid } from "nanoid";
 import {
@@ -42,6 +29,7 @@ import {
 } from "./serve/handlers/control-messages.js";
 import { readSessionMessages } from "./serve/session-history.js";
 import { ToolApprovalManager } from "./serve/tool-approval-manager.js";
+import { WorkerRegistry } from "./serve/worker-registry.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -173,267 +161,13 @@ async function cleanupStaleResources(): Promise<void> {
   }
 }
 
-// ---------- Worker 管理 ----------
-
-// 将 worker 的 claude stream-json 事件路由为类型化 envelope / control message
-// 对齐 Claude CLI stream-json 输出: {type: "assistant"|"result"|"system"|"user", ...}
-// assistant 事件: 提取 content[] 中 text blocks 发 assistant_message; thinking 单独发 thinking envelope
-// tool_use content block 不在此路由, 审批请求走 worker_approval_request 分支
-// result 事件: 发 turn_result control, 客户端据此 markTurnComplete
-// system/user/其他: 忽略 (无 UI 影响)
-function forwardWorkerEvent(
-  relayConnection: RelayConnection,
-  sessionManager: SessionManager,
-  sessionId: string,
-  seq: number,
-  event: Record<string, unknown>,
-): void {
-  const type = event.type;
-  if (type === "assistant") {
-    const message = event.message as { content?: Array<Record<string, unknown>> } | undefined;
-    const content = message?.content ?? [];
-    const text = content
-      .filter((c) => c.type === "text")
-      .map((c) => (c.text as string | undefined) ?? "")
-      .join("");
-    if (text) {
-      relayConnection.sendEnvelope(
-        buildMessage("assistant_message", sessionId, seq, { text, isPartial: true }, "proxy"),
-      );
-    }
-    const thinkingBlock = content.find((c) => c.type === "thinking");
-    if (thinkingBlock) {
-      const thinkingText = (thinkingBlock.thinking as string | undefined) ?? "";
-      if (thinkingText) {
-        relayConnection.sendEnvelope(
-          buildMessage("thinking", sessionId, seq, { text: thinkingText }, "proxy"),
-        );
-      }
-    }
-    return;
-  }
-  if (type === "result") {
-    relayConnection.sendRaw(
-      JSON.stringify({
-        type: "turn_result",
-        sessionId,
-        success: event.subtype === "success",
-        isError: Boolean(event.is_error),
-      }),
-    );
-    // turn 结束 = JSON 会话回 IDLE；changeSessionState 内部会推 session_status envelope
-    changeSessionState(sessionManager, relayConnection, sessionId, SessionState.IDLE);
-    return;
-  }
-  // system / user / rate_limit_event 等当前不投给 client
-}
-
-function connectToWorker(
-  sessionId: string,
-  sockPath: string,
-  sessionManager: SessionManager,
-  workerSockets: Map<string, Socket>,
-  toolApprovalManager: ToolApprovalManager,
-  relayConnection: RelayConnection | null = null,
-): Promise<Socket | null> {
-  return new Promise((resolve) => {
-    const sock = connect(sockPath);
-    sock.on("connect", () => {
-      workerSockets.set(sessionId, sock);
-
-      createWorkerReader(sock, (msg: WorkerMessage) => {
-        switch (msg.type) {
-          case "worker_ready":
-            serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
-            break;
-          case "worker_event":
-            // 不在此处改 session.state:
-            // Claude CLI 会在启动/连接阶段发 system init 之类的非 turn 事件,
-            // 若无条件转 WORKING 会导致新建会话立刻显示"停止"按钮并一直卡住.
-            // WORKING 的真正入口是 user_input (见下方 L812); result 事件由 forwardWorkerEvent 负责转 IDLE.
-            // 将 worker 事件按 stream-json 语义路由到类型化 envelope / control message
-            // event 结构参考 claude CLI stream-json: assistant / result / system / user
-            if (relayConnection) {
-              try {
-                forwardWorkerEvent(relayConnection, sessionManager, sessionId, msg.seq, msg.event);
-              } catch (err) {
-                serviceLogger.debug(
-                  { sessionId, error: String(err) },
-                  "Failed to forward event to relay",
-                );
-              }
-            }
-            serviceLogger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
-            break;
-          case "worker_replay_done":
-            serviceLogger.info(
-              { sessionId, replayedCount: msg.replayedCount },
-              "Worker event replay complete",
-            );
-            break;
-          case "worker_exit":
-            sessionManager.terminateSession(sessionId);
-            workerSockets.delete(sessionId);
-            serviceLogger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
-            break;
-          case "worker_approval_request":
-            if (relayConnection) {
-              serviceLogger.info(
-                { sessionId, toolName: msg.toolName, requestId: msg.requestId },
-                "Tool approval forwarding to relay",
-              );
-              try {
-                const seqCounter = new SeqCounter(sessionId);
-                const approvalSeq = seqCounter.next();
-                const envelope = buildMessage(
-                  "tool_use_request",
-                  sessionId,
-                  approvalSeq,
-                  {
-                    toolName: msg.toolName,
-                    toolId: msg.requestId,
-                    parameters: msg.input,
-                  },
-                  "proxy",
-                );
-                relayConnection.sendEnvelope(envelope);
-                toolApprovalManager.register(msg.requestId, {
-                  sessionId,
-                  toolName: msg.toolName,
-                  input: msg.input,
-                  workerSocket: sock,
-                });
-              } catch (err) {
-                serviceLogger.warn(
-                  { sessionId, error: String(err) },
-                  "Failed to forward tool approval to relay, denying",
-                );
-                sock.write(
-                  serializeWorkerMsg({
-                    type: "worker_approval_response",
-                    requestId: msg.requestId,
-                    behavior: "deny",
-                    message: "Failed to forward approval request to relay.",
-                  }),
-                );
-              }
-            } else {
-              serviceLogger.info(
-                { sessionId, toolName: msg.toolName },
-                "Tool approval denied (no relay connection)",
-              );
-              sock.write(
-                serializeWorkerMsg({
-                  type: "worker_approval_response",
-                  requestId: msg.requestId,
-                  behavior: "deny",
-                  message: "No relay connection available for remote approval.",
-                }),
-              );
-            }
-            break;
-          case "worker_claude_session_id":
-            sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
-            serviceLogger.info(
-              { sessionId, claudeSessionId: msg.sessionId },
-              "Claude session ID captured",
-            );
-            break;
-        }
-      });
-
-      sock.on("close", () => {
-        workerSockets.delete(sessionId);
-        toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
-      });
-      sock.on("error", () => {
-        workerSockets.delete(sessionId);
-        toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
-      });
-
-      resolve(sock);
-    });
-    sock.on("error", () => resolve(null));
-  });
-}
-
-function spawnWorker(
-  sessionId: string,
-  options?: { cwd?: string; resumeSessionId?: string; permissionMode?: string },
-): number {
-  const paths = sessionPaths(sessionId);
-
-  const workerArgs: string[] = [sessionId, paths.workerSock];
-  if (options?.cwd) workerArgs.push("--cwd", options.cwd);
-  if (options?.resumeSessionId) workerArgs.push("--resume", options.resumeSessionId);
-  // 远程场景默认走 default (每工具审批), 覆盖用户全局 claude settings 的 defaultMode
-  workerArgs.push("--permission-mode", options?.permissionMode ?? "default");
-  workerArgs.push("--");
-
-  const child = spawnScript(new URL("./session-worker", import.meta.url), workerArgs, {
-    logger: serviceLogger,
-  });
-  const workerPid = child.pid!;
-  serviceLogger.info(
-    { sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId },
-    "Worker process spawned",
-  );
-  return workerPid;
-}
-
-async function reconnectWorkers(
-  sessionManager: SessionManager,
-  workerSockets: Map<string, Socket>,
-  toolApprovalManager: ToolApprovalManager,
-  relayConnection: RelayConnection | null = null,
-): Promise<void> {
-  if (!existsSync(DATA_DIR)) return;
-
-  const dirs = readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
-
-  for (const dir of dirs) {
-    const sessionId = dir.name;
-    const paths = sessionPaths(sessionId);
-    if (!existsSync(paths.workerSock)) continue;
-
-    const sock = await connectToWorker(
-      sessionId,
-      paths.workerSock,
-      sessionManager,
-      workerSockets,
-      toolApprovalManager,
-      relayConnection,
-    );
-    if (sock) {
-      if (!sessionManager.getSession(sessionId)) {
-        serviceLogger.warn(
-          { sessionId },
-          "Orphaned worker found without session data, terminating",
-        );
-        sock.end();
-        workerSockets.delete(sessionId);
-        continue;
-      }
-      serviceLogger.info({ sessionId }, "Reconnected to existing worker");
-    } else {
-      try {
-        unlinkSync(paths.workerSock);
-      } catch {
-        // socket 文件可能已被删除
-      }
-      serviceLogger.info({ sessionId }, "Cleaned up stale worker socket");
-    }
-  }
-}
-
 // ---------- 客户端 IPC 消息处理 ----------
 
 function handleTerminalConnection(
   socket: Socket,
   sessionManager: SessionManager,
-  workerSockets: Map<string, Socket>,
+  workerRegistry: WorkerRegistry,
   terminalSockets: Map<string, Socket>,
-  toolApprovalManager: ToolApprovalManager,
   relayConnection: RelayConnection | null = null,
   controlHandlers?: ControlMessageHandlers,
 ): void {
@@ -460,7 +194,7 @@ function handleTerminalConnection(
             serviceLogger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
           } else {
             const pendingId = nanoid();
-            const workerPid = spawnWorker(pendingId);
+            const workerPid = workerRegistry.spawn(pendingId);
             const session = sessionManager.createSession(
               "json",
               msg.cwd,
@@ -474,14 +208,7 @@ function handleTerminalConnection(
             const maxRetries = 20;
             const tryConnectWorker = () => {
               attempt++;
-              connectToWorker(
-                session.id,
-                paths.workerSock,
-                sessionManager,
-                workerSockets,
-                toolApprovalManager,
-                relayConnection,
-              ).then((sock) => {
+              workerRegistry.connect(session.id, paths.workerSock).then((sock) => {
                 if (sock) {
                   socket.write(
                     serializeIpc({
@@ -526,7 +253,7 @@ function handleTerminalConnection(
                 state: s.state,
                 createdAt: new Date(s.createdAt).toISOString(),
                 ...(s.name !== undefined ? { name: s.name } : {}),
-                hasWorker: workerSockets.has(s.id),
+                hasWorker: workerRegistry.has(s.id),
               })),
             }),
           );
@@ -591,11 +318,11 @@ function handleTerminalConnection(
 
         case "session_terminate_request": {
           const result = sessionManager.terminateSession(msg.sessionId);
-          const ws = workerSockets.get(msg.sessionId);
+          const ws = workerRegistry.getSocket(msg.sessionId);
           if (ws?.writable) {
             ws.write(serializeWorkerMsg({ type: "worker_stop" }));
           }
-          workerSockets.delete(msg.sessionId);
+          workerRegistry.delete(msg.sessionId);
 
           controlHandlers?.cleanup(msg.sessionId);
           socket.write(
@@ -785,7 +512,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
   sessionManager.startReaper();
 
-  const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
   const toolApprovalManager = new ToolApprovalManager();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
@@ -813,11 +539,23 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const proxyConfig = loadConfig();
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;
-  let relayConnection: RelayConnection | null = null;
+  const relayConnection: RelayConnection | null = relayUrl
+    ? new RelayConnection(relayUrl, { name: proxyName, token: relayToken })
+    : null;
+  if (relayConnection) {
+    relaySend = (data) => relayConnection.sendRaw(data);
+  }
 
-  if (relayUrl) {
-    relayConnection = new RelayConnection(relayUrl, { name: proxyName, token: relayToken });
-    relaySend = (data) => relayConnection!.sendRaw(data);
+  // WorkerRegistry 需要 relayConnection 引用来转发 worker 事件；建在 relay 之后、listener 之前
+  const workerRegistry = new WorkerRegistry({
+    sessionManager,
+    toolApprovalManager,
+    relayConnection,
+    changeSessionState: (sessionId, next) =>
+      changeSessionState(sessionManager, relayConnection, sessionId, next),
+  });
+
+  if (relayConnection) {
     relayConnection.connect();
     serviceLogger.info(
       { relayUrl, proxyName, tokenSet: !!relayToken },
@@ -840,7 +578,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               "Remote input dropped: session not found",
             );
           } else if (session.mode === "json") {
-            const ws = workerSockets.get(parsed.sessionId);
+            const ws = workerRegistry.getSocket(parsed.sessionId);
             if (ws?.writable) {
               // user_input 是 JSON turn 的唯一入口, 此刻就推 WORKING, 不再依赖 worker_event 的副作用
               changeSessionState(
@@ -966,21 +704,18 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const name = tildify(cwd);
           // 先生成 ID 和启动 worker，连接成功后再注册 session
           const pendingId = nanoid();
-          const workerPid = spawnWorker(pendingId, { cwd, resumeSessionId, permissionMode });
+          const workerPid = workerRegistry.spawn(pendingId, {
+            cwd,
+            resumeSessionId,
+            permissionMode,
+          });
 
           const paths = sessionPaths(pendingId);
           let attempt = 0;
           const maxRetries = 20;
           const tryConnect = () => {
             attempt++;
-            connectToWorker(
-              pendingId,
-              paths.workerSock,
-              sessionManager,
-              workerSockets,
-              toolApprovalManager,
-              relayConnection,
-            ).then((sock) => {
+            workerRegistry.connect(pendingId, paths.workerSock).then((sock) => {
               if (sock) {
                 // worker 连接成功，正式注册 session
                 const session = sessionManager.createSession(
@@ -1115,11 +850,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "session_terminate") {
           const sid = parsed.sessionId as string;
           const result = sessionManager.terminateSession(sid);
-          const ws = workerSockets.get(sid);
+          const ws = workerRegistry.getSocket(sid);
           if (ws?.writable) {
             ws.write(serializeWorkerMsg({ type: "worker_stop" }));
           }
-          workerSockets.delete(sid);
+          workerRegistry.delete(sid);
           controlHandlers.cleanup(sid);
           serviceLogger.info(
             { sessionId: sid, success: result.success },
@@ -1240,15 +975,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     }
   }
 
-  await reconnectWorkers(sessionManager, workerSockets, toolApprovalManager, relayConnection);
+  await workerRegistry.reconnectAll();
 
   const server = createServer((socket) => {
     handleTerminalConnection(
       socket,
       sessionManager,
-      workerSockets,
+      workerRegistry,
       terminalSockets,
-      toolApprovalManager,
       relayConnection,
       controlHandlers,
     );
@@ -1266,10 +1000,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     if (relayConnection) {
       relayConnection.close();
     }
-    for (const [, ws] of workerSockets) {
-      ws.destroy();
-    }
-    workerSockets.clear();
+    workerRegistry.destroyAll();
     server.close();
     try {
       unlinkSync(SOCK_PATH);
