@@ -195,10 +195,19 @@ Plans:
   2. PreToolUse / PostToolUse / Stop / UserPromptSubmit / SessionStart 五类 hook 事件作为 `terminal.hook_event` 转发到 client，phase 状态 (idle/thinking/tool_use/waiting) 通过 `terminal.status` 推出
   3. serve daemon 启动/退出按 marker 精确管理 `~/.claude/settings.json` 注入/清理，不破坏用户现有 hooks
   4. 同机多终端实例通过 `CC_ANYWHERE_SESSION_ID` env 路由，事件不串扰
-**Plans**: TBD
+**Plans:** 10 plans
 
 Plans:
-- [ ] 11.5-01: TBD
+- [ ] 11.5-01-PLAN.md — shared schema 扩展 4 个新 envelope 成员
+- [ ] 11.5-02-PLAN.md — relay PROXY_TO_CLIENT_TYPES allowlist 追加 3 个 type
+- [ ] 11.5-03-PLAN.md — daemon-id + paths 常量 + settings.json atomic 读写
+- [ ] 11.5-04-PLAN.md — hook-endpoint HTTP server 127.0.0.1 + derivePhase
+- [ ] 11.5-05-PLAN.md — HookApprovalManager pending map + 24h auto-deny
+- [ ] 11.5-06-PLAN.md — pty-manager 注入 CC_ANYWHERE_SESSION_ID / HOOK_PORT env
+- [ ] 11.5-07-PLAN.md — relay-router 分发 terminal.permission_decision
+- [ ] 11.5-08-PLAN.md — serve.ts 装配 hook lifecycle 启停
+- [ ] 11.5-09-PLAN.md — 集成测试：真 shell + curl 验证 env 继承 + 挂住 response
+- [ ] 11.5-10-PLAN.md — web 侧 chat-store + dispatcher + 简版 HookPermissionModal
 
 ### Phase 11.6: Scroll 重构 + safeFit
 **Goal**: 拆掉 chat-pty-view 的双向同步 hack，改单向数据流（xterm buffer 权威 + 自绘 scrollbar），修滚动/键盘/resize 的所有 UX bug
