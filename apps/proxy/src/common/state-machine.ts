@@ -91,9 +91,7 @@ interface StatelessFSM<S extends string> {
   isAbsorbing(state: S): boolean;
 }
 
-export function defineFSM<S extends string>(
-  transitions: Record<S, readonly S[]>,
-): StatelessFSM<S> {
+export function defineFSM<S extends string>(transitions: Record<S, readonly S[]>): StatelessFSM<S> {
   const absorbing = computeAbsorbingSet(transitions);
   return {
     canTransition: (from, to) => transitions[from]?.includes(to) ?? false,
