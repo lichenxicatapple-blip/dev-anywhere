@@ -160,14 +160,12 @@ export class SessionManager {
     if (oldState === newState) return false;
     const fsm = fsmForMode(session.mode);
     if (!fsm.canTransition(oldState, newState)) {
-      // 吸收态（TERMINATED / ERROR）之后的残余转换请求是进程竞态，日志降噪到 debug；
-      // 其他非法转换是协议违反或 bug，warn 以便盯盘能看到
-      const isAbsorbingResidual =
-        oldState === SessionState.TERMINATED || oldState === SessionState.ERROR;
-      const level = isAbsorbingResidual ? "debug" : "warn";
+      // 吸收态（传递闭包推导：TERMINATED + 所有出边都指向吸收态的状态）之后的残余转换请求
+      // 是进程竞态，日志降噪到 debug；其他非法转换是协议违反或 bug，warn 以便盯盘能看到
+      const level = fsm.isAbsorbing(oldState) ? "debug" : "warn";
       serviceLogger[level](
         { sessionId: id, from: oldState, to: newState, mode: session.mode },
-        isAbsorbingResidual
+        level === "debug"
           ? "State change after absorbing state (residual, likely race)"
           : "Invalid state transition rejected by FSM",
       );

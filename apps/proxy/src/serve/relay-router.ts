@@ -31,15 +31,7 @@ interface RelayRouterDeps {
 export class RelayRouter {
   constructor(private deps: RelayRouterDeps) {}
 
-  handle(data: string): void {
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(data);
-    } catch (err) {
-      serviceLogger.warn({ error: String(err) }, "Failed to parse relay message");
-      return;
-    }
-
+  handle(parsed: Record<string, unknown>): void {
     const type = parsed.type as string | undefined;
     if (!type) {
       serviceLogger.warn("Relay message without type discriminator");

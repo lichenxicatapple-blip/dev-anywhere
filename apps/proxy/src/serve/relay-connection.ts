@@ -81,6 +81,13 @@ export class RelayConnection extends EventEmitter {
     transitions: RELAY_TRANSITIONS,
     onTransition: (from, to) =>
       serviceLogger.info({ from, to }, "RelayConnection state transition"),
+    onRejected: (from, to, isAbsorbing) =>
+      serviceLogger[isAbsorbing ? "debug" : "warn"](
+        { from, to },
+        isAbsorbing
+          ? "Late event after absorbing state, ignored"
+          : "Invalid relay connection transition rejected",
+      ),
   });
   private name?: string;
   private token?: string;
@@ -91,10 +98,6 @@ export class RelayConnection extends EventEmitter {
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
     this.token = options?.token;
-  }
-
-  private transition(to: RelayConnectionState): void {
-    this.fsm.transitionTo(to);
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -117,7 +120,7 @@ export class RelayConnection extends EventEmitter {
 
   // 连接到 relay server
   connect(): void {
-    this.transition(RelayConnectionState.CONNECTING);
+    if (!this.fsm.tryTransitionTo(RelayConnectionState.CONNECTING)) return;
     this.doConnect();
   }
 
@@ -129,8 +132,8 @@ export class RelayConnection extends EventEmitter {
       this.ws = new WebSocket(url);
 
       this.ws.on("open", () => {
-        this.reconnectAttempt = 0;
-        this.transition(RelayConnectionState.REGISTERING);
+        // open 属异步回调，若同步 close() 已先切 CLOSED，REGISTERING 会被拒，需跳过后续 register
+        if (!this.fsm.tryTransitionTo(RelayConnectionState.REGISTERING)) return;
         serviceLogger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
         this.ws!.send(
           JSON.stringify({
@@ -143,32 +146,28 @@ export class RelayConnection extends EventEmitter {
 
       this.ws.on("message", (data) => {
         const raw = data.toString();
+        let msg: Record<string, unknown>;
         try {
-          const parsed = JSON.parse(raw);
-          if (parsed.type === "proxy_register_response") {
-            const status: string = parsed.status;
-            const sessions: Record<string, number> | undefined = parsed.sessions;
-            serviceLogger.info(
-              { status, sessionCount: sessions ? Object.keys(sessions).length : 0 },
-              "Received register response",
-            );
-            this.transition(RelayConnectionState.SYNCED);
-            // 先 emit sync 让调用方补数据，再 flush 队列保证顺序
-            this.emit("sync", { status, sessions: sessions ?? {} });
-            this.flushQueue();
-            this.emit("connected");
-            return;
-          }
-        } catch {
-          // 非 JSON 消息，正常转发
+          msg = JSON.parse(raw) as Record<string, unknown>;
+        } catch (err) {
+          serviceLogger.warn({ error: String(err) }, "Non-JSON message from relay, dropped");
+          return;
         }
-        this.emit("message", raw);
+        if (msg.type === "proxy_register_response") {
+          serviceLogger.info({ status: msg.status }, "Received register response");
+          if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;
+          this.reconnectAttempt = 0;
+          this.flushQueue();
+          this.emit("connected");
+          return;
+        }
+        this.emit("message", msg);
       });
 
       this.ws.on("close", () => {
         this.ws = null;
         if (this.fsm.current() !== RelayConnectionState.CLOSED) {
-          this.transition(RelayConnectionState.WAITING_RECONNECT);
+          this.fsm.tryTransitionTo(RelayConnectionState.WAITING_RECONNECT);
           serviceLogger.info("Relay connection closed unexpectedly");
           this.emit("disconnected");
           this.scheduleReconnect();
@@ -183,7 +182,7 @@ export class RelayConnection extends EventEmitter {
     } catch (err) {
       serviceLogger.error({ error: String(err) }, "Failed to create relay connection");
       if (this.fsm.current() !== RelayConnectionState.CLOSED) {
-        this.transition(RelayConnectionState.WAITING_RECONNECT);
+        this.fsm.tryTransitionTo(RelayConnectionState.WAITING_RECONNECT);
         this.scheduleReconnect();
       }
     }
@@ -207,8 +206,9 @@ export class RelayConnection extends EventEmitter {
     );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempt++;
-      // 必须先回 CONNECTING 才能让 open handler 合法转到 REGISTERING
-      this.transition(RelayConnectionState.CONNECTING);
+      // 必须先回 CONNECTING 才能让 open handler 合法转到 REGISTERING；
+      // 若 close() 抢先切 CLOSED（clearTimeout 理论上拦得住，保险再守一层），跳过重连
+      if (!this.fsm.tryTransitionTo(RelayConnectionState.CONNECTING)) return;
       this.doConnect();
     }, backoff);
   }
@@ -258,7 +258,7 @@ export class RelayConnection extends EventEmitter {
   close(): void {
     // 幂等：已 CLOSED 直接跳过，避免 FSM 抛 closed -> closed
     if (this.fsm.is(RelayConnectionState.CLOSED)) return;
-    this.transition(RelayConnectionState.CLOSED);
+    this.fsm.tryTransitionTo(RelayConnectionState.CLOSED);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

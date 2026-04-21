@@ -489,7 +489,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     jsonObserver,
   });
 
-  relayConnection.on("message", (data: string) => relayRouter.handle(data));
+  relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
   relayConnection.on("connected", () => {
     controlHandlers.reinitializeOnReconnect();
     broadcastBridgeStatus(true);

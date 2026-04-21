@@ -1,18 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
 
 // RelayConnectionState 需要从 relay-connection.ts 导出
 import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
 
-// mock ws 模块，避免实际 WebSocket 连接
-vi.mock("ws", () => {
-  const MockWebSocket = Object.assign(vi.fn(), {
-    OPEN: 1,
-    CONNECTING: 0,
-    CLOSING: 2,
-    CLOSED: 3,
-  });
+// mock ws 模块：用 EventEmitter 派生类，每次 new 把实例挂到 static lastInstance 供测试访问
+vi.mock("ws", async () => {
+  const { EventEmitter } = await import("node:events");
+  class MockWebSocket extends EventEmitter {
+    send = vi.fn();
+    close = vi.fn();
+    readyState = 0;
+    static OPEN = 1;
+    static CONNECTING = 0;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    static lastInstance: MockWebSocket | null = null;
+    constructor(_url: string) {
+      super();
+      MockWebSocket.lastInstance = this;
+    }
+  }
   return { default: MockWebSocket };
 });
+
+type MockWsModule = { default: { lastInstance: EventEmitter & { readyState: number } } };
 
 // mock nanoid
 vi.mock("nanoid", () => ({
@@ -100,5 +112,48 @@ describe("RelayConnection state machine", () => {
     }
     const status = conn.getStatus();
     expect(status.queueDepth).toBe(MAX_QUEUE);
+  });
+});
+
+// 复现 ws 异步回调 vs. 同步 close() 的竞态：open/message 事件到达时 FSM 已 CLOSED，
+// 当前 transitionTo 非法转换 throw 会冒到 unhandledException
+describe("RelayConnection: async ws events arriving after close()", () => {
+  async function connectAndGrabWs(): Promise<{
+    conn: RelayConnection;
+    fakeWs: EventEmitter & { readyState: number };
+  }> {
+    const conn = new RelayConnection("ws://test:1234", { proxyIdPath: "/tmp/test-proxy-id" });
+    conn.connect();
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const fakeWs = mod.default.lastInstance;
+    if (!fakeWs) throw new Error("mock WebSocket did not capture instance");
+    return { conn, fakeWs };
+  }
+
+  it("baseline: fakeWs mock takes effect, open → REGISTERING", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    fakeWs.emit("open");
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.REGISTERING);
+  });
+
+  it("does not throw when ws 'open' fires after close() (race A)", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    conn.close();
+    // 模拟 TCP 握手先于 close() 已完成，open 事件在 event loop 后到
+    expect(() => fakeWs.emit("open")).not.toThrow();
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
+  });
+
+  it("register_response after close() gets swallowed by over-broad try/catch and leaks as message (race B)", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    fakeWs.emit("open"); // 先 open 进 REGISTERING
+    conn.close(); // 然后外部 close
+    const leaked: unknown[] = [];
+    conn.on("message", (msg: unknown) => leaked.push(msg));
+    const resp = JSON.stringify({ type: "proxy_register_response", status: "ok", sessions: {} });
+    // register_response 在 CLOSED 态应被忽略：不改状态、不泄露为 message
+    fakeWs.emit("message", Buffer.from(resp));
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
+    expect(leaked).toEqual([]);
   });
 });

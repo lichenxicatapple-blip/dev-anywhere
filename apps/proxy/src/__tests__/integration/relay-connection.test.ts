@@ -90,9 +90,9 @@ describe("RelayConnection", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const received: string[] = [];
-    conn.on("message", (data: string) => {
-      received.push(data);
+    const received: Record<string, unknown>[] = [];
+    conn.on("message", (msg: Record<string, unknown>) => {
+      received.push(msg);
     });
 
     // 通过 relay 的 registry 直接向 proxy 发送消息来模拟 relay 转发
@@ -100,13 +100,13 @@ describe("RelayConnection", () => {
     const proxySocket = relay.registry.getProxy(proxyId);
     expect(proxySocket).toBeTruthy();
 
-    const testMsg = JSON.stringify({ type: "test", data: "from-relay" });
-    proxySocket!.send(testMsg);
+    const testPayload = { type: "test", data: "from-relay" };
+    proxySocket!.send(JSON.stringify(testPayload));
 
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     expect(received.length).toBe(1);
-    expect(received[0]).toBe(testMsg);
+    expect(received[0]).toEqual(testPayload);
   });
 
   it("close() cleanly closes the WebSocket", async () => {

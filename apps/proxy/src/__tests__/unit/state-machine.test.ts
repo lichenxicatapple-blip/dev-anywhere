@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createFSM } from "../../common/state-machine.js";
+import { createFSM, defineFSM } from "../../common/state-machine.js";
 
 // 测试用的小状态集：start → middle → end
 const TRANSITIONS = {
@@ -78,5 +78,78 @@ describe("createFSM", () => {
     fsm.transitionTo("end");
     expect(fsm.canTransitionTo("start")).toBe(false);
     expect(fsm.canTransitionTo("end")).toBe(false);
+  });
+
+  it("tryTransitionTo 合法转换返回 true 并更新 current", () => {
+    const fsm = createFSM<S>({ initial: "start", transitions: TRANSITIONS });
+    expect(fsm.tryTransitionTo("middle")).toBe(true);
+    expect(fsm.current()).toBe("middle");
+  });
+
+  it("tryTransitionTo 非法转换返回 false 且状态不变，不抛", () => {
+    const fsm = createFSM<S>({ initial: "start", transitions: TRANSITIONS });
+    expect(() => fsm.tryTransitionTo("start")).not.toThrow();
+    expect(fsm.tryTransitionTo("start")).toBe(false);
+    expect(fsm.current()).toBe("start");
+  });
+
+  // 接近真实用例的图：active ↔ idle 循环，error 只能通向 terminated
+  // idle/active 都有非吸收出边（互相循环）→ 都非吸收；error → [terminated] → 吸收
+  const LIFECYCLE = {
+    active: ["idle", "terminated"],
+    idle: ["active", "terminated"],
+    error: ["terminated"],
+    terminated: [],
+  } as const;
+  type L = keyof typeof LIFECYCLE;
+
+  it("isInAbsorbingState: 结构终态 (terminated)", () => {
+    const fsm = createFSM<L>({ initial: "terminated", transitions: LIFECYCLE });
+    expect(fsm.isInAbsorbingState()).toBe(true);
+  });
+
+  it("isInAbsorbingState: 闭包传递 (error → [terminated])", () => {
+    const fsm = createFSM<L>({ initial: "error", transitions: LIFECYCLE });
+    expect(fsm.isInAbsorbingState()).toBe(true);
+  });
+
+  it("isInAbsorbingState: 有非吸收出边的状态 (active/idle 互循环) 非吸收", () => {
+    const a = createFSM<L>({ initial: "active", transitions: LIFECYCLE });
+    expect(a.isInAbsorbingState()).toBe(false);
+    const i = createFSM<L>({ initial: "idle", transitions: LIFECYCLE });
+    expect(i.isInAbsorbingState()).toBe(false);
+  });
+});
+
+describe("defineFSM.isAbsorbing", () => {
+  const LIFECYCLE = {
+    active: ["idle", "terminated"],
+    idle: ["active", "terminated"],
+    error: ["terminated"],
+    terminated: [],
+  } as const;
+  type L = keyof typeof LIFECYCLE;
+
+  it("终态被识别", () => {
+    const fsm = defineFSM<L>(LIFECYCLE);
+    expect(fsm.isAbsorbing("terminated")).toBe(true);
+  });
+
+  it("闭包传递: error 所有出边指向吸收 → 吸收", () => {
+    const fsm = defineFSM<L>(LIFECYCLE);
+    expect(fsm.isAbsorbing("error")).toBe(true);
+  });
+
+  it("active/idle 有非吸收出边 (互相循环) → 非吸收", () => {
+    const fsm = defineFSM<L>(LIFECYCLE);
+    expect(fsm.isAbsorbing("active")).toBe(false);
+    expect(fsm.isAbsorbing("idle")).toBe(false);
+  });
+
+  it("互相循环的非终态不被判吸收", () => {
+    const cyclic = { a: ["b"], b: ["a"] } as const;
+    const fsm = defineFSM<"a" | "b">(cyclic);
+    expect(fsm.isAbsorbing("a")).toBe(false);
+    expect(fsm.isAbsorbing("b")).toBe(false);
   });
 });
