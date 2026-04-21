@@ -1,4 +1,4 @@
-import { MessageEnvelopeSchema, RelayControlSchema } from "@cc-anywhere/shared";
+import { MessageEnvelopeSchema, RelayControlSchema, RelayErrorCode } from "@cc-anywhere/shared";
 import type { RelayControlMessage } from "@cc-anywhere/shared";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { WebSocket } from "ws";
@@ -84,7 +84,7 @@ export function handleReplayRequest(
     clientWs.send(
       JSON.stringify({
         type: "relay_error",
-        code: "INVALID_RANGE",
+        code: RelayErrorCode.INVALID_RANGE,
         message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${effectiveToSeq}`,
       }),
     );
@@ -132,7 +132,7 @@ export function routeClientMessage(
     clientWs.send(
       JSON.stringify({
         type: "relay_error",
-        code: "PROXY_OFFLINE",
+        code: RelayErrorCode.PROXY_OFFLINE,
         message: `Proxy ${proxyId} is not available`,
       }),
     );

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { Logger } from "@cc-anywhere/shared";
+import { RelayErrorCode, type Logger } from "@cc-anywhere/shared";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 
@@ -163,7 +163,7 @@ export function handleProxyConnection(
           proxyWs.send(
             JSON.stringify({
               type: "relay_error",
-              code: "NOT_REGISTERED",
+              code: RelayErrorCode.NOT_REGISTERED,
               message: "Proxy must register before sending messages",
             }),
           );
@@ -191,7 +191,7 @@ export function handleProxyConnection(
         proxyWs.send(
           JSON.stringify({
             type: "relay_error",
-            code: "NOT_REGISTERED",
+            code: RelayErrorCode.NOT_REGISTERED,
             message: "Proxy must register before sending messages",
           }),
         );
@@ -206,7 +206,7 @@ export function handleProxyConnection(
       proxyWs.send(
         JSON.stringify({
           type: "relay_error",
-          code: "INVALID_MESSAGE",
+          code: RelayErrorCode.INVALID_MESSAGE,
           message: `${result.error} | raw: ${raw.slice(0, 200)}`,
         }),
       );

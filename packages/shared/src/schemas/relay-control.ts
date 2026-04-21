@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PtyStatePayloadSchema } from "./session.js";
+import { RelayErrorCode } from "../constants/relay-errors.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -55,15 +56,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("relay_error"),
-    // 限定 relay 实际发出的 6 个 code，防止 handler 写错字面量 handler 侧才发现
-    code: z.enum([
-      "NOT_REGISTERED",
-      "NOT_BOUND",
-      "PROXY_OFFLINE",
-      "INVALID_MESSAGE",
-      "UNSUPPORTED",
-      "INVALID_RANGE",
-    ]),
+    code: z.enum(Object.values(RelayErrorCode) as [RelayErrorCode, ...RelayErrorCode[]]),
     message: z.string(),
   }),
 

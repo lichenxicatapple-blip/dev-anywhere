@@ -188,12 +188,6 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     message: z.string().optional(),
   }),
 
-  // serve → worker: 请求从指定 seq 开始回放事件日志
-  z.object({
-    type: z.literal("worker_replay"),
-    lastSeq: z.number(),
-  }),
-
   // worker → serve: claude 输出事件（带序列号）
   z.object({
     type: z.literal("worker_event"),
@@ -219,12 +213,6 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_ready"),
     pid: z.number(),
-  }),
-
-  // worker → serve: 回放完成，后续为实时事件
-  z.object({
-    type: z.literal("worker_replay_done"),
-    replayedCount: z.number(),
   }),
 
   // worker → serve: Claude 会话 ID，从 system 事件捕获用于后续 resume

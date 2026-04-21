@@ -74,6 +74,7 @@ export type {
 
 // constants
 export { SessionState } from "./constants/session.js";
+export { RelayErrorCode } from "./constants/relay-errors.js";
 
 // logger
 export { createLogger } from "./logger.js";

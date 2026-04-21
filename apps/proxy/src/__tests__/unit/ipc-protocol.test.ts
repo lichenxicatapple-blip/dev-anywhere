@@ -448,7 +448,6 @@ describe("Worker Protocol", () => {
         type: "worker_approval_response",
         payload: { type: "worker_approval_response", requestId: "r1", behavior: "allow" },
       },
-      { type: "worker_replay", payload: { type: "worker_replay", lastSeq: 42 } },
       {
         type: "worker_event",
         payload: { type: "worker_event", seq: 1, event: { kind: "text", data: { nested: true } } },
@@ -464,7 +463,6 @@ describe("Worker Protocol", () => {
         },
       },
       { type: "worker_ready", payload: { type: "worker_ready", pid: 999 } },
-      { type: "worker_replay_done", payload: { type: "worker_replay_done", replayedCount: 10 } },
       {
         type: "worker_claude_session_id",
         payload: { type: "worker_claude_session_id", sessionId: "cs-123" },

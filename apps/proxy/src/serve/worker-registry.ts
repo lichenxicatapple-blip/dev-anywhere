@@ -5,7 +5,11 @@ import { serviceLogger } from "../common/logger.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
 import { SeqCounter } from "../common/seq-counter.js";
-import { createWorkerReader, serializeWorkerMsg } from "../ipc/ipc-protocol.js";
+import {
+  createWorkerReader,
+  serializeWorkerMsg,
+  type WorkerMessage,
+} from "../ipc/ipc-protocol.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
@@ -80,7 +84,9 @@ export class WorkerRegistry {
       const sock = await this.connect(sessionId, paths.workerSock);
       if (sock) {
         if (!this.deps.sessionManager.getSession(sessionId)) {
-          // SessionManager 加载时已经清理了不匹配的持久化，还能连上说明 worker 孤儿
+          // 两边数据源不一致：DATA_DIR 下的 worker.sock 能连通说明 worker 进程还在跑，
+          // 但 SessionManager 的内存 Map（持久化已在 load 时清过）里没这条 session。
+          // 成因：sessions.json 被删 / 写盘失败 / 记录丢失而 worker 没跟着退。这类孤儿 worker 清掉。
           serviceLogger.warn(
             { sessionId },
             "Orphaned worker found without session data, terminating",
@@ -110,7 +116,7 @@ export class WorkerRegistry {
   }
 
   // 向指定 session 的 worker 写 WorkerMessage；socket 缺失或不可写返回 false 由 caller 决定日志。
-  send(sessionId: string, msg: import("../ipc/ipc-protocol.js").WorkerMessage): boolean {
+  send(sessionId: string, msg: WorkerMessage): boolean {
     const sock = this.sockets.get(sessionId);
     if (!sock?.writable) return false;
     sock.write(serializeWorkerMsg(msg));
@@ -124,11 +130,7 @@ export class WorkerRegistry {
     this.sockets.clear();
   }
 
-  private handleWorkerMessage(
-    sessionId: string,
-    sock: Socket,
-    msg: import("../ipc/ipc-protocol.js").WorkerMessage,
-  ): void {
+  private handleWorkerMessage(sessionId: string, sock: Socket, msg: WorkerMessage): void {
     switch (msg.type) {
       case "worker_ready":
         serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
@@ -148,13 +150,6 @@ export class WorkerRegistry {
           }
         }
         serviceLogger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
-        break;
-
-      case "worker_replay_done":
-        serviceLogger.info(
-          { sessionId, replayedCount: msg.replayedCount },
-          "Worker event replay complete",
-        );
         break;
 
       case "worker_exit":
@@ -232,10 +227,7 @@ export class WorkerRegistry {
   private forwardApprovalRequest(
     sessionId: string,
     sock: Socket,
-    msg: Extract<
-      import("../ipc/ipc-protocol.js").WorkerMessage,
-      { type: "worker_approval_request" }
-    >,
+    msg: Extract<WorkerMessage, { type: "worker_approval_request" }>,
   ): void {
     const relay = this.deps.relayConnection;
     if (!relay) {

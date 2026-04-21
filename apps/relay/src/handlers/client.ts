@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { Logger } from "@cc-anywhere/shared";
+import { RelayErrorCode, type Logger } from "@cc-anywhere/shared";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
@@ -144,7 +144,7 @@ export function handleClientConnection(
           clientWs.send(
             JSON.stringify({
               type: "relay_error",
-              code: "NOT_BOUND",
+              code: RelayErrorCode.NOT_BOUND,
               message: "Client is not bound to any proxy",
             }),
           );
@@ -157,7 +157,7 @@ export function handleClientConnection(
           clientWs.send(
             JSON.stringify({
               type: "relay_error",
-              code: "PROXY_OFFLINE",
+              code: RelayErrorCode.PROXY_OFFLINE,
               message: `Proxy ${targetProxyId} is not available`,
             }),
           );
@@ -206,7 +206,7 @@ export function handleClientConnection(
       clientWs.send(
         JSON.stringify({
           type: "relay_error",
-          code: "UNSUPPORTED",
+          code: RelayErrorCode.UNSUPPORTED,
           message: `Unsupported control message: ${msg.type}`,
         }),
       );
@@ -218,7 +218,7 @@ export function handleClientConnection(
         clientWs.send(
           JSON.stringify({
             type: "relay_error",
-            code: "NOT_BOUND",
+            code: RelayErrorCode.NOT_BOUND,
             message: "Client is not bound to any proxy",
           }),
         );
@@ -232,7 +232,7 @@ export function handleClientConnection(
     clientWs.send(
       JSON.stringify({
         type: "relay_error",
-        code: "INVALID_MESSAGE",
+        code: RelayErrorCode.INVALID_MESSAGE,
         message: `${result.error} | raw: ${raw.slice(0, 200)}`,
       }),
     );
