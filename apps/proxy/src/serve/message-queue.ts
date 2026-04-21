@@ -1,4 +1,4 @@
-// 消息队列接口，Phase 5 用内存实现，接口预留持久化扩展
+// 消息队列接口，接口预留持久化扩展
 interface MessageQueue {
   enqueue(raw: string): void;
   drain(): string[];

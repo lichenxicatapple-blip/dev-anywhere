@@ -159,9 +159,6 @@ const pendingToolApprovals = new Map<
   }
 >();
 
-// sessionId -> Claude session ID，worker 捕获 system 事件后上报
-const claudeSessionIds = new Map<string, string>();
-
 // ---------- Worker 管理 ----------
 
 // 将 worker 的 claude stream-json 事件路由为类型化 envelope / control message
@@ -222,7 +219,6 @@ function connectToWorker(
   sockPath: string,
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
-  terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
 ): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -332,7 +328,6 @@ function connectToWorker(
             }
             break;
           case "worker_claude_session_id":
-            claudeSessionIds.set(sessionId, msg.sessionId);
             sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
             serviceLogger.info(
               { sessionId, claudeSessionId: msg.sessionId },
@@ -402,7 +397,6 @@ function spawnWorker(
 async function reconnectWorkers(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
-  terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection | null = null,
 ): Promise<void> {
   if (!existsSync(DATA_DIR)) return;
@@ -419,7 +413,6 @@ async function reconnectWorkers(
       paths.workerSock,
       sessionManager,
       workerSockets,
-      terminalSockets,
       relayConnection,
     );
     if (sock) {
@@ -432,7 +425,6 @@ async function reconnectWorkers(
         workerSockets.delete(sessionId);
         continue;
       }
-      changeSessionState(sessionManager, relayConnection, sessionId, SessionState.IDLE);
       serviceLogger.info({ sessionId }, "Reconnected to existing worker");
     } else {
       try {
@@ -497,7 +489,6 @@ function handleTerminalConnection(
                 paths.workerSock,
                 sessionManager,
                 workerSockets,
-                terminalSockets,
                 relayConnection,
               ).then((sock) => {
                 if (sock) {
@@ -535,23 +526,6 @@ function handleTerminalConnection(
             };
             setTimeout(tryConnectWorker, 100);
           }
-          break;
-        }
-
-        case "session_list_request": {
-          const sessions = sessionManager.listSessions();
-          socket.write(
-            serializeIpc({
-              type: "session_list_response",
-              sessions: sessions.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                state: s.state,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-              })),
-            }),
-          );
           break;
         }
 
@@ -748,12 +722,7 @@ function handleTerminalConnection(
         }
 
         case "session_status_update": {
-          changeSessionState(
-            sessionManager,
-            relayConnection,
-            msg.sessionId,
-            msg.state as SessionState,
-          );
+          changeSessionState(sessionManager, relayConnection, msg.sessionId, msg.state);
           break;
         }
 
@@ -783,7 +752,6 @@ function handleTerminalConnection(
       }
     },
     (sessionId, data) => {
-      // D-06: binary PTY 数据从 terminal 进程转发到 relay
       // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][PTY data]
       if (relayConnection) {
         const sessionIdBuf = Buffer.from(sessionId, "utf-8");
@@ -984,7 +952,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           }
         } else if (parsed.type === "remote_input_raw" && parsed.sessionId) {
           // 远程语义动作面板发来的原始 ANSI 字节，直接写入 PTY stdin，不追加 \r
-          // CONTEXT Addendum D-21 方案 A：复用 pty_input IPC 类型，不修改 ipc-protocol.ts 与 terminal.ts
           const ts = terminalSockets.get(parsed.sessionId);
           if (ts?.writable) {
             ts.write(
@@ -1046,7 +1013,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             }
           }
         }
-        // 控制消息：dir_list_request, session_history_request, terminal_scroll_request
+        // 控制消息：dir_list_request, session_history_request 等
         else if (parsed.type === "proxy_info_request") {
           relaySend!(
             JSON.stringify({
@@ -1077,7 +1044,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               paths.workerSock,
               sessionManager,
               workerSockets,
-              terminalSockets,
               relayConnection,
             ).then((sock) => {
               if (sock) {
@@ -1363,17 +1329,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               "Subscribe failed: terminal socket not available",
             );
           }
-        } else if (parsed.type === "terminal_frame_request" && parsed.sessionId) {
-          serviceLogger.debug(
-            { sessionId: parsed.sessionId },
-            "terminal_frame_request ignored (v2 binary pipeline)",
-          );
-        } else if (parsed.type === "terminal_scroll_request" && parsed.sessionId) {
-          // Phase 9: 滚动由客户端 xterm.js scrollback 直接处理
-          serviceLogger.debug(
-            { sessionId: parsed.sessionId },
-            "terminal_scroll_request ignored (client-side xterm.js scrollback)",
-          );
         }
       } catch (err) {
         serviceLogger.warn({ error: String(err) }, "Failed to parse relay message");
@@ -1400,7 +1355,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     }
   }
 
-  await reconnectWorkers(sessionManager, workerSockets, terminalSockets, relayConnection);
+  await reconnectWorkers(sessionManager, workerSockets, relayConnection);
 
   const server = createServer((socket) => {
     handleTerminalConnection(

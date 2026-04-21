@@ -9,7 +9,11 @@ describe("IPC Protocol", () => {
   describe("serializeIpc", () => {
     it("produces valid JSON terminated with newline", async () => {
       const { serializeIpc } = await importIpc();
-      const msg = { type: "session_status_update" as const, sessionId: "s1", state: "idle" };
+      const msg = {
+        type: "session_status_update" as const,
+        sessionId: "s1",
+        state: "idle" as const,
+      };
       const result = serializeIpc(msg);
 
       expect(result.endsWith("\n")).toBe(true);
@@ -322,7 +326,6 @@ describe("IPC Protocol", () => {
   });
 });
 
-// === Phase 3d: Worker message path tests ===
 describe("Worker Protocol", () => {
   async function importIpc() {
     return await import("#src/ipc/ipc-protocol.js");

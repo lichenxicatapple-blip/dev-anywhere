@@ -24,7 +24,7 @@ export function encodeBinaryIpcFrame(sessionId: string, data: Buffer): Buffer {
   return frame;
 }
 
-const sessionStateValues = Object.values(SessionState) as [string, ...string[]];
+const sessionStateValues = Object.values(SessionState) as [SessionState, ...SessionState[]];
 
 // IPC 消息 schema，客户端与服务端通过 Unix domain socket 使用 NDJSON 通信
 export const IpcMessageSchema = z.discriminatedUnion("type", [
@@ -43,25 +43,6 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("session_create_response"),
     sessionId: z.string(),
     error: z.string().optional(),
-  }),
-
-  // 客户端请求会话列表
-  z.object({
-    type: z.literal("session_list_request"),
-  }),
-
-  // 服务端响应会话列表
-  z.object({
-    type: z.literal("session_list_response"),
-    sessions: z.array(
-      z.object({
-        id: z.string(),
-        mode: z.enum(["pty", "json"]),
-        state: z.enum(sessionStateValues),
-        createdAt: z.string(),
-        name: z.string().optional(),
-      }),
-    ),
   }),
 
   // 客户端请求终止会话
@@ -111,8 +92,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     code: z.string().optional(),
   }),
 
-  // client → serve：PTY 终端帧推送，frame 是 JSON.stringify 后的 terminal_frame Control 消息
-  // 客户端请求增强版服务状态（含 relay 连接信息和 worker 状态）
+  // 客户端请求服务状态（含 relay 连接信息和 worker 状态）
   z.object({
     type: z.literal("service_status_request"),
   }),

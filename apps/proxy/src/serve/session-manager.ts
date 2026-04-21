@@ -222,9 +222,6 @@ export class SessionManager {
     }
     for (const item of parsed) {
       const info = item as SessionInfo;
-      if (info.updatedAt === undefined) {
-        info.updatedAt = info.createdAt;
-      }
       if (info.state === SessionState.TERMINATED) {
         this.onSessionRemoved?.(info.id);
         continue;

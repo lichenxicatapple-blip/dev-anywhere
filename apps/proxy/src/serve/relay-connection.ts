@@ -177,13 +177,13 @@ export class RelayConnection extends EventEmitter {
     }, backoff);
   }
 
-  // D-46: 发送 MessageEnvelope 到 relay，离线时自动入队
+  // 发送 MessageEnvelope 到 relay，离线时自动入队
   sendEnvelope(envelope: MessageEnvelope): void {
     const raw = JSON.stringify(envelope);
     this.sendRaw(raw);
   }
 
-  // D-46: 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
+  // 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
   sendBinary(data: Buffer): void {
     if (
       this.connectionState === RelayConnectionState.SYNCED &&

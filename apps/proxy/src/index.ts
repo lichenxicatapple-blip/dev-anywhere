@@ -107,19 +107,6 @@ function showStatus(): Promise<number> {
           }
           sock.destroy();
           resolve(lines);
-        } else if (msg.type === "session_list_response") {
-          // 向后兼容：旧版 serve 进程返回 session_list_response
-          const sessions = msg.sessions;
-          if (sessions.length === 0) {
-            log("Sessions: none");
-          } else {
-            log(`Sessions: ${sessions.length}`);
-            for (const s of sessions) {
-              log(`  ${s.id}  ${s.mode}  ${s.state}`);
-            }
-          }
-          sock.destroy();
-          resolve(lines);
         }
       });
       sock.write(serializeIpc({ type: "service_status_request" }));

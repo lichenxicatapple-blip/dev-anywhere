@@ -105,7 +105,6 @@ export function createControlMessageHandlers(
 
   return {
     async handleDirListRequest(msg: { path: string }): Promise<void> {
-      // T-06-13: 路径遍历防御
       if (!isPathSafe(msg.path)) {
         send(
           JSON.stringify({
