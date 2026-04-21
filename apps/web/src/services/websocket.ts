@@ -11,6 +11,7 @@ export class WebSocketManager {
   private binarySubscribers = new Map<string, Set<(data: Uint8Array) => void>>();
   private statusHandlers = new Set<(connected: boolean) => void>();
   private pendingQueue: string[] = [];
+  private wakeListenersAttached = false;
 
   connect(url: string): void {
     if (this.ws) {
@@ -25,6 +26,39 @@ export class WebSocketManager {
     this.url = url;
     this.closed = false;
     this.reconnectAttempt = 0;
+    this.attachWakeListeners();
+    this.doConnect();
+  }
+
+  // 页面从后台/锁屏回来、网络从离线恢复，立即触发重连，避免等退避定时器
+  private attachWakeListeners(): void {
+    if (this.wakeListenersAttached || typeof window === "undefined") return;
+    this.wakeListenersAttached = true;
+    const wake = (): void => this.wakeReconnect();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") wake();
+    });
+    window.addEventListener("online", wake);
+    window.addEventListener("focus", wake);
+  }
+
+  private wakeReconnect(): void {
+    if (this.closed || this.connected) return;
+    // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
+    this.reconnectAttempt = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    // 老 ws 可能处于 half-open（TCP 半死），显式 close 再立即重连
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        // 已死的 ws close 可能抛，忽略
+      }
+      this.ws = null;
+    }
     this.doConnect();
   }
 
@@ -115,7 +149,9 @@ export class WebSocketManager {
   }
 
   private scheduleReconnect(): void {
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    // Full Jitter 指数退避，和 proxy 侧一致：避免多 client 同步重连打崩 relay
+    const cap = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    const delay = Math.random() * cap;
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
