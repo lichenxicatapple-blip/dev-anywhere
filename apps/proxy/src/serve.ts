@@ -41,6 +41,7 @@ import {
   type ControlMessageHandlers,
 } from "./serve/handlers/control-messages.js";
 import { readSessionMessages } from "./serve/session-history.js";
+import { ToolApprovalManager } from "./serve/tool-approval-manager.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -76,6 +77,33 @@ function pushSessionStatus(
   } catch (err) {
     serviceLogger.debug({ sessionId, error: String(err) }, "Failed to push session_status");
   }
+}
+
+// 广播当前全量 session 列表给 relay → client，UI 列表页靠这个刷新
+function broadcastSessionList(relay: RelayConnection | null, sessionManager: SessionManager): void {
+  if (!relay) return;
+  relay.sendRaw(
+    JSON.stringify({
+      type: "session_list",
+      sessionId: "",
+      seq: 0,
+      timestamp: Date.now(),
+      source: "proxy",
+      version: "1",
+      payload: { sessions: sessionManager.listSessions().map(toSessionListPayload) },
+    }),
+  );
+}
+
+// 通知 relay 单个 session 的存在/状态（仅 id/mode/state），relay 据此建立 proxy-session 关联
+function broadcastSessionSync(relay: RelayConnection | null, session: SessionInfo): void {
+  if (!relay) return;
+  relay.sendRaw(
+    JSON.stringify({
+      type: "session_sync",
+      sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+    }),
+  );
 }
 
 // 状态迁移 + 推 envelope 的一体化入口；same-state 或非法转移时静默 no-op，避免调用方遍地 try/catch
@@ -145,20 +173,6 @@ async function cleanupStaleResources(): Promise<void> {
   }
 }
 
-// ---------- 工具审批 pending 回调管理 ----------
-
-// requestId -> resolve callback，serve 收到 relay 的 tool_approve/tool_deny 时 resolve
-const pendingToolApprovals = new Map<
-  string,
-  {
-    sessionId: string;
-    toolName: string;
-    input: Record<string, unknown>;
-    workerSocket: Socket;
-    resolve: (response: { behavior: "allow" | "deny"; message?: string }) => void;
-  }
->();
-
 // ---------- Worker 管理 ----------
 
 // 将 worker 的 claude stream-json 事件路由为类型化 envelope / control message
@@ -219,6 +233,7 @@ function connectToWorker(
   sockPath: string,
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
+  toolApprovalManager: ToolApprovalManager,
   relayConnection: RelayConnection | null = null,
 ): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -282,21 +297,11 @@ function connectToWorker(
                   "proxy",
                 );
                 relayConnection.sendEnvelope(envelope);
-                pendingToolApprovals.set(msg.requestId, {
+                toolApprovalManager.register(msg.requestId, {
                   sessionId,
                   toolName: msg.toolName,
                   input: msg.input,
                   workerSocket: sock,
-                  resolve: (response) => {
-                    sock.write(
-                      serializeWorkerMsg({
-                        type: "worker_approval_response",
-                        requestId: msg.requestId,
-                        behavior: response.behavior,
-                        message: response.message,
-                      }),
-                    );
-                  },
                 });
               } catch (err) {
                 serviceLogger.warn(
@@ -339,29 +344,11 @@ function connectToWorker(
 
       sock.on("close", () => {
         workerSockets.delete(sessionId);
-        for (const [requestId, pending] of pendingToolApprovals) {
-          if (pending.sessionId === sessionId) {
-            pending.resolve({ behavior: "deny", message: "Worker disconnected" });
-            pendingToolApprovals.delete(requestId);
-            serviceLogger.info(
-              { sessionId, requestId },
-              "Pending tool approval denied on worker disconnect",
-            );
-          }
-        }
+        toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
       });
       sock.on("error", () => {
         workerSockets.delete(sessionId);
-        for (const [requestId, pending] of pendingToolApprovals) {
-          if (pending.sessionId === sessionId) {
-            pending.resolve({ behavior: "deny", message: "Worker disconnected" });
-            pendingToolApprovals.delete(requestId);
-            serviceLogger.info(
-              { sessionId, requestId },
-              "Pending tool approval denied on worker error",
-            );
-          }
-        }
+        toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
       });
 
       resolve(sock);
@@ -397,6 +384,7 @@ function spawnWorker(
 async function reconnectWorkers(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
+  toolApprovalManager: ToolApprovalManager,
   relayConnection: RelayConnection | null = null,
 ): Promise<void> {
   if (!existsSync(DATA_DIR)) return;
@@ -413,6 +401,7 @@ async function reconnectWorkers(
       paths.workerSock,
       sessionManager,
       workerSockets,
+      toolApprovalManager,
       relayConnection,
     );
     if (sock) {
@@ -444,6 +433,7 @@ function handleTerminalConnection(
   sessionManager: SessionManager,
   workerSockets: Map<string, Socket>,
   terminalSockets: Map<string, Socket>,
+  toolApprovalManager: ToolApprovalManager,
   relayConnection: RelayConnection | null = null,
   controlHandlers?: ControlMessageHandlers,
 ): void {
@@ -489,6 +479,7 @@ function handleTerminalConnection(
                 paths.workerSock,
                 sessionManager,
                 workerSockets,
+                toolApprovalManager,
                 relayConnection,
               ).then((sock) => {
                 if (sock) {
@@ -502,14 +493,7 @@ function handleTerminalConnection(
                     { sessionId: session.id, mode: "json" },
                     "JSON session created via worker",
                   );
-                  if (relayConnection) {
-                    relayConnection.sendRaw(
-                      JSON.stringify({
-                        type: "session_sync",
-                        sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-                      }),
-                    );
-                  }
+                  broadcastSessionSync(relayConnection, session);
                 } else if (attempt < maxRetries) {
                   setTimeout(tryConnectWorker, Math.min(100 * attempt, 2000));
                 } else {
@@ -645,27 +629,9 @@ function handleTerminalConnection(
           if (relayConnection) {
             const session = sessionManager.getSession(msg.sessionId);
             if (session) {
-              relayConnection.sendRaw(
-                JSON.stringify({
-                  type: "session_sync",
-                  sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-                }),
-              );
+              broadcastSessionSync(relayConnection, session);
             }
-            const allSessions = sessionManager.listSessions();
-            relayConnection.sendRaw(
-              JSON.stringify({
-                type: "session_list",
-                sessionId: "",
-                seq: 0,
-                timestamp: Date.now(),
-                source: "proxy",
-                version: "1",
-                payload: {
-                  sessions: allSessions.map(toSessionListPayload),
-                },
-              }),
-            );
+            broadcastSessionList(relayConnection, sessionManager);
           }
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session registered");
           break;
@@ -686,23 +652,7 @@ function handleTerminalConnection(
           terminalSockets.delete(msg.sessionId);
 
           controlHandlers?.cleanup(msg.sessionId);
-          // 推送更新后的会话列表给客户端
-          if (relayConnection) {
-            const remaining = sessionManager.listSessions();
-            relayConnection.sendRaw(
-              JSON.stringify({
-                type: "session_list",
-                sessionId: "",
-                seq: 0,
-                timestamp: Date.now(),
-                source: "proxy",
-                version: "1",
-                payload: {
-                  sessions: remaining.map(toSessionListPayload),
-                },
-              }),
-            );
-          }
+          broadcastSessionList(relayConnection, sessionManager);
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
           break;
         }
@@ -794,22 +744,7 @@ function handleTerminalConnection(
         }
         sessionManager.terminateSession(sessionId);
         controlHandlers?.cleanup(sessionId);
-        if (relayConnection) {
-          const remaining = sessionManager.listSessions();
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "session_list",
-              sessionId: "",
-              seq: 0,
-              timestamp: Date.now(),
-              source: "proxy",
-              version: "1",
-              payload: {
-                sessions: remaining.map(toSessionListPayload),
-              },
-            }),
-          );
-        }
+        broadcastSessionList(relayConnection, sessionManager);
         serviceLogger.info(
           { sessionId },
           "PTY session cleaned up on socket close (crash fallback)",
@@ -852,6 +787,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const workerSockets = new Map<string, Socket>();
   const terminalSockets = new Map<string, Socket>();
+  const toolApprovalManager = new ToolApprovalManager();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
@@ -975,10 +911,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const toolId = parsed.payload?.toolId as string | undefined;
           const whitelistTool = parsed.payload?.whitelistTool as boolean | undefined;
           if (toolId) {
-            const pending = pendingToolApprovals.get(toolId);
+            const pending = toolApprovalManager.take(toolId);
             if (pending) {
-              pending.resolve({ behavior: "allow" });
-              pendingToolApprovals.delete(toolId);
+              toolApprovalManager.respond(pending, toolId, { behavior: "allow" });
               // whitelistTool 为 true 时将工具加入会话级白名单
               if (whitelistTool) {
                 const toolName = (parsed.payload?.toolName as string) ?? "";
@@ -1005,10 +940,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           const toolId = parsed.payload?.toolId as string | undefined;
           const reason = (parsed.payload?.reason as string) ?? "Denied by remote user";
           if (toolId) {
-            const pending = pendingToolApprovals.get(toolId);
+            const pending = toolApprovalManager.take(toolId);
             if (pending) {
-              pending.resolve({ behavior: "deny", message: reason });
-              pendingToolApprovals.delete(toolId);
+              toolApprovalManager.respond(pending, toolId, { behavior: "deny", message: reason });
               serviceLogger.info({ sessionId: parsed.sessionId, toolId }, "Tool denied via relay");
             }
           }
@@ -1044,6 +978,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               paths.workerSock,
               sessionManager,
               workerSockets,
+              toolApprovalManager,
               relayConnection,
             ).then((sock) => {
               if (sock) {
@@ -1093,26 +1028,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
                   "JSON session created via relay",
                 );
                 controlHandlers.pushCommandList(session.id, cwd);
-                if (relayConnection) {
-                  relayConnection.sendRaw(
-                    JSON.stringify({
-                      type: "session_sync",
-                      sessions: [{ id: session.id, mode: session.mode, state: session.state }],
-                    }),
-                  );
-                  const sessions = sessionManager.listSessions();
-                  relayConnection.sendRaw(
-                    JSON.stringify({
-                      type: "session_list",
-                      sessionId: "",
-                      seq: 0,
-                      timestamp: Date.now(),
-                      source: "proxy",
-                      version: "1",
-                      payload: { sessions: sessions.map(toSessionListPayload) },
-                    }),
-                  );
-                }
+                broadcastSessionSync(relayConnection, session);
+                broadcastSessionList(relayConnection, sessionManager);
               } else if (attempt < maxRetries) {
                 setTimeout(tryConnect, Math.min(100 * attempt, 2000));
               } else {
@@ -1174,16 +1091,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
           }
           // 推送该 session 当前 pending 的工具审批
           if (relaySend) {
-            const approvals: Array<{
-              requestId: string;
-              toolName: string;
-              input: Record<string, unknown>;
-            }> = [];
-            for (const [requestId, pending] of pendingToolApprovals) {
-              if (pending.sessionId === sid) {
-                approvals.push({ requestId, toolName: pending.toolName, input: pending.input });
-              }
-            }
+            const approvals = toolApprovalManager.listSession(sid);
             if (approvals.length > 0) {
               relaySend(
                 JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),
@@ -1217,21 +1125,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
             { sessionId: sid, success: result.success },
             "Session terminated via relay",
           );
-          // 推送更新后的 session 列表
-          if (relayConnection) {
-            const sessions = sessionManager.listSessions();
-            relayConnection.sendRaw(
-              JSON.stringify({
-                type: "session_list",
-                sessionId: "",
-                seq: 0,
-                timestamp: Date.now(),
-                source: "proxy",
-                version: "1",
-                payload: { sessions: sessions.map(toSessionListPayload) },
-              }),
-            );
-          }
+          broadcastSessionList(relayConnection, sessionManager);
         } else if (parsed.type === "session_worker_abort") {
           const sid = parsed.sessionId as string;
           const session = sessionManager.getSession(sid);
@@ -1271,18 +1165,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         } else if (parsed.type === "session_history_request") {
           controlHandlers.handleSessionHistoryRequest();
         } else if (parsed.type === "session_list") {
-          const sessions = sessionManager.listSessions();
-          relaySend!(
-            JSON.stringify({
-              type: "session_list",
-              sessionId: "",
-              seq: 0,
-              timestamp: Date.now(),
-              source: "proxy",
-              version: "1",
-              payload: { sessions: sessions.map(toSessionListPayload) },
-            }),
-          );
+          broadcastSessionList(relayConnection, sessionManager);
           serviceLogger.info("Session list sent via relay");
         } else if (parsed.type === "permission_mode_change") {
           const sid = (parsed as { sessionId?: string }).sessionId;
@@ -1357,7 +1240,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     }
   }
 
-  await reconnectWorkers(sessionManager, workerSockets, relayConnection);
+  await reconnectWorkers(sessionManager, workerSockets, toolApprovalManager, relayConnection);
 
   const server = createServer((socket) => {
     handleTerminalConnection(
@@ -1365,6 +1248,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       sessionManager,
       workerSockets,
       terminalSockets,
+      toolApprovalManager,
       relayConnection,
       controlHandlers,
     );
