@@ -187,12 +187,15 @@ export const useChatStore = create<ChatStoreState>()(
           })),
         ),
 
+      // 按 requestId 去重：proxy worker 在 serve 重启或 socket 瞬断重连时会重发 pending，
+      // 同一 requestId 的 tool_use_request envelope 合法地到达多次；UI 必须幂等，否则出现重复卡片。
       addApprovalRequest: (sessionId, request) =>
         set((state) =>
-          updateSlice(state, sessionId, (slice) => ({
-            ...slice,
-            pendingApprovals: [...slice.pendingApprovals, request],
-          })),
+          updateSlice(state, sessionId, (slice) => {
+            const existing = slice.pendingApprovals.find((a) => a.requestId === request.requestId);
+            if (existing) return slice;
+            return { ...slice, pendingApprovals: [...slice.pendingApprovals, request] };
+          }),
         ),
 
       updateApprovalStatus: (sessionId, requestId, status) =>

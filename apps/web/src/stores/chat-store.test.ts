@@ -61,6 +61,32 @@ describe("chat-store per-session", () => {
     expect(useChatStore.getState().bySessionId["s2"].pendingApprovals[0].status).toBe("pending");
   });
 
+  it("addApprovalRequest dedupes by requestId (proxy worker may replay pending on reconnect)", () => {
+    useChatStore.getState().addApprovalRequest("s1", {
+      requestId: "r-dupe",
+      toolName: "Write",
+      input: { file_path: "/tmp/x" },
+      status: "pending",
+    });
+    // 同一 requestId 第二次 add，应被静默吞掉而不是追加
+    useChatStore.getState().addApprovalRequest("s1", {
+      requestId: "r-dupe",
+      toolName: "Write",
+      input: { file_path: "/tmp/x" },
+      status: "pending",
+    });
+    expect(useChatStore.getState().bySessionId["s1"].pendingApprovals).toHaveLength(1);
+    // 状态已变 approved 后再 replay 也不应把 status 倒退回 pending
+    useChatStore.getState().updateApprovalStatus("s1", "r-dupe", "approved");
+    useChatStore.getState().addApprovalRequest("s1", {
+      requestId: "r-dupe",
+      toolName: "Write",
+      input: { file_path: "/tmp/x" },
+      status: "pending",
+    });
+    expect(useChatStore.getState().bySessionId["s1"].pendingApprovals[0].status).toBe("approved");
+  });
+
   it("clearSession removes only one slice", () => {
     useChatStore.getState().appendAssistantText("s1", "x");
     useChatStore.getState().appendAssistantText("s2", "y");
