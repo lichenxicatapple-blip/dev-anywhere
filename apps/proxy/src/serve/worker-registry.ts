@@ -273,9 +273,7 @@ export class WorkerRegistry {
           ),
         );
       } else if (d.type === "thinking_delta" && d.thinking) {
-        relay.sendEnvelope(
-          buildMessage("thinking", sessionId, seq, { text: d.thinking }, "proxy"),
-        );
+        relay.sendEnvelope(buildMessage("thinking", sessionId, seq, { text: d.thinking }, "proxy"));
       }
       return;
     }

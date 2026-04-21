@@ -203,8 +203,10 @@ describe.each(versions)("stream-json fixtures (%s)", (version) => {
     // 所有 control_request 都能被 schema parse，tool_name + input 两个必需字段完整
     for (const req of requests) {
       const parsed = ControlRequestEventSchema.safeParse(req);
-      expect(parsed.success, `control_request parse failed: ${JSON.stringify(req).slice(0, 200)}`)
-        .toBe(true);
+      expect(
+        parsed.success,
+        `control_request parse failed: ${JSON.stringify(req).slice(0, 200)}`,
+      ).toBe(true);
       if (parsed.success) {
         expect(parsed.data.request.tool_name.length).toBeGreaterThan(0);
       }
@@ -218,9 +220,7 @@ describe.each(versions)("stream-json fixtures (%s)", (version) => {
 
     // request_id 必须一一对应，否则 claude 会永远阻塞在审批上
     const reqIds = new Set(
-      requests.map(
-        (r) => ControlRequestEventSchema.parse(r as Record<string, unknown>).request_id,
-      ),
+      requests.map((r) => ControlRequestEventSchema.parse(r as Record<string, unknown>).request_id),
     );
     const respIds = new Set(
       responses.map(

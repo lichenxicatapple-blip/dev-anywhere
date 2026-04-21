@@ -51,7 +51,6 @@ export const KnownContentBlockSchema = z.discriminatedUnion("type", [
   ToolResultBlockSchema,
 ]);
 
-
 // event 级别 schema。message.content 用 z.array(z.unknown())，不在此层 narrow content block 类型，
 // 让调用方逐 block 跑 KnownContentBlockSchema.safeParse 以宽容未知 block
 const AssistantEventSchema = z
@@ -190,4 +189,3 @@ export const StreamJsonEventSchema = z.discriminatedUnion("type", [
 // forwardEvent 遇到这些 type 不发 warn，测试也按这份名单判断"safeParse 失败是否在意"。
 // 新增一种忽略 type 时只改这里一处。
 export const IGNORED_EVENT_TYPES: ReadonlySet<string> = new Set(["system", "rate_limit_event"]);
-
