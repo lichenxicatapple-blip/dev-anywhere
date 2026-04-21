@@ -40,3 +40,27 @@ export function createFSM<S extends string>(def: FSMDef<S>): FSM<S> {
     },
   };
 }
+
+// 无内部 state 的 FSM 视图，供 state 存在外部（如 SessionInfo、DB 行）的 per-instance 场景使用。
+// 调用方每次自行传入 from，transition() 校验并返回 to（或抛错）。
+interface StatelessFSM<S extends string> {
+  canTransition(from: S, to: S): boolean;
+  // 非法转换抛 Error，调用方负责只在合法路径调用。返回 to 以便链式赋值。
+  transition(from: S, to: S): S;
+}
+
+export function defineFSM<S extends string>(
+  transitions: Record<S, readonly S[]>,
+  onTransition?: (from: S, to: S) => void,
+): StatelessFSM<S> {
+  return {
+    canTransition: (from, to) => transitions[from]?.includes(to) ?? false,
+    transition: (from, to) => {
+      if (!transitions[from]?.includes(to)) {
+        throw new Error(`Invalid FSM transition: ${from} -> ${to}`);
+      }
+      onTransition?.(from, to);
+      return to;
+    },
+  };
+}

@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { SessionState } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { defineFSM } from "../common/state-machine.js";
 
 export interface SessionInfo {
   id: string;
@@ -25,23 +26,25 @@ interface SessionManagerOptions {
 // 合法的状态转换表
 // terminated 是终态，不允许任何转出
 // error 只能转到 terminated
-const VALID_TRANSITIONS: Record<SessionState, Set<SessionState>> = {
-  [SessionState.IDLE]: new Set([SessionState.WORKING, SessionState.ERROR, SessionState.TERMINATED]),
-  [SessionState.WORKING]: new Set([
+const SESSION_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
+  [SessionState.IDLE]: [SessionState.WORKING, SessionState.ERROR, SessionState.TERMINATED],
+  [SessionState.WORKING]: [
     SessionState.IDLE,
     SessionState.WAITING_APPROVAL,
     SessionState.ERROR,
     SessionState.TERMINATED,
-  ]),
-  [SessionState.WAITING_APPROVAL]: new Set([
+  ],
+  [SessionState.WAITING_APPROVAL]: [
     SessionState.IDLE,
     SessionState.WORKING,
     SessionState.ERROR,
     SessionState.TERMINATED,
-  ]),
-  [SessionState.ERROR]: new Set([SessionState.TERMINATED]),
-  [SessionState.TERMINATED]: new Set(),
+  ],
+  [SessionState.ERROR]: [SessionState.TERMINATED],
+  [SessionState.TERMINATED]: [],
 };
+
+const sessionFSM = defineFSM(SESSION_TRANSITIONS);
 
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
@@ -94,12 +97,9 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session not found: ${id}`);
     }
-    const allowed = VALID_TRANSITIONS[session.state];
-    if (!allowed.has(newState)) {
-      throw new Error(`Invalid state transition: ${session.state} -> ${newState}`);
-    }
     const oldState = session.state;
-    session.state = newState;
+    // FSM 非法转换会抛，保持原来行为；调用方（changeSessionState）捕获后静默 no-op
+    session.state = sessionFSM.transition(oldState, newState);
     session.updatedAt = Date.now();
     this.save();
     serviceLogger.info({ sessionId: id, from: oldState, to: newState }, "Session state changed");

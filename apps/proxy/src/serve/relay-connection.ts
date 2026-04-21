@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
 import type { MessageEnvelope } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { createFSM } from "../common/state-machine.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
@@ -28,6 +29,36 @@ export const RelayConnectionState = {
 } as const;
 export type RelayConnectionState = (typeof RelayConnectionState)[keyof typeof RelayConnectionState];
 
+// 合法的 WS 连接状态转移
+// CLOSED 是终态；connect 流转: DISCONNECTED → CONNECTING → REGISTERING → SYNCED
+// 断线: SYNCED/REGISTERING/CONNECTING → WAITING_RECONNECT → CONNECTING
+// 主动关: 任意 → CLOSED
+const RELAY_TRANSITIONS: Record<RelayConnectionState, readonly RelayConnectionState[]> = {
+  [RelayConnectionState.DISCONNECTED]: [
+    RelayConnectionState.CONNECTING,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.CONNECTING]: [
+    RelayConnectionState.REGISTERING,
+    RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.REGISTERING]: [
+    RelayConnectionState.SYNCED,
+    RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.SYNCED]: [
+    RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.WAITING_RECONNECT]: [
+    RelayConnectionState.CONNECTING,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.CLOSED]: [],
+};
+
 interface RelayConnectionOptions {
   // 自定义 proxyId 文件路径，测试时使用临时目录
   proxyIdPath?: string;
@@ -45,7 +76,12 @@ export class RelayConnection extends EventEmitter {
   private queue: MemoryMessageQueue = new MemoryMessageQueue();
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private connectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED;
+  private fsm = createFSM({
+    initial: RelayConnectionState.DISCONNECTED as RelayConnectionState,
+    transitions: RELAY_TRANSITIONS,
+    onTransition: (from, to) =>
+      serviceLogger.info({ from, to }, "RelayConnection state transition"),
+  });
   private name?: string;
   private token?: string;
 
@@ -58,9 +94,7 @@ export class RelayConnection extends EventEmitter {
   }
 
   private transition(to: RelayConnectionState): void {
-    const from = this.connectionState;
-    this.connectionState = to;
-    serviceLogger.info({ from, to }, "RelayConnection state transition");
+    this.fsm.transitionTo(to);
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -133,7 +167,7 @@ export class RelayConnection extends EventEmitter {
 
       this.ws.on("close", () => {
         this.ws = null;
-        if (this.connectionState !== RelayConnectionState.CLOSED) {
+        if (this.fsm.current() !== RelayConnectionState.CLOSED) {
           this.transition(RelayConnectionState.WAITING_RECONNECT);
           serviceLogger.info("Relay connection closed unexpectedly");
           this.emit("disconnected");
@@ -148,7 +182,7 @@ export class RelayConnection extends EventEmitter {
       });
     } catch (err) {
       serviceLogger.error({ error: String(err) }, "Failed to create relay connection");
-      if (this.connectionState !== RelayConnectionState.CLOSED) {
+      if (this.fsm.current() !== RelayConnectionState.CLOSED) {
         this.transition(RelayConnectionState.WAITING_RECONNECT);
         this.scheduleReconnect();
       }
@@ -173,6 +207,8 @@ export class RelayConnection extends EventEmitter {
     );
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempt++;
+      // 必须先回 CONNECTING 才能让 open handler 合法转到 REGISTERING
+      this.transition(RelayConnectionState.CONNECTING);
       this.doConnect();
     }, backoff);
   }
@@ -186,7 +222,7 @@ export class RelayConnection extends EventEmitter {
   // 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
   sendBinary(data: Buffer): void {
     if (
-      this.connectionState === RelayConnectionState.SYNCED &&
+      this.fsm.current() === RelayConnectionState.SYNCED &&
       this.ws?.readyState === WebSocket.OPEN
     ) {
       this.ws.send(data);
@@ -197,11 +233,11 @@ export class RelayConnection extends EventEmitter {
   // 发送原始 JSON 字符串到 relay，根据 connectionState 决定直发、入队或丢弃
   sendRaw(raw: string): void {
     if (
-      this.connectionState === RelayConnectionState.SYNCED &&
+      this.fsm.current() === RelayConnectionState.SYNCED &&
       this.ws?.readyState === WebSocket.OPEN
     ) {
       this.ws.send(raw);
-    } else if (this.connectionState === RelayConnectionState.CLOSED) {
+    } else if (this.fsm.current() === RelayConnectionState.CLOSED) {
       serviceLogger.warn("Message discarded: connection is closed");
     } else {
       if (this.queue.size() >= MAX_QUEUE_SIZE) {
@@ -218,6 +254,8 @@ export class RelayConnection extends EventEmitter {
 
   // 主动关闭连接，发送 proxy_disconnect 通知 relay 立即清理，不触发重连
   close(): void {
+    // 幂等：已 CLOSED 直接跳过，避免 FSM 抛 closed -> closed
+    if (this.fsm.is(RelayConnectionState.CLOSED)) return;
     this.transition(RelayConnectionState.CLOSED);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -246,8 +284,8 @@ export class RelayConnection extends EventEmitter {
     queueDepth: number;
   } {
     return {
-      connected: this.connectionState === RelayConnectionState.SYNCED,
-      connectionState: this.connectionState,
+      connected: this.fsm.current() === RelayConnectionState.SYNCED,
+      connectionState: this.fsm.current(),
       proxyId: this.proxyId,
       reconnectAttempt: this.reconnectAttempt,
       queueDepth: this.queue.size(),

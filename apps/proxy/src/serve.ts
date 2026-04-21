@@ -573,7 +573,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     // 处理来自 remote client 的消息（信封消息和控制消息）
     relayConnection.on("message", (data: string) => relayRouter.handle(data));
 
-
     // relay 重连时重新推送控制数据
     relayConnection.on("connected", () => {
       controlHandlers.reinitializeOnReconnect();

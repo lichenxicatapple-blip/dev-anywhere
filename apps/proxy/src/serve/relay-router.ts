@@ -94,10 +94,7 @@ export class RelayRouter {
     if (session.mode === "json") {
       const ws = this.deps.workerRegistry.getSocket(sessionId);
       if (!ws?.writable) {
-        serviceLogger.warn(
-          { sessionId },
-          "Remote input dropped: JSON worker socket not available",
-        );
+        serviceLogger.warn({ sessionId }, "Remote input dropped: JSON worker socket not available");
         return;
       }
       // user_input 是 JSON turn 的唯一入口，此刻就推 WORKING，不再依赖 worker_event 的副作用
@@ -415,10 +412,7 @@ export class RelayRouter {
     const ts = this.deps.terminalSockets.get(sid);
     if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x1b[Z" }));
-      serviceLogger.info(
-        { sessionId: sid, mode },
-        "Permission mode cycle: Shift+Tab sent to PTY",
-      );
+      serviceLogger.info({ sessionId: sid, mode }, "Permission mode cycle: Shift+Tab sent to PTY");
     } else {
       serviceLogger.warn(
         { sessionId: sid },
