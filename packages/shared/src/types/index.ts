@@ -20,7 +20,6 @@ export type {
 } from "../schemas/session.js";
 export type {
   HeartbeatPayload,
-  ErrorPayload,
   AuthPayload,
   SyncRequestPayload,
   SyncResponsePayload,

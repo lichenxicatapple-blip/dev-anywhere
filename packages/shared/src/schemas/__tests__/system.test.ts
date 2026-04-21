@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   HeartbeatPayloadSchema,
-  ErrorPayloadSchema,
   SyncRequestPayloadSchema,
   SyncResponsePayloadSchema,
 } from "../system.js";
@@ -15,16 +14,6 @@ describe("HeartbeatPayloadSchema", () => {
   it("strips extra fields", () => {
     const result = HeartbeatPayloadSchema.parse({ extra: "field" });
     expect(result).toEqual({});
-  });
-});
-
-describe("ErrorPayloadSchema", () => {
-  it("rejects missing code", () => {
-    expect(() => ErrorPayloadSchema.parse({ message: "something" })).toThrow();
-  });
-
-  it("rejects missing message", () => {
-    expect(() => ErrorPayloadSchema.parse({ code: "UNKNOWN" })).toThrow();
   });
 });
 

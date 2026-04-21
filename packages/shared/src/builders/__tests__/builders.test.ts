@@ -27,12 +27,6 @@ describe("buildMessage", () => {
     expect(msg.source).toBe("proxy");
   });
 
-  it("builds a valid error envelope", () => {
-    const msg = buildMessage("error", "sess-1", 10, { code: "UNKNOWN", message: "fail" }, "proxy");
-    expect(msg.type).toBe("error");
-    expect(msg.payload).toEqual({ code: "UNKNOWN", message: "fail" });
-  });
-
   it("uses the seq value provided by caller", () => {
     const msg1 = buildMessage("heartbeat", "sess-1", 42, {}, "proxy");
     const msg2 = buildMessage("heartbeat", "sess-1", 43, {}, "proxy");

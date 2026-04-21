@@ -55,7 +55,15 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("relay_error"),
-    code: z.string(),
+    // 限定 relay 实际发出的 6 个 code，防止 handler 写错字面量 handler 侧才发现
+    code: z.enum([
+      "NOT_REGISTERED",
+      "NOT_BOUND",
+      "PROXY_OFFLINE",
+      "INVALID_MESSAGE",
+      "UNSUPPORTED",
+      "INVALID_RANGE",
+    ]),
     message: z.string(),
   }),
 

@@ -19,7 +19,6 @@ import {
 } from "./session.js";
 import {
   HeartbeatPayloadSchema,
-  ErrorPayloadSchema,
   AuthPayloadSchema,
   SyncRequestPayloadSchema,
   SyncResponsePayloadSchema,
@@ -104,11 +103,6 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     ...BaseEnvelopeFields,
     type: z.literal("heartbeat"),
     payload: HeartbeatPayloadSchema,
-  }),
-  z.object({
-    ...BaseEnvelopeFields,
-    type: z.literal("error"),
-    payload: ErrorPayloadSchema,
   }),
   z.object({
     ...BaseEnvelopeFields,

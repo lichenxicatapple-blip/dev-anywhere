@@ -39,14 +39,12 @@ export type {
 } from "./schemas/session.js";
 export {
   HeartbeatPayloadSchema,
-  ErrorPayloadSchema,
   AuthPayloadSchema,
   SyncRequestPayloadSchema,
   SyncResponsePayloadSchema,
 } from "./schemas/system.js";
 export type {
   HeartbeatPayload,
-  ErrorPayload,
   AuthPayload,
   SyncRequestPayload,
   SyncResponsePayload,
@@ -75,7 +73,6 @@ export type {
 } from "./schemas/relay-control.js";
 
 // constants
-export { ErrorCode } from "./constants/errors.js";
 export { SessionState } from "./constants/session.js";
 
 // logger

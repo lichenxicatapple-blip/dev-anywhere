@@ -5,14 +5,6 @@ export const HeartbeatPayloadSchema = z.object({});
 
 export type HeartbeatPayload = z.infer<typeof HeartbeatPayloadSchema>;
 
-// 错误消息，统一错误类型
-export const ErrorPayloadSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-});
-
-export type ErrorPayload = z.infer<typeof ErrorPayloadSchema>;
-
 // 认证消息，支持配对码和 token 两种方式
 export const AuthPayloadSchema = z.object({
   pairingCode: z.string().optional(),
