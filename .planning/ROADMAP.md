@@ -186,6 +186,50 @@ Plans:
 - [ ] 11-01: TBD
 - [ ] 11-02: TBD
 
+### Phase 11.5: Hook 侧信道
+**Goal**: 为 PTY 模式解锁远程权限审批 + 结构化工具事件，基于 Claude Code hooks 注入本地 HTTP endpoint
+**Depends on**: Phase 10
+**Requirements**: PTY-08 (new, TBD)
+**Success Criteria** (what must be TRUE):
+  1. PTY 模式下 claude 触发工具调用时，手机端收到结构化 `terminal.permission_request` envelope（含 tool_name, tool_input），点 Approve/Deny 能正确放行/拒绝
+  2. PreToolUse / PostToolUse / Stop / UserPromptSubmit / SessionStart 五类 hook 事件作为 `terminal.hook_event` 转发到 client，phase 状态 (idle/thinking/tool_use/waiting) 通过 `terminal.status` 推出
+  3. serve daemon 启动/退出按 marker 精确管理 `~/.claude/settings.json` 注入/清理，不破坏用户现有 hooks
+  4. 同机多终端实例通过 `CC_ANYWHERE_SESSION_ID` env 路由，事件不串扰
+**Plans**: TBD
+
+Plans:
+- [ ] 11.5-01: TBD
+
+### Phase 11.6: Scroll 重构 + safeFit
+**Goal**: 拆掉 chat-pty-view 的双向同步 hack，改单向数据流（xterm buffer 权威 + 自绘 scrollbar），修滚动/键盘/resize 的所有 UX bug
+**Depends on**: Phase 10
+**Requirements**: FRONT-09 (new, TBD)
+**Success Criteria** (what must be TRUE):
+  1. 容器固定高度 + `overflow: hidden`，浏览器原生滚动完全不参与；xterm buffer 是唯一位置 source of truth
+  2. 自绘 scrollbar (`xterm-scrollbar.tsx`) 读 xterm 状态驱动 thumb 位置，手势拖动通过 `term.scrollToLine` 回写
+  3. `safeFit(term, op)` 包装器在 resize / fontSize / snapshot apply 前记 wasAtBottom，操作后按需 scrollToBottom
+  4. 代码净减（删除 chat-pty-view.tsx:173-315 约 140 行 hack，新增 xterm-scrollbar + safe-fit 约 130 行）
+  5. 手动回归清单全绿：长文本滚底、手动翻历史不被打扰、键盘弹出位置保持、字号变化按行锁定
+**Plans**: TBD
+
+Plans:
+- [ ] 11.6-01: TBD
+
+### Phase 11.7: seq/ack + proxy 单层 ring buffer
+**Goal**: 消除断线重连时的 `term.reset() + 全量 snapshot` 闪屏。proxy 侧 per-session ring buffer + 每 envelope seq 字段 + client ack，reconnect 走 resume 增量补齐
+**Depends on**: Phase 11.5, Phase 11.6
+**Requirements**: PTY-09 (new, TBD)
+**Success Criteria** (what must be TRUE):
+  1. 每条 proxy → client 的 envelope（含 PTY binary 帧）都带 seq；proxy 按 sessionId 维护 1000 条 ring buffer
+  2. client 每 500ms 或收 50 条 envelope 批量 ack(`session.ack`)；reconnect 时发 `session.resume {lastAckedSeq}`
+  3. resume 命中 ring buffer：proxy 回增量 envelope，client `term.write` 续上，不 `term.reset`，用户视觉上**无闪屏**
+  4. resume 未命中（lastAckedSeq 过老）：降级走现有全量 snapshot 流程，用户看到一次 reset（保留现有行为，不劣化）
+  5. relay 保持无状态透传；relay 代码零改动
+**Plans**: TBD
+
+Plans:
+- [ ] 11.7-01: TBD
+
 ### Phase 12: Deployment + PWA Basics
 **Goal**: The app is deployable as a single Docker container (relay + static files) and installable as a PWA on mobile devices
 **Depends on**: Phase 10
