@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { SessionState } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
-import { serializeIpc, serializeWorkerMsg } from "../ipc/ipc-protocol.js";
+import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
@@ -92,14 +92,17 @@ export class RelayRouter {
     const text = payload?.text ?? "";
 
     if (session.mode === "json") {
-      const ws = this.deps.workerRegistry.getSocket(sessionId);
-      if (!ws?.writable) {
+      // user_input 是 JSON turn 的唯一入口，先推 WORKING 再 send；send 失败回滚不必要，
+      // worker 会在下次消息往返时把状态拉回。
+      this.deps.changeSessionState(sessionId, SessionState.WORKING);
+      const sent = this.deps.workerRegistry.send(sessionId, {
+        type: "worker_input",
+        content: text,
+      });
+      if (!sent) {
         serviceLogger.warn({ sessionId }, "Remote input dropped: JSON worker socket not available");
         return;
       }
-      // user_input 是 JSON turn 的唯一入口，此刻就推 WORKING，不再依赖 worker_event 的副作用
-      this.deps.changeSessionState(sessionId, SessionState.WORKING);
-      ws.write(serializeWorkerMsg({ type: "worker_input", content: text }));
       serviceLogger.info({ sessionId }, "Remote input forwarded to JSON worker");
       return;
     }
@@ -137,16 +140,25 @@ export class RelayRouter {
     const pending = this.deps.toolApprovalManager.take(payload.toolId);
     if (!pending) return;
 
-    this.deps.toolApprovalManager.respond(pending, payload.toolId, { behavior: "allow" });
+    this.deps.workerRegistry.send(pending.sessionId, {
+      type: "worker_approval_response",
+      requestId: payload.toolId,
+      behavior: "allow",
+    });
 
     if (payload.whitelistTool) {
       const toolName = payload.toolName ?? "";
-      if (toolName && pending.workerSocket.writable) {
-        pending.workerSocket.write(serializeWorkerMsg({ type: "worker_whitelist_add", toolName }));
-        serviceLogger.info(
-          { sessionId: pending.sessionId, toolName },
-          "Tool added to session whitelist via relay",
-        );
+      if (toolName) {
+        const whitelisted = this.deps.workerRegistry.send(pending.sessionId, {
+          type: "worker_whitelist_add",
+          toolName,
+        });
+        if (whitelisted) {
+          serviceLogger.info(
+            { sessionId: pending.sessionId, toolName },
+            "Tool added to session whitelist via relay",
+          );
+        }
       }
     }
     serviceLogger.info(
@@ -164,7 +176,9 @@ export class RelayRouter {
     const pending = this.deps.toolApprovalManager.take(payload.toolId);
     if (!pending) return;
 
-    this.deps.toolApprovalManager.respond(pending, payload.toolId, {
+    this.deps.workerRegistry.send(pending.sessionId, {
+      type: "worker_approval_response",
+      requestId: payload.toolId,
       behavior: "deny",
       message: reason,
     });
@@ -329,10 +343,7 @@ export class RelayRouter {
     if (!sid) return;
 
     const result = this.deps.sessionManager.terminateSession(sid);
-    const ws = this.deps.workerRegistry.getSocket(sid);
-    if (ws?.writable) {
-      ws.write(serializeWorkerMsg({ type: "worker_stop" }));
-    }
+    this.deps.workerRegistry.send(sid, { type: "worker_stop" });
     this.deps.workerRegistry.delete(sid);
     this.deps.controlHandlers.cleanup(sid);
     serviceLogger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");

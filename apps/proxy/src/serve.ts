@@ -8,12 +8,7 @@ import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
 import { SOCK_PATH, PID_PATH, STOPPED_PATH, SESSIONS_PATH, sessionPaths } from "./common/paths.js";
 import { loadConfig } from "./common/config.js";
-import {
-  createIpcReader,
-  serializeIpc,
-  serializeWorkerMsg,
-  type IpcMessage,
-} from "./ipc/ipc-protocol.js";
+import { createIpcReader, serializeIpc, type IpcMessage } from "./ipc/ipc-protocol.js";
 import { nanoid } from "nanoid";
 import {
   createControlMessageHandlers,
@@ -310,10 +305,7 @@ function handleTerminalConnection(
 
         case "session_terminate_request": {
           const result = sessionManager.terminateSession(msg.sessionId);
-          const ws = workerRegistry.getSocket(msg.sessionId);
-          if (ws?.writable) {
-            ws.write(serializeWorkerMsg({ type: "worker_stop" }));
-          }
+          workerRegistry.send(msg.sessionId, { type: "worker_stop" });
           workerRegistry.delete(msg.sessionId);
 
           controlHandlers?.cleanup(msg.sessionId);

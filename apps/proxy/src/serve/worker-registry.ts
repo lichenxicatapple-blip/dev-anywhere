@@ -101,16 +101,20 @@ export class WorkerRegistry {
     }
   }
 
-  getSocket(sessionId: string): Socket | undefined {
-    return this.sockets.get(sessionId);
-  }
-
   has(sessionId: string): boolean {
     return this.sockets.has(sessionId);
   }
 
   delete(sessionId: string): void {
     this.sockets.delete(sessionId);
+  }
+
+  // 向指定 session 的 worker 写 WorkerMessage；socket 缺失或不可写返回 false 由 caller 决定日志。
+  send(sessionId: string, msg: import("../ipc/ipc-protocol.js").WorkerMessage): boolean {
+    const sock = this.sockets.get(sessionId);
+    if (!sock?.writable) return false;
+    sock.write(serializeWorkerMsg(msg));
+    return true;
   }
 
   destroyAll(): void {
@@ -274,7 +278,6 @@ export class WorkerRegistry {
         sessionId,
         toolName: msg.toolName,
         input: msg.input,
-        workerSocket: sock,
       });
     } catch (err) {
       // envelope 构造失败回 deny，避免 worker 无限等待。

@@ -1,22 +1,16 @@
-import type { Socket } from "node:net";
-import { serializeWorkerMsg } from "../ipc/ipc-protocol.js";
 import { serviceLogger } from "../common/logger.js";
 
-// 待审批的工具调用元数据，registered 时由 caller 提供
+// 待审批的工具调用元数据。
+// WorkerRegistry.forwardApprovalRequest() 在收到 worker_approval_request 时 register；
+// RelayRouter.onToolApprove/onToolDeny 在收到 relay 指令后 take + 通过 WorkerRegistry.send 回写响应。
 interface PendingApproval {
   sessionId: string;
   toolName: string;
   input: Record<string, unknown>;
-  workerSocket: Socket;
 }
 
-interface ApprovalResponse {
-  behavior: "allow" | "deny";
-  message?: string;
-}
-
-// 追踪 requestId → PendingApproval 的映射，负责把审批结果写回 worker。
-// 三条清理路径：正常响应 take()、worker 断开 cleanupSession()、会话终止复用 cleanupSession()。
+// 纯数据管理器：记录 requestId → PendingApproval 的映射，清理路径不做 IO。
+// 写 worker socket 的职责在 WorkerRegistry.send()，这里只负责谁在等。
 export class ToolApprovalManager {
   private pending = new Map<string, PendingApproval>();
 
@@ -24,7 +18,7 @@ export class ToolApprovalManager {
     this.pending.set(requestId, approval);
   }
 
-  // 取出并删除 pending entry。caller 拿到后调 respond() 把结果写回 worker。
+  // 取出并删除 pending entry；caller 拿 sessionId 后自己调 WorkerRegistry.send 回写。
   take(requestId: string): PendingApproval | null {
     const entry = this.pending.get(requestId);
     if (!entry) return null;
@@ -32,26 +26,13 @@ export class ToolApprovalManager {
     return entry;
   }
 
-  // 写审批响应到 worker socket；socket 不可写时静默，worker 早晚会感知自己退出。
-  respond(approval: PendingApproval, requestId: string, response: ApprovalResponse): void {
-    if (!approval.workerSocket.writable) return;
-    approval.workerSocket.write(
-      serializeWorkerMsg({
-        type: "worker_approval_response",
-        requestId,
-        behavior: response.behavior,
-        ...(response.message !== undefined ? { message: response.message } : {}),
-      }),
-    );
-  }
-
-  // worker 断开或会话终止时，统一 deny 该 session 的所有 pending 并清出 map。
+  // worker 断开或 session 终止时清掉该 session 的 pending。
+  // 不再回写 deny response：worker 已断或 session 已终止，写了也没人读。
   cleanupSession(sessionId: string, reason: string): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.sessionId !== sessionId) continue;
-      this.respond(pending, requestId, { behavior: "deny", message: reason });
       this.pending.delete(requestId);
-      serviceLogger.info({ sessionId, requestId, reason }, "Pending tool approval denied");
+      serviceLogger.info({ sessionId, requestId, reason }, "Pending tool approval dropped");
     }
   }
 
