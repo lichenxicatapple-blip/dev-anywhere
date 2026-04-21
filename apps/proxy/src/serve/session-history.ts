@@ -11,21 +11,22 @@ interface SessionHistoryEntry {
   updatedAt: number;
 }
 
+const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
+
 // 扫描 ~/.claude/projects/ 获取 Claude Code 会话历史
 // 实际目录结构: ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
 export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
-  const projectsDir = join(homedir(), ".claude", "projects");
   const entries: SessionHistoryEntry[] = [];
 
   let projectDirs: string[];
   try {
-    projectDirs = await readdir(projectsDir);
+    projectDirs = await readdir(claudeProjectsDir());
   } catch {
     return [];
   }
 
   for (const encodedDir of projectDirs) {
-    const projectPath = join(projectsDir, encodedDir);
+    const projectPath = join(claudeProjectsDir(), encodedDir);
 
     let files: string[];
     try {
@@ -58,14 +59,12 @@ export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
   // 按 title + projectDir 去重，resume 产生的多个 session 只保留最新的
   const seen = new Set<string>();
-  const deduped = entries.filter((e) => {
+  return entries.filter((e) => {
     const key = `${e.projectDir}::${e.title}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  // 限制返回数量，避免大量历史记录拖慢传输
-  return deduped.slice(0, 50);
 }
 
 interface SessionMessage {
@@ -76,17 +75,16 @@ interface SessionMessage {
 
 // 从 JSONL 文件中提取 user/assistant 对话消息用于恢复时展示历史
 export async function readSessionMessages(claudeSessionId: string): Promise<SessionMessage[]> {
-  const projectsDir = join(homedir(), ".claude", "projects");
   let projectDirs: string[];
   try {
-    projectDirs = await readdir(projectsDir);
+    projectDirs = await readdir(claudeProjectsDir());
   } catch {
     return [];
   }
 
   // 在所有项目目录中搜索匹配的 session 文件
   for (const encodedDir of projectDirs) {
-    const filePath = join(projectsDir, encodedDir, `${claudeSessionId}.jsonl`);
+    const filePath = join(claudeProjectsDir(), encodedDir, `${claudeSessionId}.jsonl`);
     try {
       await access(filePath);
     } catch {
