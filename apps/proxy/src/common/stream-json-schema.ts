@@ -127,10 +127,67 @@ const StreamEventSchema = z
   })
   .passthrough();
 
+// permission-prompt-tool=stdio 模式下，claude 发 control_request 要求审批，
+// proxy handleControlRequest 需写回 control_response 解除工具阻塞。
+// subtype 目前只见过 "can_use_tool"；request.display_name / permission_suggestions /
+// decision_reason / decision_reason_type / tool_use_id 是 CLI 辅助字段，审批决策只看 tool_name + input。
+const CanUseToolRequestSchema = z
+  .object({
+    subtype: z.literal("can_use_tool"),
+    tool_name: z.string(),
+    input: z.record(z.string(), z.unknown()),
+  })
+  .passthrough();
+
+export const ControlRequestEventSchema = z
+  .object({
+    type: z.literal("control_request"),
+    request_id: z.string(),
+    request: CanUseToolRequestSchema,
+  })
+  .passthrough();
+
+// 审批结果回写 shape。proxy 自己写入 stdin，主要用于单元测试断言 wire shape 合法。
+export const ControlResponseEventSchema = z
+  .object({
+    type: z.literal("control_response"),
+    response: z
+      .object({
+        subtype: z.literal("success"),
+        request_id: z.string(),
+        response: z.discriminatedUnion("behavior", [
+          z
+            .object({
+              behavior: z.literal("allow"),
+              updatedInput: z.record(z.string(), z.unknown()),
+            })
+            .passthrough(),
+          z
+            .object({
+              behavior: z.literal("deny"),
+              message: z.string(),
+            })
+            .passthrough(),
+        ]),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+// control_response 是 proxy 写回 claude stdin 的方向，不会出现在 stdout fixture 里；
+// 但 control-request scenario 的采样脚本也把写回 shape 留在 fixture 里用于 round-trip 验证。
+// 并入 union 让通用 canary "every event is known" 测试能覆盖它。
 export const StreamJsonEventSchema = z.discriminatedUnion("type", [
   AssistantEventSchema,
   UserEventSchema,
   ResultEventSchema,
   StreamEventSchema,
+  ControlRequestEventSchema,
+  ControlResponseEventSchema,
 ]);
+
+// schema discriminatedUnion 未覆盖但 proxy 明确静默忽略的 event type。
+// forwardEvent 遇到这些 type 不发 warn，测试也按这份名单判断"safeParse 失败是否在意"。
+// 新增一种忽略 type 时只改这里一处。
+export const IGNORED_EVENT_TYPES: ReadonlySet<string> = new Set(["system", "rate_limit_event"]);
 

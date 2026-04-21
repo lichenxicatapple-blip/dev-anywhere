@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { z } from "zod";
 import { LineBuffer } from "../ipc/line-buffer.js";
+import { ControlRequestEventSchema } from "../common/stream-json-schema.js";
 
 // stream-json 事件类型定义，基于 cc-connect 验证的结构
 export type StreamJsonEventType =
@@ -232,11 +234,17 @@ export class JsonSession {
         this.claudeSessionId = event.session_id;
       }
 
-      if (
-        event.type === "control_request" &&
-        (event.request as { subtype?: string })?.subtype === "can_use_tool"
-      ) {
-        this.handleControlRequest(event);
+      if (event.type === "control_request") {
+        // schema parse 失败说明 CLI 协议漂移，调用方必须感知而不是静默吃掉
+        const parsed = ControlRequestEventSchema.safeParse(event);
+        if (!parsed.success) {
+          console.error(
+            "[json-session] control_request shape mismatch; skipping approval",
+            parsed.error.issues.slice(0, 3),
+          );
+          return;
+        }
+        this.handleControlRequest(parsed.data);
         return;
       }
 
@@ -258,12 +266,9 @@ export class JsonSession {
     });
   }
 
-  private handleControlRequest(event: StreamJsonEvent): void {
-    const requestId = event.request_id as string;
-    const request = event.request as {
-      tool_name: string;
-      input: Record<string, unknown>;
-    };
+  private handleControlRequest(event: z.infer<typeof ControlRequestEventSchema>): void {
+    const requestId = event.request_id;
+    const request = event.request;
 
     this.approvalStrategy(request.tool_name, request.input).then((decision) => {
       const response =

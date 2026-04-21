@@ -4,6 +4,9 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ContentBlockDeltaSchema,
+  ControlRequestEventSchema,
+  ControlResponseEventSchema,
+  IGNORED_EVENT_TYPES,
   StreamJsonEventSchema,
   KnownContentBlockSchema,
 } from "#src/common/stream-json-schema.js";
@@ -11,9 +14,6 @@ import {
 // Claude CLI schema drift canary: 每当 CLI 升级后重采 fixture 跑这批测试
 // fixture 目录按 CLI 版本分目录存，测试覆盖最新版本目录下的全部 scenario
 const FIXTURES_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/stream-json");
-
-// 我们主动忽略的 event type（schema discriminatedUnion 未覆盖但 forwardEvent 明确跳过）
-const IGNORED_EVENT_TYPES = new Set(["system", "rate_limit_event"]);
 
 function listVersions(): string[] {
   return readdirSync(FIXTURES_ROOT, { withFileTypes: true })
@@ -35,7 +35,14 @@ if (versions.length === 0) {
 }
 
 describe.each(versions)("stream-json fixtures (%s)", (version) => {
-  const scenarios = ["text-only", "tool-use", "thinking", "thinking-plain", "stream-delta"];
+  const scenarios = [
+    "text-only",
+    "tool-use",
+    "thinking",
+    "thinking-plain",
+    "stream-delta",
+    "control-request",
+  ];
 
   it.each(scenarios)("%s: every event is known or intentionally ignored", (scenario) => {
     const events = readFixture(version, scenario);
@@ -180,5 +187,46 @@ describe.each(versions)("stream-json fixtures (%s)", (version) => {
     // text_delta 和 thinking_delta 来自正常增量，是 proxy 消费目标
     expect(deltaTypes.has("text_delta")).toBe(true);
     expect(deltaTypes.has("thinking_delta")).toBe(true);
+  });
+
+  it("control-request scenario contains a parseable request + response pair", () => {
+    const events = readFixture(version, "control-request");
+    const requests = events.filter(
+      (ev) => ev && typeof ev === "object" && (ev as { type?: string }).type === "control_request",
+    );
+    const responses = events.filter(
+      (ev) => ev && typeof ev === "object" && (ev as { type?: string }).type === "control_response",
+    );
+    expect(requests.length).toBeGreaterThan(0);
+    expect(responses.length).toBe(requests.length);
+
+    // 所有 control_request 都能被 schema parse，tool_name + input 两个必需字段完整
+    for (const req of requests) {
+      const parsed = ControlRequestEventSchema.safeParse(req);
+      expect(parsed.success, `control_request parse failed: ${JSON.stringify(req).slice(0, 200)}`)
+        .toBe(true);
+      if (parsed.success) {
+        expect(parsed.data.request.tool_name.length).toBeGreaterThan(0);
+      }
+    }
+
+    // 响应 shape 也 round-trip 可解，保证 handleControlRequest 写回的 JSON 合法
+    for (const resp of responses) {
+      const parsed = ControlResponseEventSchema.safeParse(resp);
+      expect(parsed.success).toBe(true);
+    }
+
+    // request_id 必须一一对应，否则 claude 会永远阻塞在审批上
+    const reqIds = new Set(
+      requests.map(
+        (r) => ControlRequestEventSchema.parse(r as Record<string, unknown>).request_id,
+      ),
+    );
+    const respIds = new Set(
+      responses.map(
+        (r) => ControlResponseEventSchema.parse(r as Record<string, unknown>).response.request_id,
+      ),
+    );
+    expect(reqIds).toEqual(respIds);
   });
 });

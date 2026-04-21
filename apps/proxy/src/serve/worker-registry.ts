@@ -4,6 +4,7 @@ import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   ContentBlockDeltaSchema,
+  IGNORED_EVENT_TYPES,
   KnownContentBlockSchema,
   StreamJsonEventSchema,
 } from "../common/stream-json-schema.js";
@@ -243,8 +244,8 @@ export class WorkerRegistry {
     const parsed = StreamJsonEventSchema.safeParse(event);
     if (!parsed.success) {
       const rawType = typeof event.type === "string" ? event.type : "<missing>";
-      // 已知无害 type 显式列在这里避免噪声
-      if (rawType === "system" || rawType === "rate_limit_event") {
+      if (IGNORED_EVENT_TYPES.has(rawType)) {
+        serviceLogger.debug({ sessionId, type: rawType }, "Dropped ignored stream-json event");
         return;
       }
       serviceLogger.warn(
