@@ -28,9 +28,10 @@ interface SpawnOptions {
   permissionMode?: string;
 }
 
-// 管理 session → worker socket 的映射，并负责 spawn/connect/reconnect 三个生命周期入口。
-// worker_event 路由、worker_approval_request 转发、worker_exit 清理都在内部闭环，
-// 让 serve.ts 侧只通过 getSocket 拿到 write 能力。
+// 管理 session → worker socket 的映射，封装全部 worker IO：
+// - spawn / connect / reconnectAll / destroyAll 生命周期入口
+// - send(sessionId, msg) 统一出口
+// - worker_event 路由、worker_approval_request 转发、worker_exit 清理都在内部闭环
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
 
