@@ -241,11 +241,13 @@ export class RelayConnection extends EventEmitter {
       serviceLogger.warn("Message discarded: connection is closed");
     } else {
       if (this.queue.size() >= MAX_QUEUE_SIZE) {
-        this.queue.dropOldest();
+        const dropped = this.queue.dropOldest();
         serviceLogger.warn(
           { maxSize: MAX_QUEUE_SIZE },
           "Message queue overflow, oldest message dropped",
         );
+        // 通知订阅方（WorkerRegistry）补偿被丢的 envelope，例如清理 pending 审批
+        if (dropped !== null) this.emit("envelope_dropped", dropped);
       }
       this.queue.enqueue(raw);
       serviceLogger.debug({ queueSize: this.queue.size() }, "Message queued during disconnect");

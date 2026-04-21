@@ -2,14 +2,11 @@ import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { KnownContentBlockSchema, StreamJsonEventSchema } from "../common/stream-json-schema.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
 import { SeqCounter } from "../common/seq-counter.js";
-import {
-  createWorkerReader,
-  serializeWorkerMsg,
-  type WorkerMessage,
-} from "../ipc/ipc-protocol.js";
+import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
@@ -17,7 +14,7 @@ import type { ToolApprovalManager } from "./tool-approval-manager.js";
 interface WorkerRegistryDeps {
   sessionManager: SessionManager;
   toolApprovalManager: ToolApprovalManager;
-  relayConnection: RelayConnection | null;
+  relayConnection: RelayConnection;
   // session 状态迁移需要通知客户端，同时 updateState 鉴于非法转换的守卫
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
 }
@@ -35,7 +32,49 @@ interface SpawnOptions {
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
 
-  constructor(private deps: WorkerRegistryDeps) {}
+  constructor(private deps: WorkerRegistryDeps) {
+    // relay queue 溢出时，被 drop 的 envelope 不会到达 client；若是 tool_use_request，
+    // 主动清 pending 审批并回 worker env-failure deny，避免 worker 永挂、toolApprovalManager 泄漏。
+    deps.relayConnection.on("envelope_dropped", (raw: string) => this.onEnvelopeDropped(raw));
+  }
+
+  private onEnvelopeDropped(raw: string): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      (parsed as { type?: unknown }).type !== "tool_use_request"
+    ) {
+      return;
+    }
+    const envelope = parsed as {
+      sessionId?: unknown;
+      payload?: { toolId?: unknown };
+    };
+    const sessionId = typeof envelope.sessionId === "string" ? envelope.sessionId : null;
+    const requestId =
+      envelope.payload && typeof envelope.payload.toolId === "string"
+        ? envelope.payload.toolId
+        : null;
+    if (!sessionId || !requestId) return;
+    if (!this.deps.toolApprovalManager.take(requestId)) return;
+
+    serviceLogger.warn(
+      { sessionId, requestId },
+      "Tool approval request lost to relay queue overflow, denying worker",
+    );
+    this.send(sessionId, {
+      type: "worker_approval_response",
+      requestId,
+      behavior: "deny",
+      message: "Approval request was dropped due to relay queue overflow.",
+    });
+  }
 
   spawn(sessionId: string, options?: SpawnOptions): number {
     const paths = sessionPaths(sessionId);
@@ -62,7 +101,7 @@ export class WorkerRegistry {
       const sock = connect(sockPath);
       sock.on("connect", () => {
         this.sockets.set(sessionId, sock);
-        createWorkerReader(sock, (msg) => this.handleWorkerMessage(sessionId, sock, msg));
+        createWorkerReader(sock, (msg) => this.handleWorkerMessage(sessionId, msg));
         sock.on("close", () => this.onDisconnect(sessionId));
         sock.on("error", () => this.onDisconnect(sessionId));
         resolve(sock);
@@ -131,24 +170,20 @@ export class WorkerRegistry {
     this.sockets.clear();
   }
 
-  private handleWorkerMessage(sessionId: string, sock: Socket, msg: WorkerMessage): void {
+  private handleWorkerMessage(sessionId: string, msg: WorkerMessage): void {
     switch (msg.type) {
       case "worker_ready":
         serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
         break;
 
       case "worker_event":
-        // WORKING 状态由 user_input 入口负责推；这里只转发事件本身到 relay，
-        // result 事件交由 forwardEvent 在 turn 结束后把 session 推回 IDLE。
-        if (this.deps.relayConnection) {
-          try {
-            this.forwardEvent(sessionId, msg.seq, msg.event);
-          } catch (err) {
-            serviceLogger.debug(
-              { sessionId, error: String(err) },
-              "Failed to forward event to relay",
-            );
-          }
+        try {
+          this.forwardEvent(sessionId, msg.seq, msg.event);
+        } catch (err) {
+          serviceLogger.debug(
+            { sessionId, error: String(err) },
+            "Failed to forward event to relay",
+          );
         }
         serviceLogger.debug({ sessionId, eventType: msg.event.type }, "JSON session event");
         break;
@@ -160,7 +195,7 @@ export class WorkerRegistry {
         break;
 
       case "worker_approval_request":
-        this.forwardApprovalRequest(sessionId, sock, msg);
+        this.forwardApprovalRequest(sessionId, msg);
         break;
 
       case "worker_claude_session_id":
@@ -179,46 +214,108 @@ export class WorkerRegistry {
     this.deps.toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
   }
 
-  // 对齐 Claude CLI stream-json 输出：
-  //   assistant.content[].text → assistant_message envelope
-  //   assistant.content[].thinking → thinking envelope
-  //   result → turn_result control + 会话状态回 IDLE
-  //   system/user/其他：忽略（无 UI 影响）
+  // 对齐 Claude CLI stream-json 输出，按 type 分发：
+  //   assistant.content[].text      → assistant_message envelope
+  //   assistant.content[].thinking  → thinking envelope
+  //   assistant.content[].tool_use  → assistant_tool_use envelope
+  //   user.content[].tool_result    → tool_result envelope
+  //   result                        → turn_result control + 会话状态回 IDLE
+  //   system/rate_limit_event/其他  → 静默忽略
+  // schema 未识别的 event/block 以 warn 暴露，作为 Claude CLI 协议变化的 runtime canary。
   private forwardEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
-    if (!relay) return;
-
-    const type = event.type;
-    if (type === "assistant") {
-      const message = event.message as { content?: Array<Record<string, unknown>> } | undefined;
-      const content = message?.content ?? [];
-      const text = content
-        .filter((c) => c.type === "text")
-        .map((c) => (c.text as string | undefined) ?? "")
-        .join("");
-      if (text) {
-        relay.sendEnvelope(
-          buildMessage("assistant_message", sessionId, seq, { text, isPartial: true }, "proxy"),
-        );
+    const parsed = StreamJsonEventSchema.safeParse(event);
+    if (!parsed.success) {
+      // 事件 type 不在已知集合（system/rate_limit_event/stream_event 等）；非 warn 级别只记 debug
+      // 已知无害 type 显式列在这里避免噪声
+      const rawType = typeof event.type === "string" ? event.type : "<missing>";
+      if (rawType === "system" || rawType === "rate_limit_event" || rawType === "stream_event") {
+        return;
       }
-      const thinkingBlock = content.find((c) => c.type === "thinking");
-      if (thinkingBlock) {
-        const thinkingText = (thinkingBlock.thinking as string | undefined) ?? "";
-        if (thinkingText) {
+      serviceLogger.warn(
+        { sessionId, type: rawType, issues: parsed.error.issues.slice(0, 3) },
+        "Unknown stream-json event type; Claude CLI schema may have changed",
+      );
+      return;
+    }
+    const ev = parsed.data;
+
+    if (ev.type === "assistant") {
+      for (const raw of ev.message.content) {
+        const blockParse = KnownContentBlockSchema.safeParse(raw);
+        if (!blockParse.success) {
+          const rawType =
+            raw && typeof raw === "object"
+              ? ((raw as Record<string, unknown>).type as string | undefined)
+              : undefined;
+          serviceLogger.warn(
+            { sessionId, seq, blockType: rawType ?? "<missing>" },
+            "Unknown assistant content block; Claude CLI schema may have changed",
+          );
+          continue;
+        }
+        const block = blockParse.data;
+        if (block.type === "text") {
+          if (block.text) {
+            relay.sendEnvelope(
+              buildMessage(
+                "assistant_message",
+                sessionId,
+                seq,
+                { text: block.text, isPartial: true },
+                "proxy",
+              ),
+            );
+          }
+        } else if (block.type === "thinking") {
+          // Opus extended thinking 明文被 Anthropic 服务端 redact 时 block.thinking 为空字符串，
+          // 不转发；session WORKING 状态已经覆盖"Claude 在思考"信号，redacted envelope 无新信息
+          if (block.thinking) {
+            relay.sendEnvelope(
+              buildMessage("thinking", sessionId, seq, { text: block.thinking }, "proxy"),
+            );
+          }
+        } else if (block.type === "tool_use") {
           relay.sendEnvelope(
-            buildMessage("thinking", sessionId, seq, { text: thinkingText }, "proxy"),
+            buildMessage(
+              "assistant_tool_use",
+              sessionId,
+              seq,
+              { toolName: block.name, toolId: block.id, parameters: block.input },
+              "proxy",
+            ),
           );
         }
       }
       return;
     }
-    if (type === "result") {
+
+    if (ev.type === "user") {
+      for (const raw of ev.message.content) {
+        const blockParse = KnownContentBlockSchema.safeParse(raw);
+        if (!blockParse.success) continue;
+        const block = blockParse.data;
+        if (block.type !== "tool_result") continue;
+        relay.sendEnvelope(
+          buildMessage(
+            "tool_result",
+            sessionId,
+            seq,
+            { toolId: block.tool_use_id, result: block.content, isError: block.is_error ?? false },
+            "proxy",
+          ),
+        );
+      }
+      return;
+    }
+
+    if (ev.type === "result") {
       relay.sendRaw(
         JSON.stringify({
           type: "turn_result",
           sessionId,
-          success: event.subtype === "success",
-          isError: Boolean(event.is_error),
+          success: ev.subtype === "success",
+          isError: ev.is_error ?? false,
         }),
       );
       this.deps.changeSessionState(sessionId, SessionState.IDLE);
@@ -227,27 +324,8 @@ export class WorkerRegistry {
 
   private forwardApprovalRequest(
     sessionId: string,
-    sock: Socket,
     msg: Extract<WorkerMessage, { type: "worker_approval_request" }>,
   ): void {
-    const relay = this.deps.relayConnection;
-    if (!relay) {
-      // 无 relay = 无 remote 审批者，直接 deny 以免 worker 卡住。
-      serviceLogger.info(
-        { sessionId, toolName: msg.toolName },
-        "Tool approval denied (no relay connection)",
-      );
-      sock.write(
-        serializeWorkerMsg({
-          type: "worker_approval_response",
-          requestId: msg.requestId,
-          behavior: "deny",
-          message: "No relay connection available for remote approval.",
-        }),
-      );
-      return;
-    }
-
     serviceLogger.info(
       { sessionId, toolName: msg.toolName, requestId: msg.requestId },
       "Tool approval forwarding to relay",
@@ -266,7 +344,7 @@ export class WorkerRegistry {
         },
         "proxy",
       );
-      relay.sendEnvelope(envelope);
+      this.deps.relayConnection.sendEnvelope(envelope);
       this.deps.toolApprovalManager.register(msg.requestId, {
         sessionId,
         toolName: msg.toolName,
@@ -278,14 +356,12 @@ export class WorkerRegistry {
         { sessionId, error: String(err) },
         "Failed to forward tool approval to relay, denying",
       );
-      sock.write(
-        serializeWorkerMsg({
-          type: "worker_approval_response",
-          requestId: msg.requestId,
-          behavior: "deny",
-          message: "Failed to forward approval request to relay.",
-        }),
-      );
+      this.send(sessionId, {
+        type: "worker_approval_response",
+        requestId: msg.requestId,
+        behavior: "deny",
+        message: "Failed to forward approval request to relay.",
+      });
     }
   }
 }

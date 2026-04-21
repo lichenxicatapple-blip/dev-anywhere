@@ -51,7 +51,8 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     type: z.literal("thinking"),
     payload: ThinkingPayloadSchema,
   }),
-  // tool (4)
+  // tool (6)
+  // tool_use_request: 审批流请求（proxy → client），toolId 是 approval requestId
   z.object({
     ...BaseEnvelopeFields,
     type: z.literal("tool_use_request"),
@@ -67,10 +68,18 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     type: z.literal("tool_deny"),
     payload: ToolDenyPayloadSchema,
   }),
+  // tool_result: 工具执行结果（proxy → client），toolId 对应 assistant_tool_use / tool_use_request 的 toolId
   z.object({
     ...BaseEnvelopeFields,
     type: z.literal("tool_result"),
     payload: ToolResultPayloadSchema,
+  }),
+  // assistant_tool_use: 纯展示型工具调用（proxy → client），区别于 tool_use_request 无审批语义
+  // payload 结构复用 ToolUseRequestPayloadSchema；toolId 是 Claude 分配的 tool_use id
+  z.object({
+    ...BaseEnvelopeFields,
+    type: z.literal("assistant_tool_use"),
+    payload: ToolUseRequestPayloadSchema,
   }),
   // session (5)
   z.object({

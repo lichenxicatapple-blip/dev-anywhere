@@ -4,7 +4,7 @@ interface MessageQueue {
   drain(): string[];
   size(): number;
   clear(): void;
-  dropOldest(): void;
+  dropOldest(): string | null;
 }
 
 export class MemoryMessageQueue implements MessageQueue {
@@ -28,10 +28,8 @@ export class MemoryMessageQueue implements MessageQueue {
     this.items = [];
   }
 
-  // 丢弃队列中最旧的一条消息
-  dropOldest(): void {
-    if (this.items.length > 0) {
-      this.items.shift();
-    }
+  // 丢弃最旧消息，返回被丢弃的 raw 供 caller 做补偿（例如清理对应 pending 审批）
+  dropOldest(): string | null {
+    return this.items.shift() ?? null;
   }
 }
