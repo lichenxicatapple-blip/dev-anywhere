@@ -10,6 +10,7 @@ import type { WorkerRegistry } from "./worker-registry.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
+import type { JsonObserver } from "./json-observer.js";
 import { readSessionMessages } from "./session-history.js";
 
 interface RelayRouterDeps {
@@ -22,7 +23,8 @@ interface RelayRouterDeps {
   terminalSockets: Map<string, Socket>;
   broadcastSessionList: () => void;
   broadcastSessionSync: (session: SessionInfo) => void;
-  changeSessionState: (sessionId: string, next: SessionState) => boolean;
+  // user_input 注入触发 turn 开始（JSON 观察器）
+  jsonObserver: JsonObserver;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -94,7 +96,7 @@ export class RelayRouter {
     if (session.mode === "json") {
       // user_input 是 JSON turn 的唯一入口，先推 WORKING 再 send；send 失败回滚不必要，
       // worker 会在下次消息往返时把状态拉回。
-      this.deps.changeSessionState(sessionId, SessionState.WORKING);
+      this.deps.jsonObserver.onTurnStart(sessionId);
       const sent = this.deps.workerRegistry.send(sessionId, {
         type: "worker_input",
         content: text,

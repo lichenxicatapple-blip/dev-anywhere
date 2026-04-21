@@ -33,7 +33,12 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
       sessionManager: {} as SessionManager,
       toolApprovalManager,
       relayConnection: relay,
-      changeSessionState: () => true,
+      jsonObserver: {
+        onTurnStart: () => {},
+        onTurnResult: () => {},
+        onApprovalRequested: () => {},
+        onChannelBroken: () => {},
+      } as unknown as import("#src/serve/json-observer.js").JsonObserver,
     });
     // 引用以避免 lint unused
     void registry;

@@ -44,7 +44,12 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       sessionManager: {} as SessionManager,
       toolApprovalManager,
       relayConnection: relay,
-      changeSessionState: () => true,
+      jsonObserver: {
+        onTurnStart: () => {},
+        onTurnResult: () => {},
+        onApprovalRequested: () => {},
+        onChannelBroken: () => {},
+      } as unknown as import("#src/serve/json-observer.js").JsonObserver,
     });
 
     // 合成 worker → serve 的 IPC 消息，内容全部取自真实 fixture

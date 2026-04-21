@@ -16,6 +16,8 @@ import {
 import { ToolApprovalManager } from "./serve/tool-approval-manager.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
+import { PtyObserver } from "./serve/pty-observer.js";
+import { JsonObserver } from "./serve/json-observer.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -77,26 +79,18 @@ function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): voi
   );
 }
 
-// 状态迁移 + 推 envelope 的一体化入口；same-state 或非法转移时静默 no-op，避免调用方遍地 try/catch
+// 状态迁移 + 推 envelope 的一体化入口。
+// same-state / 非法转换的降级和日志分级由 SessionManager.updateState 负责；这里只在真正发生了转换时才广播 status。
 function changeSessionState(
   sessionManager: SessionManager,
   relay: RelayConnection,
   sessionId: string,
   next: SessionState,
 ): boolean {
-  const session = sessionManager.getSession(sessionId);
-  if (!session || session.state === next) return false;
-  try {
-    sessionManager.updateState(sessionId, next);
-  } catch (err) {
-    serviceLogger.debug(
-      { sessionId, from: session.state, to: next, error: String(err) },
-      "updateState rejected",
-    );
-    return false;
-  }
-  pushSessionStatus(relay, sessionManager, sessionId);
-  return true;
+  if (!sessionManager.getSession(sessionId)) return false;
+  const changed = sessionManager.updateState(sessionId, next);
+  if (changed) pushSessionStatus(relay, sessionManager, sessionId);
+  return changed;
 }
 
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
@@ -153,6 +147,7 @@ function handleTerminalConnection(
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
+  ptyObserver: PtyObserver,
 ): void {
   createIpcReader(
     socket,
@@ -175,7 +170,7 @@ function handleTerminalConnection(
             existing ??
             sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
           if (existing) {
-            changeSessionState(sessionManager, relayConnection, session.id, SessionState.IDLE);
+            ptyObserver.onTerminalAttached(session.id);
             sessionManager.setPid(session.id, msg.pid);
           }
           socket.write(
@@ -221,16 +216,8 @@ function handleTerminalConnection(
         }
 
         case "pty_state_push": {
-          // terminal → serve → relay：PTY 语义状态变化
-          const stateMap: Record<string, SessionState> = {
-            working: SessionState.WORKING,
-            turn_complete: SessionState.IDLE,
-            approval_wait: SessionState.WAITING_APPROVAL,
-          };
-          const sessionState = stateMap[msg.state];
-          if (sessionState) {
-            changeSessionState(sessionManager, relayConnection, msg.sessionId, sessionState);
-          }
+          // terminal → serve → relay：PTY 语义状态变化；PtyObserver 负责 OSC 信号 → SessionState 映射
+          ptyObserver.onPtySignal(msg.sessionId, msg.state);
           relayConnection.sendRaw(
             JSON.stringify({
               type: "pty_state",
@@ -279,7 +266,7 @@ function handleTerminalConnection(
         }
 
         case "pty_register": {
-          changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
+          ptyObserver.onTerminalAttached(msg.sessionId);
           sessionManager.setPid(msg.sessionId, msg.pid);
           terminalSockets.set(msg.sessionId, socket);
           // 注册即告知当前 bridge 状态，避免新接入的终端要等下次状态翻转才知道
@@ -472,13 +459,18 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
+  // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
+  const observerChangeState = (sessionId: string, next: SessionState): boolean =>
+    changeSessionState(sessionManager, relayConnection, sessionId, next);
+  const ptyObserver = new PtyObserver({ changeSessionState: observerChangeState });
+  const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
+
   // WorkerRegistry 建在 relay 之后、listener 之前；构造期订阅 envelope_dropped 事件
   const workerRegistry = new WorkerRegistry({
     sessionManager,
     toolApprovalManager,
     relayConnection,
-    changeSessionState: (sessionId, next) =>
-      changeSessionState(sessionManager, relayConnection, sessionId, next),
+    jsonObserver,
   });
 
   relayConnection.connect();
@@ -494,8 +486,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     terminalSockets,
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
-    changeSessionState: (sessionId, next) =>
-      changeSessionState(sessionManager, relayConnection, sessionId, next),
+    jsonObserver,
   });
 
   relayConnection.on("message", (data: string) => relayRouter.handle(data));
@@ -525,6 +516,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       terminalSockets,
       relayConnection,
       controlHandlers,
+      ptyObserver,
     );
   });
 

@@ -1,6 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
-import { SessionState, buildMessage } from "@cc-anywhere/shared";
+import { buildMessage } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   ContentBlockDeltaSchema,
@@ -15,13 +15,14 @@ import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../i
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
+import type { JsonObserver } from "./json-observer.js";
 
 interface WorkerRegistryDeps {
   sessionManager: SessionManager;
   toolApprovalManager: ToolApprovalManager;
   relayConnection: RelayConnection;
-  // session 状态迁移需要通知客户端，同时 updateState 鉴于非法转换的守卫
-  changeSessionState: (sessionId: string, next: SessionState) => boolean;
+  // JSON 观察通道状态机；forwardEvent / forwardApprovalRequest 据此推状态变迁
+  jsonObserver: JsonObserver;
 }
 
 interface SpawnOptions {
@@ -358,7 +359,7 @@ export class WorkerRegistry {
           isError: ev.is_error ?? false,
         }),
       );
-      this.deps.changeSessionState(sessionId, SessionState.IDLE);
+      this.deps.jsonObserver.onTurnResult(sessionId);
     }
   }
 
@@ -370,6 +371,7 @@ export class WorkerRegistry {
       { sessionId, toolName: msg.toolName, requestId: msg.requestId },
       "Tool approval forwarding to relay",
     );
+    this.deps.jsonObserver.onApprovalRequested(sessionId);
     try {
       const seqCounter = new SeqCounter(sessionId);
       const approvalSeq = seqCounter.next();

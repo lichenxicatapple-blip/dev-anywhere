@@ -107,12 +107,20 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
-    it("transitions waiting_approval -> idle", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+    it("JSON session transitions waiting_approval -> idle directly (粒度丢失：proxy 观察不到审批后的 WORKING 中间态)", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       manager.updateState(s.id, SessionState.IDLE);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
+    });
+
+    it("PTY session rejects waiting_approval -> idle (必须先经 WORKING，turn_complete 守卫要求 currentPtyState==='working')", () => {
+      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      manager.updateState(s.id, SessionState.WORKING);
+      manager.updateState(s.id, SessionState.WAITING_APPROVAL);
+      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
     it("transitions working -> idle", () => {
@@ -122,10 +130,16 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
-    it("transitions any state -> error", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+    it("JSON session transitions idle -> error (observer channel lost)", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
+    });
+
+    it("PTY session rejects transition into error and returns false (no ERROR state for PTY)", () => {
+      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      expect(manager.updateState(s.id, SessionState.ERROR)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("transitions any state -> terminated", () => {
@@ -135,35 +149,53 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
-    it("rejects terminated -> any state (terminal)", () => {
+    it("rejects terminated -> any state (absorbing) and returns false", () => {
       const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.TERMINATED);
-      expect(() => manager.updateState(s.id, SessionState.IDLE)).toThrow();
+      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
-    it("rejects error -> idle (error only goes to terminated)", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+    it("JSON session rejects error -> idle and returns false (error only goes to terminated)", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
-      expect(() => manager.updateState(s.id, SessionState.IDLE)).toThrow();
+      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
     });
 
-    it("allows error -> terminated", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+    it("JSON session allows error -> terminated", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
+    });
+
+    it("PTY session allows waiting_approval -> working (approval resolved, claude resumes)", () => {
+      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      manager.updateState(s.id, SessionState.WORKING);
+      manager.updateState(s.id, SessionState.WAITING_APPROVAL);
+      manager.updateState(s.id, SessionState.WORKING);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
+    });
+
+    it("JSON session rejects waiting_approval -> working (proxy cannot observe mid-approval resumption)", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      manager.updateState(s.id, SessionState.WORKING);
+      manager.updateState(s.id, SessionState.WAITING_APPROVAL);
+      expect(manager.updateState(s.id, SessionState.WORKING)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
     it("throws for non-existent session", () => {
       expect(() => manager.updateState("nonexistent", SessionState.WORKING)).toThrow();
     });
 
-    it("persists state change to file", () => {
+    it("does not persist runtime state to file (state is observation, not identity)", () => {
       const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       const saved = data.find((d: { id: string }) => d.id === s.id);
-      expect(saved.state).toBe(SessionState.WORKING);
+      expect(saved.state).toBeUndefined();
     });
   });
 
@@ -239,10 +271,10 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("filters out terminated sessions on load", () => {
+    it("terminated sessions do not reappear on load", () => {
       const s1 = manager.createSession("json", "/tmp/test", ALIVE_PID);
       const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      manager.updateState(s1.id, SessionState.TERMINATED);
+      manager.terminateSession(s1.id);
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(s1.id)).toBeUndefined();
       expect(manager2.getSession(s2.id)).toBeDefined();
@@ -277,11 +309,10 @@ describe("SessionManager", () => {
       expect(Array.isArray(data)).toBe(true);
     });
 
-    it("resets WAITING_APPROVAL to IDLE on load", () => {
+    it("any in-memory state resets to IDLE on load (state is observation, discarded across restart)", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
 
       const manager2 = new SessionManager({ persistPath });
       const restored = manager2.getSession(s.id);
@@ -290,19 +321,21 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("keeps WORKING state unchanged on load", () => {
+    it("legacy disk files with persisted state field still load as IDLE", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      manager.updateState(s.id, SessionState.WORKING);
-
-      const manager2 = new SessionManager({ persistPath });
-      const restored = manager2.getSession(s.id);
-      expect(restored).toBeDefined();
-      expect(restored!.state).toBe(SessionState.WORKING);
-      manager2.stopReaper();
-    });
-
-    it("keeps IDLE state unchanged on load", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      // 模拟旧版本磁盘格式：手写一份带 state 字段的 JSON
+      const legacy = [
+        {
+          id: s.id,
+          mode: "json",
+          cwd: "/tmp/test",
+          pid: ALIVE_PID,
+          state: SessionState.WORKING,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        },
+      ];
+      writeFileSync(persistPath, JSON.stringify(legacy), "utf-8");
 
       const manager2 = new SessionManager({ persistPath });
       const restored = manager2.getSession(s.id);
@@ -335,20 +368,6 @@ describe("SessionManager", () => {
         onSessionRemoved: (id) => removedIds.push(id),
       });
       expect(removedIds).toHaveLength(1);
-      manager2.stopReaper();
-    });
-
-    it("deletes data for TERMINATED sessions regardless of mode", () => {
-      const removedIds: string[] = [];
-      const json = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      manager.updateState(json.id, SessionState.TERMINATED);
-
-      const manager2 = new SessionManager({
-        persistPath,
-        onSessionRemoved: (id) => removedIds.push(id),
-      });
-      expect(manager2.getSession(json.id)).toBeUndefined();
-      expect(removedIds).toContain(json.id);
       manager2.stopReaper();
     });
 
