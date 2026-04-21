@@ -67,6 +67,8 @@ interface Scenario {
   name: string;
   model: string;
   prompt: string;
+  // 开启 --include-partial-messages，采样 stream_event.content_block_delta 形式的增量事件
+  includePartialMessages?: boolean;
 }
 
 // 不同 scenario 用不同模型以覆盖 thinking 能力差异
@@ -94,6 +96,13 @@ const SCENARIOS: Scenario[] = [
     prompt:
       "Think step by step: how many distinct letters are in MISSISSIPPI? Show your reasoning, then give the answer.",
   },
+  // stream delta 开：验证 stream_event / content_block_delta / text_delta 真实 shape
+  {
+    name: "stream-delta",
+    model: "claude-sonnet-4-6",
+    prompt: "List the first 5 Fibonacci numbers one per line.",
+    includePartialMessages: true,
+  },
 ];
 
 async function runScenario(
@@ -120,6 +129,7 @@ async function runScenario(
     "--model",
     scenario.model,
   ];
+  if (scenario.includePartialMessages) args.push("--include-partial-messages");
 
   const child = spawn(claudeBin, args, { stdio: ["pipe", "pipe", "pipe"], cwd });
 

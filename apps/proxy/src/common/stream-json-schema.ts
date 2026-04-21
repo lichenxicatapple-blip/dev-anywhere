@@ -84,8 +84,9 @@ const ResultEventSchema = z
   })
   .passthrough();
 
-// --include-partial-messages 开启时出现的增量事件。我们只消费 content_block_delta 中的
+// --include-partial-messages 开启时出现的增量事件。我们消费 content_block_delta 中的
 // text_delta / thinking_delta，其余内层 event（message_start/message_delta/content_block_start 等）忽略。
+// signature_delta 存在但 proxy 不转发 —— signature 是 Anthropic replay 用的加密态，对 UI 无意义。
 const TextDeltaSchema = z
   .object({
     type: z.literal("text_delta"),
@@ -100,11 +101,22 @@ const ThinkingDeltaSchema = z
   })
   .passthrough();
 
+const SignatureDeltaSchema = z
+  .object({
+    type: z.literal("signature_delta"),
+    signature: z.string(),
+  })
+  .passthrough();
+
 export const ContentBlockDeltaSchema = z
   .object({
     type: z.literal("content_block_delta"),
     index: z.number(),
-    delta: z.union([TextDeltaSchema, ThinkingDeltaSchema]),
+    delta: z.discriminatedUnion("type", [
+      TextDeltaSchema,
+      ThinkingDeltaSchema,
+      SignatureDeltaSchema,
+    ]),
   })
   .passthrough();
 

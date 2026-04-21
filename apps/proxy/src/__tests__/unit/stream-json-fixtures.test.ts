@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { StreamJsonEventSchema, KnownContentBlockSchema } from "#src/common/stream-json-schema.js";
+import {
+  ContentBlockDeltaSchema,
+  StreamJsonEventSchema,
+  KnownContentBlockSchema,
+} from "#src/common/stream-json-schema.js";
 
 // Claude CLI schema drift canary: 每当 CLI 升级后重采 fixture 跑这批测试
 // fixture 目录按 CLI 版本分目录存，测试覆盖最新版本目录下的全部 scenario
@@ -31,7 +35,7 @@ if (versions.length === 0) {
 }
 
 describe.each(versions)("stream-json fixtures (%s)", (version) => {
-  const scenarios = ["text-only", "tool-use", "thinking", "thinking-plain"];
+  const scenarios = ["text-only", "tool-use", "thinking", "thinking-plain", "stream-delta"];
 
   it.each(scenarios)("%s: every event is known or intentionally ignored", (scenario) => {
     const events = readFixture(version, scenario);
@@ -152,5 +156,29 @@ describe.each(versions)("stream-json fixtures (%s)", (version) => {
       );
     });
     expect(hasText).toBe(true);
+  });
+
+  it("stream-delta scenario contains stream_event wrapped content_block_delta", () => {
+    const events = readFixture(version, "stream-delta");
+    const streamEvents = events.filter(
+      (ev) => ev && typeof ev === "object" && (ev as { type?: string }).type === "stream_event",
+    );
+    expect(streamEvents.length).toBeGreaterThan(0);
+
+    // 至少一个 stream_event 的 inner event 是 content_block_delta 且 schema parse 成功
+    const deltas = streamEvents
+      .map((se) => (se as { event?: unknown }).event)
+      .map((inner) => ContentBlockDeltaSchema.safeParse(inner))
+      .filter((r) => r.success);
+    expect(deltas.length).toBeGreaterThan(0);
+
+    // 验证 delta 字段形状：content_block_delta.delta 覆盖已知三种类型
+    const deltaTypes = new Set<string>();
+    for (const r of deltas) {
+      if (r.success) deltaTypes.add(r.data.delta.type);
+    }
+    // text_delta 和 thinking_delta 来自正常增量，是 proxy 消费目标
+    expect(deltaTypes.has("text_delta")).toBe(true);
+    expect(deltaTypes.has("thinking_delta")).toBe(true);
   });
 });
