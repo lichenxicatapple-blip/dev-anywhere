@@ -8,8 +8,8 @@ import { StreamJsonEventSchema, KnownContentBlockSchema } from "#src/common/stre
 // fixture 目录按 CLI 版本分目录存，测试覆盖最新版本目录下的全部 scenario
 const FIXTURES_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../fixtures/stream-json");
 
-// 我们主动忽略的 event type（非 assistant/user/result 的事件，不走 forwardEvent 业务分支）
-const IGNORED_EVENT_TYPES = new Set(["system", "rate_limit_event", "stream_event"]);
+// 我们主动忽略的 event type（schema discriminatedUnion 未覆盖但 forwardEvent 明确跳过）
+const IGNORED_EVENT_TYPES = new Set(["system", "rate_limit_event"]);
 
 function listVersions(): string[] {
   return readdirSync(FIXTURES_ROOT, { withFileTypes: true })

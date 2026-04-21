@@ -208,6 +208,8 @@ export class RelayRouter {
 
     const resumeSessionId = msg.resumeSessionId as string | undefined;
     const permissionMode = msg.permissionMode as string | undefined;
+    // streamDelta 来自 client 端系统设置 toggle（SessionCreatePayloadSchema 的 streamDelta）
+    const streamDelta = msg.streamDelta === true;
     const name = tildify(cwd);
     // 先生成 ID 和启动 worker，连接成功后再注册 session
     const pendingId = nanoid();
@@ -215,6 +217,7 @@ export class RelayRouter {
       cwd,
       resumeSessionId,
       permissionMode,
+      streamDelta,
     });
 
     const paths = sessionPaths(pendingId);

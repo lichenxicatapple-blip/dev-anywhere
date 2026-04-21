@@ -22,9 +22,13 @@ function getArg(name: string): string | undefined {
   const idx = preArgs.indexOf(name);
   return idx >= 0 && idx + 1 < preArgs.length ? preArgs[idx + 1] : undefined;
 }
+function hasFlag(name: string): boolean {
+  return preArgs.includes(name);
+}
 const workerCwd = getArg("--cwd");
 const workerResume = getArg("--resume");
 const workerPermissionMode = getArg("--permission-mode") as ClaudePermissionMode | undefined;
+const workerStreamDelta = hasFlag("--stream-delta");
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
@@ -72,6 +76,7 @@ const session = new JsonSession({
   cwd: workerCwd,
   resumeSessionId: workerResume,
   permissionMode: workerPermissionMode,
+  includePartialMessages: workerStreamDelta,
   approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
   onEvent: (event: StreamJsonEvent) => {
     // 从 system 事件中捕获 Claude 会话 ID 并通知 serve

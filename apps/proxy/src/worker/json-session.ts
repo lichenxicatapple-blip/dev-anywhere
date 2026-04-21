@@ -38,6 +38,7 @@ interface JsonSessionOptions {
   cwd?: string;
   resumeSessionId?: string;
   permissionMode?: ClaudePermissionMode;
+  includePartialMessages?: boolean;
 }
 
 // 默认拒绝所有工具调用，远程审批未配置前的安全兜底
@@ -99,6 +100,7 @@ export function buildClaudeArgs(options: {
   forkSession?: boolean;
   resumeSessionId?: string;
   verbose?: boolean;
+  includePartialMessages?: boolean;
 }): string[] {
   const args: string[] = [];
   if (options.outputFormat) args.push("--output-format", options.outputFormat);
@@ -108,6 +110,7 @@ export function buildClaudeArgs(options: {
   if (options.verbose) args.push("--verbose");
   if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
   if (options.forkSession !== false) args.push("--fork-session");
+  if (options.includePartialMessages) args.push("--include-partial-messages");
   return args;
 }
 
@@ -123,6 +126,7 @@ export class JsonSession {
   private readonly onExitCb?: (code: number) => void;
   private readonly resumeSessionId?: string;
   private readonly permissionMode?: ClaudePermissionMode;
+  private readonly includePartialMessages: boolean;
 
   constructor(options: JsonSessionOptions = {}) {
     this.workDir = options.cwd ?? options.workDir ?? process.cwd();
@@ -132,6 +136,7 @@ export class JsonSession {
     this.onExitCb = options.onExit;
     this.resumeSessionId = options.resumeSessionId;
     this.permissionMode = options.permissionMode;
+    this.includePartialMessages = options.includePartialMessages ?? false;
   }
 
   getClaudeSessionId(): string | null {
@@ -147,6 +152,7 @@ export class JsonSession {
       verbose: true,
       forkSession: true,
       resumeSessionId: this.resumeSessionId,
+      includePartialMessages: this.includePartialMessages,
     });
 
     const args = [...baseArgs, ...this.claudeArgs];

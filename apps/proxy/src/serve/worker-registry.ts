@@ -2,7 +2,11 @@ import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
 import { SessionState, buildMessage } from "@cc-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
-import { KnownContentBlockSchema, StreamJsonEventSchema } from "../common/stream-json-schema.js";
+import {
+  ContentBlockDeltaSchema,
+  KnownContentBlockSchema,
+  StreamJsonEventSchema,
+} from "../common/stream-json-schema.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
 import { SeqCounter } from "../common/seq-counter.js";
@@ -23,6 +27,9 @@ interface SpawnOptions {
   cwd?: string;
   resumeSessionId?: string;
   permissionMode?: string;
+  // 开启后 worker spawn claude 带 --include-partial-messages，forwardEvent 处理 stream_event delta；
+  // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
+  streamDelta?: boolean;
 }
 
 // 管理 session → worker socket 的映射，封装全部 worker IO：
@@ -31,6 +38,8 @@ interface SpawnOptions {
 // - worker_event 路由、worker_approval_request 转发、worker_exit 清理都在内部闭环
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
+  // 记录哪些 session 是 spawn 时带 --stream-delta 的；forwardEvent 据此决定是否跳过 aggregated 去重
+  private streamDeltaSessions = new Set<string>();
 
   constructor(private deps: WorkerRegistryDeps) {
     // relay queue 溢出时，被 drop 的 envelope 不会到达 client；若是 tool_use_request，
@@ -83,6 +92,10 @@ export class WorkerRegistry {
     if (options?.resumeSessionId) args.push("--resume", options.resumeSessionId);
     // 远程场景默认 default，每个工具都需审批，覆盖用户全局 claude settings 的 defaultMode
     args.push("--permission-mode", options?.permissionMode ?? "default");
+    if (options?.streamDelta) {
+      args.push("--stream-delta");
+      this.streamDeltaSessions.add(sessionId);
+    }
     args.push("--");
 
     const child = spawnScript(new URL("./session-worker", import.meta.url), args, {
@@ -153,6 +166,7 @@ export class WorkerRegistry {
 
   delete(sessionId: string): void {
     this.sockets.delete(sessionId);
+    this.streamDeltaSessions.delete(sessionId);
   }
 
   // 向指定 session 的 worker 写 WorkerMessage；socket 缺失或不可写返回 false 由 caller 决定日志。
@@ -191,6 +205,7 @@ export class WorkerRegistry {
       case "worker_exit":
         this.deps.sessionManager.terminateSession(sessionId);
         this.sockets.delete(sessionId);
+        this.streamDeltaSessions.delete(sessionId);
         serviceLogger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
         break;
 
@@ -215,8 +230,9 @@ export class WorkerRegistry {
   }
 
   // 对齐 Claude CLI stream-json 输出，按 type 分发：
-  //   assistant.content[].text      → assistant_message envelope
-  //   assistant.content[].thinking  → thinking envelope
+  //   stream_event.content_block_delta → 增量 text/thinking envelope（仅 streamDelta 会话产生）
+  //   assistant.content[].text      → assistant_message envelope（streamDelta 下跳过，避免重复）
+  //   assistant.content[].thinking  → thinking envelope（streamDelta 下跳过）
   //   assistant.content[].tool_use  → assistant_tool_use envelope
   //   user.content[].tool_result    → tool_result envelope
   //   result                        → turn_result control + 会话状态回 IDLE
@@ -226,10 +242,9 @@ export class WorkerRegistry {
     const relay = this.deps.relayConnection;
     const parsed = StreamJsonEventSchema.safeParse(event);
     if (!parsed.success) {
-      // 事件 type 不在已知集合（system/rate_limit_event/stream_event 等）；非 warn 级别只记 debug
-      // 已知无害 type 显式列在这里避免噪声
       const rawType = typeof event.type === "string" ? event.type : "<missing>";
-      if (rawType === "system" || rawType === "rate_limit_event" || rawType === "stream_event") {
+      // 已知无害 type 显式列在这里避免噪声
+      if (rawType === "system" || rawType === "rate_limit_event") {
         return;
       }
       serviceLogger.warn(
@@ -239,6 +254,29 @@ export class WorkerRegistry {
       return;
     }
     const ev = parsed.data;
+    const isStreamDeltaSession = this.streamDeltaSessions.has(sessionId);
+
+    if (ev.type === "stream_event") {
+      const delta = ContentBlockDeltaSchema.safeParse(ev.event);
+      if (!delta.success) return; // 非 content_block_delta 的内层事件（message_start 等）忽略
+      const d = delta.data.delta;
+      if (d.type === "text_delta" && d.text) {
+        relay.sendEnvelope(
+          buildMessage(
+            "assistant_message",
+            sessionId,
+            seq,
+            { text: d.text, isPartial: true },
+            "proxy",
+          ),
+        );
+      } else if (d.type === "thinking_delta" && d.thinking) {
+        relay.sendEnvelope(
+          buildMessage("thinking", sessionId, seq, { text: d.thinking }, "proxy"),
+        );
+      }
+      return;
+    }
 
     if (ev.type === "assistant") {
       for (const raw of ev.message.content) {
@@ -256,7 +294,8 @@ export class WorkerRegistry {
         }
         const block = blockParse.data;
         if (block.type === "text") {
-          if (block.text) {
+          // streamDelta 下增量已经发过了，aggregated 全文跳过避免重复
+          if (!isStreamDeltaSession && block.text) {
             relay.sendEnvelope(
               buildMessage(
                 "assistant_message",
@@ -270,7 +309,7 @@ export class WorkerRegistry {
         } else if (block.type === "thinking") {
           // Opus extended thinking 明文被 Anthropic 服务端 redact 时 block.thinking 为空字符串，
           // 不转发；session WORKING 状态已经覆盖"Claude 在思考"信号，redacted envelope 无新信息
-          if (block.thinking) {
+          if (!isStreamDeltaSession && block.thinking) {
             relay.sendEnvelope(
               buildMessage("thinking", sessionId, seq, { text: block.thinking }, "proxy"),
             );

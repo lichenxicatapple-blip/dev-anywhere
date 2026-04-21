@@ -14,9 +14,11 @@ export const SessionInfoSchema = z.object({
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 
 // 创建会话
+// streamDelta: client 端系统设置"逐字流式"toggle，true 时 proxy spawn 带 --include-partial-messages
 export const SessionCreatePayloadSchema = z.object({
   name: z.string().optional(),
   cwd: z.string().optional(),
+  streamDelta: z.boolean().optional(),
 });
 
 export type SessionCreatePayload = z.infer<typeof SessionCreatePayloadSchema>;

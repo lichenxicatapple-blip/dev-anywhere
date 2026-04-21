@@ -84,9 +84,41 @@ const ResultEventSchema = z
   })
   .passthrough();
 
+// --include-partial-messages 开启时出现的增量事件。我们只消费 content_block_delta 中的
+// text_delta / thinking_delta，其余内层 event（message_start/message_delta/content_block_start 等）忽略。
+const TextDeltaSchema = z
+  .object({
+    type: z.literal("text_delta"),
+    text: z.string(),
+  })
+  .passthrough();
+
+const ThinkingDeltaSchema = z
+  .object({
+    type: z.literal("thinking_delta"),
+    thinking: z.string(),
+  })
+  .passthrough();
+
+export const ContentBlockDeltaSchema = z
+  .object({
+    type: z.literal("content_block_delta"),
+    index: z.number(),
+    delta: z.union([TextDeltaSchema, ThinkingDeltaSchema]),
+  })
+  .passthrough();
+
+const StreamEventSchema = z
+  .object({
+    type: z.literal("stream_event"),
+    event: z.object({ type: z.string() }).passthrough(),
+  })
+  .passthrough();
+
 export const StreamJsonEventSchema = z.discriminatedUnion("type", [
   AssistantEventSchema,
   UserEventSchema,
   ResultEventSchema,
+  StreamEventSchema,
 ]);
 
