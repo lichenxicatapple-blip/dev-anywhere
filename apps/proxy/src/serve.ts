@@ -1329,6 +1329,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
               "Subscribe failed: terminal socket not available",
             );
           }
+        } else {
+          serviceLogger.warn({ type: parsed.type }, "Unhandled relay message type");
         }
       } catch (err) {
         serviceLogger.warn({ error: String(err) }, "Failed to parse relay message");

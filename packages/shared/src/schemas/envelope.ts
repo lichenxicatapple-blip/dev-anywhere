@@ -34,8 +34,7 @@ const BaseEnvelopeFields = {
   version: z.string(),
 };
 
-// 15 种消息类型的 discriminatedUnion，按 type 字段区分
-// terminal_frame/pty_state/pty_snapshot 已迁移或删除，不在 Envelope 层
+// 按 type 字段区分的 discriminatedUnion 信封
 export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
   // chat (3)
   z.object({
