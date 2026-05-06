@@ -95,7 +95,6 @@ describe("attachPtyScrollController", () => {
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => true,
       hasNewFrame: () => false,
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
@@ -118,7 +117,6 @@ describe("attachPtyScrollController", () => {
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => true,
       hasNewFrame: () => false,
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
@@ -140,7 +138,6 @@ describe("attachPtyScrollController", () => {
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => true,
       hasNewFrame: () => false,
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
@@ -165,14 +162,12 @@ describe("attachPtyScrollController", () => {
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => true,
       hasNewFrame: () => true,
       consumeNewFrame,
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway,
     });
 
-    container.scrollTop = 100;
     emitRender();
 
     expect(consumeNewFrame).toHaveBeenCalledTimes(1);
@@ -189,27 +184,53 @@ describe("attachPtyScrollController", () => {
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => false,
       hasNewFrame: () => true,
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway,
     });
 
+    container.scrollTop = 100;
     emitRender();
 
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
   });
 
-  it("cleans up DOM, xterm, and resize observers", () => {
+  it("owns at-bottom state and exposes scrollToBottom", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, disposeScroll, disposeRender } = createTerminal({ 19: "prompt" });
-    const cleanup = attachPtyScrollController({
+    const onAtBottomChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
       container,
       spacer,
       host,
       term: terminal,
-      isAtBottom: () => true,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onAtBottomChange,
+    });
+
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
+
+    controller.scrollToBottom();
+    expect(container.scrollTop).toBe(2000);
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("cleans up DOM, xterm, and resize observers", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, disposeScroll, disposeRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
       hasNewFrame: () => false,
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
@@ -217,7 +238,7 @@ describe("attachPtyScrollController", () => {
     });
     terminal.scrollToLine.mockClear();
 
-    cleanup();
+    controller.dispose();
     container.scrollTop = 45;
     container.dispatchEvent(new Event("scroll"));
 

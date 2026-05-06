@@ -6,24 +6,33 @@ interface PtyScrollControllerOptions {
   spacer: HTMLDivElement;
   host: HTMLDivElement;
   term: Terminal;
-  isAtBottom: () => boolean;
   hasNewFrame: () => boolean;
   consumeNewFrame: () => void;
   hasNewFramesWhileAway: () => boolean;
   setNewFramesWhileAway: (value: boolean) => void;
+  onAtBottomChange?: (value: boolean) => void;
+  atBottomThreshold?: number;
 }
 
-export function attachPtyScrollController(options: PtyScrollControllerOptions): () => void {
+interface PtyScrollController {
+  dispose: () => void;
+  scrollToBottom: () => void;
+}
+
+export function attachPtyScrollController(
+  options: PtyScrollControllerOptions,
+): PtyScrollController {
   const {
     container,
     spacer,
     host,
     term,
-    isAtBottom,
     hasNewFrame,
     consumeNewFrame,
     hasNewFramesWhileAway,
     setNewFramesWhileAway,
+    onAtBottomChange,
+    atBottomThreshold = 8,
   } = options;
 
   const getDims = (): { cellH: number; cellW: number } => {
@@ -36,6 +45,22 @@ export function attachPtyScrollController(options: PtyScrollControllerOptions): 
   };
 
   const syncing = { external: false, internal: false };
+  let lastAtBottom: boolean | null = null;
+
+  const computeIsAtBottom = (): boolean =>
+    container.scrollTop + container.clientHeight >= container.scrollHeight - atBottomThreshold;
+
+  const notifyAtBottom = (): void => {
+    const next = computeIsAtBottom();
+    if (lastAtBottom === next) return;
+    lastAtBottom = next;
+    onAtBottomChange?.(next);
+  };
+
+  const scrollToBottom = (): void => {
+    container.scrollTop = container.scrollHeight;
+    notifyAtBottom();
+  };
 
   const applySubpixel = (px: number): void => {
     const xtermRoot = host.querySelector<HTMLElement>(".xterm");
@@ -86,7 +111,10 @@ export function attachPtyScrollController(options: PtyScrollControllerOptions): 
   };
 
   const onContainerScroll = (): void => {
-    if (syncing.external) return;
+    if (syncing.external) {
+      notifyAtBottom();
+      return;
+    }
     const { cellH } = getDims();
     if (cellH === 0) return;
     const buffer = term.buffer.active;
@@ -102,6 +130,7 @@ export function attachPtyScrollController(options: PtyScrollControllerOptions): 
     if (ydisp !== buffer.viewportY) {
       scrollToYdisp(ydisp);
     }
+    notifyAtBottom();
   };
 
   const onTermScroll = (): void => {
@@ -111,6 +140,7 @@ export function attachPtyScrollController(options: PtyScrollControllerOptions): 
       const { cellH } = getDims();
       container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
       applySubpixel(0);
+      notifyAtBottom();
     } finally {
       syncing.external = false;
     }
@@ -120,27 +150,34 @@ export function attachPtyScrollController(options: PtyScrollControllerOptions): 
     updateSpacer();
     if (!hasNewFrame()) return;
     consumeNewFrame();
-    if (isAtBottom()) {
-      container.scrollTop = container.scrollHeight;
+    if (computeIsAtBottom()) {
+      scrollToBottom();
     } else if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
     }
+    notifyAtBottom();
   };
 
   updateSpacer();
-  container.scrollTop = container.scrollHeight;
+  scrollToBottom();
 
   container.addEventListener("scroll", onContainerScroll, { passive: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
-  const ro = new ResizeObserver(updateSpacer);
+  const ro = new ResizeObserver(() => {
+    updateSpacer();
+    notifyAtBottom();
+  });
   ro.observe(container);
   ro.observe(host);
 
-  return () => {
-    container.removeEventListener("scroll", onContainerScroll);
-    dispScroll.dispose();
-    dispRender.dispose();
-    ro.disconnect();
+  return {
+    dispose: () => {
+      container.removeEventListener("scroll", onContainerScroll);
+      dispScroll.dispose();
+      dispRender.dispose();
+      ro.disconnect();
+    },
+    scrollToBottom,
   };
 }

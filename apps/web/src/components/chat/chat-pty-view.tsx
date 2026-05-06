@@ -21,7 +21,6 @@ import { PtyRecoveryController } from "@/lib/pty-recovery";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
-import { useFollowOutput } from "@/hooks/use-follow-output";
 import { BackToBottom } from "./back-to-bottom";
 
 interface ChatPtyViewProps {
@@ -34,17 +33,13 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const scrollToBottomRef = useRef<() => void>(() => {});
   const [ready, setReady] = useState(false);
   const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
   const [subscribeExhausted, setSubscribeExhausted] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const [newFramesWhileAway, setNewFramesWhileAway] = useState(false);
-  const { isAtBottom, scrollToBottom } = useFollowOutput(containerEl);
-  const isAtBottomRef = useRef(isAtBottom);
-  useEffect(() => {
-    isAtBottomRef.current = isAtBottom;
-    if (isAtBottom) setNewFramesWhileAway(false);
-  }, [isAtBottom]);
   const newFramesWhileAwayRef = useRef(newFramesWhileAway);
   useEffect(() => {
     newFramesWhileAwayRef.current = newFramesWhileAway;
@@ -202,19 +197,27 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     const term = terminalRef.current;
     if (!container || !spacer || !host || !term) return;
 
-    return attachPtyScrollController({
+    const controller = attachPtyScrollController({
       container,
       spacer,
       host,
       term,
-      isAtBottom: () => isAtBottomRef.current,
       hasNewFrame: () => pendingNewFrameRef.current,
       consumeNewFrame: () => {
         pendingNewFrameRef.current = false;
       },
       hasNewFramesWhileAway: () => newFramesWhileAwayRef.current,
       setNewFramesWhileAway,
+      onAtBottomChange: (value) => {
+        setIsAtBottom(value);
+        if (value) setNewFramesWhileAway(false);
+      },
     });
+    scrollToBottomRef.current = controller.scrollToBottom;
+    return () => {
+      controller.dispose();
+      scrollToBottomRef.current = () => {};
+    };
   }, [ready, ptyAutoscale, containerEl]);
 
   // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
@@ -277,7 +280,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         visible={!isAtBottom}
         hasNewMessages={newFramesWhileAway}
         onClick={() => {
-          scrollToBottom();
+          scrollToBottomRef.current();
           setNewFramesWhileAway(false);
         }}
       />
