@@ -1,9 +1,8 @@
-// SessionList dual-layout 组件（Plan 10-03 正式实现，覆盖 10-01b stub）
+// SessionList dual-layout 组件：page 全屏列表，sidebar 嵌入桌面侧栏。
 // layout=page: 移动端全屏列表 + 底部浮动 "+ 新建会话" 按钮
 // layout=sidebar: 桌面侧栏中段；"+ 新建会话" 由 Sidebar 底部 slot 通过 CreateSessionButton 单独承载
 //
-// sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径（SessionList + CreateSessionButton 两个 export）
-// 本 Plan 只替换 body；新增 export 或改 props 签名会破坏与 10-02 的 W3 并行，禁止
+// Sidebar imports both SessionList and CreateSessionButton from this module; keep those exports stable.
 //
 // 历史会话区 (HistoryList) 渲染在活跃列表下方, 即使无活跃会话但有历史时也可见,
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
@@ -46,7 +45,7 @@ export function SessionList({ layout }: SessionListProps) {
 
   function handleRowClick(sessionId: string, mode: "pty" | "json" | undefined) {
     const resolvedMode = mode ?? "json";
-    // D-15: URL 更新但不触发页面级 transition（AppShell 是父路由，Outlet 内直接切换）
+    // URL 更新但不触发页面级 transition；AppShell 是父路由，Outlet 内直接切换。
     navigate(`/chat/${sessionId}?mode=${resolvedMode}`, { replace: false });
   }
 

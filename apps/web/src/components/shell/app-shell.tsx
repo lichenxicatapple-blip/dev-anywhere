@@ -1,5 +1,5 @@
-// 应用顶层布局；/chat/* 路由隐藏本 header, 由 ChatHeader 接管 (D-51)
-// Settings 齿轮 (D-53) 挂在本 header 右侧, 不随 Sidebar 移动
+// 应用顶层布局；/chat/* 路由隐藏本 header, 由 ChatHeader 接管。
+// Settings 齿轮挂在本 header 右侧, 不随 Sidebar 移动。
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router";
 import { Settings } from "lucide-react";

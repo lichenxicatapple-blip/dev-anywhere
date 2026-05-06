@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
-    "lint": "eslint .",
+    "lint": "eslint . && pnpm run lint:source-refs",
+    "lint:source-refs": "node scripts/check-source-comment-refs.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, resetLocalState } from "./helpers";
 
-test.describe("AppShell header — D-51 conditional hide on chat route", () => {
+test.describe("AppShell header visibility by route", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe("AppShell header — D-51 conditional hide on chat route", () => {
   });
 });
 
-test.describe("ChatHeader — D-51 三件套", () => {
+test.describe("ChatHeader compact navigation controls", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
@@ -68,7 +68,7 @@ test.describe("ChatHeader — D-51 三件套", () => {
   });
 });
 
-test.describe("AppShell Settings slot — D-53", () => {
+test.describe("AppShell Settings slot", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test("AppShell header has Settings gear on non-chat routes", async ({ page }) => {

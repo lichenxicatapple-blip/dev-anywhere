@@ -1,5 +1,5 @@
 /**
- * Phase 5: Relay Resilience 验收测试（进程级 E2E）
+ * Relay resilience 验收测试（进程级 E2E）
  *
  * 本文件是 05-ACCEPTANCE.md 的可执行版本。
  * 每个测试 spawn 真实 relay 子进程，通过真实 TCP WebSocket 连接测试，

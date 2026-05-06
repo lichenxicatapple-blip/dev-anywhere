@@ -97,7 +97,7 @@ export function handleClientConnection(
   });
 
   clientWs.on("message", (data: Buffer, isBinary: boolean) => {
-    // Phase 9: client 不发送 binary 帧，静默忽略
+    // Clients only send JSON control/envelope messages; binary frames from clients are ignored.
     if (isBinary) {
       return;
     }

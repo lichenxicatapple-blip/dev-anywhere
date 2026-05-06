@@ -20,7 +20,7 @@ export const SyncRequestPayloadSchema = z.object({
 
 export type SyncRequestPayload = z.infer<typeof SyncRequestPayloadSchema>;
 
-// 同步响应，使用 z.unknown 数组避免循环引用，Phase 5 实现时收紧类型
+// 同步响应，使用 z.unknown 数组避免循环引用；恢复协议稳定后再收紧类型
 export const SyncResponsePayloadSchema = z.object({
   messages: z.array(z.record(z.string(), z.unknown())),
 });

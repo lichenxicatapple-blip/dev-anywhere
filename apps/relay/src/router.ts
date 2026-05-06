@@ -68,8 +68,8 @@ export function routeProxyMessage(
   }
 }
 
-// relay 无状态，replay_request 总是返回 gap_unrecoverable
-// Phase 11 的恢复协议由 proxy 驱动，不依赖 relay 缓冲
+// relay 无状态，replay_request 总是返回 gap_unrecoverable。
+// 恢复协议由 proxy 驱动，不依赖 relay 缓冲。
 export function handleReplayRequest(
   sessionId: string,
   fromSeq: number,

@@ -1,7 +1,7 @@
 // 新建会话 Dialog, 字段: name (可选) / CWD
 // 只能创建 JSON 会话; PTY 需要本地真实终端宿主, Web 无法远程创建
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
-// 不包含 permission mode / resume —— CONTEXT D-30 移到 Chat 会话设置菜单
+// Permission mode lives here for new sessions; resume remains a chat-level action.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";

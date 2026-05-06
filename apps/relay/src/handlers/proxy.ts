@@ -76,7 +76,7 @@ export function handleProxyConnection(
   });
 
   proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
-    // D-07: binary 帧透传，只解析 sessionId 前缀用于路由，不修改内容
+    // Binary frames are pass-through; relay only reads the sessionId prefix for routing.
     if (isBinary) {
       if (data.length < 2 || data.length > MAX_BINARY_FRAME_SIZE) {
         logger.warn({ size: data.length }, "Binary frame rejected: invalid size");
@@ -95,7 +95,7 @@ export function handleProxyConnection(
         return;
       }
 
-      // D-42: zero-copy, forward entire buffer including sessionId prefix
+      // Forward the original buffer, including the sessionId prefix, so clients receive exact PTY bytes.
       const clients = registry.getClientsForProxy(proxyWs.proxyId);
       for (const clientWs of clients) {
         if (clientWs.readyState === WebSocket.OPEN) {

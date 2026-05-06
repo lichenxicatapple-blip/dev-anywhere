@@ -11,7 +11,7 @@ const appCss = readFileSync(resolve(webRoot, "src/app.css"), "utf-8");
 const buttonSrc = readFileSync(resolve(webRoot, "src/components/ui/button.tsx"), "utf-8");
 const sonnerSrc = readFileSync(resolve(webRoot, "src/components/ui/sonner.tsx"), "utf-8");
 
-describe("Phase 10-01a theme tokens (UI-SPEC D-02/D-03 + Deviation Log)", () => {
+describe("theme tokens", () => {
   it("app.css: --primary 锁定为琥珀 #D4A574", () => {
     expect(appCss).toMatch(/--primary:\s*#D4A574;/i);
   });
@@ -33,7 +33,7 @@ describe("Phase 10-01a theme tokens (UI-SPEC D-02/D-03 + Deviation Log)", () => 
   });
 });
 
-describe("Phase 10-01a button font-weight override", () => {
+describe("button font-weight override", () => {
   it("button cva base 使用 font-normal 取代 font-medium (typography 仅 400/600 契约)", () => {
     expect(buttonSrc).toMatch(/font-normal/);
     // 不允许 cva 第一参数字符串中残留 font-medium
@@ -41,8 +41,8 @@ describe("Phase 10-01a button font-weight override", () => {
   });
 });
 
-describe("Phase 10-01a Sonner wrapper (UI-SPEC §Color + Sonner status mapping)", () => {
-  it("锁定 dark 主题（D-04 不做 light toggle）", () => {
+describe("Sonner wrapper status styling", () => {
+  it("锁定 dark 主题", () => {
     expect(sonnerSrc).toMatch(/theme="dark"/);
   });
 

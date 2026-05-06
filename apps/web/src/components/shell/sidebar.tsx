@@ -44,7 +44,7 @@ export function Sidebar({ className }: SidebarProps) {
         </div>
       </div>
 
-      {/* 底部行动区: 仅 + 新建会话 card (Settings 齿轮 D-53 已迁移至 AppShell 顶栏) */}
+      {/* 底部行动区: 仅 + 新建会话 card；Settings 齿轮在 AppShell 顶栏。 */}
       <div className="px-2 py-2" data-slot="sidebar-new-session">
         <CreateSessionButton />
       </div>

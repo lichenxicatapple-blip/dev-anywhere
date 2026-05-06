@@ -94,7 +94,7 @@ export function useRelaySetup(): void {
     // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
     const unregisterResource = registerResourceDispatcher();
 
-    // D-08: 页面从后台恢复时自动重连
+    // 页面从后台恢复时立即重连，避免等待指数退避定时器。
     const handleVisibility = () => {
       if (document.visibilityState === "visible" && wsRef.current && !wsRef.current.isConnected()) {
         wsRef.current.connect(wsUrl);

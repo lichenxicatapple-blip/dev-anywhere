@@ -1,5 +1,5 @@
 // InputBar: JSON + PTY 统一输入栏, 1-8 行自撑, 斜杠/@/历史/iOS 键盘适配
-// PTY raw-key capture 已放弃 (CONTEXT Addendum D-21), 语义控制走 InputMenu / ChatHeader overflow
+// PTY raw-key capture 已放弃，语义控制走 InputMenu / ChatHeader overflow。
 // draft + history cursor 为 per-session, 通过 chat-store 跨组件共享
 // ArrowUp/Down 历史召回仅 PTY 启用 (JSON 直接点消息气泡引用/复制更直观)
 // 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理

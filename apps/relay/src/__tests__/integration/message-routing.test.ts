@@ -7,12 +7,10 @@ import { waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
 const logger = createLogger({ name: "test", silent: true });
 
 /**
- * Phase 6 Plan 05.1 集成测试
- *
  * 验证两层消息协议：Envelope (有 seq, 进 buffer, 可重放) 和 Control (无 seq, 不进 buffer)
  * 使用真实 relay server 和 WebSocket 连接，不 mock 任何组件
  */
-describe("Phase 6 Integration: Message Routing", () => {
+describe("Message routing integration", () => {
   let relay: RelayServer;
   let port: number;
   const connections: WebSocket[] = [];
