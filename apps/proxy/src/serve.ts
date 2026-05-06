@@ -21,6 +21,7 @@ import { JsonObserver } from "./serve/json-observer.js";
 import { HookRegistry } from "./serve/hook-registry.js";
 import { HookServer } from "./serve/hook-server.js";
 import { PermissionBroker } from "./serve/permission-broker.js";
+import { HookEventRouter } from "./serve/hook-event-router.js";
 import type { ProviderHookContext } from "./providers/index.js";
 
 // ---------- 基础工具函数 ----------
@@ -477,6 +478,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     changeSessionState(sessionManager, relayConnection, sessionId, next);
   const ptyObserver = new PtyObserver({ changeSessionState: observerChangeState });
   const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
+  const hookEventRouter = new HookEventRouter({
+    relayConnection,
+    changeSessionState: observerChangeState,
+  });
   const hookServer = new HookServer({
     port: proxyConfig.hookPort ?? 17654,
     registry: hookRegistry,
@@ -491,6 +496,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         },
         "Provider hook event received",
       );
+      hookEventRouter.handle(event);
     },
   });
 
@@ -540,6 +546,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,
     createHookContext,
+    permissionBroker,
+    hookEventRouter,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));

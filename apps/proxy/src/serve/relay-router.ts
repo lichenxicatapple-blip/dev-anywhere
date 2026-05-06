@@ -13,6 +13,8 @@ import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
 import { readSessionMessages } from "./session-history.js";
 import type { ProviderHookContext } from "../providers/index.js";
+import type { PermissionBroker } from "./permission-broker.js";
+import type { HookEventRouter } from "./hook-event-router.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -30,6 +32,8 @@ interface RelayRouterDeps {
     sessionId: string,
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext;
+  permissionBroker: PermissionBroker;
+  hookEventRouter: HookEventRouter;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -137,7 +141,18 @@ export class RelayRouter {
     if (!sessionId || !payload?.toolId) return;
 
     const pending = this.deps.toolApprovalManager.take(payload.toolId);
-    if (!pending) return;
+    if (!pending) {
+      const hookPending = this.deps.permissionBroker.get(payload.toolId);
+      if (!hookPending) return;
+      if (this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) {
+        this.deps.hookEventRouter.onPermissionResolved(
+          hookPending.sessionId,
+          payload.toolId,
+          "allow",
+        );
+      }
+      return;
+    }
 
     this.deps.workerRegistry.send(pending.sessionId, {
       type: "worker_approval_response",
@@ -173,7 +188,23 @@ export class RelayRouter {
 
     const reason = payload.reason ?? "Denied by remote user";
     const pending = this.deps.toolApprovalManager.take(payload.toolId);
-    if (!pending) return;
+    if (!pending) {
+      const hookPending = this.deps.permissionBroker.get(payload.toolId);
+      if (!hookPending) return;
+      if (
+        this.deps.permissionBroker.resolve(payload.toolId, {
+          behavior: "deny",
+          message: reason,
+        })
+      ) {
+        this.deps.hookEventRouter.onPermissionResolved(
+          hookPending.sessionId,
+          payload.toolId,
+          "deny",
+        );
+      }
+      return;
+    }
 
     this.deps.workerRegistry.send(pending.sessionId, {
       type: "worker_approval_response",
@@ -320,6 +351,14 @@ export class RelayRouter {
 
     // 推送该 session 当前 pending 的工具审批
     const approvals = this.deps.toolApprovalManager.listSession(sid);
+    const hookApprovals = this.deps.permissionBroker.listSession(sid);
+    for (const approval of hookApprovals) {
+      approvals.push({
+        requestId: approval.requestId,
+        toolName: approval.toolName,
+        input: approval.input,
+      });
+    }
     if (approvals.length > 0) {
       this.deps.relaySend(
         JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),

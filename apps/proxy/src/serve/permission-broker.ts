@@ -62,6 +62,26 @@ export class PermissionBroker {
     return true;
   }
 
+  get(requestId: string): {
+    requestId: string;
+    sessionId: string;
+    provider: HookProviderId;
+    toolName: string;
+    input: Record<string, unknown>;
+    createdAt: number;
+  } | null {
+    const pending = this.pending.get(requestId);
+    if (!pending) return null;
+    return {
+      requestId: pending.requestId,
+      sessionId: pending.sessionId,
+      provider: pending.provider,
+      toolName: pending.toolName,
+      input: pending.input,
+      createdAt: pending.createdAt,
+    };
+  }
+
   cleanupSession(sessionId: string, reason: string): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.sessionId !== sessionId) continue;
