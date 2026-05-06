@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay } from "./helpers";
 
 // 向 chat-store 注入 N 条消息, 使消息列表能触发滚动
 // 依赖 main.tsx 在 dev build 装的 window.__ccTest 钩子, 无需动态 import 源码
@@ -48,9 +48,8 @@ test.describe("ChatJsonView — follow-output baseline", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/chat/fo-sess?mode=json`);
-    await resetLocalState(page);
-    await page.goto(`${BASE_URL}/#/chat/fo-sess?mode=json`);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/fo-sess?mode=json");
   });
 
   test("BackToBottom absent on empty state", async ({ page }) => {
@@ -68,28 +67,27 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/chat/fo-sess?mode=json`);
-    await resetLocalState(page);
-    await page.goto(`${BASE_URL}/#/chat/fo-sess?mode=json`);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/fo-sess?mode=json");
     await seedMessages(page, 30);
     await scrollToBottom(page);
   });
 
   test("hidden at bottom", async ({ page }) => {
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveCount(0);
+    await expect(btb).toHaveAttribute("aria-hidden", "true");
   });
 
   test("within 8px threshold keeps button hidden", async ({ page }) => {
     await scrollBy(page, 5);
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveCount(0);
+    await expect(btb).toHaveAttribute("aria-hidden", "true");
   });
 
   test("crossing threshold (10px) reveals button", async ({ page }) => {
     await scrollBy(page, 10);
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toBeVisible();
+    await expect(btb).toHaveAttribute("aria-hidden", "false");
   });
 
   test("button position is sticky; does not scroll with content", async ({ page }) => {
@@ -119,7 +117,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await expect(btb).toBeVisible();
     await btb.click();
     await page.waitForTimeout(500);
-    await expect(btb).toHaveCount(0);
+    await expect(btb).toHaveAttribute("aria-hidden", "true");
     const gap = await page.evaluate(() => {
       const el = document.querySelector('[data-slot="message-list"]') as HTMLElement | null;
       if (!el) return null;
@@ -131,7 +129,10 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
 
   test("new message while scrolled up shows has-new-messages indicator", async ({ page }) => {
     await scrollBy(page, 300);
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
 
     // 追加新消息, 不 auto-follow (因为 isAtBottom=false)
     await page.evaluate(() => {
@@ -170,6 +171,9 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     });
     expect(gap).not.toBeNull();
     expect(gap!).toBeLessThanOrEqual(8);
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
   });
 });

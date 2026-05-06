@@ -1,13 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "./helpers";
 
 test.describe("FilePathPicker @ trigger (InputBar mode=insert)", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/chat/f-sess?mode=json`);
-    await resetLocalState(page);
-    await page.goto(`${BASE_URL}/#/chat/f-sess?mode=json`);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/f-sess?mode=json");
   });
 
   test("typing @ opens FilePathPicker in insert mode", async ({ page }) => {
@@ -23,16 +22,13 @@ test.describe("FilePathPicker in CreateSessionDialog (mode=select, dirsOnly)", (
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/sessions`);
-    await resetLocalState(page);
-    await page.goto(`${BASE_URL}/#/sessions`);
+    await installFakeRelay(page);
+    await selectFakeProxy(page);
   });
 
   test("CreateSessionDialog renders FilePathPicker (select mode)", async ({ page }) => {
-    await page
-      .getByRole("button", { name: /新建会话/ })
-      .first()
-      .click();
+    await page.locator('button:has-text("新建会话"):visible').last().click();
+    await page.getByLabel("工作目录").focus();
     const picker = page.locator('[data-slot="file-path-picker"][data-mode="select"]');
     await expect(picker).toBeVisible();
   });

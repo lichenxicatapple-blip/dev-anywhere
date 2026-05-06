@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "./helpers";
+import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "./helpers";
 
 test.describe("AppShell header visibility by route", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
     await page.goto(BASE_URL);
-    await resetLocalState(page);
   });
 
   test("AppShell header visible on /sessions", async ({ page }) => {
@@ -26,9 +25,8 @@ test.describe("ChatHeader compact navigation controls", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
-    await resetLocalState(page);
-    await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/d51-sess?mode=json");
   });
 
   test("has three direct children: back button + title + overflow", async ({ page }) => {
