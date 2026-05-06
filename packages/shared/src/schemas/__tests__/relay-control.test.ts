@@ -84,6 +84,32 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
+  it("accepts PTY snapshot requestId for stale snapshot rejection", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "session_subscribe",
+        sessionId: "sess-1",
+        requestId: "pty-snapshot-1",
+      }),
+    ).toMatchObject({
+      type: "session_subscribe",
+      requestId: "pty-snapshot-1",
+    });
+    expect(
+      RelayControlSchema.parse({
+        type: "session_snapshot",
+        sessionId: "sess-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        requestId: "pty-snapshot-1",
+      }),
+    ).toMatchObject({
+      type: "session_snapshot",
+      requestId: "pty-snapshot-1",
+    });
+  });
+
   it("rejects terminal_frame (removed from schema)", () => {
     expect(() =>
       RelayControlSchema.parse({

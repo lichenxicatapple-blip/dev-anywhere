@@ -15,9 +15,9 @@
 // 离底时置 newFramesWhileAway 红点, 用户点按钮或自然滚回即清零.
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
-import type { SerializeAddon } from "@xterm/addon-serialize";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachXtermRawInput } from "@/lib/pty-input";
+import { PtyRecoveryController } from "@/lib/pty-recovery";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useFollowOutput } from "@/hooks/use-follow-output";
@@ -33,7 +33,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const serializeRef = useRef<SerializeAddon | null>(null);
   const [ready, setReady] = useState(false);
   const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
   const [subscribeExhausted, setSubscribeExhausted] = useState(false);
@@ -83,7 +82,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         return;
       }
       terminalRef.current = result.terminal;
-      serializeRef.current = result.serializeAddon;
       disposeFn = result.dispose;
       disposeRawInput = attachXtermRawInput(result.terminal, sessionId).dispose;
 
@@ -91,20 +89,19 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       host.addEventListener("pointerdown", focusTerminal, { passive: true });
       removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
 
-      let snapshotApplied = false;
-      const frameBuffer: Uint8Array[] = [];
+      const recovery = new PtyRecoveryController();
 
       const ws = wsManagerRef;
       const relay = relayClientRef;
       if (!ws || !relay) return;
 
       unsubBinary = ws.subscribeBinary(sessionId, (data) => {
-        if (!snapshotApplied) {
-          frameBuffer.push(data);
-          return;
+        const term = terminalRef.current;
+        if (!term) return;
+        const result = recovery.handleBinaryFrame(data, term);
+        if (result.written) {
+          pendingNewFrameRef.current = true;
         }
-        terminalRef.current?.write(data);
-        pendingNewFrameRef.current = true;
       });
 
       const RETRY_DELAY_MS = 3000;
@@ -119,19 +116,31 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         }
       };
 
-      const attemptSubscribe = (): void => {
-        if (cancelled || snapshotApplied) return;
-        ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
+      const requestSnapshot = (): void => {
+        const requestId = recovery.startSnapshotRequest();
+        ws.send(JSON.stringify({ type: "session_subscribe", sessionId, requestId }));
+      };
+
+      const scheduleSnapshotRetry = (): void => {
+        requestSnapshot();
         retryTimer = setTimeout(() => {
           retryTimer = null;
-          if (cancelled || snapshotApplied) return;
+          if (cancelled || recovery.hasAppliedSnapshot()) return;
           if (retryCount >= MAX_RETRIES) {
             setSubscribeExhausted(true);
             return;
           }
           retryCount += 1;
-          attemptSubscribe();
+          scheduleSnapshotRetry();
         }, RETRY_DELAY_MS);
+      };
+
+      const startSnapshotSubscribe = (): void => {
+        if (cancelled) return;
+        clearRetry();
+        retryCount = 0;
+        setSubscribeExhausted(false);
+        scheduleSnapshotRetry();
       };
 
       unsubSnapshot = relay.onMessage((msg) => {
@@ -139,28 +148,35 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         if (m.sessionId !== sessionId) return;
         if (m.type === "terminal_resize") {
           terminalRef.current?.resize(m.cols as number, m.rows as number);
-          snapshotApplied = false;
-          ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
+          startSnapshotSubscribe();
           return;
         }
         if (m.type !== "session_snapshot") return;
         const term = terminalRef.current;
         if (!term) return;
+        const result = recovery.applySnapshot(
+          {
+            requestId: m.requestId as string | undefined,
+            cols: m.cols as number,
+            rows: m.rows as number,
+            data: m.data as string,
+          },
+          term,
+        );
+        if (!result.applied) {
+          return;
+        }
+        if (result.replayedFrames > 0) {
+          pendingNewFrameRef.current = true;
+        }
         clearRetry();
-        term.reset();
-        term.resize(m.cols as number, m.rows as number);
-        term.write(m.data as string, () => {
-          for (const frame of frameBuffer) {
-            term.write(frame);
-          }
-          frameBuffer.length = 0;
+        requestAnimationFrame(() => {
+          setReady(true);
+          setSubscribeExhausted(false);
         });
-        snapshotApplied = true;
-        setReady(true);
-        setSubscribeExhausted(false);
       });
 
-      attemptSubscribe();
+      startSnapshotSubscribe();
 
       cleanupRetry = clearRetry;
     })();
@@ -174,7 +190,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       disposeRawInput?.();
       disposeFn?.();
       terminalRef.current = null;
-      serializeRef.current = null;
     };
   }, [sessionId, connected, proxyOnline, retryNonce]);
 

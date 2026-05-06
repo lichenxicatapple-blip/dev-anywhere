@@ -355,6 +355,7 @@ function handleTerminalConnection(
               cols: msg.cols,
               rows: msg.rows,
               data: msg.data,
+              requestId: msg.requestId,
             }),
           );
           serviceLogger.info(

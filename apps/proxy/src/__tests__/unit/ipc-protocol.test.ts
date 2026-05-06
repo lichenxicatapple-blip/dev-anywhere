@@ -65,6 +65,28 @@ describe("IPC Protocol", () => {
 
       expect(result.success).toBe(true);
     });
+
+    it("accepts PTY subscribe and snapshot requestId round-trip fields", async () => {
+      const { IpcMessageSchema } = await importIpc();
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_subscribe",
+          sessionId: "sess-1",
+          requestId: "pty-snapshot-1",
+        }).success,
+      ).toBe(true);
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_snapshot",
+          sessionId: "sess-1",
+          cols: 80,
+          rows: 24,
+          data: "snapshot",
+          requestId: "pty-snapshot-1",
+        }).success,
+      ).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

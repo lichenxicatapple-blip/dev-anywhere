@@ -342,7 +342,11 @@ const relayControlDefinitions = [
   }),
 
   // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态
-  control("session_subscribe", { sessionId: z.string() }, "client_to_proxy"),
+  control(
+    "session_subscribe",
+    { sessionId: z.string(), requestId: z.string().optional() },
+    "client_to_proxy",
+  ),
 
   // PTY 会话快照，proxy -> client，serialize() 的全量终端状态
   control(
@@ -352,6 +356,7 @@ const relayControlDefinitions = [
       cols: z.number().int().positive(),
       rows: z.number().int().positive(),
       data: z.string(),
+      requestId: z.string().optional(),
     },
     "proxy_to_client",
   ),

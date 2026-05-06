@@ -545,12 +545,13 @@ export class RelayRouter {
 
   private onSessionSubscribe(msg: Record<string, unknown>): void {
     const sid = msg.sessionId as string | undefined;
+    const requestId = msg.requestId as string | undefined;
     if (!sid) return;
 
     const ts = this.deps.terminalSockets.get(sid);
     if (ts?.writable) {
-      ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid }));
-      serviceLogger.info({ sessionId: sid }, "Subscribe forwarded to terminal");
+      ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid, requestId }));
+      serviceLogger.info({ sessionId: sid, requestId }, "Subscribe forwarded to terminal");
     } else {
       serviceLogger.warn({ sessionId: sid }, "Subscribe failed: terminal socket not available");
     }

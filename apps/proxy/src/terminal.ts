@@ -330,6 +330,7 @@ class TerminalSession {
               cols: this.headlessTerminal.cols,
               rows: this.headlessTerminal.rows,
               data,
+              requestId: msg.requestId,
             }),
           );
           log.info(
