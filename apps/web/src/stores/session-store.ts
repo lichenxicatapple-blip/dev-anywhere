@@ -2,7 +2,7 @@
 // 选中态不在这里存, 由 URL (/chat/:id) 作为单一事实来源
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { SessionInfo, HistorySession } from "@dev-anywhere/shared";
+import type { AgentStatusPayload, SessionInfo, HistorySession } from "@dev-anywhere/shared";
 
 interface SessionStoreState {
   sessions: SessionInfo[];
@@ -12,12 +12,14 @@ interface SessionStoreState {
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
   ptyTitles: Record<string, string>;
+  agentStatusBySessionId: Record<string, AgentStatusPayload>;
 
   setSessions: (sessions: SessionInfo[]) => void;
   addSession: (session: SessionInfo) => void;
   removeSession: (sessionId: string) => void;
   // lastActive 可选：PTY 控制消息 pty_state 无此字段，envelope session_status 则会一并写入
   updateSessionState: (sessionId: string, state: SessionInfo["state"], lastActive?: number) => void;
+  setAgentStatus: (sessionId: string, status: AgentStatusPayload) => void;
   updateSessionName: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
@@ -30,12 +32,28 @@ export const useSessionStore = create<SessionStoreState>()(
       sessionListLoaded: false,
       historySessions: [],
       ptyTitles: {},
+      agentStatusBySessionId: {},
 
-      setSessions: (sessions) => set({ sessions, sessionListLoaded: true }),
+      setSessions: (sessions) =>
+        set((state) => {
+          const activeSessionIds = new Set(sessions.map((session) => session.sessionId));
+          return {
+            sessions,
+            sessionListLoaded: true,
+            agentStatusBySessionId: Object.fromEntries(
+              Object.entries(state.agentStatusBySessionId).filter(([sid]) =>
+                activeSessionIds.has(sid),
+              ),
+            ),
+          };
+        }),
       addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
       removeSession: (sessionId) =>
         set((state) => ({
           sessions: state.sessions.filter((s) => s.sessionId !== sessionId),
+          agentStatusBySessionId: Object.fromEntries(
+            Object.entries(state.agentStatusBySessionId).filter(([sid]) => sid !== sessionId),
+          ),
         })),
       updateSessionState: (sessionId, newState, lastActive) =>
         set((state) => ({
@@ -49,6 +67,17 @@ export const useSessionStore = create<SessionStoreState>()(
               : s,
           ),
         })),
+      setAgentStatus: (sessionId, status) =>
+        set((state) => {
+          const current = state.agentStatusBySessionId[sessionId];
+          if (current && current.seq > status.seq) return state;
+          return {
+            agentStatusBySessionId: {
+              ...state.agentStatusBySessionId,
+              [sessionId]: status,
+            },
+          };
+        }),
       updateSessionName: (sessionId, name) =>
         set((state) => ({
           sessions: state.sessions.map((s) => (s.sessionId === sessionId ? { ...s, name } : s)),

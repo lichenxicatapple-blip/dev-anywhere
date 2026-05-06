@@ -15,6 +15,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
+import type { AgentStatusPayload } from "@dev-anywhere/shared";
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +32,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
+  const agentStatus = useSessionStore((s) => s.agentStatusBySessionId[id]);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
@@ -46,17 +48,18 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     relay.sendControl({ type: "session_resources_request", sessionId: id });
   }, [id, connected, proxyOnline]);
 
-  // 单一权威信号: session.state（proxy 的 session_status envelope + pty_state 都写到这个字段）
-  // pendingApprovals 与 session.state === "waiting_approval" 作 OR：审批推送可能比 session_status 早到
+  // 生命周期由 session.state 负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。
+  // pendingApprovals 与 session.state === "waiting_approval" 作 OR：审批推送可能比 session_status/agent_status 早到。
   const statusState: StatusLineState =
     !connected || !proxyOnline
       ? "disconnected"
       : pendingApprovals.some((a) => a.status === "pending") ||
+          agentStatusToStatusLineState(agentStatus) === "waiting_approval" ||
           session?.state === "waiting_approval"
         ? "waiting_approval"
         : session?.state === "terminated"
           ? "terminated"
-          : session?.state === "working"
+          : agentStatusToStatusLineState(agentStatus) === "working" || session?.state === "working"
             ? "working"
             : "idle";
 
@@ -88,4 +91,21 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       </div>
     </div>
   );
+}
+
+function agentStatusToStatusLineState(
+  status: AgentStatusPayload | undefined,
+): Extract<StatusLineState, "idle" | "working" | "waiting_approval"> | null {
+  switch (status?.phase) {
+    case "waiting_permission":
+      return "waiting_approval";
+    case "thinking":
+    case "tool_use":
+    case "outputting":
+      return "working";
+    case "idle":
+      return "idle";
+    default:
+      return null;
+  }
 }

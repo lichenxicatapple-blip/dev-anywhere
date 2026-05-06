@@ -15,7 +15,7 @@ interface StatusLineProps {
 
 const ARIA_LABEL: Record<StatusLineState, string> = {
   idle: "会话空闲",
-  working: "Claude 正在响应",
+  working: "正在响应",
   waiting_approval: "等待工具审批",
   terminated: "会话已终止",
   disconnected: "连接已断开",
