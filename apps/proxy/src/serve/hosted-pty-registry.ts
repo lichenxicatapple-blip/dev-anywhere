@@ -5,7 +5,11 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
-import { extractOscSignals, type PtySemanticState } from "../common/osc-extractor.js";
+import {
+  extractOscSequences,
+  extractOscSignals,
+  type PtySemanticState,
+} from "../common/osc-extractor.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -210,7 +214,18 @@ export class HostedPtyRegistry {
       this.deps.changeSessionState(sessionId, SessionState.WORKING);
     }
 
+    const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
+    if (oscSequences.length > 0) {
+      serviceLogger.info(
+        {
+          sessionId,
+          oscSequences,
+          signal,
+        },
+        "Hosted PTY OSC sequences parsed",
+      );
+    }
     if (signal?.title) {
       this.sendTerminalTitle(sessionId, signal.title);
     }

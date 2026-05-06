@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { extractOscSignals } from "#src/common/osc-extractor.js";
+import { extractOscSequences, extractOscSignals } from "#src/common/osc-extractor.js";
 
 describe("extractOscSignals", () => {
+  it("extracts OSC sequences in frame order", () => {
+    const data = "\x1b]0;old title\x07text\x1b]9;waiting for your input\x07";
+    expect(extractOscSequences(data)).toEqual([
+      { code: 0, text: "old title" },
+      { code: 9, text: "waiting for your input" },
+    ]);
+  });
+
   it("returns turn_complete for OSC 9 'waiting for your input'", () => {
     // BEL 结尾
     const data = "\x1b]9;waiting for your input\x07";
@@ -38,6 +46,16 @@ describe("extractOscSignals", () => {
     const data = "\x1b]0;some title\x07" + "some output" + "\x1b]9;waiting for your input\x07";
     const result = extractOscSignals(data);
     expect(result).toEqual({ state: "turn_complete", title: "some title" });
+  });
+
+  it("uses the last OSC title and notification when a frame contains repeated OSC sequences", () => {
+    const data =
+      "\x1b]0;stale title\x07" +
+      "\x1b]9;needs your permission: Bash\x07" +
+      "\x1b]0;fresh title\x07" +
+      "\x1b]9;waiting for your input\x07";
+    const result = extractOscSignals(data);
+    expect(result).toEqual({ state: "turn_complete", title: "fresh title" });
   });
 
   it("keeps title when OSC 9 reports approval wait", () => {

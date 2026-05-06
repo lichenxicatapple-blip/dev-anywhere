@@ -12,23 +12,41 @@ interface PtyStateEvent {
   tool?: string;
 }
 
-// 从 PTY 原始数据中提取 OSC 语义信号。
-// OSC 9 优先级高于 OSC 0，无匹配时返回 null。
-export function extractOscSignals(rawData: string): PtyStateEvent | null {
+interface OscSequence {
+  code: number;
+  text: string;
+}
+
+export function extractOscSequences(rawData: string): OscSequence[] {
   const regex = new RegExp(OSC_PATTERN.source, OSC_PATTERN.flags);
-  const matches: Array<{ code: number; text: string }> = [];
+  const matches: OscSequence[] = [];
 
   let match: RegExpExecArray | null;
   while ((match = regex.exec(rawData)) !== null) {
     matches.push({ code: parseInt(match[1], 10), text: match[2] });
   }
 
+  return matches;
+}
+
+function lastSequence(matches: OscSequence[], code: number): OscSequence | undefined {
+  for (let i = matches.length - 1; i >= 0; i -= 1) {
+    if (matches[i].code === code) return matches[i];
+  }
+  return undefined;
+}
+
+// 从 PTY 原始数据中提取 OSC 语义信号。
+// OSC 9 优先级高于 OSC 0，无匹配时返回 null。
+export function extractOscSignals(rawData: string): PtyStateEvent | null {
+  const matches = extractOscSequences(rawData);
+
   if (matches.length === 0) return null;
 
-  const osc0 = matches.find((m) => m.code === 0);
+  const osc0 = lastSequence(matches, 0);
 
   // OSC 9 优先级更高，包含具体的语义信号；同帧 OSC 0 仍保留 title 给 UI。
-  const osc9 = matches.find((m) => m.code === 9);
+  const osc9 = lastSequence(matches, 9);
   if (osc9) {
     if (osc9.text.includes("waiting for your input")) {
       return { state: "turn_complete", ...(osc0 ? { title: osc0.text } : {}) };

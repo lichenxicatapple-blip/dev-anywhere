@@ -7,7 +7,11 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { extractOscSignals, type PtySemanticState } from "./common/osc-extractor.js";
+import {
+  extractOscSequences,
+  extractOscSignals,
+  type PtySemanticState,
+} from "./common/osc-extractor.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
@@ -282,7 +286,18 @@ class TerminalSession {
       this.sendPtyState("working");
     }
 
+    const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
+    if (oscSequences.length > 0) {
+      log.info(
+        {
+          sessionId: this.sessionId,
+          oscSequences,
+          signal,
+        },
+        "PTY OSC sequences parsed",
+      );
+    }
     if (signal?.title) {
       this.sendTerminalTitle(signal.title);
     }
