@@ -234,12 +234,12 @@ LinkShell 做法：
 
 - JSON 路径的 pending approval 已接入 `PermissionBroker`，但 worker IPC 仍保留 `worker_approval_request/response` transport。
 - PTY 路径没有同等能力。
-- approval 恢复靠 `pending_approvals_push`，但没有 delivered/result 语义。
+- approval 恢复靠 `pending_approvals_push` 补齐当前 pending；`permission_request_delivered` / `permission_decision_result` 已补上 request delivered 和 decision result 语义。
 
 救援方向：
 
 - provider-neutral `PermissionBroker` 已承接 JSON `control_request` 和 hook `PermissionRequest` 的 pending/resolve/timeout。
-- approval response 必须区分：
+- approval response 已开始区分：
   - relay/client 收到了
   - proxy 收到了
   - provider CLI 是否实际收到并继续

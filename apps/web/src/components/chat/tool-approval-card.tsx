@@ -17,7 +17,7 @@ import {
   Terminal,
   Wrench,
 } from "lucide-react";
-import { useChatStore, type ToolApprovalRequest } from "@/stores/chat-store";
+import type { ToolApprovalRequest } from "@/stores/chat-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { Button } from "@/components/ui/button";
 import { summarizeToolInput } from "@/utils/summarize-tool-input";
@@ -90,9 +90,9 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
 
   function send(decision: "allow" | "deny", whitelistTool = false) {
     if (acted || isResolved) return;
-    setActed(true);
     const relay = relayClientRef;
     if (!relay) return;
+    setActed(true);
     const base = buildEnvelopeBase(sessionId);
     if (decision === "allow") {
       relay.sendEnvelope({
@@ -108,15 +108,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
         payload: { toolId: approval.requestId },
       });
     }
-    // 乐观更新 status, 卡片立即从 pending 列表消失。服务端后续 tool_result 也走同一 setter, 幂等
-    // 拒绝不会回 tool_result, 这里也是唯一把 "denied" 写回 store 的地方
-    useChatStore
-      .getState()
-      .updateApprovalStatus(
-        sessionId,
-        approval.requestId,
-        decision === "allow" ? "approved" : "denied",
-      );
+    // 状态由 proxy 的 permission_decision_result 回写，避免 UI 本地假定 provider/worker 已收到决策。
   }
 
   if (isResolved) {

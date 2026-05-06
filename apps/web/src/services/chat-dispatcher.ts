@@ -8,8 +8,10 @@ import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared"
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
+import type { RelayClient } from "@/services/relay-client";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
+type ChatRelay = Pick<RelayClient, "sendControl">;
 
 function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant_message" }>) {
   const store = useChatStore.getState();
@@ -22,7 +24,10 @@ function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant
   }
 }
 
-function handleToolUseRequest(env: Extract<MessageEnvelope, { type: "tool_use_request" }>) {
+function handleToolUseRequest(
+  env: Extract<MessageEnvelope, { type: "tool_use_request" }>,
+  relay: Pick<RelayClient, "sendControl"> | null,
+) {
   const store = useChatStore.getState();
   // 审批 ID = toolId (ToolUseRequestPayloadSchema)
   store.addApprovalRequest(env.sessionId, {
@@ -30,6 +35,11 @@ function handleToolUseRequest(env: Extract<MessageEnvelope, { type: "tool_use_re
     toolName: env.payload.toolName,
     input: env.payload.parameters,
     status: "pending",
+  });
+  relay?.sendControl({
+    type: "permission_request_delivered",
+    sessionId: env.sessionId,
+    requestId: env.payload.toolId,
   });
 }
 
@@ -41,6 +51,7 @@ function handleToolResult(env: Extract<MessageEnvelope, { type: "tool_result" }>
 
 function handlePendingApprovalsPush(
   msg: Extract<RelayControlMessage, { type: "pending_approvals_push" }>,
+  relay: Pick<RelayClient, "sendControl"> | null,
 ) {
   // 重连后 relay 推送 proxy 当前 pending 审批全量, 增量补齐未知项, 不重复入队已有项
   const store = useChatStore.getState();
@@ -54,7 +65,25 @@ function handlePendingApprovalsPush(
       input: appr.input,
       status: "pending",
     });
+    relay?.sendControl({
+      type: "permission_request_delivered",
+      sessionId: msg.sessionId,
+      requestId: appr.requestId,
+    });
   }
+}
+
+function handlePermissionDecisionResult(
+  msg: Extract<RelayControlMessage, { type: "permission_decision_result" }>,
+) {
+  if (!msg.delivered) return;
+  useChatStore
+    .getState()
+    .updateApprovalStatus(
+      msg.sessionId,
+      msg.requestId,
+      msg.outcome === "allow" ? "approved" : "denied",
+    );
 }
 
 function handleSessionHistoryMessages(
@@ -81,13 +110,17 @@ export function registerChatDispatcher(): () => void {
     return () => {};
   }
 
-  return relay.onMessage((msg: InboundMessage) => {
+  return relay.onMessage(createChatMessageHandler(relay));
+}
+
+export function createChatMessageHandler(relay: ChatRelay | null): (msg: InboundMessage) => void {
+  return (msg: InboundMessage) => {
     switch (msg.type) {
       case "assistant_message":
         handleAssistantMessage(msg);
         break;
       case "tool_use_request":
-        handleToolUseRequest(msg);
+        handleToolUseRequest(msg, relay);
         break;
       case "tool_result":
         handleToolResult(msg);
@@ -99,7 +132,10 @@ export function registerChatDispatcher(): () => void {
         // Echo: 本端已乐观入 store, 此处不重复追加
         break;
       case "pending_approvals_push":
-        handlePendingApprovalsPush(msg);
+        handlePendingApprovalsPush(msg, relay);
+        break;
+      case "permission_decision_result":
+        handlePermissionDecisionResult(msg);
         break;
       case "session_history_messages":
         handleSessionHistoryMessages(msg);
@@ -113,5 +149,5 @@ export function registerChatDispatcher(): () => void {
       default:
         break;
     }
-  });
+  };
 }

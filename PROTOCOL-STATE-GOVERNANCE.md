@@ -125,6 +125,7 @@ Owner：permission broker
 - `requestId`
 - `sessionId`
 - `provider`
+- `source`: `hook | worker`
 - `toolName`
 - `input`
 - `createdAt`
@@ -136,6 +137,8 @@ Owner：permission broker
 
 - `allow/deny` 必须最终回到 provider 或 worker，不允许 UI 点击后本地假定成功。
 - pending 清理必须覆盖 allow、deny、timeout、session terminate、worker disconnect。
+- web 收到审批请求后发送 `permission_request_delivered`；proxy 只记录送达，不把它当用户决策。
+- proxy resolve 用户决策后发送 `permission_decision_result`；web 以该结果更新审批卡片，不能只靠本地乐观状态。
 - JSON `worker_approval_request` 只保留为 worker 私有 transport；pending 列表、allow/deny、timeout、terminate cleanup 统一由 permission broker 管。
 
 ## 协议分层
@@ -248,6 +251,8 @@ Owner：hook server + hook event router + permission broker
 | `worker_approval_request` IPC     | worker -> serve              | JSON runner        | 是，经 JsonObserver       | 待合并            |
 | `tool_use_request` envelope       | proxy -> relay -> web        | permission broker  | 否，已是结果              | 保留              |
 | `tool_approve/tool_deny` envelope | web -> relay -> proxy        | permission broker  | 是，resolved 后回 working | 保留              |
+| `permission_request_delivered`    | web -> relay -> proxy        | permission broker  | 否                        | 主路径            |
+| `permission_decision_result`      | proxy -> relay -> web        | permission broker  | 否，已是结果              | 主路径            |
 | provider hook HTTP                | provider -> serve            | hook/status router | 是                        | 主路径            |
 | `agent_status` control            | proxy -> relay -> web        | hook/status router | 否，已是结果              | 主路径            |
 | `agent_status_request` control    | web -> relay -> proxy        | hook/status router | 否                        | 主路径            |

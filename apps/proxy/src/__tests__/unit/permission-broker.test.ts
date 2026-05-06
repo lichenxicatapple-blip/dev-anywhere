@@ -65,4 +65,19 @@ describe("PermissionBroker", () => {
     expect(decisions).toEqual([{ behavior: "deny", message: "No." }]);
     expect(broker.listSession("s1")).toHaveLength(0);
   });
+
+  it("marks pending requests as delivered", () => {
+    const broker = new PermissionBroker(1000);
+    void broker.request({
+      requestId: "req-1",
+      sessionId: "s1",
+      provider: "claude",
+      toolName: "Bash",
+      input: {},
+    });
+
+    expect(broker.markDelivered("req-1")).toBe(true);
+    expect(broker.get("req-1")?.deliveredAt).toBeTypeOf("number");
+    expect(broker.markDelivered("missing")).toBe(false);
+  });
 });

@@ -11,6 +11,7 @@ describe("RelayRouter hook permission decisions", () => {
     permissionBroker: PermissionBroker;
     workerSend: ReturnType<typeof vi.fn>;
     hookResolved: ReturnType<typeof vi.fn>;
+    sent?: string[];
   }): RelayRouter {
     return new RelayRouter({
       sessionManager: { getSession: () => undefined } as never,
@@ -19,7 +20,7 @@ describe("RelayRouter hook permission decisions", () => {
       relayConnection: Object.assign(new EventEmitter(), {
         sendRaw: () => {},
       }) as unknown as RelayConnection,
-      relaySend: () => {},
+      relaySend: (data) => options.sent?.push(data),
       terminalSockets: new Map(),
       broadcastSessionList: () => {},
       broadcastSessionSync: () => {},
@@ -120,6 +121,60 @@ describe("RelayRouter hook permission decisions", () => {
     expect(hookResolved).toHaveBeenCalledWith("s1", "claude", "worker-req-1", "allow", {
       toolName: "Write",
       toolInput: { file_path: "/tmp/a" },
+    });
+  });
+
+  it("records permission request delivery acknowledgements", async () => {
+    const permissionBroker = new PermissionBroker(1000);
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisionPromise = permissionBroker.request({
+      requestId: "req-delivered",
+      sessionId: "s1",
+      provider: "claude",
+      toolName: "Bash",
+      input: {},
+    });
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "permission_request_delivered",
+      sessionId: "s1",
+      requestId: "req-delivered",
+    });
+
+    expect(permissionBroker.get("req-delivered")?.deliveredAt).toBeTypeOf("number");
+    expect(permissionBroker.resolve("req-delivered", { behavior: "deny" })).toBe(true);
+    await expect(decisionPromise).resolves.toEqual({ behavior: "deny" });
+  });
+
+  it("pushes permission decision result after resolving approval", async () => {
+    const permissionBroker = new PermissionBroker(1000);
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const sent: string[] = [];
+    const decisionPromise = permissionBroker.request({
+      requestId: "req-result",
+      sessionId: "s1",
+      provider: "claude",
+      toolName: "Bash",
+      input: {},
+    });
+    const router = createRouter({ permissionBroker, workerSend, hookResolved, sent });
+
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "req-result" },
+    });
+
+    await expect(decisionPromise).resolves.toEqual({ behavior: "allow" });
+    expect(sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      type: "permission_decision_result",
+      sessionId: "s1",
+      requestId: "req-result",
+      outcome: "allow",
+      delivered: true,
     });
   });
 });

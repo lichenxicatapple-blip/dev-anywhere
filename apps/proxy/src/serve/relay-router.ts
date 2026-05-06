@@ -72,6 +72,7 @@ export class RelayRouter {
     session_messages_request: (msg) => this.onSessionMessagesRequest(msg),
     session_resources_request: (msg) => this.onSessionResourcesRequest(msg),
     agent_status_request: (msg) => this.onAgentStatusRequest(msg),
+    permission_request_delivered: (msg) => this.onPermissionRequestDelivered(msg),
     session_terminate: (msg) => this.onSessionTerminate(msg),
     session_worker_abort: (msg) => this.onSessionWorkerAbort(msg),
     session_history_request: () => this.deps.controlHandlers.handleSessionHistoryRequest(),
@@ -142,8 +143,26 @@ export class RelayRouter {
     if (!sessionId || !payload?.toolId) return;
 
     const pending = this.deps.permissionBroker.get(payload.toolId);
-    if (!pending) return;
-    if (!this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) return;
+    if (!pending) {
+      this.pushPermissionDecisionResult(
+        sessionId,
+        payload.toolId,
+        "allow",
+        false,
+        "Permission request is no longer pending.",
+      );
+      return;
+    }
+    if (!this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) {
+      this.pushPermissionDecisionResult(
+        pending.sessionId,
+        payload.toolId,
+        "allow",
+        false,
+        "Permission request is no longer pending.",
+      );
+      return;
+    }
     this.deps.hookEventRouter.onPermissionResolved(
       pending.sessionId,
       pending.provider,
@@ -167,6 +186,7 @@ export class RelayRouter {
         }
       }
     }
+    this.pushPermissionDecisionResult(pending.sessionId, payload.toolId, "allow", true);
     serviceLogger.info(
       { sessionId, toolId: payload.toolId, whitelistTool: payload.whitelistTool },
       "Tool approved via relay",
@@ -180,13 +200,29 @@ export class RelayRouter {
 
     const reason = payload.reason ?? "Denied by remote user";
     const pending = this.deps.permissionBroker.get(payload.toolId);
-    if (!pending) return;
+    if (!pending) {
+      this.pushPermissionDecisionResult(
+        sessionId,
+        payload.toolId,
+        "deny",
+        false,
+        "Permission request is no longer pending.",
+      );
+      return;
+    }
     if (
       !this.deps.permissionBroker.resolve(payload.toolId, {
         behavior: "deny",
         message: reason,
       })
     ) {
+      this.pushPermissionDecisionResult(
+        pending.sessionId,
+        payload.toolId,
+        "deny",
+        false,
+        "Permission request is no longer pending.",
+      );
       return;
     }
     this.deps.hookEventRouter.onPermissionResolved(
@@ -196,7 +232,27 @@ export class RelayRouter {
       "deny",
       { toolName: pending.toolName, toolInput: pending.input },
     );
+    this.pushPermissionDecisionResult(pending.sessionId, payload.toolId, "deny", true, reason);
     serviceLogger.info({ sessionId, toolId: payload.toolId }, "Tool denied via relay");
+  }
+
+  private pushPermissionDecisionResult(
+    sessionId: string,
+    requestId: string,
+    outcome: "allow" | "deny",
+    delivered: boolean,
+    message?: string,
+  ): void {
+    this.deps.relaySend(
+      JSON.stringify({
+        type: "permission_decision_result",
+        sessionId,
+        requestId,
+        outcome,
+        delivered,
+        ...(message ? { message } : {}),
+      }),
+    );
   }
 
   private onProxyInfoRequest(): void {
@@ -381,6 +437,14 @@ export class RelayRouter {
       count++;
     }
     serviceLogger.info({ count }, "Agent statuses pushed");
+  }
+
+  private onPermissionRequestDelivered(msg: Record<string, unknown>): void {
+    const sid = msg.sessionId as string | undefined;
+    const requestId = msg.requestId as string | undefined;
+    if (!sid || !requestId) return;
+    const marked = this.deps.permissionBroker.markDelivered(requestId);
+    serviceLogger.info({ sessionId: sid, requestId, marked }, "Permission request delivered");
   }
 
   private onSessionTerminate(msg: Record<string, unknown>): void {

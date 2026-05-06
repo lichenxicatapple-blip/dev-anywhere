@@ -26,9 +26,11 @@ describe("RelayControlSchema", () => {
 
   it("derives client-to-proxy control routing from protocol metadata", () => {
     expect(isClientToProxyRelayControlType("agent_status_request")).toBe(true);
+    expect(isClientToProxyRelayControlType("permission_request_delivered")).toBe(true);
     expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
     expect(isClientToProxyRelayControlType("session_list")).toBe(true);
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
+    expect(isClientToProxyRelayControlType("permission_decision_result")).toBe(false);
     expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
   });
 
@@ -205,6 +207,35 @@ describe("RelayControlSchema", () => {
       type: "agent_status_request",
       sessionId: "s1",
     });
+  });
+
+  it("parses permission delivery and decision result controls", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "permission_request_delivered",
+        sessionId: "s1",
+        requestId: "req-1",
+      }),
+    ).toEqual({
+      type: "permission_request_delivered",
+      sessionId: "s1",
+      requestId: "req-1",
+    });
+
+    const result = RelayControlSchema.parse({
+      type: "permission_decision_result",
+      sessionId: "s1",
+      requestId: "req-1",
+      outcome: "deny",
+      delivered: true,
+      message: "No.",
+    });
+    expect(result.type).toBe("permission_decision_result");
+    if (result.type === "permission_decision_result") {
+      expect(result.outcome).toBe("deny");
+      expect(result.delivered).toBe(true);
+      expect(result.message).toBe("No.");
+    }
   });
 
   it("rejects agent_status with invalid phase", () => {

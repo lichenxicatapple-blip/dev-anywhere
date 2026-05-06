@@ -19,6 +19,7 @@ interface PendingPermission extends PermissionRequest {
   resolve: (decision: PermissionDecision) => void;
   timeout: ReturnType<typeof setTimeout>;
   createdAt: number;
+  deliveredAt?: number;
 }
 
 export class PermissionBroker {
@@ -96,6 +97,13 @@ export class PermissionBroker {
     return true;
   }
 
+  markDelivered(requestId: string): boolean {
+    const pending = this.pending.get(requestId);
+    if (!pending) return false;
+    pending.deliveredAt = Date.now();
+    return true;
+  }
+
   get(requestId: string): {
     requestId: string;
     sessionId: string;
@@ -104,6 +112,7 @@ export class PermissionBroker {
     toolName: string;
     input: Record<string, unknown>;
     createdAt: number;
+    deliveredAt?: number;
   } | null {
     const pending = this.pending.get(requestId);
     if (!pending) return null;
@@ -115,6 +124,7 @@ export class PermissionBroker {
       toolName: pending.toolName,
       input: pending.input,
       createdAt: pending.createdAt,
+      ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
     };
   }
 
@@ -140,6 +150,7 @@ export class PermissionBroker {
         toolName: pending.toolName,
         input: pending.input,
         createdAt: pending.createdAt,
+        ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
       });
     }
     return out;

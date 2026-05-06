@@ -277,6 +277,26 @@ const relayControlDefinitions = [
   // 客户端请求当前 provider 语义状态；不经 relay 缓存，由 proxy 返回当前值
   control("agent_status_request", { sessionId: z.string().optional() }, "client_to_proxy"),
 
+  // 客户端确认已收到审批请求；proxy 只记录送达状态，不把它当成用户决策
+  control(
+    "permission_request_delivered",
+    { sessionId: z.string(), requestId: z.string() },
+    "client_to_proxy",
+  ),
+
+  // proxy 确认用户决策已进入 provider/worker 路径；web 用它更新审批卡片状态
+  control(
+    "permission_decision_result",
+    {
+      sessionId: z.string(),
+      requestId: z.string(),
+      outcome: z.enum(["allow", "deny"]),
+      delivered: z.boolean(),
+      message: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
+
   // proxy 推送当前 pending 的工具审批列表，client 据此恢复审批卡片
   control(
     "pending_approvals_push",
