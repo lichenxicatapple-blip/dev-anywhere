@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { RelayControlSchema } from "@dev-anywhere/shared";
+import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
+import { serializeBatchPtyInput, serializeRawPtyInput } from "#src/serve/pty-input.js";
+
+function parseSerializedIpc(serialized: string) {
+  const raw = JSON.parse(serialized.trim());
+  return IpcMessageSchema.parse(raw);
+}
 
 describe("remote_input_raw envelope", () => {
   it("accepts a well-formed message", () => {
@@ -37,34 +44,38 @@ describe("remote_input_raw envelope", () => {
 });
 
 describe("serve.ts remote_input_raw forwarding semantics", () => {
-  // 验证核心不变量：parsed data 作为 pty_input 的 data 字段转发，不追加 \r
-  // serve.ts 入口未抽象为纯函数，这里仅断言 schema + envelope 形状契约
-  it("preserves raw bytes without trailing carriage return", () => {
-    const raw = { type: "remote_input_raw", sessionId: "s1", data: "\x03" };
+  // 验证核心不变量：parsed data 作为 pty_input 的 data 字段转发，不追加 \r。
+  it.each([
+    ["plain text", "abc"],
+    ["enter", "\r"],
+    ["backspace", "\x7f"],
+    ["tab", "\t"],
+    ["escape", "\x1b"],
+    ["ctrl+c", "\x03"],
+    ["arrow up", "\x1b[A"],
+    ["arrow down", "\x1b[B"],
+    ["arrow right", "\x1b[C"],
+    ["arrow left", "\x1b[D"],
+  ])("preserves %s raw bytes without append", (_label, data) => {
+    const raw = { type: "remote_input_raw", sessionId: "s1", data };
     const parsed = RelayControlSchema.safeParse(raw);
     expect(parsed.success).toBe(true);
 
     if (parsed.success && parsed.data.type === "remote_input_raw") {
-      // 模拟 serve.ts 分支构造出的 IPC payload
-      const expectedIpc = {
-        type: "pty_input",
-        sessionId: parsed.data.sessionId,
-        data: parsed.data.data,
-      };
-      expect(expectedIpc.data).toBe("\x03");
-      expect(expectedIpc.data.endsWith("\r")).toBe(false);
-      expect(expectedIpc.data.length).toBe(1);
+      const ipc = parseSerializedIpc(serializeRawPtyInput(parsed.data.sessionId, parsed.data.data));
+      expect(ipc.type).toBe("pty_input");
+      if (ipc.type === "pty_input") {
+        expect(ipc.sessionId).toBe("s1");
+        expect(ipc.data).toBe(data);
+      }
     }
   });
 
-  it("preserves 3-byte arrow sequences without append", () => {
-    const raw = { type: "remote_input_raw", sessionId: "s1", data: "\x1b[A" };
-    const parsed = RelayControlSchema.safeParse(raw);
-    expect(parsed.success).toBe(true);
-
-    if (parsed.success && parsed.data.type === "remote_input_raw") {
-      expect(parsed.data.data.length).toBe(3);
-      expect(parsed.data.data.endsWith("\r")).toBe(false);
+  it("keeps historical user_input batch semantics separate from raw input", () => {
+    const ipc = parseSerializedIpc(serializeBatchPtyInput("s1", "echo ok"));
+    expect(ipc.type).toBe("pty_input");
+    if (ipc.type === "pty_input") {
+      expect(ipc.data).toBe("echo ok\r");
     }
   });
 });

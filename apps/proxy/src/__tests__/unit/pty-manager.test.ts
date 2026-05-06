@@ -133,6 +133,26 @@ describe("PtyManager", () => {
     expect(mockPty.write).toHaveBeenCalledWith("hello");
   });
 
+  it.each([
+    ["plain text", "abc"],
+    ["enter", "\r"],
+    ["backspace", "\x7f"],
+    ["tab", "\t"],
+    ["escape", "\x1b"],
+    ["ctrl+c", "\x03"],
+    ["arrow up", "\x1b[A"],
+    ["arrow down", "\x1b[B"],
+    ["arrow right", "\x1b[C"],
+    ["arrow left", "\x1b[D"],
+  ])("writes remote %s bytes to the child PTY unchanged", async (_label, data) => {
+    const { manager } = await createManager();
+
+    manager.start();
+    manager.write(data);
+
+    expect(mockPty.write).toHaveBeenCalledWith(data);
+  });
+
   it("forwards pty output to stdout and tap", async () => {
     const tap = vi.fn();
     const { manager, stdout } = await createManager({ tap });

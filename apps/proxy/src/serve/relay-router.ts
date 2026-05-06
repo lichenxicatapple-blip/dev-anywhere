@@ -5,6 +5,7 @@ import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
+import { serializeBatchPtyInput, serializeRawPtyInput } from "./pty-input.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
@@ -117,7 +118,7 @@ export class RelayRouter {
       serviceLogger.warn({ sessionId }, "Remote input dropped: PTY terminal socket not available");
       return;
     }
-    ts.write(serializeIpc({ type: "pty_input", sessionId, data: text + "\r" }));
+    ts.write(serializeBatchPtyInput(sessionId, text));
     serviceLogger.info({ sessionId }, "Remote input forwarded to PTY terminal");
   }
 
@@ -131,7 +132,7 @@ export class RelayRouter {
       serviceLogger.warn({ sessionId }, "Raw PTY input dropped: terminal socket unavailable");
       return;
     }
-    ts.write(serializeIpc({ type: "pty_input", sessionId, data }));
+    ts.write(serializeRawPtyInput(sessionId, data));
     serviceLogger.info({ sessionId, bytes: data.length }, "Raw PTY input forwarded");
   }
 
