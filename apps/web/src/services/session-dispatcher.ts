@@ -3,7 +3,7 @@
 //   Envelope: session_list / session_status
 //   Control:  pty_state / session_history_response
 // 未选 proxy 时短路, 避免跨 proxy 残留. 去重: chat-dispatcher 不消费这些类型, 无 race.
-import type { MessageEnvelope, RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
+import type { MessageEnvelope, RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";

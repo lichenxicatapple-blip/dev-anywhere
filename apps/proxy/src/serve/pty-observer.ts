@@ -1,4 +1,4 @@
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 
 // OSC 派生的 PTY 语义信号 → SessionState 映射。
 // mid_pause 故意不在表里：它是 spinner/标题刷新的心跳信号，不是状态转换。

@@ -4,7 +4,7 @@
 // Permission mode lives here for new sessions; resume remains a chat-level action.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import type { RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
+import type { RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";

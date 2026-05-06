@@ -1,23 +1,23 @@
-# Publishing cc-anywhere
+# Publishing dev-anywhere
 
 ## Release artifacts
 
 A single `vX.Y.Z` git tag produces four artifacts:
 
-| Kind   | Name                                      | What it's for                                         |
-| ------ | ----------------------------------------- | ----------------------------------------------------- |
-| npm    | `@lichenxi.cat/cc-anywhere`               | Local proxy CLI end-users install on their laptop     |
-| npm    | `@lichenxi.cat/cc-anywhere-relay`         | Standalone relay binary for local/dev use             |
-| Docker | `ghcr.io/<owner>/cc-anywhere-relay:<tag>` | Production relay container                            |
-| Docker | `ghcr.io/<owner>/cc-anywhere-web:<tag>`   | Nginx + web SPA container (reverse-proxies the relay) |
+| Kind   | Name                                       | What it's for                                         |
+| ------ | ------------------------------------------ | ----------------------------------------------------- |
+| npm    | `@dev-anywhere/proxy`                      | Local proxy CLI end-users install on their laptop     |
+| npm    | `@dev-anywhere/relay`                      | Standalone relay binary for local/dev use             |
+| Docker | `ghcr.io/<owner>/dev-anywhere-relay:<tag>` | Production relay container                            |
+| Docker | `ghcr.io/<owner>/dev-anywhere-web:<tag>`   | Nginx + web SPA container (reverse-proxies the relay) |
 
-`@cc-anywhere/shared` stays `private: true` and is bundled into both npm packages via tsup `noExternal`.
+`@dev-anywhere/shared` stays `private: true` and is bundled into both npm packages via tsup `noExternal`.
 
 ## Release pipeline
 
 `.github/workflows/release.yml` triggers on any `v*.*.*` tag push (or manual `workflow_dispatch`) and runs two jobs in parallel:
 
-1. **publish-images** — matrix over `cc-anywhere-relay` and `cc-anywhere-web`. Each job uses `docker/build-push-action` with buildx + GHA cache and pushes image tags `latest`, `X.Y.Z`, `X.Y`, `X` to GHCR.
+1. **publish-images** — matrix over `dev-anywhere-relay` and `dev-anywhere-web`. Each job uses `docker/build-push-action` with buildx + GHA cache and pushes image tags `latest`, `X.Y.Z`, `X.Y`, `X` to GHCR.
 2. **publish-npm** — `pnpm -r build` then `pnpm publish` for each npm package. Requires `NPM_TOKEN` repo secret.
 
 GHCR auth uses the workflow's `GITHUB_TOKEN` (no extra secret needed). `packages: write` permission is set on the workflow.
@@ -50,16 +50,16 @@ pnpm -r build
 
 rm -rf /tmp/cc-test
 npm install --prefix /tmp/cc-test --global \
-  /tmp/cc-anywhere-*.tgz /tmp/cc-anywhere-relay-*.tgz
+  /tmp/dev-anywhere-*.tgz /tmp/dev-anywhere-relay-*.tgz
 
-/tmp/cc-test/bin/cc-anywhere --version
-PORT=3199 /tmp/cc-test/bin/cc-anywhere-relay &   # ^C to stop
+/tmp/cc-test/bin/dev-anywhere --version
+PORT=3199 /tmp/cc-test/bin/dev-anywhere-relay &   # ^C to stop
 
-rm -rf /tmp/cc-test /tmp/cc-anywhere-*.tgz
+rm -rf /tmp/cc-test /tmp/dev-anywhere-*.tgz
 
 # Validate Docker images build (optional)
-docker buildx build -f apps/relay/Dockerfile -t cc-anywhere-relay:dry .
-docker buildx build -f apps/web/Dockerfile   -t cc-anywhere-web:dry   .
+docker buildx build -f apps/relay/Dockerfile -t dev-anywhere-relay:dry .
+docker buildx build -f apps/web/Dockerfile   -t dev-anywhere-web:dry   .
 ```
 
 ## First-time repo setup
@@ -79,10 +79,10 @@ docker buildx build -f apps/web/Dockerfile   -t cc-anywhere-web:dry   .
 ### Local proxy CLI (end-user laptop)
 
 ```bash
-npm install -g @lichenxi.cat/cc-anywhere
-cc-anywhere init
-# edit ~/.cc-anywhere/config.json: { "relayUrl": "wss://...", "relayToken": "..." }
-cc-anywhere serve start
+npm install -g @dev-anywhere/proxy
+dev-anywhere init
+# edit ~/.dev-anywhere/config.json: { "relayUrl": "wss://...", "relayToken": "..." }
+dev-anywhere serve start
 ```
 
 ### Self-hosted relay + web (VPS, turnkey)
@@ -91,24 +91,24 @@ cc-anywhere serve start
 
 ```bash
 # A) From your laptop, auto-ssh:
-./scripts/install-relay.sh --ssh user@vps-host cc-anywhere.example.com
+./scripts/install-relay.sh --ssh user@vps-host dev-anywhere.example.com
 
 # B) On the VPS directly:
-curl -fsSL https://raw.githubusercontent.com/<owner>/cc-anywhere/main/scripts/install-relay.sh \
-  | sudo bash -s -- cc-anywhere.example.com
+curl -fsSL https://raw.githubusercontent.com/<owner>/dev-anywhere/main/scripts/install-relay.sh \
+  | sudo bash -s -- dev-anywhere.example.com
 ```
 
 Upgrade later:
 
 ```bash
-cd /opt/cc-anywhere && docker compose pull && docker compose up -d
+cd /opt/dev-anywhere && docker compose pull && docker compose up -d
 ```
 
 ### Standalone relay without TLS (dev)
 
 ```bash
-npm install -g @lichenxi.cat/cc-anywhere-relay
+npm install -g @dev-anywhere/relay
 RELAY_PROXY_TOKEN=$(openssl rand -hex 24) \
 RELAY_CLIENT_TOKEN=$(openssl rand -hex 24) \
-PORT=3100 cc-anywhere-relay
+PORT=3100 dev-anywhere-relay
 ```

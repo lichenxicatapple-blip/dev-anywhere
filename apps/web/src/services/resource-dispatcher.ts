@@ -1,7 +1,7 @@
 // 资源数据 dispatcher: 把 proxy 的 command_list_push / dir_list_response / file_tree_push
 // 写进 command-store / file-store, 喂给 SlashCommandPicker 与 FilePathPicker
 // file_tree_push 是 session 打开时的首轮文件树 (path = cwd), 与 dir_list_response 共享 store slot
-import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
+import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";

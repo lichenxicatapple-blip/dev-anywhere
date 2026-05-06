@@ -3,7 +3,7 @@
 // 状态点走 UI-SPEC --color-status-* tokens
 // 操作菜单（终止会话等）走 shadcn DropdownMenu —— 不移植 Feishu 的 swipe-to-terminate 手势
 import { MoreHorizontal } from "lucide-react";
-import type { SessionInfo } from "@cc-anywhere/shared";
+import type { SessionInfo } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

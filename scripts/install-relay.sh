@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Deploy cc-anywhere (relay + web) on a VPS using pre-built images from GHCR.
+# Deploy dev-anywhere (relay + web) on a VPS using pre-built images from GHCR.
 #
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./install-relay.sh --ssh user@vps-host cc-anywhere.example.com
+#        ./install-relay.sh --ssh user@vps-host dev-anywhere.example.com
 #      Requires ssh-key access to the remote host and sudo for that user.
 #
 #   2) Run directly on the VPS:
-#        sudo ./install-relay.sh cc-anywhere.example.com
+#        sudo ./install-relay.sh dev-anywhere.example.com
 #      Or:
-#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- cc-anywhere.example.com
+#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- dev-anywhere.example.com
 #
 # Arguments:
 #   domain — public DNS name with an A record pointing at the VPS.
@@ -29,7 +29,7 @@
 #   IMAGE_TAG     — image tag to pull (default: latest).
 #
 # Layout created on the VPS:
-#   /opt/cc-anywhere/
+#   /opt/dev-anywhere/
 #     ├─ docker-compose.yml
 #     └─ .env                # RELAY_PROXY_TOKEN, chmod 600
 #
@@ -58,15 +58,15 @@ fi
 
 DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh <host> <domain>}"
 TOKEN="${2:-}"
-INSTALL_DIR="/opt/cc-anywhere"
+INSTALL_DIR="/opt/dev-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
 # REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from the
 # Aliyun ACR personal instance (requires `docker login` on the VPS first):
 #   REGISTRY_BASE=crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
 REGISTRY_BASE="${REGISTRY_BASE:-ghcr.io/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-RELAY_IMAGE="${REGISTRY_BASE}/cc-anywhere-relay:${IMAGE_TAG}"
-WEB_IMAGE="${REGISTRY_BASE}/cc-anywhere-web:${IMAGE_TAG}"
+RELAY_IMAGE="${REGISTRY_BASE}/dev-anywhere-relay:${IMAGE_TAG}"
+WEB_IMAGE="${REGISTRY_BASE}/dev-anywhere-web:${IMAGE_TAG}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: must run as root (use sudo)" >&2
@@ -121,7 +121,7 @@ cat > docker-compose.yml <<EOF
 services:
   relay:
     image: $RELAY_IMAGE
-    container_name: cc-anywhere-relay
+    container_name: dev-anywhere-relay
     restart: unless-stopped
     env_file: .env
     expose: ["3100"]
@@ -135,7 +135,7 @@ services:
 
   nginx:
     image: $WEB_IMAGE
-    container_name: cc-anywhere-nginx
+    container_name: dev-anywhere-nginx
     restart: unless-stopped
     depends_on:
       relay:
@@ -176,7 +176,7 @@ chmod 600 .env
 # source-build deployment). `docker compose down` alone won't catch them when
 # the old stack was created under a different project name.
 docker compose down --remove-orphans 2>/dev/null || true
-docker rm -f cc-anywhere-relay cc-anywhere-nginx 2>/dev/null || true
+docker rm -f dev-anywhere-relay dev-anywhere-nginx 2>/dev/null || true
 
 echo "==> pulling images"
 docker compose pull
@@ -187,18 +187,18 @@ docker compose up -d
 sleep 3
 if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo
-  echo "=== cc-anywhere deployed ==="
+  echo "=== dev-anywhere deployed ==="
   echo "  Web UI:  https://$DOMAIN"
   echo "  Health:  https://$DOMAIN/health"
   echo "  Proxy:   wss://$DOMAIN/proxy?token=$TOKEN"
   echo "  Client:  wss://$DOMAIN/client"
   echo
   echo "Next, on your local machine:"
-  echo "  npm install -g @lichenxi.cat/cc-anywhere"
-  echo "  cc-anywhere init"
-  echo "  # edit ~/.cc-anywhere/config.json:"
+  echo "  npm install -g @dev-anywhere/proxy"
+  echo "  dev-anywhere init"
+  echo "  # edit ~/.dev-anywhere/config.json:"
   echo "  #   { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$TOKEN\" }"
-  echo "  cc-anywhere serve start"
+  echo "  dev-anywhere serve start"
   echo
   echo "To upgrade later:"
   echo "  cd $INSTALL_DIR && docker compose pull && docker compose up -d"

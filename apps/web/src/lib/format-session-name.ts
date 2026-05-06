@@ -1,5 +1,5 @@
 // 格式化 session 名称：将长路径截断为易读的短路径
-// ~/workspace/cc_anywhere/apps/proxy → ~/…/apps/proxy
+// ~/workspace/dev-anywhere/apps/proxy → ~/…/apps/proxy
 // ~/my-project → ~/my-project
 // /tmp/test → /tmp/test
 export function formatSessionName(name: string | undefined): string {

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import { RelayErrorCode, type Logger } from "@cc-anywhere/shared";
+import { RelayErrorCode, type Logger } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 

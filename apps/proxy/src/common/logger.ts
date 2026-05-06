@@ -1,4 +1,4 @@
-import { createLogger } from "@cc-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared";
 import { LOG_DIR } from "./paths.js";
 
 export const serviceLogger = createLogger({

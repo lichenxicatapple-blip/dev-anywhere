@@ -3,7 +3,7 @@
 // proxy 的 isPathSafe 只接受绝对路径, 相对路径会被直接拒绝
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { DirEntry } from "@cc-anywhere/shared";
+import type { DirEntry } from "@dev-anywhere/shared";
 
 interface FileStoreState {
   tree: Map<string, DirEntry[]>;

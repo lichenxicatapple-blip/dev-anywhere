@@ -14,7 +14,7 @@ interface EmptyStateProps {
 const COPY: Record<Variant, { heading: string; body: string }> = {
   "no-proxy": {
     heading: "尚未连接 Proxy",
-    body: "在电脑上启动 cc-anywhere。",
+    body: "在电脑上启动 dev-anywhere。",
   },
   "no-session": {
     heading: "没有选中的会话",

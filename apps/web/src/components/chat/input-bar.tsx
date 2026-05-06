@@ -4,7 +4,7 @@
 // ArrowUp/Down 历史召回仅 PTY 启用 (JSON 直接点消息气泡引用/复制更直观)
 // 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CommandEntry } from "@cc-anywhere/shared";
+import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";

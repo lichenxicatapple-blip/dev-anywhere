@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MessageEnvelopeSchema } from "@cc-anywhere/shared";
+import { MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { ToolApprovalManager } from "#src/serve/tool-approval-manager.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";

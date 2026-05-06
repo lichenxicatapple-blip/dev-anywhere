@@ -2,7 +2,7 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import { homedir } from "node:os";
 import { WebSocketServer } from "ws";
-import type { Logger } from "@cc-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared";
 import { RelayRegistry } from "./registry.js";
 import { healthRouter } from "./health.js";
 import { handleProxyConnection } from "./handlers/proxy.js";
@@ -45,8 +45,8 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const registry = new RelayRegistry();
   const app = express();
 
-  // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.cc-anywhere/relay-data/fonts 提供
-  const fontsDir = dataDir ? `${dataDir}/fonts` : `${homedir()}/.cc-anywhere/relay-data/fonts`;
+  // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.dev-anywhere/relay-data/fonts 提供
+  const fontsDir = dataDir ? `${dataDir}/fonts` : `${homedir()}/.dev-anywhere/relay-data/fonts`;
   app.use(
     "/fonts",
     (req, res, next) => {

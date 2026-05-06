@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { parseMessage, routeProxyMessage, routeClientMessage } from "#src/router.js";
 import { RelayRegistry } from "#src/registry.js";
 import { WebSocket } from "ws";
-import type { Logger } from "@cc-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared";
 
 function createMockWs(overrides: Record<string, unknown> = {}): WebSocket {
   return {

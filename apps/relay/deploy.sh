@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CC Anywhere deployment script (relay + web SPA + nginx)
+# Dev Anywhere deployment script (relay + web SPA + nginx)
 # Usage: ./deploy.sh <ssh-host> <domain>
 # Example: ./deploy.sh ubuntu@1.2.3.4 relay.example.com
 
@@ -9,9 +9,9 @@ SSH_HOST="${1:?Usage: ./deploy.sh <ssh-host> <domain>}"
 DOMAIN="${2:?Usage: ./deploy.sh <ssh-host> <domain>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-LOCAL_FONTS_DIR="${HOME}/.cc-anywhere/relay-data/fonts"
-REMOTE_DIR="/opt/cc-anywhere"
-REMOTE_DATA_DIR="/opt/cc-anywhere-data"
+LOCAL_FONTS_DIR="${HOME}/.dev-anywhere/relay-data/fonts"
+REMOTE_DIR="/opt/dev-anywhere"
+REMOTE_DATA_DIR="/opt/dev-anywhere-data"
 
 # 检测是否需要 sudo (非 root 用户)
 SUDO=""
@@ -35,7 +35,7 @@ else
   fi
 fi
 
-echo "=== CC Anywhere Deployment ==="
+echo "=== Dev Anywhere Deployment ==="
 echo "Target: $SSH_HOST (user: $REMOTE_USER)"
 echo "Domain: $DOMAIN"
 echo ""
@@ -100,7 +100,7 @@ ssh "$SSH_HOST" "${SUDO} sh -c '
 echo "[4/8] Syncing project files..."
 ssh "$SSH_HOST" "${SUDO} mkdir -p $REMOTE_DIR && ${SUDO} chown ${REMOTE_USER}:${REMOTE_USER} $REMOTE_DIR"
 
-TMPFILE=$(mktemp /tmp/cc-anywhere-deploy.XXXXXX.tar.gz)
+TMPFILE=$(mktemp /tmp/dev-anywhere-deploy.XXXXXX.tar.gz)
 echo "  Packing project files..."
 tar czf "$TMPFILE" -C "$PROJECT_ROOT" \
   --no-xattrs \
@@ -113,21 +113,21 @@ tar czf "$TMPFILE" -C "$PROJECT_ROOT" \
   --exclude=reference \
   .
 echo "  Uploading $(du -h "$TMPFILE" | cut -f1)..."
-scp -q "$TMPFILE" "$SSH_HOST:/tmp/cc-anywhere-deploy.tar.gz"
-ssh "$SSH_HOST" "cd $REMOTE_DIR && rm -rf ./* && tar xzf /tmp/cc-anywhere-deploy.tar.gz && rm /tmp/cc-anywhere-deploy.tar.gz"
+scp -q "$TMPFILE" "$SSH_HOST:/tmp/dev-anywhere-deploy.tar.gz"
+ssh "$SSH_HOST" "cd $REMOTE_DIR && rm -rf ./* && tar xzf /tmp/dev-anywhere-deploy.tar.gz && rm /tmp/dev-anywhere-deploy.tar.gz"
 rm -f "$TMPFILE"
 
 # Step 5: 同步字体 (apps/web 通过 /fonts 端点引用, relay 服务)
 echo "[5/8] Syncing fonts..."
 if [ -d "$LOCAL_FONTS_DIR" ]; then
-  FONT_TMP=$(mktemp /tmp/cc-anywhere-fonts.XXXXXX.tar.gz)
+  FONT_TMP=$(mktemp /tmp/dev-anywhere-fonts.XXXXXX.tar.gz)
   tar czf "$FONT_TMP" -C "$(dirname "$LOCAL_FONTS_DIR")" --no-xattrs fonts
   echo "  Uploading fonts ($(du -h "$FONT_TMP" | cut -f1))..."
-  scp -q "$FONT_TMP" "$SSH_HOST:/tmp/cc-anywhere-fonts.tar.gz"
+  scp -q "$FONT_TMP" "$SSH_HOST:/tmp/dev-anywhere-fonts.tar.gz"
   ssh "$SSH_HOST" "
     ${SUDO} mkdir -p $REMOTE_DATA_DIR
-    ${SUDO} tar xzf /tmp/cc-anywhere-fonts.tar.gz -C $REMOTE_DATA_DIR
-    rm /tmp/cc-anywhere-fonts.tar.gz
+    ${SUDO} tar xzf /tmp/dev-anywhere-fonts.tar.gz -C $REMOTE_DATA_DIR
+    rm /tmp/dev-anywhere-fonts.tar.gz
   "
   rm -f "$FONT_TMP"
 else
@@ -214,7 +214,7 @@ if [ "$FAIL" -eq 0 ]; then
   echo "=== Deployment verified: $PASS checks passed ==="
 else
   echo "=== Deployment partial: $PASS passed, $FAIL failed ==="
-  echo "Logs: ssh $SSH_HOST '${SUDO} docker compose --env-file /opt/cc-anywhere/.env -f /opt/cc-anywhere/apps/relay/docker-compose.yml logs -f'"
+  echo "Logs: ssh $SSH_HOST '${SUDO} docker compose --env-file /opt/dev-anywhere/.env -f /opt/dev-anywhere/apps/relay/docker-compose.yml logs -f'"
   exit 1
 fi
 
@@ -224,6 +224,6 @@ echo "WSS:   wss://$DOMAIN/client  (open)"
 echo "       wss://$DOMAIN/proxy?token=<redacted>  (token required)"
 echo ""
 echo "Local proxy example:"
-echo "  RELAY_URL='wss://$DOMAIN/proxy?token=$TOKEN' pnpm --filter @lichenxi.cat/cc-anywhere run serve"
+echo "  RELAY_URL='wss://$DOMAIN/proxy?token=$TOKEN' pnpm --filter @dev-anywhere/proxy run serve"
 echo ""
 echo "Token stored on remote in $REMOTE_DIR/.env (chmod 600)"

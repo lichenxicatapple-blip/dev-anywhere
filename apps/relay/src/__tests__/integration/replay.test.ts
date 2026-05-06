@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
-import { createLogger } from "@cc-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared";
 import { waitForOpen, waitForMessage, getPort } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });

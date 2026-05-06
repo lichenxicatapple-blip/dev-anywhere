@@ -17,7 +17,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "./src"),
-      "@cc-anywhere/shared": resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@dev-anywhere/shared": resolve(__dirname, "../../packages/shared/src/index.ts"),
     },
   },
   test: {

@@ -2,7 +2,7 @@
 // 选中态不在这里存, 由 URL (/chat/:id) 作为单一事实来源
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { SessionInfo, HistorySession } from "@cc-anywhere/shared";
+import type { SessionInfo, HistorySession } from "@dev-anywhere/shared";
 
 interface SessionStoreState {
   sessions: SessionInfo[];

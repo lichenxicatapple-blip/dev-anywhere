@@ -4,7 +4,7 @@
 // 真实 type literals (见 packages/shared/src/schemas/envelope.ts + relay-control.ts):
 //   Envelope 层: assistant_message / tool_use_request / tool_result / thinking / user_input
 //   Control 层: pending_approvals_push / session_history_messages / turn_result
-import type { MessageEnvelope, RelayControlMessage } from "@cc-anywhere/shared";
+import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";

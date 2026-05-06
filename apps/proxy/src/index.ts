@@ -213,14 +213,14 @@ async function startDaemon(): Promise<void> {
   process.exit(1);
 }
 
-const program = new Command("cc-anywhere")
-  .description("CC Anywhere - transparent Claude Code proxy with remote control")
+const program = new Command("dev-anywhere")
+  .description("Dev Anywhere - transparent local AI CLI proxy with remote control")
   .version(pkg.version)
   .allowUnknownOption()
   .allowExcessArguments()
   .action(async () => {
     if (!isInitialized()) {
-      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
     // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
@@ -231,11 +231,11 @@ const program = new Command("cc-anywhere")
 
 // serve 子命令组
 const serve = new Command("serve")
-  .description("Manage the cc-anywhere background service")
+  .description("Manage the dev-anywhere background service")
   .option("-d, --daemon", "Run in background")
   .action(async (opts) => {
     if (!isInitialized()) {
-      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
     if (opts.daemon) {
@@ -252,7 +252,7 @@ serve
   .description("Start the background service")
   .action(async () => {
     if (!isInitialized()) {
-      console.error(`CC Anywhere is not initialized. Run "cc-anywhere init" first.`);
+      console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
     await startDaemon();
@@ -297,14 +297,14 @@ program.addCommand(serve);
 
 program
   .command("init")
-  .description("Initialize cc-anywhere workspace (~/.cc-anywhere)")
+  .description("Initialize dev-anywhere workspace (~/.dev-anywhere)")
   .action(() => {
     if (isInitialized()) {
       console.log(`Already initialized. Config at ${CONFIG_PATH}`);
       return;
     }
     initWorkspace();
-    console.log("Initialized ~/.cc-anywhere/");
+    console.log("Initialized ~/.dev-anywhere/");
     console.log(`Edit ${CONFIG_PATH} to configure relay server URL.`);
   });
 

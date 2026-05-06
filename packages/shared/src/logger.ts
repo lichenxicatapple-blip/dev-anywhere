@@ -12,7 +12,7 @@ export interface CreateLoggerOptions {
   silent?: boolean;
 }
 
-const DEFAULT_LOG_DIR = `${homedir()}/.cc-anywhere/logs`;
+const DEFAULT_LOG_DIR = `${homedir()}/.dev-anywhere/logs`;
 
 export function createLogger(options: CreateLoggerOptions): pino.Logger {
   const {

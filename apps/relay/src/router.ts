@@ -1,8 +1,8 @@
-import { MessageEnvelopeSchema, RelayControlSchema, RelayErrorCode } from "@cc-anywhere/shared";
-import type { RelayControlMessage } from "@cc-anywhere/shared";
-import type { MessageEnvelope } from "@cc-anywhere/shared";
+import { MessageEnvelopeSchema, RelayControlSchema, RelayErrorCode } from "@dev-anywhere/shared";
+import type { RelayControlMessage } from "@dev-anywhere/shared";
+import type { MessageEnvelope } from "@dev-anywhere/shared";
 import { WebSocket } from "ws";
-import type { Logger } from "@cc-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息

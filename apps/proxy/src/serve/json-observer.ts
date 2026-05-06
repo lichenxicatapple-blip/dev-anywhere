@@ -1,4 +1,4 @@
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 
 interface JsonObserverDeps {
   changeSessionState: (sessionId: string, next: SessionState) => boolean;

@@ -1,7 +1,7 @@
 import type { Socket } from "node:net";
 import { homedir } from "node:os";
 import { nanoid } from "nanoid";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";

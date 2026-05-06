@@ -16,7 +16,7 @@ const include =
 export default defineConfig({
   resolve: {
     alias: {
-      "@cc-anywhere/shared": resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@dev-anywhere/shared": resolve(__dirname, "../../packages/shared/src/index.ts"),
     },
   },
   test: {

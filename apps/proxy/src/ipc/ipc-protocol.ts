@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 import { LineBuffer } from "./line-buffer.js";
 
 // IPC binary 帧标记字节，0x00 不可能是 JSON 行的首字节（JSON 以 '{' 开头）

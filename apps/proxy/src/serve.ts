@@ -2,7 +2,7 @@ import { createServer, connect, type Socket } from "node:net";
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
 import { unlinkSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
-import { SessionState, buildMessage } from "@cc-anywhere/shared";
+import { SessionState, buildMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
@@ -429,7 +429,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const terminalSockets = new Map<string, Socket>();
   const toolApprovalManager = new ToolApprovalManager();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
-  const proxyName = process.env.CC_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
+  const proxyName = process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
   function getComputerName(): string | null {
     try {
@@ -450,7 +450,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relayToken = proxyConfig.relayToken;
   if (!relayUrl) {
     const msg =
-      'RELAY_URL is required. Set it via $RELAY_URL or ~/.cc-anywhere/config.json {"relayUrl": "ws://..."}';
+      'RELAY_URL is required. Set it via $RELAY_URL or ~/.dev-anywhere/config.json {"relayUrl": "ws://..."}';
     serviceLogger.error(msg);
     console.error(msg);
     process.exit(1);

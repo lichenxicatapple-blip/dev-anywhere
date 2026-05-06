@@ -4,13 +4,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import type { MessageEnvelope } from "@cc-anywhere/shared";
+import type { MessageEnvelope } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { createFSM } from "../common/state-machine.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
-const DEFAULT_PROXY_ID_PATH = join(homedir(), ".cc-anywhere", "proxy-id");
+const DEFAULT_PROXY_ID_PATH = join(homedir(), ".dev-anywhere", "proxy-id");
 
 // 指数退避上限 30 秒
 const MAX_BACKOFF_MS = 30000;

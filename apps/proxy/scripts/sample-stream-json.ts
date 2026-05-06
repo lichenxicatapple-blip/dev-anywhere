@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 采样 Claude CLI stream-json 原始事件流，落成 fixture 供后续 schema drift 回归测试
-// 用法: pnpm --filter @lichenxi.cat/cc-anywhere exec tsx scripts/sample-stream-json.ts
+// 用法: pnpm --filter @dev-anywhere/proxy exec tsx scripts/sample-stream-json.ts
 // 前置: 本机已安装并登录 claude CLI (CLAUDE_BIN 可覆盖二进制路径)
 
 import { spawn, execSync } from "node:child_process";
@@ -113,7 +113,7 @@ const SCENARIOS: Scenario[] = [
     name: "control-request",
     model: "claude-sonnet-4-6",
     prompt:
-      'Use the Write tool to create a file at "/tmp/cc-anywhere-canary.txt" with content "canary". Just do it, no other output.',
+      'Use the Write tool to create a file at "/tmp/dev-anywhere-canary.txt" with content "canary". Just do it, no other output.',
     permissionMode: "default",
   },
 ];

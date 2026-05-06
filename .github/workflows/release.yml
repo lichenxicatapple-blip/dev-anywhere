@@ -22,9 +22,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: cc-anywhere-relay
+          - name: dev-anywhere-relay
             dockerfile: apps/relay/Dockerfile
-          - name: cc-anywhere-web
+          - name: dev-anywhere-web
             dockerfile: apps/web/Dockerfile
     steps:
       - uses: actions/checkout@v4
@@ -101,12 +101,12 @@ jobs:
 
       - run: pnpm -r build
 
-      - name: Publish @lichenxi.cat/cc-anywhere
-        run: pnpm --filter @lichenxi.cat/cc-anywhere publish --no-git-checks --access public
+      - name: Publish @dev-anywhere/proxy
+        run: pnpm --filter @dev-anywhere/proxy publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @lichenxi.cat/cc-anywhere-relay
-        run: pnpm --filter @lichenxi.cat/cc-anywhere-relay publish --no-git-checks --access public
+      - name: Publish @dev-anywhere/relay
+        run: pnpm --filter @dev-anywhere/relay publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

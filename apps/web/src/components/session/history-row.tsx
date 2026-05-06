@@ -2,7 +2,7 @@
 // 总在某个 projectDir group 下渲染, 所以本行不再重复展示 projectDir, 只剩 title + 时间
 // 行内不放图标: 每行前导时钟图标信息量为零 (group header 已表达"历史"语义), 纯靠左侧 pl-10 缩进体现层级
 import { ArrowUpRight } from "lucide-react";
-import type { HistorySession } from "@cc-anywhere/shared";
+import type { HistorySession } from "@dev-anywhere/shared";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
 

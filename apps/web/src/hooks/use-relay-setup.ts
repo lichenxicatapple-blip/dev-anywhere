@@ -14,7 +14,7 @@ export let wsManagerRef: WebSocketManager | null = null;
 export let relayClientRef: RelayClient | null = null;
 
 // Sarasa Fixed SC 按 cn-font-split 分片托管在 relay, 按 unicode-range 按需下载
-// relay 静态目录 ~/.cc-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 CJK font hosting 预生成
+// relay 静态目录 ~/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 CJK font hosting 预生成
 function loadFontCSS(relayUrl: string): void {
   const base = relayUrl
     .replace(/^ws:/, "http:")

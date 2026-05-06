@@ -1,24 +1,24 @@
 {
-  "name": "@lichenxi.cat/cc-anywhere-relay",
+  "name": "@dev-anywhere/relay",
   "version": "0.0.5",
-  "description": "Relay server for cc-anywhere — bridges local Claude Code proxies to remote web clients via WebSocket.",
+  "description": "Relay server for Dev Anywhere — bridges local AI CLI proxies to remote web clients via WebSocket.",
   "keywords": [
     "claude-code",
     "relay",
     "websocket",
     "server",
-    "cc-anywhere"
+    "dev-anywhere"
   ],
   "license": "MIT",
   "author": "catli <catli@futunn.com>",
-  "homepage": "https://github.com/lichenxicatapple-blip/cc-anywhere",
+  "homepage": "https://github.com/lichenxicatapple-blip/dev-anywhere",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lichenxicatapple-blip/cc-anywhere.git",
+    "url": "git+https://github.com/lichenxicatapple-blip/dev-anywhere.git",
     "directory": "apps/relay"
   },
   "bugs": {
-    "url": "https://github.com/lichenxicatapple-blip/cc-anywhere/issues"
+    "url": "https://github.com/lichenxicatapple-blip/dev-anywhere/issues"
   },
   "type": "module",
   "engines": {
@@ -30,7 +30,7 @@
     "LICENSE"
   ],
   "bin": {
-    "cc-anywhere-relay": "./dist/index.js"
+    "dev-anywhere-relay": "./dist/index.js"
   },
   "exports": {
     "./server": {
@@ -56,7 +56,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cc-anywhere/shared": "workspace:*",
+    "@dev-anywhere/shared": "workspace:*",
     "@types/express": "^5.0.2",
     "@types/node": "^22.15.30",
     "@types/ws": "^8.18.1",

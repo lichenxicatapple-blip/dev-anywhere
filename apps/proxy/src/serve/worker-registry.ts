@@ -1,6 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
-import { buildMessage } from "@cc-anywhere/shared";
+import { buildMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   ContentBlockDeltaSchema,

@@ -1,14 +1,14 @@
-# @lichenxi.cat/cc-anywhere-relay
+# @dev-anywhere/relay
 
-Relay server for [`@lichenxi.cat/cc-anywhere`](https://www.npmjs.com/package/@lichenxi.cat/cc-anywhere) — bridges local Claude Code proxies to remote web clients via WebSocket.
+Relay server for [`@dev-anywhere/proxy`](https://www.npmjs.com/package/@dev-anywhere/proxy) — bridges local AI CLI proxies to remote web clients via WebSocket.
 
 ## Install
 
 ```bash
-npm install -g @lichenxi.cat/cc-anywhere-relay
+npm install -g @dev-anywhere/relay
 ```
 
-This installs the `cc-anywhere-relay` command globally.
+This installs the `dev-anywhere-relay` command globally.
 
 Requires Node.js >= 20.
 
@@ -16,12 +16,12 @@ Requires Node.js >= 20.
 
 ```bash
 # Minimal, plaintext WS on port 3100:
-PORT=3100 cc-anywhere-relay
+PORT=3100 dev-anywhere-relay
 
 # With auth tokens (recommended for any public relay):
 RELAY_PROXY_TOKEN="$(openssl rand -hex 24)" \
 RELAY_CLIENT_TOKEN="$(openssl rand -hex 24)" \
-PORT=3100 cc-anywhere-relay
+PORT=3100 dev-anywhere-relay
 ```
 
 ## Endpoints
@@ -38,7 +38,7 @@ PORT=3100 cc-anywhere-relay
 | Variable             | Default                         | Notes                                              |
 | -------------------- | ------------------------------- | -------------------------------------------------- |
 | `PORT`               | `3100`                          | HTTP + WSS listen port                             |
-| `DATA_DIR`           | `~/.cc-anywhere/relay-data`     | Persistent state. Set to empty string to disable.  |
+| `DATA_DIR`           | `~/.dev-anywhere/relay-data`    | Persistent state. Set to empty string to disable.  |
 | `HEARTBEAT_INTERVAL` | `30000` (ms)                    | WS ping cadence                                    |
 | `RELAY_PROXY_TOKEN`  | unset (open `/proxy` endpoint)  | When set, `/proxy` rejects connections without it  |
 | `RELAY_CLIENT_TOKEN` | unset (open `/client` endpoint) | When set, `/client` rejects connections without it |
@@ -50,12 +50,12 @@ For the bundled web client, open the app once with `?relayToken=<RELAY_CLIENT_TO
 
 ## TLS
 
-This package serves plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare with a TLS termination. One-liner turnkey setup (docker compose + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/cc-anywhere).
+This package serves plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare with a TLS termination. One-liner turnkey setup (docker compose + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
 
 ## Using the embedded server programmatically
 
 ```ts
-import { createRelayServer } from "@lichenxi.cat/cc-anywhere-relay/server";
+import { createRelayServer } from "@dev-anywhere/relay/server";
 import pino from "pino";
 
 const relay = createRelayServer({

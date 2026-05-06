@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { nanoid } from "nanoid";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { defineFSM } from "../common/state-machine.js";
 

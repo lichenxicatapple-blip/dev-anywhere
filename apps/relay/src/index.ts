@@ -1,9 +1,9 @@
 import { homedir } from "node:os";
-import { createLogger } from "@cc-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared";
 import { createRelayServer } from "./server.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
-const DEFAULT_DATA_DIR = `${homedir()}/.cc-anywhere/relay-data`;
+const DEFAULT_DATA_DIR = `${homedir()}/.dev-anywhere/relay-data`;
 // ?? 而不是 ||：空字符串表示显式禁用持久化，undefined 表示使用默认路径
 const DATA_DIR = (process.env.DATA_DIR ?? DEFAULT_DATA_DIR) || undefined;
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL ?? "30000", 10);

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { MessageType, MessageSource } from "@cc-anywhere/shared";
+import type { MessageType, MessageSource } from "@dev-anywhere/shared";
 import type { RelayServer } from "#src/server.js";
 
 /**

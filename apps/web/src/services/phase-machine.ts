@@ -1,5 +1,5 @@
 // 状态机事件处理，直接访问 zustand store 和 router，不再通过 PhaseNav 间接注入
-import type { ProxyInfo } from "@cc-anywhere/shared";
+import type { ProxyInfo } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
 import { router } from "@/lib/router";

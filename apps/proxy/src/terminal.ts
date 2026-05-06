@@ -105,7 +105,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
 
   log.error({ maxRetries: ENSURE_SERVICE_MAX_RETRIES }, "Failed to connect to service");
   throw new Error(
-    `Failed to connect to cc-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${SERVICE_LOG_PATH} for details.`,
+    `Failed to connect to dev-anywhere service after ${ENSURE_SERVICE_MAX_RETRIES} retries. Check ${SERVICE_LOG_PATH} for details.`,
   );
 }
 
@@ -357,9 +357,9 @@ class TerminalSession {
     log.info("Serve connection lost, starting reconnection");
 
     // 两条路径都不该再继续 spawn daemon：
-    //   - STOPPED=true：用户主动 cc-anywhere stop，不要对抗用户意图。
+    //   - STOPPED=true：用户主动 dev-anywhere stop，不要对抗用户意图。
     //   - consecutiveSpawnFailures 跨过阈值：说明环境有持续性问题，spawn 再多也白搭。
-    // 进入 passive 后仅做 tryConnect 等待，daemon 起来或用户 cc-anywhere start 后自动恢复。
+    // 进入 passive 后仅做 tryConnect 等待，daemon 起来或用户 dev-anywhere start 后自动恢复。
     let consecutiveSpawnFailures = 0;
 
     for (let i = 0; ; i++) {
@@ -414,7 +414,7 @@ class TerminalSession {
           consecutiveSpawnFailures++;
           if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
             notifyUser(
-              `serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'cc-anywhere start'`,
+              `serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'dev-anywhere start'`,
             );
           }
         }

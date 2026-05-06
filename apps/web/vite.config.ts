@@ -12,9 +12,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["brand-icon.svg"],
       manifest: {
-        name: "CC Anywhere",
-        short_name: "CC Anywhere",
-        description: "Claude Code 远程控制: 手机浏览器像坐在电脑前一样实时与 Claude Code 交互",
+        name: "Dev Anywhere",
+        short_name: "Dev Anywhere",
+        description: "本地 AI CLI 透明代理和远程镜像: 在浏览器中实时查看和接管本地开发会话",
         id: "/",
         start_url: "/",
         scope: "/",

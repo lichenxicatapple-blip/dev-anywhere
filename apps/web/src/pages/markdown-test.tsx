@@ -63,7 +63,7 @@ fn main() {
 
 | 维度 | 值 |
 | --- | --- |
-| 名称 | cc-anywhere |
+| 名称 | dev-anywhere |
 | 语言 | TypeScript |
 | Runtime | Node >= 20 |
 

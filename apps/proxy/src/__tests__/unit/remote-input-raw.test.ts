@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RelayControlSchema } from "@cc-anywhere/shared";
+import { RelayControlSchema } from "@dev-anywhere/shared";
 
 describe("remote_input_raw envelope", () => {
   it("accepts a well-formed message", () => {

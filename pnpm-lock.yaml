@@ -79,10 +79,10 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@cc-anywhere/shared':
+      '@dev-anywhere/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@lichenxi.cat/cc-anywhere-relay':
+      '@dev-anywhere/relay':
         specifier: workspace:*
         version: link:../relay
       '@types/node':
@@ -113,7 +113,7 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@cc-anywhere/shared':
+      '@dev-anywhere/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@types/express':
@@ -198,7 +198,7 @@ importers:
         specifier: ^5.0.12
         version: 5.0.12(@types/react@19.2.14)(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5))
     devDependencies:
-      '@cc-anywhere/shared':
+      '@dev-anywhere/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@playwright/test':

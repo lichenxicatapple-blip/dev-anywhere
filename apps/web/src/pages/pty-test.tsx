@@ -38,7 +38,7 @@ export function PtyTest() {
 
     init();
 
-    document.title = "PTY Test -- CC Anywhere";
+    document.title = "PTY Test -- Dev Anywhere";
 
     return () => {
       cancelled = true;

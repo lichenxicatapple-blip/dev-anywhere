@@ -4,7 +4,7 @@
 import { forwardRef, useImperativeHandle, useMemo, useState, useEffect } from "react";
 import { Command, CommandList, CommandItem, CommandEmpty } from "@/components/ui/command";
 import { useCommandStore } from "@/stores/command-store";
-import type { CommandEntry } from "@cc-anywhere/shared";
+import type { CommandEntry } from "@dev-anywhere/shared";
 import type { PickerHandle } from "./picker-handle";
 
 interface SlashCommandPickerProps {

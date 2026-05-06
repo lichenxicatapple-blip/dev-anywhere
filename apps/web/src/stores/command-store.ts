@@ -1,7 +1,7 @@
 // 命令列表缓存：slash command 列表和更新时间
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { CommandEntry } from "@cc-anywhere/shared";
+import type { CommandEntry } from "@dev-anywhere/shared";
 
 interface CommandStoreState {
   commands: CommandEntry[];

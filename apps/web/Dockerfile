@@ -10,13 +10,13 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/web/package.json apps/web/
 
-RUN pnpm install --frozen-lockfile --filter @cc-anywhere/shared --filter @cc-anywhere/web
+RUN pnpm install --frozen-lockfile --filter @dev-anywhere/shared --filter @dev-anywhere/web
 
 COPY packages/shared/ packages/shared/
 COPY apps/web/ apps/web/
 
-RUN pnpm --filter @cc-anywhere/shared build
-RUN pnpm --filter @cc-anywhere/web build
+RUN pnpm --filter @dev-anywhere/shared build
+RUN pnpm --filter @dev-anywhere/web build
 
 # 生产阶段: nginx 静态服务 + 反代 relay
 FROM nginx:alpine AS runner

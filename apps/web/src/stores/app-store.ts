@@ -1,7 +1,7 @@
 // 应用级状态管理：连接状态、选中代理、客户端标识、AppPhase 状态机
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { ProxyInfo } from "@cc-anywhere/shared";
+import type { ProxyInfo } from "@dev-anywhere/shared";
 
 type AppPhase =
   | "connecting"

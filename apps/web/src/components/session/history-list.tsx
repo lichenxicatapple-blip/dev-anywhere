@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronRight, RefreshCw } from "lucide-react";
-import type { HistorySession, RelayControlMessage, SessionInfo } from "@cc-anywhere/shared";
+import type { HistorySession, RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";

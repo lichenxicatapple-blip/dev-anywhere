@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SessionManager } from "#src/serve/session-manager.js";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "session-mgr-test-"));

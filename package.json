@@ -1,5 +1,5 @@
 {
-  "name": "cc-anywhere",
+  "name": "dev-anywhere",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,8 +13,8 @@
     "test:integration": "TEST_SCOPE=integration vitest run",
     "typecheck": "tsc -b",
     "knip": "knip",
-    "cc-anywhere": "node apps/proxy/dist/index.js",
-    "proxy": "INIT_CWD=$PWD pnpm --filter @lichenxi.cat/cc-anywhere run dev --",
+    "dev-anywhere": "node apps/proxy/dist/index.js",
+    "proxy": "INIT_CWD=$PWD pnpm --filter @dev-anywhere/proxy run dev --",
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"
   },
   "devDependencies": {

@@ -11,20 +11,20 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/relay/package.json apps/relay/
 
 RUN pnpm install --frozen-lockfile \
-  --filter @cc-anywhere/shared \
-  --filter @lichenxi.cat/cc-anywhere-relay
+  --filter @dev-anywhere/shared \
+  --filter @dev-anywhere/relay
 
 # Sources
 COPY packages/shared/ packages/shared/
 COPY apps/relay/ apps/relay/
 
-RUN pnpm --filter @cc-anywhere/shared build
-RUN pnpm --filter @lichenxi.cat/cc-anywhere-relay build
+RUN pnpm --filter @dev-anywhere/shared build
+RUN pnpm --filter @dev-anywhere/relay build
 
 # Produce a self-contained prod-only deployment directory.
 # `pnpm deploy --prod` copies the package files (as declared in "files")
 # and installs only runtime dependencies — no devDeps, no workspace graph.
-RUN pnpm --filter @lichenxi.cat/cc-anywhere-relay deploy --prod /app/deploy
+RUN pnpm --filter @dev-anywhere/relay deploy --prod /app/deploy
 
 # Stage 2: minimal runtime
 FROM node:22-alpine AS runner

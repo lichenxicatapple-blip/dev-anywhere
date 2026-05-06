@@ -19,9 +19,9 @@ fi
 nohup pnpm --filter relay run dev &>/dev/null &
 sleep 2
 if lsof -i :3100 -sTCP:LISTEN &>/dev/null; then
-  echo "Relay started on :3100 (log: ~/.cc-anywhere/logs/relay.log)"
+  echo "Relay started on :3100 (log: ~/.dev-anywhere/logs/relay.log)"
 else
-  echo "ERROR: Relay failed to start, check ~/.cc-anywhere/logs/relay.log"
+  echo "ERROR: Relay failed to start, check ~/.dev-anywhere/logs/relay.log"
   exit 1
 fi
 

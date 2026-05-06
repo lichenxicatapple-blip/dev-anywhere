@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { SessionState } from "@cc-anywhere/shared";
+import { SessionState } from "@dev-anywhere/shared";
 import { PtyObserver } from "#src/serve/pty-observer.js";
 import { JsonObserver } from "#src/serve/json-observer.js";
 
