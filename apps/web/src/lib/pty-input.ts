@@ -1,11 +1,14 @@
-import type { Terminal } from "@xterm/xterm";
 import { sendRemoteInputRaw } from "./ansi-keys";
 
 type Disposable = {
   dispose: () => void;
 };
 
-export function attachXtermRawInput(term: Pick<Terminal, "onData">, sessionId: string): Disposable {
+interface RawInputTerminal {
+  onData: (handler: (data: string) => void) => Disposable;
+}
+
+export function attachXtermRawInput(term: RawInputTerminal, sessionId: string): Disposable {
   return term.onData((data) => {
     sendRemoteInputRaw(sessionId, data);
   });

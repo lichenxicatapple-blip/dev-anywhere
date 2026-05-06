@@ -20,7 +20,7 @@ import { attachPtyFitController } from "@/lib/pty-fit-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
-import { attachPtySessionTransport } from "@/lib/pty-session-transport";
+import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { BackToBottom } from "./back-to-bottom";
@@ -73,59 +73,36 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     const host = xtermHostRef.current;
-    if (!host) return;
-    let disposeFn: (() => void) | null = null;
-    let disposeRawInput: (() => void) | null = null;
-    let disposeTransport: (() => void) | null = null;
-    let removeFocusHandler: (() => void) | null = null;
-    let cancelled = false;
-
-    (async () => {
-      const result = await createXtermTerminal(host);
-      if (cancelled) {
-        result.dispose();
-        return;
-      }
-      terminalRef.current = result.terminal;
-      disposeFn = result.dispose;
-      disposeRawInput = attachXtermRawInput(result.terminal, sessionId).dispose;
-
-      const focusTerminal = (): void => result.terminal.focus();
-      host.addEventListener("pointerdown", focusTerminal, { passive: true });
-      removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
-
-      const ws = wsManagerRef;
-      const relay = relayClientRef;
-      if (!ws || !relay) return;
-
-      const transport = attachPtySessionTransport({
-        sessionId,
-        ws,
-        relay,
-        target: result.terminal,
-        onFrameWritten: () => {
-          pendingNewFrameRef.current = true;
-        },
-        onReady: () => {
-          setReady(true);
-          setSubscribeExhausted(false);
-        },
-        onSubscribeStarted: () => {
-          setSubscribeExhausted(false);
-        },
-        onSubscribeExhausted: () => {
-          setSubscribeExhausted(true);
-        },
-      });
-      disposeTransport = transport.dispose;
-    })();
+    const ws = wsManagerRef;
+    const relay = relayClientRef;
+    if (!host || !ws || !relay) return;
+    const controller = attachPtyTerminalController({
+      host,
+      sessionId,
+      ws,
+      relay,
+      createTerminal: createXtermTerminal,
+      attachRawInput: attachXtermRawInput,
+      onTerminalReady: (term) => {
+        terminalRef.current = term as Terminal;
+      },
+      onFrameWritten: () => {
+        pendingNewFrameRef.current = true;
+      },
+      onReady: () => {
+        setReady(true);
+        setSubscribeExhausted(false);
+      },
+      onSubscribeStarted: () => {
+        setSubscribeExhausted(false);
+      },
+      onSubscribeExhausted: () => {
+        setSubscribeExhausted(true);
+      },
+    });
 
     return () => {
-      cancelled = true;
-      disposeTransport?.();
-      removeFocusHandler?.();
-      disposeRawInput?.();
-      disposeFn?.();
+      controller.dispose();
       terminalRef.current = null;
     };
   }, [sessionId, connected, proxyOnline, retryNonce]);
