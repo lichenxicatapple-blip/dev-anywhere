@@ -18,11 +18,14 @@ const CODEX_HOOK_EVENTS = [
   "SessionStart",
 ] as const;
 
+export const CODEX_HOOK_OUTPUT_EVENTS = ["PreToolUse", "PermissionRequest"] as const;
+
 // Codex hook configs also express command timeout as a finite value. Permission hooks should
 // mirror native approval behavior and wait for the user, so avoid short provider defaults.
 const PERMISSION_HOOK_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
 
 const HOOK_FORWARDER_SCRIPT = `
+const OUTPUT_EVENTS = new Set(${JSON.stringify(CODEX_HOOK_OUTPUT_EVENTS)});
 let body = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { body += chunk; });
@@ -46,12 +49,19 @@ process.stdin.on("end", async () => {
       },
       body: JSON.stringify(request),
     });
-    process.stdout.write(await response.text());
+    const text = await response.text();
+    if (OUTPUT_EVENTS.has(request.event)) {
+      process.stdout.write(text);
+    }
   } catch {
     process.exit(0);
   }
 });
 `.trim();
+
+export function getCodexHookForwarderScriptForTest(): string {
+  return HOOK_FORWARDER_SCRIPT;
+}
 
 const HOOK_FORWARDER_PATH = `${RUN_DIR}/provider-hook-forwarder.mjs`;
 

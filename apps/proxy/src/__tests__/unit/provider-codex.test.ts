@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CODEX_PROVIDER, resolveCodexCommand } from "#src/providers/codex.js";
+import {
+  CODEX_HOOK_OUTPUT_EVENTS,
+  CODEX_PROVIDER,
+  getCodexHookForwarderScriptForTest,
+  resolveCodexCommand,
+} from "#src/providers/codex.js";
 
 describe("Codex provider", () => {
   it("declares Codex provider capabilities", () => {
@@ -58,6 +63,11 @@ describe("Codex provider", () => {
     expect(countInlineTableBraceBalance(command.args.join(" "))).toBe(0);
     expect(command.args.join(" ")).not.toContain(".codex/hooks.json");
     expect(command.args.join(" ")).not.toContain("token-1");
+  });
+
+  it("only writes provider hook output for Codex events that consume hook decisions", () => {
+    expect(CODEX_HOOK_OUTPUT_EVENTS).toEqual(["PreToolUse", "PermissionRequest"]);
+    expect(getCodexHookForwarderScriptForTest()).toContain("if (OUTPUT_EVENTS.has(request.event))");
   });
 
   it("rejects JSON sessions until Codex stream parsing is implemented", () => {
