@@ -12,7 +12,9 @@ interface PtyObserverDeps {
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
 }
 
-// PTY 观察通道：把 terminal.ts 上报的 PTY 语义信号翻译成 SessionState。
+// 待删除旧路径：把 terminal.ts 上报的 PTY 语义信号翻译成 SessionState。
+// 删除条件见 ARCHITECTURE-GOVERNANCE.md「删除债务登记」：
+// hook/status channel 覆盖 PTY Claude 主流程后，从主状态路径移除 idle/OSC 推断。
 // 观察通道天然没有 ERROR——PTY 错误体现为终端 ANSI 内容，proxy 不建模观察器失联。
 export class PtyObserver {
   constructor(private deps: PtyObserverDeps) {}

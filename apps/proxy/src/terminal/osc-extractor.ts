@@ -12,7 +12,9 @@ interface PtyStateEvent {
   tool?: string;
 }
 
-// 从 PTY 原始数据中提取 OSC 语义信号
+// 待删除旧路径：从 PTY 原始数据中提取 OSC 语义信号。
+// 删除条件见 ARCHITECTURE-GOVERNANCE.md「删除债务登记」：
+// hook PermissionRequest 覆盖 PTY Claude 审批后，删除审批主流程依赖。
 // OSC 9 优先级高于 OSC 0，无匹配时返回 null
 export function extractOscSignals(rawData: string): PtyStateEvent | null {
   const regex = new RegExp(OSC_PATTERN.source, OSC_PATTERN.flags);

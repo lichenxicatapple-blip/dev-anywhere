@@ -290,6 +290,15 @@ LinkShell 做法：
 5. `ToolApprovalCard` 的本地 whitelist 如果与 server-side whitelist 不一致，应删除或改成真实 server-side 行为。
 6. 没有主流程入口的 dead web state、debug routes、file watcher 应继续清理。
 7. 渲染层要做集中治理，不能继续在 chat view、xterm view、store、dispatcher 之间补丁式修 bug。
+
+### 待删除旧路径
+
+| 旧路径                                  | 删除条件                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| JSON `worker_approval_request/response` | hook `PermissionRequest` 接入统一 permission broker 和 relay 决策后删除 |
+| PTY idle timer 主状态路径               | hook/status channel 覆盖 PTY Claude 主流程后删除                        |
+| OSC approval wait 主审批信号            | hook `PermissionRequest` 覆盖 PTY Claude 审批后删除                     |
+
 8. 架构边界要做集中治理，不能继续让 provider、proxy service、relay protocol、web store 互相穿透。
 
 ### 不建议照搬

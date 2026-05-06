@@ -1,6 +1,9 @@
 import { serviceLogger } from "../common/logger.js";
 
-// 待审批的工具调用元数据。
+// 待删除旧路径：stream-json control_request 审批元数据。
+// 删除条件见 ARCHITECTURE-GOVERNANCE.md「删除债务登记」：
+// hook PermissionRequest 接入统一 permission broker 和 relay 决策后，删除
+// worker_approval_request/response 这条 JSON 专用审批路径。
 // WorkerRegistry.forwardApprovalRequest() 在收到 worker_approval_request 时 register；
 // RelayRouter.onToolApprove/onToolDeny 在收到 relay 指令后 take + 通过 WorkerRegistry.send 回写响应。
 interface PendingApproval {

@@ -47,11 +47,11 @@
 
 本地有三条不同通道：
 
-| 通道               | 方向                           | 用途                                              |
-| ------------------ | ------------------------------ | ------------------------------------------------- |
-| terminal IPC       | terminal runtime <-> serve     | PTY 注册、PTY bytes、resize、snapshot、远端输入   |
-| worker IPC         | session-worker <-> serve       | JSON event、JSON input、worker 生命周期、旧审批   |
-| provider hook HTTP | Claude/Codex provider -> serve | provider 语义事件、tool lifecycle、阻塞式权限请求 |
+| 通道               | 方向                           | 用途                                                  |
+| ------------------ | ------------------------------ | ----------------------------------------------------- |
+| terminal IPC       | terminal runtime <-> serve     | PTY 注册、PTY bytes、resize、snapshot、远端输入       |
+| worker IPC         | session-worker <-> serve       | JSON event、JSON input、worker 生命周期、待删除旧审批 |
+| provider hook HTTP | Claude/Codex provider -> serve | provider 语义事件、tool lifecycle、阻塞式权限请求     |
 
 hook HTTP 不替代 terminal IPC 或 worker IPC。它只承接 provider 主动回调的语义事件；PTY 字节流、远端逐键输入、terminal snapshot 仍归 terminal runtime。
 
@@ -293,6 +293,16 @@ PTY 模式不允许：
 - 每次删除旧路径必须补一个失败模式测试，证明主流程不再依赖旧路径。
 - PTY 渲染、远端逐键输入、permission broker、hook 注入属于高风险路径，不能只靠手测。
 - 大重写前先补 characterization tests，锁住当前可接受行为；重写后删除过时测试，而不是让旧行为继续约束新架构。
+
+## 删除债务登记
+
+这些路径只允许作为迁移期间的待删除旧路径，不能被继续扩展：
+
+| 旧路径                                       | 当前用途                            | 删除条件                                                                |
+| -------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
+| `worker_approval_request/response` JSON 审批 | stream-json `control_request` 审批  | hook `PermissionRequest` 接入统一 permission broker 和 relay 决策后删除 |
+| PTY idle timer 状态推断                      | PTY 无 hook provider 的短期降级信号 | hook/status channel 覆盖 PTY Claude 主流程后从主状态路径移除            |
+| OSC approval wait 识别                       | PTY 审批等待的旧语义猜测            | hook `PermissionRequest` 对 PTY Claude 生效后删除审批主流程依赖         |
 
 ## Review Checklist
 
