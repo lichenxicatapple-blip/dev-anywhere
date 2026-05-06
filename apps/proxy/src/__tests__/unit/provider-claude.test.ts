@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_PROVIDER,
+  buildClaudeHookSettings,
   buildClaudeArgs,
   filterClaudeEnvVars,
   resolveClaudeJsonCommand,
@@ -100,6 +101,37 @@ describe("Claude provider", () => {
       args,
       env,
     });
+  });
+
+  it("injects session-scoped Claude hook settings and env", () => {
+    const hook = {
+      provider: "claude" as const,
+      sessionId: "s1",
+      hookUrl: "http://127.0.0.1:17654/hook",
+      marker: "marker-1",
+      token: "token-1",
+    };
+
+    const command = CLAUDE_PROVIDER.buildJsonCommand({ hook }, { PATH: "/usr/bin" });
+
+    expect(command.env.DEV_ANYWHERE_SESSION_ID).toBe("s1");
+    expect(command.env.DEV_ANYWHERE_HOOK_URL).toBe("http://127.0.0.1:17654/hook");
+    expect(command.args).toContain("--settings");
+    const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number }> }>>;
+    };
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain(
+      "DEV_ANYWHERE_HOOK_EVENT='SessionStart'",
+    );
+    expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(150);
+  });
+
+  it("builds Claude hook settings without global config paths", () => {
+    const settings = buildClaudeHookSettings();
+
+    expect(JSON.stringify(settings)).not.toContain(".claude");
+    expect(JSON.stringify(settings)).not.toContain(".codex");
+    expect(JSON.stringify(settings)).not.toContain("token-1");
   });
 
   it("keeps fork-session optional for compatibility tests", () => {

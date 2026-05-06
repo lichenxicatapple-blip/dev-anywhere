@@ -12,6 +12,7 @@ import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
 import { readSessionMessages } from "./session-history.js";
+import type { ProviderHookContext } from "../providers/index.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -25,6 +26,10 @@ interface RelayRouterDeps {
   broadcastSessionSync: (session: SessionInfo) => void;
   // user_input 注入触发 turn 开始（JSON 观察器）
   jsonObserver: JsonObserver;
+  createHookContext: (
+    sessionId: string,
+    provider: ProviderHookContext["provider"],
+  ) => ProviderHookContext;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -207,11 +212,13 @@ export class RelayRouter {
     const name = tildify(cwd);
     // 先生成 ID 和启动 worker，连接成功后再注册 session
     const pendingId = nanoid();
+    const hook = this.deps.createHookContext(pendingId, "claude");
     const workerPid = this.deps.workerRegistry.spawn(pendingId, {
       cwd,
       resumeSessionId,
       permissionMode,
       streamDelta,
+      hook,
     });
 
     const paths = sessionPaths(pendingId);

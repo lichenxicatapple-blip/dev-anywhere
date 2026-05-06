@@ -1,10 +1,11 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { CLAUDE_PROVIDER } from "../providers/index.js";
+import { CLAUDE_PROVIDER, type ProviderHookContext } from "../providers/index.js";
 import { readTtySize } from "./tty.js";
 
 interface PtyManagerOptions {
   claudeArgs: string[];
+  hook?: ProviderHookContext;
   tap: (data: string) => void;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
@@ -15,6 +16,7 @@ interface PtyManagerOptions {
 export class PtyManager {
   private child: IPty | null = null;
   private readonly claudeArgs: string[];
+  private readonly hook?: ProviderHookContext;
   private readonly tap: (data: string) => void;
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
@@ -23,6 +25,7 @@ export class PtyManager {
 
   constructor(options: PtyManagerOptions) {
     this.claudeArgs = options.claudeArgs;
+    this.hook = options.hook;
     this.tap = options.tap;
     this.stdin = options.stdin;
     this.stdout = options.stdout;
@@ -33,7 +36,10 @@ export class PtyManager {
   start(): void {
     const { cols, rows } = readTtySize(this.stdout);
 
-    const command = CLAUDE_PROVIDER.buildTerminalCommand({ args: this.claudeArgs }, process.env);
+    const command = CLAUDE_PROVIDER.buildTerminalCommand(
+      { args: this.claudeArgs, hook: this.hook },
+      process.env,
+    );
     const child = pty.spawn(command.command, command.args, {
       name: process.env.TERM ?? "xterm-256color",
       cols,

@@ -34,6 +34,23 @@ describe("IPC Protocol", () => {
 
       expect(parsed).toEqual(msg);
     });
+
+    it("accepts session create response with hook context", async () => {
+      const { IpcMessageSchema } = await importIpc();
+      const result = IpcMessageSchema.safeParse({
+        type: "session_create_response",
+        sessionId: "s1",
+        hook: {
+          provider: "claude",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:17654/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

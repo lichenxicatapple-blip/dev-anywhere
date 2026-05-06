@@ -26,6 +26,14 @@ export function encodeBinaryIpcFrame(sessionId: string, data: Buffer): Buffer {
 
 const sessionStateValues = Object.values(SessionState) as [SessionState, ...SessionState[]];
 
+const ProviderHookContextSchema = z.object({
+  provider: z.enum(["claude", "codex"]),
+  sessionId: z.string(),
+  hookUrl: z.string(),
+  marker: z.string(),
+  token: z.string(),
+});
+
 // IPC 消息 schema，客户端与服务端通过 Unix domain socket 使用 NDJSON 通信
 export const IpcMessageSchema = z.discriminatedUnion("type", [
   // 客户端请求创建新会话，sessionId 可选用于重连时复用
@@ -43,6 +51,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("session_create_response"),
     sessionId: z.string(),
     error: z.string().optional(),
+    hook: ProviderHookContextSchema.optional(),
   }),
 
   // 客户端请求终止会话

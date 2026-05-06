@@ -16,6 +16,7 @@ import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { ToolApprovalManager } from "./tool-approval-manager.js";
 import type { JsonObserver } from "./json-observer.js";
+import type { ProviderHookContext } from "../providers/index.js";
 
 interface WorkerRegistryDeps {
   sessionManager: SessionManager;
@@ -33,6 +34,7 @@ interface SpawnOptions {
   // 开启后 worker spawn claude 带 --include-partial-messages，forwardEvent 处理 stream_event delta；
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
   streamDelta?: boolean;
+  hook?: ProviderHookContext;
 }
 
 // 管理 session → worker socket 的映射，封装全部 worker IO：
@@ -99,10 +101,23 @@ export class WorkerRegistry {
       args.push("--stream-delta");
       this.streamDeltaSessions.add(sessionId);
     }
+    if (options?.hook) {
+      args.push(
+        "--hook-provider",
+        options.hook.provider,
+        "--hook-url",
+        options.hook.hookUrl,
+        "--hook-marker",
+        options.hook.marker,
+      );
+    }
     args.push("--");
 
     const child = spawnScript(new URL("./session-worker", import.meta.url), args, {
       logger: serviceLogger,
+      env: options?.hook
+        ? { ...process.env, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }
+        : process.env,
     });
     const workerPid = child.pid!;
     serviceLogger.info(

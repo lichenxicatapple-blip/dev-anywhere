@@ -19,6 +19,7 @@ import {
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { createFSM } from "./common/state-machine.js";
+import type { ProviderHookContext } from "./providers/index.js";
 
 // serve daemon 自动拉起的连接重试参数
 const ENSURE_SERVICE_MAX_RETRIES = 20;
@@ -139,6 +140,7 @@ class TerminalSession {
   // socket 在 run() 中连上 serve 后首次赋值；reconnect 会重新赋值为新实例
   private socket!: Socket;
   private sessionId: string | null = null;
+  private hookContext: ProviderHookContext | null = null;
   private ptyManager: PtyManager | null = null;
   private lastOutputTime = 0;
   private idleCheckTimer: NodeJS.Timeout | null = null;
@@ -199,6 +201,7 @@ class TerminalSession {
       throw new Error(`Failed to create session: ${response.error}`);
     }
     this.sessionId = response.sessionId;
+    this.hookContext = response.hook ?? null;
   }
 
   private initHeadlessTerminal(): void {
@@ -222,6 +225,7 @@ class TerminalSession {
   private startPtyManager(): void {
     this.ptyManager = new PtyManager({
       claudeArgs: this.claudeArgs,
+      hook: this.hookContext ?? undefined,
       tap: (data) => this.handlePtyData(data),
       stdin: process.stdin,
       stdout: process.stdout,

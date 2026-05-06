@@ -9,6 +9,7 @@ import {
 } from "./worker/json-session.js";
 import { SeqCounter } from "./common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
+import type { ProviderHookContext } from "./providers/index.js";
 
 // 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
 const sessionId = process.argv[2];
@@ -29,11 +30,26 @@ const workerCwd = getArg("--cwd");
 const workerResume = getArg("--resume");
 const workerPermissionMode = getArg("--permission-mode") as ClaudePermissionMode | undefined;
 const workerStreamDelta = hasFlag("--stream-delta");
+const workerHookUrl = getArg("--hook-url");
+const workerHookMarker = getArg("--hook-marker");
+const workerHookToken = process.env.DEV_ANYWHERE_HOOK_TOKEN;
+const workerHookProvider = getArg("--hook-provider") as ProviderHookContext["provider"] | undefined;
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
   process.exit(1);
 }
+
+const workerHook: ProviderHookContext | undefined =
+  workerHookUrl && workerHookMarker && workerHookToken && workerHookProvider
+    ? {
+        provider: workerHookProvider,
+        sessionId,
+        hookUrl: workerHookUrl,
+        marker: workerHookMarker,
+        token: workerHookToken,
+      }
+    : undefined;
 
 let serveSocket: Socket | null = null;
 const seqCounter = new SeqCounter(sessionId);
@@ -77,6 +93,7 @@ const session = new JsonSession({
   resumeSessionId: workerResume,
   permissionMode: workerPermissionMode,
   includePartialMessages: workerStreamDelta,
+  hook: workerHook,
   approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
   onEvent: (event: StreamJsonEvent) => {
     // 从 system 事件中捕获 Claude 会话 ID 并通知 serve

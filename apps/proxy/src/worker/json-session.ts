@@ -8,6 +8,7 @@ import {
   filterClaudeEnvVars,
   type ClaudePermissionMode,
 } from "../providers/index.js";
+import type { ProviderHookContext } from "../providers/index.js";
 
 export { buildClaudeArgs, filterClaudeEnvVars };
 export type { ClaudePermissionMode };
@@ -42,6 +43,7 @@ interface JsonSessionOptions {
   resumeSessionId?: string;
   permissionMode?: ClaudePermissionMode;
   includePartialMessages?: boolean;
+  hook?: ProviderHookContext;
 }
 
 // 默认拒绝所有工具调用，远程审批未配置前的安全兜底
@@ -96,6 +98,7 @@ export class JsonSession {
   private readonly resumeSessionId?: string;
   private readonly permissionMode?: ClaudePermissionMode;
   private readonly includePartialMessages: boolean;
+  private readonly hook?: ProviderHookContext;
 
   constructor(options: JsonSessionOptions = {}) {
     this.workDir = options.cwd ?? options.workDir ?? process.cwd();
@@ -106,6 +109,7 @@ export class JsonSession {
     this.resumeSessionId = options.resumeSessionId;
     this.permissionMode = options.permissionMode;
     this.includePartialMessages = options.includePartialMessages ?? false;
+    this.hook = options.hook;
   }
 
   getClaudeSessionId(): string | null {
@@ -119,6 +123,7 @@ export class JsonSession {
         permissionMode: this.permissionMode,
         resumeSessionId: this.resumeSessionId,
         includePartialMessages: this.includePartialMessages,
+        hook: this.hook,
       },
       process.env,
     );

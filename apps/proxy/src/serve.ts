@@ -21,6 +21,7 @@ import { JsonObserver } from "./serve/json-observer.js";
 import { HookRegistry } from "./serve/hook-registry.js";
 import { HookServer } from "./serve/hook-server.js";
 import { PermissionBroker } from "./serve/permission-broker.js";
+import type { ProviderHookContext } from "./providers/index.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -151,6 +152,10 @@ function handleTerminalConnection(
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
   ptyObserver: PtyObserver,
+  createHookContext: (
+    sessionId: string,
+    provider: ProviderHookContext["provider"],
+  ) => ProviderHookContext,
 ): void {
   createIpcReader(
     socket,
@@ -180,6 +185,7 @@ function handleTerminalConnection(
             serializeIpc({
               type: "session_create_response",
               sessionId: session.id,
+              hook: createHookContext(session.id, "claude"),
             }),
           );
           serviceLogger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
@@ -416,9 +422,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     // STOPPED 文件不存在时忽略
   }
 
+  const hookRegistry = new HookRegistry();
+  const permissionBroker = new PermissionBroker();
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
+      hookRegistry.unregisterSession(id);
+      permissionBroker.cleanupSession(id, "session removed");
       const paths = sessionPaths(id);
       try {
         rmSync(paths.dir, { recursive: true, force: true });
@@ -431,8 +441,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const terminalSockets = new Map<string, Socket>();
   const toolApprovalManager = new ToolApprovalManager();
-  const hookRegistry = new HookRegistry();
-  const permissionBroker = new PermissionBroker();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
@@ -494,6 +502,20 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     console.error(msg);
     process.exit(1);
   }
+  const hookUrl = `http://127.0.0.1:${hookServer.getListeningPort() ?? proxyConfig.hookPort ?? 17654}/hook`;
+  const createHookContext = (
+    sessionId: string,
+    provider: ProviderHookContext["provider"],
+  ): ProviderHookContext => {
+    const credentials = hookRegistry.registerSession(sessionId, provider);
+    return {
+      provider,
+      sessionId,
+      hookUrl,
+      marker: credentials.marker,
+      token: credentials.token,
+    };
+  };
 
   // WorkerRegistry 建在 relay 之后、listener 之前；构造期订阅 envelope_dropped 事件
   const workerRegistry = new WorkerRegistry({
@@ -517,6 +539,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,
+    createHookContext,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -547,6 +570,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       relayConnection,
       controlHandlers,
       ptyObserver,
+      createHookContext,
     );
   });
 

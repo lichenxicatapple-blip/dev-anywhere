@@ -155,8 +155,12 @@ export class HookServer {
   ): Promise<void> {
     const requestId = event.requestId ?? `${event.sessionId}:${Date.now()}`;
     const toolName =
-      typeof event.payload.toolName === "string" ? event.payload.toolName : "unknown";
-    const input = asRecord(event.payload.input);
+      typeof event.payload.toolName === "string"
+        ? event.payload.toolName
+        : typeof event.payload.tool_name === "string"
+          ? event.payload.tool_name
+          : "unknown";
+    const input = asRecord(event.payload.input ?? event.payload.tool_input);
 
     this.options.onEvent?.({ ...event, requestId });
     const decision = await this.options.permissionBroker.request({

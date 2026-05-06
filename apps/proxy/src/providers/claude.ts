@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import type {
   ProviderAdapter,
   ProviderCommand,
+  ProviderHookContext,
   ProviderJsonOptions,
   ProviderTerminalOptions,
 } from "./types.js";
@@ -62,6 +63,94 @@ export function resolveClaudeJsonCommand(env: NodeJS.ProcessEnv): string {
   return env.CLAUDE_BIN || "claude";
 }
 
+const CLAUDE_HOOK_EVENTS = [
+  "PreToolUse",
+  "PostToolUse",
+  "PostToolUseFailure",
+  "Stop",
+  "PermissionRequest",
+  "UserPromptSubmit",
+  "SessionStart",
+] as const;
+
+const HOOK_FORWARDER_SCRIPT = `
+let body = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { body += chunk; });
+process.stdin.on("end", async () => {
+  let payload = {};
+  try { payload = body ? JSON.parse(body) : {}; } catch { payload = { raw: body }; }
+  const request = {
+    sessionId: process.env.DEV_ANYWHERE_SESSION_ID,
+    provider: process.env.DEV_ANYWHERE_PROVIDER,
+    marker: process.env.DEV_ANYWHERE_HOOK_MARKER,
+    event: process.env.DEV_ANYWHERE_HOOK_EVENT || payload.hook_event_name || payload.event_name || "unknown",
+    requestId: payload.request_id || payload.requestId,
+    payload,
+  };
+  try {
+    const response = await fetch(process.env.DEV_ANYWHERE_HOOK_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + process.env.DEV_ANYWHERE_HOOK_TOKEN,
+      },
+      body: JSON.stringify(request),
+    });
+    process.stdout.write(await response.text());
+  } catch {
+    process.exit(0);
+  }
+});
+`.trim();
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildHookForwardCommand(event: string): string {
+  return `DEV_ANYWHERE_HOOK_EVENT=${shellQuote(event)} node -e ${shellQuote(HOOK_FORWARDER_SCRIPT)}`;
+}
+
+export function buildClaudeHookSettings(): Record<string, unknown> {
+  const hooks: Record<string, unknown[]> = {};
+  for (const event of CLAUDE_HOOK_EVENTS) {
+    hooks[event] = [
+      {
+        matcher: "",
+        hooks: [
+          {
+            type: "command",
+            command: buildHookForwardCommand(event),
+            timeout: event === "PermissionRequest" ? 150 : 5,
+          },
+        ],
+      },
+    ];
+  }
+  return { hooks };
+}
+
+function withClaudeHookArgs(args: string[], context: ProviderHookContext | undefined): string[] {
+  if (!context) return args;
+  return [...args, "--settings", JSON.stringify(buildClaudeHookSettings())];
+}
+
+function withClaudeHookEnv(
+  env: NodeJS.ProcessEnv,
+  context: ProviderHookContext | undefined,
+): NodeJS.ProcessEnv {
+  if (!context) return env;
+  return {
+    ...env,
+    DEV_ANYWHERE_PROVIDER: context.provider,
+    DEV_ANYWHERE_SESSION_ID: context.sessionId,
+    DEV_ANYWHERE_HOOK_URL: context.hookUrl,
+    DEV_ANYWHERE_HOOK_MARKER: context.marker,
+    DEV_ANYWHERE_HOOK_TOKEN: context.token,
+  };
+}
+
 export const CLAUDE_PROVIDER: ProviderAdapter = {
   id: "claude",
   displayName: "Claude Code",
@@ -85,15 +174,15 @@ export const CLAUDE_PROVIDER: ProviderAdapter = {
 
     return {
       command: resolveClaudeJsonCommand(env),
-      args: [...baseArgs, ...(options.extraArgs ?? [])],
-      env: filterClaudeEnvVars(env),
+      args: [...withClaudeHookArgs(baseArgs, options.hook), ...(options.extraArgs ?? [])],
+      env: withClaudeHookEnv(filterClaudeEnvVars(env), options.hook),
     };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
       command: resolveClaudePtyCommand(env),
-      args: options.args,
-      env,
+      args: withClaudeHookArgs(options.args, options.hook),
+      env: withClaudeHookEnv(env, options.hook),
     };
   },
 };

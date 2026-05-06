@@ -13,15 +13,25 @@ export interface ProviderCommand {
   readonly env: NodeJS.ProcessEnv;
 }
 
+export interface ProviderHookContext {
+  readonly provider: ProviderId;
+  readonly sessionId: string;
+  readonly hookUrl: string;
+  readonly marker: string;
+  readonly token: string;
+}
+
 export interface ProviderJsonOptions {
   readonly extraArgs?: string[];
   readonly permissionMode?: string;
   readonly resumeSessionId?: string;
   readonly includePartialMessages?: boolean;
+  readonly hook?: ProviderHookContext;
 }
 
 export interface ProviderTerminalOptions {
   readonly args: string[];
+  readonly hook?: ProviderHookContext;
 }
 
 export interface ProviderAdapter {
