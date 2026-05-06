@@ -18,7 +18,7 @@ import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { PtyRecoveryController } from "@/lib/pty-recovery";
-import { computePtyHostLayout, computeScrollTarget, ydispToScrollTop } from "@/lib/pty-scroll";
+import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useFollowOutput } from "@/hooks/use-follow-output";
@@ -194,8 +194,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     };
   }, [sessionId, connected, proxyOnline, retryNonce]);
 
-  // 同步 spacer 尺寸 + scroll 双向绑定 + 初始 pin-bottom.
-  // 用一个 effect 统一管理生命周期, 避免多个 effect 各自持有 syncing 标志时互相打架.
   useEffect(() => {
     if (!ready) return;
     const container = containerEl;
@@ -204,135 +202,19 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     const term = terminalRef.current;
     if (!container || !spacer || !host || !term) return;
 
-    const getDims = (): { cellH: number; cellW: number } => {
-      const screen = host.querySelector<HTMLElement>(".xterm-screen");
-      if (!screen || term.rows === 0 || term.cols === 0) return { cellH: 0, cellW: 0 };
-      return {
-        cellH: screen.clientHeight / term.rows,
-        cellW: screen.clientWidth / term.cols,
-      };
-    };
-
-    // syncing 旗标: container.scroll -> term.scrollToLine 会触发 term.onScroll, 反向同步
-    // 需要抑制避免 feedback loop. ref 包起来让两边 handler 共享.
-    const syncing = { external: false, internal: false };
-
-    const updateSpacer = (): void => {
-      const { cellH, cellW } = getDims();
-      if (cellH === 0 || cellW === 0) return;
-      const buffer = term.buffer.active;
-      let canvasLastY = -1;
-      for (let ry = term.rows - 1; ry >= 0; ry--) {
-        const absY = buffer.viewportY + ry;
-        if (absY < 0 || absY >= buffer.length) continue;
-        const line = buffer.getLine(absY);
-        if (line && line.translateToString(true).trimEnd().length > 0) {
-          canvasLastY = ry;
-          break;
-        }
-      }
-      const layout = computePtyHostLayout(
-        {
-          bufferLength: buffer.length,
-          rows: term.rows,
-          cols: term.cols,
-          viewportY: buffer.viewportY,
-          cellH,
-          cellW,
-        },
-        canvasLastY,
-      );
-      if (!layout) return;
-      spacer.style.height = `${layout.spacerHeight}px`;
-      spacer.style.width = `${layout.spacerWidth}px`;
-      host.style.width = `${layout.hostWidth}px`;
-      host.style.height = `${layout.hostHeight}px`;
-      host.style.paddingTop = `${layout.hostPaddingTop}px`;
-    };
-
-    const scrollToYdisp = (ydisp: number): void => {
-      syncing.internal = true;
-      try {
-        term.scrollToLine(ydisp);
-      } finally {
-        syncing.internal = false;
-      }
-    };
-
-    // scrollback 阶段 (sticky pinned) ydisp 只能整行切换, 每 cellH 才动一次像素粒度明显.
-    // 在 xterm 根 .xterm 上挂亚像素 translate 补偿 scrollTop 未满一行的残余, 满一行再 flush ydisp.
-    // target 选 .xterm (xterm-host 的第一级子): xterm 内部只动 .xterm 下面的 .xterm-screen, 不碰 .xterm 自己, 不会冲突.
-    // release 阶段 ydisp 已饱和, canvas 整体位移由浏览器做 sticky release, 无需 subpixel.
-    const applySubpixel = (px: number): void => {
-      const xtermRoot = host.querySelector<HTMLElement>(".xterm");
-      if (!xtermRoot) return;
-      xtermRoot.style.transform = px !== 0 ? `translate3d(0,${-px}px,0)` : "";
-    };
-
-    const onContainerScroll = (): void => {
-      if (syncing.external) return;
-      const { cellH } = getDims();
-      if (cellH === 0) return;
-      const buffer = term.buffer.active;
-      const { ydisp, subpixel } = computeScrollTarget(container.scrollTop, {
-        bufferLength: buffer.length,
-        rows: term.rows,
-        cols: term.cols,
-        viewportY: buffer.viewportY,
-        cellH,
-        cellW: 1,
-      });
-      applySubpixel(subpixel);
-      if (ydisp !== buffer.viewportY) {
-        scrollToYdisp(ydisp);
-      }
-    };
-
-    const onTermScroll = (): void => {
-      if (syncing.internal) return;
-      syncing.external = true;
-      try {
-        const { cellH } = getDims();
-        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
-        // 反向同步后清空 subpixel, 避免遗留
-        applySubpixel(0);
-      } finally {
-        syncing.external = false;
-      }
-    };
-
-    // 新数据到来时 buffer 可能增长, spacer 需要跟着长; xterm onRender 在每次渲染后触发
-    // follow 语义对齐 JSON 模式: 新帧且在底时自动追随, 新帧且离底时置 newFramesWhileAway 红点
-    // pendingNewFrameRef guard 必要: user scroll 导致的 canvas 重绘也会触发 onRender, 不 guard 会误红点
-    const onRender = (): void => {
-      updateSpacer();
-      if (!pendingNewFrameRef.current) return;
-      pendingNewFrameRef.current = false;
-      if (isAtBottomRef.current) {
-        container.scrollTop = container.scrollHeight;
-      } else if (!newFramesWhileAwayRef.current) {
-        setNewFramesWhileAway(true);
-      }
-    };
-
-    updateSpacer();
-    // 初始 pin 到底: scrollTop = max 让 sticky release 同时把 canvas 底部 + active buffer 一起显露
-    container.scrollTop = container.scrollHeight;
-
-    container.addEventListener("scroll", onContainerScroll, { passive: true });
-    const dispScroll = term.onScroll(onTermScroll);
-    const dispRender = term.onRender(onRender);
-    // 容器尺寸变化 (侧栏开合 / 键盘弹起) 也要重算 spacer
-    const ro = new ResizeObserver(updateSpacer);
-    ro.observe(container);
-    ro.observe(host);
-
-    return () => {
-      container.removeEventListener("scroll", onContainerScroll);
-      dispScroll.dispose();
-      dispRender.dispose();
-      ro.disconnect();
-    };
+    return attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term,
+      isAtBottom: () => isAtBottomRef.current,
+      hasNewFrame: () => pendingNewFrameRef.current,
+      consumeNewFrame: () => {
+        pendingNewFrameRef.current = false;
+      },
+      hasNewFramesWhileAway: () => newFramesWhileAwayRef.current,
+      setNewFramesWhileAway,
+    });
   }, [ready, ptyAutoscale, containerEl]);
 
   // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
