@@ -140,7 +140,7 @@ export class HookServer {
       payload: asRecord(parsed.payload),
     };
 
-    if (event.event === "PermissionRequest") {
+    if (event.event === "PermissionRequest" || event.event === "PreToolUse") {
       await this.handlePermissionRequest(event, res);
       return;
     }
@@ -153,7 +153,10 @@ export class HookServer {
     event: AuthenticatedHookEvent,
     res: ServerResponse,
   ): Promise<void> {
-    const requestId = event.requestId ?? `${event.sessionId}:${Date.now()}`;
+    const requestId =
+      event.requestId ??
+      (typeof event.payload.tool_use_id === "string" ? event.payload.tool_use_id : undefined) ??
+      `${event.sessionId}:${Date.now()}`;
     const toolName =
       typeof event.payload.toolName === "string"
         ? event.payload.toolName
@@ -170,7 +173,29 @@ export class HookServer {
       toolName,
       input,
     });
-    this.writeJson(res, 200, decision);
+    this.writeJson(res, 200, this.toProviderDecision(event.event, decision));
+  }
+
+  private toProviderDecision(
+    eventName: string,
+    decision: { behavior: "allow" | "deny"; message?: string },
+  ): object {
+    if (eventName === "PreToolUse") {
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: decision.behavior,
+          ...(decision.message ? { permissionDecisionReason: decision.message } : {}),
+        },
+      };
+    }
+
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision,
+      },
+    };
   }
 
   private readBody(req: IncomingMessage): Promise<string> {

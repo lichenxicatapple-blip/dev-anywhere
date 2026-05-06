@@ -37,7 +37,6 @@ export class HookEventRouter {
         this.deps.changeSessionState(event.sessionId, SessionState.IDLE);
         break;
       case "UserPromptSubmit":
-      case "PreToolUse":
       case "PostToolUse":
       case "PostToolUseFailure":
         this.deps.changeSessionState(event.sessionId, SessionState.WORKING);
@@ -46,6 +45,7 @@ export class HookEventRouter {
         this.deps.changeSessionState(event.sessionId, SessionState.IDLE);
         break;
       case "PermissionRequest":
+      case "PreToolUse":
         this.forwardPermissionRequest(event);
         break;
       default:

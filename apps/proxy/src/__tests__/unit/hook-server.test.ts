@@ -106,6 +106,60 @@ describe("HookServer", () => {
 
     const response = await responsePromise;
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ behavior: "allow" });
+    await expect(response.json()).resolves.toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: { behavior: "allow" },
+      },
+    });
+  });
+
+  it("holds PreToolUse until the broker resolves it and returns Claude permissionDecision JSON", async () => {
+    const events: AuthenticatedHookEvent[] = [];
+    const { registry, permissionBroker, url } = await createTestServer((event) =>
+      events.push(event),
+    );
+    const credentials = registry.registerSession("s1", "claude");
+
+    const responsePromise = fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credentials.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: credentials.sessionId,
+        provider: credentials.provider,
+        marker: credentials.marker,
+        event: "PreToolUse",
+        payload: {
+          tool_name: "Bash",
+          tool_input: { command: "pwd" },
+          tool_use_id: "toolu-1",
+        },
+      }),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(permissionBroker.listSession("s1")).toHaveLength(1);
+    expect(permissionBroker.resolve("toolu-1", { behavior: "deny", message: "No." })).toBe(true);
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "No.",
+      },
+    });
+    expect(events).toMatchObject([
+      {
+        sessionId: "s1",
+        provider: "claude",
+        event: "PreToolUse",
+        requestId: "toolu-1",
+      },
+    ]);
   });
 });
