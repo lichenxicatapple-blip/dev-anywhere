@@ -16,7 +16,6 @@ import {
 import { ToolApprovalManager } from "./serve/tool-approval-manager.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
-import { PtyObserver } from "./serve/pty-observer.js";
 import { JsonObserver } from "./serve/json-observer.js";
 import { HookRegistry } from "./serve/hook-registry.js";
 import { HookServer } from "./serve/hook-server.js";
@@ -155,7 +154,6 @@ function handleTerminalConnection(
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
-  ptyObserver: PtyObserver,
   createHookContext: (
     sessionId: string,
     provider: ProviderHookContext["provider"],
@@ -190,7 +188,6 @@ function handleTerminalConnection(
               provider,
             );
           if (existing) {
-            ptyObserver.onTerminalAttached(session.id);
             sessionManager.setPid(session.id, msg.pid);
           }
           socket.write(
@@ -241,8 +238,7 @@ function handleTerminalConnection(
         }
 
         case "pty_state_push": {
-          // terminal → serve → relay：PTY 语义状态变化；PtyObserver 负责 OSC 信号 → SessionState 映射
-          ptyObserver.onPtySignal(msg.sessionId, msg.state);
+          // terminal → serve → relay：PTY 语义状态只作为终端观察事件透传，不再写 SessionState。
           relayConnection.sendRaw(
             JSON.stringify({
               type: "pty_state",
@@ -291,7 +287,6 @@ function handleTerminalConnection(
         }
 
         case "pty_register": {
-          ptyObserver.onTerminalAttached(msg.sessionId);
           sessionManager.setPid(msg.sessionId, msg.pid);
           terminalSockets.set(msg.sessionId, socket);
           // 注册即告知当前 bridge 状态，避免新接入的终端要等下次状态翻转才知道
@@ -491,7 +486,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
   const observerChangeState = (sessionId: string, next: SessionState): boolean =>
     changeSessionState(sessionManager, relayConnection, sessionId, next);
-  const ptyObserver = new PtyObserver({ changeSessionState: observerChangeState });
   const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
   const hookEventRouter = new HookEventRouter({
     relayConnection,
@@ -592,7 +586,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       terminalSockets,
       relayConnection,
       controlHandlers,
-      ptyObserver,
       createHookContext,
     );
   });
