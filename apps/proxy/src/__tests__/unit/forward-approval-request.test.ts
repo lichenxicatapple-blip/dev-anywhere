@@ -50,6 +50,7 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
         onApprovalRequested: () => {},
         onChannelBroken: () => {},
       } as unknown as import("#src/serve/json-observer.js").JsonObserver,
+      nextSeq: () => 1,
     });
 
     // 合成 worker → serve 的 IPC 消息，内容全部取自真实 fixture

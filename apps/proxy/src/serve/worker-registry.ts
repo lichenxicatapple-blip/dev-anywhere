@@ -23,6 +23,7 @@ interface WorkerRegistryDeps {
   relayConnection: RelayConnection;
   // JSON 观察通道状态机；forwardEvent / forwardApprovalRequest 据此推状态变迁
   jsonObserver: JsonObserver;
+  nextSeq?: (sessionId: string) => number;
 }
 
 interface SpawnOptions {
@@ -371,8 +372,7 @@ export class WorkerRegistry {
     );
     this.deps.jsonObserver.onApprovalRequested(sessionId);
     try {
-      const seqCounter = new SeqCounter(sessionId);
-      const approvalSeq = seqCounter.next();
+      const approvalSeq = this.deps.nextSeq?.(sessionId) ?? new SeqCounter(sessionId).next();
       const envelope = buildMessage(
         "tool_use_request",
         sessionId,
