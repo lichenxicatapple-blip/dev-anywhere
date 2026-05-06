@@ -9,12 +9,13 @@ interface PermissionRequest {
   input: Record<string, unknown>;
 }
 
-interface PermissionDecision {
+export interface PermissionDecision {
   behavior: "allow" | "deny";
   message?: string;
 }
 
 interface PendingPermission extends PermissionRequest {
+  source: "hook" | "worker";
   resolve: (decision: PermissionDecision) => void;
   timeout: ReturnType<typeof setTimeout>;
   createdAt: number;
@@ -46,11 +47,44 @@ export class PermissionBroker {
 
       this.pending.set(request.requestId, {
         ...request,
+        source: "hook",
         resolve,
         timeout,
         createdAt: Date.now(),
       });
     });
+  }
+
+  registerWorkerRequest(
+    request: PermissionRequest,
+    onDecision: (decision: PermissionDecision) => void,
+  ): boolean {
+    const existing = this.pending.get(request.requestId);
+    if (existing) {
+      onDecision({
+        behavior: "deny",
+        message: "Duplicate permission request id.",
+      });
+      return false;
+    }
+
+    const timeout = setTimeout(() => {
+      this.pending.delete(request.requestId);
+      serviceLogger.warn(
+        { sessionId: request.sessionId, requestId: request.requestId },
+        "Worker permission request timed out",
+      );
+      onDecision({ behavior: "deny", message: "Permission request timed out." });
+    }, this.timeoutMs);
+
+    this.pending.set(request.requestId, {
+      ...request,
+      source: "worker",
+      resolve: onDecision,
+      timeout,
+      createdAt: Date.now(),
+    });
+    return true;
   }
 
   resolve(requestId: string, decision: PermissionDecision): boolean {
@@ -66,6 +100,7 @@ export class PermissionBroker {
     requestId: string;
     sessionId: string;
     provider: HookProviderId;
+    source: "hook" | "worker";
     toolName: string;
     input: Record<string, unknown>;
     createdAt: number;
@@ -76,6 +111,7 @@ export class PermissionBroker {
       requestId: pending.requestId,
       sessionId: pending.sessionId,
       provider: pending.provider,
+      source: pending.source,
       toolName: pending.toolName,
       input: pending.input,
       createdAt: pending.createdAt,
@@ -100,6 +136,7 @@ export class PermissionBroker {
         requestId: pending.requestId,
         sessionId: pending.sessionId,
         provider: pending.provider,
+        source: pending.source,
         toolName: pending.toolName,
         input: pending.input,
         createdAt: pending.createdAt,

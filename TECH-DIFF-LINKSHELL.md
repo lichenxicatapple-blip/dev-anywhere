@@ -54,7 +54,7 @@ LinkShell 相比当前项目最关键的优势，是把终端字节流和 AI CLI
 - `apps/proxy/src/worker/json-session.ts`
 - `apps/proxy/src/session-worker.ts`
 - `apps/proxy/src/serve/worker-registry.ts`
-- `apps/proxy/src/serve/tool-approval-manager.ts`
+- `apps/proxy/src/serve/permission-broker.ts`
 - `apps/proxy/src/serve/json-observer.ts`
 
 数据流：
@@ -232,14 +232,13 @@ LinkShell 做法：
 
 本项目现状：
 
-- JSON 路径已有 `ToolApprovalManager`，但只服务 stream-json control request。
+- JSON 路径的 pending approval 已接入 `PermissionBroker`，但 worker IPC 仍保留 `worker_approval_request/response` transport。
 - PTY 路径没有同等能力。
 - approval 恢复靠 `pending_approvals_push`，但没有 delivered/result 语义。
 
 救援方向：
 
-- 抽出 provider-neutral `PermissionBroker`。
-- JSON `control_request` 和 hook `PermissionRequest` 都接入同一个 broker。
+- provider-neutral `PermissionBroker` 已承接 JSON `control_request` 和 hook `PermissionRequest` 的 pending/resolve/timeout。
 - approval response 必须区分：
   - relay/client 收到了
   - proxy 收到了

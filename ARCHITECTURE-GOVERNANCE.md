@@ -369,11 +369,11 @@ PTY 模式不允许：
 
 这些路径只允许作为迁移期间的待删除旧路径，不能被继续扩展：
 
-| 旧路径                                       | 当前用途                            | 删除条件                                                                |
-| -------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| `worker_approval_request/response` JSON 审批 | stream-json `control_request` 审批  | hook `PermissionRequest` 接入统一 permission broker 和 relay 决策后删除 |
-| PTY idle timer 状态推断                      | PTY 无 hook provider 的短期降级信号 | hook/status channel 覆盖 PTY Claude 主流程后从主状态路径移除            |
-| OSC approval wait 识别                       | PTY 审批等待的旧语义猜测            | hook `PermissionRequest` 对 PTY Claude 生效后删除审批主流程依赖         |
+| 旧路径                                                 | 当前用途                                         | 删除条件                                                                |
+| ------------------------------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- |
+| `worker_approval_request/response` JSON 审批 transport | stream-json `control_request` 与 worker 私有 IPC | 只保留 transport；独立 pending manager 已删除，状态归 permission broker |
+| PTY idle timer 状态推断                                | PTY 无 hook provider 的短期降级信号              | hook/status channel 覆盖 PTY Claude 主流程后从主状态路径移除            |
+| OSC approval wait 识别                                 | PTY 审批等待的旧语义猜测                         | hook `PermissionRequest` 对 PTY Claude 生效后删除审批主流程依赖         |
 
 ## Review Checklist
 

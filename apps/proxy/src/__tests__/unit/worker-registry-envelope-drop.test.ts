@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
-import { ToolApprovalManager } from "#src/serve/tool-approval-manager.js";
+import { PermissionBroker } from "#src/serve/permission-broker.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 
@@ -23,15 +23,15 @@ const buildToolUseRequestRaw = (sessionId: string, toolId: string): string =>
 
 describe("WorkerRegistry onEnvelopeDropped", () => {
   let relay: EventEmitter & RelayConnection;
-  let toolApprovalManager: ToolApprovalManager;
+  let permissionBroker: PermissionBroker;
   let registry: WorkerRegistry;
 
   beforeEach(() => {
     relay = makeFakeRelay();
-    toolApprovalManager = new ToolApprovalManager();
+    permissionBroker = new PermissionBroker();
     registry = new WorkerRegistry({
       sessionManager: {} as SessionManager,
-      toolApprovalManager,
+      permissionBroker,
       relayConnection: relay,
       jsonObserver: {
         onTurnStart: () => {},
@@ -45,24 +45,41 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
   });
 
   it("clears pending approval when queue drops a tool_use_request envelope", () => {
-    toolApprovalManager.register("req-1", {
-      sessionId: "s1",
-      toolName: "Bash",
-      input: { command: "ls" },
-    });
-    expect(toolApprovalManager.listSession("s1")).toHaveLength(1);
+    const decisions: unknown[] = [];
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "req-1",
+        sessionId: "s1",
+        provider: "claude",
+        toolName: "Bash",
+        input: { command: "ls" },
+      },
+      (decision) => decisions.push(decision),
+    );
+    expect(permissionBroker.listSession("s1")).toHaveLength(1);
 
     relay.emit("envelope_dropped", buildToolUseRequestRaw("s1", "req-1"));
 
-    expect(toolApprovalManager.listSession("s1")).toHaveLength(0);
+    expect(permissionBroker.listSession("s1")).toHaveLength(0);
+    expect(decisions).toEqual([
+      {
+        behavior: "deny",
+        message: "Approval request was dropped due to relay queue overflow.",
+      },
+    ]);
   });
 
   it("leaves pending untouched for non tool_use_request envelopes", () => {
-    toolApprovalManager.register("req-2", {
-      sessionId: "s2",
-      toolName: "Write",
-      input: { path: "/tmp/a" },
-    });
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "req-2",
+        sessionId: "s2",
+        provider: "claude",
+        toolName: "Write",
+        input: { path: "/tmp/a" },
+      },
+      () => {},
+    );
     const assistantMessage = JSON.stringify({
       version: 1,
       type: "assistant_message",
@@ -74,17 +91,22 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
     });
     relay.emit("envelope_dropped", assistantMessage);
 
-    expect(toolApprovalManager.listSession("s2")).toHaveLength(1);
+    expect(permissionBroker.listSession("s2")).toHaveLength(1);
   });
 
   it("silently ignores invalid JSON", () => {
-    toolApprovalManager.register("req-3", {
-      sessionId: "s3",
-      toolName: "Read",
-      input: { path: "/tmp/b" },
-    });
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "req-3",
+        sessionId: "s3",
+        provider: "claude",
+        toolName: "Read",
+        input: { path: "/tmp/b" },
+      },
+      () => {},
+    );
     expect(() => relay.emit("envelope_dropped", "not json {{{")).not.toThrow();
-    expect(toolApprovalManager.listSession("s3")).toHaveLength(1);
+    expect(permissionBroker.listSession("s3")).toHaveLength(1);
   });
 
   it("is a no-op when toolId has no matching pending entry", () => {

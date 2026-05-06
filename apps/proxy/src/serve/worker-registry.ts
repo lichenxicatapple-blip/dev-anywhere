@@ -14,13 +14,13 @@ import { SeqCounter } from "../common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
-import type { ToolApprovalManager } from "./tool-approval-manager.js";
 import type { JsonObserver } from "./json-observer.js";
 import type { ProviderHookContext } from "../providers/index.js";
+import type { PermissionBroker, PermissionDecision } from "./permission-broker.js";
 
 interface WorkerRegistryDeps {
   sessionManager: SessionManager;
-  toolApprovalManager: ToolApprovalManager;
+  permissionBroker: PermissionBroker;
   relayConnection: RelayConnection;
   // JSON 观察通道状态机；forwardEvent / forwardApprovalRequest 据此推状态变迁
   jsonObserver: JsonObserver;
@@ -48,7 +48,7 @@ export class WorkerRegistry {
 
   constructor(private deps: WorkerRegistryDeps) {
     // relay queue 溢出时，被 drop 的 envelope 不会到达 client；若是 tool_use_request，
-    // 主动清 pending 审批并回 worker env-failure deny，避免 worker 永挂、toolApprovalManager 泄漏。
+    // 主动清 pending 审批并回 worker env-failure deny，避免 worker 永挂、permission broker 泄漏。
     deps.relayConnection.on("envelope_dropped", (raw: string) => this.onEnvelopeDropped(raw));
   }
 
@@ -76,18 +76,19 @@ export class WorkerRegistry {
         ? envelope.payload.toolId
         : null;
     if (!sessionId || !requestId) return;
-    if (!this.deps.toolApprovalManager.take(requestId)) return;
+    if (
+      !this.deps.permissionBroker.resolve(requestId, {
+        behavior: "deny",
+        message: "Approval request was dropped due to relay queue overflow.",
+      })
+    ) {
+      return;
+    }
 
     serviceLogger.warn(
       { sessionId, requestId },
       "Tool approval request lost to relay queue overflow, denying worker",
     );
-    this.send(sessionId, {
-      type: "worker_approval_response",
-      requestId,
-      behavior: "deny",
-      message: "Approval request was dropped due to relay queue overflow.",
-    });
   }
 
   spawn(sessionId: string, options?: SpawnOptions): number {
@@ -244,7 +245,7 @@ export class WorkerRegistry {
   // worker 连接断开或异常时的统一清理入口。仅记录一份，不再区分 close vs error 语义。
   private onDisconnect(sessionId: string): void {
     this.sockets.delete(sessionId);
-    this.deps.toolApprovalManager.cleanupSession(sessionId, "Worker disconnected");
+    this.deps.permissionBroker.cleanupSession(sessionId, "Worker disconnected");
   }
 
   // 对齐 Claude CLI stream-json 输出，按 type 分发：
@@ -399,24 +400,44 @@ export class WorkerRegistry {
         },
         "proxy",
       );
+      const session = this.deps.sessionManager.getSession(sessionId);
+      const registered = this.deps.permissionBroker.registerWorkerRequest(
+        {
+          requestId: msg.requestId,
+          provider: session?.provider ?? "claude",
+          sessionId,
+          toolName: msg.toolName,
+          input: msg.input,
+        },
+        (decision: PermissionDecision) => {
+          this.send(sessionId, {
+            type: "worker_approval_response",
+            requestId: msg.requestId,
+            behavior: decision.behavior,
+            ...(decision.message ? { message: decision.message } : {}),
+          });
+        },
+      );
+      if (!registered) return;
       this.deps.relayConnection.sendEnvelope(envelope);
-      this.deps.toolApprovalManager.register(msg.requestId, {
-        sessionId,
-        toolName: msg.toolName,
-        input: msg.input,
-      });
     } catch (err) {
+      const resolved = this.deps.permissionBroker.resolve(msg.requestId, {
+        behavior: "deny",
+        message: "Failed to forward approval request to relay.",
+      });
+      if (!resolved) {
+        this.send(sessionId, {
+          type: "worker_approval_response",
+          requestId: msg.requestId,
+          behavior: "deny",
+          message: "Failed to forward approval request to relay.",
+        });
+      }
       // envelope 构造失败回 deny，避免 worker 无限等待。
       serviceLogger.warn(
         { sessionId, error: String(err) },
         "Failed to forward tool approval to relay, denying",
       );
-      this.send(sessionId, {
-        type: "worker_approval_response",
-        requestId: msg.requestId,
-        behavior: "deny",
-        message: "Failed to forward approval request to relay.",
-      });
     }
   }
 }

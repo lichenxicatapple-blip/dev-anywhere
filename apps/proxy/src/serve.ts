@@ -13,7 +13,6 @@ import {
   createControlMessageHandlers,
   type ControlMessageHandlers,
 } from "./serve/handlers/control-messages.js";
-import { ToolApprovalManager } from "./serve/tool-approval-manager.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
 import { JsonObserver } from "./serve/json-observer.js";
@@ -458,7 +457,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   sessionManager.startReaper();
 
   const terminalSockets = new Map<string, Socket>();
-  const toolApprovalManager = new ToolApprovalManager();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
@@ -543,7 +541,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // WorkerRegistry 建在 relay 之后、listener 之前；构造期订阅 envelope_dropped 事件
   const workerRegistry = new WorkerRegistry({
     sessionManager,
-    toolApprovalManager,
+    permissionBroker,
     relayConnection,
     jsonObserver,
   });
@@ -554,7 +552,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relayRouter = new RelayRouter({
     sessionManager,
     workerRegistry,
-    toolApprovalManager,
     controlHandlers,
     relayConnection,
     relaySend,

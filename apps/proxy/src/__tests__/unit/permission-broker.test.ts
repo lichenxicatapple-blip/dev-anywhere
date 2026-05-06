@@ -36,4 +36,33 @@ describe("PermissionBroker", () => {
     });
     expect(broker.listSession("s1")).toHaveLength(0);
   });
+
+  it("registers worker permission requests on the same pending path", () => {
+    const broker = new PermissionBroker(1000);
+    const decisions: unknown[] = [];
+
+    expect(
+      broker.registerWorkerRequest(
+        {
+          requestId: "worker-req-1",
+          sessionId: "s1",
+          provider: "claude",
+          toolName: "Write",
+          input: { file_path: "/tmp/a" },
+        },
+        (decision) => decisions.push(decision),
+      ),
+    ).toBe(true);
+
+    expect(broker.listSession("s1")[0]).toMatchObject({
+      requestId: "worker-req-1",
+      source: "worker",
+      provider: "claude",
+      toolName: "Write",
+      input: { file_path: "/tmp/a" },
+    });
+    expect(broker.resolve("worker-req-1", { behavior: "deny", message: "No." })).toBe(true);
+    expect(decisions).toEqual([{ behavior: "deny", message: "No." }]);
+    expect(broker.listSession("s1")).toHaveLength(0);
+  });
 });

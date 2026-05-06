@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
-import { ToolApprovalManager } from "#src/serve/tool-approval-manager.js";
+import { PermissionBroker } from "#src/serve/permission-broker.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 
@@ -39,10 +39,12 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       sendEnvelope: (env: unknown) => captured.push(env),
     }) as unknown as RelayConnection;
 
-    const toolApprovalManager = new ToolApprovalManager();
+    const permissionBroker = new PermissionBroker();
     const registry = new WorkerRegistry({
-      sessionManager: {} as SessionManager,
-      toolApprovalManager,
+      sessionManager: {
+        getSession: () => ({ provider: "claude" }),
+      } as unknown as SessionManager,
+      permissionBroker,
       relayConnection: relay,
       jsonObserver: {
         onTurnStart: () => {},
@@ -85,11 +87,13 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
     // input 里 { file_path, content } 等 CLI 生成的嵌套结构必须原样 passthrough
     expect(parsed.data.payload.parameters).toEqual(fixtureReq.request.input);
 
-    // 副作用：待审批条目已登记，后续 tool_approve/tool_deny 才能 take
-    const pending = toolApprovalManager.listSession("session-real-data");
+    // 副作用：待审批条目已登记，后续 tool_approve/tool_deny 才能 resolve
+    const pending = permissionBroker.listSession("session-real-data");
     expect(pending).toHaveLength(1);
-    expect(pending[0]).toEqual({
+    expect(pending[0]).toMatchObject({
       requestId: fixtureReq.request_id,
+      provider: "claude",
+      source: "worker",
       toolName: fixtureReq.request.tool_name,
       input: fixtureReq.request.input,
     });

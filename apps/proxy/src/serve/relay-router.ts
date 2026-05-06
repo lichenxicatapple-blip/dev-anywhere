@@ -7,7 +7,6 @@ import { sessionPaths, tildify } from "../common/paths.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
-import type { ToolApprovalManager } from "./tool-approval-manager.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -20,7 +19,6 @@ import type { AgentStatusRegistry } from "./agent-status-registry.js";
 interface RelayRouterDeps {
   sessionManager: SessionManager;
   workerRegistry: WorkerRegistry;
-  toolApprovalManager: ToolApprovalManager;
   controlHandlers: ControlMessageHandlers;
   relayConnection: RelayConnection;
   relaySend: (data: string) => void;
@@ -143,29 +141,18 @@ export class RelayRouter {
       | undefined;
     if (!sessionId || !payload?.toolId) return;
 
-    const pending = this.deps.toolApprovalManager.take(payload.toolId);
-    if (!pending) {
-      const hookPending = this.deps.permissionBroker.get(payload.toolId);
-      if (!hookPending) return;
-      if (this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) {
-        this.deps.hookEventRouter.onPermissionResolved(
-          hookPending.sessionId,
-          hookPending.provider,
-          payload.toolId,
-          "allow",
-          { toolName: hookPending.toolName, toolInput: hookPending.input },
-        );
-      }
-      return;
-    }
+    const pending = this.deps.permissionBroker.get(payload.toolId);
+    if (!pending) return;
+    if (!this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) return;
+    this.deps.hookEventRouter.onPermissionResolved(
+      pending.sessionId,
+      pending.provider,
+      payload.toolId,
+      "allow",
+      { toolName: pending.toolName, toolInput: pending.input },
+    );
 
-    this.deps.workerRegistry.send(pending.sessionId, {
-      type: "worker_approval_response",
-      requestId: payload.toolId,
-      behavior: "allow",
-    });
-
-    if (payload.whitelistTool) {
+    if (pending.source === "worker" && payload.whitelistTool) {
       const toolName = payload.toolName ?? "";
       if (toolName) {
         const whitelisted = this.deps.workerRegistry.send(pending.sessionId, {
@@ -192,33 +179,23 @@ export class RelayRouter {
     if (!sessionId || !payload?.toolId) return;
 
     const reason = payload.reason ?? "Denied by remote user";
-    const pending = this.deps.toolApprovalManager.take(payload.toolId);
-    if (!pending) {
-      const hookPending = this.deps.permissionBroker.get(payload.toolId);
-      if (!hookPending) return;
-      if (
-        this.deps.permissionBroker.resolve(payload.toolId, {
-          behavior: "deny",
-          message: reason,
-        })
-      ) {
-        this.deps.hookEventRouter.onPermissionResolved(
-          hookPending.sessionId,
-          hookPending.provider,
-          payload.toolId,
-          "deny",
-          { toolName: hookPending.toolName, toolInput: hookPending.input },
-        );
-      }
+    const pending = this.deps.permissionBroker.get(payload.toolId);
+    if (!pending) return;
+    if (
+      !this.deps.permissionBroker.resolve(payload.toolId, {
+        behavior: "deny",
+        message: reason,
+      })
+    ) {
       return;
     }
-
-    this.deps.workerRegistry.send(pending.sessionId, {
-      type: "worker_approval_response",
-      requestId: payload.toolId,
-      behavior: "deny",
-      message: reason,
-    });
+    this.deps.hookEventRouter.onPermissionResolved(
+      pending.sessionId,
+      pending.provider,
+      payload.toolId,
+      "deny",
+      { toolName: pending.toolName, toolInput: pending.input },
+    );
     serviceLogger.info({ sessionId, toolId: payload.toolId }, "Tool denied via relay");
   }
 
@@ -358,15 +335,11 @@ export class RelayRouter {
     }
 
     // 推送该 session 当前 pending 的工具审批
-    const approvals = this.deps.toolApprovalManager.listSession(sid);
-    const hookApprovals = this.deps.permissionBroker.listSession(sid);
-    for (const approval of hookApprovals) {
-      approvals.push({
-        requestId: approval.requestId,
-        toolName: approval.toolName,
-        input: approval.input,
-      });
-    }
+    const approvals = this.deps.permissionBroker.listSession(sid).map((approval) => ({
+      requestId: approval.requestId,
+      toolName: approval.toolName,
+      input: approval.input,
+    }));
     if (approvals.length > 0) {
       this.deps.relaySend(
         JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),

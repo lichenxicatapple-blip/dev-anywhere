@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
-import { ToolApprovalManager } from "#src/serve/tool-approval-manager.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { WorkerRegistry } from "#src/serve/worker-registry.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
@@ -16,7 +15,6 @@ describe("RelayRouter hook permission decisions", () => {
     return new RelayRouter({
       sessionManager: { getSession: () => undefined } as never,
       workerRegistry: { send: options.workerSend } as unknown as WorkerRegistry,
-      toolApprovalManager: new ToolApprovalManager(),
       controlHandlers: {} as never,
       relayConnection: Object.assign(new EventEmitter(), {
         sendRaw: () => {},
@@ -91,6 +89,37 @@ describe("RelayRouter hook permission decisions", () => {
     expect(hookResolved).toHaveBeenCalledWith("s1", "claude", "req-1", "deny", {
       toolName: "Bash",
       toolInput: { command: "pwd" },
+    });
+  });
+
+  it("resolves worker approval requests through the same broker path", () => {
+    const permissionBroker = new PermissionBroker(1000);
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisions: unknown[] = [];
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "worker-req-1",
+        sessionId: "s1",
+        provider: "claude",
+        toolName: "Write",
+        input: { file_path: "/tmp/a" },
+      },
+      (decision) => decisions.push(decision),
+    );
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "worker-req-1" },
+    });
+
+    expect(decisions).toEqual([{ behavior: "allow" }]);
+    expect(permissionBroker.get("worker-req-1")).toBeNull();
+    expect(hookResolved).toHaveBeenCalledWith("s1", "claude", "worker-req-1", "allow", {
+      toolName: "Write",
+      toolInput: { file_path: "/tmp/a" },
     });
   });
 });
