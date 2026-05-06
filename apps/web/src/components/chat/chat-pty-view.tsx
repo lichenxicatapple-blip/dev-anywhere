@@ -18,6 +18,7 @@ import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachPtyFitController } from "@/lib/pty-fit-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
+import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
@@ -153,6 +154,24 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     });
     return () => controller.dispose();
   }, [connection.ready, ptyAutoscale, containerEl]);
+
+  useEffect(() => {
+    if (!connection.ready) return;
+    const container = containerEl;
+    const term = terminalRef.current;
+    const relay = relayClientRef;
+    if (!container || !term || !relay) return;
+
+    const controller = attachPtyResizeController({
+      container,
+      term,
+      onResize: (cols, rows) => {
+        relay.sendControl({ type: "terminal_resize_request", sessionId, cols, rows });
+      },
+      onRelayout: () => relayoutPtyRef.current(),
+    });
+    return () => controller.dispose();
+  }, [connection.ready, ptyAutoscale, containerEl, sessionId]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
