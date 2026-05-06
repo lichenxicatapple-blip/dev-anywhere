@@ -53,6 +53,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [submitting, setSubmitting] = useState(false);
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
+  const pendingCreateUnsubRef = useRef<(() => void) | null>(null);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
 
@@ -69,51 +70,19 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     function closePickerOnOutsidePointer(event: PointerEvent) {
       const target = event.target;
       if (target instanceof Node && cwdFieldRef.current?.contains(target)) return;
-      setCwdPickerOpen(false);
+      window.setTimeout(() => setCwdPickerOpen(false), 0);
     }
 
     document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
     return () => document.removeEventListener("pointerdown", closePickerOnOutsidePointer, true);
   }, [cwdPickerOpen]);
 
-  // 只在提交态订阅 session_create_response，避免跨实例竞争
-  // 卸载时强制清理订阅，防止对话框多次打开/关闭泄漏 handler
   useEffect(() => {
-    if (!submitting) return;
-    const relay = relayClientRef;
-    if (!relay) return;
-
-    const unsub = relay.onMessage((msg) => {
-      const ctrl = msg as RelayControlMessage;
-      if (ctrl.type !== "session_create_response") return;
-      unsub();
-      setSubmitting(false);
-
-      if (ctrl.error || !ctrl.sessionId) {
-        toast.error(`创建失败: ${ctrl.error ?? "unknown"}`);
-        return;
-      }
-
-      const newSession: SessionInfo = {
-        sessionId: ctrl.sessionId,
-        name: name.trim() || undefined,
-        state: "idle",
-        mode: ctrl.mode ?? mode,
-        provider: ctrl.provider ?? provider,
-      };
-      useSessionStore.getState().addSession(newSession);
-      onOpenChange(false);
-      setName("");
-      setCwd("");
-      setCwdPickerOpen(false);
-      setProvider("claude");
-      setMode("pty");
-      setPermissionMode("default");
-      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
-    });
-
-    return unsub;
-  }, [submitting, name, mode, provider, navigate, onOpenChange]);
+    return () => {
+      pendingCreateUnsubRef.current?.();
+      pendingCreateUnsubRef.current = null;
+    };
+  }, []);
 
   function handleSubmit() {
     if (!cwd.trim()) {
@@ -125,7 +94,43 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       toast.error("Relay 客户端未就绪");
       return;
     }
+    const submittedName = name.trim();
+    const submittedMode = mode;
+    const submittedProvider = provider;
+    pendingCreateUnsubRef.current?.();
     setSubmitting(true);
+    const unsub = relay.onMessage((msg) => {
+      const ctrl = msg as RelayControlMessage;
+      if (ctrl.type !== "session_create_response") return;
+      unsub();
+      if (pendingCreateUnsubRef.current === unsub) {
+        pendingCreateUnsubRef.current = null;
+      }
+      setSubmitting(false);
+
+      if (ctrl.error || !ctrl.sessionId) {
+        toast.error(`创建失败: ${ctrl.error ?? "unknown"}`);
+        return;
+      }
+
+      const newSession: SessionInfo = {
+        sessionId: ctrl.sessionId,
+        name: submittedName || undefined,
+        state: "idle",
+        mode: ctrl.mode ?? submittedMode,
+        provider: ctrl.provider ?? submittedProvider,
+      };
+      useSessionStore.getState().addSession(newSession);
+      onOpenChange(false);
+      setName("");
+      setCwd("");
+      setCwdPickerOpen(false);
+      setProvider("claude");
+      setMode("pty");
+      setPermissionMode("default");
+      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? submittedMode}`);
+    });
+    pendingCreateUnsubRef.current = unsub;
     relay.sendControl({
       type: "session_create",
       cwd: cwd.trim(),
@@ -145,7 +150,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   function handleCwdFieldBlur(event: FocusEvent<HTMLDivElement>) {
     const nextFocus = event.relatedTarget;
     if (nextFocus instanceof Node && cwdFieldRef.current?.contains(nextFocus)) return;
-    setCwdPickerOpen(false);
+    window.setTimeout(() => setCwdPickerOpen(false), 0);
   }
 
   return (
