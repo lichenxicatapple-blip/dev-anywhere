@@ -24,7 +24,10 @@ import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { BackToBottom } from "./back-to-bottom";
+import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyScrollbar } from "./pty-scrollbar";
+import { usePtyConnectionState } from "./use-pty-connection-state";
+import { usePtyFollowState } from "./use-pty-follow-state";
 
 interface ChatPtyViewProps {
   sessionId: string;
@@ -39,34 +42,18 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const relayoutPtyRef = useRef<() => void>(() => {});
   const scrollToBottomRef = useRef<() => void>(() => {});
   const scrollToRatioRef = useRef<(ratio: number) => void>(() => {});
-  const [ready, setReady] = useState(false);
-  const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
-  const [subscribeExhausted, setSubscribeExhausted] = useState(false);
-  const [retryNonce, setRetryNonce] = useState(0);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const [newFramesWhileAway, setNewFramesWhileAway] = useState(false);
+  const connection = usePtyConnectionState();
+  const follow = usePtyFollowState();
   const [scrollState, setScrollState] = useState<PtyScrollState>({
     scrollTop: 0,
     scrollHeight: 0,
     clientHeight: 0,
     scrollable: false,
   });
-  const newFramesWhileAwayRef = useRef(newFramesWhileAway);
-  useEffect(() => {
-    newFramesWhileAwayRef.current = newFramesWhileAway;
-  }, [newFramesWhileAway]);
   // xterm.onRender 会在用户 scroll 触发 ydisp 变化时也跑 (canvas 重绘),
   // 不做来源区分会把"scroll 触发的 render"误判为"新帧到达" → 红点虚亮 / scroll 被 follow 拉回.
   // 用 ref flag 标记 "真的有新帧到达", subscribeBinary 收到数据时 set, onRender 消费后清零.
   const pendingNewFrameRef = useRef(false);
-  useEffect(() => {
-    if (ready) {
-      setShowConnectingOverlay(false);
-      return;
-    }
-    const t = setTimeout(() => setShowConnectingOverlay(true), 300);
-    return () => clearTimeout(t);
-  }, [ready]);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
@@ -89,26 +76,17 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       onFrameWritten: () => {
         pendingNewFrameRef.current = true;
       },
-      onReady: () => {
-        setReady(true);
-        setSubscribeExhausted(false);
-      },
-      onSubscribeStarted: () => {
-        setSubscribeExhausted(false);
-      },
-      onSubscribeExhausted: () => {
-        setSubscribeExhausted(true);
-      },
+      ...connection.transport,
     });
 
     return () => {
       controller.dispose();
       terminalRef.current = null;
     };
-  }, [sessionId, connected, proxyOnline, retryNonce]);
+  }, [sessionId, connected, proxyOnline, connection.retryNonce, connection.transport]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!connection.ready) return;
     const container = containerEl;
     const spacer = spacerRef.current;
     const host = xtermHostRef.current;
@@ -124,12 +102,9 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       consumeNewFrame: () => {
         pendingNewFrameRef.current = false;
       },
-      hasNewFramesWhileAway: () => newFramesWhileAwayRef.current,
-      setNewFramesWhileAway,
-      onAtBottomChange: (value) => {
-        setIsAtBottom(value);
-        if (value) setNewFramesWhileAway(false);
-      },
+      hasNewFramesWhileAway: () => follow.hasNewFramesWhileAwayRef.current,
+      setNewFramesWhileAway: follow.setHasNewFramesWhileAway,
+      onAtBottomChange: follow.handleAtBottomChange,
       onScrollStateChange: setScrollState,
     });
     relayoutPtyRef.current = controller.relayout;
@@ -141,10 +116,17 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       scrollToBottomRef.current = () => {};
       scrollToRatioRef.current = () => {};
     };
-  }, [ready, ptyAutoscale, containerEl]);
+  }, [
+    connection.ready,
+    ptyAutoscale,
+    containerEl,
+    follow.handleAtBottomChange,
+    follow.hasNewFramesWhileAwayRef,
+    follow.setHasNewFramesWhileAway,
+  ]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!connection.ready) return;
     const container = containerEl;
     const term = terminalRef.current;
     if (!container || !term) return;
@@ -156,7 +138,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       onRelayout: () => relayoutPtyRef.current(),
     });
     return () => controller.dispose();
-  }, [ready, ptyAutoscale, containerEl]);
+  }, [connection.ready, ptyAutoscale, containerEl]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
@@ -180,45 +162,18 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         </div>
       </div>
       <BackToBottom
-        visible={!isAtBottom}
-        hasNewMessages={newFramesWhileAway}
+        visible={!follow.isAtBottom}
+        hasNewMessages={follow.hasNewFramesWhileAway}
         onClick={() => {
           scrollToBottomRef.current();
-          setNewFramesWhileAway(false);
+          follow.clearNewFramesWhileAway();
         }}
       />
       <PtyScrollbar
         state={scrollState}
         onScrollRatio={(ratio) => scrollToRatioRef.current(ratio)}
       />
-      {showConnectingOverlay && !subscribeExhausted && (
-        <div
-          className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-card/60 text-xs text-muted-foreground"
-          data-slot="pty-connecting"
-        >
-          PTY 正在连接...
-        </div>
-      )}
-      {subscribeExhausted && (
-        <div
-          className="absolute top-0 left-0 right-0 h-10 flex items-center justify-center gap-3 bg-destructive/10 text-xs text-destructive"
-          data-slot="pty-subscribe-failed"
-          role="alert"
-        >
-          <span>PTY 订阅未响应，请重试</span>
-          <button
-            type="button"
-            onClick={() => {
-              setReady(false);
-              setSubscribeExhausted(false);
-              setRetryNonce((n) => n + 1);
-            }}
-            className="rounded-sm border border-destructive/40 px-2 py-0.5 text-destructive hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-          >
-            重试
-          </button>
-        </div>
-      )}
+      <PtyConnectionOverlay {...connection.overlay} />
     </div>
   );
 }
