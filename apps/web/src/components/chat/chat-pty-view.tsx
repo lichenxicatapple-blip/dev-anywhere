@@ -19,9 +19,11 @@ import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { PtyRecoveryController } from "@/lib/pty-recovery";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
+import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { BackToBottom } from "./back-to-bottom";
+import { PtyScrollbar } from "./pty-scrollbar";
 
 interface ChatPtyViewProps {
   sessionId: string;
@@ -34,12 +36,19 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const scrollToBottomRef = useRef<() => void>(() => {});
+  const scrollToRatioRef = useRef<(ratio: number) => void>(() => {});
   const [ready, setReady] = useState(false);
   const [showConnectingOverlay, setShowConnectingOverlay] = useState(false);
   const [subscribeExhausted, setSubscribeExhausted] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [newFramesWhileAway, setNewFramesWhileAway] = useState(false);
+  const [scrollState, setScrollState] = useState<PtyScrollState>({
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+    scrollable: false,
+  });
   const newFramesWhileAwayRef = useRef(newFramesWhileAway);
   useEffect(() => {
     newFramesWhileAwayRef.current = newFramesWhileAway;
@@ -212,11 +221,14 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
         setIsAtBottom(value);
         if (value) setNewFramesWhileAway(false);
       },
+      onScrollStateChange: setScrollState,
     });
     scrollToBottomRef.current = controller.scrollToBottom;
+    scrollToRatioRef.current = controller.scrollToRatio;
     return () => {
       controller.dispose();
       scrollToBottomRef.current = () => {};
+      scrollToRatioRef.current = () => {};
     };
   }, [ready, ptyAutoscale, containerEl]);
 
@@ -283,6 +295,10 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
           scrollToBottomRef.current();
           setNewFramesWhileAway(false);
         }}
+      />
+      <PtyScrollbar
+        state={scrollState}
+        onScrollRatio={(ratio) => scrollToRatioRef.current(ratio)}
       />
       {showConnectingOverlay && !subscribeExhausted && (
         <div

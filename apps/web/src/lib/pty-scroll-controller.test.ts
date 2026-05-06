@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { attachPtyScrollController } from "./pty-scroll-controller";
+import { attachPtyScrollController, type PtyScrollState } from "./pty-scroll-controller";
 
 type Handler = () => void;
 
@@ -221,6 +221,64 @@ describe("attachPtyScrollController", () => {
     controller.scrollToBottom();
     expect(container.scrollTop).toBe(2000);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("publishes scroll state changes without duplicating identical snapshots", () => {
+    const { container, spacer, host } = createDom();
+    const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onScrollStateChange,
+    });
+
+    expect(onScrollStateChange).toHaveBeenLastCalledWith({
+      scrollTop: 2000,
+      scrollHeight: 2000,
+      clientHeight: 400,
+      scrollable: true,
+    });
+    const initialCalls = onScrollStateChange.mock.calls.length;
+
+    container.dispatchEvent(new Event("scroll"));
+    expect(onScrollStateChange).toHaveBeenCalledTimes(initialCalls);
+
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    expect(onScrollStateChange).toHaveBeenLastCalledWith({
+      scrollTop: 100,
+      scrollHeight: 2000,
+      clientHeight: 400,
+      scrollable: true,
+    });
+  });
+
+  it("exposes ratio scrolling for a custom terminal scrollbar", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.scrollToLine.mockClear();
+
+    controller.scrollToRatio(0.5);
+
+    expect(container.scrollTop).toBe(800);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
   });
 
   it("cleans up DOM, xterm, and resize observers", () => {

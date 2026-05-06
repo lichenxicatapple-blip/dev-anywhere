@@ -11,12 +11,21 @@ interface PtyScrollControllerOptions {
   hasNewFramesWhileAway: () => boolean;
   setNewFramesWhileAway: (value: boolean) => void;
   onAtBottomChange?: (value: boolean) => void;
+  onScrollStateChange?: (state: PtyScrollState) => void;
   atBottomThreshold?: number;
 }
 
 interface PtyScrollController {
   dispose: () => void;
   scrollToBottom: () => void;
+  scrollToRatio: (ratio: number) => void;
+}
+
+export interface PtyScrollState {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  scrollable: boolean;
 }
 
 export function attachPtyScrollController(
@@ -32,6 +41,7 @@ export function attachPtyScrollController(
     hasNewFramesWhileAway,
     setNewFramesWhileAway,
     onAtBottomChange,
+    onScrollStateChange,
     atBottomThreshold = 8,
   } = options;
 
@@ -46,6 +56,23 @@ export function attachPtyScrollController(
 
   const syncing = { external: false, internal: false };
   let lastAtBottom: boolean | null = null;
+  let lastScrollStateKey = "";
+
+  const getScrollState = (): PtyScrollState => ({
+    scrollTop: container.scrollTop,
+    scrollHeight: container.scrollHeight,
+    clientHeight: container.clientHeight,
+    scrollable: container.scrollHeight > container.clientHeight + atBottomThreshold,
+  });
+
+  const notifyScrollState = (): void => {
+    if (!onScrollStateChange) return;
+    const state = getScrollState();
+    const key = `${state.scrollTop}:${state.scrollHeight}:${state.clientHeight}:${state.scrollable}`;
+    if (key === lastScrollStateKey) return;
+    lastScrollStateKey = key;
+    onScrollStateChange(state);
+  };
 
   const computeIsAtBottom = (): boolean =>
     container.scrollTop + container.clientHeight >= container.scrollHeight - atBottomThreshold;
@@ -57,9 +84,21 @@ export function attachPtyScrollController(
     onAtBottomChange?.(next);
   };
 
+  const notifyScroll = (): void => {
+    notifyAtBottom();
+    notifyScrollState();
+  };
+
   const scrollToBottom = (): void => {
     container.scrollTop = container.scrollHeight;
-    notifyAtBottom();
+    notifyScroll();
+  };
+
+  const scrollToRatio = (ratio: number): void => {
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const clamped = Math.max(0, Math.min(1, ratio));
+    container.scrollTop = maxScrollTop * clamped;
+    onContainerScroll();
   };
 
   const applySubpixel = (px: number): void => {
@@ -112,7 +151,7 @@ export function attachPtyScrollController(
 
   const onContainerScroll = (): void => {
     if (syncing.external) {
-      notifyAtBottom();
+      notifyScroll();
       return;
     }
     const { cellH } = getDims();
@@ -130,7 +169,7 @@ export function attachPtyScrollController(
     if (ydisp !== buffer.viewportY) {
       scrollToYdisp(ydisp);
     }
-    notifyAtBottom();
+    notifyScroll();
   };
 
   const onTermScroll = (): void => {
@@ -140,7 +179,7 @@ export function attachPtyScrollController(
       const { cellH } = getDims();
       container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
       applySubpixel(0);
-      notifyAtBottom();
+      notifyScroll();
     } finally {
       syncing.external = false;
     }
@@ -155,7 +194,7 @@ export function attachPtyScrollController(
     } else if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
     }
-    notifyAtBottom();
+    notifyScroll();
   };
 
   updateSpacer();
@@ -166,7 +205,7 @@ export function attachPtyScrollController(
   const dispRender = term.onRender(onRender);
   const ro = new ResizeObserver(() => {
     updateSpacer();
-    notifyAtBottom();
+    notifyScroll();
   });
   ro.observe(container);
   ro.observe(host);
@@ -179,5 +218,6 @@ export function attachPtyScrollController(
       ro.disconnect();
     },
     scrollToBottom,
+    scrollToRatio,
   };
 }
