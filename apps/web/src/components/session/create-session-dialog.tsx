@@ -44,6 +44,19 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
   }, [open, homePath, cwd]);
 
+  useEffect(() => {
+    if (!cwdPickerOpen) return;
+
+    function closePickerOnOutsidePointer(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && cwdFieldRef.current?.contains(target)) return;
+      setCwdPickerOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", closePickerOnOutsidePointer, true);
+  }, [cwdPickerOpen]);
+
   // 只在提交态订阅 session_create_response，避免跨实例竞争
   // 卸载时强制清理订阅，防止对话框多次打开/关闭泄漏 handler
   useEffect(() => {
