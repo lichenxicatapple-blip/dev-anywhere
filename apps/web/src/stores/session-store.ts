@@ -17,7 +17,7 @@ interface SessionStoreState {
   setSessions: (sessions: SessionInfo[]) => void;
   addSession: (session: SessionInfo) => void;
   removeSession: (sessionId: string) => void;
-  // lastActive 可选：PTY 控制消息 pty_state 无此字段，envelope session_status 则会一并写入
+  // lastActive 可选：envelope session_status 会一并写入；agent_status 不修改主生命周期时间。
   updateSessionState: (sessionId: string, state: SessionInfo["state"], lastActive?: number) => void;
   setAgentStatus: (sessionId: string, status: AgentStatusPayload) => void;
   updateSessionName: (sessionId: string, name: string) => void;

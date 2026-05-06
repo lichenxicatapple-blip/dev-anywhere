@@ -24,11 +24,10 @@ LinkShell 的优势不是 UI 好看，而是语义和字节流分离得更彻底
 
 Dev Anywhere 当前已经补上了 Claude/Codex provider hook path，但协议和状态还没完全收敛：
 
-- `session_status`、`pty_state`、hook event、JSON observer 都能影响 UI 看到的状态。
+- `session_status`、hook event、JSON observer 都能影响 UI 看到的状态；web 已不再把 `pty_state` 映射进 `session.state`。
 - PTY idle timer / OSC 仍然能写主状态。
 - JSON `worker_approval_request` 和 hook permission broker 语义相似但路径不同。
 - relay 有 replay 协议外壳，但没有 last status replay 的真实语义。
-- web dispatcher 会把 `pty_state` 映射进 `session.state`，这会让 UI 继续依赖 PTY 猜测。
 
 ## 状态模型
 
@@ -235,7 +234,7 @@ Owner：hook server + hook event router + permission broker
 | `session_list` envelope           | proxy -> relay -> web        | session lifecycle  | 否                        | 保留              |
 | `session_status` envelope         | proxy -> relay -> web        | session lifecycle  | 否，已是结果              | 保留              |
 | `session_sync` control            | proxy -> relay               | session lifecycle  | 否                        | 保留              |
-| `pty_state` control               | proxy -> relay -> web        | PTY runner         | 迁移期 web 会映射         | 待降级            |
+| `pty_state` control               | proxy -> relay -> web        | PTY runner         | 否，web 主路径已移除      | 已降级            |
 | `pty_state_push` IPC              | terminal -> serve            | PTY runner         | 迁移期 proxy 会映射       | 待删除主线        |
 | PTY binary frame                  | terminal -> serve -> relay   | PTY runner         | 否                        | 保留              |
 | `session_snapshot` control        | proxy -> relay -> web        | PTY runner         | 否                        | 保留              |
@@ -254,8 +253,8 @@ Owner：hook server + hook event router + permission broker
 1. 新增 shared `agent_status` contract。
 2. HookEventRouter 在处理 `SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop` 时发送 `agent_status`。
 3. relay 支持 last `agent_status` replay 给新绑定 client。
-4. web 增加 agent status dispatcher/store，`StatusLine` 改为读取 agent status + lifecycle。
-5. 移除 web `pty_state -> session.state` 映射。
+4. web 增加 agent status dispatcher/store，`StatusLine` 改为读取 agent status + lifecycle。已完成。
+5. 移除 web `pty_state -> session.state` 映射。已完成。
 6. proxy 降级 `PtyObserver`：保留调试/无 hook provider 显式模式，不再作为主状态输入。
 7. JSON approval 合并到 permission broker 语义，删除 `ToolApprovalManager` 或把它变成 broker adapter。
 
@@ -276,6 +275,5 @@ Owner：hook server + hook event router + permission broker
 | ------------------------------------------- | ------------------------------------------------ |
 | PTY idle timer 写 `SessionState`            | `agent_status` 覆盖 PTY Claude/Codex 主流程      |
 | OSC approval wait 写 `SessionState`         | hook `PreToolUse/PermissionRequest` 覆盖真实审批 |
-| web `pty_state -> session.state`            | web status line 接入 agent status                |
 | `worker_approval_request/response` 独立路径 | JSON approval 合并到 permission broker           |
 | `user_input` 作为 PTY 主输入                | xterm raw input 成为 PTY 主输入                  |
