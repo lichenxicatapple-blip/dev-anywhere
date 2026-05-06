@@ -54,6 +54,15 @@ start_detached() {
   local cwd="$1"
   local log_file="$2"
   shift 2
+  if command -v screen >/dev/null 2>&1; then
+    local session_name
+    session_name="dev-anywhere-$(basename "$cwd")-$(date +%s)-$RANDOM"
+    screen -dmS "$session_name" bash -lc \
+      'cd "$1" && log_file="$2" && shift 2 && exec "$@" >"$log_file" 2>&1 </dev/null' \
+      _ "$cwd" "$log_file" "$@"
+    return
+  fi
+
   nohup bash -c 'cd "$1" && shift && exec "$@"' _ "$cwd" "$@" >"$log_file" 2>&1 </dev/null &
   local pid=$!
   disown "$pid" 2>/dev/null || true
