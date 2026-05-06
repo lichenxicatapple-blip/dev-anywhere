@@ -134,7 +134,7 @@ describe("Claude provider", () => {
     expect(JSON.stringify(settings)).not.toContain("token-1");
   });
 
-  it("keeps fork-session optional for compatibility tests", () => {
+  it("omits fork-session when disabled", () => {
     expect(buildClaudeArgs({ forkSession: false })).not.toContain("--fork-session");
   });
 

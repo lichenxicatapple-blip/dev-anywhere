@@ -75,11 +75,21 @@ describe("SessionStatusPayloadSchema", () => {
       SessionStatusPayloadSchema.parse({
         sessionId: "s1",
         state: "unknown",
+        lastActive: 123,
       }),
     ).toThrow();
   });
 
   it("rejects missing state", () => {
     expect(() => SessionStatusPayloadSchema.parse({ sessionId: "s1" })).toThrow();
+  });
+
+  it("rejects missing lastActive", () => {
+    expect(() =>
+      SessionStatusPayloadSchema.parse({
+        sessionId: "s1",
+        state: "idle",
+      }),
+    ).toThrow();
   });
 });

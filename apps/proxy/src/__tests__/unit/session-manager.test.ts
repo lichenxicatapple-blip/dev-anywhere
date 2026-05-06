@@ -342,10 +342,9 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("legacy disk files with persisted state field still load as IDLE", () => {
+    it("rejects persisted sessions with state field", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      // 模拟旧版本磁盘格式：手写一份带 state 字段的 JSON
-      const legacy = [
+      const invalid = [
         {
           id: s.id,
           mode: "json",
@@ -357,13 +356,9 @@ describe("SessionManager", () => {
           updatedAt: s.updatedAt,
         },
       ];
-      writeFileSync(persistPath, JSON.stringify(legacy), "utf-8");
+      writeFileSync(persistPath, JSON.stringify(invalid), "utf-8");
 
-      const manager2 = new SessionManager({ persistPath });
-      const restored = manager2.getSession(s.id);
-      expect(restored).toBeDefined();
-      expect(restored!.state).toBe(SessionState.IDLE);
-      manager2.stopReaper();
+      expect(() => new SessionManager({ persistPath })).toThrow("invalid persisted state");
     });
 
     it("rejects persisted sessions without provider", () => {
@@ -371,7 +366,7 @@ describe("SessionManager", () => {
         persistPath,
         JSON.stringify([
           {
-            id: "legacy",
+            id: "invalid",
             mode: "json",
             cwd: "/tmp/test",
             pid: ALIVE_PID,

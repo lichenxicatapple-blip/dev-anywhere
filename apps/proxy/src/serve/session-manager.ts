@@ -316,7 +316,13 @@ export class SessionManager {
       );
     }
     for (const item of parsed) {
-      // 磁盘上从本版本起不含 state 字段；旧文件残留的 state 会被下面的 IDLE 覆盖，无需迁移逻辑
+      if (item && typeof item === "object" && "state" in item) {
+        throw new Error(
+          `Session persistence file has invalid persisted state for session ${String(
+            (item as { id?: unknown }).id,
+          )}`,
+        );
+      }
       const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
       if (!isProviderId(info.provider)) {
         throw new Error(

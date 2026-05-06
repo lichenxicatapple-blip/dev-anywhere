@@ -341,7 +341,7 @@ describe("IPC Protocol", () => {
       expect(binaryFrames[0].data.toString()).toBe("combined");
     });
 
-    it("backward compatible: works without onBinaryFrame callback", async () => {
+    it("skips binary frames when no binary callback is registered", async () => {
       const { createIpcReader, serializeIpc, encodeBinaryIpcFrame } = await importIpc();
       const stream = new PassThrough();
       const jsonMsgs: unknown[] = [];
