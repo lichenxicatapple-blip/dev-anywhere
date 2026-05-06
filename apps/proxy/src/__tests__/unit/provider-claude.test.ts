@@ -118,12 +118,13 @@ describe("Claude provider", () => {
     expect(command.env.DEV_ANYWHERE_HOOK_URL).toBe("http://127.0.0.1:17654/hook");
     expect(command.args).toContain("--settings");
     const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
-      hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout: number }> }>>;
+      hooks: Record<string, Array<{ hooks: Array<{ command: string; timeout?: number }> }>>;
     };
     expect(settings.hooks.SessionStart[0].hooks[0].command).toContain(
       "DEV_ANYWHERE_HOOK_EVENT='SessionStart'",
     );
-    expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(150);
+    expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(31_536_000);
+    expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(5);
   });
 
   it("builds Claude hook settings without global config paths", () => {

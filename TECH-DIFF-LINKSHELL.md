@@ -225,7 +225,7 @@ LinkShell 做法：
 LinkShell 做法：
 
 - hook `PermissionRequest` 生成 `requestId`。
-- pending permission 存在 map 中，带 timeout。
+- pending permission 存在 map 中，直到用户决策或会话/provider 结束。
 - 远端 decision 通过 `permission.decision` 回到 host。
 - host resolve pending HTTP response 后，再发 `permission.decision.result` / status snapshot。
 - Stop、PostToolUse、terminal drain 会清理 pending。
@@ -238,12 +238,13 @@ LinkShell 做法：
 
 救援方向：
 
-- provider-neutral `PermissionBroker` 已承接 JSON `control_request` 和 hook `PermissionRequest` 的 pending/resolve/timeout。
+- provider-neutral `PermissionBroker` 已承接 JSON `control_request` 和 hook `PermissionRequest` 的 pending/resolve/cleanup。
+- 权限类 provider hook 使用极长 command timeout lease，避免 provider 默认短超时破坏“等待用户审批”的原生体验。
 - approval response 已开始区分：
   - relay/client 收到了
   - proxy 收到了
   - provider CLI 是否实际收到并继续
-- timeout/drain/exit 必须产生明确状态。
+- drain/exit 必须产生明确状态；审批不能因为时间流逝自动拒绝。
 
 ### Relay Status Replay
 
@@ -352,7 +353,7 @@ LinkShell 做法：
 实现目标：
 
 - requestId -> pending permission。
-- 支持 allow / deny / timeout / drain。
+- 支持 allow / deny / drain；审批无限等待，不做时间自动拒绝。
 - 支持 delivered/result 状态。
 - JSON control request 和 hook permission request 都可接入。
 
@@ -401,7 +402,7 @@ LinkShell 做法：
 
 - Unit: hook URL marker 校验。
 - Unit: normalize mock hook event -> status payload。
-- Unit: PermissionBroker allow / deny / timeout / drain。
+- Unit: PermissionBroker allow / deny / indefinite wait / drain。
 - Relay integration: last status replay to newly bound client。
 - Proxy integration: mock provider hook event -> relay -> client。
 - Web smoke: status line 能显示 hook status，不依赖 PTY idle 推断。

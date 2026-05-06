@@ -37,7 +37,7 @@ describe("RelayRouter hook permission decisions", () => {
   }
 
   it("resolves hook PermissionRequest before falling back to worker approval path", async () => {
-    const permissionBroker = new PermissionBroker(1000);
+    const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();
     const hookResolved = vi.fn();
     const decisionPromise = permissionBroker.request({
@@ -65,7 +65,7 @@ describe("RelayRouter hook permission decisions", () => {
   });
 
   it("denies hook permission requests and clears the pending broker entry", async () => {
-    const permissionBroker = new PermissionBroker(1000);
+    const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();
     const hookResolved = vi.fn();
     const decisionPromise = permissionBroker.request({
@@ -94,7 +94,7 @@ describe("RelayRouter hook permission decisions", () => {
   });
 
   it("resolves worker approval requests through the same broker path", () => {
-    const permissionBroker = new PermissionBroker(1000);
+    const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();
     const hookResolved = vi.fn();
     const decisions: unknown[] = [];
@@ -125,7 +125,7 @@ describe("RelayRouter hook permission decisions", () => {
   });
 
   it("records permission request delivery acknowledgements", async () => {
-    const permissionBroker = new PermissionBroker(1000);
+    const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();
     const hookResolved = vi.fn();
     const decisionPromise = permissionBroker.request({
@@ -149,7 +149,7 @@ describe("RelayRouter hook permission decisions", () => {
   });
 
   it("pushes permission decision result after resolving approval", async () => {
-    const permissionBroker = new PermissionBroker(1000);
+    const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();
     const hookResolved = vi.fn();
     const sent: string[] = [];

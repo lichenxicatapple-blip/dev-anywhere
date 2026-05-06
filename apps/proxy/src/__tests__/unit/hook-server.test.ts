@@ -7,7 +7,7 @@ const servers: HookServer[] = [];
 
 async function createTestServer(onEvent?: (event: AuthenticatedHookEvent) => void) {
   const registry = new HookRegistry();
-  const permissionBroker = new PermissionBroker(1000);
+  const permissionBroker = new PermissionBroker();
   const server = new HookServer({
     port: 0,
     registry,

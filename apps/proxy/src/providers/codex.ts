@@ -18,6 +18,10 @@ const CODEX_HOOK_EVENTS = [
   "SessionStart",
 ] as const;
 
+// Codex hook configs also express command timeout as a finite value. Permission hooks should
+// mirror native approval behavior and wait for the user, so avoid short provider defaults.
+const PERMISSION_HOOK_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
+
 const HOOK_FORWARDER_SCRIPT = `
 let body = "";
 process.stdin.setEncoding("utf8");
@@ -66,10 +70,13 @@ function tomlString(value: string): string {
 }
 
 function buildCodexHookEntry(event: string): string {
-  const timeout = event === "PreToolUse" || event === "PermissionRequest" ? 150 : 5;
+  const timeoutConfig =
+    event === "PreToolUse" || event === "PermissionRequest"
+      ? `, timeout=${PERMISSION_HOOK_TIMEOUT_SECONDS}`
+      : ", timeout=5";
   return `${event}=[{matcher="", hooks=[{type="command", command=${tomlString(
     buildHookForwardCommand(event),
-  )}, timeout=${timeout}}]}]`;
+  )}${timeoutConfig}}]}]`;
 }
 
 function buildCodexHooksConfig(): string {

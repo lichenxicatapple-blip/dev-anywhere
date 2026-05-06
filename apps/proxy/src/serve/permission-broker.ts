@@ -17,15 +17,12 @@ export interface PermissionDecision {
 interface PendingPermission extends PermissionRequest {
   source: "hook" | "worker";
   resolve: (decision: PermissionDecision) => void;
-  timeout: ReturnType<typeof setTimeout>;
   createdAt: number;
   deliveredAt?: number;
 }
 
 export class PermissionBroker {
   private readonly pending = new Map<string, PendingPermission>();
-
-  constructor(private readonly timeoutMs = 120_000) {}
 
   request(request: PermissionRequest): Promise<PermissionDecision> {
     const existing = this.pending.get(request.requestId);
@@ -37,20 +34,10 @@ export class PermissionBroker {
     }
 
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(request.requestId);
-        serviceLogger.warn(
-          { sessionId: request.sessionId, requestId: request.requestId },
-          "Hook permission request timed out",
-        );
-        resolve({ behavior: "deny", message: "Permission request timed out." });
-      }, this.timeoutMs);
-
       this.pending.set(request.requestId, {
         ...request,
         source: "hook",
         resolve,
-        timeout,
         createdAt: Date.now(),
       });
     });
@@ -69,20 +56,10 @@ export class PermissionBroker {
       return false;
     }
 
-    const timeout = setTimeout(() => {
-      this.pending.delete(request.requestId);
-      serviceLogger.warn(
-        { sessionId: request.sessionId, requestId: request.requestId },
-        "Worker permission request timed out",
-      );
-      onDecision({ behavior: "deny", message: "Permission request timed out." });
-    }, this.timeoutMs);
-
     this.pending.set(request.requestId, {
       ...request,
       source: "worker",
       resolve: onDecision,
-      timeout,
       createdAt: Date.now(),
     });
     return true;
@@ -91,7 +68,6 @@ export class PermissionBroker {
   resolve(requestId: string, decision: PermissionDecision): boolean {
     const pending = this.pending.get(requestId);
     if (!pending) return false;
-    clearTimeout(pending.timeout);
     this.pending.delete(requestId);
     pending.resolve(decision);
     return true;
@@ -131,15 +107,14 @@ export class PermissionBroker {
   cleanupSession(sessionId: string, reason: string): void {
     for (const [requestId, pending] of this.pending) {
       if (pending.sessionId !== sessionId) continue;
-      clearTimeout(pending.timeout);
       this.pending.delete(requestId);
       pending.resolve({ behavior: "deny", message: reason });
       serviceLogger.info({ sessionId, requestId, reason }, "Pending hook permission dropped");
     }
   }
 
-  listSession(sessionId: string): Array<Omit<PendingPermission, "resolve" | "timeout">> {
-    const out: Array<Omit<PendingPermission, "resolve" | "timeout">> = [];
+  listSession(sessionId: string): Array<Omit<PendingPermission, "resolve">> {
+    const out: Array<Omit<PendingPermission, "resolve">> = [];
     for (const pending of this.pending.values()) {
       if (pending.sessionId !== sessionId) continue;
       out.push({

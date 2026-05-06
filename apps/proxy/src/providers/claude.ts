@@ -73,6 +73,11 @@ const CLAUDE_HOOK_EVENTS = [
   "SessionStart",
 ] as const;
 
+// Claude Code hook schema uses a finite command timeout. Permission hooks must behave like
+// native CLI approval and wait for the user, so use a deliberately long lease instead of
+// allowing the provider default timeout to cut the request short.
+const PERMISSION_HOOK_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
+
 const HOOK_FORWARDER_SCRIPT = `
 let body = "";
 process.stdin.setEncoding("utf8");
@@ -122,7 +127,7 @@ export function buildClaudeHookSettings(): Record<string, unknown> {
           {
             type: "command",
             command: buildHookForwardCommand(event),
-            timeout: event === "PermissionRequest" ? 150 : 5,
+            timeout: event === "PermissionRequest" ? PERMISSION_HOOK_TIMEOUT_SECONDS : 5,
           },
         ],
       },

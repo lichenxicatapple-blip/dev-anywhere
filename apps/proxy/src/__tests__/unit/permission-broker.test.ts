@@ -1,9 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 
 describe("PermissionBroker", () => {
+  it("keeps permission requests pending indefinitely until explicit resolution", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = new PermissionBroker();
+      const decisionPromise = broker.request({
+        requestId: "req-wait",
+        sessionId: "s1",
+        provider: "claude",
+        toolName: "Bash",
+        input: {},
+      });
+      let resolved = false;
+      decisionPromise.then(() => {
+        resolved = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+
+      expect(resolved).toBe(false);
+      expect(broker.listSession("s1")).toHaveLength(1);
+      expect(broker.resolve("req-wait", { behavior: "allow" })).toBe(true);
+      await expect(decisionPromise).resolves.toEqual({ behavior: "allow" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resolves a pending permission request by requestId", async () => {
-    const broker = new PermissionBroker(1000);
+    const broker = new PermissionBroker();
     const decisionPromise = broker.request({
       requestId: "req-1",
       sessionId: "s1",
@@ -19,7 +46,7 @@ describe("PermissionBroker", () => {
   });
 
   it("denies pending requests when a session is cleaned up", async () => {
-    const broker = new PermissionBroker(1000);
+    const broker = new PermissionBroker();
     const decisionPromise = broker.request({
       requestId: "req-1",
       sessionId: "s1",
@@ -38,7 +65,7 @@ describe("PermissionBroker", () => {
   });
 
   it("registers worker permission requests on the same pending path", () => {
-    const broker = new PermissionBroker(1000);
+    const broker = new PermissionBroker();
     const decisions: unknown[] = [];
 
     expect(
@@ -67,7 +94,7 @@ describe("PermissionBroker", () => {
   });
 
   it("marks pending requests as delivered", () => {
-    const broker = new PermissionBroker(1000);
+    const broker = new PermissionBroker();
     void broker.request({
       requestId: "req-1",
       sessionId: "s1",
