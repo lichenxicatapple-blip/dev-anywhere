@@ -2,7 +2,7 @@
 // Web 新建会话走 serve 托管 PTY，Claude/Codex 都由本机 proxy 持有真实 Agent CLI。
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
 // 权限模式只对 JSON worker 有效；当前 PTY 创建路径不展示该控件，避免误导。
-import { useEffect, useState } from "react";
+import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
@@ -31,6 +31,8 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [cwd, setCwd] = useState("");
   const [provider, setProvider] = useState<"claude" | "codex">("claude");
   const [submitting, setSubmitting] = useState(false);
+  const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
+  const cwdFieldRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const mode = "pty" as const;
@@ -71,6 +73,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       onOpenChange(false);
       setName("");
       setCwd("");
+      setCwdPickerOpen(false);
       setProvider("claude");
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
     });
@@ -90,6 +93,12 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
     setSubmitting(true);
     relay.sendControl({ type: "session_create", cwd: cwd.trim(), mode, provider });
+  }
+
+  function handleCwdFieldBlur(event: FocusEvent<HTMLDivElement>) {
+    const nextFocus = event.relatedTarget;
+    if (nextFocus instanceof Node && cwdFieldRef.current?.contains(nextFocus)) return;
+    setCwdPickerOpen(false);
   }
 
   return (
@@ -115,7 +124,12 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               placeholder="自动生成"
             />
           </label>
-          <div className="flex flex-col gap-2">
+          <div
+            ref={cwdFieldRef}
+            className="flex flex-col gap-2"
+            onFocus={() => setCwdPickerOpen(true)}
+            onBlur={handleCwdFieldBlur}
+          >
             <label htmlFor="create-session-cwd" className="text-sm">
               工作目录
             </label>
@@ -127,13 +141,18 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               placeholder="输入绝对路径"
               className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <FilePathPicker
-              mode="select"
-              dirsOnly
-              filter={cwd}
-              title="选择下一级目录"
-              onSelect={(path) => setCwd(path)}
-            />
+            {cwdPickerOpen ? (
+              <FilePathPicker
+                mode="select"
+                dirsOnly
+                filter={cwd}
+                title="选择下一级目录"
+                onSelect={(path) => {
+                  setCwd(path);
+                  setCwdPickerOpen(true);
+                }}
+              />
+            ) : null}
           </div>
           <section aria-label="Agent CLI" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
