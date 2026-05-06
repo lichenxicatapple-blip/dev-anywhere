@@ -176,6 +176,7 @@ LinkShell 的 `terminal.status` payload 包含：
 - 增加 provider-neutral `terminal_status` 或 `agent_status` schema。
 - 不把它做成 UI store 私有状态，必须进入 shared schema。
 - PTY idle/OSC 不作为长期备用路径。Hook/status channel 覆盖同等能力后，应删除主流程依赖；只允许在无 hook provider 的显式降级模式里短期存在，并写明删除条件。
+- 协议和状态机的 owner、输入源分级、删除债务已经单独登记在 `PROTOCOL-STATE-GOVERNANCE.md`，后续实现必须以该文档为准。
 
 ### Terminal Input Channel
 
