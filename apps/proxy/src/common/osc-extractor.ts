@@ -25,20 +25,25 @@ export function extractOscSignals(rawData: string): PtyStateEvent | null {
 
   if (matches.length === 0) return null;
 
-  // OSC 9 优先级更高，包含具体的语义信号
+  const osc0 = matches.find((m) => m.code === 0);
+
+  // OSC 9 优先级更高，包含具体的语义信号；同帧 OSC 0 仍保留 title 给 UI。
   const osc9 = matches.find((m) => m.code === 9);
   if (osc9) {
     if (osc9.text.includes("waiting for your input")) {
-      return { state: "turn_complete" };
+      return { state: "turn_complete", ...(osc0 ? { title: osc0.text } : {}) };
     }
     if (osc9.text.includes("needs your permission")) {
       const toolMatch = osc9.text.match(/permission.*?:\s*(\S+)/);
-      return { state: "approval_wait", tool: toolMatch?.[1] };
+      return {
+        state: "approval_wait",
+        ...(osc0 ? { title: osc0.text } : {}),
+        ...(toolMatch?.[1] ? { tool: toolMatch[1] } : {}),
+      };
     }
   }
 
   // 仅有 OSC 0（标题/spinner 变化）时视为 MID_PAUSE
-  const osc0 = matches.find((m) => m.code === 0);
   if (osc0 && !osc9) {
     return { state: "mid_pause", title: osc0.text };
   }

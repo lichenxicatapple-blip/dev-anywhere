@@ -189,9 +189,12 @@ export class HostedPtyRegistry {
     }
 
     const signal = extractOscSignals(data);
-    if (signal?.state === "approval_wait") {
-      hosted.currentState = "approval_wait";
-      this.sendPtyState(sessionId, "approval_wait", { title: signal.title, tool: signal.tool });
+    if (signal?.title) {
+      this.sendTerminalTitle(sessionId, signal.title);
+    }
+    if (signal && signal.state !== "working") {
+      hosted.currentState = signal.state;
+      this.sendPtyState(sessionId, signal.state, { title: signal.title, tool: signal.tool });
     }
   }
 
@@ -222,6 +225,16 @@ export class HostedPtyRegistry {
           ...(meta?.title !== undefined ? { title: meta.title } : {}),
           ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
         },
+      }),
+    );
+  }
+
+  private sendTerminalTitle(sessionId: string, title: string): void {
+    this.deps.relayConnection.sendRaw(
+      JSON.stringify({
+        type: "terminal_title",
+        sessionId,
+        title,
       }),
     );
   }

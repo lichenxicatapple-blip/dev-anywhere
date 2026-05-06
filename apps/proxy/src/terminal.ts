@@ -283,10 +283,24 @@ class TerminalSession {
     }
 
     const signal = extractOscSignals(data);
-    if (signal?.state === "approval_wait") {
-      this.currentPtyState = "approval_wait";
-      this.sendPtyState("approval_wait", { title: signal.title, tool: signal.tool });
+    if (signal?.title) {
+      this.sendTerminalTitle(signal.title);
     }
+    if (signal && signal.state !== "working") {
+      this.currentPtyState = signal.state;
+      this.sendPtyState(signal.state, { title: signal.title, tool: signal.tool });
+    }
+  }
+
+  private sendTerminalTitle(title: string): void {
+    if (!this.socket.writable || !this.sessionId) return;
+    this.socket.write(
+      serializeIpc({
+        type: "pty_title_change",
+        sessionId: this.sessionId,
+        title,
+      }),
+    );
   }
 
   private sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {

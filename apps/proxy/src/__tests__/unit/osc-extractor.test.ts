@@ -37,7 +37,13 @@ describe("extractOscSignals", () => {
   it("prioritizes OSC 9 over OSC 0 when both present", () => {
     const data = "\x1b]0;some title\x07" + "some output" + "\x1b]9;waiting for your input\x07";
     const result = extractOscSignals(data);
-    expect(result).toEqual({ state: "turn_complete" });
+    expect(result).toEqual({ state: "turn_complete", title: "some title" });
+  });
+
+  it("keeps title when OSC 9 reports approval wait", () => {
+    const data = "\x1b]0;approval title\x07\x1b]9;needs your permission: Bash\x07";
+    const result = extractOscSignals(data);
+    expect(result).toEqual({ state: "approval_wait", title: "approval title", tool: "Bash" });
   });
 
   it("handles BEL terminator (\\x07)", () => {
