@@ -34,5 +34,6 @@ describe("PermissionBroker", () => {
       behavior: "deny",
       message: "session ended",
     });
+    expect(broker.listSession("s1")).toHaveLength(0);
   });
 });

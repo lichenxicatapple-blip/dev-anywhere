@@ -21,6 +21,17 @@ async function createTestServer(onEvent?: (event: AuthenticatedHookEvent) => voi
   return { registry, permissionBroker, url: `http://127.0.0.1:${port}/hook` };
 }
 
+async function waitForPendingPermission(
+  permissionBroker: PermissionBroker,
+  sessionId: string,
+): Promise<void> {
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    if (permissionBroker.listSession(sessionId).length > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
@@ -100,7 +111,7 @@ describe("HookServer", () => {
       }),
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForPendingPermission(permissionBroker, "s1");
     expect(permissionBroker.listSession("s1")).toHaveLength(1);
     expect(permissionBroker.resolve("req-1", { behavior: "allow" })).toBe(true);
 
@@ -140,7 +151,7 @@ describe("HookServer", () => {
       }),
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForPendingPermission(permissionBroker, "s1");
     expect(permissionBroker.listSession("s1")).toHaveLength(1);
     expect(permissionBroker.resolve("toolu-1", { behavior: "deny", message: "No." })).toBe(true);
 

@@ -19,7 +19,13 @@ import {
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { createFSM } from "./common/state-machine.js";
-import type { ProviderHookContext } from "./providers/index.js";
+import {
+  CLAUDE_PROVIDER,
+  CODEX_PROVIDER,
+  type ProviderAdapter,
+  type ProviderHookContext,
+  type ProviderId,
+} from "./providers/index.js";
 
 // serve daemon 自动拉起的连接重试参数
 const ENSURE_SERVICE_MAX_RETRIES = 20;
@@ -39,6 +45,11 @@ const RECONNECT_MAX_DELAY_MS = 5_000;
 // 连续 spawn 失败到达阈值后停止自动 spawn，降为被动 tryConnect 轮询。
 // 作用：环境异常（端口占用、依赖缺失、权限不足）时避免反复拉起短命子进程把日志刷爆。
 const SPAWN_FAILURE_THRESHOLD = 3;
+
+const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
+  claude: CLAUDE_PROVIDER,
+  codex: CODEX_PROVIDER,
+};
 
 function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -153,7 +164,10 @@ class TerminalSession {
   // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
   private cleanupAndExit!: (code: number) => void;
 
-  constructor(private readonly claudeArgs: string[]) {}
+  constructor(
+    private readonly provider: ProviderAdapter,
+    private readonly providerArgs: string[],
+  ) {}
 
   async run(): Promise<void> {
     log.info("Terminal starting");
@@ -191,6 +205,7 @@ class TerminalSession {
       serializeIpc({
         type: "session_create_request",
         mode: "pty",
+        provider: this.provider.id,
         cwd: this.sessionCwd,
         name: tildify(this.sessionCwd),
         pid: process.pid,
@@ -224,7 +239,8 @@ class TerminalSession {
 
   private startPtyManager(): void {
     this.ptyManager = new PtyManager({
-      claudeArgs: this.claudeArgs,
+      provider: this.provider,
+      providerArgs: this.providerArgs,
       hook: this.hookContext ?? undefined,
       tap: (data) => this.handlePtyData(data),
       stdin: process.stdin,
@@ -392,6 +408,7 @@ class TerminalSession {
             serializeIpc({
               type: "session_create_request",
               mode: "pty",
+              provider: this.provider.id,
               cwd: this.sessionCwd,
               name: tildify(this.sessionCwd),
               pid: process.pid,
@@ -431,6 +448,13 @@ class TerminalSession {
   }
 }
 
-export async function startTerminal(claudeArgs: string[]): Promise<void> {
-  await new TerminalSession(claudeArgs).run();
+function providerFromEnv(): ProviderId {
+  return process.env.DEV_ANYWHERE_PROVIDER === "codex" ? "codex" : "claude";
+}
+
+export async function startTerminal(
+  providerArgs: string[],
+  providerId: ProviderId = providerFromEnv(),
+): Promise<void> {
+  await new TerminalSession(PROVIDERS[providerId], providerArgs).run();
 }

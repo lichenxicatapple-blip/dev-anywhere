@@ -7,21 +7,14 @@ import type { WorkerRegistry } from "#src/serve/worker-registry.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 
 describe("RelayRouter hook permission decisions", () => {
-  it("resolves hook PermissionRequest before falling back to worker approval path", async () => {
-    const permissionBroker = new PermissionBroker(1000);
-    const workerSend = vi.fn();
-    const hookResolved = vi.fn();
-    const decisionPromise = permissionBroker.request({
-      requestId: "req-1",
-      sessionId: "s1",
-      provider: "claude",
-      toolName: "Bash",
-      input: { command: "pwd" },
-    });
-
-    const router = new RelayRouter({
+  function createRouter(options: {
+    permissionBroker: PermissionBroker;
+    workerSend: ReturnType<typeof vi.fn>;
+    hookResolved: ReturnType<typeof vi.fn>;
+  }): RelayRouter {
+    return new RelayRouter({
       sessionManager: { getSession: () => undefined } as never,
-      workerRegistry: { send: workerSend } as unknown as WorkerRegistry,
+      workerRegistry: { send: options.workerSend } as unknown as WorkerRegistry,
       toolApprovalManager: new ToolApprovalManager(),
       controlHandlers: {} as never,
       relayConnection: Object.assign(new EventEmitter(), {
@@ -35,11 +28,26 @@ describe("RelayRouter hook permission decisions", () => {
       createHookContext: () => {
         throw new Error("not used");
       },
-      permissionBroker,
+      permissionBroker: options.permissionBroker,
       hookEventRouter: {
-        onPermissionResolved: hookResolved,
+        onPermissionResolved: options.hookResolved,
       } as never,
     });
+  }
+
+  it("resolves hook PermissionRequest before falling back to worker approval path", async () => {
+    const permissionBroker = new PermissionBroker(1000);
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisionPromise = permissionBroker.request({
+      requestId: "req-1",
+      sessionId: "s1",
+      provider: "claude",
+      toolName: "Bash",
+      input: { command: "pwd" },
+    });
+
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
 
     router.handle({
       type: "tool_approve",
@@ -50,5 +58,31 @@ describe("RelayRouter hook permission decisions", () => {
     await expect(decisionPromise).resolves.toEqual({ behavior: "allow" });
     expect(workerSend).not.toHaveBeenCalled();
     expect(hookResolved).toHaveBeenCalledWith("s1", "req-1", "allow");
+  });
+
+  it("denies hook permission requests and clears the pending broker entry", async () => {
+    const permissionBroker = new PermissionBroker(1000);
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisionPromise = permissionBroker.request({
+      requestId: "req-1",
+      sessionId: "s1",
+      provider: "claude",
+      toolName: "Bash",
+      input: { command: "pwd" },
+    });
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "tool_deny",
+      sessionId: "s1",
+      payload: { toolId: "req-1", reason: "No." },
+    });
+
+    await expect(decisionPromise).resolves.toEqual({ behavior: "deny", message: "No." });
+    expect(permissionBroker.get("req-1")).toBeNull();
+    expect(permissionBroker.listSession("s1")).toHaveLength(0);
+    expect(workerSend).not.toHaveBeenCalled();
+    expect(hookResolved).toHaveBeenCalledWith("s1", "req-1", "deny");
   });
 });

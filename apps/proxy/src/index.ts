@@ -15,6 +15,7 @@ import {
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
+import type { ProviderId } from "./providers/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as {
@@ -226,7 +227,8 @@ const program = new Command("dev-anywhere")
     // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
     // tsup 基于 dynamic import 自动代码分裂，避免所有命令都为 terminal 付出 14KB 额外启动成本。
     const { startTerminal } = await import("./terminal.js");
-    await startTerminal(cliArgs);
+    const { provider, args } = extractProviderArgs(cliArgs);
+    await startTerminal(args, provider);
   });
 
 // serve 子命令组
@@ -311,4 +313,34 @@ program
 // pnpm run dev -- args 会在参数前插入 "--"，过滤掉前导分隔符再交给 Commander
 const cliArgs = process.argv.slice(2);
 if (cliArgs[0] === "--") cliArgs.shift();
+
+function extractProviderArgs(args: string[]): { provider: ProviderId; args: string[] } {
+  const providerFromEnv: ProviderId =
+    process.env.DEV_ANYWHERE_PROVIDER === "codex" ? "codex" : "claude";
+  const out: string[] = [];
+  let provider = providerFromEnv;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--provider") {
+      const next = args[i + 1];
+      if (next === "claude" || next === "codex") {
+        provider = next;
+        i++;
+        continue;
+      }
+    }
+    if (arg.startsWith("--provider=")) {
+      const value = arg.slice("--provider=".length);
+      if (value === "claude" || value === "codex") {
+        provider = value;
+        continue;
+      }
+    }
+    out.push(arg);
+  }
+
+  return { provider, args: out };
+}
+
 program.parse(cliArgs, { from: "user" });

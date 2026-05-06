@@ -14,7 +14,7 @@ export function tildify(cwd: string): string {
 export const CONFIG_PATH = `${APP_DIR}/config.json`;
 
 // 运行时文件
-const RUN_DIR = `${APP_DIR}/run`;
+export const RUN_DIR = `${APP_DIR}/run`;
 export const SOCK_PATH = `${RUN_DIR}/dev-anywhere.sock`;
 export const PID_PATH = `${RUN_DIR}/dev-anywhere.pid`;
 // 停机标记文件。用户执行 `dev-anywhere stop` 时创建，其它时候不存在。文件内容无意义。

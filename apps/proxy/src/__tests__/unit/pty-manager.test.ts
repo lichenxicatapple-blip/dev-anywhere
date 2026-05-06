@@ -65,7 +65,7 @@ describe("PtyManager", () => {
 
   async function createManager(
     overrides: {
-      claudeArgs?: string[];
+      providerArgs?: string[];
       tap?: (data: string) => void;
       isTTY?: boolean;
       cols?: number;
@@ -79,21 +79,38 @@ describe("PtyManager", () => {
     const stdin = createMockStdin(overrides.isTTY ?? true);
     const stdout = createMockStdout(overrides.cols ?? 120, overrides.rows ?? 40);
     const tap = overrides.tap ?? vi.fn();
+    const provider = {
+      id: "claude" as const,
+      displayName: "Claude Code",
+      capabilities: {
+        supportsHooks: true,
+        supportsSessionScopedConfig: true,
+        supportsProjectScopedConfig: true,
+        supportsGlobalSetup: true,
+      },
+      buildJsonCommand: vi.fn(),
+      buildTerminalCommand: vi.fn(({ args }) => ({
+        command: "claude",
+        args,
+        env: process.env,
+      })),
+    };
 
     const manager = new PtyManager({
-      claudeArgs: overrides.claudeArgs ?? [],
+      provider,
+      providerArgs: overrides.providerArgs ?? [],
       tap,
       stdin,
       stdout,
       onSessionExit: overrides.onSessionExit,
     });
 
-    return { manager, stdin, stdout, tap, pty };
+    return { manager, stdin, stdout, tap, pty, provider };
   }
 
   it("spawns claude with correct args and terminal dimensions", async () => {
     const { manager, pty } = await createManager({
-      claudeArgs: ["--help"],
+      providerArgs: ["--help"],
       cols: 120,
       rows: 40,
     });

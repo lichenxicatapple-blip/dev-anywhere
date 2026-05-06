@@ -41,6 +41,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("session_create_request"),
     name: z.string().optional(),
     mode: z.enum(["pty", "json"]),
+    provider: z.enum(["claude", "codex"]).optional(),
     cwd: z.string(),
     pid: z.number(),
     sessionId: z.string().optional(),

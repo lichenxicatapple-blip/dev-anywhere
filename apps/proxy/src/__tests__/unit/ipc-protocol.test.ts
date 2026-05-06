@@ -51,6 +51,19 @@ describe("IPC Protocol", () => {
 
       expect(result.success).toBe(true);
     });
+
+    it("accepts a Codex PTY session create request", async () => {
+      const { IpcMessageSchema } = await importIpc();
+      const result = IpcMessageSchema.safeParse({
+        type: "session_create_request",
+        mode: "pty",
+        provider: "codex",
+        cwd: "/tmp/test",
+        pid: 12345,
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

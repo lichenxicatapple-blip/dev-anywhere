@@ -1,10 +1,11 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { CLAUDE_PROVIDER, type ProviderHookContext } from "../providers/index.js";
+import type { ProviderAdapter, ProviderHookContext } from "../providers/index.js";
 import { readTtySize } from "./tty.js";
 
 interface PtyManagerOptions {
-  claudeArgs: string[];
+  provider: ProviderAdapter;
+  providerArgs: string[];
   hook?: ProviderHookContext;
   tap: (data: string) => void;
   stdin: NodeJS.ReadStream;
@@ -15,7 +16,8 @@ interface PtyManagerOptions {
 
 export class PtyManager {
   private child: IPty | null = null;
-  private readonly claudeArgs: string[];
+  private readonly provider: ProviderAdapter;
+  private readonly providerArgs: string[];
   private readonly hook?: ProviderHookContext;
   private readonly tap: (data: string) => void;
   private readonly stdin: NodeJS.ReadStream;
@@ -24,7 +26,8 @@ export class PtyManager {
   private readonly onResize?: (cols: number, rows: number) => void;
 
   constructor(options: PtyManagerOptions) {
-    this.claudeArgs = options.claudeArgs;
+    this.provider = options.provider;
+    this.providerArgs = options.providerArgs;
     this.hook = options.hook;
     this.tap = options.tap;
     this.stdin = options.stdin;
@@ -36,8 +39,8 @@ export class PtyManager {
   start(): void {
     const { cols, rows } = readTtySize(this.stdout);
 
-    const command = CLAUDE_PROVIDER.buildTerminalCommand(
-      { args: this.claudeArgs, hook: this.hook },
+    const command = this.provider.buildTerminalCommand(
+      { args: this.providerArgs, hook: this.hook },
       process.env,
     );
     const child = pty.spawn(command.command, command.args, {

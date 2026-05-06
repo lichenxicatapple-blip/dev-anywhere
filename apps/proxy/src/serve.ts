@@ -174,6 +174,7 @@ function handleTerminalConnection(
             );
             break;
           }
+          const provider = msg.provider ?? "claude";
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
           const session =
             existing ??
@@ -186,10 +187,13 @@ function handleTerminalConnection(
             serializeIpc({
               type: "session_create_response",
               sessionId: session.id,
-              hook: createHookContext(session.id, "claude"),
+              hook: createHookContext(session.id, provider),
             }),
           );
-          serviceLogger.info({ sessionId: session.id, mode: "pty" }, "PTY session created");
+          serviceLogger.info(
+            { sessionId: session.id, mode: "pty", provider },
+            "PTY session created",
+          );
           break;
         }
 
