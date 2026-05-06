@@ -18,6 +18,7 @@ import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { PtyRecoveryController } from "@/lib/pty-recovery";
+import { computePtyHostLayout, computeScrollTarget, ydispToScrollTop } from "@/lib/pty-scroll";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useFollowOutput } from "@/hooks/use-follow-output";
@@ -220,18 +221,6 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       const { cellH, cellW } = getDims();
       if (cellH === 0 || cellW === 0) return;
       const buffer = term.buffer.active;
-      // H = buffer.length * cellH 恰好 = (buffer.length - rows) * cellH (scrollback) + rows * cellH (active buffer).
-      // 当 host 高于容器 (canvas 溢出), max scrollTop > release threshold, 后段 scrollTop 自然走 sticky release 暴露 canvas 底部.
-      spacer.style.height = `${buffer.length * cellH}px`;
-      // host 不在 flex 容器里, 需要显式 width/height 才能正确 sticky + 让 canvas 不被压扁
-      host.style.width = `${term.cols * cellW}px`;
-      host.style.height = `${term.rows * cellH}px`;
-      spacer.style.width = host.style.width;
-
-      // 扫 canvas 视口 (buffer[viewportY..viewportY+rows]) 找最后一个非空行, 只看 rows 行不随 scrollback 增长
-      // 冷启动 TUI 只画前 N 行时, 用 paddingTop = (rows-1-canvasLastY)*cellH 把 canvas 内容推到 host 底部 (N+1)*cellH 内,
-      // host overflow:hidden 裁掉 canvas 超出 host 底的空白行. host height 保持 rows*cellH → sticky release 照常工作.
-      // 累积 canvasLastY=rows-1 时 paddingTop=0, 和原状态无视觉差异.
       let canvasLastY = -1;
       for (let ry = term.rows - 1; ry >= 0; ry--) {
         const absY = buffer.viewportY + ry;
@@ -242,13 +231,23 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
           break;
         }
       }
-      const blankRows = canvasLastY < 0 ? term.rows - 1 : term.rows - 1 - canvasLastY;
-      host.style.paddingTop = `${blankRows * cellH}px`;
-    };
-
-    const ydispToScrollTop = (ydisp: number): number => {
-      const { cellH } = getDims();
-      return ydisp * cellH;
+      const layout = computePtyHostLayout(
+        {
+          bufferLength: buffer.length,
+          rows: term.rows,
+          cols: term.cols,
+          viewportY: buffer.viewportY,
+          cellH,
+          cellW,
+        },
+        canvasLastY,
+      );
+      if (!layout) return;
+      spacer.style.height = `${layout.spacerHeight}px`;
+      spacer.style.width = `${layout.spacerWidth}px`;
+      host.style.width = `${layout.hostWidth}px`;
+      host.style.height = `${layout.hostHeight}px`;
+      host.style.paddingTop = `${layout.hostPaddingTop}px`;
     };
 
     const scrollToYdisp = (ydisp: number): void => {
@@ -275,21 +274,17 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       const { cellH } = getDims();
       if (cellH === 0) return;
       const buffer = term.buffer.active;
-      const maxYdisp = Math.max(0, buffer.length - term.rows);
-      const pinnedMaxScrollTop = maxYdisp * cellH;
-      let wantYdisp: number;
-      let subpixel: number;
-      if (container.scrollTop >= pinnedMaxScrollTop) {
-        // sticky release 阶段: ydisp 已饱和, 不做 subpixel
-        wantYdisp = maxYdisp;
-        subpixel = 0;
-      } else {
-        wantYdisp = Math.floor(container.scrollTop / cellH);
-        subpixel = container.scrollTop - wantYdisp * cellH;
-      }
+      const { ydisp, subpixel } = computeScrollTarget(container.scrollTop, {
+        bufferLength: buffer.length,
+        rows: term.rows,
+        cols: term.cols,
+        viewportY: buffer.viewportY,
+        cellH,
+        cellW: 1,
+      });
       applySubpixel(subpixel);
-      if (wantYdisp !== buffer.viewportY) {
-        scrollToYdisp(wantYdisp);
+      if (ydisp !== buffer.viewportY) {
+        scrollToYdisp(ydisp);
       }
     };
 
@@ -297,7 +292,8 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       if (syncing.internal) return;
       syncing.external = true;
       try {
-        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY);
+        const { cellH } = getDims();
+        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
         // 反向同步后清空 subpixel, 避免遗留
         applySubpixel(0);
       } finally {
