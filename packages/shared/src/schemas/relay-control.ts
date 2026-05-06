@@ -278,6 +278,7 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
       z.object({
         id: z.string(),
         mode: z.enum(["pty", "json"]),
+        provider: z.enum(["claude", "codex"]),
         state: z.string(),
       }),
     ),

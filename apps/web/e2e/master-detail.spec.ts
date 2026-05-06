@@ -30,6 +30,7 @@ test.describe("Master-detail — 桌面端即时会话切换", () => {
         name: "Test Session",
         mode: "json",
         state: "idle",
+        provider: "claude",
       });
     });
     const row = page.locator('[data-slot="session-row"]').first();
@@ -63,6 +64,7 @@ test.describe("Master-detail — 桌面端即时会话切换", () => {
         name: "Another Session",
         mode: "json",
         state: "idle",
+        provider: "claude",
       });
       store?.getState().setCurrentSession("test-sess-2", "json");
     });

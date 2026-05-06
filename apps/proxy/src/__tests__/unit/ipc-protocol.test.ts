@@ -26,6 +26,7 @@ describe("IPC Protocol", () => {
         type: "session_create_request" as const,
         name: "test-session",
         mode: "pty" as const,
+        provider: "claude" as const,
         cwd: "/tmp/test",
         pid: 12345,
       };
@@ -80,6 +81,7 @@ describe("IPC Protocol", () => {
           type: "session_create_request",
           name: "test",
           mode: "pty",
+          provider: "claude",
           cwd: "/tmp/test",
           pid: 12345,
         }),
@@ -99,6 +101,7 @@ describe("IPC Protocol", () => {
         type: "session_create_request",
         name: "test",
         mode: "pty",
+        provider: "claude",
         cwd: "/tmp/test",
         pid: 12345,
       });
@@ -144,6 +147,7 @@ describe("IPC Protocol", () => {
         JSON.stringify({
           type: "session_create_request",
           mode: "pty",
+          provider: "claude",
           cwd: "/tmp/test",
           pid: 12345,
         }) + "\n",

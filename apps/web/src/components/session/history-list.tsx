@@ -60,6 +60,7 @@ export function HistoryList({ now }: HistoryListProps) {
         sessionId: ctrl.sessionId,
         state: "idle",
         mode: "json",
+        provider: "claude",
       };
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=json`);

@@ -91,6 +91,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         name: name.trim() || undefined,
         state: "idle",
         mode,
+        provider: "claude",
       };
       useSessionStore.getState().addSession(newSession);
       onOpenChange(false);

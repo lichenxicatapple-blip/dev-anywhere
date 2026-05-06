@@ -13,6 +13,7 @@ function createMockSessionManager(
       sessions.map((s) => ({
         id: s.id,
         mode: "pty" as const,
+        provider: "claude" as const,
         state: s.state,
         createdAt: new Date().toISOString(),
       })),

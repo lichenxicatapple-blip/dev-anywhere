@@ -30,6 +30,7 @@ function toSessionListPayload(s: SessionInfo) {
   return {
     sessionId: s.id,
     mode: s.mode,
+    provider: s.provider,
     state: s.state,
     lastActive: s.updatedAt,
     ...(s.name !== undefined ? { name: s.name } : {}),
@@ -79,7 +80,9 @@ function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): voi
   relay.sendRaw(
     JSON.stringify({
       type: "session_sync",
-      sessions: [{ id: session.id, mode: session.mode, state: session.state }],
+      sessions: [
+        { id: session.id, mode: session.mode, provider: session.provider, state: session.state },
+      ],
     }),
   );
 }
@@ -174,11 +177,18 @@ function handleTerminalConnection(
             );
             break;
           }
-          const provider = msg.provider ?? "claude";
+          const provider = msg.provider;
           const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
           const session =
             existing ??
-            sessionManager.createSession("pty", msg.cwd, msg.pid, msg.name, msg.sessionId);
+            sessionManager.createSession(
+              "pty",
+              msg.cwd,
+              msg.pid,
+              msg.name,
+              msg.sessionId,
+              provider,
+            );
           if (existing) {
             ptyObserver.onTerminalAttached(session.id);
             sessionManager.setPid(session.id, msg.pid);
@@ -207,6 +217,7 @@ function handleTerminalConnection(
               sessions: sessions.map((s) => ({
                 id: s.id,
                 mode: s.mode,
+                provider: s.provider,
                 state: s.state,
                 createdAt: new Date(s.createdAt).toISOString(),
                 ...(s.name !== undefined ? { name: s.name } : {}),

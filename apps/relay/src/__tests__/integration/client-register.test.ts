@@ -379,8 +379,8 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "session_sync",
         sessions: [
-          { id: "s1", mode: "pty", state: "idle" },
-          { id: "s2", mode: "json", state: "working" },
+          { id: "s1", mode: "pty", provider: "claude", state: "idle" },
+          { id: "s2", mode: "json", provider: "claude", state: "working" },
         ],
       }),
     );

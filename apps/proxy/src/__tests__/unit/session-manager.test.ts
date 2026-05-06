@@ -31,6 +31,7 @@ describe("SessionManager", () => {
       const info = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       expect(info.id).toBeTruthy();
       expect(info.mode).toBe("pty");
+      expect(info.provider).toBe("claude");
       expect(info.state).toBe(SessionState.IDLE);
       expect(info.pid).toBe(ALIVE_PID);
       expect(info.createdAt).toBeGreaterThan(0);
@@ -49,6 +50,18 @@ describe("SessionManager", () => {
       expect(info.name).toBe("my-session");
     });
 
+    it("stores provider in SessionInfo", () => {
+      const info = manager.createSession(
+        "pty",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "codex",
+      );
+      expect(info.provider).toBe("codex");
+    });
+
     it("generates unique IDs for each session", () => {
       const s1 = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);
@@ -60,6 +73,7 @@ describe("SessionManager", () => {
       expect(existsSync(persistPath)).toBe(true);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       expect(data).toHaveLength(1);
+      expect(data[0].provider).toBe("claude");
     });
   });
 
@@ -324,6 +338,7 @@ describe("SessionManager", () => {
       const restored = manager2.getSession(s.id);
       expect(restored).toBeDefined();
       expect(restored!.state).toBe(SessionState.IDLE);
+      expect(restored!.provider).toBe("claude");
       manager2.stopReaper();
     });
 
@@ -334,6 +349,7 @@ describe("SessionManager", () => {
         {
           id: s.id,
           mode: "json",
+          provider: "claude",
           cwd: "/tmp/test",
           pid: ALIVE_PID,
           state: SessionState.WORKING,
@@ -348,6 +364,25 @@ describe("SessionManager", () => {
       expect(restored).toBeDefined();
       expect(restored!.state).toBe(SessionState.IDLE);
       manager2.stopReaper();
+    });
+
+    it("rejects persisted sessions without provider", () => {
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "legacy",
+            mode: "json",
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      expect(() => new SessionManager({ persistPath })).toThrow("invalid provider");
     });
   });
 

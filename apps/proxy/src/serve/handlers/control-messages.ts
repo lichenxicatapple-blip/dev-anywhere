@@ -268,6 +268,7 @@ export function createControlMessageHandlers(
             sessions: activeSessions.map((s) => ({
               id: s.id,
               mode: s.mode,
+              provider: s.provider,
               state: s.state,
             })),
           }),

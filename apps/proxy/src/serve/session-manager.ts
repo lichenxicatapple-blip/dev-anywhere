@@ -4,10 +4,12 @@ import { nanoid } from "nanoid";
 import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { defineFSM } from "../common/state-machine.js";
+import type { ProviderId } from "../providers/index.js";
 
 export interface SessionInfo {
   id: string;
   mode: "pty" | "json";
+  provider: ProviderId;
   state: SessionState;
   createdAt: number;
   updatedAt: number;
@@ -106,6 +108,10 @@ function fsmForMode(mode: "pty" | "json"): ReturnType<typeof defineFSM<SessionSt
   return mode === "pty" ? ptyFSM : jsonFSM;
 }
 
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "claude" || value === "codex";
+}
+
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
   private reaperTimer: NodeJS.Timeout | null = null;
@@ -126,11 +132,13 @@ export class SessionManager {
     pid: number,
     name?: string,
     id?: string,
+    provider: ProviderId = "claude",
   ): SessionInfo {
     const now = Date.now();
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
+      provider,
       state: SessionState.IDLE,
       createdAt: now,
       updatedAt: now,
@@ -140,7 +148,7 @@ export class SessionManager {
     };
     this.sessions.set(info.id, info);
     this.save();
-    serviceLogger.info({ sessionId: info.id, mode, name }, "Session created");
+    serviceLogger.info({ sessionId: info.id, mode, provider, name }, "Session created");
     return info;
   }
 
@@ -275,6 +283,7 @@ export class SessionManager {
     const persisted = Array.from(this.sessions.values()).map((s) => ({
       id: s.id,
       mode: s.mode,
+      provider: s.provider,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       cwd: s.cwd,
@@ -309,6 +318,11 @@ export class SessionManager {
     for (const item of parsed) {
       // 磁盘上从本版本起不含 state 字段；旧文件残留的 state 会被下面的 IDLE 覆盖，无需迁移逻辑
       const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
+      if (!isProviderId(info.provider)) {
+        throw new Error(
+          `Session persistence file has invalid provider for session ${String(info.id)}`,
+        );
+      }
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存

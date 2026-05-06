@@ -10,12 +10,14 @@ describe("SessionListPayloadSchema", () => {
   it("accepts valid session list", () => {
     const result = SessionListPayloadSchema.parse({
       sessions: [
-        { sessionId: "s1", name: "sess1", state: "idle" },
-        { sessionId: "s2", state: "working" },
+        { sessionId: "s1", name: "sess1", state: "idle", provider: "claude" },
+        { sessionId: "s2", state: "working", provider: "codex" },
       ],
     });
     expect(result.sessions).toHaveLength(2);
     expect(result.sessions[0].name).toBe("sess1");
+    expect(result.sessions[0].provider).toBe("claude");
+    expect(result.sessions[1].provider).toBe("codex");
     expect(result.sessions[1].name).toBeUndefined();
   });
 
@@ -27,7 +29,15 @@ describe("SessionListPayloadSchema", () => {
   it("rejects invalid session state", () => {
     expect(() =>
       SessionListPayloadSchema.parse({
-        sessions: [{ sessionId: "s1", state: "invalid_state" }],
+        sessions: [{ sessionId: "s1", state: "invalid_state", provider: "claude" }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects missing provider", () => {
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [{ sessionId: "s1", state: "idle" }],
       }),
     ).toThrow();
   });
@@ -36,7 +46,7 @@ describe("SessionListPayloadSchema", () => {
     const states = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
     for (const state of states) {
       const result = SessionListPayloadSchema.parse({
-        sessions: [{ sessionId: "s1", state }],
+        sessions: [{ sessionId: "s1", state, provider: "claude" }],
       });
       expect(result.sessions[0].state).toBe(state);
     }

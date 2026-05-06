@@ -54,6 +54,11 @@ const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; lab
   },
 };
 
+const PROVIDER_LABEL: Record<NonNullable<SessionInfo["provider"]>, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
 function StateDot({ state }: { state: SessionInfo["state"] }) {
   const style = STATE_STYLE[state];
   return (
@@ -71,7 +76,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
     formatSessionName(session.name) === "New Session"
       ? session.sessionId.slice(0, 8)
       : formatSessionName(session.name);
-  const hasMeta = !!session.mode || lastActive !== undefined;
+  const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
   return (
     <li
       className={cn(
@@ -108,6 +113,16 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                 ·
               </span>
+            )}
+            {session.provider && (
+              <>
+                <span className="font-mono text-muted-foreground shrink-0">
+                  {PROVIDER_LABEL[session.provider]}
+                </span>
+                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+                  ·
+                </span>
+              </>
             )}
             <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
               {STATE_STYLE[session.state].label}

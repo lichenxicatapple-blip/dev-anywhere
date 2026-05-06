@@ -120,12 +120,13 @@ describe("MessageEnvelopeSchema", () => {
     it("accepts session entries with mode field", () => {
       const result = SessionListPayloadSchema.parse({
         sessions: [
-          { sessionId: "s1", state: "idle", mode: "pty" },
-          { sessionId: "s2", state: "working", mode: "json" },
+          { sessionId: "s1", state: "idle", mode: "pty", provider: "claude" },
+          { sessionId: "s2", state: "working", mode: "json", provider: "codex" },
         ],
       });
       expect(result.sessions[0].mode).toBe("pty");
       expect(result.sessions[1].mode).toBe("json");
+      expect(result.sessions[1].provider).toBe("codex");
     });
   });
 

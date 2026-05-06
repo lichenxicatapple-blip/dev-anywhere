@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
+const providerValues = ["claude", "codex"] as const;
 
 // 会话信息，用于会话列表展示
 // lastActive: 最近一次状态变更/消息时间戳 (ms), 用于列表"N 分钟前"显示, 可选
@@ -9,6 +10,7 @@ export const SessionInfoSchema = z.object({
   name: z.string().optional(),
   state: z.enum(sessionStateValues),
   mode: z.enum(["pty", "json"]).optional(),
+  provider: z.enum(providerValues),
   lastActive: z.number().optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;

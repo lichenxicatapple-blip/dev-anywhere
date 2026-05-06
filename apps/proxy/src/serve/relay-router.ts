@@ -266,6 +266,7 @@ export class RelayRouter {
             workerPid,
             name,
             pendingId,
+            "claude",
           );
           if (resumeSessionId) {
             this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
