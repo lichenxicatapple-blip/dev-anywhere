@@ -18,9 +18,9 @@ import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachPtyFitController } from "@/lib/pty-fit-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
-import { PtyRecoveryController } from "@/lib/pty-recovery";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
+import { attachPtySessionTransport } from "@/lib/pty-session-transport";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { BackToBottom } from "./back-to-bottom";
@@ -76,10 +76,8 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     if (!host) return;
     let disposeFn: (() => void) | null = null;
     let disposeRawInput: (() => void) | null = null;
+    let disposeTransport: (() => void) | null = null;
     let removeFocusHandler: (() => void) | null = null;
-    let unsubBinary: (() => void) | null = null;
-    let unsubSnapshot: (() => void) | null = null;
-    let cleanupRetry: (() => void) | null = null;
     let cancelled = false;
 
     (async () => {
@@ -96,103 +94,35 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       host.addEventListener("pointerdown", focusTerminal, { passive: true });
       removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
 
-      const recovery = new PtyRecoveryController();
-
       const ws = wsManagerRef;
       const relay = relayClientRef;
       if (!ws || !relay) return;
 
-      unsubBinary = ws.subscribeBinary(sessionId, (data) => {
-        const term = terminalRef.current;
-        if (!term) return;
-        const result = recovery.handleBinaryFrame(data, term);
-        if (result.written) {
+      const transport = attachPtySessionTransport({
+        sessionId,
+        ws,
+        relay,
+        target: result.terminal,
+        onFrameWritten: () => {
           pendingNewFrameRef.current = true;
-        }
-      });
-
-      const RETRY_DELAY_MS = 3000;
-      const MAX_RETRIES = 3;
-      let retryTimer: ReturnType<typeof setTimeout> | null = null;
-      let retryCount = 0;
-
-      const clearRetry = (): void => {
-        if (retryTimer) {
-          clearTimeout(retryTimer);
-          retryTimer = null;
-        }
-      };
-
-      const requestSnapshot = (): void => {
-        const requestId = recovery.startSnapshotRequest();
-        ws.send(JSON.stringify({ type: "session_subscribe", sessionId, requestId }));
-      };
-
-      const scheduleSnapshotRetry = (): void => {
-        requestSnapshot();
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          if (cancelled || recovery.hasAppliedSnapshot()) return;
-          if (retryCount >= MAX_RETRIES) {
-            setSubscribeExhausted(true);
-            return;
-          }
-          retryCount += 1;
-          scheduleSnapshotRetry();
-        }, RETRY_DELAY_MS);
-      };
-
-      const startSnapshotSubscribe = (): void => {
-        if (cancelled) return;
-        clearRetry();
-        retryCount = 0;
-        setSubscribeExhausted(false);
-        scheduleSnapshotRetry();
-      };
-
-      unsubSnapshot = relay.onMessage((msg) => {
-        const m = msg as Record<string, unknown>;
-        if (m.sessionId !== sessionId) return;
-        if (m.type === "terminal_resize") {
-          terminalRef.current?.resize(m.cols as number, m.rows as number);
-          startSnapshotSubscribe();
-          return;
-        }
-        if (m.type !== "session_snapshot") return;
-        const term = terminalRef.current;
-        if (!term) return;
-        const result = recovery.applySnapshot(
-          {
-            requestId: m.requestId as string | undefined,
-            cols: m.cols as number,
-            rows: m.rows as number,
-            data: m.data as string,
-          },
-          term,
-        );
-        if (!result.applied) {
-          return;
-        }
-        if (result.replayedFrames > 0) {
-          pendingNewFrameRef.current = true;
-        }
-        clearRetry();
-        requestAnimationFrame(() => {
+        },
+        onReady: () => {
           setReady(true);
           setSubscribeExhausted(false);
-        });
+        },
+        onSubscribeStarted: () => {
+          setSubscribeExhausted(false);
+        },
+        onSubscribeExhausted: () => {
+          setSubscribeExhausted(true);
+        },
       });
-
-      startSnapshotSubscribe();
-
-      cleanupRetry = clearRetry;
+      disposeTransport = transport.dispose;
     })();
 
     return () => {
       cancelled = true;
-      cleanupRetry?.();
-      unsubBinary?.();
-      unsubSnapshot?.();
+      disposeTransport?.();
       removeFocusHandler?.();
       disposeRawInput?.();
       disposeFn?.();
