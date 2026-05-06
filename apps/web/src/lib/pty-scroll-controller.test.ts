@@ -281,6 +281,58 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
   });
 
+  it("relayout keeps bottom pinned after terminal metrics change", () => {
+    const { container, spacer, host, xterm } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+
+    defineSize(screen, { clientHeight: 600, clientWidth: 800 });
+    controller.relayout();
+
+    expect(spacer.style.height).toBe("3000px");
+    expect(host.style.height).toBe("600px");
+    expect(container.scrollTop).toBe(2000);
+    expect(xterm.style.transform).toBe("");
+  });
+
+  it("relayout preserves xterm viewport when user is away from bottom", () => {
+    const { container, spacer, host, xterm } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+
+    container.scrollTop = 100;
+    terminal.buffer.active.viewportY = 7;
+    xterm.style.transform = "translate3d(0,-5px,0)";
+    defineSize(screen, { clientHeight: 600, clientWidth: 800 });
+    controller.relayout();
+
+    expect(spacer.style.height).toBe("3000px");
+    expect(container.scrollTop).toBe(210);
+    expect(xterm.style.transform).toBe("");
+  });
+
   it("cleans up DOM, xterm, and resize observers", () => {
     const { container, spacer, host } = createDom();
     const { terminal, disposeScroll, disposeRender } = createTerminal({ 19: "prompt" });

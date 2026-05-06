@@ -17,6 +17,7 @@ interface PtyScrollControllerOptions {
 
 interface PtyScrollController {
   dispose: () => void;
+  relayout: () => void;
   scrollToBottom: () => void;
   scrollToRatio: (ratio: number) => void;
 }
@@ -185,6 +186,22 @@ export function attachPtyScrollController(
     }
   };
 
+  const relayout = (): void => {
+    const wasAtBottom = computeIsAtBottom();
+    updateSpacer();
+    if (wasAtBottom) {
+      scrollToBottom();
+      return;
+    }
+
+    const { cellH } = getDims();
+    if (cellH !== 0) {
+      container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
+      applySubpixel(0);
+    }
+    notifyScroll();
+  };
+
   const onRender = (): void => {
     updateSpacer();
     if (!hasNewFrame()) return;
@@ -203,10 +220,7 @@ export function attachPtyScrollController(
   container.addEventListener("scroll", onContainerScroll, { passive: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
-  const ro = new ResizeObserver(() => {
-    updateSpacer();
-    notifyScroll();
-  });
+  const ro = new ResizeObserver(relayout);
   ro.observe(container);
   ro.observe(host);
 
@@ -217,6 +231,7 @@ export function attachPtyScrollController(
       dispRender.dispose();
       ro.disconnect();
     },
+    relayout,
     scrollToBottom,
     scrollToRatio,
   };

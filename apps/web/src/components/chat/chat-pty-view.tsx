@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
+import { attachPtyFitController } from "@/lib/pty-fit-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { PtyRecoveryController } from "@/lib/pty-recovery";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
@@ -35,6 +36,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const relayoutPtyRef = useRef<() => void>(() => {});
   const scrollToBottomRef = useRef<() => void>(() => {});
   const scrollToRatioRef = useRef<(ratio: number) => void>(() => {});
   const [ready, setReady] = useState(false);
@@ -223,48 +225,30 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       },
       onScrollStateChange: setScrollState,
     });
+    relayoutPtyRef.current = controller.relayout;
     scrollToBottomRef.current = controller.scrollToBottom;
     scrollToRatioRef.current = controller.scrollToRatio;
     return () => {
       controller.dispose();
+      relayoutPtyRef.current = () => {};
       scrollToBottomRef.current = () => {};
       scrollToRatioRef.current = () => {};
     };
   }, [ready, ptyAutoscale, containerEl]);
 
-  // autoscale fontSize: 按容器尺寸反推字号, 让 xterm 的 cell 铺满视口.
-  // cols/rows 保持 snapshot 原值, 字号变会带动 cellH 变, 驱动 spacer 重算.
   useEffect(() => {
     if (!ready) return;
-    const host = xtermHostRef.current;
     const container = containerEl;
     const term = terminalRef.current;
-    if (!host || !container || !term) return;
+    if (!container || !term) return;
 
-    if (!ptyAutoscale) {
-      if (term.options.fontSize !== 14) {
-        term.options.fontSize = 14;
-      }
-      return;
-    }
-
-    const fit = (): void => {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      const { cols, rows } = term;
-      if (!w || !h || !cols || !rows) return;
-      const byWidth = w / cols / 0.6;
-      const byHeight = h / rows / 1.2;
-      const next = Math.max(8, Math.min(16, Math.floor(Math.min(byWidth, byHeight))));
-      if (term.options.fontSize !== next) {
-        term.options.fontSize = next;
-      }
-    };
-
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(container);
-    return () => ro.disconnect();
+    const controller = attachPtyFitController({
+      container,
+      term,
+      enabled: ptyAutoscale,
+      onRelayout: () => relayoutPtyRef.current(),
+    });
+    return () => controller.dispose();
   }, [ready, ptyAutoscale, containerEl]);
 
   return (
