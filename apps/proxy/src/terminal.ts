@@ -7,7 +7,7 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { extractOscSignals, type PtySemanticState } from "./terminal/osc-extractor.js";
+import { extractOscSignals, type PtySemanticState } from "./common/osc-extractor.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";

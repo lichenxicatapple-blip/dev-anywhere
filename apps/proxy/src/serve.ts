@@ -22,6 +22,7 @@ import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import type { ProviderHookContext } from "./providers/index.js";
+import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -152,6 +153,7 @@ function handleTerminalConnection(
   sessionManager: SessionManager,
   workerRegistry: WorkerRegistry,
   terminalSockets: Map<string, Socket>,
+  hostedPtyRegistry: HostedPtyRegistry,
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
   agentStatusRegistry: AgentStatusRegistry,
@@ -268,12 +270,16 @@ function handleTerminalConnection(
         }
 
         case "session_terminate_request": {
-          const result = sessionManager.terminateSession(msg.sessionId);
-          workerRegistry.send(msg.sessionId, { type: "worker_stop" });
-          workerRegistry.delete(msg.sessionId);
-
-          controlHandlers.cleanup(msg.sessionId);
-          agentStatusRegistry.delete(msg.sessionId);
+          const hosted = hostedPtyRegistry.terminate(msg.sessionId);
+          const result = hosted
+            ? { success: true }
+            : sessionManager.terminateSession(msg.sessionId);
+          if (!hosted) {
+            workerRegistry.send(msg.sessionId, { type: "worker_stop" });
+            workerRegistry.delete(msg.sessionId);
+            controlHandlers.cleanup(msg.sessionId);
+            agentStatusRegistry.delete(msg.sessionId);
+          }
           socket.write(
             serializeIpc({
               type: "session_terminate_response",
@@ -329,6 +335,9 @@ function handleTerminalConnection(
 
         case "pty_input": {
           const targetSocket = terminalSockets.get(msg.sessionId);
+          if (hostedPtyRegistry.write(msg.sessionId, msg.data)) {
+            break;
+          }
           if (targetSocket?.writable) {
             targetSocket.write(
               serializeIpc({
@@ -546,6 +555,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     jsonObserver,
   });
+  const hostedPtyRegistry = new HostedPtyRegistry({
+    sessionManager,
+    relayConnection,
+    changeSessionState: observerChangeState,
+    onSessionClosed: (sessionId) => {
+      controlHandlers.cleanup(sessionId);
+      agentStatusRegistry.delete(sessionId);
+      broadcastSessionList(relayConnection, sessionManager);
+    },
+  });
 
   relayConnection.connect();
   serviceLogger.info({ relayUrl, proxyName, tokenSet: !!relayToken }, "Connecting to relay server");
@@ -557,6 +576,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     relaySend,
     terminalSockets,
+    hostedPtyRegistry,
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,
@@ -591,6 +611,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       sessionManager,
       workerRegistry,
       terminalSockets,
+      hostedPtyRegistry,
       relayConnection,
       controlHandlers,
       agentStatusRegistry,
@@ -610,6 +631,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     await hookServer.close();
     relayConnection.close();
     workerRegistry.destroyAll();
+    hostedPtyRegistry.destroyAll();
     server.close();
     try {
       unlinkSync(SOCK_PATH);

@@ -16,6 +16,8 @@ import type { ProviderHookContext, ProviderId } from "../providers/index.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
+import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
+import { buildHostedPtyArgs } from "./hosted-pty-registry.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -24,6 +26,7 @@ interface RelayRouterDeps {
   relayConnection: RelayConnection;
   relaySend: (data: string) => void;
   terminalSockets: Map<string, Socket>;
+  hostedPtyRegistry: HostedPtyRegistry;
   broadcastSessionList: () => void;
   broadcastSessionSync: (session: SessionInfo) => void;
   // user_input 注入触发 turn 开始（JSON 观察器）
@@ -80,6 +83,7 @@ export class RelayRouter {
     session_list: () => this.onSessionList(),
     permission_mode_change: (msg) => this.onPermissionModeChange(msg),
     session_subscribe: (msg) => this.onSessionSubscribe(msg),
+    terminal_resize_request: (msg) => this.onTerminalResizeRequest(msg),
   };
 
   // ---------- handlers ----------
@@ -125,6 +129,13 @@ export class RelayRouter {
     if (!sessionId || data === undefined) return;
 
     const ts = this.deps.terminalSockets.get(sessionId);
+    if (!ts?.writable && this.deps.hostedPtyRegistry.write(sessionId, data)) {
+      serviceLogger.info(
+        { sessionId, bytes: data.length },
+        "Raw PTY input forwarded to hosted PTY",
+      );
+      return;
+    }
     if (!ts?.writable) {
       serviceLogger.warn({ sessionId }, "Raw PTY input dropped: terminal socket unavailable");
       return;
@@ -275,6 +286,12 @@ export class RelayRouter {
     if (!cwd) return;
 
     const provider = msg.provider as ProviderId | undefined;
+    const mode = (msg.mode as "json" | "pty" | undefined) ?? "json";
+    if (mode === "pty") {
+      this.createHostedPtySession(msg, cwd, provider ?? "claude");
+      return;
+    }
+
     if (provider !== "claude") {
       this.deps.relaySend(
         JSON.stringify({
@@ -350,6 +367,70 @@ export class RelayRouter {
       });
     };
     setTimeout(tryConnect, 100);
+  }
+
+  private createHostedPtySession(
+    msg: Record<string, unknown>,
+    cwd: string,
+    provider: ProviderId,
+  ): void {
+    if (provider !== "claude" && provider !== "codex") {
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_create_response",
+          sessionId: "",
+          error: "Unsupported provider for PTY session.",
+        }),
+      );
+      return;
+    }
+
+    const resumeSessionId = msg.resumeSessionId as string | undefined;
+    const pendingId = nanoid();
+    const name = tildify(cwd);
+    const hook = this.deps.createHookContext(pendingId, provider);
+    try {
+      const pid = this.deps.hostedPtyRegistry.start({
+        sessionId: pendingId,
+        provider,
+        cwd,
+        args: buildHostedPtyArgs(provider, resumeSessionId),
+        hook,
+      });
+      const session = this.deps.sessionManager.createSession(
+        "pty",
+        cwd,
+        pid,
+        name,
+        pendingId,
+        provider,
+      );
+      if (resumeSessionId && provider === "claude") {
+        this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
+      }
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_create_response",
+          sessionId: session.id,
+          mode: "pty",
+          provider,
+        }),
+      );
+      this.deps.controlHandlers.pushCommandList(session.id, cwd);
+      this.deps.controlHandlers.pushFileTree(session.id, cwd);
+      this.deps.broadcastSessionSync(session);
+      this.deps.broadcastSessionList();
+      serviceLogger.info({ sessionId: session.id, provider, cwd }, "Hosted PTY session created");
+    } catch (err) {
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_create_response",
+          sessionId: "",
+          error: String(err),
+        }),
+      );
+      serviceLogger.warn({ provider, cwd, error: String(err) }, "Hosted PTY session create failed");
+    }
   }
 
   private pushHistoryMessages(sessionId: string, resumeSessionId: string): void {
@@ -465,13 +546,16 @@ export class RelayRouter {
     const sid = msg.sessionId as string | undefined;
     if (!sid) return;
 
-    const result = this.deps.sessionManager.terminateSession(sid);
-    this.deps.workerRegistry.send(sid, { type: "worker_stop" });
-    this.deps.workerRegistry.delete(sid);
-    this.deps.controlHandlers.cleanup(sid);
-    this.deps.agentStatusRegistry.delete(sid);
+    const hosted = this.deps.hostedPtyRegistry.terminate(sid);
+    const result = hosted ? { success: true } : this.deps.sessionManager.terminateSession(sid);
+    if (!hosted) {
+      this.deps.workerRegistry.send(sid, { type: "worker_stop" });
+      this.deps.workerRegistry.delete(sid);
+      this.deps.controlHandlers.cleanup(sid);
+      this.deps.agentStatusRegistry.delete(sid);
+    }
     serviceLogger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");
-    this.deps.broadcastSessionList();
+    if (!hosted) this.deps.broadcastSessionList();
   }
 
   private onSessionWorkerAbort(msg: Record<string, unknown>): void {
@@ -491,7 +575,9 @@ export class RelayRouter {
     if (session.mode === "pty") {
       // PTY 会话直接把 Ctrl+C 写入 PTY stdin，避免杀掉 terminal wrapper 进程
       const ts = this.deps.terminalSockets.get(sid);
-      if (ts?.writable) {
+      if (this.deps.hostedPtyRegistry.write(sid, "\x03")) {
+        serviceLogger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to hosted PTY");
+      } else if (ts?.writable) {
         ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x03" }));
         serviceLogger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to PTY");
       } else {
@@ -545,7 +631,12 @@ export class RelayRouter {
     // PTY 会话：发 Shift+Tab (CSI Z) 让 claude CLI 循环 permission mode
     // mode 字段当前保留但不使用 —— Claude CLI 仅支持循环键，无法一键直选档位
     const ts = this.deps.terminalSockets.get(sid);
-    if (ts?.writable) {
+    if (this.deps.hostedPtyRegistry.write(sid, "\x1b[Z")) {
+      serviceLogger.info(
+        { sessionId: sid, mode },
+        "Permission mode cycle: Shift+Tab sent to hosted PTY",
+      );
+    } else if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x1b[Z" }));
       serviceLogger.info({ sessionId: sid, mode }, "Permission mode cycle: Shift+Tab sent to PTY");
     } else {
@@ -562,11 +653,23 @@ export class RelayRouter {
     if (!sid) return;
 
     const ts = this.deps.terminalSockets.get(sid);
-    if (ts?.writable) {
+    if (this.deps.hostedPtyRegistry.snapshot(sid, requestId)) {
+      serviceLogger.info({ sessionId: sid, requestId }, "Subscribe handled by hosted PTY");
+    } else if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid, requestId }));
       serviceLogger.info({ sessionId: sid, requestId }, "Subscribe forwarded to terminal");
     } else {
       serviceLogger.warn({ sessionId: sid }, "Subscribe failed: terminal socket not available");
+    }
+  }
+
+  private onTerminalResizeRequest(msg: Record<string, unknown>): void {
+    const sid = msg.sessionId as string | undefined;
+    const cols = msg.cols as number | undefined;
+    const rows = msg.rows as number | undefined;
+    if (!sid || !cols || !rows) return;
+    if (!this.deps.hostedPtyRegistry.resize(sid, cols, rows)) {
+      serviceLogger.debug({ sessionId: sid, cols, rows }, "Resize request ignored: not hosted PTY");
     }
   }
 }

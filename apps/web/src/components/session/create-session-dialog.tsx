@@ -1,7 +1,7 @@
 // 新建会话 Dialog, 字段: name (可选) / CWD
-// 目前只能创建 Claude JSON 会话; 托管 PTY 专项会接入 Claude/Codex PTY 创建。
+// Web 新建会话走 serve 托管 PTY，Claude/Codex 都由本机 proxy 持有真实 Agent CLI。
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
-// Permission mode lives here for new sessions; resume remains a chat-level action.
+// 权限模式只对 JSON worker 有效；当前 PTY 创建路径不展示该控件，避免误导。
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
@@ -9,6 +9,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
 import { toast } from "@/components/toast";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -18,34 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
-
-type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
-
-const PERMISSION_MODE_OPTIONS: {
-  value: PermissionMode;
-  label: string;
-  hint: string;
-  danger?: boolean;
-}[] = [
-  { value: "default", label: "严格审批", hint: "每个工具调用都弹审批（推荐）" },
-  { value: "auto", label: "自动判定", hint: "Claude 内置规则决定是否放行" },
-  { value: "acceptEdits", label: "自动接受编辑", hint: "文件编辑直接放行，其他仍审批" },
-  { value: "plan", label: "只读规划", hint: "只做只读操作，不执行 side-effect 工具" },
-  {
-    value: "bypassPermissions",
-    label: "跳过全部审批（危险）",
-    hint: "所有工具直接放行，仅限可信会话",
-    danger: true,
-  },
-];
 
 interface CreateSessionDialogProps {
   open: boolean;
@@ -55,13 +29,11 @@ interface CreateSessionDialogProps {
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [provider, setProvider] = useState<"claude" | "codex">("claude");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
-  const mode = "json" as const;
-  const provider = "claude" as const;
-  const currentPermissionOption = PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode);
+  const mode = "pty" as const;
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -92,15 +64,15 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         sessionId: ctrl.sessionId,
         name: name.trim() || undefined,
         state: "idle",
-        mode,
-        provider,
+        mode: ctrl.mode ?? mode,
+        provider: ctrl.provider ?? provider,
       };
       useSessionStore.getState().addSession(newSession);
       onOpenChange(false);
       setName("");
       setCwd("");
-      setPermissionMode("default");
-      navigate(`/chat/${ctrl.sessionId}?mode=${mode}`);
+      setProvider("claude");
+      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
     });
 
     return unsub;
@@ -117,7 +89,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       return;
     }
     setSubmitting(true);
-    relay.sendControl({ type: "session_create", cwd: cwd.trim(), provider, permissionMode });
+    relay.sendControl({ type: "session_create", cwd: cwd.trim(), mode, provider });
   }
 
   return (
@@ -166,60 +138,44 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           <section aria-label="Agent CLI" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-sm">Agent CLI</span>
-              <span className="text-xs text-muted-foreground">默认使用 Claude Code</span>
+              <span className="text-xs text-muted-foreground">托管 PTY</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                aria-pressed="true"
-                className="flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border border-primary/70 bg-primary/10 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-pressed={provider === "claude"}
+                onClick={() => setProvider("claude")}
+                className={cn(
+                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  provider === "claude"
+                    ? "border-primary/70 bg-primary/10"
+                    : "border-border bg-muted/20",
+                )}
               >
                 <span className="text-sm font-medium">Claude Code</span>
-                <span className="text-xs text-muted-foreground">JSON 会话</span>
+                <span className="text-xs text-muted-foreground">PTY 会话</span>
               </button>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    aria-disabled="true"
-                    onClick={(e) => e.preventDefault()}
-                    className="flex min-h-14 cursor-not-allowed flex-col items-start justify-center gap-1 rounded-md border border-border bg-muted/20 px-3 text-left opacity-55 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-pressed={provider === "codex"}
+                    onClick={() => setProvider("codex")}
+                    className={cn(
+                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      provider === "codex"
+                        ? "border-primary/70 bg-primary/10"
+                        : "border-border bg-muted/20",
+                    )}
                   >
                     <span className="text-sm font-medium">Codex</span>
-                    <span className="text-xs text-muted-foreground">即将支持</span>
+                    <span className="text-xs text-muted-foreground">PTY 会话</span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Codex 网页创建会在托管 PTY 专项中接入</TooltipContent>
+                <TooltipContent side="top">由本机 proxy 启动真实 Codex CLI</TooltipContent>
               </Tooltip>
             </div>
           </section>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">权限模式</span>
-            <Select
-              value={permissionMode}
-              onValueChange={(v) => setPermissionMode(v as PermissionMode)}
-            >
-              <SelectTrigger className="h-9 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PERMISSION_MODE_OPTIONS.map((opt) => (
-                  <SelectItem
-                    key={opt.value}
-                    value={opt.value}
-                    className={opt.danger ? "text-destructive focus:text-destructive" : undefined}
-                  >
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span
-              className={`text-xs ${currentPermissionOption?.danger ? "text-destructive" : "text-muted-foreground"}`}
-            >
-              {currentPermissionOption?.hint}
-            </span>
-          </label>
           <DialogFooter>
             <Button
               type="button"

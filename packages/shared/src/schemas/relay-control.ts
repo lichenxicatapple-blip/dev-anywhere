@@ -224,6 +224,11 @@ const relayControlDefinitions = [
     { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
     "proxy_to_client",
   ),
+  control(
+    "terminal_resize_request",
+    { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
+    "client_to_proxy",
+  ),
 
   // 远程终止 JSON 会话，client -> proxy
   control("session_terminate", { sessionId: z.string() }, "client_to_proxy"),
@@ -256,6 +261,7 @@ const relayControlDefinitions = [
     {
       cwd: z.string(),
       provider: z.enum(["claude", "codex"]),
+      mode: z.enum(["json", "pty"]).optional(),
       resumeSessionId: z.string().optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
       permissionMode: z
@@ -266,7 +272,12 @@ const relayControlDefinitions = [
   ),
   control(
     "session_create_response",
-    { sessionId: z.string(), error: z.string().optional() },
+    {
+      sessionId: z.string(),
+      mode: z.enum(["json", "pty"]).optional(),
+      provider: z.enum(["claude", "codex"]).optional(),
+      error: z.string().optional(),
+    },
     "proxy_to_client",
   ),
 

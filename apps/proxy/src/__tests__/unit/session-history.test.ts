@@ -34,6 +34,15 @@ describe("scanSessionHistory", () => {
     writeFileSync(join(projectDir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
   }
 
+  function writeCodexSession(sessionId: string, lines: string[]): void {
+    const sessionDir = join(testDir, ".codex", "sessions", "2026", "05", "06");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, `rollout-2026-05-06T12-00-00-${sessionId}.jsonl`),
+      lines.join("\n") + "\n",
+    );
+  }
+
   it("returns empty array when ~/.claude/projects/ does not exist", async () => {
     const result = await scanSessionHistory();
     expect(result).toEqual([]);
@@ -248,5 +257,59 @@ describe("scanSessionHistory", () => {
     expect(result).toHaveLength(2);
     expect(result[0].title).toBe("bbbbbbbb");
     expect(result[1].title).toBe("aaaaaaaa");
+  });
+
+  it("includes Codex sessions from ~/.codex/sessions", async () => {
+    writeCodexSession("019dfc36-cd43-71d1-bf52-ce65cd40b61d", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: {
+          id: "019dfc36-cd43-71d1-bf52-ce65cd40b61d",
+          cwd: "/Users/admin/workspace/cc_anywhere",
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Use shell to run pwd, then answer DONE." }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "019dfc36-cd43-71d1-bf52-ce65cd40b61d",
+      provider: "codex",
+      projectDir: "/Users/admin/workspace/cc_anywhere",
+      title: "Use shell to run pwd, then answer DONE.",
+    });
+  });
+
+  it("keeps Claude and Codex entries with the same title and cwd separate", async () => {
+    writeSession("-same-proj", "claude1", [
+      JSON.stringify({ type: "progress", cwd: "/same/proj", sessionId: "claude1" }),
+      JSON.stringify({ type: "user", message: "Same title" }),
+    ]);
+    writeCodexSession("codex1", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex1", cwd: "/same/proj" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Same title" }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.provider).sort()).toEqual(["claude", "codex"]);
   });
 });

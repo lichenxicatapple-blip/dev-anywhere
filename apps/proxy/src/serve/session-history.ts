@@ -9,16 +9,29 @@ interface SessionHistoryEntry {
   title: string;
   projectDir: string;
   updatedAt: number;
-  provider: "claude";
+  provider: "claude" | "codex";
 }
 
 const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
+const codexSessionsDir = (): string => join(homedir(), ".codex", "sessions");
 
 // 扫描 ~/.claude/projects/ 获取 Claude Code 会话历史
 // 实际目录结构: ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
 export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
-  const entries: SessionHistoryEntry[] = [];
+  const entries = [...(await scanClaudeSessionHistory()), ...(await scanCodexSessionHistory())];
+  entries.sort((a, b) => b.updatedAt - a.updatedAt);
+  // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
+  const seen = new Set<string>();
+  return entries.filter((e) => {
+    const key = `${e.provider}::${e.projectDir}::${e.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
+async function scanClaudeSessionHistory(): Promise<SessionHistoryEntry[]> {
+  const entries: SessionHistoryEntry[] = [];
   let projectDirs: string[];
   try {
     projectDirs = await readdir(claudeProjectsDir());
@@ -58,15 +71,29 @@ export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
     }
   }
 
-  entries.sort((a, b) => b.updatedAt - a.updatedAt);
-  // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
-  const seen = new Set<string>();
-  return entries.filter((e) => {
-    const key = `${e.provider}::${e.projectDir}::${e.title}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return entries;
+}
+
+async function scanCodexSessionHistory(): Promise<SessionHistoryEntry[]> {
+  const files = await collectJsonlFiles(codexSessionsDir());
+  const entries: SessionHistoryEntry[] = [];
+  for (const filePath of files) {
+    try {
+      const fileStat = await stat(filePath);
+      const meta = await extractCodexTitleAndCwd(filePath);
+      if (!meta.id) continue;
+      entries.push({
+        id: meta.id,
+        title: meta.title || meta.id.slice(0, 8),
+        projectDir: meta.cwd || homedir(),
+        updatedAt: fileStat.mtimeMs,
+        provider: "codex",
+      });
+    } catch {
+      continue;
+    }
+  }
+  return entries;
 }
 
 interface SessionMessage {
@@ -228,4 +255,76 @@ async function extractTitleAndCwd(
     });
     rl.on("error", () => resolve({ title, cwd }));
   });
+}
+
+async function collectJsonlFiles(root: string): Promise<string[]> {
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const child = join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectJsonlFiles(child)));
+    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(child);
+    }
+  }
+  return files;
+}
+
+async function extractCodexTitleAndCwd(
+  filePath: string,
+): Promise<{ id: string | null; title: string | null; cwd: string | null }> {
+  return new Promise((resolve) => {
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+    let id: string | null = null;
+    let cwd: string | null = null;
+    let title: string | null = null;
+
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === "session_meta" && obj.payload) {
+          if (!id && typeof obj.payload.id === "string") id = obj.payload.id;
+          if (!cwd && typeof obj.payload.cwd === "string") cwd = obj.payload.cwd;
+        }
+        if (!title && obj.type === "response_item") {
+          const text = extractCodexUserText(obj.payload);
+          if (text) title = text.slice(0, 80);
+        }
+        if (id && cwd && title) rl.close();
+      } catch {
+        /* skip malformed lines */
+      }
+    });
+
+    rl.on("close", () => resolve({ id, title, cwd }));
+    rl.on("error", () => resolve({ id, title, cwd }));
+  });
+}
+
+function extractCodexUserText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const item = payload as { type?: unknown; role?: unknown; content?: unknown };
+  if (item.type !== "message" || item.role !== "user") return null;
+  if (typeof item.content === "string") return item.content;
+  if (!Array.isArray(item.content)) return null;
+  const texts = item.content
+    .map((block: unknown) => {
+      if (!block || typeof block !== "object") return "";
+      const typed = block as { type?: unknown; text?: unknown };
+      return typed.type === "input_text" && typeof typed.text === "string" ? typed.text : "";
+    })
+    .filter(Boolean);
+  const joined = texts.join("\n").trim();
+  return joined || null;
 }

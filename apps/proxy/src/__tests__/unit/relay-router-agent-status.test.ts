@@ -34,6 +34,7 @@ describe("RelayRouter agent_status_request", () => {
       }) as unknown as RelayConnection,
       relaySend: options.relaySend,
       terminalSockets: new Map(),
+      hostedPtyRegistry: {} as never,
       broadcastSessionList: () => {},
       broadcastSessionSync: () => {},
       jsonObserver: {} as never,

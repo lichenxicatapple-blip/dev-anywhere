@@ -77,11 +77,11 @@ export function HistoryList({ now }: HistoryListProps) {
       const newSession: SessionInfo = {
         sessionId: ctrl.sessionId,
         state: "idle",
-        mode: "json",
-        provider: "claude",
+        mode: ctrl.mode ?? "pty",
+        provider: ctrl.provider ?? "claude",
       };
       useSessionStore.getState().addSession(newSession);
-      navigate(`/chat/${ctrl.sessionId}?mode=json`);
+      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? "pty"}`);
     });
     return unsub;
   }, [resumingId, navigate]);
@@ -94,10 +94,12 @@ export function HistoryList({ now }: HistoryListProps) {
       return;
     }
     setResumingId(h.id);
+    const provider = historySessionProvider(h);
     relay.sendControl({
       type: "session_create",
       cwd: h.projectDir,
-      provider: "claude",
+      mode: "pty",
+      provider,
       resumeSessionId: h.id,
     });
   }

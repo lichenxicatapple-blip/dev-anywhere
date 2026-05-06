@@ -17,6 +17,7 @@ function createRouter(options: {
   mode: "json" | "pty";
   workerSend?: ReturnType<typeof vi.fn>;
   terminalWrite?: ReturnType<typeof vi.fn>;
+  hostedWrite?: ReturnType<typeof vi.fn>;
   jsonTurnStart?: ReturnType<typeof vi.fn>;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
@@ -50,6 +51,12 @@ function createRouter(options: {
     }) as unknown as RelayConnection,
     relaySend: () => {},
     terminalSockets,
+    hostedPtyRegistry: {
+      write: options.hostedWrite ?? vi.fn(() => false),
+      snapshot: vi.fn(() => false),
+      resize: vi.fn(() => false),
+      terminate: vi.fn(() => false),
+    } as never,
     broadcastSessionList: () => {},
     broadcastSessionSync: () => {},
     jsonObserver: {
@@ -146,5 +153,18 @@ describe("RelayRouter input routing", () => {
         expect(ipc.data).toBe("\x03");
       }
     }
+  });
+
+  it("forwards remote_input_raw to hosted PTY when no terminal socket is attached", () => {
+    const hostedWrite = vi.fn(() => true);
+    const router = createRouter({ mode: "pty", hostedWrite });
+
+    router.handle({
+      type: "remote_input_raw",
+      sessionId: "s1",
+      data: "abc",
+    });
+
+    expect(hostedWrite).toHaveBeenCalledWith("s1", "abc");
   });
 });

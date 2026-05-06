@@ -325,11 +325,13 @@ describe("RelayControlSchema", () => {
       type: "session_create",
       cwd: "/tmp/project",
       provider: "claude",
+      mode: "pty",
       permissionMode: "default",
     });
     expect(result.type).toBe("session_create");
     if (result.type === "session_create") {
       expect(result.provider).toBe("claude");
+      expect(result.mode).toBe("pty");
     }
 
     expect(() =>
@@ -338,6 +340,18 @@ describe("RelayControlSchema", () => {
         cwd: "/tmp/project",
       }),
     ).toThrow();
+  });
+
+  it("routes terminal_resize_request from client to proxy", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_resize_request",
+      sessionId: "s1",
+      cols: 100,
+      rows: 30,
+    });
+    expect(result.type).toBe("terminal_resize_request");
+    expect(ClientToProxyRelayControlTypes.has("terminal_resize_request")).toBe(true);
+    expect(ProxyToClientRelayControlTypes.has("terminal_resize_request")).toBe(false);
   });
 
   it("rejects bind_by_session type (removed from schema)", () => {
