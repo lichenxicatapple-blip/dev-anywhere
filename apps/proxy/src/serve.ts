@@ -18,6 +18,9 @@ import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
 import { PtyObserver } from "./serve/pty-observer.js";
 import { JsonObserver } from "./serve/json-observer.js";
+import { HookRegistry } from "./serve/hook-registry.js";
+import { HookServer } from "./serve/hook-server.js";
+import { PermissionBroker } from "./serve/permission-broker.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -428,6 +431,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const terminalSockets = new Map<string, Socket>();
   const toolApprovalManager = new ToolApprovalManager();
+  const hookRegistry = new HookRegistry();
+  const permissionBroker = new PermissionBroker();
   // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
   const proxyName = process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
 
@@ -464,6 +469,31 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     changeSessionState(sessionManager, relayConnection, sessionId, next);
   const ptyObserver = new PtyObserver({ changeSessionState: observerChangeState });
   const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
+  const hookServer = new HookServer({
+    port: proxyConfig.hookPort ?? 17654,
+    registry: hookRegistry,
+    permissionBroker,
+    onEvent: (event) => {
+      serviceLogger.info(
+        {
+          sessionId: event.sessionId,
+          provider: event.provider,
+          event: event.event,
+          requestId: event.requestId,
+        },
+        "Provider hook event received",
+      );
+    },
+  });
+
+  try {
+    await hookServer.start();
+  } catch (err) {
+    const msg = `Failed to start hook server on 127.0.0.1:${proxyConfig.hookPort ?? 17654}: ${String(err)}`;
+    serviceLogger.error(msg);
+    console.error(msg);
+    process.exit(1);
+  }
 
   // WorkerRegistry 建在 relay 之后、listener 之前；构造期订阅 envelope_dropped 事件
   const workerRegistry = new WorkerRegistry({
@@ -529,6 +559,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   async function shutdown(): Promise<void> {
     serviceLogger.info("Shutting down service");
     sessionManager.stopReaper();
+    await hookServer.close();
     relayConnection.close();
     workerRegistry.destroyAll();
     server.close();

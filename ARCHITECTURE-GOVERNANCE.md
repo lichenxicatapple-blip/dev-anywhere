@@ -36,6 +36,25 @@
 | web stores         | UI state owner    | typed dispatcher actions                              | raw WebSocket parsing、proxy internals    | session/proxy/chat/status/file state                           |
 | render components  | display           | stores、UI utilities                                  | relay client raw message、proxy internals | xterm、status line、timeline、controls                         |
 
+## Local Runtime 控制面
+
+本地控制面以 `dev-anywhere serve` 为中心：
+
+- `serve` 内嵌 hook server，监听 `127.0.0.1:<固定配置端口>`。
+- hook server 不是独立全局服务，不自动随机端口，不监听公网地址。
+- 端口冲突时 `serve` fail-fast，并提示用户检查已有进程或配置。
+- session 隔离靠 `sessionId + marker + token`，不靠端口隔离。
+
+本地有三条不同通道：
+
+| 通道               | 方向                           | 用途                                              |
+| ------------------ | ------------------------------ | ------------------------------------------------- |
+| terminal IPC       | terminal runtime <-> serve     | PTY 注册、PTY bytes、resize、snapshot、远端输入   |
+| worker IPC         | session-worker <-> serve       | JSON event、JSON input、worker 生命周期、旧审批   |
+| provider hook HTTP | Claude/Codex provider -> serve | provider 语义事件、tool lifecycle、阻塞式权限请求 |
+
+hook HTTP 不替代 terminal IPC 或 worker IPC。它只承接 provider 主动回调的语义事件；PTY 字节流、远端逐键输入、terminal snapshot 仍归 terminal runtime。
+
 ## 协议消息分类
 
 每个新增消息必须归入下表之一。
@@ -254,6 +273,26 @@ PTY 模式不允许：
 - 为绕过测试而新增旁路。
 - 组件直接接入新 raw message。
 - 在 shared 中加入运行时副作用。
+
+## 测试治理
+
+项目救援期的测试分层：
+
+| 层级              | 覆盖内容                                     | 必须验证                                      |
+| ----------------- | -------------------------------------------- | --------------------------------------------- |
+| module unit       | provider adapter、hook registry、broker、FSM | owner 边界、错误输入、timeout、清理路径       |
+| protocol contract | shared schema、IPC、relay envelope           | 方向、字段、兼容性、未知字段策略              |
+| integration       | serve + worker/terminal IPC + relay router   | 创建会话、输入、审批、断线、恢复、状态 replay |
+| render contract   | web dispatcher、store、xterm view、timeline  | raw message 不进组件、状态不重叠、输入不丢    |
+| smoke/e2e         | 本地 serve + relay + web 的最小上线路径      | 用户可连接、可输入、可审批、可恢复            |
+
+测试规则：
+
+- 每个新 owner 模块必须先有 module unit 测试。
+- 每个新增协议消息必须有 schema/contract 测试。
+- 每次删除旧路径必须补一个失败模式测试，证明主流程不再依赖旧路径。
+- PTY 渲染、远端逐键输入、permission broker、hook 注入属于高风险路径，不能只靠手测。
+- 大重写前先补 characterization tests，锁住当前可接受行为；重写后删除过时测试，而不是让旧行为继续约束新架构。
 
 ## Review Checklist
 

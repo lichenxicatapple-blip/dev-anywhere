@@ -6,6 +6,16 @@ interface ProxyConfig {
   relayUrl?: string;
   // /proxy 端点的预共享 token, 和 relay 侧 RELAY_PROXY_TOKEN 对应. 公网 relay 必须设置
   relayToken?: string;
+  hookPort?: number;
+}
+
+function parsePort(value: string | undefined, source: string): number | undefined {
+  if (!value) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid ${source}: expected TCP port 1-65535`);
+  }
+  return port;
 }
 
 export function loadConfig(): ProxyConfig {
@@ -26,6 +36,10 @@ export function loadConfig(): ProxyConfig {
   const config: ProxyConfig = {
     relayUrl: process.env.RELAY_URL ?? fromFile.relayUrl,
     relayToken: process.env.RELAY_PROXY_TOKEN ?? fromFile.relayToken,
+    hookPort:
+      parsePort(process.env.DEV_ANYWHERE_HOOK_PORT, "DEV_ANYWHERE_HOOK_PORT") ??
+      fromFile.hookPort ??
+      17654,
   };
 
   serviceLogger.info(
@@ -37,6 +51,12 @@ export function loadConfig(): ProxyConfig {
         : fromFile.relayToken
           ? "file"
           : "none",
+      hookPort: config.hookPort,
+      hookPortSource: process.env.DEV_ANYWHERE_HOOK_PORT
+        ? "env"
+        : fromFile.hookPort
+          ? "file"
+          : "default",
     },
     "Config loaded",
   );
