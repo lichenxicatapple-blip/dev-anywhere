@@ -156,6 +156,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         </DialogHeader>
         <form
           className="flex flex-col gap-4"
+          autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault();
             handleSubmit();
@@ -165,6 +166,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <span className="text-sm">名称（可选）</span>
             <input
               type="text"
+              name="dev-anywhere-session-name"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="h-9 px-3 rounded-md bg-input border border-border text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -183,6 +188,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <input
               id="create-session-cwd"
               type="text"
+              name="dev-anywhere-session-cwd"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
               placeholder="输入绝对路径"
