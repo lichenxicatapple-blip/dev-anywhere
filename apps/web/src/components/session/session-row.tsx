@@ -149,7 +149,13 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem variant="destructive" onClick={onTerminate}>
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={(event) => {
+                event.stopPropagation();
+                onTerminate();
+              }}
+            >
               终止会话
             </DropdownMenuItem>
           </DropdownMenuContent>

@@ -96,6 +96,15 @@ describe("MessageEnvelopeSchema", () => {
       expect(result.title).toBe("task done");
     });
 
+    it("validates state mid_pause with title", () => {
+      const result = PtyStatePayloadSchema.parse({
+        state: "mid_pause",
+        title: "spinner title",
+      });
+      expect(result.state).toBe("mid_pause");
+      expect(result.title).toBe("spinner title");
+    });
+
     it("rejects invalid state value", () => {
       expect(() => PtyStatePayloadSchema.parse({ state: "invalid_state" })).toThrow();
     });

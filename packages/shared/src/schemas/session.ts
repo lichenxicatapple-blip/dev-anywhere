@@ -66,7 +66,7 @@ export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({
-  state: z.enum(["working", "turn_complete", "approval_wait"]),
+  state: z.enum(["working", "turn_complete", "approval_wait", "mid_pause"]),
   title: z.string().optional(),
   tool: z.string().optional(),
 });

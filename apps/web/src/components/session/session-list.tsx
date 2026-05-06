@@ -21,6 +21,7 @@ import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { toast } from "@/components/toast";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -53,7 +54,14 @@ export function SessionList({ layout }: SessionListProps) {
 
   function handleTerminate(sessionId: string) {
     const relay = relayClientRef;
-    relay?.sendControl({ type: "session_terminate", sessionId });
+    if (!relay) {
+      toast.error("Relay 客户端未就绪");
+      return;
+    }
+    relay.sendControl({ type: "session_terminate", sessionId });
+    useSessionStore.getState().removeSession(sessionId);
+    if (sessionId === activeSessionId) navigate("/sessions");
+    toast.info("已发送终止请求");
   }
 
   const hasActive = sessions.length > 0;
