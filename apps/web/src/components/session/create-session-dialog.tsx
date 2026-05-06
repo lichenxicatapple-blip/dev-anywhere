@@ -1,7 +1,7 @@
 // 新建会话 Dialog, 字段: name (可选) / CWD
 // Web 新建会话走 serve 托管 PTY，Claude/Codex 都由本机 proxy 持有真实 Agent CLI。
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
-// 权限模式只对 JSON worker 有效；当前 PTY 创建路径不展示该控件，避免误导。
+// 权限模式只对 JSON 消息流有效；当前 PTY 创建路径不展示该控件，避免误导。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
@@ -205,7 +205,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <div className="flex items-center justify-between">
               <span className="text-sm">交互模式</span>
               <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "完整终端" : "结构化消息"}
+                {mode === "pty" ? "完整终端" : "聊天消息"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -231,7 +231,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 )}
               >
                 <span className="text-sm font-medium">JSON</span>
-                <span className="text-xs text-muted-foreground">Claude 结构化 worker</span>
+                <span className="text-xs text-muted-foreground">按消息发送和显示</span>
               </button>
             </div>
           </section>
