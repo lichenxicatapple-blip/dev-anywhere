@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { SerializeAddon } from "@xterm/addon-serialize";
 import { createXtermTerminal } from "@/lib/create-xterm";
+import { attachXtermRawInput } from "@/lib/pty-input";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useFollowOutput } from "@/hooks/use-follow-output";
@@ -68,6 +69,8 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     const host = xtermHostRef.current;
     if (!host) return;
     let disposeFn: (() => void) | null = null;
+    let disposeRawInput: (() => void) | null = null;
+    let removeFocusHandler: (() => void) | null = null;
     let unsubBinary: (() => void) | null = null;
     let unsubSnapshot: (() => void) | null = null;
     let cleanupRetry: (() => void) | null = null;
@@ -82,6 +85,11 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       terminalRef.current = result.terminal;
       serializeRef.current = result.serializeAddon;
       disposeFn = result.dispose;
+      disposeRawInput = attachXtermRawInput(result.terminal, sessionId).dispose;
+
+      const focusTerminal = (): void => result.terminal.focus();
+      host.addEventListener("pointerdown", focusTerminal, { passive: true });
+      removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
 
       let snapshotApplied = false;
       const frameBuffer: Uint8Array[] = [];
@@ -162,6 +170,8 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       cleanupRetry?.();
       unsubBinary?.();
       unsubSnapshot?.();
+      removeFocusHandler?.();
+      disposeRawInput?.();
       disposeFn?.();
       terminalRef.current = null;
       serializeRef.current = null;

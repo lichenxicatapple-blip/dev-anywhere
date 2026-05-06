@@ -3,11 +3,9 @@
 type PickerMode = "none" | "slash" | "file";
 
 export function computeSendDisabled(
-  mode: "pty" | "json",
   isWorking: boolean,
   pendingApprovals: Array<{ status: string }>,
 ): boolean {
-  if (mode === "pty") return false;
   if (isWorking) return true;
   if (pendingApprovals.some((a) => a.status === "pending")) return true;
   return false;

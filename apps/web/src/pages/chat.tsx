@@ -1,6 +1,6 @@
-// ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + QuotePreviewBar + InputBar
+// ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + JSON QuotePreviewBar/InputBar
 // statusState 按优先级聚合 connection/approval/terminated/working/idle，StatusLine 放 Header 正下方
-// InputBar 统一承载 JSON 与 PTY 两种模式；右侧不再有 SemanticActionPanel 侧栏
+// PTY 模式由 xterm 自己承载逐键输入，不再保留下方聊天式命令输入框。
 import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { ChatHeader } from "@/components/chat/chat-header";
@@ -86,10 +86,14 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       <div className="flex-1 min-h-0">
         {mode === "pty" ? <ChatPtyView sessionId={id} /> : <ChatJsonView sessionId={id} />}
       </div>
-      <QuotePreviewBar sessionId={id} />
-      <div className="p-2" data-slot="input-bar-region">
-        <InputBar sessionId={id} mode={mode} />
-      </div>
+      {mode === "json" && (
+        <>
+          <QuotePreviewBar sessionId={id} />
+          <div className="p-2" data-slot="input-bar-region">
+            <InputBar sessionId={id} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

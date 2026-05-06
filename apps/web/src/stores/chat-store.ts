@@ -1,4 +1,4 @@
-// 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿/历史游标
+// 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 
@@ -38,8 +38,6 @@ interface ChatSessionSlice {
   pendingApprovals: ToolApprovalRequest[];
   quotedMessage: QuotedMessage | null;
   inputDraft: string;
-  // 游标范围 [-1, historyLen - 1]; -1 表示未激活历史回溯
-  inputHistoryCursor: number;
 }
 
 export const EMPTY_SLICE: ChatSessionSlice = {
@@ -48,7 +46,6 @@ export const EMPTY_SLICE: ChatSessionSlice = {
   pendingApprovals: [],
   quotedMessage: null,
   inputDraft: "",
-  inputHistoryCursor: -1,
 };
 
 interface ChatStoreState {
@@ -74,11 +71,6 @@ interface ChatStoreState {
   setWorkingTool: (sessionId: string, toolName: string) => void;
   setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
   setInputDraft: (sessionId: string, draft: string) => void;
-  // delta > 0 向更早的历史, delta < 0 向更新; clamp 在 [-1, historyLen - 1]
-  // 历史游标由 InputBar 的 localStorage historyRef 决定长度, 直接 set 绝对值,
-  // 避免原 moveInputHistoryCursor 用 slice.messages 长度 clamp 导致 PTY 模式失效
-  setInputHistoryCursor: (sessionId: string, cursor: number) => void;
-  resetInputHistoryCursor: (sessionId: string) => void;
   loadHistory: (
     sessionId: string,
     messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>,
@@ -220,19 +212,6 @@ export const useChatStore = create<ChatStoreState>()(
 
       setInputDraft: (sessionId, draft) =>
         set((state) => updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft }))),
-
-      setInputHistoryCursor: (sessionId, cursor) =>
-        set((state) =>
-          updateSlice(state, sessionId, (slice) => ({
-            ...slice,
-            inputHistoryCursor: cursor,
-          })),
-        ),
-
-      resetInputHistoryCursor: (sessionId) =>
-        set((state) =>
-          updateSlice(state, sessionId, (slice) => ({ ...slice, inputHistoryCursor: -1 })),
-        ),
 
       loadHistory: (sessionId, historyMessages) =>
         set((state) =>

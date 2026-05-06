@@ -305,14 +305,9 @@ JSON 模式负责：
 
 - 多行消息编辑
 - slash command / file token picker
-- 历史草稿
 - `user_input` envelope
 
-PTY 模式只允许作为辅助入口：
-
-- 批量粘贴/提交文本
-- 移动端软键盘辅助入口
-- 显式提示它不是主终端输入 surface
+PTY 模式不渲染 `input-bar`。终端逐键输入归 `chat-pty-view` 的 xterm surface，终端级控制归 header/terminal menu。
 
 PTY 模式不允许：
 

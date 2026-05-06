@@ -247,7 +247,7 @@ Owner：hook server + hook event router + permission broker
 | `session_snapshot` control        | proxy -> relay -> web        | PTY runner         | 否                        | 保留              |
 | `remote_input_raw` control        | web -> relay -> proxy -> PTY | PTY runner         | 否                        | 升级为 PTY 主输入 |
 | `user_input` envelope, JSON       | web -> relay -> proxy        | JSON runner        | 是，经 JsonObserver       | 保留              |
-| `user_input` envelope, PTY        | web -> relay -> proxy        | 历史 batch input   | 否                        | 降级为辅助入口    |
+| `user_input` envelope, PTY        | web -> relay -> proxy        | 历史 batch input   | 否                        | 从 PTY 页面移除   |
 | `worker_event` IPC                | worker -> serve              | JSON runner        | 是，经 JsonObserver       | 保留              |
 | `worker_approval_request` IPC     | worker -> serve              | JSON runner        | 是，经 JsonObserver       | 待合并            |
 | `tool_use_request` envelope       | proxy -> relay -> web        | permission broker  | 否，已是结果              | 保留              |

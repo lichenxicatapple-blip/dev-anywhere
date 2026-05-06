@@ -1,6 +1,5 @@
 // Chat 页顶栏: 返回按钮 | 会话标题 flex-1 truncate + mode badge | overflow 菜单
-// overflow 内容: Rename / Duplicate / 分隔线 / Terminate (destructive)
-// Permission mode 归 InputBar 的 ... 菜单 (per-session, 纯触发 Shift+Tab 循环)
+// PTY 模式没有下方 InputBar，终端级控制入口归这里。
 import { ArrowLeft, MoreVertical } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -12,7 +11,9 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useSessionStore } from "@/stores/session-store";
+import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { toast } from "@/components/toast";
 
 interface ChatHeaderProps {
@@ -25,6 +26,9 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
   // proxy 转发为 terminal_title, dispatcher 写到 ptyTitles, 这里优先展示
   const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
+  const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
+  const setPtyAutoscale = useAppStore((s) => s.setPtyAutoscale);
+  const isPty = session?.mode === "pty";
 
   function handleRename() {
     // session_rename 控制消息未在 shared schema 定义, 占位 toast, 真正接入另起 phase
@@ -46,6 +50,14 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
   function handleTerminate() {
     relayClientRef?.sendControl({ type: "session_terminate", sessionId });
     navigate("/sessions");
+  }
+
+  function handlePermissionModeCycle() {
+    relayClientRef?.sendControl({
+      type: "permission_mode_change",
+      mode: "default",
+      sessionId,
+    });
   }
 
   return (
@@ -83,6 +95,18 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
         <DropdownMenuContent align="end" data-slot="chat-overflow-menu">
           <DropdownMenuItem onClick={handleRename}>重命名</DropdownMenuItem>
           <DropdownMenuItem onClick={handleDuplicate}>复制会话</DropdownMenuItem>
+          {isPty && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handlePermissionModeCycle}>切换权限模式</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPtyAutoscale(!ptyAutoscale)}>
+                终端字号自适应：{ptyAutoscale ? "开" : "关"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => sendRemoteInputRaw(sessionId, "\x03")}>
+                发送 Ctrl+C
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"

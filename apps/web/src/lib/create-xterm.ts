@@ -26,7 +26,7 @@ export async function createXtermTerminal(container: HTMLDivElement): Promise<Cr
     fontSize: 14,
     cursorBlink: false,
     cursorInactiveStyle: "none",
-    disableStdin: true,
+    disableStdin: false,
     theme: xtermTheme,
     allowProposedApi: true,
   });

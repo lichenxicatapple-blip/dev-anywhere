@@ -1,7 +1,6 @@
-// InputBar: JSON + PTY 统一输入栏, 1-8 行自撑, 斜杠/@/历史/iOS 键盘适配
-// PTY raw-key capture 已放弃，语义控制走 InputMenu / ChatHeader overflow。
-// draft + history cursor 为 per-session, 通过 chat-store 跨组件共享
-// ArrowUp/Down 历史召回仅 PTY 启用 (JSON 直接点消息气泡引用/复制更直观)
+// InputBar: JSON 消息输入栏, 1-8 行自撑, 斜杠/@/iOS 键盘适配
+// PTY 模式由 xterm 逐键输入承载，不再复用聊天式 InputBar。
+// draft 为 per-session, 通过 chat-store 跨组件共享
 // 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommandEntry } from "@dev-anywhere/shared";
@@ -17,45 +16,17 @@ import { InputMenu } from "./input-menu";
 import { SendButton } from "./send-button";
 import type { PickerHandle } from "./picker-handle";
 
-const MAX_HISTORY = 100;
-
 interface InputBarProps {
   sessionId: string;
-  mode: "json" | "pty";
 }
 
-function inputHistoryKey(sessionId: string): string {
-  return `cc_inputHistory:${sessionId}`;
-}
-
-function loadPersistedHistory(sessionId: string): string[] {
-  try {
-    const raw = localStorage.getItem(inputHistoryKey(sessionId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((e): e is string => typeof e === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePersistedHistory(sessionId: string, history: string[]): void {
-  try {
-    localStorage.setItem(inputHistoryKey(sessionId), JSON.stringify(history));
-  } catch {
-    // 存储配额用尽时静默失败, 不阻止发送
-  }
-}
-
-export function InputBar({ sessionId, mode }: InputBarProps) {
+export function InputBar({ sessionId }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashPickerRef = useRef<PickerHandle>(null);
   const filePickerRef = useRef<PickerHandle>(null);
   const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
-  const setCursor = useChatStore((s) => s.setInputHistoryCursor);
-  const resetCursor = useChatStore((s) => s.resetInputHistoryCursor);
   // 发送按钮的 working 态直接读 session.state（proxy 推的单一权威信号）
   const sessionState = useSessionStore(
     (s) => s.sessions.find((x) => x.sessionId === sessionId)?.state,
@@ -67,17 +38,10 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   const value = slice.inputDraft;
   const isWorking = sessionState === "working";
   const pendingApprovals = slice.pendingApprovals;
-  const cursor = slice.inputHistoryCursor;
 
   const pickerMode = detectPickerMode(value);
-  const sendDisabled = computeSendDisabled(mode, isWorking, pendingApprovals);
+  const sendDisabled = computeSendDisabled(isWorking, pendingApprovals);
   const canSend = !sendDisabled && value.trim() !== "";
-
-  // localStorage 持久化的用户消息历史 (按 session key)
-  const historyRef = useRef<string[]>([]);
-  useEffect(() => {
-    historyRef.current = loadPersistedHistory(sessionId);
-  }, [sessionId]);
 
   // 已插入 token (slash 命令 or @路径) 列表, 用于 backspace 整体删除
   const [insertedTokens, setInsertedTokens] = useState<string[]>([]);
@@ -93,23 +57,10 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
   }, [sessionId]);
 
   // value 变化时保持 prevTextRef 同步: 覆盖外部触发的 draft 更新
-  // (picker onSelect / cursor 历史回放内部已手动同步, 这里是兜底)
+  // picker onSelect 内部已手动同步, 这里是兜底。
   useEffect(() => {
     prevTextRef.current = value;
   }, [value]);
-
-  // cursor 变化 -> 同步 draft 为对应历史条目
-  useEffect(() => {
-    if (cursor < 0) return;
-    const history = historyRef.current;
-    if (history.length === 0) return;
-    const recalled = history[history.length - 1 - cursor];
-    if (typeof recalled === "string") {
-      setInputDraft(sessionId, recalled);
-      prevTextRef.current = recalled;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cursor]);
 
   const clearTrackingState = useCallback(() => {
     setInsertedTokens([]);
@@ -145,19 +96,14 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
       source: "client",
       version: "1",
     });
-    const nextHistory = [...historyRef.current, trimmed].slice(-MAX_HISTORY);
-    historyRef.current = nextHistory;
-    savePersistedHistory(sessionId, nextHistory);
     setInputDraft(sessionId, "");
     prevTextRef.current = "";
     clearTrackingState();
-    resetCursor(sessionId);
   }, [
     canSend,
     value,
     sessionId,
     setInputDraft,
-    resetCursor,
     addUserMessage,
     updateSessionState,
     clearTrackingState,
@@ -196,29 +142,6 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
         e.preventDefault();
         send();
       }
-    } else if (e.key === "ArrowUp" && mode === "pty") {
-      // 历史翻页: 光标在首行才劫持, 多行编辑让 ↑ 走默认行为
-      const caret = e.currentTarget.selectionStart ?? 0;
-      if (value.slice(0, caret).includes("\n")) return;
-      const len = historyRef.current.length;
-      if (len === 0) return;
-      e.preventDefault();
-      // cursor 范围 [-1, len-1]; -1 为空, 0 为最近一条
-      setCursor(sessionId, Math.min(len - 1, cursor + 1));
-    } else if (e.key === "ArrowDown" && mode === "pty") {
-      const caret = e.currentTarget.selectionStart ?? 0;
-      // 多行里的 ↓ 让光标自然移动, 单行或最后一行才走历史
-      if (value.slice(caret).includes("\n")) return;
-      if (cursor > 0) {
-        e.preventDefault();
-        setCursor(sessionId, cursor - 1);
-      } else if (cursor === 0) {
-        e.preventDefault();
-        resetCursor(sessionId);
-        setInputDraft(sessionId, "");
-        prevTextRef.current = "";
-        clearTrackingState();
-      }
     } else if (e.key === "Escape") {
       if (pickerMode !== "none") {
         e.preventDefault();
@@ -229,16 +152,10 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
     }
   };
 
-  const placeholder = isDesktop
-    ? mode === "json"
-      ? "输入消息... (Enter 发送，Shift+Enter 换行)"
-      : "输入命令... (Enter 发送，↑↓ 方向键支持)"
-    : mode === "json"
-      ? "输入消息..."
-      : "输入命令...";
+  const placeholder = isDesktop ? "输入消息... (Enter 发送，Shift+Enter 换行)" : "输入消息...";
 
   return (
-    <div className="relative w-full" data-slot="input-bar" data-mode={mode}>
+    <div className="relative w-full" data-slot="input-bar" data-mode="json">
       {pickerMode === "slash" && (
         <SlashCommandPicker
           ref={slashPickerRef}
@@ -298,13 +215,12 @@ export function InputBar({ sessionId, mode }: InputBarProps) {
             placeholder={placeholder}
             className="flex-1 resize-none font-normal border-0 bg-transparent shadow-none rounded-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent min-h-0 max-h-60"
             rows={1}
-            aria-label={mode === "json" ? "输入聊天消息" : "输入 PTY 命令"}
+            aria-label="输入聊天消息"
           />
           <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
-            <InputMenu sessionId={sessionId} mode={mode} />
+            <InputMenu />
             <SendButton
               sessionId={sessionId}
-              mode={mode}
               isWorking={isWorking}
               canSend={canSend}
               onSend={send}

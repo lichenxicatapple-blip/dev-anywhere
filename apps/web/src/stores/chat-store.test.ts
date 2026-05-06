@@ -99,23 +99,13 @@ describe("chat-store per-session", () => {
     expect(EMPTY_SLICE.messages).toEqual([]);
     expect(EMPTY_SLICE.pendingApprovals).toEqual([]);
     expect(EMPTY_SLICE.inputDraft).toBe("");
-    expect(EMPTY_SLICE.inputHistoryCursor).toBe(-1);
   });
 
-  it("setInputDraft + setInputHistoryCursor scoped by session", () => {
+  it("setInputDraft scoped by session", () => {
     useChatStore.getState().setInputDraft("s1", "draft1");
     useChatStore.getState().setInputDraft("s2", "draft2");
     expect(useChatStore.getState().bySessionId["s1"].inputDraft).toBe("draft1");
     expect(useChatStore.getState().bySessionId["s2"].inputDraft).toBe("draft2");
-
-    // setInputHistoryCursor 设绝对值, clamp 由调用方 (InputBar) 基于 localStorage 历史长度负责
-    useChatStore.getState().setInputHistoryCursor("s1", 0);
-    expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(0);
-    useChatStore.getState().setInputHistoryCursor("s1", 1);
-    expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(1);
-
-    useChatStore.getState().resetInputHistoryCursor("s1");
-    expect(useChatStore.getState().bySessionId["s1"].inputHistoryCursor).toBe(-1);
   });
 
   it("setQuotedMessage scoped by session", () => {

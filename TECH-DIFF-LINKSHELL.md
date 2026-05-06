@@ -210,7 +210,7 @@ LinkShell 做法：
 
 - PTY view 中 xterm 必须可聚焦，并成为 PTY 模式的主输入 surface。
 - 普通字符、Enter、Backspace、方向键、Tab、Ctrl+C、Esc 等都走 raw input。
-- 聊天式 InputBar 在 PTY 模式下降级为批量粘贴/发送辅助入口，JSON 模式仍保留为主输入。
+- PTY 模式不再渲染聊天式 InputBar；JSON 模式仍保留消息输入栏。
 - relay/proxy 需要 controller/接管状态，避免多个远端 client 同时写 PTY。
 - 手机端需要单独软键盘策略，因为移动浏览器对 Tab、Ctrl、方向键捕获不可靠。
 
