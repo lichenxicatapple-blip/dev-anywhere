@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { ToolApprovalManager } from "#src/serve/tool-approval-manager.js";
+import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { WorkerRegistry } from "#src/serve/worker-registry.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 
@@ -32,6 +33,7 @@ describe("RelayRouter hook permission decisions", () => {
       hookEventRouter: {
         onPermissionResolved: options.hookResolved,
       } as never,
+      agentStatusRegistry: new AgentStatusRegistry(),
     });
   }
 

@@ -18,6 +18,12 @@ function extractSessionIdFromHash(): string | null {
   return match?.[1] ?? null;
 }
 
+function requestProxyState(relay: RelayClient): void {
+  relay.sendControl({ type: "session_list" });
+  relay.sendControl({ type: "proxy_info_request" });
+  relay.sendControl({ type: "agent_status_request" });
+}
+
 export function handleWsStatusChange(connected: boolean, timers: Timers, relay: RelayClient): void {
   useAppStore.getState().setConnected(connected);
   const s = useAppStore.getState();
@@ -122,8 +128,7 @@ export async function handleRelayMessage(
         useAppStore.getState().setProxyOnline(true);
         localStorage.setItem("cc_proxyId", result.proxyId);
         useAppStore.getState().setPhase("chatting");
-        relay.sendControl({ type: "session_list" });
-        relay.sendControl({ type: "proxy_info_request" });
+        requestProxyState(relay);
         return;
       }
 
@@ -136,8 +141,7 @@ export async function handleRelayMessage(
           useAppStore.getState().setProxy(savedProxyId, proxyInfo?.name || null);
           useAppStore.getState().setProxyOnline(true);
           // 冷启动绑定成功后拉取 session 列表 + 历史
-          relay.sendControl({ type: "session_list" });
-          relay.sendControl({ type: "proxy_info_request" });
+          requestProxyState(relay);
           relay.sendControl({ type: "session_history_request" });
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const currentHash = window.location.hash;
@@ -181,8 +185,7 @@ export async function handleRelayMessage(
         const result = await ensureBinding(relay, { proxyId: s.selectedProxyId });
         if (!isBindingError(result)) {
           useAppStore.getState().setProxyOnline(true);
-          relay.sendControl({ type: "session_list" });
-          relay.sendControl({ type: "proxy_info_request" });
+          requestProxyState(relay);
           relay.sendControl({ type: "session_history_request" });
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);

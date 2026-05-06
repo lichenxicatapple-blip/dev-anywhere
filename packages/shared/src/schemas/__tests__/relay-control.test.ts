@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  ClientToProxyRelayControlTypes,
+  isClientToProxyRelayControlType,
   isProxyToClientRelayControlType,
   ProxyToClientRelayControlTypes,
   RelayControlSchema,
@@ -20,6 +22,14 @@ describe("RelayControlSchema", () => {
     expect(isProxyToClientRelayControlType("proxy_register")).toBe(false);
     expect(isProxyToClientRelayControlType("session_sync")).toBe(false);
     expect(ProxyToClientRelayControlTypes.has("remote_input_raw")).toBe(false);
+  });
+
+  it("derives client-to-proxy control routing from protocol metadata", () => {
+    expect(isClientToProxyRelayControlType("agent_status_request")).toBe(true);
+    expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
+    expect(isClientToProxyRelayControlType("session_list")).toBe(true);
+    expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
+    expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
   });
 
   it("rejects proxy_select with empty proxyId", () => {
@@ -185,6 +195,16 @@ describe("RelayControlSchema", () => {
       expect(result.payload.phase).toBe("waiting_permission");
       expect(result.payload.permissionRequest?.requestId).toBe("req-1");
     }
+  });
+
+  it("parses agent_status_request with optional session id", () => {
+    expect(RelayControlSchema.parse({ type: "agent_status_request" })).toEqual({
+      type: "agent_status_request",
+    });
+    expect(RelayControlSchema.parse({ type: "agent_status_request", sessionId: "s1" })).toEqual({
+      type: "agent_status_request",
+      sessionId: "s1",
+    });
   });
 
   it("rejects agent_status with invalid phase", () => {

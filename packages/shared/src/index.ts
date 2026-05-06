@@ -67,6 +67,8 @@ export {
   RelayControlSchema,
   ProxyToClientRelayControlTypes,
   isProxyToClientRelayControlType,
+  ClientToProxyRelayControlTypes,
+  isClientToProxyRelayControlType,
 } from "./schemas/relay-control.js";
 export type {
   ProxyInfo,

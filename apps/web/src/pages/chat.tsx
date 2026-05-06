@@ -46,6 +46,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     const relay = relayClientRef;
     if (!relay) return;
     relay.sendControl({ type: "session_resources_request", sessionId: id });
+    relay.sendControl({ type: "agent_status_request", sessionId: id });
   }, [id, connected, proxyOnline]);
 
   // 生命周期由 session.state 负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。

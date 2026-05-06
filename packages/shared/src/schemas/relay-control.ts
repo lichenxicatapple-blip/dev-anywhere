@@ -30,12 +30,12 @@ export const HistorySessionSchema = z.object({
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
-type RelayControlDirection = "proxy_to_client";
+type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
 
 type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
   type: T;
-  direction?: RelayControlDirection;
+  directions: ReadonlySet<RelayControlDirection>;
   schema: z.ZodObject<{ type: z.ZodLiteral<T> } & S>;
 };
 
@@ -43,21 +43,21 @@ function control<T extends string>(type: T): ControlDefinition<T, EmptyShape>;
 function control<T extends string>(
   type: T,
   shape: undefined,
-  direction: RelayControlDirection,
+  directions: RelayControlDirection | RelayControlDirection[],
 ): ControlDefinition<T, EmptyShape>;
 function control<T extends string, S extends z.ZodRawShape>(
   type: T,
   shape: S,
-  direction?: RelayControlDirection,
+  directions?: RelayControlDirection | RelayControlDirection[],
 ): ControlDefinition<T, S>;
 function control<T extends string, S extends z.ZodRawShape>(
   type: T,
   shape?: S,
-  direction?: RelayControlDirection,
+  directions?: RelayControlDirection | RelayControlDirection[],
 ): ControlDefinition<T, S | EmptyShape> {
   return {
     type,
-    direction,
+    directions: new Set(Array.isArray(directions) ? directions : directions ? [directions] : []),
     schema: z.object({
       type: z.literal(type),
       ...(shape ?? {}),
@@ -140,10 +140,14 @@ const relayControlDefinitions = [
   }),
 
   // 目录列表请求与响应
-  control("dir_list_request", {
-    proxyId: z.string().min(1).optional(),
-    path: z.string(),
-  }),
+  control(
+    "dir_list_request",
+    {
+      proxyId: z.string().min(1).optional(),
+      path: z.string(),
+    },
+    "client_to_proxy",
+  ),
   control(
     "dir_list_response",
     { entries: z.array(DirEntrySchema), path: z.string() },
@@ -151,7 +155,7 @@ const relayControlDefinitions = [
   ),
 
   // 目录创建请求与响应
-  control("dir_create_request", { path: z.string() }),
+  control("dir_create_request", { path: z.string() }, "client_to_proxy"),
   control(
     "dir_create_response",
     { path: z.string(), success: z.boolean(), error: z.string().optional() },
@@ -177,15 +181,19 @@ const relayControlDefinitions = [
   ),
 
   // 会话列表请求与权限模式变更
-  control("session_list", undefined, "proxy_to_client"),
-  control("permission_mode_change", {
-    mode: z.enum(["default", "auto_accept", "plan"]),
-    // sessionId 可选：传入时 proxy 按该会话的 mode 分叉（PTY 发 Tab ANSI），未传走全局日志行为
-    sessionId: z.string().optional(),
-  }),
+  control("session_list", undefined, ["client_to_proxy", "proxy_to_client"]),
+  control(
+    "permission_mode_change",
+    {
+      mode: z.enum(["default", "auto_accept", "plan"]),
+      // sessionId 可选：传入时 proxy 按该会话的 mode 分叉（PTY 发 Tab ANSI），未传走全局日志行为
+      sessionId: z.string().optional(),
+    },
+    "client_to_proxy",
+  ),
 
   // 会话历史浏览
-  control("session_history_request"),
+  control("session_history_request", undefined, "client_to_proxy"),
   control(
     "session_history_response",
     { sessions: z.array(HistorySessionSchema) },
@@ -217,10 +225,10 @@ const relayControlDefinitions = [
   ),
 
   // 远程终止 JSON 会话，client -> proxy
-  control("session_terminate", { sessionId: z.string() }),
+  control("session_terminate", { sessionId: z.string() }, "client_to_proxy"),
 
   // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
-  control("session_worker_abort", { sessionId: z.string() }),
+  control("session_worker_abort", { sessionId: z.string() }, "client_to_proxy"),
 
   // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件
   control(
@@ -230,22 +238,30 @@ const relayControlDefinitions = [
   ),
 
   // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
-  control("remote_input_raw", { sessionId: z.string().min(1), data: z.string() }),
+  control(
+    "remote_input_raw",
+    { sessionId: z.string().min(1), data: z.string() },
+    "client_to_proxy",
+  ),
 
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
-  control("proxy_info_request"),
+  control("proxy_info_request", undefined, "client_to_proxy"),
   control("proxy_info", { homePath: z.string() }, "proxy_to_client"),
 
   // 远程创建 JSON 会话，client -> proxy -> response
-  control("session_create", {
-    cwd: z.string(),
-    resumeSessionId: z.string().optional(),
-    // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
-    permissionMode: z
-      .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
-      .optional(),
-  }),
+  control(
+    "session_create",
+    {
+      cwd: z.string(),
+      resumeSessionId: z.string().optional(),
+      // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
+      permissionMode: z
+        .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+        .optional(),
+    },
+    "client_to_proxy",
+  ),
   control(
     "session_create_response",
     { sessionId: z.string(), error: z.string().optional() },
@@ -253,10 +269,13 @@ const relayControlDefinitions = [
   ),
 
   // 客户端请求会话历史消息，client -> proxy
-  control("session_messages_request", { sessionId: z.string() }),
+  control("session_messages_request", { sessionId: z.string() }, "client_to_proxy"),
 
   // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
-  control("session_resources_request", { sessionId: z.string() }),
+  control("session_resources_request", { sessionId: z.string() }, "client_to_proxy"),
+
+  // 客户端请求当前 provider 语义状态；不经 relay 缓存，由 proxy 返回当前值
+  control("agent_status_request", { sessionId: z.string().optional() }, "client_to_proxy"),
 
   // proxy 推送当前 pending 的工具审批列表，client 据此恢复审批卡片
   control(
@@ -303,7 +322,7 @@ const relayControlDefinitions = [
   }),
 
   // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态
-  control("session_subscribe", { sessionId: z.string() }),
+  control("session_subscribe", { sessionId: z.string() }, "client_to_proxy"),
 
   // PTY 会话快照，proxy -> client，serialize() 的全量终端状态
   control(
@@ -330,10 +349,20 @@ export type RelayControlType = RelayControlMessage["type"];
 
 export const ProxyToClientRelayControlTypes = new Set(
   relayControlDefinitions
-    .filter((definition) => definition.direction === "proxy_to_client")
+    .filter((definition) => definition.directions.has("proxy_to_client"))
     .map((definition) => definition.type),
 );
 
 export function isProxyToClientRelayControlType(type: RelayControlType): boolean {
   return ProxyToClientRelayControlTypes.has(type);
+}
+
+export const ClientToProxyRelayControlTypes = new Set(
+  relayControlDefinitions
+    .filter((definition) => definition.directions.has("client_to_proxy"))
+    .map((definition) => definition.type),
+);
+
+export function isClientToProxyRelayControlType(type: RelayControlType): boolean {
+  return ClientToProxyRelayControlTypes.has(type);
 }

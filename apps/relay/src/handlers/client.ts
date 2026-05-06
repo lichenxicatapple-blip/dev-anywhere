@@ -1,23 +1,8 @@
 import { WebSocket } from "ws";
-import { RelayErrorCode, type Logger } from "@dev-anywhere/shared";
+import { isClientToProxyRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
-
-// client → proxy 透传的控制消息类型，relay 不处理内容，直接转发
-const CLIENT_TO_PROXY_TYPES = new Set([
-  "proxy_info_request",
-  "dir_list_request",
-  "dir_create_request",
-  "session_create",
-  "session_terminate",
-  "session_messages_request",
-  "session_list",
-  "session_history_request",
-  "session_resources_request",
-  "permission_mode_change",
-  "session_subscribe",
-]);
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -137,7 +122,7 @@ export function handleClientConnection(
       }
 
       // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy
-      if (CLIENT_TO_PROXY_TYPES.has(msg.type)) {
+      if (isClientToProxyRelayControlType(msg.type)) {
         const targetProxyId =
           ("proxyId" in msg ? (msg.proxyId as string) : undefined) || clientWs.boundProxyId;
         if (!targetProxyId) {

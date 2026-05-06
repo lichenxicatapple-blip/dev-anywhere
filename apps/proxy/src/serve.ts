@@ -21,6 +21,7 @@ import { HookRegistry } from "./serve/hook-registry.js";
 import { HookServer } from "./serve/hook-server.js";
 import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
+import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import type { ProviderHookContext } from "./providers/index.js";
 
 // ---------- 基础工具函数 ----------
@@ -154,6 +155,7 @@ function handleTerminalConnection(
   terminalSockets: Map<string, Socket>,
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
+  agentStatusRegistry: AgentStatusRegistry,
   createHookContext: (
     sessionId: string,
     provider: ProviderHookContext["provider"],
@@ -272,6 +274,7 @@ function handleTerminalConnection(
           workerRegistry.delete(msg.sessionId);
 
           controlHandlers.cleanup(msg.sessionId);
+          agentStatusRegistry.delete(msg.sessionId);
           socket.write(
             serializeIpc({
               type: "session_terminate_response",
@@ -319,6 +322,7 @@ function handleTerminalConnection(
           terminalSockets.delete(msg.sessionId);
 
           controlHandlers.cleanup(msg.sessionId);
+          agentStatusRegistry.delete(msg.sessionId);
           broadcastSessionList(relayConnection, sessionManager);
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
           break;
@@ -405,6 +409,7 @@ function handleTerminalConnection(
         );
         sessionManager.terminateSession(sessionId);
         controlHandlers.cleanup(sessionId);
+        agentStatusRegistry.delete(sessionId);
         broadcastSessionList(relayConnection, sessionManager);
         serviceLogger.info(
           { sessionId },
@@ -435,11 +440,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const hookRegistry = new HookRegistry();
   const permissionBroker = new PermissionBroker();
+  const agentStatusRegistry = new AgentStatusRegistry();
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id) => {
       hookRegistry.unregisterSession(id);
       permissionBroker.cleanupSession(id, "session removed");
+      agentStatusRegistry.delete(id);
       const paths = sessionPaths(id);
       try {
         rmSync(paths.dir, { recursive: true, force: true });
@@ -489,6 +496,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
   const hookEventRouter = new HookEventRouter({
     relayConnection,
+    agentStatusRegistry,
     changeSessionState: observerChangeState,
   });
   const hookServer = new HookServer({
@@ -557,6 +565,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     createHookContext,
     permissionBroker,
     hookEventRouter,
+    agentStatusRegistry,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -586,6 +595,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       terminalSockets,
       relayConnection,
       controlHandlers,
+      agentStatusRegistry,
       createHookContext,
     );
   });

@@ -15,6 +15,7 @@ import { readSessionMessages } from "./session-history.js";
 import type { ProviderHookContext } from "../providers/index.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { HookEventRouter } from "./hook-event-router.js";
+import type { AgentStatusRegistry } from "./agent-status-registry.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -34,6 +35,7 @@ interface RelayRouterDeps {
   ) => ProviderHookContext;
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
+  agentStatusRegistry: AgentStatusRegistry;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -71,6 +73,7 @@ export class RelayRouter {
     session_create: (msg) => this.onSessionCreate(msg),
     session_messages_request: (msg) => this.onSessionMessagesRequest(msg),
     session_resources_request: (msg) => this.onSessionResourcesRequest(msg),
+    agent_status_request: (msg) => this.onAgentStatusRequest(msg),
     session_terminate: (msg) => this.onSessionTerminate(msg),
     session_worker_abort: (msg) => this.onSessionWorkerAbort(msg),
     session_history_request: () => this.deps.controlHandlers.handleSessionHistoryRequest(),
@@ -386,6 +389,27 @@ export class RelayRouter {
     serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources pushed");
   }
 
+  private onAgentStatusRequest(msg: Record<string, unknown>): void {
+    const sid = msg.sessionId as string | undefined;
+    if (sid) {
+      const status = this.deps.agentStatusRegistry.get(sid);
+      if (!status || !this.deps.sessionManager.getSession(sid)) return;
+      this.deps.relaySend(
+        JSON.stringify({ type: "agent_status", sessionId: sid, payload: status }),
+      );
+      serviceLogger.info({ sessionId: sid, phase: status.phase }, "Agent status pushed");
+      return;
+    }
+
+    let count = 0;
+    for (const { sessionId, status } of this.deps.agentStatusRegistry.list()) {
+      if (!this.deps.sessionManager.getSession(sessionId)) continue;
+      this.deps.relaySend(JSON.stringify({ type: "agent_status", sessionId, payload: status }));
+      count++;
+    }
+    serviceLogger.info({ count }, "Agent statuses pushed");
+  }
+
   private onSessionTerminate(msg: Record<string, unknown>): void {
     const sid = msg.sessionId as string | undefined;
     if (!sid) return;
@@ -394,6 +418,7 @@ export class RelayRouter {
     this.deps.workerRegistry.send(sid, { type: "worker_stop" });
     this.deps.workerRegistry.delete(sid);
     this.deps.controlHandlers.cleanup(sid);
+    this.deps.agentStatusRegistry.delete(sid);
     serviceLogger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");
     this.deps.broadcastSessionList();
   }

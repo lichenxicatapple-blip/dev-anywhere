@@ -4,9 +4,11 @@ import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { AuthenticatedHookEvent } from "./hook-server.js";
 import type { HookProviderId } from "./hook-registry.js";
+import type { AgentStatusRegistry } from "./agent-status-registry.js";
 
 interface HookEventRouterDeps {
   relayConnection: RelayConnection;
+  agentStatusRegistry: AgentStatusRegistry;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
   nextSeq?: (sessionId: string) => number;
 }
@@ -133,6 +135,7 @@ export class HookEventRouter {
       updatedAt: Date.now(),
       ...extra,
     };
+    this.deps.agentStatusRegistry.set(event.sessionId, payload);
     this.deps.relayConnection.sendRaw(
       JSON.stringify({
         type: "agent_status",

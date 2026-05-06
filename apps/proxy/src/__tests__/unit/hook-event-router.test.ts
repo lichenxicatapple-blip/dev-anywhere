@@ -3,17 +3,20 @@ import { EventEmitter } from "node:events";
 import { MessageEnvelopeSchema, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { HookEventRouter } from "#src/serve/hook-event-router.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
+import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 
 describe("HookEventRouter", () => {
   it("maps lifecycle hook events to session state", () => {
     const states: Array<[string, SessionState]> = [];
     const capturedRaw: string[] = [];
     let seq = 0;
+    const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
       relayConnection: Object.assign(new EventEmitter(), {
         sendEnvelope: () => {},
         sendRaw: (raw: string) => capturedRaw.push(raw),
       }) as unknown as RelayConnection,
+      agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
         return true;
@@ -36,17 +39,20 @@ describe("HookEventRouter", () => {
       "thinking",
       "idle",
     ]);
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
   });
 
   it("emits MessageEnvelope-valid tool_use_request for hook PermissionRequest", () => {
     const captured: unknown[] = [];
     const capturedRaw: string[] = [];
     const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
       relayConnection: Object.assign(new EventEmitter(), {
         sendEnvelope: (env: unknown) => captured.push(env),
         sendRaw: (raw: string) => capturedRaw.push(raw),
       }) as unknown as RelayConnection,
+      agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
         return true;
@@ -84,6 +90,7 @@ describe("HookEventRouter", () => {
       });
       expect(status.payload.updatedAt).toBeTypeOf("number");
     }
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("waiting_permission");
     expect(captured).toHaveLength(1);
     const parsed = MessageEnvelopeSchema.safeParse(captured[0]);
     expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
@@ -101,11 +108,13 @@ describe("HookEventRouter", () => {
     const captured: unknown[] = [];
     const capturedRaw: string[] = [];
     const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
       relayConnection: Object.assign(new EventEmitter(), {
         sendEnvelope: (env: unknown) => captured.push(env),
         sendRaw: (raw: string) => capturedRaw.push(raw),
       }) as unknown as RelayConnection,
+      agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
         return true;
@@ -156,11 +165,13 @@ describe("HookEventRouter", () => {
   it("emits agent_status when hook permission is resolved", () => {
     const capturedRaw: string[] = [];
     const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
       relayConnection: Object.assign(new EventEmitter(), {
         sendEnvelope: () => {},
         sendRaw: (raw: string) => capturedRaw.push(raw),
       }) as unknown as RelayConnection,
+      agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
         return true;
@@ -190,5 +201,6 @@ describe("HookEventRouter", () => {
         },
       });
     }
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("tool_use");
   });
 });
