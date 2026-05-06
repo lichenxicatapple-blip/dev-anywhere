@@ -34,6 +34,8 @@ const PTY_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
   [SessionState.IDLE]: [
     // claude 开始响应用户输入 → handlePtyData 首字节翻 working
     SessionState.WORKING,
+    // provider hook 是语义事件，可能比 PTY 字节观察更早到达；PermissionRequest 可直接进入审批等待。
+    SessionState.WAITING_APPROVAL,
     // 终态兜底；现阶段 terminated 走 terminateSession 直接删 map 不经 updateState，本边未被触发
     SessionState.TERMINATED,
   ],

@@ -107,6 +107,12 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
+    it("PTY session allows idle -> waiting_approval for provider hook PermissionRequest", () => {
+      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      expect(manager.updateState(s.id, SessionState.WAITING_APPROVAL)).toBe(true);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
+    });
+
     it("JSON session transitions waiting_approval -> idle directly (粒度丢失：proxy 观察不到审批后的 WORKING 中间态)", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
