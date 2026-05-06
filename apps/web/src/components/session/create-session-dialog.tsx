@@ -239,7 +239,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <div className="flex items-center justify-between">
               <span className="text-sm">Agent CLI</span>
               <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "Claude / Codex" : "Claude only"}
+                {mode === "pty" ? "选择本机 CLI" : "Codex 不可用"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -255,9 +255,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 )}
               >
                 <span className="text-sm font-medium">Claude Code</span>
-                <span className="text-xs text-muted-foreground">
-                  {mode === "pty" ? "PTY 会话" : "JSON 会话"}
-                </span>
+                <span className="text-xs text-muted-foreground">可用</span>
               </button>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -279,7 +277,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                   >
                     <span className="text-sm font-medium">Codex</span>
                     <span className="text-xs text-muted-foreground">
-                      {mode === "pty" ? "PTY 会话" : "JSON 暂不支持"}
+                      {mode === "pty" ? "可用" : "暂不可用"}
                     </span>
                   </button>
                 </TooltipTrigger>
