@@ -1,30 +1,10 @@
 import { WebSocket } from "ws";
-import { RelayErrorCode, type Logger } from "@dev-anywhere/shared";
+import { isProxyToClientRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 
 // binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
 const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
-
-// proxy → client 透传的控制消息类型，relay 不处理内容，直接转发
-export const PROXY_TO_CLIENT_TYPES = new Set([
-  "proxy_info",
-  "terminal_title",
-  "terminal_resize",
-  "pty_state",
-  "agent_status",
-  "dir_list_response",
-  "dir_create_response",
-  "session_create_response",
-  "session_history_messages",
-  "pending_approvals_push",
-  "command_list_push",
-  "file_tree_push",
-  "session_history_response",
-  "session_list",
-  "session_snapshot",
-  "turn_result",
-]);
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -159,7 +139,7 @@ export function handleProxyConnection(
 
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
-      if (PROXY_TO_CLIENT_TYPES.has(result.message.type)) {
+      if (isProxyToClientRelayControlType(result.message.type)) {
         if (!proxyWs.proxyId) {
           proxyWs.send(
             JSON.stringify({

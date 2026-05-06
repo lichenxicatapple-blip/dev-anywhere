@@ -65,6 +65,8 @@ export {
   CommandEntrySchema,
   HistorySessionSchema,
   RelayControlSchema,
+  ProxyToClientRelayControlTypes,
+  isProxyToClientRelayControlType,
 } from "./schemas/relay-control.js";
 export type {
   ProxyInfo,
@@ -72,6 +74,7 @@ export type {
   CommandEntry,
   HistorySession,
   RelayControlMessage,
+  RelayControlType,
 } from "./schemas/relay-control.js";
 
 // constants

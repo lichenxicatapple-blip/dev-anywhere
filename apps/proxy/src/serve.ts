@@ -38,7 +38,7 @@ function toSessionListPayload(s: SessionInfo) {
 }
 
 // 推一条 session_status envelope 给 relay → client
-// relay 对 envelope 透传（不走 PROXY_TO_CLIENT_TYPES 白名单）；payload 包含 lastActive 让列表相对时间跟着跳
+// relay 对 envelope 透传（不走 control message 方向判断）；payload 包含 lastActive 让列表相对时间跟着跳
 function pushSessionStatus(
   relay: RelayConnection,
   sessionManager: SessionManager,

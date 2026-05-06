@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { RelayControlSchema } from "../relay-control.js";
+import {
+  isProxyToClientRelayControlType,
+  ProxyToClientRelayControlTypes,
+  RelayControlSchema,
+} from "../relay-control.js";
 
 describe("RelayControlSchema", () => {
   it("rejects proxy_register with empty proxyId", () => {
@@ -8,6 +12,14 @@ describe("RelayControlSchema", () => {
 
   it("rejects unknown type", () => {
     expect(() => RelayControlSchema.parse({ type: "unknown_type" })).toThrow();
+  });
+
+  it("derives proxy-to-client control routing from protocol metadata", () => {
+    expect(isProxyToClientRelayControlType("agent_status")).toBe(true);
+    expect(isProxyToClientRelayControlType("session_snapshot")).toBe(true);
+    expect(isProxyToClientRelayControlType("proxy_register")).toBe(false);
+    expect(isProxyToClientRelayControlType("session_sync")).toBe(false);
+    expect(ProxyToClientRelayControlTypes.has("remote_input_raw")).toBe(false);
   });
 
   it("rejects proxy_select with empty proxyId", () => {
