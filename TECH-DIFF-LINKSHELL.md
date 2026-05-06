@@ -175,7 +175,7 @@ LinkShell 的 `terminal.status` payload 包含：
 
 - 增加 provider-neutral `terminal_status` 或 `agent_status` schema。
 - 不把它做成 UI store 私有状态，必须进入 shared schema。
-- PTY idle/OSC 可以保留为 fallback，但不再作为主状态来源。
+- PTY idle/OSC 不作为长期备用路径。Hook/status channel 覆盖同等能力后，应删除主流程依赖；只允许在无 hook provider 的显式降级模式里短期存在，并写明删除条件。
 
 ### Terminal Input Channel
 
@@ -283,8 +283,8 @@ LinkShell 做法：
 
 ### 可以清理或重写
 
-1. PTY idle timer 只能作为 fallback，不应继续扩大。
-2. OSC approval 识别只能作为 fallback，不应作为主审批机制。
+1. PTY idle timer 应从主状态路径移除，不再扩大；如暂存于无 hook provider 降级模式，必须有删除条件。
+2. OSC approval 识别应从主审批路径移除，不再作为主审批机制；Hook permission broker 落地后删除旧识别路径。
 3. `session_list` 同时存在 control/envelope 语义，应重命名或统一。
 4. `serve.ts` 中 IPC、relay、session lifecycle 过度集中，应在 hook/status 通道落地时拆分。
 5. `ToolApprovalCard` 的本地 whitelist 如果与 server-side whitelist 不一致，应删除或改成真实 server-side 行为。

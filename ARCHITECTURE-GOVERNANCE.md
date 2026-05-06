@@ -29,7 +29,7 @@
 | permission broker  | 权限状态 owner    | shared schema、session registry                       | UI 组件、provider 私有 transport          | pending permission、allow/deny/timeout/drain/delivered         |
 | session lifecycle  | 会话状态 owner    | shared schema、provider adapter、PTY/JSON runner      | React、relay registry                     | session create/register/terminate/reconnect 状态               |
 | PTY runner         | 字节流 owner      | node-pty、IPC、headless xterm                         | permission UI、provider semantic state    | stdin/stdout/resize/binary frame/snapshot                      |
-| JSON runner        | stream-json owner | provider adapter、permission broker                   | PTY renderer、web store                   | stream-json event parse、turn timeline、Claude JSON fallback   |
+| JSON runner        | stream-json owner | provider adapter、permission broker                   | PTY renderer、web store                   | stream-json event parse、turn timeline、provider json runner   |
 | proxy relay client | proxy transport   | shared schema、message queue                          | provider internals、React                 | proxy -> relay 连接、发送 envelope/control/binary              |
 | relay server       | transport/binding | shared schema、registry                               | provider business logic、web store        | auth、proxy/client binding、binary routing、last status replay |
 | web dispatcher     | message mapping   | shared schema、stores                                 | proxy internals                           | raw relay message -> typed store action                        |
@@ -76,10 +76,10 @@
 
 主来源：hook/status channel。
 
-允许 fallback：
+允许降级输入：
 
 - JSON stream event 可转成 status。
-- PTY idle/OSC 只能作为无 hook provider 的降级信号。
+- PTY idle/OSC 只能作为无 hook provider 的显式降级信号，且必须在同一计划里写删除条件。
 
 禁止输入：
 
@@ -221,7 +221,7 @@ JSON 模式负责：
 PTY 模式只允许作为辅助入口：
 
 - 批量粘贴/提交文本
-- 移动端软键盘 fallback
+- 移动端软键盘辅助入口
 - 显式提示它不是主终端输入 surface
 
 PTY 模式不允许：
@@ -278,4 +278,4 @@ PTY 模式不允许：
 5. relay 增加 last status replay。
 6. web dispatcher 接管 status message。
 7. 渲染层按 PTY/status/timeline 分流。
-8. 降级 PTY idle/OSC 为 fallback。
+8. 将 PTY idle/OSC 从主流程移除；如短期保留无 hook provider 降级模式，必须绑定删除条件。
