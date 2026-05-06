@@ -57,7 +57,10 @@ describe("RelayRouter hook permission decisions", () => {
 
     await expect(decisionPromise).resolves.toEqual({ behavior: "allow" });
     expect(workerSend).not.toHaveBeenCalled();
-    expect(hookResolved).toHaveBeenCalledWith("s1", "req-1", "allow");
+    expect(hookResolved).toHaveBeenCalledWith("s1", "claude", "req-1", "allow", {
+      toolName: "Bash",
+      toolInput: { command: "pwd" },
+    });
   });
 
   it("denies hook permission requests and clears the pending broker entry", async () => {
@@ -83,6 +86,9 @@ describe("RelayRouter hook permission decisions", () => {
     expect(permissionBroker.get("req-1")).toBeNull();
     expect(permissionBroker.listSession("s1")).toHaveLength(0);
     expect(workerSend).not.toHaveBeenCalled();
-    expect(hookResolved).toHaveBeenCalledWith("s1", "req-1", "deny");
+    expect(hookResolved).toHaveBeenCalledWith("s1", "claude", "req-1", "deny", {
+      toolName: "Bash",
+      toolInput: { command: "pwd" },
+    });
   });
 });

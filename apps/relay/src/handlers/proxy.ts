@@ -12,6 +12,7 @@ export const PROXY_TO_CLIENT_TYPES = new Set([
   "terminal_title",
   "terminal_resize",
   "pty_state",
+  "agent_status",
   "dir_list_response",
   "dir_create_response",
   "session_create_response",

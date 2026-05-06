@@ -147,6 +147,49 @@ describe("RelayControlSchema", () => {
     }
   });
 
+  it("parses agent_status with permission request context", () => {
+    const result = RelayControlSchema.parse({
+      type: "agent_status",
+      sessionId: "s1",
+      payload: {
+        provider: "codex",
+        phase: "waiting_permission",
+        seq: 12,
+        updatedAt: 1760000000000,
+        toolName: "Bash",
+        toolInput: { command: "pwd" },
+        permissionRequest: {
+          requestId: "req-1",
+          toolName: "Bash",
+          input: { command: "pwd" },
+        },
+      },
+    });
+
+    expect(result.type).toBe("agent_status");
+    if (result.type === "agent_status") {
+      expect(result.sessionId).toBe("s1");
+      expect(result.payload.provider).toBe("codex");
+      expect(result.payload.phase).toBe("waiting_permission");
+      expect(result.payload.permissionRequest?.requestId).toBe("req-1");
+    }
+  });
+
+  it("rejects agent_status with invalid phase", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "agent_status",
+        sessionId: "s1",
+        payload: {
+          provider: "claude",
+          phase: "busy",
+          seq: 1,
+          updatedAt: 1760000000000,
+        },
+      }),
+    ).toThrow();
+  });
+
   it("parses proxy_select_response with success=true and proxyId", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_select_response",

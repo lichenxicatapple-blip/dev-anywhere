@@ -21,6 +21,7 @@ describe("PROXY_TO_CLIENT_TYPES completeness", () => {
     "file_tree_push",
     "session_history_response",
     "pty_state",
+    "agent_status",
     "session_list",
     "session_create_response",
     "session_history_messages",

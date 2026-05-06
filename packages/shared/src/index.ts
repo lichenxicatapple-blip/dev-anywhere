@@ -27,6 +27,7 @@ export {
   SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
   PtyStatePayloadSchema,
+  AgentStatusPayloadSchema,
 } from "./schemas/session.js";
 export type {
   SessionInfo,
@@ -36,6 +37,7 @@ export type {
   SessionTerminatePayload,
   SessionStatusPayload,
   PtyStatePayload,
+  AgentStatusPayload,
 } from "./schemas/session.js";
 export {
   HeartbeatPayloadSchema,

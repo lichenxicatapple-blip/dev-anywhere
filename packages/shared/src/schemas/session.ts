@@ -2,6 +2,14 @@ import { z } from "zod";
 
 const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
 const providerValues = ["claude", "codex"] as const;
+const agentStatusPhaseValues = [
+  "idle",
+  "thinking",
+  "tool_use",
+  "outputting",
+  "waiting_permission",
+  "error",
+] as const;
 
 // 会话信息，用于会话列表展示
 // lastActive: 最近一次状态变更/消息时间戳 (ms), 用于列表"N 分钟前"显示, 可选
@@ -63,3 +71,27 @@ export const PtyStatePayloadSchema = z.object({
   tool: z.string().optional(),
 });
 export type PtyStatePayload = z.infer<typeof PtyStatePayloadSchema>;
+
+export const AgentStatusPayloadSchema = z.object({
+  provider: z.enum(providerValues),
+  phase: z.enum(agentStatusPhaseValues),
+  seq: z.number().int().nonnegative(),
+  updatedAt: z.number(),
+  toolName: z.string().optional(),
+  toolInput: z.record(z.string(), z.unknown()).optional(),
+  permissionRequest: z
+    .object({
+      requestId: z.string(),
+      toolName: z.string(),
+      input: z.record(z.string(), z.unknown()),
+    })
+    .optional(),
+  permissionResolution: z
+    .object({
+      requestId: z.string(),
+      outcome: z.enum(["allow", "deny"]),
+    })
+    .optional(),
+  summary: z.string().optional(),
+});
+export type AgentStatusPayload = z.infer<typeof AgentStatusPayloadSchema>;

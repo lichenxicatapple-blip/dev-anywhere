@@ -147,8 +147,10 @@ export class RelayRouter {
       if (this.deps.permissionBroker.resolve(payload.toolId, { behavior: "allow" })) {
         this.deps.hookEventRouter.onPermissionResolved(
           hookPending.sessionId,
+          hookPending.provider,
           payload.toolId,
           "allow",
+          { toolName: hookPending.toolName, toolInput: hookPending.input },
         );
       }
       return;
@@ -199,8 +201,10 @@ export class RelayRouter {
       ) {
         this.deps.hookEventRouter.onPermissionResolved(
           hookPending.sessionId,
+          hookPending.provider,
           payload.toolId,
           "deny",
+          { toolName: hookPending.toolName, toolInput: hookPending.input },
         );
       }
       return;

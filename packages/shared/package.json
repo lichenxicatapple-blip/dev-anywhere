@@ -15,7 +15,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup && rm -f dist/.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "tsup && rm -f dist/.tsbuildinfo && tsc -p tsconfig.build.json --outDir dist",
     "dev": "tsup --watch",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

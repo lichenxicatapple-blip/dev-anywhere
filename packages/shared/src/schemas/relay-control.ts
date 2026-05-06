@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PtyStatePayloadSchema } from "./session.js";
+import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 
 // 控制消息中复用的子类型
@@ -177,6 +177,13 @@ export const RelayControlSchema = z.discriminatedUnion("type", [
     type: z.literal("pty_state"),
     sessionId: z.string(),
     payload: PtyStatePayloadSchema,
+  }),
+
+  // Provider 语义状态，来自 Claude/Codex hook 等结构化事件，不从 PTY 字节推断
+  z.object({
+    type: z.literal("agent_status"),
+    sessionId: z.string(),
+    payload: AgentStatusPayloadSchema,
   }),
 
   // 终端标题变化，proxy -> client
