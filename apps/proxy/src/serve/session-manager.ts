@@ -325,9 +325,13 @@ export class SessionManager {
       }
       const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
       if (!isProviderId(info.provider)) {
-        throw new Error(
-          `Session persistence file has invalid provider for session ${String(info.id)}`,
+        const sessionId = String(info.id);
+        this.onSessionRemoved?.(sessionId);
+        serviceLogger.warn(
+          { sessionId, provider: info.provider },
+          "Session persistence file has invalid provider; cleaning session",
         );
+        continue;
       }
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {

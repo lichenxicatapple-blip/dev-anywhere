@@ -361,7 +361,8 @@ describe("SessionManager", () => {
       expect(() => new SessionManager({ persistPath })).toThrow("invalid persisted state");
     });
 
-    it("rejects persisted sessions without provider", () => {
+    it("cleans persisted sessions without provider", () => {
+      const removedIds: string[] = [];
       writeFileSync(
         persistPath,
         JSON.stringify([
@@ -377,7 +378,13 @@ describe("SessionManager", () => {
         "utf-8",
       );
 
-      expect(() => new SessionManager({ persistPath })).toThrow("invalid provider");
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.listSessions()).toEqual([]);
+      expect(removedIds).toEqual(["invalid"]);
+      manager2.stopReaper();
     });
   });
 
