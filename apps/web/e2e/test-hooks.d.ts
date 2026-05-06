@@ -24,6 +24,15 @@ interface CCTestHooks {
 declare global {
   interface Window {
     __ccTest?: CCTestHooks;
+    __ptySmoke: {
+      sent: string[];
+      socket: {
+        emitPty: (data: string) => void;
+        emitResize: (cols: number, rows: number) => void;
+      } | null;
+      sendPty: (data: string) => void;
+      resize: (cols: number, rows: number) => void;
+    };
   }
 }
 
