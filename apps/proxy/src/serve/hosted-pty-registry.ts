@@ -26,6 +26,9 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   codex: CODEX_PROVIDER,
 };
 
+const HOSTED_PTY_TERM = "xterm-256color";
+const HOSTED_PTY_COLORTERM = "truecolor";
+
 interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
@@ -57,6 +60,24 @@ export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: strin
   return provider === "codex" ? ["resume", resumeSessionId] : ["--resume", resumeSessionId];
 }
 
+export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    normalized[key] = value;
+  }
+
+  delete normalized.NO_COLOR;
+  if (normalized.CLICOLOR === "0") {
+    delete normalized.CLICOLOR;
+  }
+
+  normalized.TERM = HOSTED_PTY_TERM;
+  normalized.COLORTERM = HOSTED_PTY_COLORTERM;
+  normalized.CLICOLOR = "1";
+  return normalized;
+}
+
 export class HostedPtyRegistry {
   private sessions = new Map<string, HostedPtySession>();
 
@@ -70,12 +91,13 @@ export class HostedPtyRegistry {
       { args: options.args, hook: options.hook },
       process.env,
     );
+    const env = normalizeHostedPtyEnv(command.env);
     const child = pty.spawn(command.command, command.args, {
-      name: process.env.TERM ?? "xterm-256color",
+      name: HOSTED_PTY_TERM,
       cols,
       rows,
       cwd: options.cwd,
-      env: command.env as Record<string, string>,
+      env,
     });
 
     const terminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
