@@ -8,25 +8,11 @@ import type { Timers } from "@/services/phase-machine";
 import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
 import { registerResourceDispatcher } from "@/services/resource-dispatcher";
+import { loadFontCSS } from "@/lib/font-assets";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 export let wsManagerRef: WebSocketManager | null = null;
 export let relayClientRef: RelayClient | null = null;
-
-// Sarasa Fixed SC 按 cn-font-split 分片托管在 relay, 按 unicode-range 按需下载
-// relay 静态目录 ~/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 CJK font hosting 预生成
-function loadFontCSS(relayUrl: string): void {
-  const base = relayUrl
-    .replace(/^ws:/, "http:")
-    .replace(/^wss:/, "https:")
-    .replace(/\/(proxy|client)$/, "");
-  const href = `${base}/fonts/sarasa-fixed-sc/result.css`;
-  if (document.querySelector(`link[href="${href}"]`)) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = href;
-  document.head.appendChild(link);
-}
 
 // 将用户配置的 relayUrl 规整为 /client WebSocket 端点:
 // 同域部署默认取 window.location.origin (https://...), 需要转 ws scheme 并补 /client 路径

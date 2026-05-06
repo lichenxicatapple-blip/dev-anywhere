@@ -27,6 +27,7 @@ export const HistorySessionSchema = z.object({
   title: z.string(),
   projectDir: z.string(),
   updatedAt: z.number(),
+  provider: z.enum(["claude", "codex"]).optional(),
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
@@ -254,6 +255,7 @@ const relayControlDefinitions = [
     "session_create",
     {
       cwd: z.string(),
+      provider: z.enum(["claude", "codex"]),
       resumeSessionId: z.string().optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
       permissionMode: z

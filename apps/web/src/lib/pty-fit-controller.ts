@@ -38,6 +38,23 @@ export function computePtyFontSize(
   return Math.max(minFontSize, Math.min(maxFontSize, Math.floor(Math.min(byWidth, byHeight))));
 }
 
+function getAvailableContainerSize(container: HTMLDivElement): {
+  width: number;
+  height: number;
+} {
+  const style = getComputedStyle(container);
+  const px = (value: string): number => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const horizontalPadding = px(style.paddingLeft) + px(style.paddingRight);
+  const verticalPadding = px(style.paddingTop) + px(style.paddingBottom);
+  return {
+    width: Math.max(0, container.clientWidth - horizontalPadding),
+    height: Math.max(0, container.clientHeight - verticalPadding),
+  };
+}
+
 export function attachPtyFitController(options: PtyFitControllerOptions): PtyFitController {
   const {
     container,
@@ -64,13 +81,13 @@ export function attachPtyFitController(options: PtyFitControllerOptions): PtyFit
       return;
     }
 
-    const next = computePtyFontSize(
-      container.clientWidth,
-      container.clientHeight,
-      term.cols,
-      term.rows,
-      { minFontSize, maxFontSize, widthCellRatio, heightCellRatio },
-    );
+    const available = getAvailableContainerSize(container);
+    const next = computePtyFontSize(available.width, available.height, term.cols, term.rows, {
+      minFontSize,
+      maxFontSize,
+      widthCellRatio,
+      heightCellRatio,
+    });
     if (next !== null) applyFontSize(next);
   };
 

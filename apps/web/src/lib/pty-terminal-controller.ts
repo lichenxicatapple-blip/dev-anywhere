@@ -28,10 +28,15 @@ interface PtyTerminalControllerOptions {
   ws: PtyWebSocketLike;
   relay: PtyRelayLike;
   createTerminal: (host: HTMLDivElement) => Promise<CreatedTerminal>;
-  attachRawInput: (term: PtyControlledTerminal, sessionId: string) => Disposable;
+  attachRawInput: (
+    term: PtyControlledTerminal,
+    sessionId: string,
+    options?: { onRawInput?: (data: string) => void },
+  ) => Disposable;
   attachTransport?: typeof attachPtySessionTransport;
   onTerminalReady?: (term: PtyControlledTerminal) => void;
   onFrameWritten?: () => void;
+  onRawInput?: (data: string) => void;
   onReady?: () => void;
   onSubscribeStarted?: () => void;
   onSubscribeExhausted?: () => void;
@@ -54,6 +59,7 @@ export function attachPtyTerminalController(
     attachTransport = attachPtySessionTransport,
     onTerminalReady,
     onFrameWritten,
+    onRawInput,
     onReady,
     onSubscribeStarted,
     onSubscribeExhausted,
@@ -73,7 +79,7 @@ export function attachPtyTerminalController(
     }
 
     disposeTerminal = result.dispose;
-    disposeRawInput = attachRawInput(result.terminal, sessionId).dispose;
+    disposeRawInput = attachRawInput(result.terminal, sessionId, { onRawInput }).dispose;
 
     const focusTerminal = (): void => result.terminal.focus();
     host.addEventListener("pointerdown", focusTerminal, { passive: true });

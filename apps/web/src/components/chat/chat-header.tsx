@@ -43,7 +43,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
       return;
     }
     // SessionInfo 不含 cwd 字段, 无从读取, 暂以 "." 作 fallback
-    relay.sendControl({ type: "session_create", cwd: "." });
+    relay.sendControl({ type: "session_create", cwd: ".", provider: "claude" });
     toast.info("正在创建副本会话...");
   }
 

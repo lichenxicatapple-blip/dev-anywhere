@@ -4,9 +4,8 @@ import type { ITheme } from "@xterm/xterm";
 export const xtermTheme: ITheme = {
   background: "#1E1E1E",
   foreground: "#D4D4D4",
-  // 远程观察镜语义：我们是只读展示端，不接管 Claude Code 自己画的光标，
-  // xterm WebGL 叠加的硬光标与背景同色做肉眼隐身（8-hex alpha 在 WebGL renderer 上不生效）
-  cursor: "#1E1E1E",
+  // PTY 模式已支持逐键输入，光标必须可见；未聚焦时由 xterm 的 outline 样式表达焦点状态。
+  cursor: "#D4D4D4",
   cursorAccent: "#1E1E1E",
   selectionBackground: "#264F78",
   selectionForeground: undefined,

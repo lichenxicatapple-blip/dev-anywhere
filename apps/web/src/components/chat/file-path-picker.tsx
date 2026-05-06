@@ -15,33 +15,19 @@ import {
 import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { cn } from "@/lib/utils";
+import {
+  resolvePickerTarget,
+  withTrailingSlash,
+  type PickerMode,
+} from "@/lib/file-path-picker-target";
 import type { PickerHandle } from "./picker-handle";
 
 interface FilePathPickerProps {
   filter: string;
-  mode?: "insert" | "select";
+  mode?: PickerMode;
   onSelect: (path: string) => void;
   dirsOnly?: boolean;
-}
-
-function extractQuery(filter: string, mode: "insert" | "select"): string {
-  if (mode === "select") {
-    const lastSlash = filter.lastIndexOf("/");
-    return lastSlash >= 0 ? filter.slice(lastSlash + 1).toLowerCase() : filter.toLowerCase();
-  }
-  const afterAt = filter.split("@").pop() ?? "";
-  const lastSlash = afterAt.lastIndexOf("/");
-  return lastSlash >= 0 ? afterAt.slice(lastSlash + 1).toLowerCase() : afterAt.toLowerCase();
-}
-
-function extractPath(filter: string, mode: "insert" | "select"): string {
-  if (mode === "select") {
-    const lastSlash = filter.lastIndexOf("/");
-    return lastSlash >= 0 ? filter.slice(0, lastSlash + 1) : "./";
-  }
-  const afterAt = filter.split("@").pop() ?? "";
-  const lastSlash = afterAt.lastIndexOf("/");
-  return lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : "";
+  title?: string;
 }
 
 // 相对路径 (./, apps/, apps/web/) + cwd 拼成绝对路径
@@ -56,8 +42,12 @@ function toAbsolutePath(cwd: string, relPath: string): string {
   return cleaned ? `${cwd}/${cleaned}` : cwd;
 }
 
+function joinPickerPath(currentPath: string, entry: { name: string; isDir: boolean }): string {
+  return `${withTrailingSlash(currentPath)}${entry.name}${entry.isDir ? "/" : ""}`;
+}
+
 export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(function FilePathPicker(
-  { filter, onSelect, mode = "insert", dirsOnly = false },
+  { filter, onSelect, mode = "insert", dirsOnly = false, title },
   ref,
 ) {
   const tree = useFileStore((s) => s.tree);
@@ -66,9 +56,14 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   // insert 模式在 Chat 页, 锚到 session cwd (@ 后的相对路径拼在 session cwd 下)
   // select 模式给新建会话用, 那会儿还没有 session, 锚到 $HOME
   const baseCwd = mode === "insert" ? sessionCwd : sessionCwd || homePath;
-  const currentPath = useMemo(() => extractPath(filter, mode) || "./", [filter, mode]);
+  const knownDirs = useMemo(() => new Set(tree.keys()), [tree]);
+  const target = useMemo(
+    () => resolvePickerTarget(filter, mode, { baseCwd, knownDirs }),
+    [filter, mode, baseCwd, knownDirs],
+  );
+  const currentPath = target.currentPath;
   const absolutePath = useMemo(() => toAbsolutePath(baseCwd, currentPath), [baseCwd, currentPath]);
-  const query = useMemo(() => extractQuery(filter, mode), [filter, mode]);
+  const query = target.query;
 
   useEffect(() => {
     if (!absolutePath) return;
@@ -113,7 +108,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   // select 模式保持原语义 (CreateSessionDialog 依赖 "./xxx" 表达相对路径)
   const emitPath = useCallback(
     (entry: { name: string; isDir: boolean }): string => {
-      const raw = currentPath + entry.name + (entry.isDir ? "/" : "");
+      const raw = joinPickerPath(currentPath, entry);
       return mode === "insert" ? raw.replace(/^\.\//, "") : raw;
     },
     [currentPath, mode],
@@ -151,6 +146,11 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
 
   return (
     <div className={containerClass} data-slot="file-path-picker" data-mode={mode}>
+      {mode === "select" && title ? (
+        <div className="border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
+          {title}
+        </div>
+      ) : null}
       <div className="max-h-60 overflow-y-auto overscroll-contain">
         {filteredEntries.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">

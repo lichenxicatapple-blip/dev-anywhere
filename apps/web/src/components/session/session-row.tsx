@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
 import { formatSessionName } from "@/lib/format-session-name";
+import { providerLabel } from "@/lib/session-provider";
 
 interface SessionRowProps {
   session: SessionInfo;
@@ -52,11 +53,6 @@ const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; lab
     text: "text-muted-foreground",
     label: "已终止",
   },
-};
-
-const PROVIDER_LABEL: Record<NonNullable<SessionInfo["provider"]>, string> = {
-  claude: "Claude",
-  codex: "Codex",
 };
 
 function StateDot({ state }: { state: SessionInfo["state"] }) {
@@ -117,7 +113,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
             {session.provider && (
               <>
                 <span className="font-mono text-muted-foreground shrink-0">
-                  {PROVIDER_LABEL[session.provider]}
+                  {providerLabel(session.provider)}
                 </span>
                 <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                   ·

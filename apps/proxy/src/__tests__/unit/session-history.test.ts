@@ -67,6 +67,7 @@ describe("scanSessionHistory", () => {
     const fixBug = result.find((r) => r.id === "abc123")!;
     expect(fixBug.title).toBe("Fix login bug");
     expect(fixBug.updatedAt).toBeGreaterThan(0);
+    expect(fixBug.provider).toBe("claude");
 
     const addFeature = result.find((r) => r.id === "def456")!;
     expect(addFeature.title).toBe("Add new feature");

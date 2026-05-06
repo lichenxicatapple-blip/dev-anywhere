@@ -175,8 +175,14 @@ export function attachPtyScrollController(
 
   const onTermScroll = (): void => {
     if (syncing.internal) return;
+    const wasAtBottom = computeIsAtBottom();
     syncing.external = true;
     try {
+      updateSpacer();
+      if (wasAtBottom) {
+        scrollToBottom();
+        return;
+      }
       const { cellH } = getDims();
       container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
       applySubpixel(0);
@@ -203,10 +209,11 @@ export function attachPtyScrollController(
   };
 
   const onRender = (): void => {
+    const wasAtBottom = computeIsAtBottom();
     updateSpacer();
     if (!hasNewFrame()) return;
     consumeNewFrame();
-    if (computeIsAtBottom()) {
+    if (wasAtBottom) {
       scrollToBottom();
     } else if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);

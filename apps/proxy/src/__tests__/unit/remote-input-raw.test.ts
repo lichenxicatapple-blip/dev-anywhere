@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { RelayControlSchema } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
-import { serializeBatchPtyInput, serializeRawPtyInput } from "#src/serve/pty-input.js";
+import { serializeRawPtyInput } from "#src/serve/pty-input.js";
 
 function parseSerializedIpc(serialized: string) {
   const raw = JSON.parse(serialized.trim());
@@ -56,6 +56,8 @@ describe("serve.ts remote_input_raw forwarding semantics", () => {
     ["arrow down", "\x1b[B"],
     ["arrow right", "\x1b[C"],
     ["arrow left", "\x1b[D"],
+    ["paste", "first line\nsecond line"],
+    ["ime text", "你好，世界"],
   ])("preserves %s raw bytes without append", (_label, data) => {
     const raw = { type: "remote_input_raw", sessionId: "s1", data };
     const parsed = RelayControlSchema.safeParse(raw);
@@ -71,11 +73,7 @@ describe("serve.ts remote_input_raw forwarding semantics", () => {
     }
   });
 
-  it("keeps historical user_input batch semantics separate from raw input", () => {
-    const ipc = parseSerializedIpc(serializeBatchPtyInput("s1", "echo ok"));
-    expect(ipc.type).toBe("pty_input");
-    if (ipc.type === "pty_input") {
-      expect(ipc.data).toBe("echo ok\r");
-    }
+  it("does not expose a batch-input serializer for PTY", async () => {
+    expect("serializeBatchPtyInput" in (await import("#src/serve/pty-input.js"))).toBe(false);
   });
 });

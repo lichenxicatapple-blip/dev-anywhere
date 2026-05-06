@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
+import type { SessionInfo } from "@dev-anywhere/shared";
+import { compareProvider, providerLabel, type SessionProvider } from "@/lib/session-provider";
 import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
@@ -100,15 +102,26 @@ export function SessionList({ layout }: SessionListProps) {
 
   const activeListElement = hasActive ? (
     <ul role="list" className="flex flex-col w-full min-w-0">
-      {sessions.map((s) => (
-        <SessionRow
-          key={s.sessionId}
-          session={s}
-          selected={s.sessionId === activeSessionId}
-          now={now}
-          onClick={() => handleRowClick(s.sessionId, s.mode)}
-          onTerminate={() => handleTerminate(s.sessionId)}
-        />
+      {groupActiveSessionsByProvider(sessions).map((group) => (
+        <li key={group.provider}>
+          <div className="flex items-center gap-2 px-4 pt-2 pb-1 text-xs text-muted-foreground">
+            <span className="font-mono">{providerLabel(group.provider)}</span>
+            <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+            <span className="tabular-nums">{group.sessions.length}</span>
+          </div>
+          <ul role="list" className="flex flex-col">
+            {group.sessions.map((s) => (
+              <SessionRow
+                key={s.sessionId}
+                session={s}
+                selected={s.sessionId === activeSessionId}
+                now={now}
+                onClick={() => handleRowClick(s.sessionId, s.mode)}
+                onTerminate={() => handleTerminate(s.sessionId)}
+              />
+            ))}
+          </ul>
+        </li>
       ))}
     </ul>
   ) : (
@@ -153,6 +166,18 @@ export function SessionList({ layout }: SessionListProps) {
       <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>
   );
+}
+
+function groupActiveSessionsByProvider(sessions: SessionInfo[]) {
+  const map = new Map<SessionProvider, SessionInfo[]>();
+  for (const session of sessions) {
+    const list = map.get(session.provider);
+    if (list) list.push(session);
+    else map.set(session.provider, [session]);
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => compareProvider(a, b))
+    .map(([provider, groupedSessions]) => ({ provider, sessions: groupedSessions }));
 }
 
 // 侧栏底部的 "+ 新建会话" 按钮触发器 —— 被 10-01b sidebar.tsx 直接 import

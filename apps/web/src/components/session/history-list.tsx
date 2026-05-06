@@ -14,6 +14,12 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import { formatSessionName } from "@/lib/format-session-name";
+import {
+  compareProvider,
+  historySessionProvider,
+  providerLabel,
+  type SessionProvider,
+} from "@/lib/session-provider";
 import { HistoryRow } from "./history-row";
 
 interface HistoryListProps {
@@ -28,18 +34,30 @@ export function HistoryList({ now }: HistoryListProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
 
-  const groups = useMemo(() => {
-    const map = new Map<string, HistorySession[]>();
+  const providerGroups = useMemo(() => {
+    const providerMap = new Map<SessionProvider, Map<string, HistorySession[]>>();
     for (const h of historySessions) {
-      const list = map.get(h.projectDir);
+      const provider = historySessionProvider(h);
+      let projectMap = providerMap.get(provider);
+      if (!projectMap) {
+        projectMap = new Map<string, HistorySession[]>();
+        providerMap.set(provider, projectMap);
+      }
+      const list = projectMap.get(h.projectDir);
       if (list) list.push(h);
-      else map.set(h.projectDir, [h]);
+      else projectMap.set(h.projectDir, [h]);
     }
-    return Array.from(map.entries()).map(([dir, sessions]) => ({
-      dir,
-      shortDir: formatSessionName(dir),
-      sessions,
-    }));
+    return Array.from(providerMap.entries())
+      .sort(([a], [b]) => compareProvider(a, b))
+      .map(([provider, projectMap]) => ({
+        provider,
+        sessions: Array.from(projectMap.values()).flat(),
+        projects: Array.from(projectMap.entries()).map(([dir, sessions]) => ({
+          dir,
+          shortDir: formatSessionName(dir),
+          sessions,
+        })),
+      }));
   }, [historySessions]);
 
   // 只在 resume 在飞时挂订阅, 收到一次 response 就摘掉, 避免与 CreateSessionDialog 的同名订阅撞车
@@ -79,6 +97,7 @@ export function HistoryList({ now }: HistoryListProps) {
     relay.sendControl({
       type: "session_create",
       cwd: h.projectDir,
+      provider: "claude",
       resumeSessionId: h.id,
     });
   }
@@ -167,53 +186,64 @@ export function HistoryList({ now }: HistoryListProps) {
       )}
       {hasHistory && sectionExpanded && (
         <ul role="list" className="flex flex-col">
-          {groups.map((g) => {
-            const expanded = expandedGroups.has(g.dir);
-            return (
-              <li key={g.dir}>
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(g.dir)}
-                  aria-expanded={expanded}
-                  data-slot="history-group-header"
-                  data-expanded={expanded}
-                  className={cn(
-                    "w-full flex items-center gap-1.5 pl-6 pr-4 py-2 min-h-[36px]",
-                    "text-left transition-colors outline-none",
-                    "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  <span className="text-sm font-mono truncate flex-1 min-w-0" title={g.dir}>
-                    {g.shortDir}
-                  </span>
-                  <span className="text-xs text-muted-foreground/80 tabular-nums shrink-0">
-                    {g.sessions.length}
-                  </span>
-                  <ChevronRight
-                    className={cn(
-                      "size-3.5 shrink-0 text-muted-foreground/80 transition-transform",
-                      expanded && "rotate-90",
-                    )}
-                    aria-hidden="true"
-                  />
-                </button>
-                {expanded && (
-                  <ul role="list" className="flex flex-col">
-                    {g.sessions.map((h) => (
-                      <HistoryRow
-                        key={h.id}
-                        session={h}
-                        now={now}
-                        disabled={resumingId !== null}
-                        loading={resumingId === h.id}
-                        onClick={() => handleResume(h)}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
+          {providerGroups.map((providerGroup) => (
+            <li key={providerGroup.provider}>
+              <div className="flex items-center gap-2 px-4 pt-2 pb-1 text-xs text-muted-foreground">
+                <span className="font-mono">{providerLabel(providerGroup.provider)}</span>
+                <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
+                <span className="tabular-nums">{providerGroup.sessions.length}</span>
+              </div>
+              <ul role="list" className="flex flex-col">
+                {providerGroup.projects.map((g) => {
+                  const expanded = expandedGroups.has(g.dir);
+                  return (
+                    <li key={g.dir}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(g.dir)}
+                        aria-expanded={expanded}
+                        data-slot="history-group-header"
+                        data-expanded={expanded}
+                        className={cn(
+                          "w-full flex items-center gap-1.5 pl-6 pr-4 py-2 min-h-[36px]",
+                          "text-left transition-colors outline-none",
+                          "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        )}
+                      >
+                        <span className="text-sm font-mono truncate flex-1 min-w-0" title={g.dir}>
+                          {g.shortDir}
+                        </span>
+                        <span className="text-xs text-muted-foreground/80 tabular-nums shrink-0">
+                          {g.sessions.length}
+                        </span>
+                        <ChevronRight
+                          className={cn(
+                            "size-3.5 shrink-0 text-muted-foreground/80 transition-transform",
+                            expanded && "rotate-90",
+                          )}
+                          aria-hidden="true"
+                        />
+                      </button>
+                      {expanded && (
+                        <ul role="list" className="flex flex-col">
+                          {g.sessions.map((h) => (
+                            <HistoryRow
+                              key={h.id}
+                              session={h}
+                              now={now}
+                              disabled={resumingId !== null}
+                              loading={resumingId === h.id}
+                              onClick={() => handleResume(h)}
+                            />
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
         </ul>
       )}
     </div>

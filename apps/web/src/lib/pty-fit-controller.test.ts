@@ -62,6 +62,18 @@ describe("attachPtyFitController", () => {
     expect(onRelayout).toHaveBeenCalledTimes(1);
   });
 
+  it("subtracts terminal padding before computing autoscaled font size", () => {
+    const container = document.createElement("div") as HTMLDivElement;
+    container.style.padding = "12px 16px";
+    defineSize(container, { clientWidth: 512, clientHeight: 360 });
+    const term = createTerminal(14);
+
+    attachPtyFitController({ container, term, enabled: true });
+
+    expect(term.options.fontSize).toBe(10);
+    expect(term.refresh).toHaveBeenCalledWith(0, 19);
+  });
+
   it("resets to default font size when autoscale is disabled", () => {
     const container = document.createElement("div") as HTMLDivElement;
     defineSize(container, { clientWidth: 720, clientHeight: 360 });

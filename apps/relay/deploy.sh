@@ -10,6 +10,7 @@ DOMAIN="${2:?Usage: ./deploy.sh <ssh-host> <domain>}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LOCAL_FONTS_DIR="${HOME}/.dev-anywhere/relay-data/fonts"
+PACKAGE_FONTS_DIR="$PROJECT_ROOT/apps/proxy/assets/fonts"
 REMOTE_DIR="/opt/dev-anywhere"
 REMOTE_DATA_DIR="/opt/dev-anywhere-data"
 
@@ -119,9 +120,18 @@ rm -f "$TMPFILE"
 
 # Step 5: 同步字体 (apps/web 通过 /fonts 端点引用, relay 服务)
 echo "[5/8] Syncing fonts..."
-if [ -d "$LOCAL_FONTS_DIR" ]; then
+FONT_SOURCE_DIR=""
+if [ -d "$PACKAGE_FONTS_DIR/sarasa-fixed-sc" ]; then
+  FONT_SOURCE_DIR="$PACKAGE_FONTS_DIR"
+  echo "  Using bundled font assets"
+elif [ -d "$LOCAL_FONTS_DIR/sarasa-fixed-sc" ]; then
+  FONT_SOURCE_DIR="$LOCAL_FONTS_DIR"
+  echo "  Using local installed font assets"
+fi
+
+if [ -n "$FONT_SOURCE_DIR" ]; then
   FONT_TMP=$(mktemp /tmp/dev-anywhere-fonts.XXXXXX.tar.gz)
-  tar czf "$FONT_TMP" -C "$(dirname "$LOCAL_FONTS_DIR")" --no-xattrs fonts
+  tar czf "$FONT_TMP" -C "$(dirname "$FONT_SOURCE_DIR")" --no-xattrs "$(basename "$FONT_SOURCE_DIR")"
   echo "  Uploading fonts ($(du -h "$FONT_TMP" | cut -f1))..."
   scp -q "$FONT_TMP" "$SSH_HOST:/tmp/dev-anywhere-fonts.tar.gz"
   ssh "$SSH_HOST" "
@@ -131,7 +141,7 @@ if [ -d "$LOCAL_FONTS_DIR" ]; then
   "
   rm -f "$FONT_TMP"
 else
-  echo "  WARN: $LOCAL_FONTS_DIR not found, skipping font sync (web will miss CJK fonts)"
+  echo "  WARN: bundled fonts not found, skipping font sync (web will miss CJK fonts)"
 fi
 
 # Step 6: 写入 .env (含 token)

@@ -145,11 +145,41 @@ describe("attachPtyScrollController", () => {
     });
 
     xterm.style.transform = "translate3d(0,-5px,0)";
+    container.scrollTop = 100;
     terminal.buffer.active.viewportY = 7;
     emitScroll();
 
     expect(container.scrollTop).toBe(140);
     expect(xterm.style.transform).toBe("");
+  });
+
+  it("keeps the browser scroll pinned when xterm scrolls after content growth at bottom", () => {
+    const { container, spacer, host } = createDom();
+    let scrollHeight = 2000;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(container.scrollTop).toBe(2000);
+
+    terminal.buffer.active.length = 110;
+    terminal.buffer.active.viewportY = 90;
+    scrollHeight = 2200;
+    emitScroll();
+
+    expect(container.scrollTop).toBe(2200);
   });
 
   it("follows to bottom on render when a real new frame arrives at bottom", () => {
@@ -172,6 +202,39 @@ describe("attachPtyScrollController", () => {
 
     expect(consumeNewFrame).toHaveBeenCalledTimes(1);
     expect(container.scrollTop).toBe(2000);
+    expect(setNewFramesWhileAway).not.toHaveBeenCalled();
+  });
+
+  it("keeps following when a new frame increases scroll height while pinned", () => {
+    const { container, spacer, host } = createDom();
+    const consumeNewFrame = vi.fn();
+    const setNewFramesWhileAway = vi.fn();
+    let scrollHeight = 2000;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    terminal.buffer.active.length = 100;
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => true,
+      consumeNewFrame,
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+    });
+
+    expect(container.scrollTop).toBe(2000);
+
+    terminal.buffer.active.length = 110;
+    scrollHeight = 2200;
+    emitRender();
+
+    expect(consumeNewFrame).toHaveBeenCalledTimes(1);
+    expect(container.scrollTop).toBe(2200);
     expect(setNewFramesWhileAway).not.toHaveBeenCalled();
   });
 

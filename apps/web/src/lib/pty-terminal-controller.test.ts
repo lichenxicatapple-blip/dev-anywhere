@@ -56,7 +56,9 @@ describe("attachPtyTerminalController", () => {
     await Promise.resolve();
 
     expect(h.createTerminal).toHaveBeenCalledWith(h.host);
-    expect(h.attachRawInput).toHaveBeenCalledWith(h.terminal, "s1");
+    expect(h.attachRawInput).toHaveBeenCalledWith(h.terminal, "s1", {
+      onRawInput: undefined,
+    });
     expect(onTerminalReady).toHaveBeenCalledWith(h.terminal);
     expect(h.attachTransport).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -70,6 +72,25 @@ describe("attachPtyTerminalController", () => {
 
     h.host.dispatchEvent(new Event("pointerdown"));
     expect(h.terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes raw input notifications through to the raw input adapter", async () => {
+    const h = createHarness();
+    const onRawInput = vi.fn();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+      onRawInput,
+    });
+    await Promise.resolve();
+
+    expect(h.attachRawInput).toHaveBeenCalledWith(h.terminal, "s1", { onRawInput });
   });
 
   it("disposes transport, focus handler, raw input, and terminal", async () => {

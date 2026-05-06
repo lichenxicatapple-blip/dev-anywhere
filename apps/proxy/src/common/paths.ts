@@ -1,11 +1,17 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // 所有 dev-anywhere 文件路径的集中定义
 // 使用 os.homedir()：POSIX 走 HOME，Windows 走 USERPROFILE；未设置时回退到 getpwuid。
 // 相比 process.env.HOME，不会在缺失环境变量时构造出 "undefined/.dev-anywhere"。
 const HOME = homedir();
 const APP_DIR = `${HOME}/.dev-anywhere`;
+const LEGACY_APP_DIR = `${HOME}/.cc-anywhere`;
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGE_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../../assets/fonts");
+const DEFAULT_FONT_FAMILY = "sarasa-fixed-sc";
 
 // 把 cwd 前缀替换为 ~，HOME 为空时原样返回（避免 replace("", "~") 把 ~ 前缀到所有路径）
 export function tildify(cwd: string): string {
@@ -31,6 +37,8 @@ export const SESSIONS_PATH = `${STATE_DIR}/sessions.json`;
 
 // 会话数据
 export const DATA_DIR = `${APP_DIR}/data`;
+const RELAY_DATA_DIR = `${APP_DIR}/relay-data`;
+const FONT_DIR = `${RELAY_DATA_DIR}/fonts`;
 
 // 日志
 export const LOG_DIR = `${APP_DIR}/logs`;
@@ -57,11 +65,45 @@ const DEFAULT_CONFIG = `{
 }
 `;
 
+type FontAssetSource = {
+  dir: string;
+  family?: string;
+};
+
+function copyFontFamilyIfMissing(targetFontsDir: string, source: FontAssetSource): boolean {
+  const family = source.family ?? DEFAULT_FONT_FAMILY;
+  const sourceFamilyDir = `${source.dir}/${family}`;
+  const targetFamilyDir = `${targetFontsDir}/${family}`;
+  if (existsSync(targetFamilyDir) || !existsSync(sourceFamilyDir)) return false;
+  mkdirSync(targetFontsDir, { recursive: true });
+  cpSync(sourceFamilyDir, targetFamilyDir, { recursive: true });
+  return true;
+}
+
+export function installFontAssetsFromSources(
+  targetFontsDir: string,
+  sources: FontAssetSource[],
+): boolean {
+  for (const source of sources) {
+    if (copyFontFamilyIfMissing(targetFontsDir, source)) return true;
+  }
+  return false;
+}
+
+function installFontAssets(): void {
+  installFontAssetsFromSources(FONT_DIR, [
+    { dir: `${LEGACY_APP_DIR}/relay-data/fonts`, family: DEFAULT_FONT_FAMILY },
+    { dir: PACKAGE_FONT_ASSETS_DIR, family: DEFAULT_FONT_FAMILY },
+  ]);
+}
+
 export function initWorkspace(): void {
   mkdirSync(RUN_DIR, { recursive: true });
   mkdirSync(STATE_DIR, { recursive: true });
   mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(RELAY_DATA_DIR, { recursive: true });
   mkdirSync(LOG_DIR, { recursive: true });
+  installFontAssets();
   if (!existsSync(CONFIG_PATH)) {
     writeFileSync(CONFIG_PATH, DEFAULT_CONFIG);
   }

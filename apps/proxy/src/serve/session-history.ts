@@ -9,6 +9,7 @@ interface SessionHistoryEntry {
   title: string;
   projectDir: string;
   updatedAt: number;
+  provider: "claude";
 }
 
 const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
@@ -49,6 +50,7 @@ export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
           title: title || sessionId.slice(0, 8),
           projectDir: cwd || "/" + encodedDir.replace(/^-/, "").split("-").join("/"),
           updatedAt: fileStat.mtimeMs,
+          provider: "claude",
         });
       } catch {
         continue;
@@ -57,10 +59,10 @@ export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
   }
 
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
-  // 按 title + projectDir 去重，resume 产生的多个 session 只保留最新的
+  // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
   const seen = new Set<string>();
   return entries.filter((e) => {
-    const key = `${e.projectDir}::${e.title}`;
+    const key = `${e.provider}::${e.projectDir}::${e.title}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

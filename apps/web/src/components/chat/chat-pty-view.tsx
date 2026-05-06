@@ -44,6 +44,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const scrollToRatioRef = useRef<(ratio: number) => void>(() => {});
   const connection = usePtyConnectionState();
   const follow = usePtyFollowState();
+  const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
   const [scrollState, setScrollState] = useState<PtyScrollState>({
     scrollTop: 0,
     scrollHeight: 0,
@@ -76,6 +77,12 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       onFrameWritten: () => {
         pendingNewFrameRef.current = true;
       },
+      onRawInput: () => {
+        requestAnimationFrame(() => {
+          scrollToBottomRef.current();
+          clearNewFramesWhileAway();
+        });
+      },
       ...connection.transport,
     });
 
@@ -83,7 +90,14 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       controller.dispose();
       terminalRef.current = null;
     };
-  }, [sessionId, connected, proxyOnline, connection.retryNonce, connection.transport]);
+  }, [
+    sessionId,
+    connected,
+    proxyOnline,
+    connection.retryNonce,
+    connection.transport,
+    clearNewFramesWhileAway,
+  ]);
 
   useEffect(() => {
     if (!connection.ready) return;
@@ -144,7 +158,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
         ref={setContainerEl}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E]"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 py-2"
         data-slot="pty-terminal"
       >
         <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">

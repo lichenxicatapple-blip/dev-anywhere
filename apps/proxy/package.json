@@ -27,6 +27,7 @@
   },
   "files": [
     "dist",
+    "assets",
     "README.md",
     "LICENSE"
   ],
@@ -44,6 +45,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
+    "prepack": "pnpm run build",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

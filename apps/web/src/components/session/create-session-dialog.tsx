@@ -1,5 +1,5 @@
 // 新建会话 Dialog, 字段: name (可选) / CWD
-// 只能创建 JSON 会话; PTY 需要本地真实终端宿主, Web 无法远程创建
+// 目前只能创建 Claude JSON 会话; 托管 PTY 专项会接入 Claude/Codex PTY 创建。
 // CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
 // Permission mode lives here for new sessions; resume remains a chat-level action.
 import { useEffect, useState } from "react";
@@ -17,6 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -59,6 +60,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const mode = "json" as const;
+  const provider = "claude" as const;
   const currentPermissionOption = PERMISSION_MODE_OPTIONS.find((o) => o.value === permissionMode);
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
@@ -91,7 +93,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         name: name.trim() || undefined,
         state: "idle",
         mode,
-        provider: "claude",
+        provider,
       };
       useSessionStore.getState().addSession(newSession);
       onOpenChange(false);
@@ -102,7 +104,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     });
 
     return unsub;
-  }, [submitting, name, mode, navigate, onOpenChange]);
+  }, [submitting, name, mode, provider, navigate, onOpenChange]);
 
   function handleSubmit() {
     if (!cwd.trim()) {
@@ -115,7 +117,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       return;
     }
     setSubmitting(true);
-    relay.sendControl({ type: "session_create", cwd: cwd.trim(), permissionMode });
+    relay.sendControl({ type: "session_create", cwd: cwd.trim(), provider, permissionMode });
   }
 
   return (
@@ -141,17 +143,56 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               placeholder="自动生成"
             />
           </label>
-          <label className="flex flex-col gap-2">
-            <span className="text-sm">工作目录</span>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="create-session-cwd" className="text-sm">
+              工作目录
+            </label>
             <input
+              id="create-session-cwd"
               type="text"
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
-              placeholder="输入或选择绝对路径"
+              placeholder="输入绝对路径"
               className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            <FilePathPicker mode="select" dirsOnly filter={cwd} onSelect={(path) => setCwd(path)} />
-          </label>
+            <FilePathPicker
+              mode="select"
+              dirsOnly
+              filter={cwd}
+              title="选择下一级目录"
+              onSelect={(path) => setCwd(path)}
+            />
+          </div>
+          <section aria-label="Agent CLI" className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Agent CLI</span>
+              <span className="text-xs text-muted-foreground">默认使用 Claude Code</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                aria-pressed="true"
+                className="flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border border-primary/70 bg-primary/10 px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="text-sm font-medium">Claude Code</span>
+                <span className="text-xs text-muted-foreground">JSON 会话</span>
+              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-disabled="true"
+                    onClick={(e) => e.preventDefault()}
+                    className="flex min-h-14 cursor-not-allowed flex-col items-start justify-center gap-1 rounded-md border border-border bg-muted/20 px-3 text-left opacity-55 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="text-sm font-medium">Codex</span>
+                    <span className="text-xs text-muted-foreground">即将支持</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Codex 网页创建会在托管 PTY 专项中接入</TooltipContent>
+              </Tooltip>
+            </div>
+          </section>
           <label className="flex flex-col gap-1">
             <span className="text-sm">权限模式</span>
             <Select

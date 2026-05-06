@@ -320,6 +320,26 @@ describe("RelayControlSchema", () => {
     }
   });
 
+  it("requires provider on session_create", () => {
+    const result = RelayControlSchema.parse({
+      type: "session_create",
+      cwd: "/tmp/project",
+      provider: "claude",
+      permissionMode: "default",
+    });
+    expect(result.type).toBe("session_create");
+    if (result.type === "session_create") {
+      expect(result.provider).toBe("claude");
+    }
+
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "session_create",
+        cwd: "/tmp/project",
+      }),
+    ).toThrow();
+  });
+
   it("rejects bind_by_session type (removed from schema)", () => {
     expect(() => RelayControlSchema.parse({ type: "bind_by_session", sessionId: "s1" })).toThrow();
   });

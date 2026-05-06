@@ -24,8 +24,9 @@ export async function createXtermTerminal(container: HTMLDivElement): Promise<Cr
     fontFamily:
       '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
     fontSize: 14,
-    cursorBlink: false,
-    cursorInactiveStyle: "none",
+    cursorBlink: true,
+    cursorStyle: "block",
+    cursorInactiveStyle: "outline",
     disableStdin: false,
     theme: xtermTheme,
     allowProposedApi: true,

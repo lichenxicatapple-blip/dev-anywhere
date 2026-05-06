@@ -5,14 +5,14 @@ import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
-import { serializeBatchPtyInput, serializeRawPtyInput } from "./pty-input.js";
+import { serializeRawPtyInput } from "./pty-input.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
 import { readSessionMessages } from "./session-history.js";
-import type { ProviderHookContext } from "../providers/index.js";
+import type { ProviderHookContext, ProviderId } from "../providers/index.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
@@ -113,13 +113,10 @@ export class RelayRouter {
       return;
     }
 
-    const ts = this.deps.terminalSockets.get(sessionId);
-    if (!ts?.writable) {
-      serviceLogger.warn({ sessionId }, "Remote input dropped: PTY terminal socket not available");
-      return;
-    }
-    ts.write(serializeBatchPtyInput(sessionId, text));
-    serviceLogger.info({ sessionId }, "Remote input forwarded to PTY terminal");
+    serviceLogger.warn(
+      { sessionId, mode: session.mode },
+      "Remote batch input dropped: PTY sessions require remote_input_raw",
+    );
   }
 
   private onRemoteInputRaw(msg: Record<string, unknown>): void {
@@ -277,6 +274,22 @@ export class RelayRouter {
     const cwd = msg.cwd as string | undefined;
     if (!cwd) return;
 
+    const provider = msg.provider as ProviderId | undefined;
+    if (provider !== "claude") {
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_create_response",
+          sessionId: "",
+          error:
+            provider === "codex"
+              ? "Codex JSON sessions are not supported yet; start a Codex PTY session locally."
+              : "Unsupported provider for JSON session.",
+        }),
+      );
+      serviceLogger.warn({ provider }, "JSON session create rejected for unsupported provider");
+      return;
+    }
+
     const resumeSessionId = msg.resumeSessionId as string | undefined;
     const permissionMode = msg.permissionMode as string | undefined;
     // streamDelta 来自 client 端系统设置 toggle（SessionCreatePayloadSchema 的 streamDelta）
@@ -284,7 +297,7 @@ export class RelayRouter {
     const name = tildify(cwd);
     // 先生成 ID 和启动 worker，连接成功后再注册 session
     const pendingId = nanoid();
-    const hook = this.deps.createHookContext(pendingId, "claude");
+    const hook = this.deps.createHookContext(pendingId, provider);
     const workerPid = this.deps.workerRegistry.spawn(pendingId, {
       cwd,
       resumeSessionId,
@@ -307,7 +320,7 @@ export class RelayRouter {
             workerPid,
             name,
             pendingId,
-            "claude",
+            provider,
           );
           if (resumeSessionId) {
             this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);

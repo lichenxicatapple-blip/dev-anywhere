@@ -4,3 +4,4 @@ build
 pnpm-lock.yaml
 .planning
 .claude
+apps/proxy/assets/fonts/
