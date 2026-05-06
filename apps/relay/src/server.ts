@@ -16,6 +16,8 @@ export interface RelayServerOptions {
   dataDir?: string;
   // proxy 注册预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
   proxyToken?: string;
+  // client 连接预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
+  clientToken?: string;
 }
 
 export interface RelayServer {
@@ -26,11 +28,17 @@ export interface RelayServer {
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
-  const { heartbeatInterval = 30000, logger, dataDir, proxyToken } = options;
+  const { heartbeatInterval = 30000, logger, dataDir, proxyToken, clientToken } = options;
   const proxyTokenRequired = typeof proxyToken === "string" && proxyToken.length > 0;
+  const clientTokenRequired = typeof clientToken === "string" && clientToken.length > 0;
   if (!proxyTokenRequired) {
     logger.warn(
       "proxy auth token not set, /proxy endpoint is open — ok for dev, not for public relay",
+    );
+  }
+  if (!clientTokenRequired) {
+    logger.warn(
+      "client auth token not set, /client endpoint is open — ok for dev, not for public relay",
     );
   }
 
@@ -83,6 +91,18 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     }
 
     if (pathname === "/client") {
+      if (clientTokenRequired) {
+        const token = url.searchParams.get("token");
+        if (token !== clientToken) {
+          logger.warn(
+            { ip: request.socket.remoteAddress },
+            "rejected /client upgrade: invalid token",
+          );
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      }
       clientWss.handleUpgrade(request, socket, head, (ws) => {
         clientWss.emit("connection", ws, request);
       });

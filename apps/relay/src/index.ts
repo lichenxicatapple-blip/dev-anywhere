@@ -8,6 +8,7 @@ const DEFAULT_DATA_DIR = `${homedir()}/.cc-anywhere/relay-data`;
 const DATA_DIR = (process.env.DATA_DIR ?? DEFAULT_DATA_DIR) || undefined;
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL ?? "30000", 10);
 const PROXY_TOKEN = process.env.RELAY_PROXY_TOKEN;
+const CLIENT_TOKEN = process.env.RELAY_CLIENT_TOKEN;
 
 const logger = createLogger({
   name: "relay",
@@ -21,6 +22,7 @@ const relay = createRelayServer({
   dataDir: DATA_DIR,
   heartbeatInterval: HEARTBEAT_INTERVAL,
   proxyToken: PROXY_TOKEN,
+  clientToken: CLIENT_TOKEN,
 });
 
 relay.httpServer.listen(PORT, () => {

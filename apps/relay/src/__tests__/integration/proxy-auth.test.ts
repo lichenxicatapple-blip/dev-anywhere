@@ -11,8 +11,14 @@ describe("proxy endpoint token auth", () => {
   let port: number;
   const connections: WebSocket[] = [];
 
-  async function start(proxyToken?: string): Promise<void> {
-    relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger, proxyToken });
+  async function start(proxyToken?: string, clientToken?: string): Promise<void> {
+    relay = createRelayServer({
+      port: 0,
+      heartbeatInterval: 60000,
+      logger,
+      proxyToken,
+      clientToken,
+    });
     await new Promise<void>((resolve) => {
       relay.httpServer.listen(0, resolve);
     });
@@ -58,9 +64,28 @@ describe("proxy endpoint token auth", () => {
       expect(ok).toBe(false);
     });
 
-    it("/client endpoint is unaffected (no token required)", async () => {
+    it("/client endpoint remains open unless clientToken is configured", async () => {
       const ok = await tryConnect(`ws://127.0.0.1:${port}/client`);
       expect(ok).toBe(true);
+    });
+  });
+
+  describe("with clientToken configured", () => {
+    beforeEach(() => start(undefined, "client-secret"));
+
+    it("accepts /client with correct ?token=", async () => {
+      const ok = await tryConnect(`ws://127.0.0.1:${port}/client?token=client-secret`);
+      expect(ok).toBe(true);
+    });
+
+    it("rejects /client with wrong token", async () => {
+      const ok = await tryConnect(`ws://127.0.0.1:${port}/client?token=wrong`);
+      expect(ok).toBe(false);
+    });
+
+    it("rejects /client with no token", async () => {
+      const ok = await tryConnect(`ws://127.0.0.1:${port}/client`);
+      expect(ok).toBe(false);
     });
   });
 

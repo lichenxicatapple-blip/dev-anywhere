@@ -33,8 +33,21 @@ function loadFontCSS(relayUrl: string): void {
 function toClientWsUrl(relayUrl: string): string {
   const withWsScheme = relayUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const trimmed = withWsScheme.replace(/\/$/, "");
-  if (/\/client$/.test(trimmed)) return trimmed;
-  return `${trimmed.replace(/\/proxy$/, "")}/client`;
+  const token = getRelayClientToken();
+  const base = /\/client$/.test(trimmed) ? trimmed : `${trimmed.replace(/\/proxy$/, "")}/client`;
+  if (!token) return base;
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}token=${encodeURIComponent(token)}`;
+}
+
+function getRelayClientToken(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get("relayToken");
+  if (fromUrl) {
+    sessionStorage.setItem("cc_relayClientToken", fromUrl);
+    return fromUrl;
+  }
+  return sessionStorage.getItem("cc_relayClientToken");
 }
 
 export function useRelaySetup(): void {

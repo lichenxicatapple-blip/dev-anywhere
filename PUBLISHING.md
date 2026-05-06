@@ -108,5 +108,7 @@ cd /opt/cc-anywhere && docker compose pull && docker compose up -d
 
 ```bash
 npm install -g @lichenxi.cat/cc-anywhere-relay
-RELAY_PROXY_TOKEN=$(openssl rand -hex 24) PORT=3100 cc-anywhere-relay
+RELAY_PROXY_TOKEN=$(openssl rand -hex 24) \
+RELAY_CLIENT_TOKEN=$(openssl rand -hex 24) \
+PORT=3100 cc-anywhere-relay
 ```
