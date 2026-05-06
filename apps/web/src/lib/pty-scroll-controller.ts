@@ -184,8 +184,21 @@ export function attachPtyScrollController(
         return;
       }
       const { cellH } = getDims();
-      container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
-      applySubpixel(0);
+      if (cellH !== 0) {
+        const buffer = term.buffer.active;
+        const { ydisp, subpixel } = computeScrollTarget(container.scrollTop, {
+          bufferLength: buffer.length,
+          rows: term.rows,
+          cols: term.cols,
+          viewportY: buffer.viewportY,
+          cellH,
+          cellW: 1,
+        });
+        applySubpixel(subpixel);
+        if (ydisp !== buffer.viewportY) {
+          scrollToYdisp(ydisp);
+        }
+      }
       notifyScroll();
     } finally {
       syncing.external = false;

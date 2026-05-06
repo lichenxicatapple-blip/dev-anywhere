@@ -130,7 +130,7 @@ describe("attachPtyScrollController", () => {
     expect(xterm.style.transform).toBe("translate3d(0,-5px,0)");
   });
 
-  it("syncs xterm scroll back to container scrollTop and clears subpixel", () => {
+  it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
     const { container, spacer, host, xterm } = createDom();
     const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
@@ -149,7 +149,8 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.viewportY = 7;
     emitScroll();
 
-    expect(container.scrollTop).toBe(140);
+    expect(container.scrollTop).toBe(100);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
     expect(xterm.style.transform).toBe("");
   });
 
