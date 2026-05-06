@@ -1,19 +1,7 @@
-import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
+import { CLAUDE_PROVIDER } from "../providers/index.js";
 import { readTtySize } from "./tty.js";
-
-function resolveClaudePath(): string {
-  const custom = process.env.CLAUDE_BIN;
-  if (custom) return custom;
-  try {
-    return execFileSync("which", ["claude"], { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error(
-      "claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download",
-    );
-  }
-}
 
 interface PtyManagerOptions {
   claudeArgs: string[];
@@ -45,13 +33,13 @@ export class PtyManager {
   start(): void {
     const { cols, rows } = readTtySize(this.stdout);
 
-    const claudePath = resolveClaudePath();
-    const child = pty.spawn(claudePath, this.claudeArgs, {
+    const command = CLAUDE_PROVIDER.buildTerminalCommand({ args: this.claudeArgs }, process.env);
+    const child = pty.spawn(command.command, command.args, {
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
       cwd: process.env.INIT_CWD || process.cwd(),
-      env: process.env as Record<string, string>,
+      env: command.env as Record<string, string>,
     });
     this.child = child;
 

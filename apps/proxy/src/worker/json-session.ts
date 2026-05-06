@@ -2,6 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { z } from "zod";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { ControlRequestEventSchema } from "../common/stream-json-schema.js";
+import {
+  CLAUDE_PROVIDER,
+  buildClaudeArgs,
+  filterClaudeEnvVars,
+  type ClaudePermissionMode,
+} from "../providers/index.js";
+
+export { buildClaudeArgs, filterClaudeEnvVars };
+export type { ClaudePermissionMode };
 
 // stream-json 事件类型定义，基于 cc-connect 验证的结构
 export type StreamJsonEventType =
@@ -22,14 +31,6 @@ export type ApprovalStrategy = (
   toolName: string,
   input: Record<string, unknown>,
 ) => Promise<{ behavior: "allow" | "deny"; message?: string }>;
-
-export type ClaudePermissionMode =
-  | "default"
-  | "auto"
-  | "acceptEdits"
-  | "plan"
-  | "bypassPermissions"
-  | "dontAsk";
 
 interface JsonSessionOptions {
   workDir?: string;
@@ -82,40 +83,6 @@ export function createRelayApprovalStrategy(
   };
 }
 
-// 过滤 CLAUDECODE 开头的环境变量，避免泄漏到 claude 子进程
-export function filterClaudeEnvVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const filtered: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith("CLAUDECODE")) {
-      filtered[key] = value;
-    }
-  }
-  return filtered;
-}
-
-// 构建 claude CLI 参数，统一管理 stream-json、fork-session、resume 等标志
-export function buildClaudeArgs(options: {
-  outputFormat?: string;
-  inputFormat?: string;
-  permissionPromptTool?: string;
-  permissionMode?: ClaudePermissionMode;
-  forkSession?: boolean;
-  resumeSessionId?: string;
-  verbose?: boolean;
-  includePartialMessages?: boolean;
-}): string[] {
-  const args: string[] = [];
-  if (options.outputFormat) args.push("--output-format", options.outputFormat);
-  if (options.inputFormat) args.push("--input-format", options.inputFormat);
-  args.push("--permission-prompt-tool", options.permissionPromptTool ?? "stdio");
-  args.push("--permission-mode", options.permissionMode ?? "default");
-  if (options.verbose) args.push("--verbose");
-  if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
-  if (options.forkSession !== false) args.push("--fork-session");
-  if (options.includePartialMessages) args.push("--include-partial-messages");
-  return args;
-}
-
 export class JsonSession {
   private child: ChildProcess | null = null;
   private stderrChunks: string[] = [];
@@ -146,26 +113,20 @@ export class JsonSession {
   }
 
   start(): number {
-    const baseArgs = buildClaudeArgs({
-      outputFormat: "stream-json",
-      inputFormat: "stream-json",
-      permissionPromptTool: "stdio",
-      permissionMode: this.permissionMode,
-      verbose: true,
-      forkSession: true,
-      resumeSessionId: this.resumeSessionId,
-      includePartialMessages: this.includePartialMessages,
-    });
+    const command = CLAUDE_PROVIDER.buildJsonCommand(
+      {
+        extraArgs: this.claudeArgs,
+        permissionMode: this.permissionMode,
+        resumeSessionId: this.resumeSessionId,
+        includePartialMessages: this.includePartialMessages,
+      },
+      process.env,
+    );
 
-    const args = [...baseArgs, ...this.claudeArgs];
-
-    const filteredEnv = filterClaudeEnvVars(process.env);
-
-    const claudeBin = process.env.CLAUDE_BIN || "claude";
-    this.child = spawn(claudeBin, args, {
+    this.child = spawn(command.command, command.args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
-      env: filteredEnv,
+      env: command.env,
     });
 
     this.setupStdoutParsing();
