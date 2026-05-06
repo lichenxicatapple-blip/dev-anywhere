@@ -28,7 +28,7 @@ interface ChatPtyViewProps {
 }
 
 export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
-  // containerEl 用 state 是为了让 useFollowOutput 在 DOM 挂载后拿到 el
+  // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
