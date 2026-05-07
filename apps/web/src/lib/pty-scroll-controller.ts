@@ -108,7 +108,21 @@ export function attachPtyScrollController(
     notifyScrollState();
   };
 
+  const applySubpixel = (px: number): void => {
+    const xtermRoot = host.querySelector<HTMLElement>(".xterm");
+    if (!xtermRoot) return;
+    xtermRoot.style.transform = px !== 0 ? `translate3d(0,${-px}px,0)` : "";
+  };
+
   const scrollToBottom = (): void => {
+    const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
+    syncing.internal = true;
+    try {
+      term.scrollToLine(maxYdisp);
+    } finally {
+      syncing.internal = false;
+    }
+    applySubpixel(0);
     container.scrollTop = container.scrollHeight;
     notifyScroll();
   };
@@ -125,12 +139,6 @@ export function attachPtyScrollController(
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollLeft = maxScrollLeft * clamped;
     notifyScroll();
-  };
-
-  const applySubpixel = (px: number): void => {
-    const xtermRoot = host.querySelector<HTMLElement>(".xterm");
-    if (!xtermRoot) return;
-    xtermRoot.style.transform = px !== 0 ? `translate3d(0,${-px}px,0)` : "";
   };
 
   const updateSpacer = (): void => {

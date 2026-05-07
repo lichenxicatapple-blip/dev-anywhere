@@ -289,7 +289,29 @@ describe("attachPtyScrollController", () => {
 
     controller.scrollToBottom();
     expect(container.scrollTop).toBe(2000);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("syncs xterm viewport to bottom on initial layout", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "latest prompt" });
+    terminal.buffer.active.viewportY = 10;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
+    expect(terminal.buffer.active.viewportY).toBe(80);
+    expect(container.scrollTop).toBe(2000);
   });
 
   it("publishes scroll state changes without duplicating identical snapshots", () => {
