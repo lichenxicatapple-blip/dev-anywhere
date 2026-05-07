@@ -125,15 +125,16 @@ pnpm dev:chaos
 
 当前覆盖：
 
-| 场景                          | 注入点                     | 期望                                                          |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------- |
-| relay 进程崩溃后恢复          | kill 真实 `:3100` relay    | proxy 进入重连态，relay 重启后恢复 connected，health 过       |
-| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID        | daemon 可重新启动，重新连接 relay，health 过                  |
-| web dev server 崩溃后恢复     | kill 真实 `:5173` web      | web 可重新启动，真实 UI smoke 通过                            |
-| relay 控制消息扰动            | delay/duplicate/reorder    | 真实 UI 仍能选择电脑、打开新建会话、拉目录                    |
-| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧 | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq     |
-| 协议快照扰动                  | stale requestId response   | 请求型资源、历史、agent status snapshot 不污染全局 UI         |
-| PTY 审批刷新恢复              | stale response + pty_state | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复 |
+| 场景                          | 注入点                      | 期望                                                          |
+| ----------------------------- | --------------------------- | ------------------------------------------------------------- |
+| relay 进程崩溃后恢复          | kill 真实 `:3100` relay     | proxy 进入重连态，relay 重启后恢复 connected，health 过       |
+| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID         | daemon 可重新启动，重新连接 relay，health 过                  |
+| web dev server 崩溃后恢复     | kill 真实 `:5173` web       | web 可重新启动，真实 UI smoke 通过                            |
+| relay 控制消息扰动            | delay/duplicate/reorder     | 真实 UI 仍能选择电脑、打开新建会话、拉目录                    |
+| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧  | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq     |
+| 协议快照扰动                  | stale requestId response    | 请求型资源、历史、agent status snapshot 不污染全局 UI         |
+| PTY 审批刷新恢复              | stale response + pty_state  | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复 |
+| hosted PTY provider 异常退出  | 临时 provider CLI 主动 exit | Web 进入终止态，终端输入面消失，会话列表清掉该托管会话        |
 
 下一层继续补 Web/FakeRelay 的精确协议 chaos：
 
@@ -239,3 +240,23 @@ pnpm dev:chaos
 仍未完成：
 
 - provider 子进程级 chaos、hosted PTY 异常退出和 Web 断线重连还可以继续扩展；这些属于下一轮真实故障注入，而不是当前 request snapshot 边界的问题。
+
+### 2026-05-08 第五轮
+
+已完成：
+
+- `pnpm dev:chaos` 新增 hosted PTY provider 退出场景：脚本在 chaos 章节内临时生成一个可控 Claude CLI 替身，并只用 `CLAUDE_BIN=...` 重启 proxy serve；最终 restore 会恢复真实环境，不污染用户后续会话。
+- 新增 `apps/web/e2e/hosted-pty-chaos.spec.ts`：通过真实 Web 创建托管终端会话，向 PTY 逐键输入 `exit-chaos` 触发 provider 进程退出，断言当前页面进入终止态、终端输入面消失、会话列表移除该托管会话。
+- 该场景覆盖真实 relay/web/proxy/hosted PTY spawn/onExit/session cleanup/Web UI 消费链路，不依赖 FakeRelay。
+
+验证：
+
+- `bash -n scripts/dev-chaos.sh`
+- `pnpm typecheck`
+- `pnpm dev:health`
+- `pnpm dev:chaos`
+
+仍未完成：
+
+- WebSocket 断线发生在 PTY 连续输出/用户滚动/审批中时的 UI 表现，还可以继续扩展。
+- Codex hosted PTY 的 provider 退出可以复用同一机制追加 `CODEX_BIN` 覆盖；本轮先用 Claude 入口验证托管 PTY 生命周期共性。

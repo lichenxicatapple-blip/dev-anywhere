@@ -17,6 +17,8 @@ mkdir -p "$LOG_DIR"
 SERVICE_LOG_CURSOR=0
 STARTED_PROXY_PID=""
 RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,session_snapshot}"
+HOSTED_PTY_CHAOS_BIN=""
+HOSTED_PTY_CHAOS_CWD="${DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD:-/Users/admin/test_go}"
 
 section() {
   echo ""
@@ -139,6 +141,53 @@ run_protocol_chaos_smoke() {
   echo "+ UI smoke: requestId snapshot and approval recovery chaos"
   WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
     e2e/protocol-chaos.spec.ts --project=desktop
+}
+
+run_hosted_pty_exit_chaos_smoke() {
+  echo "+ UI smoke: hosted PTY provider exit while Web is attached"
+  DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
+    DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/hosted-pty-chaos.spec.ts --project=desktop
+}
+
+create_hosted_pty_chaos_provider() {
+  mkdir -p "$HOSTED_PTY_CHAOS_CWD"
+  HOSTED_PTY_CHAOS_BIN="$LOG_DIR/chaos-claude-${DEV_ANYWHERE_LOG_RUN_ID}.sh"
+  cat >"$HOSTED_PTY_CHAOS_BIN" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '\033]0;DEV Anywhere Chaos Claude\a'
+printf 'DEV Anywhere chaos PTY ready\r\n'
+printf 'type exit-chaos to terminate\r\n'
+buffer=""
+while IFS= read -rsn1 ch; do
+  case "$ch" in
+    $'\r'|$'\n')
+      printf '\r\n'
+      if [[ "$buffer" == *"exit-chaos"* ]]; then
+        printf 'chaos provider exiting now\r\n'
+        exit 42
+      fi
+      buffer=""
+      ;;
+    $'\003')
+      printf '^C\r\n'
+      buffer=""
+      ;;
+    *)
+      buffer+="$ch"
+      printf '%s' "$ch"
+      if [[ "$buffer" == *"exit-chaos"* ]]; then
+        printf '\r\nchaos provider exiting now\r\n'
+        exit 42
+      fi
+      ;;
+  esac
+done
+EOF
+  chmod +x "$HOSTED_PTY_CHAOS_BIN"
+  ok "hosted PTY chaos provider ready: $HOSTED_PTY_CHAOS_BIN"
 }
 
 kill_port() {
@@ -316,6 +365,15 @@ run_render_chaos_smoke
 
 section "Chaos 6: protocol snapshot staleness and approval recovery"
 run_protocol_chaos_smoke
+
+section "Chaos 7: hosted PTY provider exit while Web is attached"
+create_hosted_pty_chaos_provider
+mark_service_log
+run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+wait_until "proxy serve is running with hosted PTY chaos provider" 15 proxy_service_running_observed
+wait_until "proxy serve reconnects to relay after hosted PTY chaos provider swap" 30 proxy_relay_connected_observed
+run_hosted_pty_exit_chaos_smoke
+run pnpm dev:health
 
 section "Restore normal dev services"
 run pnpm dev:restart
