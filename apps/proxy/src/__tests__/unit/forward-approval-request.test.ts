@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
-import type { RelayConnection } from "#src/serve/relay-connection.js";
-import type { SessionManager } from "#src/serve/session-manager.js";
+import {
+  createJsonObserverFake,
+  createRelayConnectionFake,
+  createSessionManagerFake,
+} from "./test-fakes.js";
 
 // 拿真实 claude CLI control_request fixture 端到端验证 forwardApprovalRequest：
 // 真实 tool_name + request.input 喂进去 → 检查出站 tool_use_request envelope shape 合法，
@@ -33,25 +35,14 @@ function readFixtureControlRequest(): {
 describe("forwardApprovalRequest (real CLI control_request data)", () => {
   it("emits a MessageEnvelope-valid tool_use_request that preserves tool_name/request_id/input", () => {
     const fixtureReq = readFixtureControlRequest();
-    const captured: unknown[] = [];
-
-    const relay = Object.assign(new EventEmitter(), {
-      sendEnvelope: (env: unknown) => captured.push(env),
-    }) as unknown as RelayConnection;
+    const relay = createRelayConnectionFake();
 
     const permissionBroker = new PermissionBroker();
     const registry = new WorkerRegistry({
-      sessionManager: {
-        getSession: () => ({ provider: "claude" }),
-      } as unknown as SessionManager,
+      sessionManager: createSessionManagerFake([{ id: "session-real-data", provider: "claude" }]),
       permissionBroker,
-      relayConnection: relay,
-      jsonObserver: {
-        onTurnStart: () => {},
-        onTurnResult: () => {},
-        onApprovalRequested: () => {},
-        onChannelBroken: () => {},
-      } as unknown as import("#src/serve/json-observer.js").JsonObserver,
+      relayConnection: relay.relayConnection,
+      jsonObserver: createJsonObserverFake(),
       nextSeq: () => 1,
     });
 
@@ -70,10 +61,10 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       }
     ).forwardApprovalRequest("session-real-data", ipcMsg);
 
-    expect(captured).toHaveLength(1);
+    expect(relay.envelopes).toHaveLength(1);
 
     // envelope 必须能通过 shared 端的 MessageEnvelopeSchema —— 任何字段漂移或 shape 不合法都会炸
-    const parsed = MessageEnvelopeSchema.safeParse(captured[0]);
+    const parsed = MessageEnvelopeSchema.safeParse(relay.envelopes[0]);
     expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
     if (!parsed.success) return;
 

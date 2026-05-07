@@ -337,12 +337,7 @@ function handleTerminalConnection(
             const session = sessionManager.getSession(msg.sessionId);
             const transitions = resolvePtySemanticSessionTransitions(session?.state, msg.state);
             for (const next of transitions) {
-              changeSessionState(
-                sessionManager,
-                relayConnection,
-                msg.sessionId,
-                next,
-              );
+              changeSessionState(sessionManager, relayConnection, msg.sessionId, next);
             }
             emitAgentStatus(msg.sessionId, "idle");
           }

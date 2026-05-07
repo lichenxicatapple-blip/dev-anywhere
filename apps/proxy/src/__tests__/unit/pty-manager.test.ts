@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { EventEmitter } from "node:events";
+import { createTerminalStdinFake, createTerminalStdoutFake } from "./test-fakes.js";
 
 // 模拟 node-pty 的 IPty 接口
 interface MockPty {
@@ -35,28 +35,6 @@ vi.mock("node-pty", () => ({
   }),
 }));
 
-function createMockStdin(isTTY = true) {
-  const emitter = new EventEmitter();
-  const setRawMode = vi.fn().mockReturnThis();
-  const resume = vi.fn();
-  return Object.assign(emitter, {
-    isTTY,
-    setRawMode,
-    resume,
-  }) as unknown as NodeJS.ReadStream;
-}
-
-function createMockStdout(cols = 120, rows = 40) {
-  const emitter = new EventEmitter();
-  const write = vi.fn();
-  return Object.assign(emitter, {
-    isTTY: true,
-    columns: cols,
-    rows,
-    write,
-  }) as unknown as NodeJS.WriteStream;
-}
-
 describe("PtyManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,8 +57,8 @@ describe("PtyManager", () => {
     const { PtyManager } = await import("#src/terminal/pty-manager.js");
     const pty = await import("node-pty");
 
-    const stdin = createMockStdin(overrides.isTTY ?? true);
-    const stdout = createMockStdout(overrides.cols ?? 120, overrides.rows ?? 40);
+    const stdin = createTerminalStdinFake(overrides.isTTY ?? true);
+    const stdout = createTerminalStdoutFake(overrides.cols ?? 120, overrides.rows ?? 40);
     const tap = overrides.tap ?? vi.fn();
     const provider = {
       id: "claude" as const,
@@ -190,16 +168,16 @@ describe("PtyManager", () => {
     manager.start();
 
     // 连续触发 3 次 resize
-    (stdout as { columns: number }).columns = 110;
-    (stdout as { rows: number }).rows = 35;
+    stdout.columns = 110;
+    stdout.rows = 35;
     stdout.emit("resize");
 
-    (stdout as { columns: number }).columns = 120;
-    (stdout as { rows: number }).rows = 40;
+    stdout.columns = 120;
+    stdout.rows = 40;
     stdout.emit("resize");
 
-    (stdout as { columns: number }).columns = 130;
-    (stdout as { rows: number }).rows = 45;
+    stdout.columns = 130;
+    stdout.rows = 45;
     stdout.emit("resize");
 
     // 防抖窗口内不应调用 resize

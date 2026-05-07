@@ -1,27 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChildProcess } from "node:child_process";
-import type { Logger } from "pino";
 import { spawnScript } from "#src/common/env.js";
-
-interface LogCall {
-  level: "warn" | "error";
-  obj: Record<string, unknown>;
-  msg: string;
-}
-
-function createMockLogger(): Logger & { calls: LogCall[] } {
-  const calls: LogCall[] = [];
-  const record = (level: "warn" | "error") => (obj: Record<string, unknown>, msg: string) => {
-    calls.push({ level, obj, msg });
-  };
-  // 只实现用到的方法；其它 pino API 在 spawnScript 里不调用，cast 到 Logger 即可
-  const mock = {
-    calls,
-    warn: record("warn"),
-    error: record("error"),
-  };
-  return mock as unknown as Logger & { calls: LogCall[] };
-}
+import { createLoggerFake } from "./test-fakes.js";
 
 // 等待子进程彻底结束（exit + 所有 stdio 流关闭），保证 stderr 的 data 事件已派发完
 function waitForClose(child: ChildProcess): Promise<void> {
@@ -32,7 +12,7 @@ const fixtureUrl = new URL("../fixtures/spawn-child", import.meta.url);
 
 describe("spawnScript with logger", () => {
   it("forwards child stderr lines to logger.warn", async () => {
-    const logger = createMockLogger();
+    const logger = createLoggerFake();
     const child = spawnScript(fixtureUrl, ["stderr", "0"], { logger, unref: false });
     await waitForClose(child);
 
@@ -42,7 +22,7 @@ describe("spawnScript with logger", () => {
   });
 
   it("logs error with code when child exits non-zero", async () => {
-    const logger = createMockLogger();
+    const logger = createLoggerFake();
     const child = spawnScript(fixtureUrl, ["quiet", "2"], { logger, unref: false });
     await waitForClose(child);
 
@@ -53,7 +33,7 @@ describe("spawnScript with logger", () => {
   });
 
   it("flushes trailing partial line (no newline) when stream ends", async () => {
-    const logger = createMockLogger();
+    const logger = createLoggerFake();
     const child = spawnScript(fixtureUrl, ["partial", "0"], { logger, unref: false });
     await waitForClose(child);
 
@@ -64,7 +44,7 @@ describe("spawnScript with logger", () => {
   });
 
   it("stays silent on clean zero exit", async () => {
-    const logger = createMockLogger();
+    const logger = createLoggerFake();
     const child = spawnScript(fixtureUrl, ["quiet", "0"], { logger, unref: false });
     await waitForClose(child);
 
@@ -85,7 +65,7 @@ describe("spawnScript captures pre-logger crash", () => {
   // 这是真实世界"早期启动错误"最典型的场景（import 失败、语法错误、top-level throw 等）。
   // 验证：父进程的 logger 能拿到子进程 Node runtime 打到 stderr 的原始 Error stack。
   it("captures Node runtime stderr from a child throwing at module load", async () => {
-    const logger = createMockLogger();
+    const logger = createLoggerFake();
     const crashUrl = new URL("../fixtures/crash-on-load", import.meta.url);
     const child = spawnScript(crashUrl, [], { logger, unref: false });
     await waitForClose(child);

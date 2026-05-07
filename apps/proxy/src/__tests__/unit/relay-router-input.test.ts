@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EventEmitter } from "node:events";
 import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
-import type { WorkerRegistry } from "#src/serve/worker-registry.js";
-import type { RelayConnection } from "#src/serve/relay-connection.js";
 import type { Socket } from "node:net";
+import {
+  createRelayConnectionFake,
+  createWorkerRegistryFake,
+  createWritableSocketFake,
+} from "./test-fakes.js";
 
 function parseIpc(raw: string) {
   return IpcMessageSchema.parse(JSON.parse(raw.trim()));
@@ -27,10 +29,7 @@ function createRouter(options: {
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
-    terminalSockets.set("s1", {
-      writable: true,
-      write: options.terminalWrite,
-    } as unknown as Socket);
+    terminalSockets.set("s1", createWritableSocketFake(options.terminalWrite).socket);
   }
 
   return new RelayRouter({
@@ -47,16 +46,16 @@ function createRouter(options: {
             }
           : undefined,
     } as never,
-    workerRegistry: {
-      send: options.workerSend ?? vi.fn(),
-      spawn: options.workerSpawn ?? vi.fn(),
-      connect: options.workerConnect ?? vi.fn(),
-      terminateProcess: options.workerTerminateProcess ?? vi.fn(() => false),
-    } as unknown as WorkerRegistry,
+    workerRegistry: createWorkerRegistryFake({
+      send: options.workerSend,
+      spawn: options.workerSpawn,
+      connect: options.workerConnect ? vi.fn(options.workerConnect) : undefined,
+      terminateProcess: options.workerTerminateProcess
+        ? vi.fn(options.workerTerminateProcess)
+        : undefined,
+    }),
     controlHandlers: {} as never,
-    relayConnection: Object.assign(new EventEmitter(), {
-      sendRaw: () => {},
-    }) as unknown as RelayConnection,
+    relayConnection: createRelayConnectionFake().relayConnection,
     relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
     hostedPtyRegistry: {

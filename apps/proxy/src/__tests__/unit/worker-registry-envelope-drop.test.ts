@@ -1,14 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { EventEmitter } from "node:events";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
-import type { SessionManager } from "#src/serve/session-manager.js";
-
-// 用 EventEmitter 模拟 RelayConnection 的 on/emit 接口，只测 envelope_dropped 订阅路径
-function makeFakeRelay(): EventEmitter & RelayConnection {
-  return new EventEmitter() as unknown as EventEmitter & RelayConnection;
-}
+import {
+  createJsonObserverFake,
+  createRelayConnectionFake,
+  createSessionManagerFake,
+} from "./test-fakes.js";
 
 const buildToolUseRequestRaw = (sessionId: string, toolId: string): string =>
   JSON.stringify({
@@ -22,23 +20,18 @@ const buildToolUseRequestRaw = (sessionId: string, toolId: string): string =>
   });
 
 describe("WorkerRegistry onEnvelopeDropped", () => {
-  let relay: EventEmitter & RelayConnection;
+  let relay: RelayConnection;
   let permissionBroker: PermissionBroker;
   let registry: WorkerRegistry;
 
   beforeEach(() => {
-    relay = makeFakeRelay();
+    relay = createRelayConnectionFake().relayConnection;
     permissionBroker = new PermissionBroker();
     registry = new WorkerRegistry({
-      sessionManager: {} as SessionManager,
+      sessionManager: createSessionManagerFake(),
       permissionBroker,
       relayConnection: relay,
-      jsonObserver: {
-        onTurnStart: () => {},
-        onTurnResult: () => {},
-        onApprovalRequested: () => {},
-        onChannelBroken: () => {},
-      } as unknown as import("#src/serve/json-observer.js").JsonObserver,
+      jsonObserver: createJsonObserverFake(),
     });
     // 引用以避免 lint unused
     void registry;

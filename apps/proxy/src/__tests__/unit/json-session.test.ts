@@ -1,52 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import type { ChildProcess } from "node:child_process";
 import type { StreamJsonEvent, ApprovalStrategy } from "#src/worker/json-session.js";
-
-// 模拟 child_process.spawn 返回的子进程
-function createMockChild(): ChildProcess & {
-  mockStdout: PassThrough;
-  mockStdin: PassThrough;
-  mockStderr: PassThrough;
-} {
-  const emitter = new EventEmitter();
-  const mockStdout = new PassThrough();
-  const mockStdin = new PassThrough();
-  const mockStderr = new PassThrough();
-
-  const child = Object.assign(emitter, {
-    stdin: mockStdin,
-    stdout: mockStdout,
-    stderr: mockStderr,
-    pid: 12345,
-    killed: false,
-    connected: true,
-    exitCode: null,
-    signalCode: null,
-    spawnargs: [],
-    spawnfile: "",
-    kill: vi.fn().mockReturnValue(true),
-    send: vi.fn(),
-    disconnect: vi.fn(),
-    unref: vi.fn(),
-    ref: vi.fn(),
-    stdio: [mockStdin, mockStdout, mockStderr, null, null] as ChildProcess["stdio"],
-    [Symbol.dispose]: vi.fn(),
-    mockStdout,
-    mockStdin,
-    mockStderr,
-  }) as unknown as ChildProcess & {
-    mockStdout: PassThrough;
-    mockStdin: PassThrough;
-    mockStderr: PassThrough;
-  };
-
-  return child;
-}
+import { createChildProcessFake } from "./test-fakes.js";
 
 // spawn 返回值需要在模块加载前 mock
-let mockChild: ReturnType<typeof createMockChild>;
+let mockChild: ReturnType<typeof createChildProcessFake>;
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => mockChild),
@@ -56,7 +13,7 @@ describe("JsonSession", () => {
   let JsonSession: typeof import("#src/worker/json-session.js").JsonSession;
 
   beforeEach(async () => {
-    mockChild = createMockChild();
+    mockChild = createChildProcessFake();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
     const mod = await import("#src/worker/json-session.js");

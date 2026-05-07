@@ -2,14 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { terminateSessionByOwnership } from "#src/serve/session-termination.js";
+import { createWritableSocketFake } from "./test-fakes.js";
 
 function createDeps(session: unknown, options?: { terminalWrite?: ReturnType<typeof vi.fn> }) {
   const terminalSockets = new Map<string, Socket>();
   if (options?.terminalWrite) {
-    terminalSockets.set("s1", {
-      writable: true,
-      write: options.terminalWrite,
-    } as unknown as Socket);
+    terminalSockets.set("s1", createWritableSocketFake(options.terminalWrite).socket);
   }
   return {
     sessionManager: {

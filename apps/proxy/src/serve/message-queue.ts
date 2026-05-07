@@ -1,4 +1,4 @@
-// 消息队列接口，接口预留持久化扩展
+// 发送队列只负责内存背压和有序 drain；持久化恢复由 relay/proxy 重拉协议承担。
 interface MessageQueue {
   enqueue(raw: string): void;
   drain(): string[];

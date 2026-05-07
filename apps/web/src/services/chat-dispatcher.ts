@@ -144,7 +144,7 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         handleAssistantToolUse(msg);
         break;
       case "thinking":
-        // thinking envelope 携带模型思考文本, 当前 UI 暂不展示, 后续可接入 workingToolName 指示
+        // thinking 文本不进入聊天流；UI 只通过 agent_status/session_status 展示响应状态。
         break;
       case "user_input":
         // Echo: 本端已乐观入 store, 此处不重复追加

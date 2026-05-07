@@ -50,12 +50,12 @@
 
 ### 应删除或重写的低质测试
 
-| 测试                                               | 问题                                                                 | 处理                                                           |
-| -------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `apps/web/e2e/smoke.spec.ts`                       | 只断言 body 可见，几乎不提供质量信号；注释也写着“后续 plan 会替换”。 | 删除，或并入真正 smoke：能连 fake relay、展示会话、打开 chat。 |
-| `apps/web/e2e/toast.spec.ts`                       | 主要测试 Sonner portal 是否挂载，和核心产品风险弱相关。              | 降级为组件级测试，E2E 预算留给真实链路。                       |
-| `apps/web/src/__tests__/unit/theme-tokens.test.ts` | 大量读源码字符串和 CSS token，易因设计微调制造噪声。                 | 只保留少数 design contract，其他交给视觉审查/截图测试。        |
-| `apps/web/e2e/functional-walkthrough.spec.ts`      | 价值高，但现在耦合文案且已过期。                                     | 重写为语义路径测试：用 data-slot/role，不绑 PTY/JSON 文案。    |
+| 测试                                               | 问题                                                                 | 处理                                                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `apps/web/e2e/smoke.spec.ts`                       | 只断言 body 可见，几乎不提供质量信号；注释也写着“后续 plan 会替换”。 | 删除，或并入真正 smoke：能连 fake relay、展示会话、打开 chat。       |
+| `apps/web/e2e/toast.spec.ts`                       | 主要测试 Sonner portal 是否挂载，和核心产品风险弱相关。              | 降级为组件级测试，E2E 预算留给真实链路。                             |
+| `apps/web/src/__tests__/unit/theme-tokens.test.ts` | 大量读源码字符串和 CSS token，易因设计微调制造噪声。                 | 已删除；设计风险交给字体、xterm theme、Markdown 表格和后续截图测试。 |
+| `apps/web/e2e/functional-walkthrough.spec.ts`      | 价值高，但现在耦合文案且已过期。                                     | 重写为语义路径测试：用 data-slot/role，不绑 PTY/JSON 文案。          |
 
 ### 需要新增的高质量测试
 
@@ -80,15 +80,15 @@
 
 ### 需要治理的代码风格问题
 
-| 编号        | 问题                                                           | 证据                                                                                                                                                                          | 风险                                                       | 建议                                                                                                  |
-| ----------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| STYLE-P1-01 | `apps/proxy/src/serve.ts` 仍是“上帝入口文件”。                 | 文件约 800 行，既负责 socket server、relay wiring、hook server、session lifecycle、PTY cleanup、worker registry wiring；见 `apps/proxy/src/serve.ts:557` 之后的大量装配逻辑。 | 任何生命周期改动都要碰同一个大文件，容易引入跨模块回归。   | 拆成 `createServeRuntime()`、`createRelayRuntime()`、`createTerminalBridge()`，入口只负责配置和启动。 |
-| STYLE-P1-02 | 业务代码里仍有未接入功能占位，会制造“能点但不可用”的产品噪声。 | ChatHeader duplicate 使用 `cwd: "."` fallback，rename 只是 toast；见 `apps/web/src/components/chat/chat-header.tsx:65`、`:77`。                                               | 用户误触后创建错误 cwd 会话，或误以为功能坏了。            | 未实现功能不要展示；或者接完整协议。                                                                  |
-| STYLE-P1-03 | request/response 没有统一错误模型，很多地方靠字符串判断。      | Web 里 `phase-machine` 用 `includes("not found")` / `includes("not online")` 映射 UI 文案。                                                                                   | 错误文案一改，UI 行为就变。多语言/品牌文案也会污染协议层。 | shared 定义 `error.code`，UI 只映射 code，不解析 message。                                            |
-| STYLE-P1-04 | 注释中残留阶段编号/历史计划词，降低可信度。                    | 例如 `ProxySwitcher` 注释还写 `Plan 10-02`、`10-01b stub`；`MessageBubble` 还有 `为 Plan 10-06 预留`。                                                                        | 新人会把历史施工记录误读成当前架构约束。                   | 注释只保留“为什么”，删除计划编号、临时施工痕迹。                                                      |
-| STYLE-P1-05 | 测试里 `as unknown as` mock 较多，类型质量被测试层绕开。       | 多个 proxy/relay unit test 通过 `as unknown as WebSocket/RelayConnection` 构造假对象。                                                                                        | 测试可能没有跟真实接口同步，重构时给出假安全感。           | 为核心边界建立 typed fake builders，禁止散落的双重 cast。                                             |
-| STYLE-P2-01 | 部分 UI 测试读取源码字符串断言 class/token。                   | `theme-tokens.test.ts` 直接 `readFileSync` app.css/button/sonner 并 regex；见 `apps/web/src/__tests__/unit/theme-tokens.test.ts:10`。                                         | 改实现细节会炸测试，但用户行为没变。                       | 设计契约测试应尽量渲染组件或截图，不读源码。                                                          |
-| STYLE-P2-02 | 内部术语和用户术语混用仍存在。                                 | UI 已改成“电脑/终端/聊天”，代码注释和 debug page 仍大量出现 Proxy/PTY/JSON。                                                                                                  | 不影响运行，但会拖慢维护。                                 | 建术语表：用户文案、协议字段、代码模块名三层分别约束。                                                |
+| 编号        | 问题                                                           | 证据                                                                                                                                                                                                                 | 风险                                                       | 建议                                                                                                  |
+| ----------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| STYLE-P1-01 | `apps/proxy/src/serve.ts` 仍是“上帝入口文件”。                 | 文件约 800 行，既负责 socket server、relay wiring、hook server、session lifecycle、PTY cleanup、worker registry wiring；见 `apps/proxy/src/serve.ts:557` 之后的大量装配逻辑。                                        | 任何生命周期改动都要碰同一个大文件，容易引入跨模块回归。   | 拆成 `createServeRuntime()`、`createRelayRuntime()`、`createTerminalBridge()`，入口只负责配置和启动。 |
+| STYLE-P1-02 | 业务代码里仍有未接入功能占位，会制造“能点但不可用”的产品噪声。 | ChatHeader 的重命名/复制占位已删除；后续仍需防止未接协议的入口进入主 UI。                                                                                                                                            | 用户误触后创建错误会话，或误以为功能坏了。                 | 未实现功能不要展示；或者接完整协议。                                                                  |
+| STYLE-P1-03 | request/response 没有统一错误模型，很多地方靠字符串判断。      | Web 里 `phase-machine` 用 `includes("not found")` / `includes("not online")` 映射 UI 文案。                                                                                                                          | 错误文案一改，UI 行为就变。多语言/品牌文案也会污染协议层。 | shared 定义 `error.code`，UI 只映射 code，不解析 message。                                            |
+| STYLE-P1-04 | 注释中残留阶段编号/历史计划词，降低可信度。                    | 本轮已清理 Playwright 配置中的历史 Plan 编号、message queue 的“预留”说法、thinking 注释中的“后续”施工痕迹；仍需继续扫描。                                                                                            | 新人会把历史施工记录误读成当前架构约束。                   | 注释只保留“为什么”，删除计划编号、临时施工痕迹。                                                      |
+| STYLE-P1-05 | 测试里 `as unknown as` mock 较多，类型质量被测试层绕开。       | 本轮已为 proxy unit 测试建立 `test-fakes.ts`，集中封装 RelayConnection、WorkerRegistry、Socket、SessionManager、JsonObserver、ChildProcess、terminal stream、Logger 等边界 fake；高频测试文件不再散落这些双重 cast。 | 测试可能没有跟真实接口同步，重构时给出假安全感。           | 新增边界 fake 必须优先进入 `test-fakes.ts`，测试文件只表达行为断言。                                  |
+| STYLE-P2-01 | 部分 UI 测试读取源码字符串断言 class/token。                   | `theme-tokens.test.ts` 已删除；设计风险交给字体、xterm theme、Markdown 表格和后续截图测试。                                                                                                                          | 改实现细节会炸测试，但用户行为没变。                       | 设计契约测试应尽量渲染组件或截图，不读源码。                                                          |
+| STYLE-P2-02 | 内部术语和用户术语混用仍存在。                                 | UI 已改成“电脑/终端/聊天”，代码注释和 debug page 仍大量出现 Proxy/PTY/JSON。                                                                                                                                         | 不影响运行，但会拖慢维护。                                 | 建术语表：用户文案、协议字段、代码模块名三层分别约束。                                                |
 
 ### 风格治理准则
 
@@ -158,5 +158,5 @@ Chaos Monkey 不是随机把系统搞坏，而是验证不变量：
 仍未完成：
 
 - request/response 还没有全量 `requestId` 配对；历史、资源、目录列表等非阻塞请求仍待后续统一。
-- `theme-tokens.test.ts` 等源码字符串类低价值测试还未清理。
+- `theme-tokens.test.ts` 已清理；后续还需继续审查源码字符串/实现细节类测试。
 - proxy 进程级 chaos 还未落地。

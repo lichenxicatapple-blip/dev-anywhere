@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Socket } from "node:net";
 import { createFSM } from "../../common/state-machine.js";
 import { createExitHandler, TerminalState, TERMINAL_TRANSITIONS } from "../../terminal/state.js";
+import { createSocketFake } from "./test-fakes.js";
 
 function makeFsm(initial: TerminalState = TerminalState.RUNNING) {
   return createFSM<TerminalState>({ initial, transitions: TERMINAL_TRANSITIONS });
@@ -11,7 +11,7 @@ function makeSocket(writable: boolean) {
   const end = vi.fn((_msg: string, cb: () => void) => {
     cb();
   });
-  return { socket: { writable, end } as unknown as Socket, end };
+  return createSocketFake({ writable, end });
 }
 
 describe("createExitHandler", () => {

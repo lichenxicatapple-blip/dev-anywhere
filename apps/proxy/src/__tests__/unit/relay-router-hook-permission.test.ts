@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { EventEmitter } from "node:events";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
-import type { WorkerRegistry } from "#src/serve/worker-registry.js";
-import type { RelayConnection } from "#src/serve/relay-connection.js";
+import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter hook permission decisions", () => {
   function createRouter(options: {
@@ -15,11 +13,9 @@ describe("RelayRouter hook permission decisions", () => {
   }): RelayRouter {
     return new RelayRouter({
       sessionManager: { getSession: () => undefined } as never,
-      workerRegistry: { send: options.workerSend } as unknown as WorkerRegistry,
+      workerRegistry: createWorkerRegistryFake({ send: options.workerSend }),
       controlHandlers: {} as never,
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendRaw: () => {},
-      }) as unknown as RelayConnection,
+      relayConnection: createRelayConnectionFake().relayConnection,
       relaySend: (data) => options.sent?.push(data),
       terminalSockets: new Map(),
       hostedPtyRegistry: {} as never,

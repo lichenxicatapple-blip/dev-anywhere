@@ -2,23 +2,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { SessionManager } from "#src/serve/session-manager.js";
+import { SessionState } from "@dev-anywhere/shared";
 import { createControlMessageHandlers } from "#src/serve/handlers/control-messages.js";
+import { createSessionManagerFake } from "./test-fakes.js";
 
-function createMockSessionManager(
-  sessions: Array<{ id: string; state: string }> = [],
-): SessionManager {
-  return {
-    listSessions: () =>
-      sessions.map((s) => ({
-        id: s.id,
-        mode: "pty" as const,
-        provider: "claude" as const,
-        state: s.state,
-        createdAt: new Date().toISOString(),
-      })),
-  } as unknown as SessionManager;
-}
+const createMockSessionManager = createSessionManagerFake;
 
 describe("control-messages: path traversal defense", () => {
   let sent: string[];
@@ -274,8 +262,8 @@ describe("control-messages: reinitializeOnReconnect", () => {
     const sent: string[] = [];
 
     const sessionManager = createMockSessionManager([
-      { id: "active-1", state: "running" },
-      { id: "terminated-1", state: "terminated" },
+      { id: "active-1", state: SessionState.WORKING },
+      { id: "terminated-1", state: SessionState.TERMINATED },
     ]);
 
     const handlers = createControlMessageHandlers((d) => sent.push(d), sessionManager);

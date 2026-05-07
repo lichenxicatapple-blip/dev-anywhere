@@ -295,7 +295,9 @@ test.describe("PTY browser smoke", () => {
     });
     expect(afterApprovalChrome.clientHeight).toBe(beforeApprovalChrome.clientHeight);
     expect(afterApprovalChrome.scrollTop).toBeGreaterThan(0);
-    expect(afterApprovalChrome.scrollTop).toBeGreaterThanOrEqual(beforeApprovalChrome.scrollTop - 8);
+    expect(afterApprovalChrome.scrollTop).toBeGreaterThanOrEqual(
+      beforeApprovalChrome.scrollTop - 8,
+    );
 
     await page.evaluate(() => window.__ptySmoke.resize(100, 30));
     await expectTerminalMounted(page);

@@ -31,13 +31,7 @@ const PROVIDER_RESOLVED_PATTERNS: Record<ApprovalScreenProvider, readonly RegExp
     /User cancelled\b/i,
     /permission denied/i,
   ],
-  codex: [
-    /\bapproved\b/i,
-    /\bdenied\b/i,
-    /\brejected\b/i,
-    /\bcancelled\b/i,
-    /permission denied/i,
-  ],
+  codex: [/\bapproved\b/i, /\bdenied\b/i, /\brejected\b/i, /\bcancelled\b/i, /permission denied/i],
 };
 
 export function stripTerminalControls(text: string): string {

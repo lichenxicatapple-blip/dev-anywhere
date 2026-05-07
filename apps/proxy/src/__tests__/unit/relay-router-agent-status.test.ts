@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { EventEmitter } from "node:events";
 import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
-import type { WorkerRegistry } from "#src/serve/worker-registry.js";
-import type { RelayConnection } from "#src/serve/relay-connection.js";
+import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter agent_status_request", () => {
   function createRouter(options: {
@@ -27,11 +25,9 @@ describe("RelayRouter agent_status_request", () => {
               }
             : undefined,
       } as never,
-      workerRegistry: { send: () => true } as unknown as WorkerRegistry,
+      workerRegistry: createWorkerRegistryFake({ send: () => true }),
       controlHandlers: {} as never,
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendRaw: () => {},
-      }) as unknown as RelayConnection,
+      relayConnection: createRelayConnectionFake().relayConnection,
       relaySend: options.relaySend,
       terminalSockets: new Map(),
       hostedPtyRegistry: {} as never,

@@ -1,21 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { EventEmitter } from "node:events";
 import { MessageEnvelopeSchema, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { HookEventRouter } from "#src/serve/hook-event-router.js";
-import type { RelayConnection } from "#src/serve/relay-connection.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
+import { createRelayConnectionFake } from "./test-fakes.js";
 
 describe("HookEventRouter", () => {
   it("maps lifecycle hook events to session state", () => {
     const states: Array<[string, SessionState]> = [];
-    const capturedRaw: string[] = [];
+    const relay = createRelayConnectionFake();
     let seq = 0;
     const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendEnvelope: () => {},
-        sendRaw: (raw: string) => capturedRaw.push(raw),
-      }) as unknown as RelayConnection,
+      relayConnection: relay.relayConnection,
       agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
@@ -33,7 +29,7 @@ describe("HookEventRouter", () => {
       ["s1", SessionState.WORKING],
       ["s1", SessionState.IDLE],
     ]);
-    const statuses = capturedRaw.map((raw) => RelayControlSchema.parse(JSON.parse(raw)));
+    const statuses = relay.raw.map((raw) => RelayControlSchema.parse(JSON.parse(raw)));
     expect(statuses.map((msg) => (msg.type === "agent_status" ? msg.payload.phase : ""))).toEqual([
       "idle",
       "thinking",
@@ -43,15 +39,11 @@ describe("HookEventRouter", () => {
   });
 
   it("emits MessageEnvelope-valid tool_use_request for hook PermissionRequest", () => {
-    const captured: unknown[] = [];
-    const capturedRaw: string[] = [];
+    const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendEnvelope: (env: unknown) => captured.push(env),
-        sendRaw: (raw: string) => capturedRaw.push(raw),
-      }) as unknown as RelayConnection,
+      relayConnection: relay.relayConnection,
       agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
@@ -72,8 +64,8 @@ describe("HookEventRouter", () => {
     });
 
     expect(states).toEqual([["s1", SessionState.WAITING_APPROVAL]]);
-    expect(capturedRaw).toHaveLength(1);
-    const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
+    expect(relay.raw).toHaveLength(1);
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
     expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
       expect(status.payload).toMatchObject({
@@ -91,8 +83,8 @@ describe("HookEventRouter", () => {
       expect(status.payload.updatedAt).toBeTypeOf("number");
     }
     expect(agentStatusRegistry.get("s1")?.phase).toBe("waiting_permission");
-    expect(captured).toHaveLength(1);
-    const parsed = MessageEnvelopeSchema.safeParse(captured[0]);
+    expect(relay.envelopes).toHaveLength(1);
+    const parsed = MessageEnvelopeSchema.safeParse(relay.envelopes[0]);
     expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
     if (!parsed.success || parsed.data.type !== "tool_use_request") return;
     expect(parsed.data.seq).toBe(7);
@@ -105,15 +97,11 @@ describe("HookEventRouter", () => {
   });
 
   it("treats hook PreToolUse as non-blocking tool-use telemetry", () => {
-    const captured: unknown[] = [];
-    const capturedRaw: string[] = [];
+    const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendEnvelope: (env: unknown) => captured.push(env),
-        sendRaw: (raw: string) => capturedRaw.push(raw),
-      }) as unknown as RelayConnection,
+      relayConnection: relay.relayConnection,
       agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
@@ -134,8 +122,8 @@ describe("HookEventRouter", () => {
     });
 
     expect(states).toEqual([]);
-    expect(capturedRaw).toHaveLength(1);
-    const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
+    expect(relay.raw).toHaveLength(1);
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
     expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
       expect(status.payload).toMatchObject({
@@ -146,18 +134,15 @@ describe("HookEventRouter", () => {
         toolInput: { command: "pwd" },
       });
     }
-    expect(captured).toHaveLength(0);
+    expect(relay.envelopes).toHaveLength(0);
   });
 
   it("emits agent_status when hook permission is resolved", () => {
-    const capturedRaw: string[] = [];
+    const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendEnvelope: () => {},
-        sendRaw: (raw: string) => capturedRaw.push(raw),
-      }) as unknown as RelayConnection,
+      relayConnection: relay.relayConnection,
       agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
@@ -172,8 +157,8 @@ describe("HookEventRouter", () => {
     });
 
     expect(states).toEqual([["s1", SessionState.WORKING]]);
-    expect(capturedRaw).toHaveLength(1);
-    const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
+    expect(relay.raw).toHaveLength(1);
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
     expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
       expect(status.payload).toMatchObject({
@@ -192,14 +177,11 @@ describe("HookEventRouter", () => {
   });
 
   it("returns to idle when hook permission is denied", () => {
-    const capturedRaw: string[] = [];
+    const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
     const router = new HookEventRouter({
-      relayConnection: Object.assign(new EventEmitter(), {
-        sendEnvelope: () => {},
-        sendRaw: (raw: string) => capturedRaw.push(raw),
-      }) as unknown as RelayConnection,
+      relayConnection: relay.relayConnection,
       agentStatusRegistry,
       changeSessionState: (sessionId, state) => {
         states.push([sessionId, state]);
@@ -217,7 +199,7 @@ describe("HookEventRouter", () => {
       ["s1", SessionState.WORKING],
       ["s1", SessionState.IDLE],
     ]);
-    const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
     expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
       expect(status.payload).toMatchObject({
