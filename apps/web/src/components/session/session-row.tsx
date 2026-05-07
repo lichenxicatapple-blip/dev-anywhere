@@ -66,6 +66,12 @@ function StateDot({ state }: { state: SessionInfo["state"] }) {
   );
 }
 
+function sessionModeLabel(mode: SessionInfo["mode"]): string {
+  if (mode === "pty") return "终端";
+  if (mode === "json") return "聊天";
+  return "";
+}
+
 export function SessionRow({ session, selected, now, onClick, onTerminate }: SessionRowProps) {
   const lastActive = session.lastActive;
   const displayName =
@@ -103,8 +109,8 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
         {hasMeta && (
           <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
             {session.mode && (
-              <span className="font-mono uppercase text-muted-foreground shrink-0 inline-block min-w-[4ch]">
-                {session.mode}
+              <span className="text-muted-foreground shrink-0">
+                {sessionModeLabel(session.mode)}
               </span>
             )}
             {session.mode && (

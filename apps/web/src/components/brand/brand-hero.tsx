@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Typewriter } from "./typewriter";
 
-const BRAND_TEXTS = ["Dev Anywhere", "/unlimited @anytime"];
+const BRAND_TEXTS = ["DEV Anywhere", "/unlimited @anytime"];
 
 interface Props {
   subtitle: string;

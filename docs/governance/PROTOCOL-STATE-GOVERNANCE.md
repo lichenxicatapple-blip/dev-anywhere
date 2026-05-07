@@ -4,7 +4,7 @@
 
 ## 目标
 
-这份文档专门约束 Dev Anywhere 的协议层和状态机层。它的目标不是重述产品，而是把后续追赶 LinkShell 的技术路径写成可执行规则：
+这份文档专门约束 DEV Anywhere 的协议层和状态机层。它的目标不是重述产品，而是把后续追赶 LinkShell 的技术路径写成可执行规则：
 
 - 哪类消息属于哪个 owner。
 - 哪些消息可以改变 session lifecycle。
@@ -22,7 +22,7 @@ LinkShell 的优势不是 UI 好看，而是语义和字节流分离得更彻底
 - gateway/relay 主要做 transport binding 和必要的 last status replay。
 - web 不从 terminal bytes 猜 agent 状态。
 
-Dev Anywhere 当前已经补上了 Claude/Codex provider hook path，但协议和状态还没完全收敛：
+DEV Anywhere 当前已经补上了 Claude/Codex provider hook path，但协议和状态还没完全收敛：
 
 - `session_status`、hook event、JSON observer 都能影响 UI 看到的状态；web 已不再把 `pty_state` 映射进 `session.state`。
 - PTY idle timer / OSC 已不再写主状态，只保留为 `pty_state` 观察事件来源。
@@ -135,7 +135,7 @@ Owner：permission broker
 规则：
 
 - `allow/deny` 必须最终回到 provider 或 worker，不允许 UI 点击后本地假定成功。
-- 审批必须无限等待；Dev Anywhere 不允许因为时间流逝自动 allow/deny。
+- 审批必须无限等待；DEV Anywhere 不允许因为时间流逝自动 allow/deny。
 - 如果 provider hook 配置要求有限命令 timeout，权限类 hook 必须使用极长 lease 规避 provider 默认短超时；这不是业务超时。
 - pending 清理必须覆盖 allow、deny、session terminate、worker disconnect、provider exit。
 - web 收到审批请求后发送 `permission_request_delivered`；proxy 只记录送达，不把它当用户决策。

@@ -93,7 +93,7 @@ describe("CreateSessionDialog", () => {
 
       expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(false);
       expect(unsubscribe).toHaveBeenCalled();
-      expect(toastError).toHaveBeenCalledWith("创建失败: 请求超时，请检查本地 proxy 日志后重试");
+      expect(toastError).toHaveBeenCalledWith("创建超时，请检查本机连接后重试");
     } finally {
       vi.useRealTimers();
     }

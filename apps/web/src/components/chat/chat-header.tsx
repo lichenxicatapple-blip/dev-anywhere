@@ -71,7 +71,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
     // 以当前 session 为种子创建一个新会话, cwd 透传
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("Relay 客户端未就绪");
+      toast.error("连接尚未就绪");
       return;
     }
     // SessionInfo 不含 cwd 字段, 无从读取, 暂以 "." 作 fallback
@@ -91,7 +91,7 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
     toast.info(
       targetSession.mode === "pty" && targetSession.ptyOwner === "local-terminal"
         ? "已断开远程连接，本地终端仍在运行"
-        : "已发送终止请求",
+        : "正在终止会话",
     );
   }
 

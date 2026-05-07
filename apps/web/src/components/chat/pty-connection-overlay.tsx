@@ -15,7 +15,7 @@ export function PtyConnectionOverlay({
         className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-card/60 text-xs text-muted-foreground"
         data-slot="pty-connecting"
       >
-        PTY 正在连接...
+        正在连接终端...
       </div>
     );
   }
@@ -28,7 +28,7 @@ export function PtyConnectionOverlay({
       data-slot="pty-subscribe-failed"
       role="alert"
     >
-      <span>PTY 订阅未响应，请重试</span>
+      <span>终端画面暂未响应，请重试</span>
       <button
         type="button"
         onClick={onRetry}

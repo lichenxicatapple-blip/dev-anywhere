@@ -18,7 +18,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -104,7 +103,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("Relay 客户端未就绪");
+      toast.error("连接尚未就绪");
       return;
     }
     const submittedName = name.trim();
@@ -130,7 +129,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       setSubmitting(false);
 
       if (ctrl.error || !ctrl.sessionId) {
-        toast.error(`创建失败: ${ctrl.error ?? "unknown"}`);
+        toast.error(`创建失败：${ctrl.error ?? "未知错误"}`);
         return;
       }
 
@@ -160,7 +159,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       }
       pendingCreateTimeoutRef.current = null;
       setSubmitting(false);
-      toast.error("创建失败: 请求超时，请检查本地 proxy 日志后重试");
+      toast.error("创建超时，请检查本机连接后重试");
     }, SESSION_CREATE_TIMEOUT_MS);
     relay.sendControl({
       type: "session_create",
@@ -246,11 +245,11 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               />
             ) : null}
           </div>
-          <section aria-label="交互模式" className="flex flex-col gap-2">
+          <section aria-label="会话模式" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm">交互模式</span>
+              <span className="text-sm">会话模式</span>
               <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "完整终端" : "聊天消息"}
+                {mode === "pty" ? "完整 CLI 终端" : "消息式对话"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -263,8 +262,8 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                   mode === "pty" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
                 )}
               >
-                <span className="text-sm font-medium">PTY</span>
-                <span className="text-xs text-muted-foreground">像本地终端一样交互</span>
+                <span className="text-sm font-medium">终端模式</span>
+                <span className="text-xs text-muted-foreground">像本地 CLI 一样操作</span>
               </button>
               <button
                 type="button"
@@ -275,7 +274,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                   mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
                 )}
               >
-                <span className="text-sm font-medium">JSON</span>
+                <span className="text-sm font-medium">聊天模式</span>
                 <span className="text-xs text-muted-foreground">按消息发送和显示</span>
               </button>
             </div>
@@ -302,34 +301,27 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 <span className="text-sm font-medium">Claude Code</span>
                 <span className="text-xs text-muted-foreground">可用</span>
               </button>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-pressed={provider === "codex"}
-                    aria-disabled={mode === "json"}
-                    onClick={() => {
-                      if (mode === "json") return;
-                      setProvider("codex");
-                    }}
-                    className={cn(
-                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      mode === "json" && "cursor-not-allowed opacity-45",
-                      provider === "codex"
-                        ? "border-primary/70 bg-primary/10"
-                        : "border-border bg-muted/20",
-                    )}
-                  >
-                    <span className="text-sm font-medium">Codex</span>
-                    <span className="text-xs text-muted-foreground">
-                      {mode === "pty" ? "可用" : "暂不可用"}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {mode === "pty" ? "由本机 proxy 启动真实 Codex CLI" : "Codex 当前只支持 PTY 会话"}
-                </TooltipContent>
-              </Tooltip>
+              <button
+                type="button"
+                aria-pressed={provider === "codex"}
+                aria-disabled={mode === "json"}
+                onClick={() => {
+                  if (mode === "json") return;
+                  setProvider("codex");
+                }}
+                className={cn(
+                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  mode === "json" && "cursor-not-allowed opacity-45",
+                  provider === "codex"
+                    ? "border-primary/70 bg-primary/10"
+                    : "border-border bg-muted/20",
+                )}
+              >
+                <span className="text-sm font-medium">Codex</span>
+                <span className="text-xs text-muted-foreground">
+                  {mode === "pty" ? "可用" : "聊天模式暂不可用"}
+                </span>
+              </button>
             </div>
           </section>
           {mode === "json" ? (

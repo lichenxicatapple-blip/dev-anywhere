@@ -13,12 +13,18 @@ const DOT_CLASS: Record<ProxyStatusDotProps["status"], string> = {
   connecting: "bg-[var(--color-status-working)] animate-pulse",
 };
 
+const STATUS_LABEL: Record<ProxyStatusDotProps["status"], string> = {
+  online: "电脑在线",
+  offline: "电脑离线",
+  connecting: "正在连接电脑",
+};
+
 export function ProxyStatusDot({ status, className }: ProxyStatusDotProps) {
   return (
     <span
       className={cn("inline-block w-2 h-2 rounded-full shrink-0", DOT_CLASS[status], className)}
       role="status"
-      aria-label={`Proxy status: ${status}`}
+      aria-label={STATUS_LABEL[status]}
     />
   );
 }

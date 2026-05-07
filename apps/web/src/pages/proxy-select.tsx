@@ -12,9 +12,9 @@ export function ProxySelectPage() {
   const sessionCount = useSessionStore((s) => s.sessions.length);
 
   let subtitle: string;
-  if (proxies.length === 0) subtitle = "在电脑上启动 dev-anywhere。";
-  else if (!hasProxy) subtitle = "选择一个 Proxy。";
-  else if (sessionCount === 0) subtitle = "在电脑上启动 dev-anywhere，或新建会话。";
+  if (proxies.length === 0) subtitle = "在电脑上启动 dev-anywhere，本页会显示可连接的电脑。";
+  else if (!hasProxy) subtitle = "选择要连接的电脑。";
+  else if (sessionCount === 0) subtitle = "从本地终端接入，或新建一个会话。";
   else subtitle = "选择一个会话继续，或新建。";
 
   return (

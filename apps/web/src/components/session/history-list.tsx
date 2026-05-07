@@ -91,7 +91,7 @@ export function HistoryList({ now }: HistoryListProps) {
     if (resumingId) return;
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("Relay 客户端未就绪");
+      toast.error("连接尚未就绪");
       return;
     }
     setResumingId(h.id);

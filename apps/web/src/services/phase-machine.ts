@@ -84,7 +84,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       useAppStore.getState().setProxyOnline(false);
-      toast.warning("Proxy 已离线");
+      toast.warning("当前电脑已离线");
     }
     return;
   }
@@ -94,7 +94,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       useAppStore.getState().setProxyOnline(true);
-      toast.success("Proxy 已恢复");
+      toast.success("当前电脑已恢复连接");
     }
     return;
   }
@@ -116,7 +116,7 @@ export async function handleRelayMessage(
           const errMsg = result.error.includes("not found")
             ? "会话不存在或已关闭"
             : result.error.includes("not online")
-              ? "Proxy 已离线"
+              ? "电脑已离线"
               : "无法打开会话";
           useAppStore.getState().setPendingToast({ kind: "error", message: errMsg });
           router.navigate("/");

@@ -4,13 +4,13 @@
 
 ## 结论
 
-项目新名确定为 **Dev Anywhere**。
+项目新名确定为 **DEV Anywhere**。
 
 技术命名：
 
 | 对象           | 新值                                     |
 | -------------- | ---------------------------------------- |
-| 产品名         | Dev Anywhere                             |
+| 产品名         | DEV Anywhere                             |
 | 根 package     | `dev-anywhere`                           |
 | 主 CLI         | `dev-anywhere`                           |
 | proxy package  | `@dev-anywhere/proxy`                    |

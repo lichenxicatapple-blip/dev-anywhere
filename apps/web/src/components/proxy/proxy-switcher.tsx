@@ -28,13 +28,13 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   async function handleSelect(proxyId: string, proxyName: string | undefined): Promise<void> {
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("Relay client not available");
+      toast.error("连接尚未就绪");
       return;
     }
     const displayName = proxyName ?? proxyId;
     const result = await relay.selectProxy(proxyId);
     if (!result.success) {
-      toast.error(`选择 ${displayName} 失败：${result.error ?? "unknown"}`);
+      toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
       return;
     }
     localStorage.setItem("cc_proxyId", proxyId);
@@ -67,7 +67,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     return (
       <div className="flex flex-col gap-3 p-4 h-full overflow-auto">
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          本地 Proxy
+          可连接电脑
         </h3>
         <ul role="list" className="flex flex-col gap-2">
           {proxies.map((p) => (
@@ -81,7 +81,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                 onClick={() => handleSelect(p.proxyId, p.name)}
                 className="w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border border-border bg-card hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card"
                 aria-pressed={selectedProxyId === p.proxyId}
-                title={!p.online ? "Proxy 离线，无法连接" : undefined}
+                title={!p.online ? "这台电脑离线，暂时无法连接" : undefined}
               >
                 <ProxyStatusDot status={p.online ? "online" : "offline"} />
                 <span className="text-sm font-normal flex-1 truncate min-w-0">
@@ -105,12 +105,12 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
           type="button"
           data-slot="proxy-switcher-trigger"
           className="group w-full flex items-center gap-2 px-4 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`Proxy: ${currentProxy?.name ?? "未选择 Proxy"}`}
+          aria-label={`当前连接：${currentProxy?.name ?? "未选择电脑"}`}
         >
           {/* 左侧 placeholder 与右侧 chevron 等宽, 让 name 真正居中 */}
           <span className="h-4 w-4 shrink-0" aria-hidden />
           <span className="text-sm font-normal truncate flex-1 text-center">
-            {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择 Proxy"}
+            {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择电脑"}
           </span>
           <ChevronDown
             className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
@@ -120,7 +120,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[260px] p-1">
         {proxies.length === 0 ? (
-          <div className="text-xs text-muted-foreground p-2">没有可用 Proxy</div>
+          <div className="text-xs text-muted-foreground p-2">没有可连接电脑</div>
         ) : (
           <ul role="list" className="flex flex-col">
             {proxies.map((p) => (
@@ -134,7 +134,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                   onClick={() => handleSelect(p.proxyId, p.name)}
                   className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-pressed={selectedProxyId === p.proxyId}
-                  title={!p.online ? "Proxy 离线" : undefined}
+                  title={!p.online ? "这台电脑离线" : undefined}
                 >
                   <ProxyStatusDot status={p.online ? "online" : "offline"} />
                   <span className="text-sm font-normal flex-1 truncate min-w-0">

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/stores/app-store";
 
 // 移动端顶栏品牌: 打字机 loop, 挂在 AppShell header (Outlet 之外) 保证 `/` 与 `/sessions` 间切换不重挂
-const BRAND_TEXTS = ["Dev Anywhere", "/unlimited @anytime"];
+const BRAND_TEXTS = ["DEV Anywhere", "/unlimited @anytime"];
 
 export function AppShell() {
   const location = useLocation();
@@ -35,7 +35,7 @@ export function AppShell() {
           data-slot="app-shell-header"
         >
           <Typewriter texts={BRAND_TEXTS} className="text-sm font-semibold md:hidden" />
-          <span className="hidden md:inline text-sm font-semibold">Dev Anywhere</span>
+          <span className="hidden md:inline text-sm font-semibold">DEV Anywhere</span>
           <div className="ml-auto">
             <Button
               variant="ghost"

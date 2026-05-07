@@ -67,7 +67,7 @@ export function SessionList({ layout }: SessionListProps) {
     const sessionId = session.sessionId;
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("Relay 客户端未就绪");
+      toast.error("连接尚未就绪");
       return;
     }
     relay.sendControl({ type: "session_terminate", sessionId });
@@ -76,7 +76,7 @@ export function SessionList({ layout }: SessionListProps) {
     toast.info(
       session?.mode === "pty" && session.ptyOwner === "local-terminal"
         ? "已断开远程连接，本地终端仍在运行"
-        : "已发送终止请求",
+        : "正在终止会话",
     );
   }
 
@@ -104,7 +104,7 @@ export function SessionList({ layout }: SessionListProps) {
     return (
       <>
         <div className="px-4 py-3 text-sm text-muted-foreground/70">
-          {isLoading ? "连接中..." : "请先选择 Proxy"}
+          {isLoading ? "连接中..." : "请先选择要连接的电脑"}
         </div>
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         <SessionTerminationDialog
@@ -326,7 +326,7 @@ export function CreateSessionButton() {
       ) : (
         <Tooltip open={tipOpen} onOpenChange={setTipOpen}>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent side="top">请先选择 Proxy</TooltipContent>
+          <TooltipContent side="top">请先选择要连接的电脑</TooltipContent>
         </Tooltip>
       )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />

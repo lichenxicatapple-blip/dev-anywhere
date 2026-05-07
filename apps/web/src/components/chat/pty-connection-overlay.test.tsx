@@ -8,7 +8,7 @@ describe("PtyConnectionOverlay", () => {
   it("renders delayed connecting state", () => {
     render(<PtyConnectionOverlay connecting={true} subscribeExhausted={false} onRetry={vi.fn()} />);
 
-    expect(screen.getByText("PTY 正在连接...")).toBeDefined();
+    expect(screen.getByText("正在连接终端...")).toBeDefined();
   });
 
   it("renders retry state and calls retry action", () => {
