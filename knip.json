@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreBinaries": ["scripts/dev-restart.sh"],
+  "ignoreBinaries": ["scripts/dev-restart.sh", "scripts/dev-health.sh"],
   "workspaces": {
     "apps/relay": {
       "entry": ["scripts/verify-relay.ts"],
