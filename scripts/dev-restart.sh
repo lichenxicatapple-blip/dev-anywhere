@@ -79,6 +79,10 @@ elif [ ! -d "$FONT_DIR/sarasa-fixed-sc" ] && [ -d "$PACKAGE_FONT_DIR/sarasa-fixe
 fi
 
 echo ""
+echo "=== Building shared protocol package ==="
+pnpm --filter @dev-anywhere/shared run build
+
+echo ""
 echo "=== Restarting relay ==="
 kill_port "$RELAY_PORT" "relay"
 RELAY_LOG="$LOG_DIR/relay-dev.log"

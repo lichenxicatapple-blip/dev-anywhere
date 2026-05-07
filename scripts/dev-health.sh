@@ -11,6 +11,9 @@ WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
 LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
 
 EXIT_CODE=0
+RELAY_PIDS=""
+WEB_PIDS=""
+SERVICE_PID=""
 
 section() {
   echo ""
@@ -44,6 +47,10 @@ check_port() {
     return
   fi
   ok "$label listening on :$port (PID: $(echo "$pids" | tr '\n' ' '))"
+  case "$label" in
+    Relay) RELAY_PIDS="$pids" ;;
+    Web) WEB_PIDS="$pids" ;;
+  esac
 }
 
 check_http() {
@@ -80,6 +87,7 @@ check_proxy_status() {
   fi
 
   printf '%s\n' "$output" | indent
+  SERVICE_PID="$(printf '%s\n' "$output" | sed -n 's/.*Service: running (PID \([0-9][0-9]*\)).*/\1/p' | head -n 1)"
 
   if printf '%s\n' "$output" | grep -q "Service: running"; then
     ok "proxy serve daemon is running"
@@ -99,6 +107,7 @@ check_proxy_status() {
 scan_log() {
   local label="$1"
   local file="$2"
+  local pid_filter="${3:-}"
   if [ ! -f "$file" ]; then
     warn "$label log missing: $file"
     return
@@ -112,7 +121,8 @@ scan_log() {
 
   local suspicious
   suspicious="$(
-    tail -n 200 "$file" 2>/dev/null |
+    tail -n 300 "$file" 2>/dev/null |
+      if [ -n "$pid_filter" ]; then grep -E "\"pid\":($(printf '%s' "$pid_filter" | paste -sd '|' -))\\b" || true; else cat; fi |
       grep -Ei 'invalid .*json|hook .*failed|failed to start|uncaught|eaddrinuse|fatal|panic|error' |
       grep -Eiv 'proxy auth token not set|client auth token not set|ok for dev|NO_COLOR|ws proxy socket error|ECONNRESET|EPIPE' || true
   )"
@@ -137,9 +147,9 @@ section "Proxy Serve"
 check_proxy_status
 
 section "Logs"
-scan_log "relay dev" "$LOG_DIR/relay-dev.log"
+scan_log "relay dev" "$LOG_DIR/relay-dev.log" "$RELAY_PIDS"
 scan_log "web dev" "$LOG_DIR/web-dev.log"
-scan_log "proxy service" "$LOG_DIR/service.log"
+scan_log "proxy service" "$LOG_DIR/service.log" "$SERVICE_PID"
 scan_log "proxy terminal" "$LOG_DIR/terminal.log"
 
 section "Manual Smoke"
