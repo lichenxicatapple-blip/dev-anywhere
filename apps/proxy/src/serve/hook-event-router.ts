@@ -74,6 +74,9 @@ export class HookEventRouter {
     context?: { toolName?: string; toolInput?: Record<string, unknown> },
   ): void {
     this.deps.changeSessionState(sessionId, SessionState.WORKING);
+    if (outcome === "deny") {
+      this.deps.changeSessionState(sessionId, SessionState.IDLE);
+    }
     this.forwardAgentStatus(
       {
         sessionId,
@@ -82,7 +85,7 @@ export class HookEventRouter {
         requestId,
         payload: {},
       },
-      outcome === "allow" ? "tool_use" : "thinking",
+      outcome === "allow" ? "tool_use" : "idle",
       {
         toolName: context?.toolName,
         toolInput: context?.toolInput,

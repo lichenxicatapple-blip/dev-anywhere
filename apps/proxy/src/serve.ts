@@ -108,6 +108,42 @@ function changeSessionState(
   return changed;
 }
 
+function resolveInterruptedApprovals(
+  permissionBroker: PermissionBroker,
+  hookEventRouter: HookEventRouter,
+  relay: RelayConnection,
+  sessionId: string,
+): void {
+  const approvals = permissionBroker.listSession(sessionId);
+  if (approvals.length === 0) return;
+
+  const message = "Permission request was interrupted in the PTY.";
+  for (const approval of approvals) {
+    if (!permissionBroker.resolve(approval.requestId, { behavior: "deny", message })) continue;
+    hookEventRouter.onPermissionResolved(
+      approval.sessionId,
+      approval.provider,
+      approval.requestId,
+      "deny",
+      { toolName: approval.toolName, toolInput: approval.input },
+    );
+    relay.sendRaw(
+      JSON.stringify({
+        type: "permission_decision_result",
+        sessionId: approval.sessionId,
+        requestId: approval.requestId,
+        outcome: "deny",
+        delivered: true,
+        message,
+      }),
+    );
+  }
+  serviceLogger.info(
+    { sessionId, count: approvals.length },
+    "Pending approvals cleared after PTY interruption",
+  );
+}
+
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
     const s = connect(sockPath);
@@ -164,6 +200,8 @@ function handleTerminalConnection(
   relayConnection: RelayConnection,
   controlHandlers: ControlMessageHandlers,
   agentStatusRegistry: AgentStatusRegistry,
+  permissionBroker: PermissionBroker,
+  hookEventRouter: HookEventRouter,
   createHookContext: (
     sessionId: string,
     provider: ProviderHookContext["provider"],
@@ -249,7 +287,27 @@ function handleTerminalConnection(
         }
 
         case "pty_state_push": {
-          // terminal → serve → relay：PTY 语义状态只作为终端观察事件透传，不再写 SessionState。
+          // terminal → serve → relay：PTY 语义状态透传给 UI。
+          // 如果 provider hook 等待审批时，用户在原生 PTY 里中断/拒绝，hook 不会产生
+          // tool_deny 控制消息；turn_complete 是这条路径的恢复信号，需要清理 pending 审批。
+          if (msg.state === "turn_complete") {
+            resolveInterruptedApprovals(
+              permissionBroker,
+              hookEventRouter,
+              relayConnection,
+              msg.sessionId,
+            );
+            const session = sessionManager.getSession(msg.sessionId);
+            if (session?.state === SessionState.WAITING_APPROVAL) {
+              changeSessionState(
+                sessionManager,
+                relayConnection,
+                msg.sessionId,
+                SessionState.WORKING,
+              );
+              changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
+            }
+          }
           relayConnection.sendRaw(
             JSON.stringify({
               type: "pty_state",
@@ -625,6 +683,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       relayConnection,
       controlHandlers,
       agentStatusRegistry,
+      permissionBroker,
+      hookEventRouter,
       createHookContext,
     );
   });

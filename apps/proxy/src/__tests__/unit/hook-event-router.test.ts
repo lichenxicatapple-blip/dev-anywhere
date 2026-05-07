@@ -203,4 +203,45 @@ describe("HookEventRouter", () => {
     }
     expect(agentStatusRegistry.get("s1")?.phase).toBe("tool_use");
   });
+
+  it("returns to idle when hook permission is denied", () => {
+    const capturedRaw: string[] = [];
+    const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
+    const router = new HookEventRouter({
+      relayConnection: Object.assign(new EventEmitter(), {
+        sendEnvelope: () => {},
+        sendRaw: (raw: string) => capturedRaw.push(raw),
+      }) as unknown as RelayConnection,
+      agentStatusRegistry,
+      changeSessionState: (sessionId, state) => {
+        states.push([sessionId, state]);
+        return true;
+      },
+      nextSeq: () => 10,
+    });
+
+    router.onPermissionResolved("s1", "claude", "req-1", "deny", {
+      toolName: "Bash",
+      toolInput: { command: "pwd" },
+    });
+
+    expect(states).toEqual([
+      ["s1", SessionState.WORKING],
+      ["s1", SessionState.IDLE],
+    ]);
+    const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
+    expect(status.type).toBe("agent_status");
+    if (status.type === "agent_status") {
+      expect(status.payload).toMatchObject({
+        provider: "claude",
+        phase: "idle",
+        permissionResolution: {
+          requestId: "req-1",
+          outcome: "deny",
+        },
+      });
+    }
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
+  });
 });
