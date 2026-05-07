@@ -125,15 +125,17 @@ pnpm dev:chaos
 
 当前覆盖：
 
-| 场景                          | 注入点                     | 期望                                                      |
-| ----------------------------- | -------------------------- | --------------------------------------------------------- |
-| relay 进程崩溃后恢复          | kill 真实 `:3100` relay    | proxy 进入重连态，relay 重启后恢复 connected，health 过   |
-| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID        | daemon 可重新启动，重新连接 relay，health 过              |
-| web dev server 崩溃后恢复     | kill 真实 `:5173` web      | web 可重新启动，真实 UI smoke 通过                        |
-| relay 控制消息扰动            | delay/duplicate/reorder    | 真实 UI 仍能选择电脑、打开新建会话、拉目录                |
-| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧 | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq |
+| 场景                          | 注入点                     | 期望                                                          |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------- |
+| relay 进程崩溃后恢复          | kill 真实 `:3100` relay    | proxy 进入重连态，relay 重启后恢复 connected，health 过       |
+| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID        | daemon 可重新启动，重新连接 relay，health 过                  |
+| web dev server 崩溃后恢复     | kill 真实 `:5173` web      | web 可重新启动，真实 UI smoke 通过                            |
+| relay 控制消息扰动            | delay/duplicate/reorder    | 真实 UI 仍能选择电脑、打开新建会话、拉目录                    |
+| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧 | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq     |
+| 协议快照扰动                  | stale requestId response   | 请求型资源、历史、agent status snapshot 不污染全局 UI         |
+| PTY 审批刷新恢复              | stale response + pty_state | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复 |
 
-下一层再补 Web/FakeRelay 的精确协议 chaos：
+下一层继续补 Web/FakeRelay 的精确协议 chaos：
 
 建议放在 `apps/web/e2e/chaos.spec.ts` 和 `apps/proxy/src/__tests__/integration/chaos-*.test.ts`：
 
@@ -213,3 +215,27 @@ pnpm dev:chaos
 仍未完成：
 
 - session resources 的 6 小时命令刷新仍是 `command_list_push`，这是实时刷新事件，不是页面进入时的阻塞请求；当前保留 push 语义。
+
+### 2026-05-08 第四轮
+
+已完成：
+
+- 明确 request-scoped snapshot 的所有权：带 `requestId` 的 `session_history_messages`、`session_resources_response`、`agent_status_response` 只允许对应 `RelayClient.request*()` 调用方消费；全局 dispatcher 只消费无 `requestId` 的实时广播。
+- 修复一个真实架构隐患：旧的 request response 即使被 `RelayClient` 忽略，仍可能被全局 dispatcher 写入 store，导致目录、历史消息、agent status 被 stale 响应污染。
+- `ChatJsonView`、`ChatPage`、`phase-machine`、`ProxySwitcher` 改为显式应用 request-scoped snapshot，避免“请求层正确、全局状态层仍串线”的双通道问题。
+- 新增 `apps/web/e2e/protocol-chaos.spec.ts`：覆盖 stale `session_resources_response`、`session_history_messages`、`agent_status_response`，以及 PTY 审批状态在 stale response 和真实 `pty_state` 之间的恢复优先级。
+- `pnpm dev:chaos` 增加协议 snapshot chaos 段，并把 relay 扰动类型扩展到 `agent_status_response`、`session_history_messages`、`session_resources_response`。
+
+验证：
+
+- `pnpm --filter @dev-anywhere/shared build`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm format:check`
+- `pnpm knip`
+- `pnpm --filter @dev-anywhere/web exec playwright test e2e/protocol-chaos.spec.ts e2e/functional-walkthrough.spec.ts --project=desktop`
+- `pnpm dev:chaos`
+
+仍未完成：
+
+- provider 子进程级 chaos、hosted PTY 异常退出和 Web 断线重连还可以继续扩展；这些属于下一轮真实故障注入，而不是当前 request snapshot 边界的问题。

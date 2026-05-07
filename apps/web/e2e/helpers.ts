@@ -203,10 +203,18 @@ export async function installFakeRelay(page: Page): Promise<void> {
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;
           case "session_history_request":
-            this.emitJson({ type: "session_history_response", sessions: history });
+            this.emitJson({
+              type: "session_history_response",
+              requestId: msg.requestId,
+              sessions: history,
+            });
             break;
           case "proxy_info_request":
-            this.emitJson({ type: "proxy_info", homePath: "/Users/admin" });
+            this.emitJson({
+              type: "proxy_info",
+              requestId: msg.requestId,
+              homePath: "/Users/admin",
+            });
             break;
           case "dir_list_request":
             this.emitJson({
@@ -239,18 +247,31 @@ export async function installFakeRelay(page: Page): Promise<void> {
             break;
           }
           case "session_resources_request":
-            this.emitResources(String(msg.sessionId ?? ""));
+            this.emitResources(String(msg.sessionId ?? ""), String(msg.requestId ?? ""));
             break;
           case "agent_status_request":
             this.emitJson({
-              type: "agent_status",
-              sessionId: String(msg.sessionId ?? "json-sess"),
-              payload: {
-                provider: "claude",
-                phase: "idle",
-                seq: 1,
-                updatedAt: Date.now(),
-              },
+              type: "agent_status_response",
+              requestId: msg.requestId,
+              statuses: [
+                {
+                  sessionId: String(msg.sessionId ?? "json-sess"),
+                  payload: {
+                    provider: "claude",
+                    phase: "idle",
+                    seq: 1,
+                    updatedAt: Date.now(),
+                  },
+                },
+              ],
+            });
+            break;
+          case "session_messages_request":
+            this.emitJson({
+              type: "session_history_messages",
+              requestId: msg.requestId,
+              sessionId: String(msg.sessionId),
+              messages: [],
             });
             break;
           case "session_subscribe":
@@ -277,6 +298,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               this.emitJson({
                 type: "session_create_response",
                 requestId: msg.requestId,
+                errorCode: "PATH_NOT_FOUND",
                 error: `工作目录不存在或不可访问: ${cwd}`,
               });
               break;
@@ -413,7 +435,30 @@ export async function installFakeRelay(page: Page): Promise<void> {
         });
       }
 
-      private emitResources(sessionId: string): void {
+      private emitResources(sessionId: string, requestId?: string): void {
+        this.emitJson({
+          type: "session_resources_response",
+          requestId,
+          sessionId,
+          commands: [
+            {
+              name: "/init",
+              description: "Initialize project memory",
+              argumentHint: "[optional context]",
+              source: "claude",
+            },
+            { name: "/compact", description: "Compact context", source: "claude" },
+          ],
+          groups: [
+            {
+              path: "/Users/admin/test_go",
+              entries: [
+                { name: "src", isDir: true },
+                { name: "README.md", isDir: false },
+              ],
+            },
+          ],
+        });
         this.emitJson({
           type: "command_list_push",
           commands: [

@@ -16,7 +16,7 @@ export DEV_ANYWHERE_LOG_RETENTION
 mkdir -p "$LOG_DIR"
 SERVICE_LOG_CURSOR=0
 STARTED_PROXY_PID=""
-RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,pty_state,pending_approvals_push,session_snapshot}"
+RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,session_snapshot}"
 
 section() {
   echo ""
@@ -133,6 +133,12 @@ run_render_chaos_smoke() {
   echo "+ UI smoke: PTY render-time stale snapshot and duplicate frame handling"
   WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
     e2e/pty-smoke.spec.ts --project=desktop --grep "stale render"
+}
+
+run_protocol_chaos_smoke() {
+  echo "+ UI smoke: requestId snapshot and approval recovery chaos"
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/protocol-chaos.spec.ts --project=desktop
 }
 
 kill_port() {
@@ -307,6 +313,9 @@ run pnpm dev:health
 
 section "Chaos 5: PTY render-time stale snapshot and duplicate frames"
 run_render_chaos_smoke
+
+section "Chaos 6: protocol snapshot staleness and approval recovery"
+run_protocol_chaos_smoke
 
 section "Restore normal dev services"
 run pnpm dev:restart

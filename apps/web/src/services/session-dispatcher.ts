@@ -64,6 +64,7 @@ export function registerSessionDispatcher(): () => void {
         handleAgentStatus(msg);
         break;
       case "agent_status_response":
+        if (msg.requestId) break;
         handleAgentStatusResponse(msg);
         break;
       case "pty_state":

@@ -29,7 +29,15 @@ function requestProxyState(relay: RelayClient): void {
       useFileStore.getState().setHomePath(info.homePath);
     })
     .catch(() => undefined);
-  void relay.requestAgentStatuses().catch(() => undefined);
+  void relay
+    .requestAgentStatuses()
+    .then((statuses) => {
+      const store = useSessionStore.getState();
+      for (const status of statuses) {
+        store.setAgentStatus(status.sessionId, status.payload);
+      }
+    })
+    .catch(() => undefined);
 }
 
 function requestSessionHistory(relay: RelayClient): void {

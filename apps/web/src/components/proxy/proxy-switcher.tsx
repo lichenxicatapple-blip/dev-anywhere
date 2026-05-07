@@ -38,9 +38,17 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     useAppStore.getState().setProxy(proxyId, proxyName ?? null);
     useAppStore.getState().setProxyOnline(true);
     useAppStore.getState().transitionToPhase("session_browsing");
-    // 绑定成功后显式请求 session 列表 + 历史, proxy 收到后以 envelope 推回, session-dispatcher 写入 store
+    // 绑定成功后刷新会话列表，并用 request-scoped snapshot 拉取历史和 provider 状态。
     relay.sendControl({ type: "session_list" });
-    void relay.requestAgentStatuses().catch(() => undefined);
+    void relay
+      .requestAgentStatuses()
+      .then((statuses) => {
+        const store = useSessionStore.getState();
+        for (const status of statuses) {
+          store.setAgentStatus(status.sessionId, status.payload);
+        }
+      })
+      .catch(() => undefined);
     void relay
       .requestSessionHistory()
       .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))

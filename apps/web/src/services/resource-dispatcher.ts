@@ -63,6 +63,7 @@ export function registerResourceDispatcher(): () => void {
         handleFileTreePush(msg);
         break;
       case "session_resources_response":
+        if (msg.requestId) break;
         handleSessionResourcesResponse(msg);
         break;
       case "proxy_info":

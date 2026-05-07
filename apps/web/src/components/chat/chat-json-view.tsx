@@ -54,7 +54,10 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
     const relay = relayClientRef;
     if (!relay || !sessionId || !connected || !proxyOnline) return;
     relay.sendControl({ type: "session_subscribe", sessionId });
-    void relay.requestSessionMessages(sessionId).catch(() => undefined);
+    void relay
+      .requestSessionMessages(sessionId)
+      .then((messages) => useChatStore.getState().loadHistory(sessionId, messages))
+      .catch(() => undefined);
   }, [sessionId, connected, proxyOnline]);
 
   const virtualizer = useVirtualizer({

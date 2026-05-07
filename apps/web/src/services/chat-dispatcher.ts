@@ -156,6 +156,7 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         handlePermissionDecisionResult(msg);
         break;
       case "session_history_messages":
+        if (msg.requestId) break;
         handleSessionHistoryMessages(msg);
         break;
       case "turn_result":

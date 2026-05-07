@@ -16,6 +16,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { isRouteSessionEnded, resolveChatStatusState } from "./chat-status";
+import { useCommandStore } from "@/stores/command-store";
+import { useFileStore } from "@/stores/file-store";
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>();
@@ -42,15 +44,34 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   // iOS/Android 软键盘高度: 用 paddingBottom 把整个 flex-col 列上挤, flex-1 min-h-0 的 PTY/JSON 区会同步缩短, 底部气泡/PTY 尾行自动跟 InputBar 一起挪到键盘之上
   const kbOffset = useVisualViewportBottomOffset();
 
-  // 会话资源 (slash 命令列表 + @ 文件树) 按 session 请求:
-  // proxy 侧按 session.cwd 推 command_list_push + file_tree_push, 不请求就拿不到数据
+  // 会话资源按 session 做 request-scoped snapshot，避免会话切换时沿用旧命令或旧文件树。
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     if (routeSessionEnded) return;
     const relay = relayClientRef;
     if (!relay) return;
-    void relay.requestSessionResources(id).catch(() => undefined);
-    void relay.requestAgentStatuses(id).catch(() => undefined);
+    void relay
+      .requestSessionResources(id)
+      .then((resources) => {
+        useCommandStore.getState().setCommands(resources.commands);
+        const fileStore = useFileStore.getState();
+        fileStore.clearTree();
+        if (resources.groups.length === 0) return;
+        fileStore.setCwd(resources.groups[0].path);
+        for (const group of resources.groups) {
+          fileStore.setDirEntries(group.path, group.entries);
+        }
+      })
+      .catch(() => undefined);
+    void relay
+      .requestAgentStatuses(id)
+      .then((statuses) => {
+        const sessionStore = useSessionStore.getState();
+        for (const status of statuses) {
+          sessionStore.setAgentStatus(status.sessionId, status.payload);
+        }
+      })
+      .catch(() => undefined);
   }, [id, connected, proxyOnline, routeSessionEnded]);
 
   // 生命周期由 session.state / 活跃列表负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。
