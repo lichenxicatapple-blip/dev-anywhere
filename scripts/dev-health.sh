@@ -14,6 +14,7 @@ EXIT_CODE=0
 RELAY_PIDS=""
 WEB_PIDS=""
 SERVICE_PID=""
+TERMINAL_PIDS=""
 
 section() {
   echo ""
@@ -104,6 +105,26 @@ check_proxy_status() {
   fi
 }
 
+detect_terminal_pids() {
+  local candidates
+  local pid
+  local cwd
+  candidates="$(
+    ps -axo pid=,command= |
+      grep -E 'tsx .*apps/proxy/src/index\.ts|tsx src/index\.ts|dev-anywhere( |$)' |
+      grep -Ev 'serve status|serve\.ts|relay|web|grep ' |
+      awk '{print $1}' || true
+  )"
+  TERMINAL_PIDS=""
+  for pid in $candidates; do
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+    if [ "$cwd" = "$ROOT/apps/proxy" ] || [ "$cwd" = "$ROOT" ]; then
+      TERMINAL_PIDS="${TERMINAL_PIDS}${pid}"$'\n'
+    fi
+  done
+  TERMINAL_PIDS="$(printf '%s' "$TERMINAL_PIDS" | sed '/^$/d')"
+}
+
 scan_log() {
   local label="$1"
   local file="$2"
@@ -114,8 +135,8 @@ scan_log() {
   fi
 
   ok "$label log exists: $file"
-  if [ "$label" = "proxy terminal" ] && find "$file" -mmin +30 -print -quit 2>/dev/null | grep -q .; then
-    ok "$label log has no recent activity; skipping old attach errors"
+  if [ "$label" = "proxy terminal" ] && [ -z "$pid_filter" ]; then
+    ok "$label has no active attached terminal process; skipping historical attach log"
     return
   fi
 
@@ -147,10 +168,11 @@ section "Proxy Serve"
 check_proxy_status
 
 section "Logs"
+detect_terminal_pids
 scan_log "relay dev" "$LOG_DIR/relay-dev.log" "$RELAY_PIDS"
 scan_log "web dev" "$LOG_DIR/web-dev.log"
 scan_log "proxy service" "$LOG_DIR/service.log" "$SERVICE_PID"
-scan_log "proxy terminal" "$LOG_DIR/terminal.log"
+scan_log "proxy terminal" "$LOG_DIR/terminal.log" "$TERMINAL_PIDS"
 
 section "Manual Smoke"
 echo "Open: http://localhost:$WEB_PORT"
