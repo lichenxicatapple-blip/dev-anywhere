@@ -11,6 +11,11 @@ export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void>;
+  handleSessionResourcesRequest(msg: {
+    sessionId: string;
+    requestId?: string;
+    workDir: string;
+  }): Promise<void>;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
   reinitializeOnReconnect(): Promise<void>;
@@ -103,6 +108,27 @@ export function createControlMessageHandlers(
       sessionResources.set(sessionId, res);
     }
     return res;
+  }
+
+  function scheduleCommandRefresh(sessionId: string, workDir: string): void {
+    const resources = getResources(sessionId);
+    if (resources.commandRefreshTimer) {
+      clearInterval(resources.commandRefreshTimer);
+    }
+    resources.commandRefreshTimer = setInterval(async () => {
+      try {
+        const commands = await discoverCommands(workDir);
+        send(
+          JSON.stringify({
+            type: "command_list_push",
+            commands,
+          }),
+        );
+        serviceLogger.debug({ sessionId, count: commands.length }, "Command list refreshed");
+      } catch (err) {
+        serviceLogger.warn({ sessionId, error: String(err) }, "Command refresh failed");
+      }
+    }, COMMAND_REFRESH_MS);
   }
 
   return {
@@ -213,9 +239,49 @@ export function createControlMessageHandlers(
       }
     },
 
-    async pushCommandList(sessionId: string, workDir: string): Promise<void> {
-      const resources = getResources(sessionId);
+    async handleSessionResourcesRequest(msg: {
+      sessionId: string;
+      requestId?: string;
+      workDir: string;
+    }): Promise<void> {
+      getResources(msg.sessionId).fileTreeWorkDir = msg.workDir;
+      scheduleCommandRefresh(msg.sessionId, msg.workDir);
 
+      const [commandsResult, groupsResult] = await Promise.allSettled([
+        discoverCommands(msg.workDir),
+        getFileTree(msg.workDir),
+      ]);
+      const commands = commandsResult.status === "fulfilled" ? commandsResult.value : [];
+      const groups = groupsResult.status === "fulfilled" ? groupsResult.value : [];
+      const failedReason =
+        commandsResult.status === "rejected"
+          ? commandsResult.reason
+          : groupsResult.status === "rejected"
+            ? groupsResult.reason
+            : undefined;
+
+      send(
+        JSON.stringify({
+          type: "session_resources_response",
+          requestId: msg.requestId,
+          sessionId: msg.sessionId,
+          commands,
+          groups,
+          ...(failedReason
+            ? {
+                errorCode: classifyPathError(failedReason),
+                error: String(failedReason),
+              }
+            : {}),
+        }),
+      );
+      serviceLogger.info(
+        { sessionId: msg.sessionId, commandCount: commands.length, groupCount: groups.length },
+        "Session resources snapshot sent",
+      );
+    },
+
+    async pushCommandList(sessionId: string, workDir: string): Promise<void> {
       try {
         const commands = await discoverCommands(workDir);
         send(
@@ -230,23 +296,7 @@ export function createControlMessageHandlers(
       }
 
       // 6 小时定时刷新
-      if (resources.commandRefreshTimer) {
-        clearInterval(resources.commandRefreshTimer);
-      }
-      resources.commandRefreshTimer = setInterval(async () => {
-        try {
-          const commands = await discoverCommands(workDir);
-          send(
-            JSON.stringify({
-              type: "command_list_push",
-              commands,
-            }),
-          );
-          serviceLogger.debug({ sessionId, count: commands.length }, "Command list refreshed");
-        } catch (err) {
-          serviceLogger.warn({ sessionId, error: String(err) }, "Command refresh failed");
-        }
-      }, COMMAND_REFRESH_MS);
+      scheduleCommandRefresh(sessionId, workDir);
     },
 
     async pushFileTree(sessionId: string, workDir: string): Promise<void> {

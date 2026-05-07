@@ -12,7 +12,7 @@ import { ThinkingIndicator } from "./thinking-indicator";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { EmptyState } from "@/components/shell/empty-state";
-import { wsManagerRef } from "@/hooks/use-relay-setup";
+import { relayClientRef } from "@/hooks/use-relay-setup";
 
 interface ChatJsonViewProps {
   sessionId: string;
@@ -51,10 +51,10 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   // 订阅 session + 拉取历史消息: 必须等 WS 连接 + proxy 已绑定 (relay NOT_BOUND 会丢请求)
   // 直接 URL 进入 /chat/:id 时, 本 effect 会在 connected/proxyOnline 变 true 后重放
   useEffect(() => {
-    const ws = wsManagerRef;
-    if (!ws || !sessionId || !connected || !proxyOnline) return;
-    ws.send(JSON.stringify({ type: "session_subscribe", sessionId }));
-    ws.send(JSON.stringify({ type: "session_messages_request", sessionId }));
+    const relay = relayClientRef;
+    if (!relay || !sessionId || !connected || !proxyOnline) return;
+    relay.sendControl({ type: "session_subscribe", sessionId });
+    void relay.requestSessionMessages(sessionId).catch(() => undefined);
   }, [sessionId, connected, proxyOnline]);
 
   const virtualizer = useVirtualizer({

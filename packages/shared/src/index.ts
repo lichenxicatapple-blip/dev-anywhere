@@ -62,6 +62,7 @@ export { buildMessage } from "./builders/index.js";
 export {
   ProxyInfoSchema,
   DirEntrySchema,
+  FileTreeGroupSchema,
   CommandEntrySchema,
   HistorySessionSchema,
   RelayControlSchema,
@@ -73,6 +74,7 @@ export {
 export type {
   ProxyInfo,
   DirEntry,
+  FileTreeGroup,
   CommandEntry,
   HistorySession,
   RelayControlMessage,

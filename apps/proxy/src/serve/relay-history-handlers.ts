@@ -16,13 +16,19 @@ export class RelayHistoryHandlers {
   onSessionMessagesRequest(msg: Record<string, unknown>): void {
     const sid = msg.sessionId as string | undefined;
     if (!sid) return;
+    const requestId = msg.requestId as string | undefined;
 
     const session = this.deps.sessionManager.getSession(sid);
     if (session?.claudeSessionId) {
       readSessionMessages(session.claudeSessionId)
         .then((messages) => {
           this.deps.relaySend(
-            JSON.stringify({ type: "session_history_messages", sessionId: sid, messages }),
+            JSON.stringify({
+              type: "session_history_messages",
+              requestId,
+              sessionId: sid,
+              messages,
+            }),
           );
           serviceLogger.info(
             { sessionId: sid, messageCount: messages.length },
@@ -35,12 +41,22 @@ export class RelayHistoryHandlers {
             "Failed to read session history messages on request",
           );
           this.deps.relaySend(
-            JSON.stringify({ type: "session_history_messages", sessionId: sid, messages: [] }),
+            JSON.stringify({
+              type: "session_history_messages",
+              requestId,
+              sessionId: sid,
+              messages: [],
+            }),
           );
         });
     } else {
       this.deps.relaySend(
-        JSON.stringify({ type: "session_history_messages", sessionId: sid, messages: [] }),
+        JSON.stringify({
+          type: "session_history_messages",
+          requestId,
+          sessionId: sid,
+          messages: [],
+        }),
       );
     }
 

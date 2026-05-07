@@ -1,7 +1,10 @@
 // Relay 协议客户端，处理注册、代理选择、消息发送和控制消息路由
 import type { WebSocketManager } from "@/services/websocket";
 import type {
+  AgentStatusPayload,
+  CommandEntry,
   DirEntry,
+  FileTreeGroup,
   HistorySession,
   MessageEnvelope,
   RelayControlMessage,
@@ -17,6 +20,16 @@ type ProxyInfoResult = Array<{
   online: boolean;
   sessions?: string[];
 }>;
+type SessionHistoryMessage = Extract<
+  RelayControlMessage,
+  { type: "session_history_messages" }
+>["messages"][number];
+type AgentStatusSnapshot = Array<{ sessionId: string; payload: AgentStatusPayload }>;
+type SessionResourcesSnapshot = {
+  sessionId: string;
+  commands: CommandEntry[];
+  groups: FileTreeGroup[];
+} & RequestError;
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -180,6 +193,73 @@ export class RelayClient {
       "读取历史会话超时",
       timeoutMs,
     ).then((resp) => resp.sessions);
+  }
+
+  requestSessionMessages(
+    sessionId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<SessionHistoryMessage[]> {
+    const requestId = nextRequestId("session-messages");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "session_history_messages" }> =>
+        msg.type === "session_history_messages" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(JSON.stringify({ type: "session_messages_request", requestId, sessionId })),
+      "读取会话消息超时",
+      timeoutMs,
+    ).then((resp) => resp.messages);
+  }
+
+  requestAgentStatuses(
+    sessionId?: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<AgentStatusSnapshot> {
+    const requestId = nextRequestId("agent-status");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "agent_status_response" }> =>
+        msg.type === "agent_status_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "agent_status_request",
+            requestId,
+            ...(sessionId ? { sessionId } : {}),
+          }),
+        ),
+      "读取 Agent 状态超时",
+      timeoutMs,
+    ).then((resp) => resp.statuses);
+  }
+
+  requestSessionResources(
+    sessionId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<SessionResourcesSnapshot> {
+    const requestId = nextRequestId("session-resources");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "session_resources_response" }> =>
+        msg.type === "session_resources_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "session_resources_request",
+            requestId,
+            sessionId,
+          }),
+        ),
+      "读取会话资源超时",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      commands: resp.commands,
+      groups: resp.groups,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
   }
 
   createSession(

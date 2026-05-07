@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
@@ -44,10 +45,24 @@ export class RelayResourceHandlers {
     const session = this.deps.sessionManager.getSession(sid);
     if (!session?.cwd) {
       serviceLogger.warn({ sessionId: sid }, "Session resources request: no cwd available");
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_resources_response",
+          requestId: msg.requestId as string | undefined,
+          sessionId: sid,
+          commands: [],
+          groups: [],
+          errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+          error: "Session not found or cwd unavailable",
+        }),
+      );
       return;
     }
-    this.deps.controlHandlers.pushCommandList(sid, session.cwd);
-    this.deps.controlHandlers.pushFileTree(sid, session.cwd);
-    serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources pushed");
+    this.deps.controlHandlers.handleSessionResourcesRequest({
+      sessionId: sid,
+      requestId: msg.requestId as string | undefined,
+      workDir: session.cwd,
+    });
+    serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources requested");
   }
 }

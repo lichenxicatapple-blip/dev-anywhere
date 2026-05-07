@@ -44,7 +44,7 @@ describe("RelayRouter agent_status_request", () => {
     });
   }
 
-  it("pushes current status for the requested active session", () => {
+  it("returns current status snapshot for the requested active session", () => {
     const registry = new AgentStatusRegistry();
     registry.set("s1", {
       provider: "claude",
@@ -59,18 +59,20 @@ describe("RelayRouter agent_status_request", () => {
       activeSessions: new Set(["s1"]),
     });
 
-    router.handle({ type: "agent_status_request", sessionId: "s1" });
+    router.handle({ type: "agent_status_request", requestId: "req-1", sessionId: "s1" });
 
     expect(sent).toHaveLength(1);
     const msg = RelayControlSchema.parse(JSON.parse(sent[0]));
-    expect(msg.type).toBe("agent_status");
-    if (msg.type === "agent_status") {
-      expect(msg.sessionId).toBe("s1");
-      expect(msg.payload.phase).toBe("waiting_permission");
+    expect(msg.type).toBe("agent_status_response");
+    if (msg.type === "agent_status_response") {
+      expect(msg.requestId).toBe("req-1");
+      expect(msg.statuses).toHaveLength(1);
+      expect(msg.statuses[0].sessionId).toBe("s1");
+      expect(msg.statuses[0].payload.phase).toBe("waiting_permission");
     }
   });
 
-  it("does not replay stale status for removed sessions", () => {
+  it("returns an empty snapshot for removed sessions", () => {
     const registry = new AgentStatusRegistry();
     registry.set("removed", {
       provider: "codex",
@@ -85,8 +87,14 @@ describe("RelayRouter agent_status_request", () => {
       activeSessions: new Set(),
     });
 
-    router.handle({ type: "agent_status_request" });
+    router.handle({ type: "agent_status_request", requestId: "req-2" });
 
-    expect(sent).toEqual([]);
+    expect(sent).toHaveLength(1);
+    const msg = RelayControlSchema.parse(JSON.parse(sent[0]));
+    expect(msg.type).toBe("agent_status_response");
+    if (msg.type === "agent_status_response") {
+      expect(msg.requestId).toBe("req-2");
+      expect(msg.statuses).toEqual([]);
+    }
   });
 });

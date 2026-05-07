@@ -15,6 +15,12 @@ export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
 export type DirEntry = z.infer<typeof DirEntrySchema>;
 
+export const FileTreeGroupSchema = z.object({
+  path: z.string(),
+  entries: z.array(DirEntrySchema),
+});
+export type FileTreeGroup = z.infer<typeof FileTreeGroupSchema>;
+
 export const CommandEntrySchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -162,12 +168,7 @@ const relayControlDefinitions = [
   control(
     "file_tree_push",
     {
-      groups: z.array(
-        z.object({
-          path: z.string(),
-          entries: z.array(DirEntrySchema),
-        }),
-      ),
+      groups: z.array(FileTreeGroupSchema),
     },
     "proxy_to_client",
   ),
@@ -283,13 +284,44 @@ const relayControlDefinitions = [
   ),
 
   // 客户端请求会话历史消息，client -> proxy
-  control("session_messages_request", { sessionId: z.string() }, "client_to_proxy"),
+  control(
+    "session_messages_request",
+    { ...RequestIdShape, sessionId: z.string() },
+    "client_to_proxy",
+  ),
 
   // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
-  control("session_resources_request", { sessionId: z.string() }, "client_to_proxy"),
+  control(
+    "session_resources_request",
+    { ...RequestIdShape, sessionId: z.string() },
+    "client_to_proxy",
+  ),
+  control(
+    "session_resources_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: z.string(),
+      commands: z.array(CommandEntrySchema),
+      groups: z.array(FileTreeGroupSchema),
+    },
+    "proxy_to_client",
+  ),
 
   // 客户端请求当前 provider 语义状态；不经 relay 缓存，由 proxy 返回当前值
-  control("agent_status_request", { sessionId: z.string().optional() }, "client_to_proxy"),
+  control(
+    "agent_status_request",
+    { ...RequestIdShape, sessionId: z.string().optional() },
+    "client_to_proxy",
+  ),
+  control(
+    "agent_status_response",
+    {
+      ...RequestIdShape,
+      statuses: z.array(z.object({ sessionId: z.string(), payload: AgentStatusPayloadSchema })),
+    },
+    "proxy_to_client",
+  ),
 
   // 客户端确认已收到审批请求；proxy 只记录送达状态，不把它当成用户决策
   control(
@@ -331,6 +363,7 @@ const relayControlDefinitions = [
   control(
     "session_history_messages",
     {
+      ...RequestIdShape,
       sessionId: z.string(),
       messages: z.array(
         z.object({

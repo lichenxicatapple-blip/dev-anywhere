@@ -171,6 +171,104 @@ describe("RelayClient request handling", () => {
     ]);
   });
 
+  it("waits for matching session message responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestSessionMessages("s1");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "session_history_messages",
+      requestId: "other-request",
+      sessionId: "s1",
+      messages: [{ role: "user", text: "wrong" }],
+    });
+    ws.emit({
+      type: "session_history_messages",
+      requestId,
+      sessionId: "other-session",
+      messages: [{ role: "user", text: "wrong session" }],
+    });
+    ws.emit({
+      type: "session_history_messages",
+      requestId,
+      sessionId: "s1",
+      messages: [{ role: "assistant", text: "hello" }],
+    });
+
+    await expect(promise).resolves.toEqual([{ role: "assistant", text: "hello" }]);
+  });
+
+  it("waits for matching agent status snapshots", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestAgentStatuses("s1");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({ type: "agent_status_response", requestId: "other-request", statuses: [] });
+    ws.emit({
+      type: "agent_status_response",
+      requestId,
+      statuses: [
+        {
+          sessionId: "s1",
+          payload: {
+            provider: "claude",
+            phase: "thinking",
+            seq: 1,
+            updatedAt: 1760000000000,
+          },
+        },
+      ],
+    });
+
+    await expect(promise).resolves.toEqual([
+      {
+        sessionId: "s1",
+        payload: {
+          provider: "claude",
+          phase: "thinking",
+          seq: 1,
+          updatedAt: 1760000000000,
+        },
+      },
+    ]);
+  });
+
+  it("waits for matching session resource snapshots", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestSessionResources("s1");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "session_resources_response",
+      requestId: "other-request",
+      sessionId: "s1",
+      commands: [],
+      groups: [],
+    });
+    ws.emit({
+      type: "session_resources_response",
+      requestId,
+      sessionId: "other-session",
+      commands: [],
+      groups: [],
+    });
+    ws.emit({
+      type: "session_resources_response",
+      requestId,
+      sessionId: "s1",
+      commands: [{ name: "/init", description: "Initialize", source: "builtin" }],
+      groups: [{ path: "/tmp", entries: [{ name: "src", isDir: true }] }],
+    });
+
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      commands: [{ name: "/init", description: "Initialize", source: "builtin" }],
+      groups: [{ path: "/tmp", entries: [{ name: "src", isDir: true }] }],
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
   it("correlates concurrent session create responses by requestId", async () => {
     const { relay, ws } = createClient();
     const first = relay.createSession({ cwd: "/one", provider: "claude", mode: "pty" });

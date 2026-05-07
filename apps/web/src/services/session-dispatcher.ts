@@ -25,6 +25,15 @@ function handleAgentStatus(msg: Extract<RelayControlMessage, { type: "agent_stat
   useSessionStore.getState().setAgentStatus(msg.sessionId, msg.payload);
 }
 
+function handleAgentStatusResponse(
+  msg: Extract<RelayControlMessage, { type: "agent_status_response" }>,
+): void {
+  const store = useSessionStore.getState();
+  for (const status of msg.statuses) {
+    store.setAgentStatus(status.sessionId, status.payload);
+  }
+}
+
 function handlePtyState(msg: Extract<RelayControlMessage, { type: "pty_state" }>): void {
   useSessionStore.getState().setPtyState(msg.sessionId, msg.payload);
 }
@@ -53,6 +62,9 @@ export function registerSessionDispatcher(): () => void {
         break;
       case "agent_status":
         handleAgentStatus(msg);
+        break;
+      case "agent_status_response":
+        handleAgentStatusResponse(msg);
         break;
       case "pty_state":
         handlePtyState(msg);

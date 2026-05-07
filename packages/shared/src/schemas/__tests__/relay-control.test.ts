@@ -267,10 +267,68 @@ describe("RelayControlSchema", () => {
     expect(RelayControlSchema.parse({ type: "agent_status_request" })).toEqual({
       type: "agent_status_request",
     });
-    expect(RelayControlSchema.parse({ type: "agent_status_request", sessionId: "s1" })).toEqual({
+    expect(
+      RelayControlSchema.parse({
+        type: "agent_status_request",
+        requestId: "req-1",
+        sessionId: "s1",
+      }),
+    ).toEqual({
       type: "agent_status_request",
+      requestId: "req-1",
       sessionId: "s1",
     });
+  });
+
+  it("parses agent_status_response snapshots", () => {
+    const result = RelayControlSchema.parse({
+      type: "agent_status_response",
+      requestId: "req-1",
+      statuses: [
+        {
+          sessionId: "s1",
+          payload: {
+            provider: "claude",
+            phase: "thinking",
+            seq: 1,
+            updatedAt: 1760000000000,
+          },
+        },
+      ],
+    });
+
+    expect(result.type).toBe("agent_status_response");
+    if (result.type === "agent_status_response") {
+      expect(result.requestId).toBe("req-1");
+      expect(result.statuses[0].payload.phase).toBe("thinking");
+    }
+  });
+
+  it("parses session resources snapshots", () => {
+    const result = RelayControlSchema.parse({
+      type: "session_resources_response",
+      requestId: "req-1",
+      sessionId: "s1",
+      commands: [
+        {
+          name: "/init",
+          description: "Initialize",
+          source: "builtin",
+        },
+      ],
+      groups: [
+        {
+          path: "/tmp",
+          entries: [{ name: "src", isDir: true }],
+        },
+      ],
+    });
+
+    expect(result.type).toBe("session_resources_response");
+    if (result.type === "session_resources_response") {
+      expect(result.commands[0].name).toBe("/init");
+      expect(result.groups[0].entries[0].name).toBe("src");
+    }
   });
 
   it("parses permission delivery and decision result controls", () => {

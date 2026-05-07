@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { SessionState } from "@dev-anywhere/shared";
+import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
@@ -137,23 +137,25 @@ export class RelayRouter {
 
   private onAgentStatusRequest(msg: Record<string, unknown>): void {
     const sid = msg.sessionId as string | undefined;
+    const requestId = msg.requestId as string | undefined;
     if (sid) {
       const status = this.deps.agentStatusRegistry.get(sid);
-      if (!status || !this.deps.sessionManager.getSession(sid)) return;
-      this.deps.relaySend(
-        JSON.stringify({ type: "agent_status", sessionId: sid, payload: status }),
-      );
-      serviceLogger.info({ sessionId: sid, phase: status.phase }, "Agent status pushed");
+      const statuses =
+        status && this.deps.sessionManager.getSession(sid)
+          ? [{ sessionId: sid, payload: status }]
+          : [];
+      this.deps.relaySend(JSON.stringify({ type: "agent_status_response", requestId, statuses }));
+      serviceLogger.info({ sessionId: sid, count: statuses.length }, "Agent status snapshot sent");
       return;
     }
 
-    let count = 0;
+    const statuses: Array<{ sessionId: string; payload: AgentStatusPayload }> = [];
     for (const { sessionId, status } of this.deps.agentStatusRegistry.list()) {
       if (!this.deps.sessionManager.getSession(sessionId)) continue;
-      this.deps.relaySend(JSON.stringify({ type: "agent_status", sessionId, payload: status }));
-      count++;
+      statuses.push({ sessionId, payload: status });
     }
-    serviceLogger.info({ count }, "Agent statuses pushed");
+    this.deps.relaySend(JSON.stringify({ type: "agent_status_response", requestId, statuses }));
+    serviceLogger.info({ count: statuses.length }, "Agent status snapshot sent");
   }
 
   private onSessionTerminate(msg: Record<string, unknown>): void {

@@ -179,7 +179,7 @@ pnpm dev:chaos
 
 仍未完成：
 
-- request/response 主链路已继续收口；`session_messages_request`、`session_resources_request`、`agent_status_request` 仍是推送型请求，后续需要按是否阻塞 UI 决定是否升级为 request/response。
+- request/response 主链路当时仍有缺口；`session_messages_request`、`session_resources_request`、`agent_status_request` 已在后续第二/三轮升级为 requestId 相关的 snapshot 响应。
 - `theme-tokens.test.ts` 已清理；后续还需继续审查源码字符串/实现细节类测试。
 - 真实 chaos 还需要继续扩展到 provider 子进程退出、hosted PTY 异常退出、审批中刷新和 Web 断线重连。
 
@@ -198,3 +198,18 @@ pnpm dev:chaos
 
 - `session_messages_request`、`session_resources_request`、`agent_status_request` 仍是推送型请求；如果后续 UI 出现等待态或并发串线，再升级为 request/response。
 - UI 仍有少量错误展示直接使用 `error` 文本；需要逐步收敛到 `errorCode -> 中文文案` 映射。
+
+### 2026-05-08 第三轮
+
+已完成：
+
+- `session_messages_request` 补齐 `requestId`，`session_history_messages` echo `requestId`，JSON 会话进入页面时改用 `RelayClient.requestSessionMessages()` 拉取历史消息。
+- `agent_status_request` 改为真正的 snapshot response：新增 `agent_status_response`，返回 `{ sessionId, payload }[]`，空状态也返回空数组，不再让调用方靠 timeout 判断“没有状态”。
+- 实时 provider 状态仍保留 `agent_status` push，用于 hook/运行时状态变化；snapshot response 专门服务刷新、重连、进入页面后的确定性恢复。
+- `phase-machine`、`ProxySwitcher`、`ChatPage` 不再发送裸 `agent_status_request`，统一走 `RelayClient.requestAgentStatuses()`。
+- `session_resources_request` 改为资源 snapshot response：新增 `session_resources_response`，一次返回 slash commands 和 file tree groups；进入会话时 Web 会清空旧 file tree 后应用新资源，避免会话切换沿用旧缓存。
+- 单测补齐 `requestSessionMessages()`、`requestAgentStatuses()` 的 requestId 匹配，以及 proxy 侧 agent status snapshot 空结果语义。
+
+仍未完成：
+
+- session resources 的 6 小时命令刷新仍是 `command_list_push`，这是实时刷新事件，不是页面进入时的阻塞请求；当前保留 push 语义。

@@ -21,13 +21,27 @@ function handleDirListResponse(
 }
 
 function handleFileTreePush(msg: Extract<RelayControlMessage, { type: "file_tree_push" }>): void {
+  applyFileTreeGroups(msg.groups);
+}
+
+function applyFileTreeGroups(
+  groups: Extract<RelayControlMessage, { type: "file_tree_push" }>["groups"],
+): void {
   const store = useFileStore.getState();
-  if (msg.groups.length === 0) return;
+  if (groups.length === 0) return;
   // proxy 约定 groups[0] 即 session cwd; 其余为 cwd 下直接子目录, 作为第二层预热
-  store.setCwd(msg.groups[0].path);
-  for (const g of msg.groups) {
+  store.setCwd(groups[0].path);
+  for (const g of groups) {
     store.setDirEntries(g.path, g.entries);
   }
+}
+
+function handleSessionResourcesResponse(
+  msg: Extract<RelayControlMessage, { type: "session_resources_response" }>,
+): void {
+  useCommandStore.getState().setCommands(msg.commands);
+  useFileStore.getState().clearTree();
+  applyFileTreeGroups(msg.groups);
 }
 
 export function registerResourceDispatcher(): () => void {
@@ -47,6 +61,9 @@ export function registerResourceDispatcher(): () => void {
         break;
       case "file_tree_push":
         handleFileTreePush(msg);
+        break;
+      case "session_resources_response":
+        handleSessionResourcesResponse(msg);
         break;
       case "proxy_info":
         useFileStore.getState().setHomePath(msg.homePath);

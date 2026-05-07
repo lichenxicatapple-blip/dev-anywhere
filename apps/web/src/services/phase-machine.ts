@@ -29,7 +29,7 @@ function requestProxyState(relay: RelayClient): void {
       useFileStore.getState().setHomePath(info.homePath);
     })
     .catch(() => undefined);
-  relay.sendControl({ type: "agent_status_request" });
+  void relay.requestAgentStatuses().catch(() => undefined);
 }
 
 function requestSessionHistory(relay: RelayClient): void {
