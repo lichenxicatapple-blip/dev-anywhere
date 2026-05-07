@@ -150,6 +150,17 @@ export function attachPtyScrollController(
     }
   };
 
+  const handlePendingNewFrame = (wasAtBottom: boolean): boolean => {
+    if (!hasNewFrame()) return false;
+    consumeNewFrame();
+    if (wasAtBottom) {
+      scrollToBottom();
+    } else if (!hasNewFramesWhileAway()) {
+      setNewFramesWhileAway(true);
+    }
+    return true;
+  };
+
   const onContainerScroll = (): void => {
     if (syncing.external) {
       notifyScroll();
@@ -181,6 +192,10 @@ export function attachPtyScrollController(
       updateSpacer();
       if (wasAtBottom) {
         scrollToBottom();
+        return;
+      }
+      const handledNewFrame = handlePendingNewFrame(wasAtBottom);
+      if (handledNewFrame) {
         return;
       }
       const { cellH } = getDims();
@@ -224,13 +239,7 @@ export function attachPtyScrollController(
   const onRender = (): void => {
     const wasAtBottom = computeIsAtBottom();
     updateSpacer();
-    if (!hasNewFrame()) return;
-    consumeNewFrame();
-    if (wasAtBottom) {
-      scrollToBottom();
-    } else if (!hasNewFramesWhileAway()) {
-      setNewFramesWhileAway(true);
-    }
+    handlePendingNewFrame(wasAtBottom);
     notifyScroll();
   };
 

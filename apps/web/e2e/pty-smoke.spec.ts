@@ -230,6 +230,22 @@ test.describe("PTY browser smoke", () => {
       el.dispatchEvent(new Event("scroll"));
     });
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
+    const scrollTopBeforeNewFrame = await page
+      .locator('[data-slot="pty-terminal"]')
+      .evaluate((el) => {
+        return (el as HTMLElement).scrollTop;
+      });
+
+    await page.evaluate(() => {
+      window.__ptySmoke.sendPty("new output while reviewing history\r\n");
+    });
+    await expect(page.locator('[aria-label="有新消息"]')).toBeVisible();
+    const scrollTopAfterNewFrame = await page
+      .locator('[data-slot="pty-terminal"]')
+      .evaluate((el) => {
+        return (el as HTMLElement).scrollTop;
+      });
+    expect(scrollTopAfterNewFrame).toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
 
     await page.evaluate(() => window.__ptySmoke.resize(100, 30));
     await expectTerminalMounted(page);

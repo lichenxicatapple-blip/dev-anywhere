@@ -115,5 +115,23 @@ test.describe("functional browser walkthrough", () => {
     await expect(page).toHaveURL(/\/sessions/);
     await page.goto(`${page.url().split("#")[0]}#/chat/json-sess?mode=json`);
     await expect(page.locator('[data-slot="terminated-session-panel"]')).toBeVisible();
+    await expect(page.locator('[data-slot="input-bar-region"]')).toHaveCount(0);
+  });
+
+  test("terminated PTY sessions expose no terminal input surface", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await page.locator('[data-slot="chat-terminate-item"]').click();
+    await expect(page).toHaveURL(/\/sessions/);
+
+    await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="terminated-session-panel"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveCount(0);
+    await expect(
+      page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
+    ).toHaveCount(0);
   });
 });
