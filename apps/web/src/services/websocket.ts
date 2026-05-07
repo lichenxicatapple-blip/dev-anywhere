@@ -126,8 +126,8 @@ export class WebSocketManager {
     ws.addEventListener("open", () => {
       this.connected = true;
       this.reconnectAttempt = 0;
-      this.flushPendingQueue();
       this.statusHandlers.forEach((h) => h(true));
+      this.flushPendingQueue();
     });
 
     ws.addEventListener("message", (event) => {

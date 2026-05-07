@@ -125,16 +125,17 @@ pnpm dev:chaos
 
 当前覆盖：
 
-| 场景                          | 注入点                      | 期望                                                          |
-| ----------------------------- | --------------------------- | ------------------------------------------------------------- |
-| relay 进程崩溃后恢复          | kill 真实 `:3100` relay     | proxy 进入重连态，relay 重启后恢复 connected，health 过       |
-| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID         | daemon 可重新启动，重新连接 relay，health 过                  |
-| web dev server 崩溃后恢复     | kill 真实 `:5173` web       | web 可重新启动，真实 UI smoke 通过                            |
-| relay 控制消息扰动            | delay/duplicate/reorder     | 真实 UI 仍能选择电脑、打开新建会话、拉目录                    |
-| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧  | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq     |
-| 协议快照扰动                  | stale requestId response    | 请求型资源、历史、agent status snapshot 不污染全局 UI         |
-| PTY 审批刷新恢复              | stale response + pty_state  | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复 |
-| hosted PTY provider 异常退出  | 临时 provider CLI 主动 exit | Web 进入终止态，终端输入面消失，会话列表清掉该托管会话        |
+| 场景                          | 注入点                      | 期望                                                           |
+| ----------------------------- | --------------------------- | -------------------------------------------------------------- |
+| relay 进程崩溃后恢复          | kill 真实 `:3100` relay     | proxy 进入重连态，relay 重启后恢复 connected，health 过        |
+| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID         | daemon 可重新启动，重新连接 relay，health 过                   |
+| web dev server 崩溃后恢复     | kill 真实 `:5173` web       | web 可重新启动，真实 UI smoke 通过                             |
+| relay 控制消息扰动            | delay/duplicate/reorder     | 真实 UI 仍能选择电脑、打开新建会话、拉目录                     |
+| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧  | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq      |
+| 协议快照扰动                  | stale requestId response    | 请求型资源、历史、agent status snapshot 不污染全局 UI          |
+| PTY 审批刷新恢复              | stale response + pty_state  | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复  |
+| client WebSocket 断线重连     | 浏览器端 WebSocket close    | 断线期间显示 disconnected，重连后审批状态恢复且 pending 不重复 |
+| hosted PTY provider 异常退出  | 临时 provider CLI 主动 exit | Web 进入终止态，终端输入面消失，会话列表清掉该托管会话         |
 
 下一层继续补 Web/FakeRelay 的精确协议 chaos：
 
@@ -260,3 +261,24 @@ pnpm dev:chaos
 
 - WebSocket 断线发生在 PTY 连续输出/用户滚动/审批中时的 UI 表现，还可以继续扩展。
 - Codex hosted PTY 的 provider 退出可以复用同一机制追加 `CODEX_BIN` 覆盖；本轮先用 Claude 入口验证托管 PTY 生命周期共性。
+
+### 2026-05-08 第六轮
+
+已完成：
+
+- 新增 `apps/web/e2e/websocket-chaos.spec.ts`：精确模拟浏览器 client WebSocket 断线和自动重连，覆盖 PTY 审批状态恢复、JSON pending approval 重放去重。
+- 修复 WebSocket reconnect 的底层顺序风险：连接重新打开时先通知 `RelayClient` 发送 `client_register`，再 flush 断线期间排队的业务消息。否则排队的 `remote_input_raw` / 控制消息可能在 relay 侧因为 client 尚未绑定 proxy 而被拒。
+- 新增 `apps/web/src/services/websocket.test.ts`，锁定“register 先于 queued user input”这个协议不变量。
+- 收敛重复重连入口：页面可见性/online/focus 唤醒统一交给 `WebSocketManager`，`useRelaySetup` 不再额外监听 `visibilitychange` 调 `connect()`。
+- `pnpm dev:chaos` 新增 client WebSocket reconnect 章节，把上述精确 UI chaos 纳入完整 chaos runner。
+
+验证：
+
+- `bash -n scripts/dev-chaos.sh`
+- `pnpm --filter @dev-anywhere/web exec vitest run src/services/websocket.test.ts`
+- `pnpm --filter @dev-anywhere/web exec playwright test e2e/websocket-chaos.spec.ts --project=desktop`
+
+仍未完成：
+
+- 还可以继续扩展“断线期间用户继续输入”的端到端断言：确认排队输入在 reconnect/register/select 后实际进入 proxy-hosted PTY，而不只是顺序正确。
+- WebSocket 断线叠加 PTY 大量输出、滚动回看、resize 的组合 chaos 还未覆盖。

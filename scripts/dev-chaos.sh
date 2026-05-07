@@ -143,6 +143,12 @@ run_protocol_chaos_smoke() {
     e2e/protocol-chaos.spec.ts --project=desktop
 }
 
+run_websocket_reconnect_chaos_smoke() {
+  echo "+ UI smoke: client WebSocket reconnect state recovery"
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/websocket-chaos.spec.ts --project=desktop
+}
+
 run_hosted_pty_exit_chaos_smoke() {
   echo "+ UI smoke: hosted PTY provider exit while Web is attached"
   DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
@@ -366,7 +372,10 @@ run_render_chaos_smoke
 section "Chaos 6: protocol snapshot staleness and approval recovery"
 run_protocol_chaos_smoke
 
-section "Chaos 7: hosted PTY provider exit while Web is attached"
+section "Chaos 7: client WebSocket reconnect state recovery"
+run_websocket_reconnect_chaos_smoke
+
+section "Chaos 8: hosted PTY provider exit while Web is attached"
 create_hosted_pty_chaos_provider
 mark_service_log
 run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart

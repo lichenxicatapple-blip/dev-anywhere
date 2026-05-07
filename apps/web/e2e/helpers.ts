@@ -22,6 +22,7 @@ declare global {
       socket: {
         emitJson(payload: FakeRelayMessage): void;
         emitPty(sessionId: string, data: string): void;
+        close(): void;
       } | null;
     };
   }
