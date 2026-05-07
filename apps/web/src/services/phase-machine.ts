@@ -3,8 +3,11 @@ import type { ProxyInfo } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
 import { router } from "@/lib/router";
+import { ControlErrorCode } from "@/lib/control-error-code";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
+import { useFileStore } from "@/stores/file-store";
+import { useSessionStore } from "@/stores/session-store";
 
 export interface Timers {
   reconnect: ReturnType<typeof setTimeout> | null;
@@ -20,8 +23,33 @@ function extractSessionIdFromHash(): string | null {
 
 function requestProxyState(relay: RelayClient): void {
   relay.sendControl({ type: "session_list" });
-  relay.sendControl({ type: "proxy_info_request" });
+  const proxyInfoRequest = relay.requestProxyInfo();
+  void proxyInfoRequest
+    .then((info) => {
+      useFileStore.getState().setHomePath(info.homePath);
+    })
+    .catch(() => undefined);
   relay.sendControl({ type: "agent_status_request" });
+}
+
+function requestSessionHistory(relay: RelayClient): void {
+  void relay
+    .requestSessionHistory()
+    .then((sessions) => {
+      useSessionStore.getState().setHistorySessions(sessions);
+    })
+    .catch(() => undefined);
+}
+
+function bindingErrorMessage(code: string): string {
+  switch (code) {
+    case ControlErrorCode.SESSION_NOT_FOUND:
+      return "会话不存在或已关闭";
+    case ControlErrorCode.PROXY_OFFLINE:
+      return "电脑已离线";
+    default:
+      return "无法打开会话";
+  }
 }
 
 export function handleWsStatusChange(connected: boolean, timers: Timers, relay: RelayClient): void {
@@ -113,11 +141,7 @@ export async function handleRelayMessage(
         // URL 粘贴场景: 无 cc_proxyId 但 URL 里有 /chat/:id, 让 relay 按 sessionId 反查 proxy 自动绑
         const result = await ensureBinding(relay, { sessionId: urlSessionId });
         if (isBindingError(result)) {
-          const errMsg = result.error.includes("not found")
-            ? "会话不存在或已关闭"
-            : result.error.includes("not online")
-              ? "电脑已离线"
-              : "无法打开会话";
+          const errMsg = bindingErrorMessage(result.code);
           useAppStore.getState().setPendingToast({ kind: "error", message: errMsg });
           router.navigate("/");
           timers.coldStartDone = false;
@@ -142,7 +166,7 @@ export async function handleRelayMessage(
           useAppStore.getState().setProxyOnline(true);
           // 冷启动绑定成功后拉取 session 列表 + 历史
           requestProxyState(relay);
-          relay.sendControl({ type: "session_history_request" });
+          requestSessionHistory(relay);
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const currentHash = window.location.hash;
           const sessionStillExists =
@@ -186,7 +210,7 @@ export async function handleRelayMessage(
         if (!isBindingError(result)) {
           useAppStore.getState().setProxyOnline(true);
           requestProxyState(relay);
-          relay.sendControl({ type: "session_history_request" });
+          requestSessionHistory(relay);
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);
           if (savedSessionId && sessionStillExists) {

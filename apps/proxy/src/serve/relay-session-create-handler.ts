@@ -1,6 +1,7 @@
 import { rmSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
@@ -12,6 +13,7 @@ import type { SessionInfo, SessionManager } from "./session-manager.js";
 import { readSessionMessages } from "./session-history.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
+import { classifyPathError } from "./path-errors.js";
 
 interface RelaySessionCreateHandlerDeps {
   relaySend: RelaySend;
@@ -30,15 +32,29 @@ interface RelaySessionCreateHandlerDeps {
   broadcastSessionList: () => void;
 }
 
-function validateSessionCwd(cwd: unknown): string | null {
-  if (typeof cwd !== "string" || !cwd.trim()) return "请输入工作目录";
+interface SessionCwdValidationError {
+  message: string;
+  code: ControlErrorCode;
+}
+
+function validateSessionCwd(cwd: unknown): SessionCwdValidationError | null {
+  if (typeof cwd !== "string" || !cwd.trim()) {
+    return { message: "请输入工作目录", code: ControlErrorCode.INVALID_PATH };
+  }
   const trimmed = cwd.trim();
-  if (!isAbsolute(trimmed)) return "工作目录必须是绝对路径";
+  if (!isAbsolute(trimmed)) {
+    return { message: "工作目录必须是绝对路径", code: ControlErrorCode.INVALID_PATH };
+  }
   try {
     const stat = statSync(trimmed);
-    return stat.isDirectory() ? null : "工作目录不是目录";
-  } catch {
-    return `工作目录不存在或不可访问: ${trimmed}`;
+    return stat.isDirectory()
+      ? null
+      : { message: "工作目录不是目录", code: ControlErrorCode.PATH_NOT_DIRECTORY };
+  } catch (err) {
+    return {
+      message: `工作目录不存在或不可访问: ${trimmed}`,
+      code: classifyPathError(err),
+    };
   }
 }
 
@@ -55,7 +71,8 @@ export class RelaySessionCreateHandler {
           type: "session_create_response",
           requestId,
           sessionId: "",
-          error: cwdError,
+          error: cwdError.message,
+          errorCode: cwdError.code,
         }),
       );
       serviceLogger.warn({ cwd }, "Session create rejected: invalid cwd");
@@ -76,6 +93,7 @@ export class RelaySessionCreateHandler {
           type: "session_create_response",
           requestId,
           sessionId: "",
+          errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error:
             provider === "codex"
               ? "Codex JSON sessions are not supported yet; start a Codex PTY session locally."
@@ -140,6 +158,7 @@ export class RelaySessionCreateHandler {
               type: "session_create_response",
               requestId,
               sessionId: pendingId,
+              errorCode: ControlErrorCode.WORKER_START_FAILED,
               error: "Worker failed to start",
             }),
           );
@@ -174,6 +193,7 @@ export class RelaySessionCreateHandler {
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: "",
+          errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error: "Unsupported provider for PTY session.",
         }),
       );
@@ -225,6 +245,7 @@ export class RelaySessionCreateHandler {
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: "",
+          errorCode: ControlErrorCode.PROCESS_START_FAILED,
           error: String(err),
         }),
       );

@@ -1,14 +1,16 @@
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import type { SessionManager } from "../session-manager.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
 import { serviceLogger } from "../../common/logger.js";
+import { classifyPathError } from "../path-errors.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void>;
-  handleSessionHistoryRequest(): Promise<void>;
+  handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void>;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
   reinitializeOnReconnect(): Promise<void>;
@@ -112,6 +114,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             entries: [],
+            errorCode: ControlErrorCode.INVALID_PATH,
             error: "Invalid path: must be absolute and must not contain path traversal",
           }),
         );
@@ -137,6 +140,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             entries: [],
+            errorCode: classifyPathError(err),
             error: String(err),
           }),
         );
@@ -152,6 +156,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             success: false,
+            errorCode: ControlErrorCode.INVALID_PATH,
             error: "Invalid path: must be absolute and must not contain path traversal",
           }),
         );
@@ -177,6 +182,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             success: false,
+            errorCode: classifyPathError(err),
             error: String(err),
           }),
         );
@@ -184,12 +190,13 @@ export function createControlMessageHandlers(
       }
     },
 
-    async handleSessionHistoryRequest(): Promise<void> {
+    async handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void> {
       try {
         const sessions = await scanSessionHistory();
         send(
           JSON.stringify({
             type: "session_history_response",
+            requestId: msg.requestId,
             sessions,
           }),
         );
@@ -198,6 +205,7 @@ export function createControlMessageHandlers(
         send(
           JSON.stringify({
             type: "session_history_response",
+            requestId: msg.requestId,
             sessions: [],
           }),
         );

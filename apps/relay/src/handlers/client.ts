@@ -1,5 +1,10 @@
 import { WebSocket } from "ws";
-import { isClientToProxyRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  isClientToProxyRelayControlType,
+  RelayErrorCode,
+  type Logger,
+} from "@dev-anywhere/shared";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";
@@ -157,6 +162,7 @@ export function handleClientConnection(
               type: "proxy_select_response",
               requestId: msg.requestId,
               success: false,
+              errorCode: ControlErrorCode.PROXY_OFFLINE,
               error: `Proxy not online: ${msg.proxyId}`,
             }),
           );
@@ -173,6 +179,7 @@ export function handleClientConnection(
               type: "proxy_select_response",
               requestId: msg.requestId,
               success: false,
+              errorCode: ControlErrorCode.PROXY_OFFLINE,
               error: `Proxy not online: ${msg.proxyId}`,
             }),
           );

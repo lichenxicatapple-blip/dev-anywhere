@@ -109,7 +109,66 @@ describe("RelayClient request handling", () => {
       path: "/Users/admin/new-project",
       success: true,
       error: undefined,
+      errorCode: undefined,
     });
+  });
+
+  it("waits for the matching directory list response", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestDirectoryList("/Users/admin");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "dir_list_response",
+      requestId: "other-request",
+      path: "/Users/admin",
+      entries: [{ name: "wrong", isDir: true }],
+    });
+    ws.emit({
+      type: "dir_list_response",
+      requestId,
+      path: "/Users/admin",
+      entries: [{ name: "workspace", isDir: true }],
+    });
+
+    await expect(promise).resolves.toEqual({
+      path: "/Users/admin",
+      entries: [{ name: "workspace", isDir: true }],
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("waits for matching proxy info responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestProxyInfo();
+    const requestId = sentRequestId(ws);
+
+    ws.emit({ type: "proxy_info", requestId: "other-request", homePath: "/tmp" });
+    ws.emit({ type: "proxy_info", requestId, homePath: "/Users/admin" });
+
+    await expect(promise).resolves.toEqual({ homePath: "/Users/admin" });
+  });
+
+  it("waits for matching session history responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestSessionHistory();
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "session_history_response",
+      requestId: "other-request",
+      sessions: [{ id: "old", title: "old", projectDir: "/old", updatedAt: 1 }],
+    });
+    ws.emit({
+      type: "session_history_response",
+      requestId,
+      sessions: [{ id: "new", title: "new", projectDir: "/new", updatedAt: 2 }],
+    });
+
+    await expect(promise).resolves.toEqual([
+      { id: "new", title: "new", projectDir: "/new", updatedAt: 2 },
+    ]);
   });
 
   it("correlates concurrent session create responses by requestId", async () => {

@@ -13,10 +13,11 @@ interface RelayResourceHandlersDeps {
 export class RelayResourceHandlers {
   constructor(private readonly deps: RelayResourceHandlersDeps) {}
 
-  onProxyInfoRequest(): void {
+  onProxyInfoRequest(msg: Record<string, unknown>): void {
     this.deps.relaySend(
       JSON.stringify({
         type: "proxy_info",
+        requestId: msg.requestId as string | undefined,
         homePath: homedir() || "/",
       }),
     );

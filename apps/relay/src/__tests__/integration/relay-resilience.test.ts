@@ -502,7 +502,7 @@ describe("client lifecycle", () => {
 
       expect(resp.type).toBe("proxy_select_response");
       expect(resp.success).toBe(false);
-      expect(resp.error).toContain("not online");
+      expect(resp.errorCode).toBe("PROXY_OFFLINE");
     },
     E2E_TIMEOUT,
   );
@@ -529,7 +529,7 @@ describe("client lifecycle", () => {
 
       expect(resp.type).toBe("proxy_select_response");
       expect(resp.success).toBe(false);
-      expect(resp.error).toContain("not online");
+      expect(resp.errorCode).toBe("PROXY_OFFLINE");
     },
     E2E_TIMEOUT,
   );

@@ -82,6 +82,8 @@ export type {
 // constants
 export { SessionState } from "./constants/session.js";
 export { RelayErrorCode } from "./constants/relay-errors.js";
+export { ControlErrorCode } from "./constants/control-errors.js";
+export type { ControlErrorCode as ControlErrorCodeType } from "./constants/control-errors.js";
 
 // logger
 export { createLogger } from "./logger.js";

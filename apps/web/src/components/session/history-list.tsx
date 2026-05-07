@@ -2,7 +2,7 @@
 // 外层: section 整体默认折叠, 点 "历史会话" header 整体展开; 活跃会话优先占主视野
 // 内层: 展开后每个 projectDir group 默认再折叠, 点 chevron 才看到 HistoryRow
 // 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞。
-// 刷新按钮: 重新发 session_history_request, proxy 会重新扫 ~/.claude/projects/
+// 刷新按钮: 通过 RelayClient 请求历史会话, proxy 会重新扫 ~/.claude/projects/
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
@@ -98,7 +98,12 @@ export function HistoryList({ now }: HistoryListProps) {
   function handleRefresh() {
     const relay = relayClientRef;
     if (!relay) return;
-    relay.sendControl({ type: "session_history_request" });
+    void relay
+      .requestSessionHistory()
+      .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : String(err));
+      });
   }
 
   function toggleGroup(dir: string) {

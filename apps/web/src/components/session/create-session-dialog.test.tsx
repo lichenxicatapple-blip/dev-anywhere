@@ -2,16 +2,18 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { sendControl, onMessage, createSession, createDirectory, toastError } = vi.hoisted(() => ({
-  sendControl: vi.fn(),
-  onMessage: vi.fn(),
-  createSession: vi.fn(),
-  createDirectory: vi.fn(),
-  toastError: vi.fn(),
-}));
+const { sendControl, onMessage, createSession, createDirectory, requestProxyInfo, toastError } =
+  vi.hoisted(() => ({
+    sendControl: vi.fn(),
+    onMessage: vi.fn(),
+    createSession: vi.fn(),
+    createDirectory: vi.fn(),
+    requestProxyInfo: vi.fn(),
+    toastError: vi.fn(),
+  }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { sendControl, onMessage, createSession, createDirectory },
+  relayClientRef: { sendControl, onMessage, createSession, createDirectory, requestProxyInfo },
   wsManagerRef: null,
 }));
 
@@ -42,6 +44,8 @@ describe("CreateSessionDialog", () => {
     onMessage.mockReturnValue(vi.fn());
     createSession.mockReset();
     createDirectory.mockReset();
+    requestProxyInfo.mockReset();
+    requestProxyInfo.mockResolvedValue({ homePath: "/Users/admin" });
     toastError.mockClear();
     useFileStore.setState({
       tree: new Map(),
@@ -54,7 +58,8 @@ describe("CreateSessionDialog", () => {
     renderDialog();
 
     await waitFor(() => {
-      expect(sendControl).toHaveBeenCalledWith({ type: "proxy_info_request" });
+      expect(requestProxyInfo).toHaveBeenCalled();
+      expect(useFileStore.getState().homePath).toBe("/Users/admin");
     });
   });
 
@@ -70,7 +75,6 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/Users/admin");
     });
-    expect(sendControl).not.toHaveBeenCalledWith({ type: "proxy_info_request" });
   });
 
   it("unblocks the create button when session creation times out", async () => {
@@ -98,6 +102,7 @@ describe("CreateSessionDialog", () => {
       .mockResolvedValueOnce({
         type: "session_create_response",
         sessionId: "",
+        errorCode: "PATH_NOT_FOUND",
         error: "工作目录不存在或不可访问: /Users/admin/missing-project",
       })
       .mockResolvedValueOnce({

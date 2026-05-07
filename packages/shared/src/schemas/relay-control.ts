@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
+import { ControlErrorCode } from "../constants/control-errors.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -34,6 +35,13 @@ export type HistorySession = z.infer<typeof HistorySessionSchema>;
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
 const RequestIdShape = { requestId: z.string().min(1).optional() };
+const ControlErrorCodeSchema = z.enum(
+  Object.values(ControlErrorCode) as [ControlErrorCode, ...ControlErrorCode[]],
+);
+const RequestErrorShape = {
+  error: z.string().optional(),
+  errorCode: ControlErrorCodeSchema.optional(),
+};
 
 type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
   type: T;
@@ -86,7 +94,7 @@ const relayControlDefinitions = [
     ...RequestIdShape,
     success: z.boolean(),
     proxyId: z.string().optional(),
-    error: z.string().optional(),
+    ...RequestErrorShape,
   }),
   control("relay_error", {
     code: z.enum(Object.values(RelayErrorCode) as [RelayErrorCode, ...RelayErrorCode[]]),
@@ -129,7 +137,7 @@ const relayControlDefinitions = [
   ),
   control(
     "dir_list_response",
-    { ...RequestIdShape, entries: z.array(DirEntrySchema), path: z.string() },
+    { ...RequestIdShape, ...RequestErrorShape, entries: z.array(DirEntrySchema), path: z.string() },
     "proxy_to_client",
   ),
 
@@ -137,7 +145,12 @@ const relayControlDefinitions = [
   control("dir_create_request", { ...RequestIdShape, path: z.string() }, "client_to_proxy"),
   control(
     "dir_create_response",
-    { ...RequestIdShape, path: z.string(), success: z.boolean(), error: z.string().optional() },
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      path: z.string(),
+      success: z.boolean(),
+    },
     "proxy_to_client",
   ),
 
@@ -172,10 +185,10 @@ const relayControlDefinitions = [
   ),
 
   // 会话历史浏览
-  control("session_history_request", undefined, "client_to_proxy"),
+  control("session_history_request", RequestIdShape, "client_to_proxy"),
   control(
     "session_history_response",
-    { sessions: z.array(HistorySessionSchema) },
+    { ...RequestIdShape, sessions: z.array(HistorySessionSchema) },
     "proxy_to_client",
   ),
 
@@ -237,8 +250,8 @@ const relayControlDefinitions = [
 
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
-  control("proxy_info_request", undefined, "client_to_proxy"),
-  control("proxy_info", { homePath: z.string() }, "proxy_to_client"),
+  control("proxy_info_request", RequestIdShape, "client_to_proxy"),
+  control("proxy_info", { ...RequestIdShape, homePath: z.string() }, "proxy_to_client"),
 
   // 远程创建 JSON 会话，client -> proxy -> response
   control(
@@ -264,7 +277,7 @@ const relayControlDefinitions = [
       mode: z.enum(["json", "pty"]).optional(),
       provider: z.enum(["claude", "codex"]).optional(),
       ptyOwner: z.enum(["local-terminal", "proxy-hosted"]).optional(),
-      error: z.string().optional(),
+      ...RequestErrorShape,
     },
     "proxy_to_client",
   ),

@@ -1,4 +1,4 @@
-// FilePathPicker: 订阅 useFileStore.tree + cache-miss 触发 dir_list_request
+// FilePathPicker: 订阅 useFileStore.tree + cache miss 时通过 RelayClient 请求目录
 // 共享给 InputBar (mode="insert") 与 CreateSessionDialog (mode="select", dirsOnly)
 // "insert" 从 "@query" 提取当前路径与过滤词; "select" 直接把 filter 视作绝对/相对路径
 // 键盘: InputBar 通过 ref.handleKey 转发 ↑↓/Enter; 选中项用 scrollIntoView 跟随
@@ -65,17 +65,35 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const currentPath = target.currentPath;
   const absolutePath = useMemo(() => toAbsolutePath(baseCwd, currentPath), [baseCwd, currentPath]);
   const query = target.query;
+  const pendingDirRequestsRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (!absolutePath) return;
-    if (!tree.get(absolutePath)) {
-      const relay = relayClientRef;
-      relay?.sendControl({ type: "dir_list_request", path: absolutePath });
-    }
+    if (tree.has(absolutePath) || pendingDirRequestsRef.current.has(absolutePath)) return;
+    const relay = relayClientRef;
+    if (!relay) return;
+    let cancelled = false;
+    pendingDirRequestsRef.current.add(absolutePath);
+    void relay
+      .requestDirectoryList(absolutePath)
+      .then((result) => {
+        if (cancelled) return;
+        useFileStore.getState().setDirEntries(result.path, result.entries);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        useFileStore.getState().setDirEntries(absolutePath, []);
+      })
+      .finally(() => {
+        pendingDirRequestsRef.current.delete(absolutePath);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [absolutePath, tree]);
 
   // tree.has vs tree.get 分两档:
-  // - 没 key: dir_list_request 飞行中, 显示 "加载中" 别误导成 "没有匹配"
+  // - 没 key: 目录请求飞行中, 显示 "加载中" 别误导成 "没有匹配"
   // - 有 key 但过滤后空: 才是 "没有匹配的路径"
   const isLoading = !tree.has(absolutePath);
   const filteredEntries = useMemo(() => {

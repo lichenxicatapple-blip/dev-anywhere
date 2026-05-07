@@ -114,7 +114,7 @@ export class RelayRouter {
     remote_input_raw: (msg) => this.inputHandlers.onRemoteInputRaw(msg),
     tool_approve: (msg) => this.permissionHandlers.onToolApprove(msg),
     tool_deny: (msg) => this.permissionHandlers.onToolDeny(msg),
-    proxy_info_request: () => this.resourceHandlers.onProxyInfoRequest(),
+    proxy_info_request: (msg) => this.resourceHandlers.onProxyInfoRequest(msg),
     dir_list_request: (msg) => this.resourceHandlers.onDirListRequest(msg),
     dir_create_request: (msg) => this.resourceHandlers.onDirCreateRequest(msg),
     session_create: (msg) => this.sessionCreateHandler.onSessionCreate(msg),
@@ -125,7 +125,10 @@ export class RelayRouter {
       this.permissionHandlers.onPermissionRequestDelivered(msg),
     session_terminate: (msg) => this.onSessionTerminate(msg),
     session_worker_abort: (msg) => this.onSessionWorkerAbort(msg),
-    session_history_request: () => this.deps.controlHandlers.handleSessionHistoryRequest(),
+    session_history_request: (msg) =>
+      this.deps.controlHandlers.handleSessionHistoryRequest({
+        requestId: msg.requestId as string | undefined,
+      }),
     session_list: () => this.onSessionList(),
     permission_mode_change: (msg) => this.onPermissionModeChange(msg),
     session_subscribe: (msg) => this.onSessionSubscribe(msg),

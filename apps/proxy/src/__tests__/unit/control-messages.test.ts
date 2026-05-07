@@ -21,6 +21,7 @@ describe("control-messages: path traversal defense", () => {
 
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("dir_list_response");
+    expect(response.errorCode).toBe("INVALID_PATH");
     expect(response.error).toContain("Invalid path");
     expect(response.entries).toEqual([]);
   });
@@ -70,6 +71,7 @@ describe("control-messages: path traversal defense", () => {
 
     const response = JSON.parse(sent[0]);
     expect(response.entries).toEqual([]);
+    expect(response.errorCode).toBe("PATH_NOT_FOUND");
     expect(response.error).toBeDefined();
   });
 
@@ -138,6 +140,7 @@ describe("control-messages: dir_create", () => {
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("dir_create_response");
     expect(response.success).toBe(false);
+    expect(response.errorCode).toBe("INVALID_PATH");
     expect(response.error).toContain("Invalid path");
   });
 

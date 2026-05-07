@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
+import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -40,7 +41,10 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     // 绑定成功后显式请求 session 列表 + 历史, proxy 收到后以 envelope 推回, session-dispatcher 写入 store
     relay.sendControl({ type: "session_list" });
     relay.sendControl({ type: "agent_status_request" });
-    relay.sendControl({ type: "session_history_request" });
+    void relay
+      .requestSessionHistory()
+      .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
+      .catch(() => undefined);
     setDropdownOpen(false);
     if (layout === "page") {
       navigate("/sessions");

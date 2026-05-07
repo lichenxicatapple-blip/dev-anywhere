@@ -1,12 +1,12 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { sendControl } = vi.hoisted(() => ({
-  sendControl: vi.fn(),
+const { requestDirectoryList } = vi.hoisted(() => ({
+  requestDirectoryList: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { sendControl },
+  relayClientRef: { requestDirectoryList },
   wsManagerRef: null,
 }));
 
@@ -15,7 +15,8 @@ import { useFileStore } from "@/stores/file-store";
 
 describe("FilePathPicker", () => {
   beforeEach(() => {
-    sendControl.mockClear();
+    requestDirectoryList.mockReset();
+    requestDirectoryList.mockResolvedValue({ path: "/Users/admin", entries: [] });
     useFileStore.setState({
       tree: new Map(),
       cwd: "/Users/admin/test_go",
@@ -35,14 +36,8 @@ describe("FilePathPicker", () => {
     );
 
     await waitFor(() => {
-      expect(sendControl).toHaveBeenCalledWith({
-        type: "dir_list_request",
-        path: "/Users/admin",
-      });
+      expect(requestDirectoryList).toHaveBeenCalledWith("/Users/admin");
     });
-    expect(sendControl).not.toHaveBeenCalledWith({
-      type: "dir_list_request",
-      path: "/Users",
-    });
+    expect(requestDirectoryList).not.toHaveBeenCalledWith("/Users");
   });
 });

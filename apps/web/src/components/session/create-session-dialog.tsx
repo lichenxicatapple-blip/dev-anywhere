@@ -7,6 +7,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
 import { toast } from "@/components/toast";
+import { ControlErrorCode } from "@/lib/control-error-code";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -43,8 +44,10 @@ const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> =
 const SESSION_CREATE_TIMEOUT_MS = 15_000;
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
 
-function extractMissingCwd(error: string): string | null {
-  if (!error.startsWith(MISSING_CWD_PREFIX)) return null;
+function extractMissingCwd(error: string, errorCode?: string): string | null {
+  if (errorCode !== ControlErrorCode.PATH_NOT_FOUND || !error.startsWith(MISSING_CWD_PREFIX)) {
+    return null;
+  }
   const path = error.slice(MISSING_CWD_PREFIX.length).trim();
   return path || null;
 }
@@ -74,7 +77,14 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   // 这里在弹窗打开时补拉一次，避免只能靠硬刷新重新走完整绑定流程。
   useEffect(() => {
     if (!open || homePath) return;
-    relayClientRef?.sendControl({ type: "proxy_info_request" });
+    if (useFileStore.getState().homePath) return;
+    const request = relayClientRef?.requestProxyInfo();
+    if (!request) return;
+    void request
+      .then((info) => {
+        useFileStore.getState().setHomePath(info.homePath);
+      })
+      .catch(() => undefined);
   }, [open, homePath]);
 
   useEffect(() => {
@@ -131,7 +141,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         SESSION_CREATE_TIMEOUT_MS,
       );
       if (ctrl.error || !ctrl.sessionId) {
-        const missingPath = extractMissingCwd(ctrl.error ?? "");
+        const missingPath = extractMissingCwd(ctrl.error ?? "", ctrl.errorCode);
         if (missingPath) {
           setMissingCwd(missingPath);
           return;

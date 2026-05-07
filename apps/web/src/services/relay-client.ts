@@ -1,6 +1,12 @@
 // Relay 协议客户端，处理注册、代理选择、消息发送和控制消息路由
 import type { WebSocketManager } from "@/services/websocket";
-import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
+import type {
+  DirEntry,
+  HistorySession,
+  MessageEnvelope,
+  RelayControlMessage,
+} from "@dev-anywhere/shared";
+import type { ControlErrorCodeType } from "@/lib/control-error-code";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -14,6 +20,7 @@ type ProxyInfoResult = Array<{
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
+type RequestError = { error?: string; errorCode?: ControlErrorCodeType };
 
 let requestSeq = 0;
 
@@ -94,7 +101,7 @@ export class RelayClient {
   selectProxy(
     proxyId: string,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<{ success: boolean; proxyId?: string; error?: string }> {
+  ): Promise<{ success: boolean; proxyId?: string } & RequestError> {
     const requestId = nextRequestId("proxy-select");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_select_response" }> =>
@@ -110,6 +117,7 @@ export class RelayClient {
         success: resp.success,
         proxyId: resp.proxyId,
         error: resp.error,
+        errorCode: resp.errorCode,
       };
     });
   }
@@ -117,7 +125,7 @@ export class RelayClient {
   createDirectory(
     path: string,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<{ success: boolean; path: string; error?: string }> {
+  ): Promise<{ success: boolean; path: string } & RequestError> {
     const requestId = nextRequestId("dir-create");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "dir_create_response" }> =>
@@ -129,7 +137,49 @@ export class RelayClient {
       success: resp.success,
       path: resp.path,
       error: resp.error,
+      errorCode: resp.errorCode,
     }));
+  }
+
+  requestDirectoryList(
+    path: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<{ path: string; entries: DirEntry[] } & RequestError> {
+    const requestId = nextRequestId("dir-list");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "dir_list_response" }> =>
+        msg.type === "dir_list_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "dir_list_request", requestId, path })),
+      "读取目录超时",
+      timeoutMs,
+    ).then((resp) => ({
+      path: resp.path,
+      entries: resp.entries,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestProxyInfo(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<{ homePath: string }> {
+    const requestId = nextRequestId("proxy-info");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "proxy_info" }> =>
+        msg.type === "proxy_info" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "proxy_info_request", requestId })),
+      "读取本机信息超时",
+      timeoutMs,
+    ).then((resp) => ({ homePath: resp.homePath }));
+  }
+
+  requestSessionHistory(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<HistorySession[]> {
+    const requestId = nextRequestId("session-history");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "session_history_response" }> =>
+        msg.type === "session_history_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "session_history_request", requestId })),
+      "读取历史会话超时",
+      timeoutMs,
+    ).then((resp) => resp.sessions);
   }
 
   createSession(

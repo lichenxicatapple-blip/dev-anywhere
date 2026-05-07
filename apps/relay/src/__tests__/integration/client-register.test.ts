@@ -276,7 +276,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_select_response");
     expect(response.success).toBe(false);
-    expect(response.error).toContain("not online");
+    expect(response.errorCode).toBe("PROXY_OFFLINE");
   });
 
   it("proxy_select rejects binding to nonexistent proxy", async () => {
@@ -289,7 +289,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_select_response");
     expect(response.success).toBe(false);
-    expect(response.error).toContain("not online");
+    expect(response.errorCode).toBe("PROXY_OFFLINE");
   });
 
   it("client receives proxy_offline on proxy graceful disconnect", async () => {

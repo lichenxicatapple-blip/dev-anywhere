@@ -126,7 +126,7 @@ describe("Relay Server Integration", () => {
 
     expect(response.type).toBe("proxy_select_response");
     expect(response.success).toBe(false);
-    expect(response.error).toContain("not online");
+    expect(response.errorCode).toBe("PROXY_OFFLINE");
   });
 
   it("GET /health returns 200 with status ok", async () => {

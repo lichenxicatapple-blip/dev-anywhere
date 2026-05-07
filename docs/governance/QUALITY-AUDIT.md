@@ -179,6 +179,22 @@ pnpm dev:chaos
 
 仍未完成：
 
-- request/response 还没有全量 `requestId` 配对；历史、资源、目录列表等非阻塞请求仍待后续统一。
+- request/response 主链路已继续收口；`session_messages_request`、`session_resources_request`、`agent_status_request` 仍是推送型请求，后续需要按是否阻塞 UI 决定是否升级为 request/response。
 - `theme-tokens.test.ts` 已清理；后续还需继续审查源码字符串/实现细节类测试。
 - 真实 chaos 还需要继续扩展到 provider 子进程退出、hosted PTY 异常退出、审批中刷新和 Web 断线重连。
+
+### 2026-05-08 第二轮
+
+已完成：
+
+- shared 增加 `ControlErrorCode`，目录、proxy 选择、session 创建等失败响应开始携带稳定 `errorCode`。
+- `dir_list_request`、`proxy_info_request`、`session_history_request` 改由 `RelayClient` 统一发起，具备 `requestId`、timeout、断线失败处理。
+- `FilePathPicker` 不再发裸 `dir_list_request`，目录加载失败会写入空结果，避免 picker 永久停在“加载中”。
+- 新建会话默认 homePath 改为 `requestProxyInfo()` 拉取，避免依赖无 requestId 的广播响应。
+- 历史会话刷新和绑定后历史拉取改为 `requestSessionHistory()`，避免多次刷新或重连时旧响应覆盖新结果。
+- `ensureBinding` 不再靠英文错误字符串判断“会话不存在/电脑离线”，改用稳定错误码。
+
+仍未完成：
+
+- `session_messages_request`、`session_resources_request`、`agent_status_request` 仍是推送型请求；如果后续 UI 出现等待态或并发串线，再升级为 request/response。
+- UI 仍有少量错误展示直接使用 `error` 文本；需要逐步收敛到 `errorCode -> 中文文案` 映射。

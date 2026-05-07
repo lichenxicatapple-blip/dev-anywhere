@@ -170,7 +170,10 @@ describe("RelayControlSchema", () => {
   it("parses dir_list_response with entries and path", () => {
     const result = RelayControlSchema.parse({
       type: "dir_list_response",
+      requestId: "dir-list-1",
       path: "/home/user/project",
+      errorCode: "PATH_ACCESS_DENIED",
+      error: "permission denied",
       entries: [
         { name: "src", isDir: true },
         { name: "README.md", isDir: false },
@@ -179,9 +182,29 @@ describe("RelayControlSchema", () => {
     expect(result.type).toBe("dir_list_response");
     if (result.type === "dir_list_response") {
       expect(result.path).toBe("/home/user/project");
+      expect(result.requestId).toBe("dir-list-1");
+      expect(result.errorCode).toBe("PATH_ACCESS_DENIED");
       expect(result.entries).toHaveLength(2);
       expect(result.entries[0]).toEqual({ name: "src", isDir: true });
     }
+  });
+
+  it("parses proxy_info request/response requestId correlation", () => {
+    expect(RelayControlSchema.parse({ type: "proxy_info_request", requestId: "info-1" })).toEqual({
+      type: "proxy_info_request",
+      requestId: "info-1",
+    });
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_info",
+        requestId: "info-1",
+        homePath: "/Users/admin",
+      }),
+    ).toEqual({
+      type: "proxy_info",
+      requestId: "info-1",
+      homePath: "/Users/admin",
+    });
   });
 
   it("parses session_history_response with sessions array", () => {
@@ -311,11 +334,13 @@ describe("RelayControlSchema", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_select_response",
       success: false,
+      errorCode: "PROXY_OFFLINE",
       error: "Proxy not online: p1",
     });
     expect(result.type).toBe("proxy_select_response");
     if (result.type === "proxy_select_response") {
       expect(result.success).toBe(false);
+      expect(result.errorCode).toBe("PROXY_OFFLINE");
       expect(result.error).toBe("Proxy not online: p1");
     }
   });
