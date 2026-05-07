@@ -63,6 +63,7 @@ export function attachPtyScrollController(
   const syncing = { external: false, internal: false };
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
+  let userHasVerticalScrollIntent = false;
 
   const getScrollState = (): PtyScrollState => ({
     scrollTop: container.scrollTop,
@@ -128,6 +129,7 @@ export function attachPtyScrollController(
   };
 
   const scrollToRatio = (ratio: number): void => {
+    userHasVerticalScrollIntent = true;
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollTop = maxScrollTop * clamped;
@@ -186,7 +188,7 @@ export function attachPtyScrollController(
   const handlePendingNewFrame = (wasAtBottom: boolean): boolean => {
     if (!hasNewFrame()) return false;
     consumeNewFrame();
-    if (wasAtBottom) {
+    if (wasAtBottom || !userHasVerticalScrollIntent) {
       scrollToBottom();
     } else if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
@@ -223,7 +225,7 @@ export function attachPtyScrollController(
     syncing.external = true;
     try {
       updateSpacer();
-      if (wasAtBottom) {
+      if (wasAtBottom || !userHasVerticalScrollIntent) {
         scrollToBottom();
         return;
       }
@@ -256,7 +258,7 @@ export function attachPtyScrollController(
   const relayout = (): void => {
     const wasAtBottom = computeIsAtBottom();
     updateSpacer();
-    if (wasAtBottom) {
+    if (wasAtBottom || !userHasVerticalScrollIntent) {
       scrollToBottom();
       return;
     }
@@ -279,6 +281,12 @@ export function attachPtyScrollController(
   updateSpacer();
   scrollToBottom();
 
+  const markUserVerticalScrollIntent = (): void => {
+    userHasVerticalScrollIntent = true;
+  };
+
+  container.addEventListener("wheel", markUserVerticalScrollIntent, { passive: true });
+  container.addEventListener("touchstart", markUserVerticalScrollIntent, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
@@ -289,6 +297,8 @@ export function attachPtyScrollController(
   return {
     dispose: () => {
       container.removeEventListener("scroll", onContainerScroll);
+      container.removeEventListener("wheel", markUserVerticalScrollIntent);
+      container.removeEventListener("touchstart", markUserVerticalScrollIntent);
       dispScroll.dispose();
       dispRender.dispose();
       ro.disconnect();

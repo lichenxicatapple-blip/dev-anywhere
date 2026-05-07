@@ -225,7 +225,9 @@ test.describe("PTY browser smoke", () => {
     });
     await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
 
+    await page.locator('[data-slot="pty-terminal"]').hover();
     await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
+      el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1200 }));
       (el as HTMLElement).scrollTop = 0;
       el.dispatchEvent(new Event("scroll"));
     });

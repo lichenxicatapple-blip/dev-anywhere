@@ -37,6 +37,10 @@ function createDom() {
   return { container, spacer, host, xterm };
 }
 
+function markUserVerticalScrollIntent(container: HTMLElement): void {
+  container.dispatchEvent(new Event("wheel"));
+}
+
 function createTerminal(lineTextByIndex: Record<number, string> = {}) {
   let scrollHandler: Handler = () => {};
   let renderHandler: Handler = () => {};
@@ -151,6 +155,7 @@ describe("attachPtyScrollController", () => {
 
     xterm.style.transform = "translate3d(0,-5px,0)";
     container.scrollTop = 100;
+    markUserVerticalScrollIntent(container);
     terminal.buffer.active.viewportY = 7;
     emitScroll();
 
@@ -260,6 +265,7 @@ describe("attachPtyScrollController", () => {
     });
 
     container.scrollTop = 100;
+    markUserVerticalScrollIntent(container);
     emitRender();
 
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
@@ -452,6 +458,7 @@ describe("attachPtyScrollController", () => {
     if (!screen) throw new Error("missing xterm screen");
 
     container.scrollTop = 100;
+    markUserVerticalScrollIntent(container);
     terminal.buffer.active.viewportY = 7;
     xterm.style.transform = "translate3d(0,-5px,0)";
     defineSize(screen, { clientHeight: 600, clientWidth: 800 });
