@@ -1,14 +1,13 @@
 // 历史会话区: 读 useSessionStore.historySessions, 按 projectDir 分组, 双层折叠
 // 外层: section 整体默认折叠, 点 "历史会话" header 整体展开; 活跃会话优先占主视野
 // 内层: 展开后每个 projectDir group 默认再折叠, 点 chevron 才看到 HistoryRow
-// 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞
-// (session_create_response 无请求 id, 无法区分来源, 所以简单锁死)
+// 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞。
 // 刷新按钮: 重新发 session_history_request, proxy 会重新扫 ~/.claude/projects/
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronRight, RefreshCw } from "lucide-react";
-import type { HistorySession, RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
+import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
@@ -61,16 +60,22 @@ export function HistoryList({ now }: HistoryListProps) {
       }));
   }, [historySessions]);
 
-  // 只在 resume 在飞时挂订阅, 收到一次 response 就摘掉, 避免与 CreateSessionDialog 的同名订阅撞车
-  useEffect(() => {
-    if (!resumingId) return;
+  async function handleResume(h: HistorySession) {
+    if (resumingId) return;
     const relay = relayClientRef;
-    if (!relay) return;
-    const unsub = relay.onMessage((msg) => {
-      const ctrl = msg as RelayControlMessage;
-      if (ctrl.type !== "session_create_response") return;
-      unsub();
-      setResumingId(null);
+    if (!relay) {
+      toast.error("连接尚未就绪");
+      return;
+    }
+    setResumingId(h.id);
+    const provider = historySessionProvider(h);
+    try {
+      const ctrl = await relay.createSession({
+        cwd: h.projectDir,
+        mode: "pty",
+        provider,
+        resumeSessionId: h.id,
+      });
       if (ctrl.error || !ctrl.sessionId) {
         toast.error(`恢复失败: ${ctrl.error ?? "unknown"}`);
         return;
@@ -83,26 +88,11 @@ export function HistoryList({ now }: HistoryListProps) {
       };
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? "pty"}`);
-    });
-    return unsub;
-  }, [resumingId, navigate]);
-
-  function handleResume(h: HistorySession) {
-    if (resumingId) return;
-    const relay = relayClientRef;
-    if (!relay) {
-      toast.error("连接尚未就绪");
-      return;
+    } catch (err) {
+      toast.error(`恢复失败: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setResumingId(null);
     }
-    setResumingId(h.id);
-    const provider = historySessionProvider(h);
-    relay.sendControl({
-      type: "session_create",
-      cwd: h.projectDir,
-      mode: "pty",
-      provider,
-      resumeSessionId: h.id,
-    });
   }
 
   function handleRefresh() {

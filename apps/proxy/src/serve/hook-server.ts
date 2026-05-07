@@ -227,7 +227,7 @@ export class HookServer {
       };
     }
 
-    return { ok: true };
+    return null;
   }
 
   private writeProviderResponse(res: ServerResponse, payload: object | null): void {

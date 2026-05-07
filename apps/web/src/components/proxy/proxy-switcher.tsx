@@ -1,9 +1,5 @@
-// ProxySwitcher dual-layout 组件, Plan 10-02 正式实现, 覆盖 10-01b stub
-// layout=page: 移动端全屏列表, 选中后 navigate 到 /sessions
-// layout=dropdown: 桌面侧栏顶部 Popover, 选中后不跳路由, 仅更新 app-store
-//
-// sidebar.tsx 已在 10-01b 通过 import 绑定本模块路径, 本 Plan 只替换 body
-// 新增 export 或改 props 签名会破坏 sidebar.tsx 与 10-03 并行, 禁止
+// layout=page 用于移动端/空壳页，选中后进入 /sessions。
+// layout=dropdown 用于桌面侧栏顶部，只切换当前绑定的本机 proxy。
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";

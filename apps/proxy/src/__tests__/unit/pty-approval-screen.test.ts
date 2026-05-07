@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hasPtyApprovalPrompt, stripTerminalControls } from "#src/common/pty-approval-screen.js";
+import {
+  detectPtyApprovalScreen,
+  hasPtyApprovalPrompt,
+  stripTerminalControls,
+} from "#src/common/pty-approval-screen.js";
 
 describe("PTY approval screen detection", () => {
   it("detects Claude native approval prompt in serialized terminal text", () => {
@@ -67,5 +71,47 @@ describe("PTY approval screen detection", () => {
       "\x1b[33mDo you want to create file?\x1b[0m\r\n1. Yes\r\n2. Yes, allow all edits in tmp/ during this session\r\n3. No";
     expect(stripTerminalControls(text)).toContain("Do you want");
     expect(hasPtyApprovalPrompt(text, "claude")).toBe(true);
+  });
+
+  it("treats Claude rejection after a still-visible prompt as approval resolved", () => {
+    const text = `
+      Do you want to create hello_world.sql?
+      › 1. Yes
+        2. Yes, allow all edits during this session (shift+tab)
+        3. No
+
+      Write(hello_world.sql)
+        User rejected write to hello_world.sql
+    `;
+
+    expect(detectPtyApprovalScreen(text, "claude")).toBe("resolved");
+    expect(hasPtyApprovalPrompt(text, "claude")).toBe(false);
+  });
+
+  it("keeps waiting when a fresh Claude prompt appears after old rejection output", () => {
+    const text = `
+      Write(old.sql)
+        User rejected write to old.sql
+
+      Do you want to create hello_world.sql?
+      › 1. Yes
+        2. Yes, allow all edits during this session (shift+tab)
+        3. No
+    `;
+
+    expect(detectPtyApprovalScreen(text, "claude")).toBe("waiting");
+  });
+
+  it("treats Codex denial after a still-visible prompt as approval resolved", () => {
+    const text = `
+      Would you like to run the following command?
+      1. Yes
+      2. No
+
+      Tool call denied by user
+    `;
+
+    expect(detectPtyApprovalScreen(text, "codex")).toBe("resolved");
+    expect(hasPtyApprovalPrompt(text, "codex")).toBe(false);
   });
 });

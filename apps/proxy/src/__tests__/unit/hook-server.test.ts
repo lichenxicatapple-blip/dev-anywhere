@@ -61,7 +61,7 @@ describe("HookServer", () => {
       }),
     });
 
-    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(response.text()).resolves.toBe("");
     expect(response.status).toBe(200);
     expect(events).toEqual([
       {
@@ -118,7 +118,7 @@ describe("HookServer", () => {
     });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(response.text()).resolves.toBe("");
     expect(events).toEqual([]);
   });
 
@@ -236,6 +236,38 @@ describe("HookServer", () => {
         event: "PreToolUse",
         requestId: "call-1",
       },
+    ]);
+  });
+
+  it("returns empty stdout for neutral Claude lifecycle hooks", async () => {
+    const events: AuthenticatedHookEvent[] = [];
+    const { registry, url } = await createTestServer((event) => events.push(event));
+    const credentials = registry.registerSession("s1", "claude");
+
+    for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${credentials.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: credentials.sessionId,
+          provider: credentials.provider,
+          marker: credentials.marker,
+          event,
+          payload: { hook_event_name: event },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe("");
+    }
+
+    expect(events.map((event) => event.event)).toEqual([
+      "SessionStart",
+      "UserPromptSubmit",
+      "Stop",
     ]);
   });
 });

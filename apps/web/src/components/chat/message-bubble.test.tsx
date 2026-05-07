@@ -20,24 +20,14 @@ function makeMessage(overrides: Partial<ChatMessage>): ChatMessage {
 
 describe("MessageBubble", () => {
   it("renders user role with data-role=user (right alignment)", () => {
-    render(
-      <MessageBubble
-        message={makeMessage({ id: "u1", role: "user", text: "hello" })}
-        sessionId="s1"
-      />,
-    );
+    render(<MessageBubble message={makeMessage({ id: "u1", role: "user", text: "hello" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("user");
     expect(bubble.className).toContain("justify-end");
   });
 
   it("renders assistant role with data-role=assistant (left alignment)", () => {
-    render(
-      <MessageBubble
-        message={makeMessage({ id: "a1", role: "assistant", text: "hi" })}
-        sessionId="s1"
-      />,
-    );
+    render(<MessageBubble message={makeMessage({ id: "a1", role: "assistant", text: "hi" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("assistant");
     expect(bubble.className).toContain("justify-start");
@@ -52,7 +42,6 @@ describe("MessageBubble", () => {
           text: "partial",
           isPartial: true,
         })}
-        sessionId="s1"
       />,
     );
     expect(screen.getByLabelText("streaming")).toBeDefined();
@@ -67,7 +56,6 @@ describe("MessageBubble", () => {
           text: "x",
           isPartial: true,
         })}
-        sessionId="s1"
       />,
     );
     expect(screen.queryByLabelText("streaming")).toBeNull();

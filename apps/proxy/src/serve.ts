@@ -26,6 +26,7 @@ import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
 import { shouldPromotePtyActivityToWorking } from "./serve/pty-state-guard.js";
 import { terminateSessionByOwnership } from "./serve/session-termination.js";
 import { SeqCounter } from "./common/seq-counter.js";
+import { resolvePtySemanticSessionTransitions } from "./serve/pty-semantic-lifecycle.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -209,6 +210,7 @@ function handleTerminalConnection(
     sessionId: string,
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext,
+  emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void,
 ): void {
   createIpcReader(
     socket,
@@ -290,9 +292,9 @@ function handleTerminalConnection(
           break;
         }
 
-        case "pty_state_push": {
+        case "pty_semantic_event": {
           if (!sessionManager.getSession(msg.sessionId)) break;
-          // terminal → serve → relay：PTY 语义状态既要透传给 UI，也要回写会话生命周期。
+          // local runtime → serve → relay：PTY 语义事件既要透传给 UI，也要回写会话生命周期。
           // 这样刷新页面后 session_list 仍能恢复 waiting_approval，而不是只依赖前端内存态。
           if (msg.state === "approval_wait") {
             changeSessionState(
@@ -333,15 +335,16 @@ function handleTerminalConnection(
               msg.sessionId,
             );
             const session = sessionManager.getSession(msg.sessionId);
-            if (session?.state === SessionState.WAITING_APPROVAL) {
+            const transitions = resolvePtySemanticSessionTransitions(session?.state, msg.state);
+            for (const next of transitions) {
               changeSessionState(
                 sessionManager,
                 relayConnection,
                 msg.sessionId,
-                SessionState.WORKING,
+                next,
               );
-              changeSessionState(sessionManager, relayConnection, msg.sessionId, SessionState.IDLE);
             }
+            emitAgentStatus(msg.sessionId, "idle");
           }
           relayConnection.sendRaw(
             JSON.stringify({
@@ -618,7 +621,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
   const observerChangeState = (sessionId: string, next: SessionState): boolean =>
     changeSessionState(sessionManager, relayConnection, sessionId, next);
-  const emitJsonAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
+  const emitAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
     const session = sessionManager.getSession(sessionId);
     if (!session) return;
     const payload: AgentStatusPayload = {
@@ -632,7 +635,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   };
   const jsonObserver = new JsonObserver({
     changeSessionState: observerChangeState,
-    emitAgentStatus: emitJsonAgentStatus,
+    emitAgentStatus,
   });
   const hookEventRouter = new HookEventRouter({
     relayConnection,
@@ -694,6 +697,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     changeSessionState: observerChangeState,
     onTurnComplete: (sessionId) => {
       resolveInterruptedApprovals(permissionBroker, hookEventRouter, relayConnection, sessionId);
+      emitAgentStatus(sessionId, "idle");
     },
     onSessionClosed: (sessionId) => {
       controlHandlers.cleanup(sessionId);
@@ -717,6 +721,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,
     createHookContext,
+    cleanupHookContext: (sessionId) => hookRegistry.unregisterSession(sessionId),
     permissionBroker,
     hookEventRouter,
     agentStatusRegistry,
@@ -754,6 +759,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       permissionBroker,
       hookEventRouter,
       createHookContext,
+      emitAgentStatus,
     );
   });
 

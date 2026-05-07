@@ -34,6 +34,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const now = Date.now();
     let createCount = 0;
     const sessionStorageKey = "__dev_anywhere_e2e_sessions";
+    const directoryStorageKey = "__dev_anywhere_e2e_dirs";
     const initializedKey = "__dev_anywhere_e2e_initialized";
     const initialized = sessionStorage.getItem(initializedKey) === "1";
     if (!initialized) {
@@ -83,9 +84,23 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const sessions: FakeSession[] = persistedSessions
       ? (JSON.parse(persistedSessions) as FakeSession[])
       : defaultSessions;
+    const defaultDirectories = [
+      "/Users/admin",
+      "/Users/admin/test_go",
+      "/Users/admin/workspace",
+      "/Users/admin/workspace/dev-anywhere",
+    ];
+    const persistedDirectories = localStorage.getItem(directoryStorageKey);
+    const directories = new Set<string>(
+      persistedDirectories ? (JSON.parse(persistedDirectories) as string[]) : defaultDirectories,
+    );
 
     function persistSessions(): void {
       localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
+    }
+
+    function persistDirectories(): void {
+      localStorage.setItem(directoryStorageKey, JSON.stringify([...directories]));
     }
 
     const history = [
@@ -174,10 +189,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
             this.emitJson({ type: "client_register_response", status: "new" });
             break;
           case "proxy_list_request":
-            this.emitProxyList();
+            this.emitProxyList(String(msg.requestId ?? ""));
             break;
           case "proxy_select":
-            this.emitJson({ type: "proxy_select_response", success: true, proxyId: "proxy-1" });
+            this.emitJson({
+              type: "proxy_select_response",
+              requestId: msg.requestId,
+              success: true,
+              proxyId: "proxy-1",
+            });
             break;
           case "session_list":
             this.emitJson(envelope("session_list", "system", { sessions }));
@@ -191,6 +211,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
           case "dir_list_request":
             this.emitJson({
               type: "dir_list_response",
+              requestId: msg.requestId,
               path: String(msg.path),
               entries:
                 msg.path === "/Users/admin"
@@ -205,6 +226,18 @@ export async function installFakeRelay(page: Page): Promise<void> {
                     ],
             });
             break;
+          case "dir_create_request": {
+            const path = String(msg.path ?? "");
+            directories.add(path);
+            persistDirectories();
+            this.emitJson({
+              type: "dir_create_response",
+              requestId: msg.requestId,
+              path,
+              success: true,
+            });
+            break;
+          }
           case "session_resources_request":
             this.emitResources(String(msg.sessionId ?? ""));
             break;
@@ -239,17 +272,32 @@ export async function installFakeRelay(page: Page): Promise<void> {
           case "session_create": {
             const provider = msg.provider === "codex" ? "codex" : "claude";
             const mode = msg.mode === "json" ? "json" : "pty";
+            const cwd = String(msg.cwd ?? "");
+            if (!directories.has(cwd)) {
+              this.emitJson({
+                type: "session_create_response",
+                requestId: msg.requestId,
+                error: `工作目录不存在或不可访问: ${cwd}`,
+              });
+              break;
+            }
             const sessionId = `created-${provider}-${mode}-${++createCount}`;
             sessions.unshift({
               sessionId,
-              name: String(msg.cwd),
+              name: cwd,
               state: "idle",
               mode,
               provider,
               lastActive: Date.now(),
             });
             persistSessions();
-            this.emitJson({ type: "session_create_response", sessionId, mode, provider });
+            this.emitJson({
+              type: "session_create_response",
+              requestId: msg.requestId,
+              sessionId,
+              mode,
+              provider,
+            });
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;
           }
@@ -350,9 +398,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
         this.dispatchEvent(new MessageEvent("message", { data: encodePtyFrame(sessionId, data) }));
       }
 
-      private emitProxyList(): void {
+      private emitProxyList(requestId?: string): void {
         this.emitJson({
           type: "proxy_list_response",
+          requestId,
           proxies: [
             {
               proxyId: "proxy-1",

@@ -1,5 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
 import { buildMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
@@ -43,6 +44,7 @@ interface SpawnOptions {
 // - worker_event 路由、worker_approval_request 转发、worker_exit 清理都在内部闭环
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
+  private children = new Map<string, ChildProcess>();
   // 记录哪些 session 是 spawn 时带 --stream-delta 的；forwardEvent 据此决定是否跳过 aggregated 去重
   private streamDeltaSessions = new Set<string>();
 
@@ -121,6 +123,7 @@ export class WorkerRegistry {
         : process.env,
     });
     const workerPid = child.pid!;
+    this.children.set(sessionId, child);
     serviceLogger.info(
       { sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId },
       "Worker process spawned",
@@ -184,8 +187,20 @@ export class WorkerRegistry {
   }
 
   delete(sessionId: string): void {
+    this.children.delete(sessionId);
     this.sockets.delete(sessionId);
     this.streamDeltaSessions.delete(sessionId);
+  }
+
+  terminateProcess(sessionId: string, signal: NodeJS.Signals = "SIGTERM"): boolean {
+    const child = this.children.get(sessionId);
+    const sock = this.sockets.get(sessionId);
+    sock?.destroy();
+    this.sockets.delete(sessionId);
+    this.streamDeltaSessions.delete(sessionId);
+    this.children.delete(sessionId);
+    if (!child || child.killed) return false;
+    return child.kill(signal);
   }
 
   // 向指定 session 的 worker 写 WorkerMessage；socket 缺失或不可写返回 false 由 caller 决定日志。
@@ -223,8 +238,7 @@ export class WorkerRegistry {
 
       case "worker_exit":
         this.deps.sessionManager.terminateSession(sessionId);
-        this.sockets.delete(sessionId);
-        this.streamDeltaSessions.delete(sessionId);
+        this.delete(sessionId);
         serviceLogger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
         break;
 

@@ -95,13 +95,10 @@ export function handleProxyConnection(
       proxyWs.proxyId = proxyId;
       logger.info({ proxyId, status }, "Proxy registered");
 
-      // 回传注册结果和 per-session 数据水位，proxy 据此决定是否需要 EventStore 回放
-      const sessions = status === "reconnected" ? registry.getSessionSeqMap(proxyId) : undefined;
       proxyWs.send(
         JSON.stringify({
           type: "proxy_register_response",
           status,
-          sessions,
         }),
       );
 

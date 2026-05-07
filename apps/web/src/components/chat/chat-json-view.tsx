@@ -155,7 +155,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                       transform: `translateY(${vi.start}px)`,
                     }}
                   >
-                    <MessageBubble message={messages[vi.index]} sessionId={sessionId} />
+                    <MessageBubble message={messages[vi.index]} />
                   </div>
                 ))}
               </div>

@@ -48,6 +48,7 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
           if (msg.type === "proxy_list_request") {
             this.emitJson({
               type: "proxy_list_response",
+              requestId: msg.requestId,
               proxies: [
                 { proxyId: "proxy-1", name: "Smoke Proxy", online: true, sessions: [sessionId] },
               ],
@@ -56,7 +57,12 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
           }
 
           if (msg.type === "proxy_select") {
-            this.emitJson({ type: "proxy_select_response", success: true, proxyId: "proxy-1" });
+            this.emitJson({
+              type: "proxy_select_response",
+              requestId: msg.requestId,
+              success: true,
+              proxyId: "proxy-1",
+            });
             return;
           }
 
@@ -163,6 +169,9 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         resize(cols: number, rows: number) {
           this.socket?.emitResize(cols, rows);
         },
+        setPtyState(state: "working" | "turn_complete" | "approval_wait" | "mid_pause") {
+          this.socket?.emitJson({ type: "pty_state", sessionId, payload: { state } });
+        },
       };
       window.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     },
@@ -252,6 +261,41 @@ test.describe("PTY browser smoke", () => {
         return (el as HTMLElement).scrollTop;
       });
     expect(scrollTopAfterNewFrame).toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
+
+    await page.locator('[data-slot="back-to-bottom"]').click();
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
+          const node = el as HTMLElement;
+          return node.scrollTop + node.clientHeight >= node.scrollHeight - 8;
+        }),
+      )
+      .toBeTruthy();
+    const beforeApprovalChrome = await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
+      const node = el as HTMLElement;
+      return {
+        scrollTop: node.scrollTop,
+        clientHeight: node.clientHeight,
+        scrollHeight: node.scrollHeight,
+      };
+    });
+    await page.evaluate(() => window.__ptySmoke.setPtyState("approval_wait"));
+    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    const afterApprovalChrome = await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
+      const node = el as HTMLElement;
+      return {
+        scrollTop: node.scrollTop,
+        clientHeight: node.clientHeight,
+        scrollHeight: node.scrollHeight,
+      };
+    });
+    expect(afterApprovalChrome.clientHeight).toBe(beforeApprovalChrome.clientHeight);
+    expect(afterApprovalChrome.scrollTop).toBeGreaterThan(0);
+    expect(afterApprovalChrome.scrollTop).toBeGreaterThanOrEqual(beforeApprovalChrome.scrollTop - 8);
 
     await page.evaluate(() => window.__ptySmoke.resize(100, 30));
     await expectTerminalMounted(page);

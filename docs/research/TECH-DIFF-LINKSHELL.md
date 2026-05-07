@@ -99,8 +99,8 @@ LinkShell 相比当前项目最关键的优势，是把终端字节流和 AI CLI
 
 问题：
 
-- relay 当前显式无状态，`replay_request` 总是 `gap_unrecoverable`。
-- `registry.getSessionSeqMap()` 返回空对象，恢复协议没有实际水位。
+- relay 当前显式无状态，不再暴露假的 replay/gap 水位协议。
+- 恢复统一由 proxy 重推 `session_list`、`agent_status`、`pending_approvals_push` 和 PTY snapshot。
 - control message 与 envelope 并存，且有 `session_list` 这种同名/近似语义。
 - 没有 LinkShell 类似的 last `terminal.status` replay。
 

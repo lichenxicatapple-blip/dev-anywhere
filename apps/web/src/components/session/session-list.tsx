@@ -288,7 +288,6 @@ function applyLiveStateToSession(
   );
 }
 
-// 侧栏底部的 "+ 新建会话" 按钮触发器 —— 被 10-01b sidebar.tsx 直接 import
 // 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因
 export function CreateSessionButton() {
   const [open, setOpen] = useState(false);

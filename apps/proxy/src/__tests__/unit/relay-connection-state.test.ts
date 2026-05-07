@@ -150,7 +150,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     conn.close(); // 然后外部 close
     const leaked: unknown[] = [];
     conn.on("message", (msg: unknown) => leaked.push(msg));
-    const resp = JSON.stringify({ type: "proxy_register_response", status: "ok", sessions: {} });
+    const resp = JSON.stringify({ type: "proxy_register_response", status: "ok" });
     // register_response 在 CLOSED 态应被忽略：不改状态、不泄露为 message
     fakeWs.emit("message", Buffer.from(resp));
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);

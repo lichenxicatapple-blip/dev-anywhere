@@ -41,6 +41,7 @@ describe("RelayRouter agent_status_request", () => {
       createHookContext: () => {
         throw new Error("not used");
       },
+      cleanupHookContext: () => {},
       permissionBroker: new PermissionBroker(),
       hookEventRouter: {} as never,
       agentStatusRegistry: options.registry,

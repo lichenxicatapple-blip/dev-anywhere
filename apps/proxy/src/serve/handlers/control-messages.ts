@@ -6,8 +6,8 @@ import { discoverCommands } from "../command-discovery.js";
 import { serviceLogger } from "../../common/logger.js";
 
 export interface ControlMessageHandlers {
-  handleDirListRequest(msg: { path: string }): Promise<void>;
-  handleDirCreateRequest(msg: { path: string }): Promise<void>;
+  handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
+  handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleSessionHistoryRequest(): Promise<void>;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
@@ -104,11 +104,12 @@ export function createControlMessageHandlers(
   }
 
   return {
-    async handleDirListRequest(msg: { path: string }): Promise<void> {
+    async handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void> {
       if (!isPathSafe(msg.path)) {
         send(
           JSON.stringify({
             type: "dir_list_response",
+            requestId: msg.requestId,
             path: msg.path,
             entries: [],
             error: "Invalid path: must be absolute and must not contain path traversal",
@@ -123,6 +124,7 @@ export function createControlMessageHandlers(
         send(
           JSON.stringify({
             type: "dir_list_response",
+            requestId: msg.requestId,
             path: msg.path,
             entries,
           }),
@@ -132,6 +134,7 @@ export function createControlMessageHandlers(
         send(
           JSON.stringify({
             type: "dir_list_response",
+            requestId: msg.requestId,
             path: msg.path,
             entries: [],
             error: String(err),
@@ -141,11 +144,12 @@ export function createControlMessageHandlers(
       }
     },
 
-    async handleDirCreateRequest(msg: { path: string }): Promise<void> {
+    async handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void> {
       if (!isPathSafe(msg.path)) {
         send(
           JSON.stringify({
             type: "dir_create_response",
+            requestId: msg.requestId,
             path: msg.path,
             success: false,
             error: "Invalid path: must be absolute and must not contain path traversal",
@@ -160,6 +164,7 @@ export function createControlMessageHandlers(
         send(
           JSON.stringify({
             type: "dir_create_response",
+            requestId: msg.requestId,
             path: msg.path,
             success: true,
           }),
@@ -169,6 +174,7 @@ export function createControlMessageHandlers(
         send(
           JSON.stringify({
             type: "dir_create_response",
+            requestId: msg.requestId,
             path: msg.path,
             success: false,
             error: String(err),

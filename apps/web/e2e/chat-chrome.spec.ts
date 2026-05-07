@@ -53,13 +53,13 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(sidebarToggle).toHaveCount(0);
   });
 
-  test("overflow menu contains Rename + Duplicate + Terminate(destructive)", async ({ page }) => {
+  test("overflow menu only exposes implemented session actions", async ({ page }) => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     const menu = page.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible();
     await expect(menu.getByText("Permission mode")).toHaveCount(0);
-    await expect(menu.getByText("重命名")).toBeVisible();
-    await expect(menu.getByText("复制会话")).toBeVisible();
+    await expect(menu.getByText("重命名")).toHaveCount(0);
+    await expect(menu.getByText("复制会话")).toHaveCount(0);
     const terminate = page.locator('[data-slot="chat-terminate-item"]');
     await expect(terminate).toBeVisible();
     await expect(terminate).toHaveClass(/text-destructive/);

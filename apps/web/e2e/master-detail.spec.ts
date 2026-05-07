@@ -12,7 +12,7 @@ test.describe("Master-detail — 桌面端即时会话切换", () => {
     await page.goto(BASE_URL);
     const sidebar = page.locator("nav[aria-label='Sidebar navigation']");
     await expect(sidebar).toBeVisible();
-    // 即便 session 列表为空，slot 容器必须存在（Sidebar 10-01b 契约）
+    // 即便 session 列表为空，slot 容器也必须存在，避免桌面布局跳变。
     const middle = sidebar.locator('[data-slot="sidebar-session-list"]');
     await expect(middle).toHaveCount(1);
   });

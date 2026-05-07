@@ -3,6 +3,7 @@ const ANSI_PATTERN =
   /[\u001b\u009b][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g;
 
 type ApprovalScreenProvider = "claude" | "codex";
+export type PtyApprovalScreenState = "waiting" | "resolved";
 
 const DETECTION_TAIL_LINES = 14;
 
@@ -22,6 +23,23 @@ const PROVIDER_PATTERNS: Record<ApprovalScreenProvider, readonly RegExp[]> = {
   ],
 };
 
+const PROVIDER_RESOLVED_PATTERNS: Record<ApprovalScreenProvider, readonly RegExp[]> = {
+  claude: [
+    /User rejected\b/i,
+    /User approved\b/i,
+    /User denied\b/i,
+    /User cancelled\b/i,
+    /permission denied/i,
+  ],
+  codex: [
+    /\bapproved\b/i,
+    /\bdenied\b/i,
+    /\brejected\b/i,
+    /\bcancelled\b/i,
+    /permission denied/i,
+  ],
+};
+
 export function stripTerminalControls(text: string): string {
   return text.replace(ANSI_PATTERN, "");
 }
@@ -31,6 +49,30 @@ function tailVisibleText(text: string): string {
 }
 
 export function hasPtyApprovalPrompt(text: string, provider: ApprovalScreenProvider): boolean {
+  return detectPtyApprovalScreen(text, provider) === "waiting";
+}
+
+function lastPatternIndex(text: string, patterns: readonly RegExp[]): number {
+  let last = -1;
+  for (const pattern of patterns) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+    const globalPattern = new RegExp(pattern.source, flags);
+    let match: RegExpExecArray | null;
+    while ((match = globalPattern.exec(text)) !== null) {
+      last = Math.max(last, match.index);
+      if (match[0].length === 0) globalPattern.lastIndex += 1;
+    }
+  }
+  return last;
+}
+
+export function detectPtyApprovalScreen(
+  text: string,
+  provider: ApprovalScreenProvider,
+): PtyApprovalScreenState | null {
   const tail = tailVisibleText(text).replace(/\s+/g, " ");
-  return PROVIDER_PATTERNS[provider].some((pattern) => pattern.test(tail));
+  const waitingIndex = lastPatternIndex(tail, PROVIDER_PATTERNS[provider]);
+  const resolvedIndex = lastPatternIndex(tail, PROVIDER_RESOLVED_PATTERNS[provider]);
+  if (waitingIndex < 0 && resolvedIndex < 0) return null;
+  return resolvedIndex > waitingIndex ? "resolved" : "waiting";
 }

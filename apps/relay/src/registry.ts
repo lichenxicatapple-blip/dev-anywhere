@@ -187,11 +187,6 @@ export class RelayRegistry {
     return state ? Array.from(state.sessions) : [];
   }
 
-  // 获取 proxy 所有 session 的 seq 映射（relay 无状态后返回空映射）
-  getSessionSeqMap(_proxyId: string): Record<string, number> {
-    return {};
-  }
-
   // clientId 绑定方式
   bindClientById(clientId: string, proxyId: string, ws: WebSocket): boolean {
     if (!this.proxyStates.has(proxyId)) {

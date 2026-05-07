@@ -15,7 +15,6 @@ import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
-import { toast } from "@/components/toast";
 import { SessionTerminationDialog } from "@/components/session/session-termination-dialog";
 
 interface ChatHeaderProps {
@@ -62,37 +61,10 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
   const title = (isPty && ptyTitle) || session?.name || sessionId.slice(0, 8);
   const terminateLabel = isLocalTerminalPty ? "断开远程连接" : "终止会话";
 
-  function handleRename() {
-    // session_rename 控制消息未在 shared schema 定义, 占位 toast, 真正接入另起 phase
-    toast.info("重命名功能即将加入");
-  }
-
-  function handleDuplicate() {
-    // 以当前 session 为种子创建一个新会话, cwd 透传
-    const relay = relayClientRef;
-    if (!relay) {
-      toast.error("连接尚未就绪");
-      return;
-    }
-    // SessionInfo 不含 cwd 字段, 无从读取, 暂以 "." 作 fallback
-    relay.sendControl({
-      type: "session_create",
-      cwd: ".",
-      mode: "pty",
-      provider: session?.provider ?? "claude",
-    });
-    toast.info("正在创建副本会话...");
-  }
-
   function handleTerminate(targetSession = session) {
     if (!targetSession) return;
     relayClientRef?.sendControl({ type: "session_terminate", sessionId: targetSession.sessionId });
     navigate("/sessions");
-    toast.info(
-      targetSession.mode === "pty" && targetSession.ptyOwner === "local-terminal"
-        ? "已断开远程连接，本地终端仍在运行"
-        : "正在终止会话",
-    );
   }
 
   function handlePermissionModeCycle() {
@@ -137,11 +109,8 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" data-slot="chat-overflow-menu">
-            <DropdownMenuItem onClick={handleRename}>重命名</DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDuplicate}>复制会话</DropdownMenuItem>
             {isPty && (
               <>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handlePermissionModeCycle}>
                   切换权限模式
                 </DropdownMenuItem>
@@ -151,9 +120,9 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
                 <DropdownMenuItem onClick={() => sendRemoteInputRaw(sessionId, "\x03")}>
                   发送 Ctrl+C
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
               </>
             )}
-            <DropdownMenuSeparator />
             <DropdownMenuItem
               className={isLocalTerminalPty ? undefined : "text-destructive focus:text-destructive"}
               data-slot="chat-terminate-item"

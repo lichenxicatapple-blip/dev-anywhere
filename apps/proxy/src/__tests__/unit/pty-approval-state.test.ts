@@ -9,7 +9,7 @@ describe("PTY approval state transitions", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        screenShowsApproval: false,
+        approvalScreenState: null,
         signalState: "mid_pause",
       }),
     ).toBe(true);
@@ -20,7 +20,7 @@ describe("PTY approval state transitions", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        screenShowsApproval: true,
+        approvalScreenState: "waiting",
         signalState: "mid_pause",
       }),
     ).toBe(false);
@@ -30,17 +30,26 @@ describe("PTY approval state transitions", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        screenShowsApproval: false,
+        approvalScreenState: null,
         signalState: "turn_complete",
       }),
     ).toBe(false);
   });
 
-  it("treats plain output after an approval screen as working", () => {
+  it("keeps approval wait for plain output without explicit resolution", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        screenShowsApproval: false,
+        approvalScreenState: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("releases approval wait when the provider screen explicitly reports resolution", () => {
+    expect(
+      shouldReleaseApprovalWait({
+        currentState: "approval_wait",
+        approvalScreenState: "resolved",
       }),
     ).toBe(true);
     expect(stateAfterApprovalRelease()).toBe("working");

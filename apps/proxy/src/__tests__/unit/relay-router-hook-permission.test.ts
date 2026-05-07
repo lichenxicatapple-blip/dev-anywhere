@@ -29,6 +29,7 @@ describe("RelayRouter hook permission decisions", () => {
       createHookContext: () => {
         throw new Error("not used");
       },
+      cleanupHookContext: () => {},
       permissionBroker: options.permissionBroker,
       hookEventRouter: {
         onPermissionResolved: options.hookResolved,

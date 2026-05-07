@@ -13,7 +13,7 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "./common/osc-extractor.js";
-import { hasPtyApprovalPrompt } from "./common/pty-approval-screen.js";
+import { detectPtyApprovalScreen, hasPtyApprovalPrompt } from "./common/pty-approval-screen.js";
 import {
   shouldReleaseApprovalWait,
   stateAfterApprovalRelease,
@@ -281,7 +281,7 @@ class TerminalSession {
     log.info({ sessionId: this.sessionId }, "PTY started with headless terminal");
   }
 
-  // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、跟 working/approval_wait 状态变化
+  // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、提取 provider 语义事件
   private handlePtyData(data: string): void {
     this.lastOutputTime = Date.now();
     this.outputSeq += 1;
@@ -296,11 +296,12 @@ class TerminalSession {
 
     const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
-    const screenShowsApproval =
-      hasPtyApprovalPrompt(data, this.provider.id) ||
+    const approvalScreenState =
+      detectPtyApprovalScreen(data, this.provider.id) ??
       (this.serializeAddon
-        ? hasPtyApprovalPrompt(this.serializeAddon.serialize(), this.provider.id)
-        : false);
+        ? detectPtyApprovalScreen(this.serializeAddon.serialize(), this.provider.id)
+        : null);
+    const screenShowsApproval = approvalScreenState === "waiting";
     if (oscSequences.length > 0) {
       log.debug(
         {
@@ -322,7 +323,7 @@ class TerminalSession {
     if (
       shouldReleaseApprovalWait({
         currentState: this.currentPtyState,
-        screenShowsApproval,
+        approvalScreenState,
         signalState: signal?.state,
       })
     ) {
@@ -361,7 +362,7 @@ class TerminalSession {
     if (this.remoteDetached || !this.socket.writable || !this.sessionId) return;
     this.socket.write(
       serializeIpc({
-        type: "pty_state_push",
+        type: "pty_semantic_event",
         sessionId: this.sessionId,
         state,
         ...(meta?.title !== undefined ? { title: meta.title } : {}),
@@ -370,7 +371,7 @@ class TerminalSession {
     );
     log.info(
       { sessionId: this.sessionId, state, title: meta?.title, tool: meta?.tool },
-      "PTY state pushed",
+      "PTY semantic event pushed",
     );
   }
 

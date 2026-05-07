@@ -33,7 +33,12 @@ export async function ensureBinding(
 
   // 只有 sessionId 没有 proxyId：通过 proxy_list 匹配
   if (!targetProxyId && context.sessionId) {
-    const proxies = await relay.requestProxyList();
+    let proxies: Awaited<ReturnType<RelayClient["requestProxyList"]>>;
+    try {
+      proxies = await relay.requestProxyList();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
     const match = proxies.find((p) => p.sessions?.includes(context.sessionId!));
     if (!match) {
       return { error: `Session ${context.sessionId} not found on any proxy` };
@@ -46,7 +51,12 @@ export async function ensureBinding(
   }
 
   // 统一走 proxy_select
-  const ack = await relay.selectProxy(targetProxyId);
+  let ack: Awaited<ReturnType<RelayClient["selectProxy"]>>;
+  try {
+    ack = await relay.selectProxy(targetProxyId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
   if (!ack.success) {
     return { error: ack.error || "Proxy select failed" };
   }

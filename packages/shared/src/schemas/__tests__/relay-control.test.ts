@@ -48,13 +48,13 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
-  it("rejects replay_request with empty sessionId", () => {
+  it("rejects replay_request because relay recovery is proxy-driven", () => {
     expect(() =>
       RelayControlSchema.parse({ type: "replay_request", sessionId: "", fromSeq: 0, toSeq: 10 }),
     ).toThrow();
   });
 
-  it("rejects gap_unrecoverable with empty sessionId", () => {
+  it("rejects gap_unrecoverable because relay no longer exposes fake replay gaps", () => {
     expect(() =>
       RelayControlSchema.parse({ type: "gap_unrecoverable", sessionId: "", fromSeq: 0, toSeq: 10 }),
     ).toThrow();

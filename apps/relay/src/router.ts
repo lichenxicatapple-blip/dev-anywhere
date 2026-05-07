@@ -68,43 +68,6 @@ export function routeProxyMessage(
   }
 }
 
-// relay 无状态，replay_request 总是返回 gap_unrecoverable。
-// 恢复协议由 proxy 驱动，不依赖 relay 缓冲。
-export function handleReplayRequest(
-  sessionId: string,
-  fromSeq: number,
-  toSeq: number | undefined,
-  clientWs: WebSocket,
-  _registry: RelayRegistry,
-  logger: Logger,
-): void {
-  const effectiveToSeq = toSeq ?? 0;
-
-  if (fromSeq > effectiveToSeq && effectiveToSeq > 0) {
-    clientWs.send(
-      JSON.stringify({
-        type: "relay_error",
-        code: RelayErrorCode.INVALID_RANGE,
-        message: `Invalid replay range: fromSeq ${fromSeq} > toSeq ${effectiveToSeq}`,
-      }),
-    );
-    return;
-  }
-
-  clientWs.send(
-    JSON.stringify({
-      type: "gap_unrecoverable",
-      sessionId,
-      fromSeq,
-      toSeq: effectiveToSeq,
-    }),
-  );
-  logger.info(
-    { sessionId, fromSeq, toSeq: effectiveToSeq },
-    "Replay request: relay is stateless, no buffer",
-  );
-}
-
 // 将 client 发来的 MessageEnvelope 转发给绑定的 proxy
 // proxyId 由调用方从 clientId 绑定中解析后传入
 // tool_approve/tool_deny 等信封消息直接发送到 proxy WS，不经过任何队列或缓冲

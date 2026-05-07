@@ -10,7 +10,7 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "../common/osc-extractor.js";
-import { hasPtyApprovalPrompt } from "../common/pty-approval-screen.js";
+import { detectPtyApprovalScreen, hasPtyApprovalPrompt } from "../common/pty-approval-screen.js";
 import {
   shouldReleaseApprovalWait,
   stateAfterApprovalRelease,
@@ -231,10 +231,12 @@ export class HostedPtyRegistry {
     const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
     const session = this.deps.sessionManager.getSession(sessionId);
-    const screenShowsApproval =
-      session !== undefined &&
-      (hasPtyApprovalPrompt(data, session.provider) ||
-        hasPtyApprovalPrompt(hosted.serializeAddon.serialize(), session.provider));
+    const approvalScreenState =
+      session !== undefined
+        ? (detectPtyApprovalScreen(data, session.provider) ??
+          detectPtyApprovalScreen(hosted.serializeAddon.serialize(), session.provider))
+        : null;
+    const screenShowsApproval = approvalScreenState === "waiting";
     if (oscSequences.length > 0) {
       serviceLogger.debug(
         {
@@ -257,7 +259,7 @@ export class HostedPtyRegistry {
     if (
       shouldReleaseApprovalWait({
         currentState: hosted.currentState,
-        screenShowsApproval,
+        approvalScreenState,
         signalState: signal?.state,
       })
     ) {

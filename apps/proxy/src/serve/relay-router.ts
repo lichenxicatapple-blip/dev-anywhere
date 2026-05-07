@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
 import type { Socket } from "node:net";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
@@ -38,6 +38,7 @@ interface RelayRouterDeps {
     sessionId: string,
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext;
+  cleanupHookContext: (sessionId: string) => void;
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   agentStatusRegistry: AgentStatusRegistry;
@@ -289,20 +290,28 @@ export class RelayRouter {
   }
 
   private onDirListRequest(msg: Record<string, unknown>): void {
-    this.deps.controlHandlers.handleDirListRequest({ path: (msg.path as string) ?? "" });
+    this.deps.controlHandlers.handleDirListRequest({
+      path: (msg.path as string) ?? "",
+      requestId: msg.requestId as string | undefined,
+    });
   }
 
   private onDirCreateRequest(msg: Record<string, unknown>): void {
-    this.deps.controlHandlers.handleDirCreateRequest({ path: (msg.path as string) ?? "" });
+    this.deps.controlHandlers.handleDirCreateRequest({
+      path: (msg.path as string) ?? "",
+      requestId: msg.requestId as string | undefined,
+    });
   }
 
   private onSessionCreate(msg: Record<string, unknown>): void {
+    const requestId = msg.requestId as string | undefined;
     const cwd = msg.cwd as string | undefined;
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
+          requestId,
           sessionId: "",
           error: cwdError,
         }),
@@ -323,6 +332,7 @@ export class RelayRouter {
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
+          requestId,
           sessionId: "",
           error:
             provider === "codex"
@@ -370,7 +380,7 @@ export class RelayRouter {
             this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
           }
           this.deps.relaySend(
-            JSON.stringify({ type: "session_create_response", sessionId: session.id }),
+            JSON.stringify({ type: "session_create_response", requestId, sessionId: session.id }),
           );
           if (resumeSessionId) {
             this.pushHistoryMessages(session.id, resumeSessionId);
@@ -385,9 +395,11 @@ export class RelayRouter {
         } else if (attempt < maxRetries) {
           setTimeout(tryConnect, Math.min(100 * attempt, 2000));
         } else {
+          this.cleanupPendingJsonSession(pendingId);
           this.deps.relaySend(
             JSON.stringify({
               type: "session_create_response",
+              requestId,
               sessionId: pendingId,
               error: "Worker failed to start",
             }),
@@ -399,6 +411,19 @@ export class RelayRouter {
     setTimeout(tryConnect, 100);
   }
 
+  private cleanupPendingJsonSession(sessionId: string): void {
+    const killed = this.deps.workerRegistry.terminateProcess(sessionId);
+    const paths = sessionPaths(sessionId);
+    rmSync(paths.dir, { recursive: true, force: true });
+    this.deps.cleanupHookContext(sessionId);
+    this.deps.permissionBroker.cleanupSession(sessionId, "Worker failed to start");
+    this.deps.agentStatusRegistry.delete(sessionId);
+    serviceLogger.warn(
+      { sessionId, killed },
+      "Cleaned up pending JSON session after startup failure",
+    );
+  }
+
   private createHostedPtySession(
     msg: Record<string, unknown>,
     cwd: string,
@@ -408,6 +433,7 @@ export class RelayRouter {
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
+          requestId: msg.requestId as string | undefined,
           sessionId: "",
           error: "Unsupported provider for PTY session.",
         }),
@@ -442,6 +468,7 @@ export class RelayRouter {
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
+          requestId: msg.requestId as string | undefined,
           sessionId: session.id,
           mode: "pty",
           provider,
@@ -457,6 +484,7 @@ export class RelayRouter {
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
+          requestId: msg.requestId as string | undefined,
           sessionId: "",
           error: String(err),
         }),

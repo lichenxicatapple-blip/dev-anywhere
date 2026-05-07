@@ -269,8 +269,8 @@ describe("proxy lifecycle", () => {
       const response = JSON.parse(await registerPromise);
       expect(response.type).toBe("proxy_register_response");
       expect(response.status).toBe("reconnected");
-      // relay 无状态，sessions 为空对象
-      expect(response.sessions).toEqual({});
+      // relay 无状态，不返回假 seq 水位
+      expect(response.sessions).toBeUndefined();
 
       const onlineMsg = JSON.parse(await onlinePromise);
       expect(onlineMsg.type).toBe("proxy_online");
@@ -419,14 +419,14 @@ describe("proxy lifecycle", () => {
         await settle(200);
       }
 
-      // 第 4 次重连，relay 无状态，sessions 为空
+      // 第 4 次重连，relay 无状态，不返回假 seq 水位
       const proxy4 = ws.proxy(port);
       await waitForOpen(proxy4);
       const msgP = waitForMessage(proxy4);
       proxy4.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("reconnected");
-      expect(resp.sessions).toEqual({});
+      expect(resp.sessions).toBeUndefined();
     },
     E2E_TIMEOUT,
   );
@@ -535,7 +535,7 @@ describe("client lifecycle", () => {
   );
 
   it(
-    "Client 断线重连（proxy 在线）→ restored + 增量回放",
+    "Client 断线重连（proxy 在线）→ restored；输出恢复由 proxy 重推负责",
     async () => {
       const proxyId = uid();
       const clientId = uid("c");
@@ -548,7 +548,7 @@ describe("client lifecycle", () => {
 
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client1.send(JSON.stringify({ type: "client_register", clientId }));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -562,11 +562,11 @@ describe("client lifecycle", () => {
       client1.close();
       await settle();
 
-      // 注册重放只包含 session_status 类型，assistant_message 不重放
+      // relay 不缓存输出，只恢复绑定状态；状态/快照由 proxy 侧重推。
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const allMsgs = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId, sessions: { s1: 1 } }));
+      client2.send(JSON.stringify({ type: "client_register", clientId }));
       const received = await allMsgs;
 
       expect(received.length).toBe(1);
@@ -591,7 +591,7 @@ describe("client lifecycle", () => {
 
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client1.send(JSON.stringify({ type: "client_register", clientId }));
       await waitForMessage(client1);
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -604,7 +604,7 @@ describe("client lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const msgP = waitForMessage(client2);
-      client2.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client2.send(JSON.stringify({ type: "client_register", clientId }));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("proxy_offline");
 
@@ -624,9 +624,7 @@ describe("client lifecycle", () => {
       const client = ws.client(port);
       await waitForOpen(client);
       const msgP = waitForMessage(client);
-      client.send(
-        JSON.stringify({ type: "client_register", clientId: uid("fresh"), sessions: {} }),
-      );
+      client.send(JSON.stringify({ type: "client_register", clientId: uid("fresh") }));
       const resp = JSON.parse(await msgP);
       expect(resp.type).toBe("client_register_response");
       expect(resp.status).toBe("new");
@@ -705,7 +703,7 @@ describe("client lifecycle", () => {
       // client1 注册绑定，收到 seq 1,2
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client1.send(JSON.stringify({ type: "client_register", clientId }));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -727,7 +725,7 @@ describe("client lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const restoreMsgs = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId, sessions: { s1: 2 } }));
+      client2.send(JSON.stringify({ type: "client_register", clientId }));
       const restored = await restoreMsgs;
       expect(JSON.parse(restored[0]).status).toBe("restored");
 
@@ -740,62 +738,12 @@ describe("client lifecycle", () => {
     },
     E2E_TIMEOUT,
   );
-
-  it(
-    "client_register_response 带 per-session 最新 seq（进度感知）",
-    async () => {
-      const proxyId = uid();
-      const clientId = uid("c");
-
-      const proxy = ws.proxy(port);
-      await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
-      await waitForMessage(proxy);
-      await settle();
-
-      // 发送多 session 消息
-      proxy.send(JSON.stringify(makeEnvelope(1, "progress-a")));
-      proxy.send(JSON.stringify(makeEnvelope(2, "progress-a")));
-      proxy.send(JSON.stringify(makeEnvelope(5, "progress-a")));
-      proxy.send(JSON.stringify(makeEnvelope(1, "progress-b")));
-      proxy.send(JSON.stringify(makeEnvelope(3, "progress-b")));
-      await settle();
-
-      // client 绑定
-      const client1 = ws.client(port);
-      await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
-      await waitForMessage(client1); // new
-      client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
-      await waitForMessage(client1); // consume proxy_select_response ACK
-
-      // 断开后重连
-      client1.close();
-      await settle();
-
-      const client2 = ws.client(port);
-      await waitForOpen(client2);
-      const msgP = waitForMessage(client2);
-      client2.send(
-        JSON.stringify({ type: "client_register", clientId, sessions: { "progress-a": 2 } }),
-      );
-      const resp = JSON.parse(await msgP);
-
-      expect(resp.type).toBe("client_register_response");
-      expect(resp.status).toBe("restored");
-      // relay 无状态，sessions 为空对象
-      expect(resp.sessions).toEqual({});
-    },
-    E2E_TIMEOUT,
-  );
 });
 
-describe("message buffering and replay", () => {
+describe("relay stateless routing", () => {
   let relay: ChildProcess;
   let port: number;
   const ws = createSocketTracker();
-  let n = 0;
-  const uid = () => `p3-${++n}`;
 
   beforeAll(async () => {
     port = await findFreePort();
@@ -823,74 +771,9 @@ describe("message buffering and replay", () => {
     },
     E2E_TIMEOUT,
   );
-
-  it(
-    "replay_request 总是返回 gap_unrecoverable（relay 无状态）",
-    async () => {
-      const proxyId = uid();
-      const sid = `s-replay-${n}`;
-      const proxy = ws.proxy(port);
-      await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
-      await waitForMessage(proxy);
-      await settle();
-
-      for (let i = 1; i <= 5; i++) {
-        proxy.send(JSON.stringify(makeEnvelope(i, sid)));
-      }
-      await settle();
-
-      const client = ws.client(port);
-      await waitForOpen(client);
-      const msgP = waitForMessage(client);
-      client.send(JSON.stringify({ type: "replay_request", sessionId: sid, fromSeq: 2, toSeq: 4 }));
-      const resp = JSON.parse(await msgP);
-      expect(resp.type).toBe("gap_unrecoverable");
-      expect(resp.sessionId).toBe(sid);
-      expect(resp.fromSeq).toBe(2);
-      expect(resp.toSeq).toBe(4);
-    },
-    E2E_TIMEOUT,
-  );
-
-  it(
-    "replay_request 完全不可用 → gap_unrecoverable",
-    async () => {
-      const client = ws.client(port);
-      await waitForOpen(client);
-      const msgP = waitForMessage(client);
-      client.send(
-        JSON.stringify({
-          type: "replay_request",
-          sessionId: "nonexistent-xyz",
-          fromSeq: 1,
-          toSeq: 10,
-        }),
-      );
-      const resp = JSON.parse(await msgP);
-      expect(resp.type).toBe("gap_unrecoverable");
-    },
-    E2E_TIMEOUT,
-  );
-
-  it(
-    "replay_request 无效范围 → INVALID_RANGE",
-    async () => {
-      const client = ws.client(port);
-      await waitForOpen(client);
-      const msgP = waitForMessage(client);
-      client.send(
-        JSON.stringify({ type: "replay_request", sessionId: "s1", fromSeq: 10, toSeq: 5 }),
-      );
-      const resp = JSON.parse(await msgP);
-      expect(resp.type).toBe("relay_error");
-      expect(resp.code).toBe("INVALID_RANGE");
-    },
-    E2E_TIMEOUT,
-  );
 });
 
-describe("per-session seq numbering", () => {
+describe("proxy reconnect metadata", () => {
   let relay: ChildProcess;
   let port: number;
   const ws = createSocketTracker();
@@ -912,40 +795,7 @@ describe("per-session seq numbering", () => {
   });
 
   it(
-    "replay_request 对任意 session 返回 gap_unrecoverable（relay 无状态）",
-    async () => {
-      const proxy = ws.proxy(port);
-      await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p5-seq" }));
-      await waitForMessage(proxy);
-      await settle();
-
-      proxy.send(JSON.stringify(makeEnvelope(1, "seq-a")));
-      proxy.send(JSON.stringify(makeEnvelope(1, "seq-b")));
-      await settle();
-
-      const client = ws.client(port);
-      await waitForOpen(client);
-
-      const msgA = waitForMessage(client);
-      client.send(
-        JSON.stringify({ type: "replay_request", sessionId: "seq-a", fromSeq: 1, toSeq: 3 }),
-      );
-      const respA = JSON.parse(await msgA);
-      expect(respA.type).toBe("gap_unrecoverable");
-
-      const msgB = waitForMessage(client);
-      client.send(
-        JSON.stringify({ type: "replay_request", sessionId: "seq-b", fromSeq: 1, toSeq: 2 }),
-      );
-      const respB = JSON.parse(await msgB);
-      expect(respB.type).toBe("gap_unrecoverable");
-    },
-    E2E_TIMEOUT,
-  );
-
-  it(
-    "重连对账 → sessions 返回空映射（relay 无状态）",
+    "重连注册结果不携带 per-session seq 映射",
     async () => {
       const proxyId = "p5-recon";
       const proxy1 = ws.proxy(port);
@@ -966,7 +816,8 @@ describe("per-session seq numbering", () => {
       const msgP = waitForMessage(proxy2);
       proxy2.send(JSON.stringify({ type: "proxy_register", proxyId }));
       const resp = JSON.parse(await msgP);
-      expect(resp.sessions).toEqual({});
+      expect(resp.status).toBe("reconnected");
+      expect(resp.sessions).toBeUndefined();
     },
     E2E_TIMEOUT,
   );
@@ -1133,7 +984,7 @@ describe("heartbeat dead connection detection", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: "hb-c1", sessions: {} }));
+      client.send(JSON.stringify({ type: "client_register", clientId: "hb-c1" }));
       await waitForMessage(client);
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "hb-c" }));
       await waitForMessage(client); // consume proxy_select_response ACK
@@ -1150,7 +1001,7 @@ describe("heartbeat dead connection detection", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const msgP = waitForMessage(client2);
-      client2.send(JSON.stringify({ type: "client_register", clientId: "hb-c1", sessions: {} }));
+      client2.send(JSON.stringify({ type: "client_register", clientId: "hb-c1" }));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("restored");
       expect(resp.proxyId).toBe("hb-c");
@@ -1193,7 +1044,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: "cable-c", sessions: {} }));
+      client.send(JSON.stringify({ type: "client_register", clientId: "cable-c" }));
       await waitForMessage(client); // new
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "cable" }));
       await waitForMessage(client); // consume proxy_select_response ACK
@@ -1225,8 +1076,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
 
       const resp = JSON.parse(await registerP);
       expect(resp.status).toBe("reconnected");
-      // relay 无状态，sessions 为空
-      expect(resp.sessions).toEqual({});
+      expect(resp.sessions).toBeUndefined();
 
       const onlineMsg = JSON.parse(await onlinePromise);
       expect(onlineMsg.type).toBe("proxy_online");
@@ -1242,7 +1092,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
   );
 
   it(
-    "Proxy 管理多 session → client 实时收到所有 session 消息 + 断线重连后 replay 返回 gap",
+    "Proxy 管理多 session → client 实时接收；断线重连后继续实时路由",
     async () => {
       const port = await findFreePort();
       const relay = spawnRelay({ port });
@@ -1258,7 +1108,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const clientId = "multi-c";
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client1.send(JSON.stringify({ type: "client_register", clientId }));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId: "multi" }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -1281,21 +1131,19 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const allRestore = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId, sessions: {} }));
+      client2.send(JSON.stringify({ type: "client_register", clientId }));
       const restoreReceived = await allRestore;
 
       const restoredResp = JSON.parse(restoreReceived[0]);
       expect(restoredResp.status).toBe("restored");
 
-      // relay 无状态，replay 返回 gap_unrecoverable
-      const replaySa = waitForMessage(client2);
-      client2.send(
-        JSON.stringify({ type: "replay_request", sessionId: "sa", fromSeq: 1, toSeq: 4 }),
-      );
-      const gapResp = JSON.parse(await replaySa);
-      expect(gapResp.type).toBe("gap_unrecoverable");
+      const newMsgP = waitForMessage(client2);
+      proxy.send(JSON.stringify(makeEnvelope(4, "sa")));
+      const newMsg = JSON.parse(await newMsgP);
+      expect(newMsg.sessionId).toBe("sa");
+      expect(newMsg.seq).toBe(4);
 
-      // proxy 断线重连 → sessions 为空（relay 无状态）
+      // proxy 断线重连后注册结果不携带 fake seq 映射
       proxy.close();
       await settle(200);
 
@@ -1305,7 +1153,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "multi" }));
       const regResp = JSON.parse(await regP);
       expect(regResp.status).toBe("reconnected");
-      expect(regResp.sessions).toEqual({});
+      expect(regResp.sessions).toBeUndefined();
     },
     E2E_TIMEOUT,
   );

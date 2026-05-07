@@ -57,7 +57,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "fresh-client",
-        sessions: {},
       }),
     );
 
@@ -81,7 +80,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: {},
       }),
     );
     // 新 client 没有绑定，收到 new
@@ -106,7 +104,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: {},
       }),
     );
 
@@ -116,7 +113,7 @@ describe("client_register protocol", () => {
     expect(response.proxyId).toBe("p1");
   });
 
-  it("streams missed messages after 'restored' response", async () => {
+  it("returns restored without relay-side message replay", async () => {
     // 注册 proxy
     const proxy = connectProxy();
     await waitForOpen(proxy);
@@ -130,7 +127,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: {},
       }),
     );
     await waitForMessage(client1); // new response
@@ -155,7 +151,7 @@ describe("client_register protocol", () => {
     proxy.send(JSON.stringify(makeEnvelope(3)));
     await client1Messages;
 
-    // 断开客户端（假设收到了 seq 1）
+    // 断开客户端。relay 不保留消息 replay buffer，恢复后的会话内容由 proxy snapshot/list 类消息重推。
     client1.close();
     await settle();
 
@@ -164,14 +160,11 @@ describe("client_register protocol", () => {
     await waitForOpen(client2);
     connections.push(client2);
 
-    // 注册重放只包含 session_status 类型，assistant_message 不重放
-    // 会话内容由客户端通过 session_messages_request 获取
     const allMessages = collectMessages(client2, 1);
     client2.send(
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: { s1: 1 },
       }),
     );
 
@@ -197,7 +190,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: {},
       }),
     );
     await waitForMessage(client1); // new
@@ -220,7 +212,6 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "client_register",
         clientId: "c1",
-        sessions: {},
       }),
     );
 
@@ -445,7 +436,7 @@ describe("client_register protocol", () => {
     expect(response.sessions).toBeUndefined();
   });
 
-  it("proxy receives proxy_register_response with status 'reconnected' and empty session seq map", async () => {
+  it("proxy receives proxy_register_response with status 'reconnected' without session seq map", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
     proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
@@ -466,7 +457,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("reconnected");
-    // relay 无状态，sessions 为空对象
-    expect(response.sessions).toEqual({});
+    // relay 无状态，不返回假 seq 水位
+    expect(response.sessions).toBeUndefined();
   });
 });

@@ -29,9 +29,11 @@ declare global {
       socket: {
         emitPty: (data: string) => void;
         emitResize: (cols: number, rows: number) => void;
+        emitJson: (payload: unknown) => void;
       } | null;
       sendPty: (data: string) => void;
       resize: (cols: number, rows: number) => void;
+      setPtyState: (state: "working" | "turn_complete" | "approval_wait" | "mid_pause") => void;
     };
   }
 }

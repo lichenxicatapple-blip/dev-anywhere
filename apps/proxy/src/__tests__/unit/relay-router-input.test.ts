@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
@@ -21,6 +21,9 @@ function createRouter(options: {
   jsonTurnStart?: ReturnType<typeof vi.fn>;
   relaySend?: (data: string) => void;
   workerSpawn?: () => number;
+  workerConnect?: () => Promise<Socket | null>;
+  workerTerminateProcess?: (sessionId: string) => boolean;
+  cleanupHookContext?: (sessionId: string) => void;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -47,6 +50,8 @@ function createRouter(options: {
     workerRegistry: {
       send: options.workerSend ?? vi.fn(),
       spawn: options.workerSpawn ?? vi.fn(),
+      connect: options.workerConnect ?? vi.fn(),
+      terminateProcess: options.workerTerminateProcess ?? vi.fn(() => false),
     } as unknown as WorkerRegistry,
     controlHandlers: {} as never,
     relayConnection: Object.assign(new EventEmitter(), {
@@ -65,9 +70,14 @@ function createRouter(options: {
     jsonObserver: {
       onTurnStart: options.jsonTurnStart ?? vi.fn(),
     } as never,
-    createHookContext: () => {
-      throw new Error("not used");
-    },
+    createHookContext: () => ({
+      provider: "claude",
+      sessionId: "pending",
+      hookUrl: "http://127.0.0.1:1/hook",
+      marker: "marker",
+      token: "token",
+    }),
+    cleanupHookContext: options.cleanupHookContext ?? vi.fn(),
     permissionBroker: new PermissionBroker(),
     hookEventRouter: {} as never,
     agentStatusRegistry: new AgentStatusRegistry(),
@@ -75,6 +85,10 @@ function createRouter(options: {
 }
 
 describe("RelayRouter input routing", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps JSON sessions on batch user_input", () => {
     const workerSend = vi.fn(() => true);
     const jsonTurnStart = vi.fn();
@@ -124,6 +138,40 @@ describe("RelayRouter input routing", () => {
       expect(msg.sessionId).toBe("");
       expect(msg.error).toContain("工作目录不存在或不可访问");
     }
+  });
+
+  it("cleans pending JSON worker when spawned worker never connects", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const workerTerminateProcess = vi.fn(() => true);
+    const cleanupHookContext = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn: vi.fn(() => 1234),
+      workerConnect: vi.fn(async () => null),
+      workerTerminateProcess,
+      cleanupHookContext,
+    });
+
+    router.handle({
+      type: "session_create",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "json",
+    });
+
+    await vi.runAllTimersAsync();
+
+    const lastRaw = relaySend.mock.calls.at(-1)?.[0];
+    expect(lastRaw).toBeTruthy();
+    const msg = RelayControlSchema.parse(JSON.parse(lastRaw!));
+    expect(msg.type).toBe("session_create_response");
+    if (msg.type === "session_create_response") {
+      expect(msg.error).toBe("Worker failed to start");
+    }
+    expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
+    expect(cleanupHookContext).toHaveBeenCalledTimes(1);
   });
 
   it("drops batch user_input for PTY sessions", () => {

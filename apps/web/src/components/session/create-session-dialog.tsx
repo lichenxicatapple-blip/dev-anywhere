@@ -1,10 +1,8 @@
-// 新建会话 Dialog, 字段: name (可选) / CWD
-// Web 新建会话走 serve 托管 PTY，Claude/Codex 都由本机 proxy 持有真实 Agent CLI。
-// CWD 行用共享 FilePathPicker (mode="select", dirsOnly) 浏览目录, 同步到文本输入
-// 权限模式只对 JSON 消息流有效；当前 PTY 创建路径不展示该控件，避免误导。
+// 新建会话入口：选择工作目录、会话模式和本机 Agent CLI。
+// 终端模式由本机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { RelayControlMessage, SessionInfo } from "@dev-anywhere/shared";
+import type { SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
@@ -43,6 +41,13 @@ const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> =
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
 const SESSION_CREATE_TIMEOUT_MS = 15_000;
+const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
+
+function extractMissingCwd(error: string): string | null {
+  if (!error.startsWith(MISSING_CWD_PREFIX)) return null;
+  const path = error.slice(MISSING_CWD_PREFIX.length).trim();
+  return path || null;
+}
 
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
@@ -51,10 +56,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [mode, setMode] = useState<SessionMode>("pty");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [submitting, setSubmitting] = useState(false);
+  const [creatingDir, setCreatingDir] = useState(false);
+  const [missingCwd, setMissingCwd] = useState<string | null>(null);
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
-  const pendingCreateUnsubRef = useRef<(() => void) | null>(null);
-  const pendingCreateTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
 
@@ -85,19 +90,23 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     return () => document.removeEventListener("pointerdown", closePickerOnOutsidePointer, true);
   }, [cwdPickerOpen]);
 
-  useEffect(() => {
-    return () => {
-      pendingCreateUnsubRef.current?.();
-      pendingCreateUnsubRef.current = null;
-      if (pendingCreateTimeoutRef.current) {
-        window.clearTimeout(pendingCreateTimeoutRef.current);
-        pendingCreateTimeoutRef.current = null;
-      }
-    };
-  }, []);
+  function resetForm() {
+    setName("");
+    setCwd("");
+    setCwdPickerOpen(false);
+    setProvider("claude");
+    setMode("pty");
+    setPermissionMode("default");
+    setMissingCwd(null);
+  }
 
   function handleSubmit() {
-    if (!cwd.trim()) {
+    submitSessionCreate();
+  }
+
+  async function submitSessionCreate(cwdOverride?: string) {
+    const targetCwd = (cwdOverride ?? cwd).trim();
+    if (!targetCwd) {
       toast.error("请输入工作目录");
       return;
     }
@@ -109,26 +118,24 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     const submittedName = name.trim();
     const submittedMode = mode;
     const submittedProvider = provider;
-    pendingCreateUnsubRef.current?.();
-    if (pendingCreateTimeoutRef.current) {
-      window.clearTimeout(pendingCreateTimeoutRef.current);
-      pendingCreateTimeoutRef.current = null;
-    }
+    setMissingCwd(null);
     setSubmitting(true);
-    const unsub = relay.onMessage((msg) => {
-      const ctrl = msg as RelayControlMessage;
-      if (ctrl.type !== "session_create_response") return;
-      unsub();
-      if (pendingCreateUnsubRef.current === unsub) {
-        pendingCreateUnsubRef.current = null;
-      }
-      if (pendingCreateTimeoutRef.current) {
-        window.clearTimeout(pendingCreateTimeoutRef.current);
-        pendingCreateTimeoutRef.current = null;
-      }
-      setSubmitting(false);
-
+    try {
+      const ctrl = await relay.createSession(
+        {
+          cwd: targetCwd,
+          mode,
+          provider,
+          ...(mode === "json" ? { permissionMode } : {}),
+        },
+        SESSION_CREATE_TIMEOUT_MS,
+      );
       if (ctrl.error || !ctrl.sessionId) {
+        const missingPath = extractMissingCwd(ctrl.error ?? "");
+        if (missingPath) {
+          setMissingCwd(missingPath);
+          return;
+        }
         toast.error(`创建失败：${ctrl.error ?? "未知错误"}`);
         return;
       }
@@ -143,31 +150,36 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       };
       useSessionStore.getState().addSession(newSession);
       onOpenChange(false);
-      setName("");
-      setCwd("");
-      setCwdPickerOpen(false);
-      setProvider("claude");
-      setMode("pty");
-      setPermissionMode("default");
+      resetForm();
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? submittedMode}`);
-    });
-    pendingCreateUnsubRef.current = unsub;
-    pendingCreateTimeoutRef.current = window.setTimeout(() => {
-      unsub();
-      if (pendingCreateUnsubRef.current === unsub) {
-        pendingCreateUnsubRef.current = null;
-      }
-      pendingCreateTimeoutRef.current = null;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
       setSubmitting(false);
-      toast.error("创建超时，请检查本机连接后重试");
-    }, SESSION_CREATE_TIMEOUT_MS);
-    relay.sendControl({
-      type: "session_create",
-      cwd: cwd.trim(),
-      mode,
-      provider,
-      ...(mode === "json" ? { permissionMode } : {}),
-    });
+    }
+  }
+
+  async function handleCreateMissingDirectory() {
+    const relay = relayClientRef;
+    if (!relay || !missingCwd) {
+      toast.error("连接尚未就绪");
+      return;
+    }
+    setCreatingDir(true);
+    try {
+      const result = await relay.createDirectory(missingCwd);
+      if (!result.success) {
+        toast.error(`目录创建失败：${result.error ?? "未知错误"}`);
+        return;
+      }
+      setCwd(result.path);
+      setMissingCwd(null);
+      submitSessionCreate(result.path);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreatingDir(false);
+    }
   }
 
   function handleModeChange(nextMode: SessionMode) {
@@ -228,7 +240,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               autoCorrect="off"
               spellCheck={false}
               value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
+              onChange={(e) => {
+                setCwd(e.target.value);
+                setMissingCwd(null);
+              }}
               placeholder="输入绝对路径"
               className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
@@ -240,11 +255,45 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 title="选择下一级目录"
                 onSelect={(path) => {
                   setCwd(path);
+                  setMissingCwd(null);
                   setCwdPickerOpen(true);
                 }}
               />
             ) : null}
           </div>
+          {missingCwd ? (
+            <section
+              role="status"
+              aria-live="polite"
+              className="flex flex-col gap-3 rounded-md border border-primary/50 bg-primary/10 p-3"
+            >
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium">这个目录还不存在</span>
+                <span className="break-all font-mono text-xs text-muted-foreground">
+                  {missingCwd}
+                </span>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setMissingCwd(null)}
+                  disabled={creatingDir || submitting}
+                >
+                  先不创建
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCreateMissingDirectory}
+                  disabled={creatingDir || submitting}
+                >
+                  {creatingDir ? "创建中..." : "创建目录并继续"}
+                </Button>
+              </div>
+            </section>
+          ) : null}
           <section aria-label="会话模式" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-sm">会话模式</span>

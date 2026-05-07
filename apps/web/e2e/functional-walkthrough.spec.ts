@@ -42,12 +42,18 @@ test.describe("functional browser walkthrough", () => {
     await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
 
-    await page.getByLabel("交互模式").getByRole("button", { name: /JSON/ }).click();
+    await page
+      .getByLabel("会话模式")
+      .getByRole("button", { name: /聊天模式/ })
+      .click();
     await expect(
       page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }),
     ).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByText("权限模式")).toBeVisible();
-    await page.getByLabel("交互模式").getByRole("button", { name: /^PTY/ }).click();
+    await page
+      .getByLabel("会话模式")
+      .getByRole("button", { name: /终端模式/ })
+      .click();
     await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
     await page.getByLabel("工作目录").fill("/Users/admin/test_go");
     await page
@@ -112,6 +118,7 @@ test.describe("functional browser walkthrough", () => {
 
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     await page.locator('[data-slot="chat-terminate-item"]').click();
+    await page.locator('[data-slot="session-termination-confirm"]').click();
     await expect(page).toHaveURL(/\/sessions/);
     await page.goto(`${page.url().split("#")[0]}#/chat/json-sess?mode=json`);
     await expect(page.locator('[data-slot="terminated-session-panel"]')).toBeVisible();
@@ -125,6 +132,7 @@ test.describe("functional browser walkthrough", () => {
 
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     await page.locator('[data-slot="chat-terminate-item"]').click();
+    await page.locator('[data-slot="session-termination-confirm"]').click();
     await expect(page).toHaveURL(/\/sessions/);
 
     await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
@@ -133,6 +141,26 @@ test.describe("functional browser walkthrough", () => {
     await expect(
       page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
     ).toHaveCount(0);
+  });
+
+  test("creating a session from a missing directory creates the directory before retrying", async ({
+    page,
+  }) => {
+    await selectFakeProxy(page);
+    await page.locator('button:has-text("新建会话"):visible').last().click();
+    await page.getByLabel("工作目录").fill("/Users/admin/new_project_e2e");
+    await page
+      .getByRole("dialog", { name: "新建会话" })
+      .getByRole("button", { name: "创建" })
+      .click();
+
+    await expect(page.getByText("这个目录还不存在")).toBeVisible();
+    await page.getByRole("button", { name: "创建目录并继续" }).click();
+
+    await expect(page).toHaveURL(/\/chat\/created-claude-pty-1\?mode=pty/);
+    const messages = await sentFakeRelayMessages(page);
+    expect(messages.some((msg) => msg.type === "dir_create_request")).toBe(true);
+    expect(messages.filter((msg) => msg.type === "session_create")).toHaveLength(2);
   });
 
   test("PTY approval state is visible immediately and survives refresh", async ({ page }) => {

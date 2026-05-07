@@ -2,7 +2,7 @@ import { WebSocket } from "ws";
 import { isClientToProxyRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
-import { parseMessage, routeClientMessage, handleReplayRequest } from "../router.js";
+import { parseMessage, routeClientMessage } from "../router.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -11,11 +11,10 @@ interface ClientSocket extends WebSocket {
   boundProxyId?: string;
 }
 
-// 处理 client_register 消息：三种状态 restored / proxy_offline / new
-// sessions 是 per-session lastSeq map，未列出的 session 视为从未收到（回放全量）
+// 处理 client_register 消息：三种状态 restored / proxy_offline / new。
+// relay 不缓存输出；恢复由 proxy 重新推送 session_list/agent_status/snapshot 等状态。
 function handleClientRegister(
   clientId: string,
-  sessions: Record<string, number> | undefined,
   clientWs: ClientSocket,
   registry: RelayRegistry,
   logger: Logger,
@@ -39,15 +38,12 @@ function handleClientRegister(
   registry.updateClientSocket(clientId, clientWs);
   clientWs.boundProxyId = proxyId;
 
-  const sessionSeqMap = registry.getSessionSeqMap(proxyId);
-
   if (!registry.isProxyOnline(proxyId)) {
     clientWs.send(
       JSON.stringify({
         type: "client_register_response",
         status: "proxy_offline",
         proxyId,
-        sessions: sessionSeqMap,
       }),
     );
     logger.info({ clientId, proxyId, status: "proxy_offline" }, "Client registered");
@@ -60,11 +56,10 @@ function handleClientRegister(
       type: "client_register_response",
       status: "restored",
       proxyId,
-      sessions: sessionSeqMap,
     }),
   );
 
-  logger.info({ clientId, proxyId, status: "restored", sessions }, "Client registered");
+  logger.info({ clientId, proxyId, status: "restored" }, "Client registered");
 }
 
 // 处理远程客户端 WebSocket 连接生命周期
@@ -98,12 +93,7 @@ export function handleClientConnection(
       );
 
       if (msg.type === "client_register") {
-        handleClientRegister(msg.clientId, msg.sessions, clientWs, registry, logger);
-        return;
-      }
-
-      if (msg.type === "replay_request") {
-        handleReplayRequest(msg.sessionId, msg.fromSeq, msg.toSeq, clientWs, registry, logger);
+        handleClientRegister(msg.clientId, clientWs, registry, logger);
         return;
       }
 
@@ -115,6 +105,7 @@ export function handleClientConnection(
         clientWs.send(
           JSON.stringify({
             type: "proxy_list_response",
+            requestId: msg.requestId,
             proxies,
           }),
         );
@@ -155,6 +146,7 @@ export function handleClientConnection(
           clientWs.send(
             JSON.stringify({
               type: "proxy_select_response",
+              requestId: msg.requestId,
               success: false,
               error: `Proxy not online: ${msg.proxyId}`,
             }),
@@ -170,6 +162,7 @@ export function handleClientConnection(
           clientWs.send(
             JSON.stringify({
               type: "proxy_select_response",
+              requestId: msg.requestId,
               success: false,
               error: `Proxy not online: ${msg.proxyId}`,
             }),
@@ -180,6 +173,7 @@ export function handleClientConnection(
         clientWs.send(
           JSON.stringify({
             type: "proxy_select_response",
+            requestId: msg.requestId,
             success: true,
             proxyId: msg.proxyId,
           }),

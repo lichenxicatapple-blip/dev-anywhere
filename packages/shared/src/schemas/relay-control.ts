@@ -33,6 +33,7 @@ export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
+const RequestIdShape = { requestId: z.string().min(1).optional() };
 
 type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
   type: T;
@@ -74,14 +75,15 @@ const relayControlDefinitions = [
   }),
   control("proxy_register_response", {
     status: z.enum(["new", "reconnected"]),
-    sessions: z.record(z.string(), z.number()).optional(),
   }),
-  control("proxy_list_request"),
+  control("proxy_list_request", RequestIdShape),
   control("proxy_list_response", {
+    ...RequestIdShape,
     proxies: z.array(ProxyInfoSchema),
   }),
-  control("proxy_select", { proxyId: z.string().min(1) }),
+  control("proxy_select", { ...RequestIdShape, proxyId: z.string().min(1) }),
   control("proxy_select_response", {
+    ...RequestIdShape,
     success: z.boolean(),
     proxyId: z.string().optional(),
     error: z.string().optional(),
@@ -94,35 +96,10 @@ const relayControlDefinitions = [
   // 客户端注册协议
   control("client_register", {
     clientId: z.string().min(1),
-    // per-session lastSeq，与 proxy_register_response.sessions 对称
-    // key=sessionId, value=该 session 客户端已收到的最大 seq
-    // 未列出的 session 视为从未收到，回放全量
-    sessions: z.record(z.string(), z.number()).optional(),
   }),
   control("client_register_response", {
     status: z.enum(["restored", "proxy_offline", "new"]),
     proxyId: z.string().optional(),
-    // per-session 最新 seq，client 可用于进度感知和自检
-    sessions: z.record(z.string(), z.number()).optional(),
-  }),
-
-  // 消息回放协议
-  control("replay_request", {
-    sessionId: z.string().min(1),
-    fromSeq: z.number().int().nonnegative(),
-    // 不传则同步到该 session 的最新消息
-    toSeq: z.number().int().nonnegative().optional(),
-  }),
-  control("replay_response", {
-    sessionId: z.string().min(1),
-    messages: z.array(z.record(z.string(), z.unknown())),
-  }),
-
-  // Gap 检测响应
-  control("gap_unrecoverable", {
-    sessionId: z.string().min(1),
-    fromSeq: z.number().int().nonnegative(),
-    toSeq: z.number().int().nonnegative(),
   }),
 
   // Proxy 离线通知
@@ -145,21 +122,22 @@ const relayControlDefinitions = [
     "dir_list_request",
     {
       proxyId: z.string().min(1).optional(),
+      ...RequestIdShape,
       path: z.string(),
     },
     "client_to_proxy",
   ),
   control(
     "dir_list_response",
-    { entries: z.array(DirEntrySchema), path: z.string() },
+    { ...RequestIdShape, entries: z.array(DirEntrySchema), path: z.string() },
     "proxy_to_client",
   ),
 
   // 目录创建请求与响应
-  control("dir_create_request", { path: z.string() }, "client_to_proxy"),
+  control("dir_create_request", { ...RequestIdShape, path: z.string() }, "client_to_proxy"),
   control(
     "dir_create_response",
-    { path: z.string(), success: z.boolean(), error: z.string().optional() },
+    { ...RequestIdShape, path: z.string(), success: z.boolean(), error: z.string().optional() },
     "proxy_to_client",
   ),
 
@@ -266,6 +244,7 @@ const relayControlDefinitions = [
   control(
     "session_create",
     {
+      ...RequestIdShape,
       cwd: z.string(),
       provider: z.enum(["claude", "codex"]),
       mode: z.enum(["json", "pty"]).optional(),
@@ -280,6 +259,7 @@ const relayControlDefinitions = [
   control(
     "session_create_response",
     {
+      ...RequestIdShape,
       sessionId: z.string(),
       mode: z.enum(["json", "pty"]).optional(),
       provider: z.enum(["claude", "codex"]).optional(),
