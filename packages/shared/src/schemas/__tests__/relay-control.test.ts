@@ -111,6 +111,20 @@ describe("RelayControlSchema", () => {
     });
   });
 
+  it("parses turn_result with optional result fallback text", () => {
+    const result = RelayControlSchema.parse({
+      type: "turn_result",
+      sessionId: "sess-json",
+      success: true,
+      isError: false,
+      result: "OK",
+    });
+    expect(result.type).toBe("turn_result");
+    if (result.type === "turn_result") {
+      expect(result.result).toBe("OK");
+    }
+  });
+
   it("rejects terminal_frame (removed from schema)", () => {
     expect(() =>
       RelayControlSchema.parse({

@@ -1,7 +1,8 @@
-import { SessionState } from "@dev-anywhere/shared";
+import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
 
 interface JsonObserverDeps {
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
+  emitAgentStatus?: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
 }
 
 // JSON 观察通道：把 worker 转发的 stream-json 事件翻译成 SessionState。
@@ -14,16 +15,19 @@ export class JsonObserver {
   // 用户消息注入 worker（relay-router 收到 user_input）→ 进入 WORKING
   onTurnStart(sessionId: string): void {
     this.deps.changeSessionState(sessionId, SessionState.WORKING);
+    this.deps.emitAgentStatus?.(sessionId, "thinking");
   }
 
   // stream-json result event 到达 → turn 结束回 IDLE
   onTurnResult(sessionId: string): void {
     this.deps.changeSessionState(sessionId, SessionState.IDLE);
+    this.deps.emitAgentStatus?.(sessionId, "idle");
   }
 
   // control_request event 到达 → worker 阻塞等审批
   onApprovalRequested(sessionId: string): void {
     this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
+    this.deps.emitAgentStatus?.(sessionId, "waiting_permission");
   }
 
   // 观察通道失联 → ERROR，待人工干预或后续 terminate

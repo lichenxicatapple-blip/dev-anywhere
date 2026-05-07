@@ -1,14 +1,23 @@
-import { render, waitFor } from "@testing-library/react";
+import { act } from "react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { sendControl } = vi.hoisted(() => ({
+const { sendControl, onMessage, toastError } = vi.hoisted(() => ({
   sendControl: vi.fn(),
+  onMessage: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { sendControl },
+  relayClientRef: { sendControl, onMessage },
   wsManagerRef: null,
+}));
+
+vi.mock("@/components/toast", () => ({
+  toast: {
+    error: toastError,
+  },
 }));
 
 import { useFileStore } from "@/stores/file-store";
@@ -28,6 +37,9 @@ function renderDialog() {
 describe("CreateSessionDialog", () => {
   beforeEach(() => {
     sendControl.mockClear();
+    onMessage.mockReset();
+    onMessage.mockReturnValue(vi.fn());
+    toastError.mockClear();
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
@@ -56,5 +68,34 @@ describe("CreateSessionDialog", () => {
       expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/Users/admin");
     });
     expect(sendControl).not.toHaveBeenCalledWith({ type: "proxy_info_request" });
+  });
+
+  it("unblocks the create button when session_create_response never arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const unsubscribe = vi.fn();
+      onMessage.mockReturnValue(unsubscribe);
+      useFileStore.setState({
+        tree: new Map(),
+        cwd: "",
+        homePath: "/Users/admin",
+      });
+
+      const { getByRole } = renderDialog();
+      const createButton = getByRole("button", { name: "创建" });
+
+      fireEvent.click(createButton);
+      expect((getByRole("button", { name: "创建中..." }) as HTMLButtonElement).disabled).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(15_000);
+      });
+
+      expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(unsubscribe).toHaveBeenCalled();
+      expect(toastError).toHaveBeenCalledWith("创建失败: 请求超时，请检查本地 proxy 日志后重试");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

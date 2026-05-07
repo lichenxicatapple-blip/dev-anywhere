@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { SessionState } from "@dev-anywhere/shared";
+import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
@@ -19,6 +19,8 @@ function createRouter(options: {
   terminalWrite?: ReturnType<typeof vi.fn>;
   hostedWrite?: ReturnType<typeof vi.fn>;
   jsonTurnStart?: ReturnType<typeof vi.fn>;
+  relaySend?: (data: string) => void;
+  workerSpawn?: () => number;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -44,12 +46,13 @@ function createRouter(options: {
     } as never,
     workerRegistry: {
       send: options.workerSend ?? vi.fn(),
+      spawn: options.workerSpawn ?? vi.fn(),
     } as unknown as WorkerRegistry,
     controlHandlers: {} as never,
     relayConnection: Object.assign(new EventEmitter(), {
       sendRaw: () => {},
     }) as unknown as RelayConnection,
-    relaySend: () => {},
+    relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
     hostedPtyRegistry: {
       write: options.hostedWrite ?? vi.fn(() => false),
@@ -95,6 +98,32 @@ describe("RelayRouter input routing", () => {
       content: "hello",
     });
     expect(terminalWrite).not.toHaveBeenCalled();
+  });
+
+  it("rejects session_create immediately when cwd does not exist", () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+    });
+
+    router.handle({
+      type: "session_create",
+      cwd: "/Users/admin/path-that-should-not-exist-dev-anywhere-test",
+      provider: "claude",
+      mode: "json",
+    });
+
+    expect(workerSpawn).not.toHaveBeenCalled();
+    expect(relaySend).toHaveBeenCalledTimes(1);
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg.type).toBe("session_create_response");
+    if (msg.type === "session_create_response") {
+      expect(msg.sessionId).toBe("");
+      expect(msg.error).toContain("工作目录不存在或不可访问");
+    }
   });
 
   it("drops batch user_input for PTY sessions", () => {

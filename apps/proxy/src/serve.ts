@@ -2,7 +2,7 @@ import { createServer, connect, type Socket } from "node:net";
 import { hostname } from "node:os";
 import { execSync } from "node:child_process";
 import { unlinkSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
-import { SessionState, buildMessage } from "@dev-anywhere/shared";
+import { SessionState, buildMessage, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
@@ -25,6 +25,7 @@ import type { ProviderHookContext } from "./providers/index.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
 import { shouldPromotePtyActivityToWorking } from "./serve/pty-state-guard.js";
 import { terminateSessionByOwnership } from "./serve/session-termination.js";
+import { SeqCounter } from "./common/seq-counter.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -617,7 +618,22 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
   const observerChangeState = (sessionId: string, next: SessionState): boolean =>
     changeSessionState(sessionManager, relayConnection, sessionId, next);
-  const jsonObserver = new JsonObserver({ changeSessionState: observerChangeState });
+  const emitJsonAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
+    const session = sessionManager.getSession(sessionId);
+    if (!session) return;
+    const payload: AgentStatusPayload = {
+      provider: session.provider,
+      phase,
+      seq: new SeqCounter(sessionId).next(),
+      updatedAt: Date.now(),
+    };
+    agentStatusRegistry.set(sessionId, payload);
+    relayConnection.sendRaw(JSON.stringify({ type: "agent_status", sessionId, payload }));
+  };
+  const jsonObserver = new JsonObserver({
+    changeSessionState: observerChangeState,
+    emitAgentStatus: emitJsonAgentStatus,
+  });
   const hookEventRouter = new HookEventRouter({
     relayConnection,
     agentStatusRegistry,

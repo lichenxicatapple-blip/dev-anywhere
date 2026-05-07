@@ -43,6 +43,7 @@ const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> =
   { value: "plan", label: "只读规划" },
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
+const SESSION_CREATE_TIMEOUT_MS = 15_000;
 
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
@@ -54,6 +55,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
   const pendingCreateUnsubRef = useRef<(() => void) | null>(null);
+  const pendingCreateTimeoutRef = useRef<number | null>(null);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
 
@@ -88,6 +90,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     return () => {
       pendingCreateUnsubRef.current?.();
       pendingCreateUnsubRef.current = null;
+      if (pendingCreateTimeoutRef.current) {
+        window.clearTimeout(pendingCreateTimeoutRef.current);
+        pendingCreateTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -105,6 +111,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     const submittedMode = mode;
     const submittedProvider = provider;
     pendingCreateUnsubRef.current?.();
+    if (pendingCreateTimeoutRef.current) {
+      window.clearTimeout(pendingCreateTimeoutRef.current);
+      pendingCreateTimeoutRef.current = null;
+    }
     setSubmitting(true);
     const unsub = relay.onMessage((msg) => {
       const ctrl = msg as RelayControlMessage;
@@ -112,6 +122,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       unsub();
       if (pendingCreateUnsubRef.current === unsub) {
         pendingCreateUnsubRef.current = null;
+      }
+      if (pendingCreateTimeoutRef.current) {
+        window.clearTimeout(pendingCreateTimeoutRef.current);
+        pendingCreateTimeoutRef.current = null;
       }
       setSubmitting(false);
 
@@ -139,6 +153,15 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? submittedMode}`);
     });
     pendingCreateUnsubRef.current = unsub;
+    pendingCreateTimeoutRef.current = window.setTimeout(() => {
+      unsub();
+      if (pendingCreateUnsubRef.current === unsub) {
+        pendingCreateUnsubRef.current = null;
+      }
+      pendingCreateTimeoutRef.current = null;
+      setSubmitting(false);
+      toast.error("创建失败: 请求超时，请检查本地 proxy 日志后重试");
+    }, SESSION_CREATE_TIMEOUT_MS);
     relay.sendControl({
       type: "session_create",
       cwd: cwd.trim(),
@@ -310,13 +333,13 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             </div>
           </section>
           {mode === "json" ? (
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-2">
               <span className="text-sm">权限模式</span>
               <Select
                 value={permissionMode}
                 onValueChange={(value) => setPermissionMode(value as PermissionMode)}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

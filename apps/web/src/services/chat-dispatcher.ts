@@ -49,6 +49,11 @@ function handleToolResult(env: Extract<MessageEnvelope, { type: "tool_result" }>
   store.updateApprovalStatus(env.sessionId, env.payload.toolId, "approved");
 }
 
+function handleAssistantToolUse(env: Extract<MessageEnvelope, { type: "assistant_tool_use" }>) {
+  // 非审批型工具调用只承载“正在用哪个工具”的语义。审批型工具仍走 tool_use_request。
+  useChatStore.getState().setWorkingTool(env.sessionId, env.payload.toolName);
+}
+
 function handlePendingApprovalsPush(
   msg: Extract<RelayControlMessage, { type: "pending_approvals_push" }>,
   relay: Pick<RelayClient, "sendControl"> | null,
@@ -95,6 +100,16 @@ function handleSessionHistoryMessages(
 
 function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result" }>) {
   const store = useChatStore.getState();
+  const resultText = typeof msg.result === "string" ? msg.result : "";
+  if (resultText.trim()) {
+    const slice = store.bySessionId[msg.sessionId];
+    const last = slice?.messages[slice.messages.length - 1];
+    const lastAssistantHasText =
+      last?.role === "assistant" && last.text.trim().length > 0 && last.isPartial;
+    if (!lastAssistantHasText) {
+      store.appendAssistantText(msg.sessionId, resultText);
+    }
+  }
   store.markTurnComplete(msg.sessionId);
 }
 
@@ -124,6 +139,9 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         break;
       case "tool_result":
         handleToolResult(msg);
+        break;
+      case "assistant_tool_use":
+        handleAssistantToolUse(msg);
         break;
       case "thinking":
         // thinking envelope 携带模型思考文本, 当前 UI 暂不展示, 后续可接入 workingToolName 指示

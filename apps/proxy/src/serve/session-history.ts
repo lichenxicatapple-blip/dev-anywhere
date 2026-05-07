@@ -157,13 +157,13 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
           const obj = JSON.parse(line);
           if (obj.type === "user") {
             if (obj.isMeta) return;
-            const text = extractMessageText(obj.message);
+            const text = extractConversationText(obj.message);
             if (!text) return;
             const ts =
               typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
             messages.push({ role: "user", text, timestamp: ts });
           } else if (obj.type === "assistant") {
-            const text = extractMessageText(obj.message);
+            const text = extractConversationText(obj.message);
             const ts =
               typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
             if (text) messages.push({ role: "assistant", text, timestamp: ts });
@@ -254,6 +254,49 @@ function extractMessageText(msg: unknown): string | null {
       .map((b: { text: string }) => b.text);
     const joined = texts.join("\n").trim();
     return normalizeHistoryTitle(joined);
+  }
+
+  return null;
+}
+
+function normalizeConversationText(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+// 对话正文恢复必须保留换行和 Markdown 结构；不能复用标题归一化逻辑。
+function extractConversationText(msg: unknown): string | null {
+  if (typeof msg === "string") {
+    const cmd = extractSlashCommand(msg);
+    if (cmd) return cmd;
+    return normalizeConversationText(msg);
+  }
+
+  if (msg && typeof msg === "object" && "content" in msg) {
+    const content = (msg as { content: unknown }).content;
+    if (typeof content === "string") {
+      const cmd = extractSlashCommand(content);
+      if (cmd) return cmd;
+      return normalizeConversationText(content);
+    }
+    if (Array.isArray(content)) {
+      const texts = content
+        .filter(
+          (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
+        )
+        .map((b: { text: string }) => b.text);
+      return normalizeConversationText(texts.join("\n"));
+    }
+  }
+
+  if (Array.isArray(msg)) {
+    const texts = msg
+      .filter(
+        (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
+      )
+      .map((b: { text: string }) => b.text);
+    return normalizeConversationText(texts.join("\n"));
   }
 
   return null;

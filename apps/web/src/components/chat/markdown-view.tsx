@@ -5,9 +5,11 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { memo, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 interface MarkdownViewProps {
   text: string;
+  tone?: "default" | "on-primary";
 }
 
 // 代码块: 与表格同策略, 外包 not-prose + overflow-x-auto 容器承担滚动
@@ -22,9 +24,17 @@ function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   );
 }
 
-export const MarkdownView = memo(function MarkdownView({ text }: MarkdownViewProps) {
+export const MarkdownView = memo(function MarkdownView({
+  text,
+  tone = "default",
+}: MarkdownViewProps) {
   return (
-    <div className="prose prose-invert prose-sm max-w-none">
+    <div
+      className={cn(
+        "prose prose-invert prose-sm max-w-none",
+        tone === "on-primary" && "cc-markdown-on-primary",
+      )}
+    >
       <Markdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}

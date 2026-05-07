@@ -114,7 +114,7 @@ export class WorkerRegistry {
     }
     args.push("--");
 
-    const child = spawnScript(new URL("./session-worker", import.meta.url), args, {
+    const child = spawnScript(new URL("../session-worker", import.meta.url), args, {
       logger: serviceLogger,
       env: options?.hook
         ? { ...process.env, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }
@@ -366,12 +366,14 @@ export class WorkerRegistry {
     }
 
     if (ev.type === "result") {
+      const resultText = typeof ev.result === "string" ? ev.result : undefined;
       relay.sendRaw(
         JSON.stringify({
           type: "turn_result",
           sessionId,
           success: ev.subtype === "success",
           isError: ev.is_error ?? false,
+          ...(resultText ? { result: resultText } : {}),
         }),
       );
       this.deps.jsonObserver.onTurnResult(sessionId);

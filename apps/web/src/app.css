@@ -140,11 +140,20 @@ code.hljs,
   accent-color: var(--primary);
 }
 
-/* 三组可能的 scrollbar 都要隐:
-   1. 外层 pty-terminal 的 overflow-auto: scrollbar-width + ::-webkit-scrollbar
-   2. xterm 内部 .xterm-viewport overflow-y:scroll 的空轨道: 同上
-   3. xterm 自己用 div 画的 monaco-style 花式 scrollbar (.scrollbar + .slider):
-      CSS 隐藏层级规则对它无效, 直接 display:none 这组 div */
+/* 用户气泡在 primary 背景上，不能沿用 prose-invert 的浅色正文，否则对比度不足。 */
+.cc-markdown-on-primary {
+  --tw-prose-invert-body: var(--primary-foreground);
+  --tw-prose-invert-headings: var(--primary-foreground);
+  --tw-prose-invert-lead: var(--primary-foreground);
+  --tw-prose-invert-links: var(--primary-foreground);
+  --tw-prose-invert-bold: var(--primary-foreground);
+  --tw-prose-invert-counters: var(--primary-foreground);
+  --tw-prose-invert-bullets: var(--primary-foreground);
+  --tw-prose-invert-quotes: var(--primary-foreground);
+  --tw-prose-invert-code: var(--primary-foreground);
+}
+
+/* PTY 只展示自研滚动条，隐藏宿主容器、xterm viewport 和 xterm 自带滚动条。 */
 [data-slot="pty-terminal"],
 [data-slot="pty-terminal"] .xterm-viewport {
   scrollbar-width: none;

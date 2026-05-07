@@ -19,7 +19,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: MessageBub
     return (
       <article data-slot="message-bubble" data-role="user" className="flex justify-end px-4 py-2">
         <div className="max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm">
-          <MarkdownView text={message.text} />
+          <MarkdownView text={message.text} tone="on-primary" />
         </div>
       </article>
     );

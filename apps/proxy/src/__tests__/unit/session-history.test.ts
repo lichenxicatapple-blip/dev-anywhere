@@ -3,7 +3,11 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { normalizeHistoryTitle, scanSessionHistory } from "#src/serve/session-history.js";
+import {
+  normalizeHistoryTitle,
+  readSessionMessages,
+  scanSessionHistory,
+} from "#src/serve/session-history.js";
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 实际结构: ~/.claude/projects/<encoded-path>/<session-id>.jsonl
@@ -415,5 +419,58 @@ describe("normalizeHistoryTitle", () => {
     expect(normalizeHistoryTitle("The following is the Codex agent history so far...")).toBeNull();
     expect(normalizeHistoryTitle("/compact")).toBeNull();
     expect(normalizeHistoryTitle("/gsd-progress 2")).toBe("/gsd-progress 2");
+  });
+});
+
+describe("readSessionMessages", () => {
+  let testDir: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `session-messages-test-${randomUUID()}`);
+    mkdirSync(testDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = testDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    try {
+      rmSync(testDir, { recursive: true, force: true });
+    } catch {
+      // 清理阶段安全忽略
+    }
+  });
+
+  it("preserves markdown newlines when restoring conversation messages", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "session-md.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          message: { role: "user", content: "用表格展示下 rust 和 go 之间的区别!" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "| 维度 | Rust | Go |\n|---|---|---|\n| 内存 | 所有权 | GC |",
+              },
+            ],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const messages = await readSessionMessages("session-md");
+    expect(messages[1]).toMatchObject({
+      role: "assistant",
+      text: "| 维度 | Rust | Go |\n|---|---|---|\n| 内存 | 所有权 | GC |",
+    });
   });
 });

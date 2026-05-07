@@ -1,5 +1,7 @@
+import { statSync } from "node:fs";
 import type { Socket } from "node:net";
 import { homedir } from "node:os";
+import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
 import { SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
@@ -39,6 +41,18 @@ interface RelayRouterDeps {
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   agentStatusRegistry: AgentStatusRegistry;
+}
+
+function validateSessionCwd(cwd: unknown): string | null {
+  if (typeof cwd !== "string" || !cwd.trim()) return "请输入工作目录";
+  const trimmed = cwd.trim();
+  if (!isAbsolute(trimmed)) return "工作目录必须是绝对路径";
+  try {
+    const stat = statSync(trimmed);
+    return stat.isDirectory() ? null : "工作目录不是目录";
+  } catch {
+    return `工作目录不存在或不可访问: ${trimmed}`;
+  }
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -284,12 +298,24 @@ export class RelayRouter {
 
   private onSessionCreate(msg: Record<string, unknown>): void {
     const cwd = msg.cwd as string | undefined;
-    if (!cwd) return;
+    const cwdError = validateSessionCwd(cwd);
+    if (cwdError) {
+      this.deps.relaySend(
+        JSON.stringify({
+          type: "session_create_response",
+          sessionId: "",
+          error: cwdError,
+        }),
+      );
+      serviceLogger.warn({ cwd }, "Session create rejected: invalid cwd");
+      return;
+    }
+    const sessionCwd = typeof cwd === "string" ? cwd.trim() : "";
 
     const provider = msg.provider as ProviderId | undefined;
     const mode = (msg.mode as "json" | "pty" | undefined) ?? "json";
     if (mode === "pty") {
-      this.createHostedPtySession(msg, cwd, provider ?? "claude");
+      this.createHostedPtySession(msg, sessionCwd, provider ?? "claude");
       return;
     }
 
@@ -312,12 +338,12 @@ export class RelayRouter {
     const permissionMode = msg.permissionMode as string | undefined;
     // streamDelta 来自 client 端系统设置 toggle（SessionCreatePayloadSchema 的 streamDelta）
     const streamDelta = msg.streamDelta === true;
-    const name = tildify(cwd);
+    const name = tildify(sessionCwd);
     // 先生成 ID 和启动 worker，连接成功后再注册 session
     const pendingId = nanoid();
     const hook = this.deps.createHookContext(pendingId, provider);
     const workerPid = this.deps.workerRegistry.spawn(pendingId, {
-      cwd,
+      cwd: sessionCwd,
       resumeSessionId,
       permissionMode,
       streamDelta,
@@ -334,7 +360,7 @@ export class RelayRouter {
           // worker 连接成功，正式注册 session
           const session = this.deps.sessionManager.createSession(
             "json",
-            cwd,
+            sessionCwd,
             workerPid,
             name,
             pendingId,
@@ -349,8 +375,11 @@ export class RelayRouter {
           if (resumeSessionId) {
             this.pushHistoryMessages(session.id, resumeSessionId);
           }
-          serviceLogger.info({ sessionId: session.id, cwd }, "JSON session created via relay");
-          this.deps.controlHandlers.pushCommandList(session.id, cwd);
+          serviceLogger.info(
+            { sessionId: session.id, cwd: sessionCwd },
+            "JSON session created via relay",
+          );
+          this.deps.controlHandlers.pushCommandList(session.id, sessionCwd);
           this.deps.broadcastSessionSync(session);
           this.deps.broadcastSessionList();
         } else if (attempt < maxRetries) {

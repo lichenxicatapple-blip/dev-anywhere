@@ -239,7 +239,14 @@ const relayControlDefinitions = [
   // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件
   control(
     "turn_result",
-    { sessionId: z.string(), success: z.boolean(), isError: z.boolean() },
+    {
+      sessionId: z.string(),
+      success: z.boolean(),
+      isError: z.boolean(),
+      // stream-json result.result 是本轮最终文本。assistant_message 流丢失或 CLI 未发增量时，
+      // Web 用它作为 JSON 模式兜底展示，避免 turn 已结束但界面空白。
+      result: z.string().optional(),
+    },
     "proxy_to_client",
   ),
 

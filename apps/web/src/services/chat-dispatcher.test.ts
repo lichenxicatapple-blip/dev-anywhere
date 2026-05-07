@@ -70,4 +70,50 @@ describe("chat-dispatcher permission flow", () => {
 
     expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0].status).toBe("pending");
   });
+
+  it("uses turn_result.result as JSON fallback when no assistant message arrived", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: true,
+      isError: false,
+      result: "OK",
+    } as RelayControlMessage);
+
+    const messages = useChatStore.getState().bySessionId.s1.messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      text: "OK",
+      isPartial: false,
+    });
+  });
+
+  it("does not duplicate turn_result.result after streamed assistant text", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle(
+      envelope({
+        type: "assistant_message",
+        payload: { text: "OK", isPartial: true },
+      }),
+    );
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: true,
+      isError: false,
+      result: "OK",
+    } as RelayControlMessage);
+
+    const messages = useChatStore.getState().bySessionId.s1.messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "assistant",
+      text: "OK",
+      isPartial: false,
+    });
+  });
 });
