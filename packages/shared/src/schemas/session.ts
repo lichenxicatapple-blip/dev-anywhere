@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
 const providerValues = ["claude", "codex"] as const;
+const ptyOwnerValues = ["local-terminal", "proxy-hosted"] as const;
 const agentStatusPhaseValues = [
   "idle",
   "thinking",
@@ -19,6 +20,10 @@ export const SessionInfoSchema = z.object({
   state: z.enum(sessionStateValues),
   mode: z.enum(["pty", "json"]).optional(),
   provider: z.enum(providerValues),
+  // PTY 尺寸所有权:
+  // - local-terminal: 本地 terminal 进程持有真实 PTY，Web 只按原始 cols/rows 展示
+  // - proxy-hosted: serve 内托管 PTY，Web 可按视口请求 resize
+  ptyOwner: z.enum(ptyOwnerValues).optional(),
   lastActive: z.number().optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;

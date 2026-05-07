@@ -269,6 +269,7 @@ export function createControlMessageHandlers(
               id: s.id,
               mode: s.mode,
               provider: s.provider,
+              ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
               state: s.state,
             })),
           }),

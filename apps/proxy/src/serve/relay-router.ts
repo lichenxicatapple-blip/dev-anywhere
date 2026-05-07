@@ -404,6 +404,7 @@ export class RelayRouter {
         name,
         pendingId,
         provider,
+        "proxy-hosted",
       );
       if (resumeSessionId && provider === "claude") {
         this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
@@ -414,6 +415,7 @@ export class RelayRouter {
           sessionId: session.id,
           mode: "pty",
           provider,
+          ptyOwner: "proxy-hosted",
         }),
       );
       this.deps.controlHandlers.pushCommandList(session.id, cwd);

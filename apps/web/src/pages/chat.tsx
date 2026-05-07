@@ -86,7 +86,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         {routeSessionEnded ? (
           <TerminatedSessionPanel mode={mode} />
         ) : mode === "pty" ? (
-          <ChatPtyView sessionId={id} />
+          <ChatPtyView sessionId={id} ptyOwner={session?.ptyOwner} />
         ) : (
           <ChatJsonView sessionId={id} />
         )}

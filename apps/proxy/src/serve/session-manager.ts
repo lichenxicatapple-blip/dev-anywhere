@@ -10,6 +10,7 @@ export interface SessionInfo {
   id: string;
   mode: "pty" | "json";
   provider: ProviderId;
+  ptyOwner?: "local-terminal" | "proxy-hosted";
   state: SessionState;
   createdAt: number;
   updatedAt: number;
@@ -133,12 +134,14 @@ export class SessionManager {
     name?: string,
     id?: string,
     provider: ProviderId = "claude",
+    ptyOwner?: "local-terminal" | "proxy-hosted",
   ): SessionInfo {
     const now = Date.now();
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
       provider,
+      ...(mode === "pty" && ptyOwner !== undefined ? { ptyOwner } : {}),
       state: SessionState.IDLE,
       createdAt: now,
       updatedAt: now,
@@ -148,7 +151,7 @@ export class SessionManager {
     };
     this.sessions.set(info.id, info);
     this.save();
-    serviceLogger.info({ sessionId: info.id, mode, provider, name }, "Session created");
+    serviceLogger.info({ sessionId: info.id, mode, provider, ptyOwner, name }, "Session created");
     return info;
   }
 

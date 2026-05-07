@@ -62,6 +62,30 @@ describe("SessionManager", () => {
       expect(info.provider).toBe("codex");
     });
 
+    it("stores PTY owner only for PTY sessions", () => {
+      const pty = manager.createSession(
+        "pty",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "claude",
+        "local-terminal",
+      );
+      const json = manager.createSession(
+        "json",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "claude",
+        "proxy-hosted",
+      );
+
+      expect(pty.ptyOwner).toBe("local-terminal");
+      expect(json.ptyOwner).toBeUndefined();
+    });
+
     it("generates unique IDs for each session", () => {
       const s1 = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);

@@ -119,6 +119,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         state: "idle",
         mode: ctrl.mode ?? submittedMode,
         provider: ctrl.provider ?? submittedProvider,
+        ptyOwner: ctrl.ptyOwner,
       };
       useSessionStore.getState().addSession(newSession);
       onOpenChange(false);

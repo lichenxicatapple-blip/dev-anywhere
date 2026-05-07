@@ -10,13 +10,21 @@ describe("SessionListPayloadSchema", () => {
   it("accepts valid session list", () => {
     const result = SessionListPayloadSchema.parse({
       sessions: [
-        { sessionId: "s1", name: "sess1", state: "idle", provider: "claude" },
+        {
+          sessionId: "s1",
+          name: "sess1",
+          state: "idle",
+          provider: "claude",
+          mode: "pty",
+          ptyOwner: "local-terminal",
+        },
         { sessionId: "s2", state: "working", provider: "codex" },
       ],
     });
     expect(result.sessions).toHaveLength(2);
     expect(result.sessions[0].name).toBe("sess1");
     expect(result.sessions[0].provider).toBe("claude");
+    expect(result.sessions[0].ptyOwner).toBe("local-terminal");
     expect(result.sessions[1].provider).toBe("codex");
     expect(result.sessions[1].name).toBeUndefined();
   });

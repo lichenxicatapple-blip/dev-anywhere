@@ -31,6 +31,7 @@ function toSessionListPayload(s: SessionInfo) {
     sessionId: s.id,
     mode: s.mode,
     provider: s.provider,
+    ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
     state: s.state,
     lastActive: s.updatedAt,
     ...(s.name !== undefined ? { name: s.name } : {}),
@@ -81,7 +82,13 @@ function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): voi
     JSON.stringify({
       type: "session_sync",
       sessions: [
-        { id: session.id, mode: session.mode, provider: session.provider, state: session.state },
+        {
+          id: session.id,
+          mode: session.mode,
+          provider: session.provider,
+          ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
+          state: session.state,
+        },
       ],
     }),
   );
@@ -189,6 +196,7 @@ function handleTerminalConnection(
               msg.name,
               msg.sessionId,
               provider,
+              "local-terminal",
             );
           if (existing) {
             sessionManager.setPid(session.id, msg.pid);

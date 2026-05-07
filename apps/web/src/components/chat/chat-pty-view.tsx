@@ -32,9 +32,10 @@ import { usePtyFollowState } from "./use-pty-follow-state";
 
 interface ChatPtyViewProps {
   sessionId: string;
+  ptyOwner?: "local-terminal" | "proxy-hosted";
 }
 
-export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
+export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
@@ -59,6 +60,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
+  const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     const host = xtermHostRef.current;
@@ -156,7 +158,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
   }, [connection.ready, ptyAutoscale, containerEl]);
 
   useEffect(() => {
-    if (!connection.ready) return;
+    if (!connection.ready || !webOwnsPtyGeometry) return;
     const container = containerEl;
     const term = terminalRef.current;
     const relay = relayClientRef;
@@ -171,7 +173,7 @@ export function ChatPtyView({ sessionId }: ChatPtyViewProps) {
       onRelayout: () => relayoutPtyRef.current(),
     });
     return () => controller.dispose();
-  }, [connection.ready, ptyAutoscale, containerEl, sessionId]);
+  }, [connection.ready, webOwnsPtyGeometry, ptyAutoscale, containerEl, sessionId]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
