@@ -8,6 +8,7 @@ import { healthRouter } from "./health.js";
 import { handleProxyConnection } from "./handlers/proxy.js";
 import { handleClientConnection } from "./handlers/client.js";
 import { setupHeartbeat } from "./heartbeat.js";
+import { createRelayChaos, type RelayChaosOptions } from "./chaos.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -18,6 +19,7 @@ export interface RelayServerOptions {
   proxyToken?: string;
   // client 连接预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
   clientToken?: string;
+  chaos?: RelayChaosOptions;
 }
 
 export interface RelayServer {
@@ -28,7 +30,7 @@ export interface RelayServer {
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
-  const { heartbeatInterval = 30000, logger, dataDir, proxyToken, clientToken } = options;
+  const { heartbeatInterval = 30000, logger, dataDir, proxyToken, clientToken, chaos } = options;
   const proxyTokenRequired = typeof proxyToken === "string" && proxyToken.length > 0;
   const clientTokenRequired = typeof clientToken === "string" && clientToken.length > 0;
   if (!proxyTokenRequired) {
@@ -43,6 +45,18 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
 
   const registry = new RelayRegistry();
+  const relayChaos = chaos?.enabled ? createRelayChaos(chaos, logger) : undefined;
+  if (chaos?.enabled) {
+    logger.warn(
+      {
+        delayMs: chaos.delayMs,
+        duplicate: chaos.duplicate,
+        reorder: chaos.reorder,
+        types: chaos.types ? [...chaos.types] : "all",
+      },
+      "Relay chaos mode enabled",
+    );
+  }
   const app = express();
 
   // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.dev-anywhere/relay-data/fonts 提供
@@ -113,11 +127,11 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   proxyWss.on("connection", (ws) => {
-    handleProxyConnection(ws, registry, logger);
+    handleProxyConnection(ws, registry, logger, relayChaos);
   });
 
   clientWss.on("connection", (ws) => {
-    handleClientConnection(ws, registry, logger);
+    handleClientConnection(ws, registry, logger, relayChaos);
   });
 
   const proxyHeartbeat = setupHeartbeat(proxyWss, heartbeatInterval);

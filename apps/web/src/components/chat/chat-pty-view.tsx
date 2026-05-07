@@ -25,6 +25,7 @@ import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
+import { registerPtySerializer } from "@/test-hooks";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
@@ -92,6 +93,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       attachRawInput: attachXtermRawInput,
       onTerminalReady: (term) => {
         terminalRef.current = term as Terminal;
+        registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
       },
       onFrameWritten: () => {
         pendingNewFrameRef.current = true;
@@ -107,6 +109,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
 
     return () => {
       controller.dispose();
+      registerPtySerializer(sessionId, null);
       terminalRef.current = null;
     };
   }, [
@@ -234,4 +237,13 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       <PtyConnectionOverlay {...connection.overlay} />
     </div>
   );
+}
+
+function serializeTerminalBuffer(term: Terminal): string {
+  const activeBuffer = term.buffer.active;
+  const lines: string[] = [];
+  for (let i = 0; i < activeBuffer.length; i += 1) {
+    lines.push(activeBuffer.getLine(i)?.translateToString(true) ?? "");
+  }
+  return lines.join("\n");
 }

@@ -78,6 +78,83 @@ describe("PtyRecoveryController", () => {
     expect(target.calls.at(-1)).toEqual(["write", frame.data]);
   });
 
+  it("buffers out-of-order binary frames and flushes them by outputSeq", () => {
+    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      {
+        requestId: "req-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      },
+      target,
+    );
+
+    const frame12 = { data: new Uint8Array([12]), outputSeq: 12 };
+    const frame11 = { data: new Uint8Array([11]), outputSeq: 11 };
+    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false });
+    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true });
+
+    expect(target.calls.slice(-2)).toEqual([
+      ["write", frame11.data],
+      ["write", frame12.data],
+    ]);
+  });
+
+  it("replays buffered pre-snapshot frames in outputSeq order", () => {
+    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    const requestId = recovery.startSnapshotRequest();
+    const frame12 = { data: new Uint8Array([12]), outputSeq: 12 };
+    const frame11 = { data: new Uint8Array([11]), outputSeq: 11 };
+    recovery.handleBinaryFrame(frame12, target);
+    recovery.handleBinaryFrame(frame11, target);
+
+    const result = recovery.applySnapshot(
+      { requestId, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
+      target,
+    );
+
+    expect(result).toEqual({ applied: true, replayedFrames: 2 });
+    expect(target.calls.slice(-2)).toEqual([
+      ["write", frame11.data],
+      ["write", frame12.data],
+    ]);
+  });
+
+  it("keeps later frames buffered until the missing outputSeq arrives", () => {
+    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      {
+        requestId: "req-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      },
+      target,
+    );
+
+    const frame12 = { data: new Uint8Array([12]), outputSeq: 12 };
+    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false });
+    expect(target.calls.at(-1)).toEqual(["write", "snapshot"]);
+
+    const frame11 = { data: new Uint8Array([11]), outputSeq: 11 };
+    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true });
+    expect(target.calls.slice(-2)).toEqual([
+      ["write", frame11.data],
+      ["write", frame12.data],
+    ]);
+  });
+
   it("ignores stale snapshots from older resize or reconnect requests", () => {
     const requestIds = ["req-old", "req-new"];
     const recovery = new PtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });

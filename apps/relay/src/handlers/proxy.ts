@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import { isProxyToClientRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
+import type { RelayChaos } from "../chaos.js";
 
 // binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
 const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
@@ -13,33 +14,49 @@ interface ProxySocket extends WebSocket {
 }
 
 // 通知绑定到指定 proxy 的所有客户端 proxy 已离线
-function notifyClientsProxyOffline(proxyId: string, registry: RelayRegistry, logger: Logger): void {
+function notifyClientsProxyOffline(
+  proxyId: string,
+  registry: RelayRegistry,
+  logger: Logger,
+  chaos?: RelayChaos,
+): void {
   const clients = registry.getClientsForProxy(proxyId);
+  const msg = JSON.stringify({ type: "proxy_offline", proxyId });
   for (const clientWs of clients) {
-    clientWs.send(JSON.stringify({ type: "proxy_offline", proxyId }));
+    if (chaos) chaos.send(clientWs, msg, { direction: "proxy_to_client", type: "proxy_offline" });
+    else clientWs.send(msg);
   }
   logger.info({ proxyId, clientCount: clients.length }, "Notified clients of proxy offline");
 }
 
 // 通知绑定到指定 proxy 的所有客户端 proxy 已上线
-function notifyClientsProxyOnline(proxyId: string, registry: RelayRegistry, logger: Logger): void {
+function notifyClientsProxyOnline(
+  proxyId: string,
+  registry: RelayRegistry,
+  logger: Logger,
+  chaos?: RelayChaos,
+): void {
   const clients = registry.getClientsForProxy(proxyId);
+  const msg = JSON.stringify({ type: "proxy_online", proxyId });
   for (const clientWs of clients) {
-    clientWs.send(JSON.stringify({ type: "proxy_online", proxyId }));
+    if (chaos) chaos.send(clientWs, msg, { direction: "proxy_to_client", type: "proxy_online" });
+    else clientWs.send(msg);
   }
   logger.info({ proxyId, clientCount: clients.length }, "Notified clients of proxy online");
 }
 
 // proxy 上线或下线时，将最新的 proxy 列表推送给所有已连接的 client。
 // 复用 proxy_list_response 消息类型，client 端已有对应处理逻辑，无需额外适配。
-function broadcastProxyList(registry: RelayRegistry): void {
+function broadcastProxyList(registry: RelayRegistry, chaos?: RelayChaos): void {
   const proxies = registry.listProxiesWithName().map((p) => ({
     ...p,
     sessions: registry.getSessionsForProxy(p.proxyId),
   }));
   const msg = JSON.stringify({ type: "proxy_list_response", proxies });
   for (const clientWs of registry.getAllClientWs()) {
-    clientWs.send(msg);
+    if (chaos)
+      chaos.send(clientWs, msg, { direction: "proxy_to_client", type: "proxy_list_response" });
+    else clientWs.send(msg);
   }
 }
 
@@ -48,6 +65,7 @@ export function handleProxyConnection(
   ws: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
+  chaos?: RelayChaos,
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
@@ -103,20 +121,20 @@ export function handleProxyConnection(
       );
 
       if (status === "reconnected") {
-        notifyClientsProxyOnline(proxyId, registry, logger);
+        notifyClientsProxyOnline(proxyId, registry, logger, chaos);
       }
 
-      broadcastProxyList(registry);
+      broadcastProxyList(registry, chaos);
       return;
     }
 
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
-        notifyClientsProxyOffline(proxyWs.proxyId, registry, logger);
+        notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.markProxyOffline(proxyWs.proxyId);
         logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, marked offline");
         proxyWs.proxyId = undefined;
-        broadcastProxyList(registry);
+        broadcastProxyList(registry, chaos);
       }
       return;
     }
@@ -150,7 +168,14 @@ export function handleProxyConnection(
         const clients = registry.getClientsForProxy(proxyWs.proxyId);
         for (const clientWs of clients) {
           if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(raw);
+            if (chaos) {
+              chaos.send(clientWs, raw, {
+                direction: "proxy_to_client",
+                type: result.message.type,
+              });
+            } else {
+              clientWs.send(raw);
+            }
           }
         }
         logger.info(
@@ -175,7 +200,7 @@ export function handleProxyConnection(
         );
         return;
       }
-      routeProxyMessage(raw, proxyWs.proxyId, registry, logger);
+      routeProxyMessage(raw, proxyWs.proxyId, registry, logger, chaos);
       return;
     }
 
@@ -194,7 +219,7 @@ export function handleProxyConnection(
 
   proxyWs.on("close", () => {
     if (proxyWs.proxyId) {
-      notifyClientsProxyOffline(proxyWs.proxyId, registry, logger);
+      notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
       // 通过状态转换标记离线，保留所有状态等待重连
       // proxy_disconnect 已经清理过的情况下 transition 会抛异常，静默忽略
       try {
@@ -206,7 +231,7 @@ export function handleProxyConnection(
         { proxyId: proxyWs.proxyId },
         "Proxy disconnected, state preserved for reconnect",
       );
-      broadcastProxyList(registry);
+      broadcastProxyList(registry, chaos);
     }
   });
 

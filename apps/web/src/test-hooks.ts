@@ -14,6 +14,9 @@ interface CCTestHooks {
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
   };
+  pty: {
+    serialize: (sessionId: string) => string;
+  };
   toast: (message: string) => void;
 }
 
@@ -25,6 +28,7 @@ declare global {
 
 export function installTestHooks(): void {
   if (!import.meta.env.DEV) return;
+  const ptySerializers = new Map<string, () => string>();
   window.__ccTest = {
     chat: {
       addUserMessage: (sid, msg) => useChatStore.getState().addUserMessage(sid, msg),
@@ -34,8 +38,26 @@ export function installTestHooks(): void {
     session: {
       setPtyTitle: (sid, title) => useSessionStore.getState().setPtyTitle(sid, title),
     },
+    pty: {
+      serialize: (sid) => ptySerializers.get(sid)?.() ?? "",
+    },
     toast: (msg) => {
       toast(msg);
     },
   };
+  window.__ccTestPtySerializers = ptySerializers;
+}
+
+declare global {
+  interface Window {
+    __ccTestPtySerializers?: Map<string, () => string>;
+  }
+}
+
+export function registerPtySerializer(sessionId: string, serialize: (() => string) | null): void {
+  if (!import.meta.env.DEV) return;
+  const serializers = window.__ccTestPtySerializers;
+  if (!serializers) return;
+  if (serialize) serializers.set(sessionId, serialize);
+  else serializers.delete(sessionId);
 }

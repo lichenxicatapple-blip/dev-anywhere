@@ -115,6 +115,26 @@ Chaos Monkey 不是随机把系统搞坏，而是验证不变量：
 
 ### 第一版 harness
 
+真实环境优先：先用本机 relay/web/proxy serve 注入进程级故障，验证真实端口、真实 WebSocket、真实 daemon 生命周期和日志链路。FakeRelay 仍可用于精确构造乱序/丢包等边界，但不能替代真实 chaos。
+
+已落地命令：
+
+```bash
+pnpm dev:chaos
+```
+
+当前覆盖：
+
+| 场景                          | 注入点                     | 期望                                                      |
+| ----------------------------- | -------------------------- | --------------------------------------------------------- |
+| relay 进程崩溃后恢复          | kill 真实 `:3100` relay    | proxy 进入重连态，relay 重启后恢复 connected，health 过   |
+| proxy serve daemon 崩溃后恢复 | kill 真实 serve PID        | daemon 可重新启动，重新连接 relay，health 过              |
+| web dev server 崩溃后恢复     | kill 真实 `:5173` web      | web 可重新启动，真实 UI smoke 通过                        |
+| relay 控制消息扰动            | delay/duplicate/reorder    | 真实 UI 仍能选择电脑、打开新建会话、拉目录                |
+| PTY 渲染期扰动                | stale snapshot/重复帧/旧帧 | xterm buffer 不被旧 snapshot 覆盖，不重复渲染旧 outputSeq |
+
+下一层再补 Web/FakeRelay 的精确协议 chaos：
+
 建议放在 `apps/web/e2e/chaos.spec.ts` 和 `apps/proxy/src/__tests__/integration/chaos-*.test.ts`：
 
 | 场景                                  | 注入点                                                     | 期望                                                 |
@@ -131,8 +151,8 @@ Chaos Monkey 不是随机把系统搞坏，而是验证不变量：
 1. 修复过期 E2E，删除最低价值 smoke/toast E2E。
 2. 给 Web relay request 层加 requestId/timeout/close cleanup。
 3. 固化 display state matrix，并在 UI 只消费一个 display state。
-4. 做第一版 chaos harness，先覆盖 Web + FakeRelay。
-5. 再做 proxy/relay 进程级 chaos，覆盖真实 WebSocket 和子进程生命周期。
+4. 真实环境 chaos 已先落地，继续扩展 provider 子进程、hosted PTY、审批刷新等真实场景。
+5. 再补 Web + FakeRelay 精确协议 chaos，用于制造真实环境很难稳定复现的丢包、乱序、超时。
 
 ## 本轮未直接修改的问题
 
@@ -155,9 +175,10 @@ Chaos Monkey 不是随机把系统搞坏，而是验证不变量：
 - JSON session 创建失败路径补齐 pending cleanup，worker 连接超时后会终止 pending worker、清理 session 目录和 hook/审批/状态残留。
 - provider hook 中性响应改为空 stdout，避免 Claude 对 `SessionStart` / `UserPromptSubmit` / `Stop` 报 invalid JSON；补充 hook contract 测试。
 - 删除低价值 E2E：`smoke.spec.ts`、`toast.spec.ts`。
+- 新增真实环境 chaos runner：`pnpm dev:chaos` 会重启三件套，实际杀掉 relay 验证 proxy 重连，再实际杀掉 proxy serve 验证 daemon 重启和 relay 恢复。
 
 仍未完成：
 
 - request/response 还没有全量 `requestId` 配对；历史、资源、目录列表等非阻塞请求仍待后续统一。
 - `theme-tokens.test.ts` 已清理；后续还需继续审查源码字符串/实现细节类测试。
-- proxy 进程级 chaos 还未落地。
+- 真实 chaos 还需要继续扩展到 provider 子进程退出、hosted PTY 异常退出、审批中刷新和 Web 断线重连。

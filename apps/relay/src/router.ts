@@ -4,6 +4,7 @@ import type { MessageEnvelope } from "@dev-anywhere/shared";
 import { WebSocket } from "ws";
 import type { Logger } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
+import type { RelayChaos } from "./chaos.js";
 
 // 消息解析结果：控制消息、信封消息或无效消息
 type ParseResult =
@@ -40,6 +41,7 @@ export function routeProxyMessage(
   proxyId: string,
   registry: RelayRegistry,
   logger: Logger,
+  chaos?: RelayChaos,
 ): void {
   const result = parseMessage(raw);
 
@@ -63,7 +65,8 @@ export function routeProxyMessage(
   const clients = registry.getClientsForProxy(proxyId);
   for (const clientWs of clients) {
     if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(raw);
+      if (chaos) chaos.send(clientWs, raw, { direction: "proxy_to_client", type: message.type });
+      else clientWs.send(raw);
     }
   }
 }
@@ -77,6 +80,7 @@ export function routeClientMessage(
   clientWs: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
+  chaos?: RelayChaos,
 ): void {
   const result = parseMessage(raw);
 
@@ -102,5 +106,6 @@ export function routeClientMessage(
     return;
   }
 
-  proxyWs.send(raw);
+  if (chaos) chaos.send(proxyWs, raw, { direction: "client_to_proxy", type: result.message.type });
+  else proxyWs.send(raw);
 }

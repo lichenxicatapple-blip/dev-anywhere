@@ -148,13 +148,17 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         }
 
         emitPty(data: string): void {
-          this.outputSeq += 1;
+          this.emitPtyWithSeq(data, this.outputSeq + 1);
+        }
+
+        emitPtyWithSeq(data: string, outputSeq: number): void {
+          this.outputSeq = Math.max(this.outputSeq, outputSeq);
           const sid = new TextEncoder().encode(sessionId);
           const payload = new TextEncoder().encode(data);
           const frame = new Uint8Array(1 + sid.length + 4 + payload.length);
           frame[0] = sid.length;
           frame.set(sid, 1);
-          new DataView(frame.buffer).setUint32(1 + sid.length, this.outputSeq, true);
+          new DataView(frame.buffer).setUint32(1 + sid.length, outputSeq, true);
           frame.set(payload, 1 + sid.length + 4);
           this.dispatchEvent(new MessageEvent("message", { data: frame.buffer }));
         }
@@ -165,6 +169,9 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         socket: null,
         sendPty(data: string) {
           this.socket?.emitPty(data);
+        },
+        sendPtyWithSeq(data: string, outputSeq: number) {
+          this.socket?.emitPtyWithSeq(data, outputSeq);
         },
         resize(cols: number, rows: number) {
           this.socket?.emitResize(cols, rows);
@@ -196,6 +203,58 @@ async function expectTerminalMounted(page: import("@playwright/test").Page): Pro
 }
 
 test.describe("PTY browser smoke", () => {
+  test("ignores stale render snapshots and reorders duplicate PTY frames by outputSeq", async ({
+    page,
+  }) => {
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+    await resetLocalState(page);
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+
+    await expectTerminalMounted(page);
+
+    await page.evaluate(() => {
+      window.__ptySmoke.socket?.emitJson({
+        type: "session_snapshot",
+        sessionId: "pty-smoke",
+        requestId: "stale-request",
+        cols: 80,
+        rows: 24,
+        data: "STALE SNAPSHOT SHOULD NOT RENDER\r\n",
+        outputSeq: 99,
+      });
+      window.__ptySmoke.sendPtyWithSeq("SEQ-2\r\n", 2);
+      window.__ptySmoke.sendPtyWithSeq("SEQ-1\r\n", 1);
+      window.__ptySmoke.sendPtyWithSeq("DUPLICATE-SEQ-1-SHOULD-NOT-RENDER\r\n", 1);
+      window.__ptySmoke.sendPtyWithSeq("OLDER-SEQ-0-SHOULD-NOT-RENDER\r\n", 0);
+      window.__ptySmoke.sendPtyWithSeq("DUPLICATE-SEQ-2-SHOULD-NOT-RENDER\r\n", 2);
+      window.__ptySmoke.sendPtyWithSeq("SEQ-4\r\n", 4);
+      window.__ptySmoke.sendPtyWithSeq("SEQ-3\r\n", 3);
+    });
+
+    await expect
+      .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("pty-smoke") ?? ""))
+      .toContain("SEQ-4");
+
+    const screen = await page.evaluate(() => window.__ccTest?.pty.serialize("pty-smoke") ?? "");
+    const seq1Index = screen.indexOf("SEQ-1");
+    const seq2Index = screen.indexOf("SEQ-2");
+    const seq3Index = screen.indexOf("SEQ-3");
+    const seq4Index = screen.indexOf("SEQ-4");
+    expect(screen).toContain("SEQ-1");
+    expect(screen).toContain("SEQ-2");
+    expect(screen).toContain("SEQ-3");
+    expect(screen).toContain("SEQ-4");
+    expect(seq1Index).toBeLessThan(seq2Index);
+    expect(seq2Index).toBeLessThan(seq3Index);
+    expect(seq3Index).toBeLessThan(seq4Index);
+    expect(screen).not.toContain("STALE SNAPSHOT SHOULD NOT RENDER");
+    expect(screen).not.toContain("DUPLICATE-SEQ-1-SHOULD-NOT-RENDER");
+    expect(screen).not.toContain("OLDER-SEQ-0-SHOULD-NOT-RENDER");
+    expect(screen).not.toContain("DUPLICATE-SEQ-2-SHOULD-NOT-RENDER");
+  });
+
   test("renders terminal, sends raw input, scrolls, and recovers after resize", async ({
     page,
   }) => {

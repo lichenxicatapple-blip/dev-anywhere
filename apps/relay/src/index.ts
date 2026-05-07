@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { createLogger } from "@dev-anywhere/shared";
 import { createRelayServer } from "./server.js";
+import { parseRelayChaosFromEnv } from "./chaos.js";
 
 const PORT = parseInt(process.env.PORT ?? "3100", 10);
 const DEFAULT_DATA_DIR = `${homedir()}/.dev-anywhere/relay-data`;
@@ -23,6 +24,7 @@ const relay = createRelayServer({
   heartbeatInterval: HEARTBEAT_INTERVAL,
   proxyToken: PROXY_TOKEN,
   clientToken: CLIENT_TOKEN,
+  chaos: parseRelayChaosFromEnv(process.env),
 });
 
 relay.httpServer.listen(PORT, () => {

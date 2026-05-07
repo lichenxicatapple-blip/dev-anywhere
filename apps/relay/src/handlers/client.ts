@@ -3,6 +3,7 @@ import { isClientToProxyRelayControlType, RelayErrorCode, type Logger } from "@d
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";
+import type { RelayChaos } from "../chaos.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -67,6 +68,7 @@ export function handleClientConnection(
   ws: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
+  chaos?: RelayChaos,
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
@@ -102,13 +104,19 @@ export function handleClientConnection(
           ...p,
           sessions: registry.getSessionsForProxy(p.proxyId),
         }));
-        clientWs.send(
-          JSON.stringify({
+        const response = JSON.stringify({
+          type: "proxy_list_response",
+          requestId: msg.requestId,
+          proxies,
+        });
+        if (chaos) {
+          chaos.send(clientWs, response, {
+            direction: "proxy_to_client",
             type: "proxy_list_response",
-            requestId: msg.requestId,
-            proxies,
-          }),
-        );
+          });
+        } else {
+          clientWs.send(response);
+        }
         return;
       }
 
@@ -128,7 +136,8 @@ export function handleClientConnection(
         }
         const proxyWs = registry.getProxy(targetProxyId);
         if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
-          proxyWs.send(raw);
+          if (chaos) chaos.send(proxyWs, raw, { direction: "client_to_proxy", type: msg.type });
+          else proxyWs.send(raw);
         } else {
           clientWs.send(
             JSON.stringify({
@@ -170,14 +179,20 @@ export function handleClientConnection(
           return;
         }
         clientWs.boundProxyId = msg.proxyId;
-        clientWs.send(
-          JSON.stringify({
+        const response = JSON.stringify({
+          type: "proxy_select_response",
+          requestId: msg.requestId,
+          success: true,
+          proxyId: msg.proxyId,
+        });
+        if (chaos) {
+          chaos.send(clientWs, response, {
+            direction: "proxy_to_client",
             type: "proxy_select_response",
-            requestId: msg.requestId,
-            success: true,
-            proxyId: msg.proxyId,
-          }),
-        );
+          });
+        } else {
+          clientWs.send(response);
+        }
         logger.info({ proxyId: msg.proxyId, clientId: clientWs.clientId }, "Client bound to proxy");
         return;
       }
@@ -203,7 +218,7 @@ export function handleClientConnection(
         );
         return;
       }
-      routeClientMessage(raw, clientWs.boundProxyId, clientWs, registry, logger);
+      routeClientMessage(raw, clientWs.boundProxyId, clientWs, registry, logger, chaos);
       return;
     }
 

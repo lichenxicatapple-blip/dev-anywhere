@@ -27,6 +27,7 @@ export class PtyRecoveryController {
   private activeRequestId: string | null = null;
   private snapshotApplied = false;
   private frameBuffer: Array<{ data: Uint8Array; outputSeq: number }> = [];
+  private pendingFrames = new Map<number, Uint8Array>();
   private appliedOutputSeq = 0;
 
   constructor(options: PtyRecoveryOptions = {}) {
@@ -39,6 +40,7 @@ export class PtyRecoveryController {
     this.activeRequestId = requestId;
     this.snapshotApplied = false;
     this.frameBuffer = [];
+    this.pendingFrames.clear();
     return requestId;
   }
 
@@ -55,9 +57,8 @@ export class PtyRecoveryController {
       return { written: false };
     }
     if (frame.outputSeq <= this.appliedOutputSeq) return { written: false };
-    this.appliedOutputSeq = frame.outputSeq;
-    target.write(frame.data);
-    return { written: true };
+    this.pendingFrames.set(frame.outputSeq, frame.data);
+    return { written: this.flushContiguousFrames(target) > 0 };
   }
 
   applySnapshot(snapshot: PtySnapshotMessage, target: PtyRenderTarget): SnapshotResult {
@@ -70,20 +71,37 @@ export class PtyRecoveryController {
 
     const frames = this.frameBuffer;
     this.frameBuffer = [];
+    this.pendingFrames.clear();
     this.activeRequestId = null;
     this.snapshotApplied = true;
     this.appliedOutputSeq = snapshot.outputSeq;
-    const replayFrames = frames.filter((frame) => frame.outputSeq > snapshot.outputSeq);
+    const replayFrames = frames
+      .filter((frame) => frame.outputSeq > snapshot.outputSeq)
+      .sort((a, b) => a.outputSeq - b.outputSeq);
 
     target.reset();
     target.resize(snapshot.cols, snapshot.rows);
     target.write(snapshot.data, () => {
       for (const frame of replayFrames) {
-        this.appliedOutputSeq = Math.max(this.appliedOutputSeq, frame.outputSeq);
-        target.write(frame.data);
+        this.pendingFrames.set(frame.outputSeq, frame.data);
       }
+      this.flushContiguousFrames(target);
     });
 
     return { applied: true, replayedFrames: replayFrames.length };
+  }
+
+  private flushContiguousFrames(target: PtyRenderTarget): number {
+    let written = 0;
+    let nextSeq = this.appliedOutputSeq + 1;
+    while (this.pendingFrames.has(nextSeq)) {
+      const data = this.pendingFrames.get(nextSeq)!;
+      this.pendingFrames.delete(nextSeq);
+      this.appliedOutputSeq = nextSeq;
+      target.write(data);
+      written += 1;
+      nextSeq += 1;
+    }
+    return written;
   }
 }

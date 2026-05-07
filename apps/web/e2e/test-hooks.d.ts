@@ -18,6 +18,9 @@ interface CCTestHooks {
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
   };
+  pty: {
+    serialize: (sessionId: string) => string;
+  };
   toast: (message: string) => void;
 }
 
@@ -28,10 +31,12 @@ declare global {
       sent: string[];
       socket: {
         emitPty: (data: string) => void;
+        emitPtyWithSeq: (data: string, outputSeq: number) => void;
         emitResize: (cols: number, rows: number) => void;
         emitJson: (payload: unknown) => void;
       } | null;
       sendPty: (data: string) => void;
+      sendPtyWithSeq: (data: string, outputSeq: number) => void;
       resize: (cols: number, rows: number) => void;
       setPtyState: (state: "working" | "turn_complete" | "approval_wait" | "mid_pause") => void;
     };
