@@ -191,6 +191,8 @@ Architecture not yet mapped. Follow existing patterns found in the codebase.
 
 ## Development
 
+脚本入口和保留理由见 `docs/SCRIPTS.md`。不要新增“保留但不用”的运维脚本；废弃路径直接删除并更新文档。
+
 ### Web SPA 本地开发
 
 ```bash
@@ -208,7 +210,7 @@ pnpm --filter @dev-anywhere/web test:e2e     # Playwright E2E（需要 relay + p
 
 ### 云端部署 (relay + web + nginx)
 
-现行部署路径是 **tag-release + GHCR 预构建镜像**，`scripts/install-relay.sh --ssh` 到 VPS 秒起容器。`apps/relay/deploy.sh` 是老的 rsync + 远端构建方式，保留但不用。
+现行部署路径是 **tag-release + GHCR 预构建镜像**，`scripts/install-relay.sh --ssh` 到 VPS 秒起容器。不要恢复旧的 rsync + 远端构建部署脚本；它已被清理。
 
 **发版**：
 
