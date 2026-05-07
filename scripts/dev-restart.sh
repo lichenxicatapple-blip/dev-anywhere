@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 本地开发环境一键重启：relay dev server + web dev server + proxy serve daemon。
 # 不自动启动 Claude/Codex 交互终端；脚本完成后在当前 shell 里运行：
-#   pnpm proxy -- --provider claude
+#   pnpm proxy -- claude
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -109,4 +109,4 @@ echo "Check local chain health:"
 echo "  pnpm dev:health"
 echo ""
 echo "Start a real PTY session in your terminal:"
-echo "  pnpm proxy -- --provider claude"
+echo "  pnpm proxy -- claude"

@@ -15,7 +15,7 @@ import {
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
-import { extractProviderArgs, normalizeCliArgs } from "./cli-args.js";
+import { extractAgentInvocation, normalizeCliArgs } from "./cli-args.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as {
@@ -227,7 +227,14 @@ const program = new Command("dev-anywhere")
     // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
     // tsup 基于 dynamic import 自动代码分裂，避免所有命令都为 terminal 付出 14KB 额外启动成本。
     const { startTerminal } = await import("./terminal.js");
-    const { provider, args } = extractProviderArgs(cliArgs);
+    let invocation: ReturnType<typeof extractAgentInvocation>;
+    try {
+      invocation = extractAgentInvocation(cliArgs);
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    const { provider, args } = invocation;
     await startTerminal(args, provider);
   });
 

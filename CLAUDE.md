@@ -59,8 +59,8 @@ pnpm --filter @dev-anywhere/web test:e2e
 Proxy：
 
 ```bash
-pnpm proxy -- --provider claude
-pnpm proxy -- --provider codex
+pnpm proxy -- claude
+pnpm proxy -- codex
 pnpm --filter @dev-anywhere/proxy run serve restart
 ```
 

@@ -4,12 +4,19 @@
 
 ## 日常开发
 
-| 命令                              | 用途                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| `pnpm dev:restart`                | 重启本地真实链路：先构建 shared 协议包，再启动 relay、web、proxy serve。 |
-| `pnpm dev:health`                 | 只读健康检查：端口、relay HTTP、proxy serve 状态、当前进程日志。         |
-| `pnpm proxy -- --provider claude` | 从本地终端 attach 一个 Claude PTY 会话。                                 |
-| `pnpm proxy -- --provider codex`  | 从本地终端 attach 一个 Codex PTY 会话。                                  |
+| 命令                   | 用途                                                                     |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `pnpm dev:restart`     | 重启本地真实链路：先构建 shared 协议包，再启动 relay、web、proxy serve。 |
+| `pnpm dev:health`      | 只读健康检查：端口、relay HTTP、proxy serve 状态、当前进程日志。         |
+| `pnpm proxy -- claude` | 从本地终端 attach 一个 Claude PTY 会话。                                 |
+| `pnpm proxy -- codex`  | 从本地终端 attach 一个 Codex PTY 会话。                                  |
+
+Agent CLI 二进制路径可通过环境变量覆盖：
+
+| 环境变量     | 用途                              |
+| ------------ | --------------------------------- |
+| `CLAUDE_BIN` | 指定 Claude Code CLI 的二进制路径 |
+| `CODEX_BIN`  | 指定 Codex CLI 的二进制路径       |
 
 ## 生产部署
 
