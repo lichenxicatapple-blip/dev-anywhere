@@ -83,6 +83,7 @@ describe("IPC Protocol", () => {
           cols: 80,
           rows: 24,
           data: "snapshot",
+          outputSeq: 1,
           requestId: "pty-snapshot-1",
         }).success,
       ).toBe(true);
@@ -213,19 +214,19 @@ describe("IPC Protocol", () => {
   });
 
   describe("encodeBinaryIpcFrame", () => {
-    it("produces correct binary frame format: [0x00][4B len LE][1B sessionId_len][sessionId][data]", async () => {
+    it("produces correct binary frame format: [0x00][4B len LE][1B sessionId_len][sessionId][4B outputSeq][data]", async () => {
       const { encodeBinaryIpcFrame, IPC_BINARY_MARKER } = await importIpc();
       const sessionId = "abc123";
       const data = Buffer.from("hello PTY");
-      const frame = encodeBinaryIpcFrame(sessionId, data);
+      const frame = encodeBinaryIpcFrame(sessionId, data, 42);
 
       // marker byte
       expect(frame[0]).toBe(IPC_BINARY_MARKER);
       expect(frame[0]).toBe(0x00);
 
-      // payload length (uint32LE): 1 + 6 + 9 = 16
+      // payload length (uint32LE): 1 + 6 + 4 + 9 = 20
       const payloadLen = frame.readUInt32LE(1);
-      expect(payloadLen).toBe(1 + sessionId.length + data.length);
+      expect(payloadLen).toBe(1 + sessionId.length + 4 + data.length);
 
       // sessionId length byte
       expect(frame[5]).toBe(sessionId.length);
@@ -234,20 +235,24 @@ describe("IPC Protocol", () => {
       const extractedSessionId = frame.subarray(6, 6 + sessionId.length).toString("utf-8");
       expect(extractedSessionId).toBe(sessionId);
 
+      // output sequence
+      const extractedOutputSeq = frame.readUInt32LE(6 + sessionId.length);
+      expect(extractedOutputSeq).toBe(42);
+
       // PTY data
-      const extractedData = frame.subarray(6 + sessionId.length);
+      const extractedData = frame.subarray(6 + sessionId.length + 4);
       expect(Buffer.compare(extractedData, data)).toBe(0);
 
       // total frame length
-      expect(frame.length).toBe(1 + 4 + 1 + sessionId.length + data.length);
+      expect(frame.length).toBe(1 + 4 + 1 + sessionId.length + 4 + data.length);
     });
 
     it("handles empty data buffer", async () => {
       const { encodeBinaryIpcFrame } = await importIpc();
-      const frame = encodeBinaryIpcFrame("s1", Buffer.alloc(0));
+      const frame = encodeBinaryIpcFrame("s1", Buffer.alloc(0), 1);
       const payloadLen = frame.readUInt32LE(1);
-      expect(payloadLen).toBe(1 + 2); // 1B sid_len + 2B "s1"
-      expect(frame.length).toBe(1 + 4 + 1 + 2);
+      expect(payloadLen).toBe(1 + 2 + 4); // 1B sid_len + 2B "s1" + 4B outputSeq
+      expect(frame.length).toBe(1 + 4 + 1 + 2 + 4);
     });
   });
 
@@ -256,16 +261,16 @@ describe("IPC Protocol", () => {
       const { createIpcReader, encodeBinaryIpcFrame } = await importIpc();
       const stream = new PassThrough();
       const jsonMsgs: unknown[] = [];
-      const binaryFrames: Array<{ sessionId: string; data: Buffer }> = [];
+      const binaryFrames: Array<{ sessionId: string; data: Buffer; outputSeq: number }> = [];
 
       createIpcReader(
         stream,
         (msg) => jsonMsgs.push(msg),
-        (sessionId, data) => binaryFrames.push({ sessionId, data }),
+        (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
       );
 
       const ptyData = Buffer.from("terminal output");
-      stream.write(encodeBinaryIpcFrame("sess-1", ptyData));
+      stream.write(encodeBinaryIpcFrame("sess-1", ptyData, 7));
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));
@@ -273,6 +278,7 @@ describe("IPC Protocol", () => {
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].sessionId).toBe("sess-1");
       expect(Buffer.compare(binaryFrames[0].data, ptyData)).toBe(0);
+      expect(binaryFrames[0].outputSeq).toBe(7);
       expect(jsonMsgs).toHaveLength(0);
     });
 
@@ -280,22 +286,22 @@ describe("IPC Protocol", () => {
       const { createIpcReader, serializeIpc, encodeBinaryIpcFrame } = await importIpc();
       const stream = new PassThrough();
       const jsonMsgs: unknown[] = [];
-      const binaryFrames: Array<{ sessionId: string; data: Buffer }> = [];
+      const binaryFrames: Array<{ sessionId: string; data: Buffer; outputSeq: number }> = [];
 
       createIpcReader(
         stream,
         (msg) => jsonMsgs.push(msg),
-        (sessionId, data) => binaryFrames.push({ sessionId, data }),
+        (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
       );
 
       // JSON message first
       stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
       // Binary frame
-      stream.write(encodeBinaryIpcFrame("s1", Buffer.from("pty data 1")));
+      stream.write(encodeBinaryIpcFrame("s1", Buffer.from("pty data 1"), 1));
       // Another JSON message
       stream.write(serializeIpc({ type: "session_status_update", sessionId: "s2", state: "idle" }));
       // Another binary frame
-      stream.write(encodeBinaryIpcFrame("s2", Buffer.from("pty data 2")));
+      stream.write(encodeBinaryIpcFrame("s2", Buffer.from("pty data 2"), 2));
       stream.end();
 
       await new Promise((r) => setTimeout(r, 50));
@@ -303,21 +309,23 @@ describe("IPC Protocol", () => {
       expect(jsonMsgs).toHaveLength(2);
       expect(binaryFrames).toHaveLength(2);
       expect(binaryFrames[0].sessionId).toBe("s1");
+      expect(binaryFrames[0].outputSeq).toBe(1);
       expect(binaryFrames[1].sessionId).toBe("s2");
+      expect(binaryFrames[1].outputSeq).toBe(2);
     });
 
     it("handles binary frame split across TCP chunks", async () => {
       const { createIpcReader, encodeBinaryIpcFrame } = await importIpc();
       const stream = new PassThrough();
-      const binaryFrames: Array<{ sessionId: string; data: Buffer }> = [];
+      const binaryFrames: Array<{ sessionId: string; data: Buffer; outputSeq: number }> = [];
 
       createIpcReader(
         stream,
         () => {},
-        (sessionId, data) => binaryFrames.push({ sessionId, data }),
+        (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
       );
 
-      const frame = encodeBinaryIpcFrame("sess-abc", Buffer.from("split me"));
+      const frame = encodeBinaryIpcFrame("sess-abc", Buffer.from("split me"), 3);
       // Split at various points across the frame header
       const split1 = 3; // middle of length field
       const split2 = 8; // middle of sessionId
@@ -331,18 +339,19 @@ describe("IPC Protocol", () => {
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].sessionId).toBe("sess-abc");
       expect(binaryFrames[0].data.toString()).toBe("split me");
+      expect(binaryFrames[0].outputSeq).toBe(3);
     });
 
     it("handles NDJSON followed by binary frame in same chunk", async () => {
       const { createIpcReader, serializeIpc, encodeBinaryIpcFrame } = await importIpc();
       const stream = new PassThrough();
       const jsonMsgs: unknown[] = [];
-      const binaryFrames: Array<{ sessionId: string; data: Buffer }> = [];
+      const binaryFrames: Array<{ sessionId: string; data: Buffer; outputSeq: number }> = [];
 
       createIpcReader(
         stream,
         (msg) => jsonMsgs.push(msg),
-        (sessionId, data) => binaryFrames.push({ sessionId, data }),
+        (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
       );
 
       // Concatenate JSON line and binary frame into a single write
@@ -351,7 +360,7 @@ describe("IPC Protocol", () => {
         sessionId: "s1",
         state: "idle",
       });
-      const binaryFrame = encodeBinaryIpcFrame("s1", Buffer.from("combined"));
+      const binaryFrame = encodeBinaryIpcFrame("s1", Buffer.from("combined"), 4);
       const combined = Buffer.concat([Buffer.from(jsonLine), binaryFrame]);
       stream.write(combined);
       stream.end();
@@ -361,6 +370,7 @@ describe("IPC Protocol", () => {
       expect(jsonMsgs).toHaveLength(1);
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].data.toString()).toBe("combined");
+      expect(binaryFrames[0].outputSeq).toBe(4);
     });
 
     it("skips binary frames when no binary callback is registered", async () => {
@@ -371,7 +381,7 @@ describe("IPC Protocol", () => {
       // No onBinaryFrame callback - binary frames should be silently skipped
       createIpcReader(stream, (msg) => jsonMsgs.push(msg));
 
-      stream.write(encodeBinaryIpcFrame("s1", Buffer.from("ignored")));
+      stream.write(encodeBinaryIpcFrame("s1", Buffer.from("ignored"), 1));
       stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
       stream.end();
 

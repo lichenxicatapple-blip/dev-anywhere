@@ -98,13 +98,26 @@ export async function installFakeRelay(page: Page): Promise<void> {
       };
     }
 
+    const outputSeqBySession = new Map<string, number>();
+
+    function nextOutputSeq(sessionId: string): number {
+      const next = (outputSeqBySession.get(sessionId) ?? 0) + 1;
+      outputSeqBySession.set(sessionId, next);
+      return next;
+    }
+
+    function currentOutputSeq(sessionId: string): number {
+      return outputSeqBySession.get(sessionId) ?? 0;
+    }
+
     function encodePtyFrame(sessionId: string, data: string): ArrayBuffer {
       const sid = new TextEncoder().encode(sessionId);
       const payload = new TextEncoder().encode(data);
-      const frame = new Uint8Array(1 + sid.length + payload.length);
+      const frame = new Uint8Array(1 + sid.length + 4 + payload.length);
       frame[0] = sid.length;
       frame.set(sid, 1);
-      frame.set(payload, 1 + sid.length);
+      new DataView(frame.buffer).setUint32(1 + sid.length, nextOutputSeq(sessionId), true);
+      frame.set(payload, 1 + sid.length + 4);
       return frame.buffer;
     }
 
@@ -196,6 +209,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               cols: 80,
               rows: 24,
               data: "Dev Anywhere PTY ready\r\n$ ",
+              outputSeq: currentOutputSeq(String(msg.sessionId)),
             });
             this.emitJson({
               type: "terminal_title",

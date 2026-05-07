@@ -20,11 +20,11 @@ describe("PtyRecoveryController", () => {
     const target = createTarget();
 
     const requestId = recovery.startSnapshotRequest();
-    const frame = new Uint8Array([65]);
+    const frame = { data: new Uint8Array([65]), outputSeq: 11 };
     expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: false });
 
     const result = recovery.applySnapshot(
-      { requestId, cols: 80, rows: 24, data: "snapshot" },
+      { requestId, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
       target,
     );
 
@@ -33,7 +33,27 @@ describe("PtyRecoveryController", () => {
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],
       ["write", "snapshot"],
-      ["write", frame],
+      ["write", frame.data],
+    ]);
+  });
+
+  it("drops buffered frames already included by the matching snapshot watermark", () => {
+    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    const requestId = recovery.startSnapshotRequest();
+    recovery.handleBinaryFrame({ data: new Uint8Array([65]), outputSeq: 10 }, target);
+
+    const result = recovery.applySnapshot(
+      { requestId, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
+      target,
+    );
+
+    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "snapshot"],
     ]);
   });
 
@@ -42,11 +62,20 @@ describe("PtyRecoveryController", () => {
     const target = createTarget();
 
     recovery.startSnapshotRequest();
-    recovery.applySnapshot({ requestId: "req-1", cols: 80, rows: 24, data: "snapshot" }, target);
+    recovery.applySnapshot(
+      {
+        requestId: "req-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      },
+      target,
+    );
 
-    const frame = new Uint8Array([66]);
+    const frame = { data: new Uint8Array([66]), outputSeq: 11 };
     expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: true });
-    expect(target.calls.at(-1)).toEqual(["write", frame]);
+    expect(target.calls.at(-1)).toEqual(["write", frame.data]);
   });
 
   it("ignores stale snapshots from older resize or reconnect requests", () => {
@@ -58,13 +87,16 @@ describe("PtyRecoveryController", () => {
     const latestRequestId = recovery.startSnapshotRequest();
 
     expect(
-      recovery.applySnapshot({ requestId: "req-old", cols: 80, rows: 24, data: "old" }, target),
+      recovery.applySnapshot(
+        { requestId: "req-old", cols: 80, rows: 24, data: "old", outputSeq: 1 },
+        target,
+      ),
     ).toEqual({ applied: false, reason: "stale_snapshot" });
     expect(target.calls).toEqual([]);
 
     expect(
       recovery.applySnapshot(
-        { requestId: latestRequestId, cols: 100, rows: 30, data: "new" },
+        { requestId: latestRequestId, cols: 100, rows: 30, data: "new", outputSeq: 2 },
         target,
       ),
     ).toEqual({ applied: true, replayedFrames: 0 });
@@ -81,24 +113,30 @@ describe("PtyRecoveryController", () => {
     const target = createTarget();
 
     const first = recovery.startSnapshotRequest();
-    const staleFrame = new Uint8Array([1]);
+    const staleFrame = { data: new Uint8Array([1]), outputSeq: 1 };
     recovery.handleBinaryFrame(staleFrame, target);
 
     const second = recovery.startSnapshotRequest();
-    const currentFrame = new Uint8Array([2]);
+    const currentFrame = { data: new Uint8Array([2]), outputSeq: 3 };
     recovery.handleBinaryFrame(currentFrame, target);
 
     expect(
-      recovery.applySnapshot({ requestId: first, cols: 80, rows: 24, data: "old" }, target),
+      recovery.applySnapshot(
+        { requestId: first, cols: 80, rows: 24, data: "old", outputSeq: 1 },
+        target,
+      ),
     ).toEqual({ applied: false, reason: "stale_snapshot" });
     expect(
-      recovery.applySnapshot({ requestId: second, cols: 80, rows: 24, data: "new" }, target),
+      recovery.applySnapshot(
+        { requestId: second, cols: 80, rows: 24, data: "new", outputSeq: 2 },
+        target,
+      ),
     ).toEqual({ applied: true, replayedFrames: 1 });
     expect(target.calls).toEqual([
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],
       ["write", "new"],
-      ["write", currentFrame],
+      ["write", currentFrame.data],
     ]);
   });
 });

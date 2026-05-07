@@ -18,6 +18,7 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         binaryType: BinaryType = "arraybuffer";
         readyState = FakeWebSocket.CONNECTING;
         sent: string[] = [];
+        outputSeq = 0;
 
         constructor(url: string) {
           super();
@@ -132,6 +133,7 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
             cols: 80,
             rows: 24,
             data,
+            outputSeq: this.outputSeq,
           });
         }
 
@@ -140,12 +142,14 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         }
 
         emitPty(data: string): void {
+          this.outputSeq += 1;
           const sid = new TextEncoder().encode(sessionId);
           const payload = new TextEncoder().encode(data);
-          const frame = new Uint8Array(1 + sid.length + payload.length);
+          const frame = new Uint8Array(1 + sid.length + 4 + payload.length);
           frame[0] = sid.length;
           frame.set(sid, 1);
-          frame.set(payload, 1 + sid.length);
+          new DataView(frame.buffer).setUint32(1 + sid.length, this.outputSeq, true);
+          frame.set(payload, 1 + sid.length + 4);
           this.dispatchEvent(new MessageEvent("message", { data: frame.buffer }));
         }
       }

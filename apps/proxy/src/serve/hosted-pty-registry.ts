@@ -57,6 +57,7 @@ interface HostedPtySession {
   idleTimer: NodeJS.Timeout;
   lastOutputTime: number;
   currentState: PtySemanticState;
+  outputSeq: number;
 }
 
 export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: string): string[] {
@@ -123,6 +124,7 @@ export class HostedPtyRegistry {
       idleTimer: setInterval(() => this.checkIdle(options.sessionId), IDLE_CHECK_INTERVAL_MS),
       lastOutputTime: 0,
       currentState: "turn_complete",
+      outputSeq: 0,
     };
     this.sessions.set(options.sessionId, hosted);
 
@@ -181,6 +183,7 @@ export class HostedPtyRegistry {
         cols: hosted.terminal.cols,
         rows: hosted.terminal.rows,
         data,
+        outputSeq: hosted.outputSeq,
         requestId,
       }),
     );
@@ -205,8 +208,9 @@ export class HostedPtyRegistry {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return;
     hosted.lastOutputTime = Date.now();
+    hosted.outputSeq += 1;
     hosted.terminal.write(data);
-    this.sendBinary(sessionId, Buffer.from(data, "utf-8"));
+    this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
     if (hosted.currentState !== "working") {
       hosted.currentState = "working";
@@ -276,12 +280,13 @@ export class HostedPtyRegistry {
     );
   }
 
-  private sendBinary(sessionId: string, data: Buffer): void {
+  private sendBinary(sessionId: string, data: Buffer, outputSeq: number): void {
     const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-    const frame = Buffer.alloc(1 + sessionIdBuf.length + data.length);
+    const frame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
     frame[0] = sessionIdBuf.length;
     sessionIdBuf.copy(frame, 1);
-    data.copy(frame, 1 + sessionIdBuf.length);
+    frame.writeUInt32LE(outputSeq, 1 + sessionIdBuf.length);
+    data.copy(frame, 1 + sessionIdBuf.length + 4);
     this.deps.relayConnection.sendBinary(frame);
   }
 

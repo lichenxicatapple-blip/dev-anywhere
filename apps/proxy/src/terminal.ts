@@ -163,6 +163,7 @@ class TerminalSession {
   // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   private serializeAddon: SerializeAddon | null = null;
+  private outputSeq = 0;
   // 记录上次 bridge 状态避免重连抖动导致 banner 连刷；初值 null 让首次状态（无论真假）都打，启动时提示 remote viewing 是否就绪
   private lastBridgeConnected: boolean | null = null;
   // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
@@ -274,11 +275,14 @@ class TerminalSession {
   // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、跟 working/approval_wait 状态变化
   private handlePtyData(data: string): void {
     this.lastOutputTime = Date.now();
+    this.outputSeq += 1;
 
     if (this.headlessTerminal) this.headlessTerminal.write(data);
 
     if (this.socket.writable && this.sessionId) {
-      this.socket.write(encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8")));
+      this.socket.write(
+        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
+      );
     }
 
     if (this.currentPtyState !== "working") {
@@ -359,6 +363,7 @@ class TerminalSession {
               cols: this.headlessTerminal.cols,
               rows: this.headlessTerminal.rows,
               data,
+              outputSeq: this.outputSeq,
               requestId: msg.requestId,
             }),
           );

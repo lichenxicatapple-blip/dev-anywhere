@@ -371,6 +371,7 @@ const relayControlDefinitions = [
       cols: z.number().int().positive(),
       rows: z.number().int().positive(),
       data: z.string(),
+      outputSeq: z.number().int().nonnegative(),
       requestId: z.string().optional(),
     },
     "proxy_to_client",

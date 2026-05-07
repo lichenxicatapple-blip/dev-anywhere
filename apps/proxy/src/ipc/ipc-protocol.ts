@@ -6,10 +6,10 @@ import { LineBuffer } from "./line-buffer.js";
 export const IPC_BINARY_MARKER = 0x00;
 
 // 编码 binary PTY 数据帧用于 IPC 传输
-// 格式: [1B 0x00 marker][4B payload_len uint32LE][1B sessionId_len][sessionId UTF-8][PTY data]
-export function encodeBinaryIpcFrame(sessionId: string, data: Buffer): Buffer {
+// 格式: [1B 0x00 marker][4B payload_len uint32LE][1B sessionId_len][sessionId UTF-8][4B outputSeq uint32LE][PTY data]
+export function encodeBinaryIpcFrame(sessionId: string, data: Buffer, outputSeq: number): Buffer {
   const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-  const payloadLen = 1 + sessionIdBuf.length + data.length;
+  const payloadLen = 1 + sessionIdBuf.length + 4 + data.length;
   const frame = Buffer.alloc(1 + 4 + payloadLen);
   let offset = 0;
   frame[offset] = IPC_BINARY_MARKER;
@@ -20,6 +20,8 @@ export function encodeBinaryIpcFrame(sessionId: string, data: Buffer): Buffer {
   offset += 1;
   sessionIdBuf.copy(frame, offset);
   offset += sessionIdBuf.length;
+  frame.writeUInt32LE(outputSeq, offset);
+  offset += 4;
   data.copy(frame, offset);
   return frame;
 }
@@ -169,6 +171,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     cols: z.number(),
     rows: z.number(),
     data: z.string(),
+    outputSeq: z.number().int().nonnegative(),
     requestId: z.string().optional(),
   }),
 
@@ -286,7 +289,7 @@ export function serializeIpc(msg: IpcMessage): string {
 export function createIpcReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: IpcMessage) => void,
-  onBinaryFrame?: (sessionId: string, data: Buffer) => void,
+  onBinaryFrame?: (sessionId: string, data: Buffer, outputSeq: number) => void,
 ): () => void {
   let buf = Buffer.alloc(0);
   let disposed = false;
@@ -302,16 +305,18 @@ export function createIpcReader(
         const totalFrameLen = 1 + 4 + payloadLen;
         if (buf.length < totalFrameLen) return;
 
-        // 解析 payload: [1B sessionId_len][sessionId][pty data]
+        // 解析 payload: [1B sessionId_len][sessionId][4B outputSeq][pty data]
         const payloadStart = 5;
         const sessionIdLen = buf[payloadStart];
         const sessionId = buf
           .subarray(payloadStart + 1, payloadStart + 1 + sessionIdLen)
           .toString("utf-8");
-        const ptyData = Buffer.from(buf.subarray(payloadStart + 1 + sessionIdLen, totalFrameLen));
+        const seqOffset = payloadStart + 1 + sessionIdLen;
+        const outputSeq = buf.readUInt32LE(seqOffset);
+        const ptyData = Buffer.from(buf.subarray(seqOffset + 4, totalFrameLen));
 
         if (onBinaryFrame) {
-          onBinaryFrame(sessionId, ptyData);
+          onBinaryFrame(sessionId, ptyData, outputSeq);
         }
 
         buf = buf.subarray(totalFrameLen);

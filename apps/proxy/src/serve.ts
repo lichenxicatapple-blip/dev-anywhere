@@ -372,6 +372,7 @@ function handleTerminalConnection(
               cols: msg.cols,
               rows: msg.rows,
               data: msg.data,
+              outputSeq: msg.outputSeq,
               requestId: msg.requestId,
             }),
           );
@@ -387,13 +388,14 @@ function handleTerminalConnection(
         }
       }
     },
-    (sessionId, data) => {
-      // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][PTY data]
+    (sessionId, data, outputSeq) => {
+      // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][4B outputSeq uint32LE][PTY data]
       const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + data.length);
+      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
       wsFrame[0] = sessionIdBuf.length;
       sessionIdBuf.copy(wsFrame, 1);
-      data.copy(wsFrame, 1 + sessionIdBuf.length);
+      wsFrame.writeUInt32LE(outputSeq, 1 + sessionIdBuf.length);
+      data.copy(wsFrame, 1 + sessionIdBuf.length + 4);
       relayConnection.sendBinary(wsFrame);
     },
   );

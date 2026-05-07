@@ -4,7 +4,10 @@ type RelayMessage = Record<string, unknown>;
 
 interface PtyWebSocketLike {
   send: (data: string) => boolean;
-  subscribeBinary: (sessionId: string, handler: (data: Uint8Array) => void) => () => void;
+  subscribeBinary: (
+    sessionId: string,
+    handler: (data: Uint8Array, outputSeq: number) => void,
+  ) => () => void;
 }
 
 interface PtyRelayLike {
@@ -84,9 +87,9 @@ export function attachPtySessionTransport(
     scheduleSnapshotRetry();
   };
 
-  const unsubBinary = ws.subscribeBinary(sessionId, (data) => {
+  const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
     if (disposed) return;
-    const result = recovery.handleBinaryFrame(data, target);
+    const result = recovery.handleBinaryFrame({ data, outputSeq }, target);
     if (result.written) onFrameWritten?.();
   });
 
@@ -105,6 +108,7 @@ export function attachPtySessionTransport(
         cols: msg.cols as number,
         rows: msg.rows as number,
         data: msg.data as string,
+        outputSeq: msg.outputSeq as number,
       },
       target,
     );

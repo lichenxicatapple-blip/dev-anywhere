@@ -8,7 +8,7 @@ export class WebSocketManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private messageHandlers = new Set<(data: string) => void>();
-  private binarySubscribers = new Map<string, Set<(data: Uint8Array) => void>>();
+  private binarySubscribers = new Map<string, Set<(data: Uint8Array, outputSeq: number) => void>>();
   private statusHandlers = new Set<(connected: boolean) => void>();
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
@@ -100,7 +100,10 @@ export class WebSocketManager {
     return this.connected;
   }
 
-  subscribeBinary(sessionId: string, handler: (data: Uint8Array) => void): () => void {
+  subscribeBinary(
+    sessionId: string,
+    handler: (data: Uint8Array, outputSeq: number) => void,
+  ): () => void {
     let subscribers = this.binarySubscribers.get(sessionId);
     if (!subscribers) {
       subscribers = new Set();
@@ -162,12 +165,14 @@ export class WebSocketManager {
   private dispatchBinary(view: Uint8Array): void {
     if (view.length < 2) return;
     const sidLen = view[0];
-    if (view.length < 1 + sidLen) return;
+    if (view.length < 1 + sidLen + 4) return;
     const sessionId = new TextDecoder().decode(view.subarray(1, 1 + sidLen));
-    const ptyData = view.subarray(1 + sidLen);
+    const seqOffset = 1 + sidLen;
+    const outputSeq = new DataView(view.buffer, view.byteOffset + seqOffset, 4).getUint32(0, true);
+    const ptyData = view.subarray(seqOffset + 4);
     const subscribers = this.binarySubscribers.get(sessionId);
     if (subscribers) {
-      subscribers.forEach((h) => h(ptyData));
+      subscribers.forEach((h) => h(ptyData, outputSeq));
     }
   }
 

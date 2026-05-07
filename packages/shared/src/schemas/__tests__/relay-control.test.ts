@@ -102,6 +102,7 @@ describe("RelayControlSchema", () => {
         cols: 80,
         rows: 24,
         data: "snapshot",
+        outputSeq: 1,
         requestId: "pty-snapshot-1",
       }),
     ).toMatchObject({

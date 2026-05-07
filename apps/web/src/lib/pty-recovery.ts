@@ -11,6 +11,7 @@ interface PtySnapshotMessage {
   cols: number;
   rows: number;
   data: string;
+  outputSeq: number;
 }
 
 interface PtyRecoveryOptions {
@@ -25,7 +26,8 @@ export class PtyRecoveryController {
   private requestIdFactory: () => string;
   private activeRequestId: string | null = null;
   private snapshotApplied = false;
-  private frameBuffer: Uint8Array[] = [];
+  private frameBuffer: Array<{ data: Uint8Array; outputSeq: number }> = [];
+  private appliedOutputSeq = 0;
 
   constructor(options: PtyRecoveryOptions = {}) {
     let seq = 0;
@@ -44,12 +46,17 @@ export class PtyRecoveryController {
     return this.snapshotApplied;
   }
 
-  handleBinaryFrame(frame: Uint8Array, target: PtyRenderTarget): { written: boolean } {
+  handleBinaryFrame(
+    frame: { data: Uint8Array; outputSeq: number },
+    target: PtyRenderTarget,
+  ): { written: boolean } {
     if (!this.snapshotApplied) {
       this.frameBuffer.push(frame);
       return { written: false };
     }
-    target.write(frame);
+    if (frame.outputSeq <= this.appliedOutputSeq) return { written: false };
+    this.appliedOutputSeq = frame.outputSeq;
+    target.write(frame.data);
     return { written: true };
   }
 
@@ -65,15 +72,18 @@ export class PtyRecoveryController {
     this.frameBuffer = [];
     this.activeRequestId = null;
     this.snapshotApplied = true;
+    this.appliedOutputSeq = snapshot.outputSeq;
+    const replayFrames = frames.filter((frame) => frame.outputSeq > snapshot.outputSeq);
 
     target.reset();
     target.resize(snapshot.cols, snapshot.rows);
     target.write(snapshot.data, () => {
-      for (const frame of frames) {
-        target.write(frame);
+      for (const frame of replayFrames) {
+        this.appliedOutputSeq = Math.max(this.appliedOutputSeq, frame.outputSeq);
+        target.write(frame.data);
       }
     });
 
-    return { applied: true, replayedFrames: frames.length };
+    return { applied: true, replayedFrames: replayFrames.length };
   }
 }

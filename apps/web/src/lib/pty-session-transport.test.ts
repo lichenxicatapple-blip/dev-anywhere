@@ -16,7 +16,7 @@ function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
 }
 
 function createHarness() {
-  let binaryHandler: ((data: Uint8Array) => void) | null = null;
+  let binaryHandler: ((data: Uint8Array, outputSeq: number) => void) | null = null;
   let relayHandler: ((msg: Record<string, unknown>) => void) | null = null;
   const sent: string[] = [];
   const unsubBinary = vi.fn();
@@ -28,10 +28,12 @@ function createHarness() {
         sent.push(data);
         return true;
       }),
-      subscribeBinary: vi.fn((_sessionId: string, handler: (data: Uint8Array) => void) => {
-        binaryHandler = handler;
-        return unsubBinary;
-      }),
+      subscribeBinary: vi.fn(
+        (_sessionId: string, handler: (data: Uint8Array, outputSeq: number) => void) => {
+          binaryHandler = handler;
+          return unsubBinary;
+        },
+      ),
     },
     relay: {
       onMessage: vi.fn((handler: (msg: Record<string, unknown>) => void) => {
@@ -39,7 +41,7 @@ function createHarness() {
         return unsubRelay;
       }),
     },
-    emitBinary: (data: Uint8Array) => binaryHandler?.(data),
+    emitBinary: (data: Uint8Array, outputSeq = 1) => binaryHandler?.(data, outputSeq),
     emitRelay: (msg: Record<string, unknown>) => relayHandler?.(msg),
     unsubBinary,
     unsubRelay,
@@ -87,6 +89,7 @@ describe("attachPtySessionTransport", () => {
       cols: 80,
       rows: 24,
       data: "snapshot",
+      outputSeq: 0,
     });
 
     expect(target.calls).toEqual([
@@ -122,6 +125,7 @@ describe("attachPtySessionTransport", () => {
       cols: 80,
       rows: 24,
       data: "old",
+      outputSeq: 1,
     });
     harness.emitRelay({
       type: "session_snapshot",
@@ -130,6 +134,7 @@ describe("attachPtySessionTransport", () => {
       cols: 100,
       rows: 30,
       data: "new",
+      outputSeq: 2,
     });
 
     expect(target.calls).toEqual([

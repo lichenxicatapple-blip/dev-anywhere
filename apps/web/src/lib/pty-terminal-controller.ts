@@ -15,7 +15,10 @@ interface PtyControlledTerminal extends PtyRenderTarget {
 
 interface PtyWebSocketLike {
   send: (data: string) => boolean;
-  subscribeBinary: (sessionId: string, handler: (data: Uint8Array) => void) => () => void;
+  subscribeBinary: (
+    sessionId: string,
+    handler: (data: Uint8Array, outputSeq: number) => void,
+  ) => () => void;
 }
 
 interface PtyRelayLike {
