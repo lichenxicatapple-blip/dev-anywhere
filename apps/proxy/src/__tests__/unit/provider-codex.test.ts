@@ -58,8 +58,10 @@ describe("Codex provider", () => {
     expect(command.args.join(" ")).toContain("DEV_ANYWHERE_HOOK_EVENT=PreToolUse");
     expect(command.args.join(" ")).toContain("DEV_ANYWHERE_HOOK_FORWARDER");
     expect(command.args.join(" ")).toContain(
-      'command="DEV_ANYWHERE_HOOK_EVENT=PreToolUse node \\"$DEV_ANYWHERE_HOOK_FORWARDER\\"", timeout=31536000',
+      'command="DEV_ANYWHERE_HOOK_EVENT=PreToolUse node \\"$DEV_ANYWHERE_HOOK_FORWARDER\\"", timeout=5',
     );
+    expect(command.args.join(" ")).not.toContain("DEV_ANYWHERE_HOOK_EVENT=PermissionRequest");
+    expect(command.args.join(" ")).not.toContain("timeout=31536000");
     expect(countInlineTableBraceBalance(command.args.join(" "))).toBe(0);
     expect(command.args.join(" ")).not.toContain(".codex/hooks.json");
     expect(command.args.join(" ")).not.toContain("token-1");

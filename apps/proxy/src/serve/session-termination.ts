@@ -1,0 +1,70 @@
+import type { Socket } from "node:net";
+import { serviceLogger } from "../common/logger.js";
+import { serializeIpc } from "../ipc/ipc-protocol.js";
+import type { AgentStatusRegistry } from "./agent-status-registry.js";
+import type { ControlMessageHandlers } from "./handlers/control-messages.js";
+import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
+import type { SessionManager } from "./session-manager.js";
+import type { WorkerRegistry } from "./worker-registry.js";
+
+type SessionTerminationAction =
+  | "detach_local_terminal"
+  | "terminate_hosted_pty"
+  | "terminate_json_worker"
+  | "not_found";
+
+interface TerminateSessionDeps {
+  sessionManager: SessionManager;
+  workerRegistry: WorkerRegistry;
+  controlHandlers: ControlMessageHandlers;
+  terminalSockets: Map<string, Socket>;
+  hostedPtyRegistry: HostedPtyRegistry;
+  agentStatusRegistry: AgentStatusRegistry;
+}
+
+export function terminateSessionByOwnership(
+  deps: TerminateSessionDeps,
+  sessionId: string,
+): { success: boolean; action: SessionTerminationAction } {
+  const session = deps.sessionManager.getSession(sessionId);
+
+  if (session?.mode === "pty" && session.ptyOwner === "local-terminal") {
+    const terminalSocket = deps.terminalSockets.get(sessionId);
+    if (terminalSocket?.writable) {
+      terminalSocket.write(serializeIpc({ type: "pty_detach", sessionId }));
+    }
+    deps.terminalSockets.delete(sessionId);
+    const result = deps.sessionManager.terminateSession(sessionId, {
+      preserveProviderHooks: true,
+    });
+    deps.controlHandlers.cleanup(sessionId);
+    deps.agentStatusRegistry.delete(sessionId);
+    serviceLogger.info(
+      { sessionId, success: result.success },
+      "Local terminal session detached from remote view",
+    );
+    return { success: result.success, action: "detach_local_terminal" };
+  }
+
+  if (session?.mode === "pty" && session.ptyOwner === "proxy-hosted") {
+    const success = deps.hostedPtyRegistry.terminate(sessionId);
+    serviceLogger.info({ sessionId, success }, "Hosted PTY termination requested");
+    return { success, action: "terminate_hosted_pty" };
+  }
+
+  if (session?.mode === "json") {
+    deps.workerRegistry.send(sessionId, { type: "worker_stop" });
+    deps.workerRegistry.delete(sessionId);
+    const result = deps.sessionManager.terminateSession(sessionId);
+    deps.controlHandlers.cleanup(sessionId);
+    deps.agentStatusRegistry.delete(sessionId);
+    serviceLogger.info({ sessionId, success: result.success }, "JSON worker session terminated");
+    return { success: result.success, action: "terminate_json_worker" };
+  }
+
+  const hostedTerminated = deps.hostedPtyRegistry.terminate(sessionId);
+  if (hostedTerminated) {
+    return { success: true, action: "terminate_hosted_pty" };
+  }
+  return { success: false, action: "not_found" };
+}

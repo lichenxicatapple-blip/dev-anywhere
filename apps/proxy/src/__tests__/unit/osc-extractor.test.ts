@@ -17,6 +17,12 @@ describe("extractOscSignals", () => {
     expect(result).toEqual({ state: "turn_complete" });
   });
 
+  it("returns turn_complete for Claude's numeric idle OSC 9 code", () => {
+    const data = "\x1b]0;Claude Code\x07\x1b]9;4;0;\x07";
+    const result = extractOscSignals(data);
+    expect(result).toEqual({ state: "turn_complete", title: "Claude Code" });
+  });
+
   it("returns approval_wait for OSC 9 'needs your permission'", () => {
     const data = "\x1b]9;needs your permission\x07";
     const result = extractOscSignals(data);

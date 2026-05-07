@@ -1,11 +1,12 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import type { ProviderAdapter, ProviderHookContext } from "../providers/index.js";
-import { readTtySize } from "./tty.js";
+import { readTtySize, restoreHostTerminalModes } from "./tty.js";
 
 interface PtyManagerOptions {
   provider: ProviderAdapter;
   providerArgs: string[];
+  cwd: string;
   hook?: ProviderHookContext;
   tap: (data: string) => void;
   stdin: NodeJS.ReadStream;
@@ -18,6 +19,7 @@ export class PtyManager {
   private child: IPty | null = null;
   private readonly provider: ProviderAdapter;
   private readonly providerArgs: string[];
+  private readonly cwd: string;
   private readonly hook?: ProviderHookContext;
   private readonly tap: (data: string) => void;
   private readonly stdin: NodeJS.ReadStream;
@@ -28,6 +30,7 @@ export class PtyManager {
   constructor(options: PtyManagerOptions) {
     this.provider = options.provider;
     this.providerArgs = options.providerArgs;
+    this.cwd = options.cwd;
     this.hook = options.hook;
     this.tap = options.tap;
     this.stdin = options.stdin;
@@ -47,7 +50,7 @@ export class PtyManager {
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
-      cwd: process.env.INIT_CWD || process.cwd(),
+      cwd: this.cwd,
       env: command.env as Record<string, string>,
     });
     this.child = child;
@@ -87,6 +90,7 @@ export class PtyManager {
           // stdin 可能已关闭
         }
       }
+      restoreHostTerminalModes(this.stdout);
       const code = signal ? 128 + signal : exitCode;
       this.onSessionExit?.(code);
     });
@@ -124,6 +128,7 @@ export class PtyManager {
         // stdin 可能已关闭
       }
     }
+    restoreHostTerminalModes(this.stdout);
     if (this.child) {
       try {
         this.child.kill();

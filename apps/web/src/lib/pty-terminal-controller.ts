@@ -88,6 +88,9 @@ export function attachPtyTerminalController(
     host.addEventListener("pointerdown", focusTerminal, { passive: true });
     removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
     onTerminalReady?.(result.terminal);
+    requestAnimationFrame(() => {
+      if (!disposed) focusTerminal();
+    });
 
     const transport = attachTransport({
       sessionId,

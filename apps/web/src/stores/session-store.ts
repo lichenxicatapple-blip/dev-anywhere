@@ -2,7 +2,12 @@
 // 选中态不在这里存, 由 URL (/chat/:id) 作为单一事实来源
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { AgentStatusPayload, SessionInfo, HistorySession } from "@dev-anywhere/shared";
+import type {
+  AgentStatusPayload,
+  SessionInfo,
+  HistorySession,
+  PtyStatePayload,
+} from "@dev-anywhere/shared";
 
 interface SessionStoreState {
   sessions: SessionInfo[];
@@ -12,6 +17,8 @@ interface SessionStoreState {
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
   ptyTitles: Record<string, string>;
+  // PTY 语义状态: terminal/proxy 从 OSC 9 等信号抽取, 用于实时展示 approval_wait 等非字节内容。
+  ptyStateBySessionId: Record<string, PtyStatePayload>;
   agentStatusBySessionId: Record<string, AgentStatusPayload>;
 
   setSessions: (sessions: SessionInfo[]) => void;
@@ -20,6 +27,7 @@ interface SessionStoreState {
   // lastActive 可选：envelope session_status 会一并写入；agent_status 不修改主生命周期时间。
   updateSessionState: (sessionId: string, state: SessionInfo["state"], lastActive?: number) => void;
   setAgentStatus: (sessionId: string, status: AgentStatusPayload) => void;
+  setPtyState: (sessionId: string, status: PtyStatePayload) => void;
   updateSessionName: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
@@ -32,6 +40,7 @@ export const useSessionStore = create<SessionStoreState>()(
       sessionListLoaded: false,
       historySessions: [],
       ptyTitles: {},
+      ptyStateBySessionId: {},
       agentStatusBySessionId: {},
 
       setSessions: (sessions) =>
@@ -45,6 +54,11 @@ export const useSessionStore = create<SessionStoreState>()(
                 activeSessionIds.has(sid),
               ),
             ),
+            ptyStateBySessionId: Object.fromEntries(
+              Object.entries(state.ptyStateBySessionId).filter(([sid]) =>
+                activeSessionIds.has(sid),
+              ),
+            ),
           };
         }),
       addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
@@ -53,6 +67,9 @@ export const useSessionStore = create<SessionStoreState>()(
           sessions: state.sessions.filter((s) => s.sessionId !== sessionId),
           agentStatusBySessionId: Object.fromEntries(
             Object.entries(state.agentStatusBySessionId).filter(([sid]) => sid !== sessionId),
+          ),
+          ptyStateBySessionId: Object.fromEntries(
+            Object.entries(state.ptyStateBySessionId).filter(([sid]) => sid !== sessionId),
           ),
         })),
       updateSessionState: (sessionId, newState, lastActive) =>
@@ -78,6 +95,13 @@ export const useSessionStore = create<SessionStoreState>()(
             },
           };
         }),
+      setPtyState: (sessionId, status) =>
+        set((state) => ({
+          ptyStateBySessionId: {
+            ...state.ptyStateBySessionId,
+            [sessionId]: status,
+          },
+        })),
       updateSessionName: (sessionId, name) =>
         set((state) => ({
           sessions: state.sessions.map((s) => (s.sessionId === sessionId ? { ...s, name } : s)),

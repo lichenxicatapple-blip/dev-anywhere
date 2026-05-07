@@ -117,9 +117,13 @@ function buildHookForwardCommand(event: string): string {
   return `DEV_ANYWHERE_HOOK_EVENT=${shellQuote(event)} node -e ${shellQuote(HOOK_FORWARDER_SCRIPT)}`;
 }
 
-export function buildClaudeHookSettings(): Record<string, unknown> {
+export function buildClaudeHookSettings(options?: {
+  includePermissionRequest?: boolean;
+}): Record<string, unknown> {
+  const includePermissionRequest = options?.includePermissionRequest ?? true;
   const hooks: Record<string, unknown[]> = {};
   for (const event of CLAUDE_HOOK_EVENTS) {
+    if (event === "PermissionRequest" && !includePermissionRequest) continue;
     hooks[event] = [
       {
         matcher: "",
@@ -139,6 +143,18 @@ export function buildClaudeHookSettings(): Record<string, unknown> {
 function withClaudeHookArgs(args: string[], context: ProviderHookContext | undefined): string[] {
   if (!context) return args;
   return [...args, "--settings", JSON.stringify(buildClaudeHookSettings())];
+}
+
+function withClaudeTerminalHookArgs(
+  args: string[],
+  context: ProviderHookContext | undefined,
+): string[] {
+  if (!context) return args;
+  return [
+    ...args,
+    "--settings",
+    JSON.stringify(buildClaudeHookSettings({ includePermissionRequest: false })),
+  ];
 }
 
 function withClaudeHookEnv(
@@ -186,7 +202,7 @@ export const CLAUDE_PROVIDER: ProviderAdapter = {
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
       command: resolveClaudePtyCommand(env),
-      args: withClaudeHookArgs(options.args, options.hook),
+      args: withClaudeTerminalHookArgs(options.args, options.hook),
       env: withClaudeHookEnv(env, options.hook),
     };
   },

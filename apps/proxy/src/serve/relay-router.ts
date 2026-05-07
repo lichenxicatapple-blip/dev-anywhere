@@ -18,6 +18,7 @@ import type { HookEventRouter } from "./hook-event-router.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import { buildHostedPtyArgs } from "./hosted-pty-registry.js";
+import { terminateSessionByOwnership } from "./session-termination.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -548,16 +549,12 @@ export class RelayRouter {
     const sid = msg.sessionId as string | undefined;
     if (!sid) return;
 
-    const hosted = this.deps.hostedPtyRegistry.terminate(sid);
-    const result = hosted ? { success: true } : this.deps.sessionManager.terminateSession(sid);
-    if (!hosted) {
-      this.deps.workerRegistry.send(sid, { type: "worker_stop" });
-      this.deps.workerRegistry.delete(sid);
-      this.deps.controlHandlers.cleanup(sid);
-      this.deps.agentStatusRegistry.delete(sid);
-    }
-    serviceLogger.info({ sessionId: sid, success: result.success }, "Session terminated via relay");
-    if (!hosted) this.deps.broadcastSessionList();
+    const result = terminateSessionByOwnership(this.deps, sid);
+    serviceLogger.info(
+      { sessionId: sid, success: result.success, action: result.action },
+      "Session termination handled via relay",
+    );
+    if (result.action !== "terminate_hosted_pty") this.deps.broadcastSessionList();
   }
 
   private onSessionWorkerAbort(msg: Record<string, unknown>): void {

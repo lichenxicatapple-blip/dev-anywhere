@@ -9,6 +9,10 @@ cd "$ROOT"
 
 LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
 mkdir -p "$LOG_DIR"
+DEV_ANYWHERE_LOG_RUN_ID="${DEV_ANYWHERE_LOG_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+DEV_ANYWHERE_LOG_RETENTION="${DEV_ANYWHERE_LOG_RETENTION:-50}"
+export DEV_ANYWHERE_LOG_RUN_ID
+export DEV_ANYWHERE_LOG_RETENTION
 
 RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
@@ -50,6 +54,42 @@ wait_port() {
   exit 1
 }
 
+prepare_run_log() {
+  local stable_file="$1"
+  local dir
+  local base
+  local stem
+  local run_file
+  dir="$(dirname "$stable_file")"
+  base="$(basename "$stable_file")"
+  stem="${base%.log}"
+  run_file="$dir/${stem}-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+
+  if [ -e "$stable_file" ] && [ ! -L "$stable_file" ]; then
+    mv "$stable_file" "$dir/${stem}-legacy-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+  fi
+
+  ln -sfn "$(basename "$run_file")" "$stable_file"
+  : >"$run_file"
+  prune_run_logs "$dir" "$stem" "$run_file"
+  printf '%s\n' "$run_file"
+}
+
+prune_run_logs() {
+  local dir="$1"
+  local stem="$2"
+  local current_file="$3"
+  local keep="$DEV_ANYWHERE_LOG_RETENTION"
+  if [ "$keep" = "0" ]; then
+    return
+  fi
+
+  ls -t "$dir/${stem}-"*.log 2>/dev/null |
+    grep -vx "$current_file" |
+    tail -n +"$keep" |
+    xargs rm -f 2>/dev/null || true
+}
+
 start_detached() {
   local cwd="$1"
   local log_file="$2"
@@ -85,14 +125,14 @@ pnpm --filter @dev-anywhere/shared run build
 echo ""
 echo "=== Restarting relay ==="
 kill_port "$RELAY_PORT" "relay"
-RELAY_LOG="$LOG_DIR/relay-dev.log"
+RELAY_LOG="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
 start_detached "$ROOT/apps/relay" "$RELAY_LOG" env PORT="$RELAY_PORT" "$ROOT/apps/relay/node_modules/.bin/tsx" src/index.ts
 wait_port "$RELAY_PORT" "Relay" "$RELAY_LOG"
 
 echo ""
 echo "=== Restarting web ==="
 kill_port "$WEB_PORT" "web"
-WEB_LOG="$LOG_DIR/web-dev.log"
+WEB_LOG="$(prepare_run_log "$LOG_DIR/web-dev.log")"
 start_detached "$ROOT/apps/web" "$WEB_LOG" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
 wait_port "$WEB_PORT" "Web" "$WEB_LOG"
 
@@ -102,6 +142,7 @@ INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
 
 echo ""
 echo "=== All services restarted ==="
+echo "  Log run: $DEV_ANYWHERE_LOG_RUN_ID"
 echo "  Relay: http://localhost:$RELAY_PORT"
 echo "  Web:   http://localhost:$WEB_PORT"
 echo ""

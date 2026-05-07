@@ -134,4 +134,30 @@ test.describe("functional browser walkthrough", () => {
       page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
     ).toHaveCount(0);
   });
+
+  test("PTY approval state is visible immediately and survives refresh", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+    await expect(page.locator('[data-slot="pty-approval-hint"]')).toHaveCount(0);
+
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "pty_state",
+        sessionId: "claude-pty",
+        payload: { state: "approval_wait", tool: "Write" },
+      });
+    });
+
+    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    await expect(
+      page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
+    ).toContainText("等待审批");
+
+    await page.reload();
+    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    await expect(
+      page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
+    ).toContainText("等待审批");
+  });
 });

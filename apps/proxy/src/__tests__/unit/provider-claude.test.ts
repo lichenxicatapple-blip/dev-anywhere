@@ -127,6 +127,27 @@ describe("Claude provider", () => {
     expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(5);
   });
 
+  it("omits PermissionRequest hooks for PTY sessions so native TUI approval remains visible", () => {
+    const hook = {
+      provider: "claude" as const,
+      sessionId: "s1",
+      hookUrl: "http://127.0.0.1:17654/hook",
+      marker: "marker-1",
+      token: "token-1",
+    };
+
+    const command = CLAUDE_PROVIDER.buildTerminalCommand(
+      { args: ["--continue"], hook },
+      { CLAUDE_BIN: "/custom/claude" },
+    );
+    const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
+      hooks: Record<string, unknown>;
+    };
+
+    expect(settings.hooks.PreToolUse).toBeDefined();
+    expect(settings.hooks.PermissionRequest).toBeUndefined();
+  });
+
   it("builds Claude hook settings without global config paths", () => {
     const settings = buildClaudeHookSettings();
 

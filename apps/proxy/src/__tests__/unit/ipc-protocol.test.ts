@@ -88,6 +88,17 @@ describe("IPC Protocol", () => {
         }).success,
       ).toBe(true);
     });
+
+    it("accepts PTY detach messages", async () => {
+      const { IpcMessageSchema } = await importIpc();
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_detach",
+          sessionId: "sess-1",
+        }).success,
+      ).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

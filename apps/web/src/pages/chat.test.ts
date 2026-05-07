@@ -36,6 +36,7 @@ describe("ChatPage session lifecycle derivation", () => {
         routeSessionEnded: true,
         session: undefined,
         agentStatus: status({ phase: "tool_use" }),
+        ptyState: { state: "approval_wait", tool: "Write" },
         hasPendingApproval: true,
       }),
     ).toBe("terminated");
@@ -49,6 +50,7 @@ describe("ChatPage session lifecycle derivation", () => {
         routeSessionEnded: true,
         session: undefined,
         agentStatus: undefined,
+        ptyState: undefined,
         hasPendingApproval: false,
       }),
     ).toBe("disconnected");
@@ -62,8 +64,51 @@ describe("ChatPage session lifecycle derivation", () => {
         routeSessionEnded: false,
         session: baseSession,
         agentStatus: status({ phase: "tool_use" }),
+        ptyState: undefined,
         hasPendingApproval: false,
       }),
     ).toBe("working");
+  });
+
+  it("shows PTY approval wait from pty_state even before session_status catches up", () => {
+    expect(
+      resolveChatStatusState({
+        connected: true,
+        proxyOnline: true,
+        routeSessionEnded: false,
+        session: baseSession,
+        agentStatus: undefined,
+        ptyState: { state: "approval_wait", tool: "Write" },
+        hasPendingApproval: false,
+      }),
+    ).toBe("waiting_approval");
+  });
+
+  it("restores approval wait from the server session state after refresh", () => {
+    expect(
+      resolveChatStatusState({
+        connected: true,
+        proxyOnline: true,
+        routeSessionEnded: false,
+        session: { ...baseSession, state: "waiting_approval" },
+        agentStatus: undefined,
+        ptyState: undefined,
+        hasPendingApproval: false,
+      }),
+    ).toBe("waiting_approval");
+  });
+
+  it("does not let JSON approval queue alone drive PTY status", () => {
+    expect(
+      resolveChatStatusState({
+        connected: true,
+        proxyOnline: true,
+        routeSessionEnded: false,
+        session: baseSession,
+        agentStatus: undefined,
+        ptyState: undefined,
+        hasPendingApproval: false,
+      }),
+    ).toBe("idle");
   });
 });

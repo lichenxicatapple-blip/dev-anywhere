@@ -90,6 +90,12 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     data: z.string(),
   }),
 
+  // serve → terminal：Web 端移除本地终端会话时，只断开远程视图，不杀本地 CLI。
+  z.object({
+    type: z.literal("pty_detach"),
+    sessionId: z.string(),
+  }),
+
   // 服务端广播会话状态变更
   z.object({
     type: z.literal("session_status_update"),

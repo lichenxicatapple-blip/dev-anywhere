@@ -10,6 +10,11 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "../common/osc-extractor.js";
+import { hasPtyApprovalPrompt } from "../common/pty-approval-screen.js";
+import {
+  shouldReleaseApprovalWait,
+  stateAfterApprovalRelease,
+} from "../common/pty-approval-state.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -37,6 +42,7 @@ interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
+  onTurnComplete: (sessionId: string) => void;
   onSessionClosed: (sessionId: string) => void;
 }
 
@@ -187,6 +193,16 @@ export class HostedPtyRegistry {
         requestId,
       }),
     );
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (
+      session &&
+      hasPtyApprovalPrompt(data, session.provider) &&
+      hosted.currentState !== "approval_wait"
+    ) {
+      hosted.currentState = "approval_wait";
+      this.sendPtyState(sessionId, "approval_wait");
+      this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
+    }
     serviceLogger.info(
       { sessionId, cols: hosted.terminal.cols, rows: hosted.terminal.rows, bytes: data.length },
       "Hosted PTY snapshot sent",
@@ -212,16 +228,15 @@ export class HostedPtyRegistry {
     hosted.terminal.write(data);
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
-    if (hosted.currentState !== "working") {
-      hosted.currentState = "working";
-      this.sendPtyState(sessionId, "working");
-      this.deps.changeSessionState(sessionId, SessionState.WORKING);
-    }
-
     const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
+    const session = this.deps.sessionManager.getSession(sessionId);
+    const screenShowsApproval =
+      session !== undefined &&
+      (hasPtyApprovalPrompt(data, session.provider) ||
+        hasPtyApprovalPrompt(hosted.serializeAddon.serialize(), session.provider));
     if (oscSequences.length > 0) {
-      serviceLogger.info(
+      serviceLogger.debug(
         {
           sessionId,
           oscSequences,
@@ -233,9 +248,47 @@ export class HostedPtyRegistry {
     if (signal?.title) {
       this.sendTerminalTitle(sessionId, signal.title);
     }
+    if (signal?.state === "approval_wait" || screenShowsApproval) {
+      hosted.currentState = "approval_wait";
+      this.sendPtyState(sessionId, "approval_wait", { title: signal?.title, tool: signal?.tool });
+      this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
+      return;
+    }
+    if (
+      shouldReleaseApprovalWait({
+        currentState: hosted.currentState,
+        screenShowsApproval,
+        signalState: signal?.state,
+      })
+    ) {
+      const nextState = stateAfterApprovalRelease(signal?.state);
+      hosted.currentState = nextState;
+      this.sendPtyState(sessionId, nextState, { title: signal?.title, tool: signal?.tool });
+      this.deps.changeSessionState(sessionId, SessionState.WORKING);
+      return;
+    }
+    if (
+      (session?.state === SessionState.WAITING_APPROVAL ||
+        hosted.currentState === "approval_wait") &&
+      signal?.state !== "turn_complete"
+    ) {
+      hosted.currentState = "approval_wait";
+      this.sendPtyState(sessionId, "approval_wait", { title: signal?.title, tool: signal?.tool });
+      return;
+    }
     if (signal && signal.state !== "working") {
       hosted.currentState = signal.state;
       this.sendPtyState(sessionId, signal.state, { title: signal.title, tool: signal.tool });
+      if (signal.state === "turn_complete") {
+        this.deps.onTurnComplete(sessionId);
+        this.deps.changeSessionState(sessionId, SessionState.IDLE);
+      }
+      return;
+    }
+    if (hosted.currentState !== "working") {
+      hosted.currentState = "working";
+      this.sendPtyState(sessionId, "working");
+      this.deps.changeSessionState(sessionId, SessionState.WORKING);
     }
   }
 
@@ -249,6 +302,7 @@ export class HostedPtyRegistry {
     if (hosted.currentState !== "working") return;
     hosted.currentState = "turn_complete";
     this.sendPtyState(sessionId, "turn_complete");
+    this.deps.onTurnComplete(sessionId);
     this.deps.changeSessionState(sessionId, SessionState.IDLE);
   }
 

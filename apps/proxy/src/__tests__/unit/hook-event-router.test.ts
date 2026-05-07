@@ -104,7 +104,7 @@ describe("HookEventRouter", () => {
     });
   });
 
-  it("emits MessageEnvelope-valid tool_use_request for hook PreToolUse", () => {
+  it("treats hook PreToolUse as non-blocking tool-use telemetry", () => {
     const captured: unknown[] = [];
     const capturedRaw: string[] = [];
     const states: Array<[string, SessionState]> = [];
@@ -133,33 +133,20 @@ describe("HookEventRouter", () => {
       },
     });
 
-    expect(states).toEqual([["s1", SessionState.WAITING_APPROVAL]]);
+    expect(states).toEqual([]);
     expect(capturedRaw).toHaveLength(1);
     const status = RelayControlSchema.parse(JSON.parse(capturedRaw[0]));
     expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
       expect(status.payload).toMatchObject({
         provider: "claude",
-        phase: "waiting_permission",
+        phase: "tool_use",
         seq: 8,
-        permissionRequest: {
-          requestId: "toolu-1",
-          toolName: "Bash",
-          input: { command: "pwd" },
-        },
+        toolName: "Bash",
+        toolInput: { command: "pwd" },
       });
     }
-    expect(captured).toHaveLength(1);
-    const parsed = MessageEnvelopeSchema.safeParse(captured[0]);
-    expect(parsed.success, parsed.success ? "" : JSON.stringify(parsed.error.issues)).toBe(true);
-    if (!parsed.success || parsed.data.type !== "tool_use_request") return;
-    expect(parsed.data.seq).toBe(8);
-    expect(parsed.data.sessionId).toBe("s1");
-    expect(parsed.data.payload).toEqual({
-      toolName: "Bash",
-      toolId: "toolu-1",
-      parameters: { command: "pwd" },
-    });
+    expect(captured).toHaveLength(0);
   });
 
   it("emits agent_status when hook permission is resolved", () => {

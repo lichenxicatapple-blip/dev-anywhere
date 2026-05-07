@@ -25,7 +25,11 @@ export interface SessionInfo {
 interface SessionManagerOptions {
   persistPath: string;
   reaperIntervalMs?: number;
-  onSessionRemoved?: (id: string) => void;
+  onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
+}
+
+interface SessionRemoveContext {
+  preserveProviderHooks?: boolean;
 }
 
 // 两个观察通道的合法转换表分离：PTY 看 OSC 信号、JSON 看 stream-json 事件，各自的状态空间和规则不同。
@@ -118,7 +122,7 @@ export class SessionManager {
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
   private readonly reaperIntervalMs: number;
-  private readonly onSessionRemoved?: (id: string) => void;
+  private readonly onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
 
   constructor(options: SessionManagerOptions) {
     this.persistPath = options.persistPath;
@@ -191,7 +195,7 @@ export class SessionManager {
     return true;
   }
 
-  terminateSession(id: string): { success: boolean; pid?: number } {
+  terminateSession(id: string, context?: SessionRemoveContext): { success: boolean; pid?: number } {
     const session = this.sessions.get(id);
     if (!session) {
       return { success: false };
@@ -200,7 +204,7 @@ export class SessionManager {
     this.sessions.delete(id);
     this.save();
     serviceLogger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
-    this.onSessionRemoved?.(id);
+    this.onSessionRemoved?.(id, context);
     return { success: true, pid };
   }
 

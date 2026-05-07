@@ -262,6 +262,20 @@ describe("SessionManager", () => {
       const result = manager.terminateSession("nonexistent");
       expect(result.success).toBe(false);
     });
+
+    it("passes remove context to lifecycle cleanup", () => {
+      const contexts: unknown[] = [];
+      const scoped = new SessionManager({
+        persistPath,
+        onSessionRemoved: (_id, context) => contexts.push(context),
+      });
+      const s = scoped.createSession("pty", "/tmp/test", ALIVE_PID);
+
+      scoped.terminateSession(s.id, { preserveProviderHooks: true });
+
+      expect(contexts).toEqual([{ preserveProviderHooks: true }]);
+      scoped.stopReaper();
+    });
   });
 
   describe("terminateAll", () => {

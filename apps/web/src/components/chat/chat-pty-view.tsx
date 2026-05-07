@@ -1,5 +1,5 @@
 // PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条 + follow-to-bottom
-// 工具审批: PTY 模式不做结构化审批 UI (xterm 原生 TUI 已完成交互), 仅由 chat.tsx 顶部 hint bar 提示
+// 工具审批: PTY 模式优先保留 provider 原生 TUI; 结构化审批卡片只用于 JSON 模式。
 // 滚动交由浏览器原生: 外层 .pty-terminal (overflow-auto) 做 scrollable, spacer 撑出 buffer.length*cellH,
 // xterm 挂在 position:sticky 的 host. scroll 事件 -> term.scrollToLine(ydisp), term.onScroll -> 同步 scrollTop.
 // canvas 比容器高时 (autoscale off 手机竖屏常见), sticky release 阶段自然暴露 canvas 底部, 代替老 pinBottom.
@@ -14,6 +14,7 @@
 // follow 语义与 JSON 模式对齐: 在底时 onRender 自动 scrollTop=scrollHeight 追随;
 // 离底时置 newFramesWhileAway 红点, 用户点按钮或自然滚回即清零.
 import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { attachPtyFitController } from "@/lib/pty-fit-controller";
@@ -66,6 +67,16 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
+
+  function handleTerminalContainerMouseDown(event: MouseEvent<HTMLDivElement>): void {
+    const target = event.target;
+    if (target instanceof Element && target.closest(".xterm")) return;
+    // 空白 spacer 区域不是 xterm DOM。浏览器默认 mousedown 会把焦点从
+    // xterm helper textarea 移到 body，导致后续方向键/Enter 不再进入 PTY。
+    event.preventDefault();
+    terminalRef.current?.focus();
+  }
+
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     const host = xtermHostRef.current;
@@ -188,6 +199,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         ref={setContainerEl}
         className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 pt-2"
         style={{ paddingBottom: scrollState.horizontalScrollable ? 32 : 8 }}
+        onMouseDownCapture={handleTerminalContainerMouseDown}
         data-slot="pty-terminal"
       >
         <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">

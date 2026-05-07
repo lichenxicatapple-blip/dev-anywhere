@@ -5,13 +5,17 @@ import { PermissionBroker } from "#src/serve/permission-broker.js";
 
 const servers: HookServer[] = [];
 
-async function createTestServer(onEvent?: (event: AuthenticatedHookEvent) => void) {
+async function createTestServer(
+  onEvent?: (event: AuthenticatedHookEvent) => void,
+  options?: { isSessionActive?: (sessionId: string) => boolean },
+) {
   const registry = new HookRegistry();
   const permissionBroker = new PermissionBroker();
   const server = new HookServer({
     port: 0,
     registry,
     permissionBroker,
+    isSessionActive: options?.isSessionActive,
     onEvent,
   });
   await server.start();
@@ -91,6 +95,33 @@ describe("HookServer", () => {
     await expect(response.json()).resolves.toEqual({ error: "invalid_hook_credentials" });
   });
 
+  it("acknowledges hooks for inactive preserved sessions without forwarding events", async () => {
+    const events: AuthenticatedHookEvent[] = [];
+    const { registry, url } = await createTestServer((event) => events.push(event), {
+      isSessionActive: () => false,
+    });
+    const credentials = registry.registerSession("s1", "claude");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credentials.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: credentials.sessionId,
+        provider: credentials.provider,
+        marker: credentials.marker,
+        event: "SessionStart",
+        payload: { cwd: "/tmp/project" },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(events).toEqual([]);
+  });
+
   it("holds PermissionRequest until the broker resolves it", async () => {
     const { registry, permissionBroker, url } = await createTestServer();
     const credentials = registry.registerSession("s1", "claude");
@@ -125,14 +156,14 @@ describe("HookServer", () => {
     });
   });
 
-  it("holds PreToolUse until the broker resolves it and returns Claude permissionDecision JSON", async () => {
+  it("forwards PreToolUse without creating a pending permission", async () => {
     const events: AuthenticatedHookEvent[] = [];
     const { registry, permissionBroker, url } = await createTestServer((event) =>
       events.push(event),
     );
     const credentials = registry.registerSession("s1", "claude");
 
-    const responsePromise = fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         authorization: `Bearer ${credentials.token}`,
@@ -151,25 +182,59 @@ describe("HookServer", () => {
       }),
     });
 
-    await waitForPendingPermission(permissionBroker, "s1");
-    expect(permissionBroker.listSession("s1")).toHaveLength(1);
-    expect(permissionBroker.resolve("toolu-1", { behavior: "deny", message: "No." })).toBe(true);
-
-    const response = await responsePromise;
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: "No.",
+        permissionDecision: "defer",
       },
     });
+    expect(permissionBroker.listSession("s1")).toHaveLength(0);
     expect(events).toMatchObject([
       {
         sessionId: "s1",
         provider: "claude",
         event: "PreToolUse",
         requestId: "toolu-1",
+      },
+    ]);
+  });
+
+  it("returns empty stdout for neutral Codex PreToolUse hooks", async () => {
+    const events: AuthenticatedHookEvent[] = [];
+    const { registry, permissionBroker, url } = await createTestServer((event) =>
+      events.push(event),
+    );
+    const credentials = registry.registerSession("s1", "codex");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credentials.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: credentials.sessionId,
+        provider: credentials.provider,
+        marker: credentials.marker,
+        event: "PreToolUse",
+        payload: {
+          tool_name: "shell",
+          tool_input: { command: "pwd" },
+          tool_use_id: "call-1",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(permissionBroker.listSession("s1")).toHaveLength(0);
+    expect(events).toMatchObject([
+      {
+        sessionId: "s1",
+        provider: "codex",
+        event: "PreToolUse",
+        requestId: "call-1",
       },
     ]);
   });

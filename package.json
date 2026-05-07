@@ -16,7 +16,7 @@
     "dev:restart": "scripts/dev-restart.sh",
     "dev:health": "scripts/dev-health.sh",
     "dev-anywhere": "node apps/proxy/dist/index.js",
-    "proxy": "INIT_CWD=$PWD pnpm --filter @dev-anywhere/proxy run dev --",
+    "proxy": "DEV_ANYWHERE_CWD=${DEV_ANYWHERE_CWD:-${INIT_CWD:-$PWD}} pnpm --filter @dev-anywhere/proxy run dev --",
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"
   },
   "devDependencies": {

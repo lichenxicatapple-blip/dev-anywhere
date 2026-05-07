@@ -73,6 +73,8 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
       ? session.sessionId.slice(0, 8)
       : formatSessionName(session.name);
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
+  const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
+  const terminateLabel = isLocalTerminalPty ? "断开远程连接" : "终止会话";
   return (
     <li
       className={cn(
@@ -150,13 +152,13 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem
-              variant="destructive"
+              variant={isLocalTerminalPty ? undefined : "destructive"}
               onSelect={(event) => {
                 event.stopPropagation();
                 onTerminate();
               }}
             >
-              终止会话
+              {terminateLabel}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

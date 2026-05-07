@@ -25,6 +25,7 @@ import type { PickerHandle } from "./picker-handle";
 interface FilePathPickerProps {
   filter: string;
   mode?: PickerMode;
+  placement?: "floating" | "inline";
   onSelect: (path: string) => void;
   dirsOnly?: boolean;
   title?: string;
@@ -47,7 +48,7 @@ function joinPickerPath(currentPath: string, entry: { name: string; isDir: boole
 }
 
 export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(function FilePathPicker(
-  { filter, onSelect, mode = "insert", dirsOnly = false, title },
+  { filter, onSelect, mode = "insert", placement = "floating", dirsOnly = false, title },
   ref,
 ) {
   const tree = useFileStore((s) => s.tree);
@@ -55,7 +56,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const homePath = useFileStore((s) => s.homePath);
   // insert 模式在 Chat 页, 锚到 session cwd (@ 后的相对路径拼在 session cwd 下)
   // select 模式给新建会话用, 那会儿还没有 session, 锚到 $HOME
-  const baseCwd = mode === "insert" ? sessionCwd : sessionCwd || homePath;
+  const baseCwd = mode === "insert" ? sessionCwd : homePath || sessionCwd;
   const knownDirs = useMemo(() => new Set(tree.keys()), [tree]);
   const target = useMemo(
     () => resolvePickerTarget(filter, mode, { baseCwd, knownDirs }),
@@ -140,18 +141,31 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   );
 
   const containerClass =
-    mode === "insert"
-      ? "absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-md shadow-lg z-10 overflow-hidden"
-      : "bg-popover border border-border rounded-md shadow-sm overflow-hidden";
+    placement === "inline"
+      ? "relative w-full bg-popover border border-border rounded-md overflow-hidden"
+      : mode === "insert"
+        ? "absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-md shadow-lg z-10 overflow-hidden"
+        : "absolute left-0 right-0 top-full z-50 mt-2 bg-popover border border-border rounded-md shadow-lg overflow-hidden";
+  const listClass =
+    placement === "inline"
+      ? "h-44 overflow-y-auto overscroll-contain"
+      : mode === "select"
+        ? "max-h-44 overflow-y-auto overscroll-contain"
+        : "max-h-60 overflow-y-auto overscroll-contain";
 
   return (
-    <div className={containerClass} data-slot="file-path-picker" data-mode={mode}>
+    <div
+      className={containerClass}
+      data-slot="file-path-picker"
+      data-mode={mode}
+      data-placement={placement}
+    >
       {mode === "select" && title ? (
         <div className="border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
           {title}
         </div>
       ) : null}
-      <div className="max-h-60 overflow-y-auto overscroll-contain">
+      <div className={listClass}>
         {filteredEntries.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {isLoading ? "加载中..." : "没有匹配的路径"}

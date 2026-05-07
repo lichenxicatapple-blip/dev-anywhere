@@ -3,6 +3,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
+import { resolveTerminalCwd } from "./terminal/cwd.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -12,6 +13,11 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "./common/osc-extractor.js";
+import { hasPtyApprovalPrompt } from "./common/pty-approval-screen.js";
+import {
+  shouldReleaseApprovalWait,
+  stateAfterApprovalRelease,
+} from "./common/pty-approval-state.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
@@ -151,7 +157,7 @@ class TerminalSession {
     transitions: TERMINAL_TRANSITIONS,
     onTransition: (from, to) => log.info({ from, to }, "Terminal state transition"),
   });
-  private readonly sessionCwd = process.env.INIT_CWD || process.cwd();
+  private readonly sessionCwd = resolveTerminalCwd();
   // socket 在 run() 中连上 serve 后首次赋值；reconnect 会重新赋值为新实例
   private socket!: Socket;
   private sessionId: string | null = null;
@@ -164,6 +170,7 @@ class TerminalSession {
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   private serializeAddon: SerializeAddon | null = null;
   private outputSeq = 0;
+  private remoteDetached = false;
   // 记录上次 bridge 状态避免重连抖动导致 banner 连刷；初值 null 让首次状态（无论真假）都打，启动时提示 remote viewing 是否就绪
   private lastBridgeConnected: boolean | null = null;
   // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
@@ -194,6 +201,7 @@ class TerminalSession {
     this.socket.write(
       serializeIpc({ type: "pty_register", sessionId: this.sessionId!, pid: process.pid }),
     );
+    this.replayCurrentPtyState();
     this.fsm.transitionTo(TerminalState.RUNNING);
     this.setupIdleCheck();
 
@@ -246,6 +254,7 @@ class TerminalSession {
     this.ptyManager = new PtyManager({
       provider: this.provider,
       providerArgs: this.providerArgs,
+      cwd: this.sessionCwd,
       hook: this.hookContext ?? undefined,
       tap: (data) => this.handlePtyData(data),
       stdin: process.stdin,
@@ -279,21 +288,21 @@ class TerminalSession {
 
     if (this.headlessTerminal) this.headlessTerminal.write(data);
 
-    if (this.socket.writable && this.sessionId) {
+    if (!this.remoteDetached && this.socket.writable && this.sessionId) {
       this.socket.write(
         encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
       );
     }
 
-    if (this.currentPtyState !== "working") {
-      this.currentPtyState = "working";
-      this.sendPtyState("working");
-    }
-
     const oscSequences = extractOscSequences(data);
     const signal = extractOscSignals(data);
+    const screenShowsApproval =
+      hasPtyApprovalPrompt(data, this.provider.id) ||
+      (this.serializeAddon
+        ? hasPtyApprovalPrompt(this.serializeAddon.serialize(), this.provider.id)
+        : false);
     if (oscSequences.length > 0) {
-      log.info(
+      log.debug(
         {
           sessionId: this.sessionId,
           oscSequences,
@@ -305,14 +314,40 @@ class TerminalSession {
     if (signal?.title) {
       this.sendTerminalTitle(signal.title);
     }
+    if (signal?.state === "approval_wait" || screenShowsApproval) {
+      this.currentPtyState = "approval_wait";
+      this.sendPtyState("approval_wait", { title: signal?.title, tool: signal?.tool });
+      return;
+    }
+    if (
+      shouldReleaseApprovalWait({
+        currentState: this.currentPtyState,
+        screenShowsApproval,
+        signalState: signal?.state,
+      })
+    ) {
+      const nextState = stateAfterApprovalRelease(signal?.state);
+      this.currentPtyState = nextState;
+      this.sendPtyState(nextState, { title: signal?.title, tool: signal?.tool });
+      return;
+    }
+    if (this.currentPtyState === "approval_wait" && signal?.state !== "turn_complete") {
+      this.sendPtyState("approval_wait", { title: signal?.title, tool: signal?.tool });
+      return;
+    }
     if (signal && signal.state !== "working") {
       this.currentPtyState = signal.state;
       this.sendPtyState(signal.state, { title: signal.title, tool: signal.tool });
+      return;
+    }
+    if (this.currentPtyState !== "working") {
+      this.currentPtyState = "working";
+      this.sendPtyState("working");
     }
   }
 
   private sendTerminalTitle(title: string): void {
-    if (!this.socket.writable || !this.sessionId) return;
+    if (this.remoteDetached || !this.socket.writable || !this.sessionId) return;
     this.socket.write(
       serializeIpc({
         type: "pty_title_change",
@@ -323,7 +358,7 @@ class TerminalSession {
   }
 
   private sendPtyState(state: PtySemanticState, meta?: { title?: string; tool?: string }): void {
-    if (!this.socket.writable || !this.sessionId) return;
+    if (this.remoteDetached || !this.socket.writable || !this.sessionId) return;
     this.socket.write(
       serializeIpc({
         type: "pty_state_push",
@@ -339,7 +374,13 @@ class TerminalSession {
     );
   }
 
+  private replayCurrentPtyState(): void {
+    if (this.currentPtyState === "turn_complete") return;
+    this.sendPtyState(this.currentPtyState);
+  }
+
   private handleBridgeStatus(connected: boolean): void {
+    if (this.remoteDetached) return;
     if (this.lastBridgeConnected === connected) return;
     this.lastBridgeConnected = connected;
     log.info({ connected }, "Bridge status changed, notifying user");
@@ -351,6 +392,8 @@ class TerminalSession {
       if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
         log.debug({ sessionId: this.sessionId, bytes: msg.data.length }, "Remote input received");
         this.ptyManager?.write(msg.data);
+      } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
+        this.detachRemoteView();
       } else if (msg.type === "bridge_status") {
         this.handleBridgeStatus(msg.connected);
       } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
@@ -367,6 +410,10 @@ class TerminalSession {
               requestId: msg.requestId,
             }),
           );
+          if (hasPtyApprovalPrompt(data, this.provider.id)) {
+            this.currentPtyState = "approval_wait";
+            this.sendPtyState("approval_wait");
+          }
           log.info(
             {
               sessionId: this.sessionId,
@@ -382,6 +429,10 @@ class TerminalSession {
 
     this.socket.on("close", () => {
       log.info("Serve socket closed");
+      if (this.remoteDetached) {
+        log.info("Remote view detached, skipping serve reconnect");
+        return;
+      }
       if (!this.fsm.isIn([TerminalState.RECONNECTING, TerminalState.EXITED])) {
         this.fsm.transitionTo(TerminalState.RECONNECTING);
         this.reconnectToServe();
@@ -418,6 +469,7 @@ class TerminalSession {
     let consecutiveSpawnFailures = 0;
 
     for (let i = 0; ; i++) {
+      if (this.remoteDetached) return;
       await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
 
       const stopped = existsSync(STOPPED_PATH);
@@ -456,6 +508,7 @@ class TerminalSession {
             this.socket.write(
               serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
             );
+            this.replayCurrentPtyState();
             this.fsm.transitionTo(TerminalState.RUNNING);
             log.info({ sessionId: this.sessionId }, "Session re-registered after reconnect");
           }
@@ -480,6 +533,18 @@ class TerminalSession {
         );
       }
     }
+  }
+
+  private detachRemoteView(): void {
+    const sessionId = this.sessionId;
+    if (!sessionId) return;
+    this.remoteDetached = true;
+    this.sessionId = null;
+    this.hookContext = null;
+    this.currentPtyState = "turn_complete";
+    log.info({ sessionId }, "Remote view detached; local PTY keeps running");
+    notifyUser("remote viewing detached");
+    if (this.socket.writable) this.socket.end();
   }
 }
 

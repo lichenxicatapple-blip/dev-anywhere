@@ -11,8 +11,29 @@ import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { loadFontCSS } from "@/lib/font-assets";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
-export let wsManagerRef: WebSocketManager | null = null;
-export let relayClientRef: RelayClient | null = null;
+const RELAY_RUNTIME_KEY = "__devAnywhereRelayRuntime";
+
+interface RelayRuntime {
+  wsManagerRef: WebSocketManager | null;
+  relayClientRef: RelayClient | null;
+}
+
+function relayRuntime(): RelayRuntime {
+  const host = globalThis as typeof globalThis & { [RELAY_RUNTIME_KEY]?: RelayRuntime };
+  host[RELAY_RUNTIME_KEY] ??= { wsManagerRef: null, relayClientRef: null };
+  return host[RELAY_RUNTIME_KEY];
+}
+
+export let wsManagerRef: WebSocketManager | null = relayRuntime().wsManagerRef;
+export let relayClientRef: RelayClient | null = relayRuntime().relayClientRef;
+
+function setRuntimeRefs(refs: RelayRuntime): void {
+  const runtime = relayRuntime();
+  runtime.wsManagerRef = refs.wsManagerRef;
+  runtime.relayClientRef = refs.relayClientRef;
+  wsManagerRef = refs.wsManagerRef;
+  relayClientRef = refs.relayClientRef;
+}
 
 // 将用户配置的 relayUrl 规整为 /client WebSocket 端点:
 // 同域部署默认取 window.location.origin (https://...), 需要转 ws scheme 并补 /client 路径
@@ -50,12 +71,11 @@ export function useRelaySetup(): void {
 
     const ws = new WebSocketManager();
     wsRef.current = ws;
-    wsManagerRef = ws;
 
     const clientId = useAppStore.getState().clientId;
     const relay = new RelayClient(ws, clientId);
     relayRef.current = relay;
-    relayClientRef = relay;
+    setRuntimeRefs({ wsManagerRef: ws, relayClientRef: relay });
 
     const timers: Timers = { reconnect: null, coldStartDone: false };
     timersRef.current = timers;
@@ -98,8 +118,7 @@ export function useRelaySetup(): void {
       unregisterResource();
       document.removeEventListener("visibilitychange", handleVisibility);
       ws.close();
-      wsManagerRef = null;
-      relayClientRef = null;
+      setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });
     };
   }, []);
 }

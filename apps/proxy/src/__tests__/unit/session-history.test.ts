@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { scanSessionHistory } from "#src/serve/session-history.js";
+import { normalizeHistoryTitle, scanSessionHistory } from "#src/serve/session-history.js";
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 实际结构: ~/.claude/projects/<encoded-path>/<session-id>.jsonl
@@ -82,7 +82,7 @@ describe("scanSessionHistory", () => {
     expect(addFeature.title).toBe("Add new feature");
   });
 
-  it("falls back to session ID prefix when no user text found", async () => {
+  it("falls back to unnamed title when no user text found", async () => {
     writeSession("-test-proj", "notitle99", [
       JSON.stringify({ type: "file-history-snapshot" }),
       JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hi" } }),
@@ -91,7 +91,7 @@ describe("scanSessionHistory", () => {
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("notitle99");
-    expect(result[0].title).toBe("notitle9");
+    expect(result[0].title).toBe("未命名会话");
   });
 
   it("skips non-jsonl files", async () => {
@@ -113,7 +113,7 @@ describe("scanSessionHistory", () => {
     const result = await scanSessionHistory();
     expect(result).toHaveLength(2);
     expect(result.find((r) => r.id === "good")!.title).toBe("Good session");
-    expect(result.find((r) => r.id === "bad")!.title).toBe("bad");
+    expect(result.find((r) => r.id === "bad")!.title).toBe("未命名会话");
   });
 
   it("sorts results by updatedAt descending", async () => {
@@ -154,6 +154,27 @@ describe("scanSessionHistory", () => {
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
     expect(result[0].title).toBe("/gsd-progress 2");
+  });
+
+  it("filters environment context before using the next real Claude user prompt", async () => {
+    writeSession("-test-go", "env1", [
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "<environment_context><cwd>/Users/admin/test_go</cwd><shell>zsh</shell></environment_context>",
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "帮我看下这个项目怎么启动" },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("帮我看下这个项目怎么启动");
   });
 
   it("reads cwd from JSONL instead of decoding directory name", async () => {
@@ -253,10 +274,10 @@ describe("scanSessionHistory", () => {
     ]);
 
     const result = await scanSessionHistory();
-    // 两个 session 的 title 分别是 "aaaaaaaa" 和 "bbbbbbbb"，不同，不去重
-    expect(result).toHaveLength(2);
-    expect(result[0].title).toBe("bbbbbbbb");
-    expect(result[1].title).toBe("aaaaaaaa");
+    // 没有真实标题时统一显示未命名；同一 provider + projectDir + title 会折叠到最新一条。
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("bbbbbbbb-2222");
+    expect(result[0].title).toBe("未命名会话");
   });
 
   it("includes Codex sessions from ~/.codex/sessions", async () => {
@@ -288,6 +309,74 @@ describe("scanSessionHistory", () => {
     });
   });
 
+  it("filters Codex environment context before using the next real user prompt", async () => {
+    writeCodexSession("codex-env", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-env", cwd: "/Users/admin/test_go" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<environment_context><cwd>/Users/admin/test_go</cwd></environment_context>",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "解释一下这里的测试结构" }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("解释一下这里的测试结构");
+  });
+
+  it("filters Codex internal history summaries before using the next real user prompt", async () => {
+    writeCodexSession("codex-summary", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-summary", cwd: "/Users/admin/workspace/MaoGe" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "The following is the Codex agent history so far...",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "engine的日志在哪里啊" }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("engine的日志在哪里啊");
+  });
+
   it("keeps Claude and Codex entries with the same title and cwd separate", async () => {
     writeSession("-same-proj", "claude1", [
       JSON.stringify({ type: "progress", cwd: "/same/proj", sessionId: "claude1" }),
@@ -311,5 +400,20 @@ describe("scanSessionHistory", () => {
     const result = await scanSessionHistory();
     expect(result).toHaveLength(2);
     expect(result.map((r) => r.provider).sort()).toEqual(["claude", "codex"]);
+  });
+});
+
+describe("normalizeHistoryTitle", () => {
+  it("normalizes whitespace and truncates long titles", () => {
+    expect(normalizeHistoryTitle("  第一行\n第二行\t第三行  ")).toBe("第一行 第二行 第三行");
+    expect(normalizeHistoryTitle("一".repeat(41))).toBe(`${"一".repeat(40)}...`);
+  });
+
+  it("filters internal XML-ish context and maintenance slash commands", () => {
+    expect(normalizeHistoryTitle("<environment_context>noise</environment_context>")).toBeNull();
+    expect(normalizeHistoryTitle("<developer_context>noise</developer_context>")).toBeNull();
+    expect(normalizeHistoryTitle("The following is the Codex agent history so far...")).toBeNull();
+    expect(normalizeHistoryTitle("/compact")).toBeNull();
+    expect(normalizeHistoryTitle("/gsd-progress 2")).toBe("/gsd-progress 2");
   });
 });

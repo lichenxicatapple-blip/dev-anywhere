@@ -23,6 +23,8 @@ import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import type { ProviderHookContext } from "./providers/index.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
+import { shouldPromotePtyActivityToWorking } from "./serve/pty-state-guard.js";
+import { terminateSessionByOwnership } from "./serve/session-termination.js";
 
 // ---------- 基础工具函数 ----------
 
@@ -275,6 +277,7 @@ function handleTerminalConnection(
         }
 
         case "pty_title_change": {
+          if (!sessionManager.getSession(msg.sessionId)) break;
           // terminal → serve → relay：转发终端标题变化
           relayConnection.sendRaw(
             JSON.stringify({
@@ -287,7 +290,38 @@ function handleTerminalConnection(
         }
 
         case "pty_state_push": {
-          // terminal → serve → relay：PTY 语义状态透传给 UI。
+          if (!sessionManager.getSession(msg.sessionId)) break;
+          // terminal → serve → relay：PTY 语义状态既要透传给 UI，也要回写会话生命周期。
+          // 这样刷新页面后 session_list 仍能恢复 waiting_approval，而不是只依赖前端内存态。
+          if (msg.state === "approval_wait") {
+            changeSessionState(
+              sessionManager,
+              relayConnection,
+              msg.sessionId,
+              SessionState.WAITING_APPROVAL,
+            );
+          } else if (msg.state === "working" || msg.state === "mid_pause") {
+            const session = sessionManager.getSession(msg.sessionId);
+            const pendingApprovals = permissionBroker.listSession(msg.sessionId);
+            if (shouldPromotePtyActivityToWorking(session, pendingApprovals.length)) {
+              changeSessionState(
+                sessionManager,
+                relayConnection,
+                msg.sessionId,
+                SessionState.WORKING,
+              );
+            } else if (session?.state === SessionState.WAITING_APPROVAL) {
+              serviceLogger.debug(
+                {
+                  sessionId: msg.sessionId,
+                  ptyState: msg.state,
+                  pendingApprovals: pendingApprovals.length,
+                },
+                "PTY working signal ignored while permission approval is pending",
+              );
+            }
+          }
+
           // 如果 provider hook 等待审批时，用户在原生 PTY 里中断/拒绝，hook 不会产生
           // tool_deny 控制消息；turn_complete 是这条路径的恢复信号，需要清理 pending 审批。
           if (msg.state === "turn_complete") {
@@ -323,6 +357,7 @@ function handleTerminalConnection(
         }
 
         case "pty_resize": {
+          if (!sessionManager.getSession(msg.sessionId)) break;
           // terminal → serve → relay：转发终端尺寸变化
           relayConnection.sendRaw(
             JSON.stringify({
@@ -336,16 +371,17 @@ function handleTerminalConnection(
         }
 
         case "session_terminate_request": {
-          const hosted = hostedPtyRegistry.terminate(msg.sessionId);
-          const result = hosted
-            ? { success: true }
-            : sessionManager.terminateSession(msg.sessionId);
-          if (!hosted) {
-            workerRegistry.send(msg.sessionId, { type: "worker_stop" });
-            workerRegistry.delete(msg.sessionId);
-            controlHandlers.cleanup(msg.sessionId);
-            agentStatusRegistry.delete(msg.sessionId);
-          }
+          const result = terminateSessionByOwnership(
+            {
+              sessionManager,
+              workerRegistry,
+              controlHandlers,
+              terminalSockets,
+              hostedPtyRegistry,
+              agentStatusRegistry,
+            },
+            msg.sessionId,
+          );
           socket.write(
             serializeIpc({
               type: "session_terminate_response",
@@ -354,13 +390,20 @@ function handleTerminalConnection(
             }),
           );
           serviceLogger.info(
-            { sessionId: msg.sessionId, success: result.success },
-            "Session terminated",
+            { sessionId: msg.sessionId, success: result.success, action: result.action },
+            "Session termination request handled",
           );
           break;
         }
 
         case "pty_register": {
+          if (!sessionManager.getSession(msg.sessionId)) {
+            serviceLogger.warn(
+              { sessionId: msg.sessionId },
+              "PTY register ignored: session missing",
+            );
+            break;
+          }
           sessionManager.setPid(msg.sessionId, msg.pid);
           terminalSockets.set(msg.sessionId, socket);
           // 注册即告知当前 bridge 状态，避免新接入的终端要等下次状态翻转才知道
@@ -400,6 +443,7 @@ function handleTerminalConnection(
         }
 
         case "pty_input": {
+          if (!sessionManager.getSession(msg.sessionId)) break;
           const targetSocket = terminalSockets.get(msg.sessionId);
           if (hostedPtyRegistry.write(msg.sessionId, msg.data)) {
             break;
@@ -422,6 +466,7 @@ function handleTerminalConnection(
         }
 
         case "pty_snapshot": {
+          if (!sessionManager.getSession(msg.sessionId)) break;
           // terminal serialize() 结果转发给 relay → client
           relayConnection.sendRaw(
             JSON.stringify({
@@ -447,6 +492,7 @@ function handleTerminalConnection(
       }
     },
     (sessionId, data, outputSeq) => {
+      if (!sessionManager.getSession(sessionId)) return;
       // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][4B outputSeq uint32LE][PTY data]
       const sessionIdBuf = Buffer.from(sessionId, "utf-8");
       const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
@@ -520,8 +566,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const agentStatusRegistry = new AgentStatusRegistry();
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
-    onSessionRemoved: (id) => {
-      hookRegistry.unregisterSession(id);
+    onSessionRemoved: (id, context) => {
+      if (!context?.preserveProviderHooks) {
+        hookRegistry.unregisterSession(id);
+      }
       permissionBroker.cleanupSession(id, "session removed");
       agentStatusRegistry.delete(id);
       const paths = sessionPaths(id);
@@ -579,6 +627,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     port: proxyConfig.hookPort ?? 17654,
     registry: hookRegistry,
     permissionBroker,
+    isSessionActive: (sessionId) => !!sessionManager.getSession(sessionId),
     onEvent: (event) => {
       serviceLogger.info(
         {
@@ -627,6 +676,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     sessionManager,
     relayConnection,
     changeSessionState: observerChangeState,
+    onTurnComplete: (sessionId) => {
+      resolveInterruptedApprovals(permissionBroker, hookEventRouter, relayConnection, sessionId);
+    },
     onSessionClosed: (sessionId) => {
       controlHandlers.cleanup(sessionId);
       agentStatusRegistry.delete(sessionId);

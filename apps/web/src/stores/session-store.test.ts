@@ -8,6 +8,7 @@ describe("session-store agent status", () => {
       sessionListLoaded: false,
       historySessions: [],
       ptyTitles: {},
+      ptyStateBySessionId: {},
       agentStatusBySessionId: {},
     });
   });
@@ -49,5 +50,17 @@ describe("session-store agent status", () => {
 
     expect(useSessionStore.getState().agentStatusBySessionId.s1).toBeUndefined();
     expect(useSessionStore.getState().agentStatusBySessionId.s2.phase).toBe("waiting_permission");
+  });
+
+  it("prunes PTY semantic state when replacing the session list", () => {
+    useSessionStore.getState().setPtyState("s1", { state: "approval_wait", tool: "Write" });
+    useSessionStore.getState().setPtyState("s2", { state: "working" });
+
+    useSessionStore
+      .getState()
+      .setSessions([{ sessionId: "s2", state: "working", provider: "claude", mode: "pty" }]);
+
+    expect(useSessionStore.getState().ptyStateBySessionId.s1).toBeUndefined();
+    expect(useSessionStore.getState().ptyStateBySessionId.s2.state).toBe("working");
   });
 });

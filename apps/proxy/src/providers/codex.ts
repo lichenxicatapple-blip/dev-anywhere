@@ -20,8 +20,8 @@ const CODEX_HOOK_EVENTS = [
 
 export const CODEX_HOOK_OUTPUT_EVENTS = ["PreToolUse", "PermissionRequest"] as const;
 
-// Codex hook configs also express command timeout as a finite value. Permission hooks should
-// mirror native approval behavior and wait for the user, so avoid short provider defaults.
+// PermissionRequest hooks mirror native approval behavior and may wait for the user.
+// PreToolUse stays short and non-blocking: it is telemetry/policy, not a remote approval gate.
 const PERMISSION_HOOK_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
 
 const HOOK_FORWARDER_SCRIPT = `
@@ -81,21 +81,27 @@ function tomlString(value: string): string {
 
 function buildCodexHookEntry(event: string): string {
   const timeoutConfig =
-    event === "PreToolUse" || event === "PermissionRequest"
-      ? `, timeout=${PERMISSION_HOOK_TIMEOUT_SECONDS}`
-      : ", timeout=5";
+    event === "PermissionRequest" ? `, timeout=${PERMISSION_HOOK_TIMEOUT_SECONDS}` : ", timeout=5";
   return `${event}=[{matcher="", hooks=[{type="command", command=${tomlString(
     buildHookForwardCommand(event),
   )}${timeoutConfig}}]}]`;
 }
 
-function buildCodexHooksConfig(): string {
-  return `hooks={${CODEX_HOOK_EVENTS.map((event) => buildCodexHookEntry(event)).join(", ")}}`;
+function buildCodexHooksConfig(options?: { includePermissionRequest?: boolean }): string {
+  const includePermissionRequest = options?.includePermissionRequest ?? true;
+  const events = CODEX_HOOK_EVENTS.filter(
+    (event) => includePermissionRequest || event !== "PermissionRequest",
+  );
+  return `hooks={${events.map((event) => buildCodexHookEntry(event)).join(", ")}}`;
 }
 
-function withCodexHookArgs(args: string[], context: ProviderHookContext | undefined): string[] {
+function withCodexHookArgs(
+  args: string[],
+  context: ProviderHookContext | undefined,
+  options?: { includePermissionRequest?: boolean },
+): string[] {
   if (!context) return args;
-  return ["-c", "features.codex_hooks=true", "-c", buildCodexHooksConfig(), ...args];
+  return ["-c", "features.codex_hooks=true", "-c", buildCodexHooksConfig(options), ...args];
 }
 
 function withCodexHookEnv(
@@ -140,7 +146,7 @@ export const CODEX_PROVIDER: ProviderAdapter = {
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
       command: resolveCodexCommand(env),
-      args: withCodexHookArgs(options.args, options.hook),
+      args: withCodexHookArgs(options.args, options.hook, { includePermissionRequest: false }),
       env: withCodexHookEnv(env, options.hook),
     };
   },

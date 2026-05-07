@@ -33,14 +33,25 @@ export async function installFakeRelay(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const now = Date.now();
     let createCount = 0;
-    const sessions: Array<{
+    const sessionStorageKey = "__dev_anywhere_e2e_sessions";
+    const initializedKey = "__dev_anywhere_e2e_initialized";
+    const initialized = sessionStorage.getItem(initializedKey) === "1";
+    if (!initialized) {
+      localStorage.clear();
+      sessionStorage.clear();
+      sessionStorage.setItem(initializedKey, "1");
+    }
+
+    type FakeSession = {
       sessionId: string;
       name?: string;
       state: "idle" | "working" | "waiting_approval" | "error" | "terminated";
       mode: "pty" | "json";
       provider: "claude" | "codex";
       lastActive: number;
-    }> = [
+    };
+
+    const defaultSessions: FakeSession[] = [
       {
         sessionId: "claude-pty",
         name: "/Users/admin/test_go/",
@@ -68,6 +79,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
         }),
       ),
     ];
+    const persistedSessions = localStorage.getItem(sessionStorageKey);
+    const sessions: FakeSession[] = persistedSessions
+      ? (JSON.parse(persistedSessions) as FakeSession[])
+      : defaultSessions;
+
+    function persistSessions(): void {
+      localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
+    }
 
     const history = [
       {
@@ -229,6 +248,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               provider,
               lastActive: Date.now(),
             });
+            persistSessions();
             this.emitJson({ type: "session_create_response", sessionId, mode, provider });
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;
@@ -239,6 +259,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               sessions.length,
               ...sessions.filter((s) => s.sessionId !== msg.sessionId),
             );
+            persistSessions();
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;
           case "tool_approve":
@@ -277,7 +298,50 @@ export async function installFakeRelay(page: Page): Promise<void> {
       }
 
       emitJson(payload: FakeRelayMessage): void {
+        const statusEchoes: FakeRelayMessage[] = [];
+        if (payload.type === "pty_state") {
+          const session = sessions.find((s) => s.sessionId === payload.sessionId);
+          const ptyPayload = payload.payload as { state?: string } | undefined;
+          if (session && ptyPayload?.state === "approval_wait") {
+            session.state = "waiting_approval";
+            session.lastActive = Date.now();
+          }
+          if (session && (ptyPayload?.state === "working" || ptyPayload?.state === "mid_pause")) {
+            session.state = "working";
+            session.lastActive = Date.now();
+          }
+          if (session && ptyPayload?.state === "turn_complete") {
+            session.state = "idle";
+            session.lastActive = Date.now();
+          }
+          if (session) {
+            statusEchoes.push(
+              envelope("session_status", session.sessionId, {
+                sessionId: session.sessionId,
+                state: session.state,
+                lastActive: session.lastActive,
+              }),
+            );
+            persistSessions();
+          }
+        }
+        if (payload.type === "session_status" && typeof payload.payload === "object") {
+          const status = payload.payload as {
+            sessionId?: string;
+            state?: string;
+            lastActive?: number;
+          };
+          const session = sessions.find((s) => s.sessionId === status.sessionId);
+          if (session && typeof status.state === "string") {
+            session.state = status.state as typeof session.state;
+            session.lastActive = status.lastActive ?? Date.now();
+            persistSessions();
+          }
+        }
         setTimeout(() => {
+          for (const statusEcho of statusEchoes) {
+            this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(statusEcho) }));
+          }
           this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(payload) }));
         }, 0);
       }
@@ -341,8 +405,6 @@ export async function installFakeRelay(page: Page): Promise<void> {
       }
     }
 
-    localStorage.clear();
-    sessionStorage.clear();
     window.__devAnywhereE2E = { sent: [], socket: null };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;
   });

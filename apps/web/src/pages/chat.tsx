@@ -34,6 +34,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const agentStatus = useSessionStore((s) => s.agentStatusBySessionId[id]);
+  const ptyState = useSessionStore((s) => s.ptyStateBySessionId[id]);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
@@ -60,7 +61,8 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     routeSessionEnded,
     session,
     agentStatus,
-    hasPendingApproval: pendingApprovals.some((a) => a.status === "pending"),
+    ptyState,
+    hasPendingApproval: mode === "json" && pendingApprovals.some((a) => a.status === "pending"),
   });
 
   return (
@@ -111,10 +113,10 @@ function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {
       role="status"
       aria-live="polite"
     >
-      <h2 className="text-lg font-semibold">会话已终止</h2>
+      <h2 className="text-lg font-semibold">{mode === "pty" ? "远程视图已断开" : "会话已终止"}</h2>
       <p className="max-w-sm text-sm text-muted-foreground">
         {mode === "pty"
-          ? "本地终端进程已经退出，远端输入已停止。"
+          ? "此 PTY 会话已从远程视图断开，远端输入已停止。"
           : "当前会话已经结束，输入已停止。"}
       </p>
     </div>

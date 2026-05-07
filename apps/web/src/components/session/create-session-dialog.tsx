@@ -64,6 +64,13 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
   }, [open, homePath, cwd]);
 
+  // proxy_info 是创建会话目录选择的基础状态。HMR/重连后前端 store 可能丢失 homePath,
+  // 这里在弹窗打开时补拉一次，避免只能靠硬刷新重新走完整绑定流程。
+  useEffect(() => {
+    if (!open || homePath) return;
+    relayClientRef?.sendControl({ type: "proxy_info_request" });
+  }, [open, homePath]);
+
   useEffect(() => {
     if (!cwdPickerOpen) return;
 
@@ -184,7 +191,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           </label>
           <div
             ref={cwdFieldRef}
-            className="flex flex-col gap-2"
+            className="relative flex flex-col gap-2"
             onFocus={() => setCwdPickerOpen(true)}
             onBlur={handleCwdFieldBlur}
           >

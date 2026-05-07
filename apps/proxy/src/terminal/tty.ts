@@ -16,3 +16,24 @@ export function readTtySize(stream: NodeJS.WriteStream): { cols: number; rows: n
 export function notifyUser(message: string): void {
   process.stderr.write(`\x1b]9;${message}\x07`);
 }
+
+// Provider TUI 可能开启 bracketed paste、application cursor/keypad、mouse tracking、
+// xterm modifyOtherKeys 或 kitty keyboard protocol。若 provider 被远程终止或异常退出，
+// 这些模式可能来不及自行恢复，外层 shell 会把 Ctrl-C 显示成 ";5;99~" 一类残留序列。
+export function restoreHostTerminalModes(stream: NodeJS.WriteStream): void {
+  if (!stream.isTTY) return;
+  const restoreSequences = [
+    "\x1b[?1l", // application cursor keys off
+    "\x1b>", // application keypad off
+    "\x1b[?1000l",
+    "\x1b[?1002l",
+    "\x1b[?1003l",
+    "\x1b[?1004l",
+    "\x1b[?1006l",
+    "\x1b[?1015l",
+    "\x1b[?2004l", // bracketed paste off
+    "\x1b[>4;0m", // xterm modifyOtherKeys off
+    "\x1b[<u", // kitty keyboard protocol off
+  ].join("");
+  stream.write(restoreSequences);
+}

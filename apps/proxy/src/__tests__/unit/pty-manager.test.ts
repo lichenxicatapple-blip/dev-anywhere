@@ -50,6 +50,7 @@ function createMockStdout(cols = 120, rows = 40) {
   const emitter = new EventEmitter();
   const write = vi.fn();
   return Object.assign(emitter, {
+    isTTY: true,
     columns: cols,
     rows,
     write,
@@ -61,11 +62,13 @@ describe("PtyManager", () => {
     vi.clearAllMocks();
     onDataCallback = null;
     onExitCallback = null;
+    delete process.env.INIT_CWD;
   });
 
   async function createManager(
     overrides: {
       providerArgs?: string[];
+      cwd?: string;
       tap?: (data: string) => void;
       isTTY?: boolean;
       cols?: number;
@@ -99,6 +102,7 @@ describe("PtyManager", () => {
     const manager = new PtyManager({
       provider,
       providerArgs: overrides.providerArgs ?? [],
+      cwd: overrides.cwd ?? "/tmp/project",
       tap,
       stdin,
       stdout,
@@ -120,7 +124,20 @@ describe("PtyManager", () => {
     expect(pty.spawn).toHaveBeenCalledWith(
       expect.stringContaining("claude"),
       ["--help"],
-      expect.objectContaining({ cols: 120, rows: 40 }),
+      expect.objectContaining({ cols: 120, rows: 40, cwd: "/tmp/project" }),
+    );
+  });
+
+  it("uses explicit session cwd instead of ambient process cwd", async () => {
+    process.env.INIT_CWD = "/tmp/wrong-init-cwd";
+    const { manager, pty } = await createManager({ cwd: "/tmp/right-session-cwd" });
+
+    manager.start();
+
+    expect(pty.spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({ cwd: "/tmp/right-session-cwd" }),
     );
   });
 
@@ -200,12 +217,14 @@ describe("PtyManager", () => {
 
   it("calls onSessionExit with child exit code instead of process.exit", async () => {
     const onSessionExit = vi.fn();
-    const { manager } = await createManager({ onSessionExit });
+    const { manager, stdout } = await createManager({ onSessionExit });
 
     manager.start();
     expect(onExitCallback).not.toBeNull();
     onExitCallback!({ exitCode: 42, signal: 0 });
 
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("\x1b[>4;0m"));
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("\x1b[<u"));
     expect(onSessionExit).toHaveBeenCalledWith(42);
   });
 
@@ -222,7 +241,7 @@ describe("PtyManager", () => {
 
   it("cleanup kills child, restores raw mode, and calls onSessionExit", async () => {
     const onSessionExit = vi.fn();
-    const { manager, stdin } = await createManager({
+    const { manager, stdin, stdout } = await createManager({
       isTTY: true,
       onSessionExit,
     });
@@ -231,6 +250,8 @@ describe("PtyManager", () => {
     manager.cleanup(1);
 
     expect(stdin.setRawMode).toHaveBeenCalledWith(false);
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("\x1b[>4;0m"));
+    expect(stdout.write).toHaveBeenCalledWith(expect.stringContaining("\x1b[<u"));
     expect(mockPty.kill).toHaveBeenCalled();
     expect(onSessionExit).toHaveBeenCalledWith(1);
   });

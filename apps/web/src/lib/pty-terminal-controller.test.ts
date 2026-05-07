@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachPtyTerminalController } from "./pty-terminal-controller";
 
 function createTerminal() {
@@ -37,6 +37,10 @@ function createHarness() {
 }
 
 describe("attachPtyTerminalController", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("creates xterm, attaches raw input, focus handler, and transport", async () => {
     const h = createHarness();
     const onTerminalReady = vi.fn();
@@ -72,6 +76,47 @@ describe("attachPtyTerminalController", () => {
 
     h.host.dispatchEvent(new Event("pointerdown"));
     expect(h.terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses the terminal once it is ready so keyboard input works after navigation", async () => {
+    vi.useFakeTimers();
+    const h = createHarness();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+    await Promise.resolve();
+
+    expect(h.terminal.focus).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(16);
+
+    expect(h.terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-focus after disposal", async () => {
+    vi.useFakeTimers();
+    const h = createHarness();
+
+    const controller = attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+    await Promise.resolve();
+    controller.dispose();
+    await vi.advanceTimersByTimeAsync(16);
+
+    expect(h.terminal.focus).not.toHaveBeenCalled();
   });
 
   it("passes raw input notifications through to the raw input adapter", async () => {

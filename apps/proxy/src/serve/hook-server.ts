@@ -10,6 +10,7 @@ interface HookServerOptions {
   permissionBroker: PermissionBroker;
   host?: string;
   maxBodyBytes?: number;
+  isSessionActive?: (sessionId: string) => boolean;
   onEvent?: (event: AuthenticatedHookEvent) => void;
 }
 
@@ -131,22 +132,37 @@ export class HookServer {
       this.writeJson(res, 403, { error: "invalid_hook_credentials" });
       return;
     }
+    if (this.options.isSessionActive && !this.options.isSessionActive(binding.sessionId)) {
+      serviceLogger.info(
+        { sessionId: binding.sessionId, provider: binding.provider, event: parsed.event },
+        "Provider hook ignored for inactive session",
+      );
+      this.writeProviderResponse(res, this.toNeutralProviderResponse(provider, parsed.event));
+      return;
+    }
 
+    const payload = asRecord(parsed.payload);
+    const requestId =
+      typeof parsed.requestId === "string"
+        ? parsed.requestId
+        : typeof payload.tool_use_id === "string"
+          ? payload.tool_use_id
+          : undefined;
     const event: AuthenticatedHookEvent = {
       sessionId: binding.sessionId,
       provider: binding.provider,
       event: parsed.event,
-      ...(typeof parsed.requestId === "string" ? { requestId: parsed.requestId } : {}),
-      payload: asRecord(parsed.payload),
+      ...(requestId !== undefined ? { requestId } : {}),
+      payload,
     };
 
-    if (event.event === "PermissionRequest" || event.event === "PreToolUse") {
+    if (event.event === "PermissionRequest") {
       await this.handlePermissionRequest(event, res);
       return;
     }
 
     this.options.onEvent?.(event);
-    this.writeJson(res, 200, { ok: true });
+    this.writeProviderResponse(res, this.toNeutralProviderResponse(event.provider, event.event));
   }
 
   private async handlePermissionRequest(
@@ -196,6 +212,32 @@ export class HookServer {
         decision,
       },
     };
+  }
+
+  private toNeutralProviderResponse(provider: HookProviderId, eventName: string): object | null {
+    if (eventName === "PreToolUse") {
+      if (provider === "codex") {
+        return null;
+      }
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "defer",
+        },
+      };
+    }
+
+    return { ok: true };
+  }
+
+  private writeProviderResponse(res: ServerResponse, payload: object | null): void {
+    if (res.headersSent) return;
+    if (payload === null) {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    this.writeJson(res, 200, payload);
   }
 
   private readBody(req: IncomingMessage): Promise<string> {

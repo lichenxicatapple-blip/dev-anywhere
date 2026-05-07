@@ -14,6 +14,30 @@ interface SessionHistoryEntry {
 
 const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
 const codexSessionsDir = (): string => join(homedir(), ".codex", "sessions");
+const UNTITLED_SESSION_TITLE = "未命名会话";
+const MAX_HISTORY_TITLE_LENGTH = 40;
+const IGNORED_SLASH_COMMANDS = new Set([
+  "/clear",
+  "/model",
+  "/compact",
+  "/help",
+  "/config",
+  "/logout",
+]);
+const XMLISH_NOISE_PREFIXES = [
+  "environment",
+  "system",
+  "developer",
+  "assistant",
+  "user",
+  "tool",
+  "context",
+];
+const INTERNAL_TITLE_PATTERNS = [
+  /^the following is the codex agent history\b/i,
+  /^codex agent history\b/i,
+  /^conversation summary\b/i,
+];
 
 // 扫描 ~/.claude/projects/ 获取 Claude Code 会话历史
 // 实际目录结构: ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
@@ -60,7 +84,7 @@ async function scanClaudeSessionHistory(): Promise<SessionHistoryEntry[]> {
 
         entries.push({
           id: sessionId,
-          title: title || sessionId.slice(0, 8),
+          title: title || UNTITLED_SESSION_TITLE,
           projectDir: cwd || "/" + encodedDir.replace(/^-/, "").split("-").join("/"),
           updatedAt: fileStat.mtimeMs,
           provider: "claude",
@@ -84,7 +108,7 @@ async function scanCodexSessionHistory(): Promise<SessionHistoryEntry[]> {
       if (!meta.id) continue;
       entries.push({
         id: meta.id,
-        title: meta.title || meta.id.slice(0, 8),
+        title: meta.title || UNTITLED_SESSION_TITLE,
         projectDir: meta.cwd || homedir(),
         updatedAt: fileStat.mtimeMs,
         provider: "codex",
@@ -158,20 +182,50 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
 }
 
 // 从 message 字段提取文本，统一处理多种格式
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function truncateTitle(text: string): string {
+  const chars = Array.from(text);
+  return chars.length > MAX_HISTORY_TITLE_LENGTH
+    ? `${chars.slice(0, MAX_HISTORY_TITLE_LENGTH).join("")}...`
+    : text;
+}
+
+function isXmlishNoise(text: string): boolean {
+  const match = text.match(/^<([A-Za-z][\w:-]*)\b/);
+  if (!match) return false;
+  const tag = match[1].toLowerCase();
+  return XMLISH_NOISE_PREFIXES.some((prefix) => tag === prefix || tag.startsWith(`${prefix}_`));
+}
+
+export function normalizeHistoryTitle(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const text = collapseWhitespace(raw);
+  if (text.length < 2) return null;
+  if (text.startsWith("<") || isXmlishNoise(text)) return null;
+  if (INTERNAL_TITLE_PATTERNS.some((pattern) => pattern.test(text))) return null;
+
+  const slashCommand = text.match(/^\/\S+/)?.[0];
+  if (slashCommand && IGNORED_SLASH_COMMANDS.has(slashCommand)) return null;
+
+  return truncateTitle(text);
+}
+
 function extractSlashCommand(text: string): string | null {
   const nameMatch = text.match(/<command-name>([^<]+)<\/command-name>/);
   if (!nameMatch) return null;
   const argsMatch = text.match(/<command-args>([^<]+)<\/command-args>/);
   const args = argsMatch ? argsMatch[1].trim() : "";
-  return args ? `${nameMatch[1]} ${args}` : nameMatch[1];
+  return normalizeHistoryTitle(args ? `${nameMatch[1]} ${args}` : nameMatch[1]);
 }
 
 function extractMessageText(msg: unknown): string | null {
   if (typeof msg === "string") {
     const cmd = extractSlashCommand(msg);
     if (cmd) return cmd;
-    if (msg.startsWith("<")) return null;
-    return msg;
+    return normalizeHistoryTitle(msg);
   }
 
   if (msg && typeof msg === "object" && "content" in msg) {
@@ -179,8 +233,7 @@ function extractMessageText(msg: unknown): string | null {
     if (typeof content === "string") {
       const cmd = extractSlashCommand(content);
       if (cmd) return cmd;
-      if (content.startsWith("<")) return null;
-      return content;
+      return normalizeHistoryTitle(content);
     }
     if (Array.isArray(content)) {
       const texts = content
@@ -189,7 +242,7 @@ function extractMessageText(msg: unknown): string | null {
         )
         .map((b: { text: string }) => b.text);
       const joined = texts.join("\n").trim();
-      if (joined && !joined.startsWith("<")) return joined;
+      return normalizeHistoryTitle(joined);
     }
   }
 
@@ -200,7 +253,7 @@ function extractMessageText(msg: unknown): string | null {
       )
       .map((b: { text: string }) => b.text);
     const joined = texts.join("\n").trim();
-    if (joined && !joined.startsWith("<")) return joined;
+    return normalizeHistoryTitle(joined);
   }
 
   return null;
@@ -231,14 +284,7 @@ async function extractTitleAndCwd(
         }
         if (!title && obj.type === "user" && !obj.isMeta) {
           const text = extractMessageText(obj.message);
-          // 跳过重置/管理类命令，它们不代表会话主题
-          if (
-            text &&
-            text.length >= 2 &&
-            !/^\/(clear|model|compact|help|config|logout)(\s|$)/.test(text)
-          ) {
-            title = text.slice(0, 80);
-          }
+          if (text) title = text;
         }
         if (cwd && title) {
           resolved = true;
@@ -299,7 +345,7 @@ async function extractCodexTitleAndCwd(
         }
         if (!title && obj.type === "response_item") {
           const text = extractCodexUserText(obj.payload);
-          if (text) title = text.slice(0, 80);
+          if (text) title = text;
         }
         if (id && cwd && title) rl.close();
       } catch {
@@ -316,7 +362,7 @@ function extractCodexUserText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const item = payload as { type?: unknown; role?: unknown; content?: unknown };
   if (item.type !== "message" || item.role !== "user") return null;
-  if (typeof item.content === "string") return item.content;
+  if (typeof item.content === "string") return normalizeHistoryTitle(item.content);
   if (!Array.isArray(item.content)) return null;
   const texts = item.content
     .map((block: unknown) => {
@@ -326,5 +372,5 @@ function extractCodexUserText(payload: unknown): string | null {
     })
     .filter(Boolean);
   const joined = texts.join("\n").trim();
-  return joined || null;
+  return normalizeHistoryTitle(joined);
 }

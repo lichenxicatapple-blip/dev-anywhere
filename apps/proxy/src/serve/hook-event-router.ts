@@ -54,8 +54,10 @@ export class HookEventRouter {
         this.forwardAgentStatus(event, "idle");
         break;
       case "PermissionRequest":
-      case "PreToolUse":
         this.forwardPermissionRequest(event);
+        break;
+      case "PreToolUse":
+        this.forwardToolUse(event);
         break;
       default:
         serviceLogger.debug(
@@ -124,6 +126,15 @@ export class HookEventRouter {
       "proxy",
     );
     this.deps.relayConnection.sendEnvelope(envelope);
+  }
+
+  private forwardToolUse(event: AuthenticatedHookEvent): void {
+    const toolName = toolNameFromPayload(event.payload);
+    const input = toolInputFromPayload(event.payload);
+    this.forwardAgentStatus(event, "tool_use", {
+      toolName,
+      toolInput: input,
+    });
   }
 
   private forwardAgentStatus(

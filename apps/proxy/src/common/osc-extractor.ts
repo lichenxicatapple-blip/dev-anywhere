@@ -48,7 +48,7 @@ export function extractOscSignals(rawData: string): PtyStateEvent | null {
   // OSC 9 优先级更高，包含具体的语义信号；同帧 OSC 0 仍保留 title 给 UI。
   const osc9 = lastSequence(matches, 9);
   if (osc9) {
-    if (osc9.text.includes("waiting for your input")) {
+    if (osc9.text.includes("waiting for your input") || osc9.text.trim() === "4;0;") {
       return { state: "turn_complete", ...(osc0 ? { title: osc0.text } : {}) };
     }
     if (osc9.text.includes("needs your permission")) {
