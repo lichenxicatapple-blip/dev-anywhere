@@ -186,7 +186,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
         ref={setContainerEl}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 py-2"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 pt-2"
+        style={{ paddingBottom: scrollState.horizontalScrollable ? 32 : 8 }}
         data-slot="pty-terminal"
       >
         <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">

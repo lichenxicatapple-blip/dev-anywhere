@@ -101,7 +101,9 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
 
 export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalScrollbarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const dragThumbOffsetRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const geometry = useMemo(() => {
     if (!state.horizontalScrollable || state.scrollWidth <= 0 || state.clientWidth <= 0) {
@@ -125,7 +127,14 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
     if (!track) return;
     const rect = track.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const ratio = (event.clientX - rect.left) / rect.width;
+    const thumbOffset = dragThumbOffsetRef.current;
+    const thumb = thumbRef.current;
+    const thumbWidth = thumb?.getBoundingClientRect().width ?? 0;
+    const travelWidth = Math.max(1, rect.width - thumbWidth);
+    const ratio =
+      thumbOffset === null
+        ? (event.clientX - rect.left) / rect.width
+        : (event.clientX - rect.left - thumbOffset) / travelWidth;
     onScrollRatio(ratio);
   };
 
@@ -142,6 +151,14 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
         draggingRef.current = true;
         setDragging(true);
         event.currentTarget.setPointerCapture(event.pointerId);
+        const thumb = thumbRef.current;
+        const target = event.target;
+        const thumbPressed = target instanceof Node && thumb?.contains(target);
+        if (thumbPressed && thumb) {
+          dragThumbOffsetRef.current = event.clientX - thumb.getBoundingClientRect().left;
+          return;
+        }
+        dragThumbOffsetRef.current = null;
         updateFromPointer(event);
       }}
       onPointerMove={(event) => {
@@ -150,11 +167,13 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
       }}
       onPointerUp={(event) => {
         draggingRef.current = false;
+        dragThumbOffsetRef.current = null;
         setDragging(false);
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onPointerCancel={(event) => {
         draggingRef.current = false;
+        dragThumbOffsetRef.current = null;
         setDragging(false);
         event.currentTarget.releasePointerCapture(event.pointerId);
       }}
@@ -167,6 +186,7 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
         )}
       />
       <div
+        ref={thumbRef}
         data-slot="pty-horizontal-scrollbar-thumb"
         className={cn(
           "absolute bottom-2 h-2 rounded-full bg-foreground/35 transition-[background-color,height,bottom]",

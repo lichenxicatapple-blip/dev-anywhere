@@ -47,6 +47,20 @@ function defineHorizontalTrackRect(track: HTMLElement): void {
   }));
 }
 
+function defineRect(el: HTMLElement, rect: Partial<DOMRect>): void {
+  el.getBoundingClientRect = vi.fn(() => ({
+    top: rect.top ?? 0,
+    left: rect.left ?? 0,
+    bottom: rect.bottom ?? 0,
+    right: rect.right ?? 0,
+    width: rect.width ?? 0,
+    height: rect.height ?? 0,
+    x: rect.x ?? rect.left ?? 0,
+    y: rect.y ?? rect.top ?? 0,
+    toJSON: () => ({}),
+  }));
+}
+
 function makeScrollState(overrides: Partial<PtyScrollState> = {}): PtyScrollState {
   return {
     scrollTop: 0,
@@ -155,5 +169,38 @@ describe("PtyHorizontalScrollbar", () => {
 
     expect(onScrollRatio).toHaveBeenNthCalledWith(1, 0.25);
     expect(onScrollRatio).toHaveBeenNthCalledWith(2, 0.5);
+  });
+
+  it("does not jump when pointer starts dragging on the thumb", () => {
+    const onScrollRatio = vi.fn();
+    const { container } = render(
+      <PtyHorizontalScrollbar
+        state={makeScrollState({
+          scrollLeft: 400,
+          scrollWidth: 1600,
+          clientWidth: 800,
+          horizontalScrollable: true,
+        })}
+        onScrollRatio={onScrollRatio}
+      />,
+    );
+    const track = container.querySelector<HTMLElement>('[data-slot="pty-horizontal-scrollbar"]');
+    const thumb = container.querySelector<HTMLElement>(
+      '[data-slot="pty-horizontal-scrollbar-thumb"]',
+    );
+    if (!track || !thumb) throw new Error("missing horizontal scrollbar");
+    defineHorizontalTrackRect(track);
+    defineRect(thumb, { left: 200, right: 400, width: 200 });
+    track.setPointerCapture = vi.fn();
+    track.releasePointerCapture = vi.fn();
+
+    dispatchPointer("pointerdown", thumb, { pointerId: 1, clientX: 250 });
+    expect(onScrollRatio).not.toHaveBeenCalled();
+
+    dispatchPointer("pointermove", track, { pointerId: 1, clientX: 300 });
+    dispatchPointer("pointerup", track, { pointerId: 1, clientX: 300 });
+
+    expect(onScrollRatio).toHaveBeenCalledTimes(1);
+    expect(onScrollRatio).toHaveBeenCalledWith(0.75);
   });
 });
