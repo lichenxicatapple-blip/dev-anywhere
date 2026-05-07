@@ -8,7 +8,13 @@ interface PtyScrollbarProps {
   onScrollRatio: (ratio: number) => void;
 }
 
+interface PtyHorizontalScrollbarProps {
+  state: PtyScrollState;
+  onScrollRatio: (ratio: number) => void;
+}
+
 const MIN_THUMB_HEIGHT = 32;
+const MIN_THUMB_WIDTH = 40;
 
 export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -87,6 +93,89 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
         style={{
           top: `${geometry.topPercent}%`,
           height: `${geometry.heightPercent}%`,
+        }}
+      />
+    </div>
+  );
+}
+
+export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalScrollbarProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const geometry = useMemo(() => {
+    if (!state.horizontalScrollable || state.scrollWidth <= 0 || state.clientWidth <= 0) {
+      return { visible: false, leftPercent: 0, widthPercent: 100 };
+    }
+    const widthPercent = Math.max(
+      (MIN_THUMB_WIDTH / state.clientWidth) * 100,
+      (state.clientWidth / state.scrollWidth) * 100,
+    );
+    const maxScrollLeft = Math.max(1, state.scrollWidth - state.clientWidth);
+    const maxLeftPercent = Math.max(0, 100 - widthPercent);
+    const leftPercent = Math.max(
+      0,
+      Math.min(maxLeftPercent, (state.scrollLeft / maxScrollLeft) * maxLeftPercent),
+    );
+    return { visible: true, leftPercent, widthPercent };
+  }, [state.clientWidth, state.horizontalScrollable, state.scrollLeft, state.scrollWidth]);
+
+  const updateFromPointer = (event: PointerEvent<HTMLDivElement>): void => {
+    const track = trackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    onScrollRatio(ratio);
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      aria-hidden="true"
+      data-slot="pty-horizontal-scrollbar"
+      className={cn(
+        "group absolute left-3 right-10 bottom-0 z-10 h-8 touch-none transition-opacity duration-150",
+        geometry.visible ? "opacity-100" : "opacity-0 pointer-events-none",
+      )}
+      onPointerDown={(event) => {
+        draggingRef.current = true;
+        setDragging(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        updateFromPointer(event);
+      }}
+      onPointerMove={(event) => {
+        if (!draggingRef.current) return;
+        updateFromPointer(event);
+      }}
+      onPointerUp={(event) => {
+        draggingRef.current = false;
+        setDragging(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={(event) => {
+        draggingRef.current = false;
+        setDragging(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+    >
+      <div
+        className={cn(
+          "absolute left-0 right-0 bottom-2 h-2 rounded-full bg-foreground/5 opacity-0 transition-opacity",
+          (dragging || geometry.visible) && "group-hover:opacity-100",
+          dragging && "opacity-100",
+        )}
+      />
+      <div
+        data-slot="pty-horizontal-scrollbar-thumb"
+        className={cn(
+          "absolute bottom-2 h-2 rounded-full bg-foreground/35 transition-[background-color,height,bottom]",
+          "group-hover:bottom-1.5 group-hover:h-2.5 group-hover:bg-foreground/55",
+          dragging && "bottom-1.5 h-2.5 bg-foreground/70",
+        )}
+        style={{
+          left: `${geometry.leftPercent}%`,
+          width: `${geometry.widthPercent}%`,
         }}
       />
     </div>

@@ -17,6 +17,10 @@ function defineScrollHeight(el: HTMLElement, scrollHeight: number): void {
   Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
 }
 
+function defineScrollWidth(el: HTMLElement, scrollWidth: number): void {
+  Object.defineProperty(el, "scrollWidth", { configurable: true, value: scrollWidth });
+}
+
 function createDom() {
   const container = document.createElement("div") as HTMLDivElement;
   const spacer = document.createElement("div") as HTMLDivElement;
@@ -28,6 +32,7 @@ function createDom() {
   host.append(xterm, screen);
   defineSize(container, { clientHeight: 400, clientWidth: 800 });
   defineScrollHeight(container, 2000);
+  defineScrollWidth(container, 800);
   defineSize(screen, { clientHeight: 400, clientWidth: 800 });
   return { container, spacer, host, xterm };
 }
@@ -305,9 +310,13 @@ describe("attachPtyScrollController", () => {
 
     expect(onScrollStateChange).toHaveBeenLastCalledWith({
       scrollTop: 2000,
+      scrollLeft: 0,
       scrollHeight: 2000,
+      scrollWidth: 800,
       clientHeight: 400,
+      clientWidth: 800,
       scrollable: true,
+      horizontalScrollable: false,
     });
     const initialCalls = onScrollStateChange.mock.calls.length;
 
@@ -318,9 +327,13 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     expect(onScrollStateChange).toHaveBeenLastCalledWith({
       scrollTop: 100,
+      scrollLeft: 0,
       scrollHeight: 2000,
+      scrollWidth: 800,
       clientHeight: 400,
+      clientWidth: 800,
       scrollable: true,
+      horizontalScrollable: false,
     });
   });
 
@@ -343,6 +356,36 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(800);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
+  });
+
+  it("exposes ratio scrolling for a custom horizontal terminal scrollbar", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onScrollStateChange,
+    });
+
+    controller.scrollToXRatio(0.5);
+
+    expect(container.scrollLeft).toBe(400);
+    expect(onScrollStateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scrollLeft: 400,
+        scrollWidth: 1600,
+        clientWidth: 800,
+        horizontalScrollable: true,
+      }),
+    );
   });
 
   it("relayout keeps bottom pinned after terminal metrics change", () => {

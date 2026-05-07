@@ -20,13 +20,18 @@ interface PtyScrollController {
   relayout: () => void;
   scrollToBottom: () => void;
   scrollToRatio: (ratio: number) => void;
+  scrollToXRatio: (ratio: number) => void;
 }
 
 export interface PtyScrollState {
   scrollTop: number;
+  scrollLeft: number;
   scrollHeight: number;
+  scrollWidth: number;
   clientHeight: number;
+  clientWidth: number;
   scrollable: boolean;
+  horizontalScrollable: boolean;
 }
 
 export function attachPtyScrollController(
@@ -61,15 +66,28 @@ export function attachPtyScrollController(
 
   const getScrollState = (): PtyScrollState => ({
     scrollTop: container.scrollTop,
+    scrollLeft: container.scrollLeft,
     scrollHeight: container.scrollHeight,
+    scrollWidth: container.scrollWidth,
     clientHeight: container.clientHeight,
+    clientWidth: container.clientWidth,
     scrollable: container.scrollHeight > container.clientHeight + atBottomThreshold,
+    horizontalScrollable: container.scrollWidth > container.clientWidth + atBottomThreshold,
   });
 
   const notifyScrollState = (): void => {
     if (!onScrollStateChange) return;
     const state = getScrollState();
-    const key = `${state.scrollTop}:${state.scrollHeight}:${state.clientHeight}:${state.scrollable}`;
+    const key = [
+      state.scrollTop,
+      state.scrollLeft,
+      state.scrollHeight,
+      state.scrollWidth,
+      state.clientHeight,
+      state.clientWidth,
+      state.scrollable,
+      state.horizontalScrollable,
+    ].join(":");
     if (key === lastScrollStateKey) return;
     lastScrollStateKey = key;
     onScrollStateChange(state);
@@ -100,6 +118,13 @@ export function attachPtyScrollController(
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollTop = maxScrollTop * clamped;
     onContainerScroll();
+  };
+
+  const scrollToXRatio = (ratio: number): void => {
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const clamped = Math.max(0, Math.min(1, ratio));
+    container.scrollLeft = maxScrollLeft * clamped;
+    notifyScroll();
   };
 
   const applySubpixel = (px: number): void => {
@@ -263,5 +288,6 @@ export function attachPtyScrollController(
     relayout,
     scrollToBottom,
     scrollToRatio,
+    scrollToXRatio,
   };
 }

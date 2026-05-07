@@ -26,7 +26,7 @@ import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
-import { PtyScrollbar } from "./pty-scrollbar";
+import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 import { usePtyConnectionState } from "./use-pty-connection-state";
 import { usePtyFollowState } from "./use-pty-follow-state";
 
@@ -44,14 +44,19 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const relayoutPtyRef = useRef<() => void>(() => {});
   const scrollToBottomRef = useRef<() => void>(() => {});
   const scrollToRatioRef = useRef<(ratio: number) => void>(() => {});
+  const scrollToXRatioRef = useRef<(ratio: number) => void>(() => {});
   const connection = usePtyConnectionState();
   const follow = usePtyFollowState();
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
   const [scrollState, setScrollState] = useState<PtyScrollState>({
     scrollTop: 0,
+    scrollLeft: 0,
     scrollHeight: 0,
+    scrollWidth: 0,
     clientHeight: 0,
+    clientWidth: 0,
     scrollable: false,
+    horizontalScrollable: false,
   });
   // xterm.onRender 会在用户 scroll 触发 ydisp 变化时也跑 (canvas 重绘),
   // 不做来源区分会把"scroll 触发的 render"误判为"新帧到达" → 红点虚亮 / scroll 被 follow 拉回.
@@ -127,11 +132,13 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     relayoutPtyRef.current = controller.relayout;
     scrollToBottomRef.current = controller.scrollToBottom;
     scrollToRatioRef.current = controller.scrollToRatio;
+    scrollToXRatioRef.current = controller.scrollToXRatio;
     return () => {
       controller.dispose();
       relayoutPtyRef.current = () => {};
       scrollToBottomRef.current = () => {};
       scrollToRatioRef.current = () => {};
+      scrollToXRatioRef.current = () => {};
     };
   }, [
     connection.ready,
@@ -188,7 +195,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
             style={{
               position: "sticky",
               top: 0,
-              left: 0,
               overflow: "hidden",
               boxSizing: "border-box",
             }}
@@ -207,6 +213,10 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       <PtyScrollbar
         state={scrollState}
         onScrollRatio={(ratio) => scrollToRatioRef.current(ratio)}
+      />
+      <PtyHorizontalScrollbar
+        state={scrollState}
+        onScrollRatio={(ratio) => scrollToXRatioRef.current(ratio)}
       />
       <PtyConnectionOverlay {...connection.overlay} />
     </div>
