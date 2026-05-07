@@ -102,8 +102,6 @@ export class RelayRouter {
     terminal_resize_request: (msg) => this.onTerminalResizeRequest(msg),
   };
 
-  // ---------- handlers ----------
-
   private onUserInput(msg: Record<string, unknown>): void {
     const sessionId = msg.sessionId as string | undefined;
     if (!sessionId) return;

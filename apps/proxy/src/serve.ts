@@ -1,116 +1,29 @@
-import { createServer, connect, type Socket } from "node:net";
-import { hostname } from "node:os";
-import { execSync } from "node:child_process";
-import { unlinkSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from "node:fs";
-import { SessionState, buildMessage, type AgentStatusPayload } from "@dev-anywhere/shared";
+import { createServer, type Socket } from "node:net";
+import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
-import { SessionManager, type SessionInfo } from "./serve/session-manager.js";
+import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
 import { SOCK_PATH, PID_PATH, STOPPED_PATH, SESSIONS_PATH, sessionPaths } from "./common/paths.js";
 import { loadConfig } from "./common/config.js";
-import { createIpcReader, serializeIpc, type IpcMessage } from "./ipc/ipc-protocol.js";
-import {
-  createControlMessageHandlers,
-  type ControlMessageHandlers,
-} from "./serve/handlers/control-messages.js";
+import { serializeIpc } from "./ipc/ipc-protocol.js";
+import { createControlMessageHandlers } from "./serve/handlers/control-messages.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
 import { JsonObserver } from "./serve/json-observer.js";
-import { HookRegistry } from "./serve/hook-registry.js";
-import { HookServer } from "./serve/hook-server.js";
 import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
-import type { ProviderHookContext } from "./providers/index.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
-import { shouldPromotePtyActivityToWorking } from "./serve/pty-state-guard.js";
-import { terminateSessionByOwnership } from "./serve/session-termination.js";
 import { SeqCounter } from "./common/seq-counter.js";
-import { resolvePtySemanticSessionTransitions } from "./serve/pty-semantic-lifecycle.js";
-
-// ---------- 基础工具函数 ----------
-
-function toSessionListPayload(s: SessionInfo) {
-  return {
-    sessionId: s.id,
-    mode: s.mode,
-    provider: s.provider,
-    ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
-    state: s.state,
-    lastActive: s.updatedAt,
-    ...(s.name !== undefined ? { name: s.name } : {}),
-  };
-}
-
-// 推一条 session_status envelope 给 relay → client
-// relay 对 envelope 透传（不走 control message 方向判断）；payload 包含 lastActive 让列表相对时间跟着跳
-function pushSessionStatus(
-  relay: RelayConnection,
-  sessionManager: SessionManager,
-  sessionId: string,
-): void {
-  const session = sessionManager.getSession(sessionId);
-  if (!session) return;
-  try {
-    const envelope = buildMessage(
-      "session_status",
-      session.id,
-      Date.now(),
-      { sessionId: session.id, state: session.state, lastActive: session.updatedAt },
-      "proxy",
-    );
-    relay.sendEnvelope(envelope);
-  } catch (err) {
-    serviceLogger.debug({ sessionId, error: String(err) }, "Failed to push session_status");
-  }
-}
-
-// 广播当前全量 session 列表给 relay → client，UI 列表页靠这个刷新
-function broadcastSessionList(relay: RelayConnection, sessionManager: SessionManager): void {
-  relay.sendRaw(
-    JSON.stringify({
-      type: "session_list",
-      sessionId: "",
-      seq: 0,
-      timestamp: Date.now(),
-      source: "proxy",
-      version: "1",
-      payload: { sessions: sessionManager.listSessions().map(toSessionListPayload) },
-    }),
-  );
-}
-
-// 通知 relay 单个 session 的存在/状态（仅 id/mode/state），relay 据此建立 proxy-session 关联
-function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): void {
-  relay.sendRaw(
-    JSON.stringify({
-      type: "session_sync",
-      sessions: [
-        {
-          id: session.id,
-          mode: session.mode,
-          provider: session.provider,
-          ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
-          state: session.state,
-        },
-      ],
-    }),
-  );
-}
-
-// 状态迁移 + 推 envelope 的一体化入口。
-// same-state / 非法转换的降级和日志分级由 SessionManager.updateState 负责；这里只在真正发生了转换时才广播 status。
-function changeSessionState(
-  sessionManager: SessionManager,
-  relay: RelayConnection,
-  sessionId: string,
-  next: SessionState,
-): boolean {
-  if (!sessionManager.getSession(sessionId)) return false;
-  const changed = sessionManager.updateState(sessionId, next);
-  if (changed) pushSessionStatus(relay, sessionManager, sessionId);
-  return changed;
-}
+import {
+  broadcastSessionList,
+  broadcastSessionSync,
+  changeSessionState,
+} from "./serve/session-broadcast.js";
+import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
+import { handleTerminalConnection } from "./serve/terminal-ipc.js";
+import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
 
 function resolveInterruptedApprovals(
   permissionBroker: PermissionBroker,
@@ -148,406 +61,6 @@ function resolveInterruptedApprovals(
   );
 }
 
-function tryConnectSocket(sockPath: string): Promise<Socket | null> {
-  return new Promise((resolve) => {
-    const s = connect(sockPath);
-    s.on("connect", () => resolve(s));
-    s.on("error", () => resolve(null));
-  });
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function cleanupStaleResources(): Promise<void> {
-  if (existsSync(SOCK_PATH)) {
-    const existing = await tryConnectSocket(SOCK_PATH);
-    if (existing) {
-      existing.destroy();
-      const msg = `Another service is already running on ${SOCK_PATH}`;
-      serviceLogger.error(msg);
-      console.error(msg);
-      process.exit(1);
-    }
-    unlinkSync(SOCK_PATH);
-    serviceLogger.info("Removed stale socket file");
-  }
-
-  if (existsSync(PID_PATH)) {
-    const pidStr = readFileSync(PID_PATH, "utf-8").trim();
-    const pid = parseInt(pidStr, 10);
-    if (!isNaN(pid) && isProcessAlive(pid)) {
-      const msg = `Another service is already running with PID ${pid}`;
-      serviceLogger.error(msg);
-      console.error(msg);
-      process.exit(1);
-    }
-    unlinkSync(PID_PATH);
-    serviceLogger.info("Removed stale PID file");
-  }
-}
-
-// ---------- 客户端 IPC 消息处理 ----------
-
-function handleTerminalConnection(
-  socket: Socket,
-  sessionManager: SessionManager,
-  workerRegistry: WorkerRegistry,
-  terminalSockets: Map<string, Socket>,
-  hostedPtyRegistry: HostedPtyRegistry,
-  relayConnection: RelayConnection,
-  controlHandlers: ControlMessageHandlers,
-  agentStatusRegistry: AgentStatusRegistry,
-  permissionBroker: PermissionBroker,
-  hookEventRouter: HookEventRouter,
-  createHookContext: (
-    sessionId: string,
-    provider: ProviderHookContext["provider"],
-  ) => ProviderHookContext,
-  emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void,
-): void {
-  createIpcReader(
-    socket,
-    (msg: IpcMessage) => {
-      switch (msg.type) {
-        case "session_create_request": {
-          // IPC 入口只接 PTY 创建；JSON session 由 relay 远程客户端驱动
-          if (msg.mode !== "pty") {
-            socket.write(
-              serializeIpc({
-                type: "session_create_response",
-                sessionId: "",
-                error: `Unsupported mode via IPC: ${msg.mode}`,
-              }),
-            );
-            break;
-          }
-          const provider = msg.provider;
-          const existing = msg.sessionId ? sessionManager.getSession(msg.sessionId) : undefined;
-          const session =
-            existing ??
-            sessionManager.createSession(
-              "pty",
-              msg.cwd,
-              msg.pid,
-              msg.name,
-              msg.sessionId,
-              provider,
-              "local-terminal",
-            );
-          if (existing) {
-            sessionManager.setPid(session.id, msg.pid);
-          }
-          socket.write(
-            serializeIpc({
-              type: "session_create_response",
-              sessionId: session.id,
-              hook: createHookContext(session.id, provider),
-            }),
-          );
-          serviceLogger.info(
-            { sessionId: session.id, mode: "pty", provider },
-            "PTY session created",
-          );
-          break;
-        }
-
-        case "service_status_request": {
-          const relayStatus = relayConnection.getStatus();
-          const sessions = sessionManager.listSessions();
-          socket.write(
-            serializeIpc({
-              type: "service_status_response",
-              relay: relayStatus,
-              sessions: sessions.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                provider: s.provider,
-                state: s.state,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-                hasWorker: workerRegistry.has(s.id),
-              })),
-            }),
-          );
-          break;
-        }
-
-        case "pty_title_change": {
-          if (!sessionManager.getSession(msg.sessionId)) break;
-          // terminal → serve → relay：转发终端标题变化
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "terminal_title",
-              sessionId: msg.sessionId,
-              title: msg.title,
-            }),
-          );
-          break;
-        }
-
-        case "pty_semantic_event": {
-          if (!sessionManager.getSession(msg.sessionId)) break;
-          // local runtime → serve → relay：PTY 语义事件既要透传给 UI，也要回写会话生命周期。
-          // 这样刷新页面后 session_list 仍能恢复 waiting_approval，而不是只依赖前端内存态。
-          if (msg.state === "approval_wait") {
-            changeSessionState(
-              sessionManager,
-              relayConnection,
-              msg.sessionId,
-              SessionState.WAITING_APPROVAL,
-            );
-          } else if (msg.state === "working" || msg.state === "mid_pause") {
-            const session = sessionManager.getSession(msg.sessionId);
-            const pendingApprovals = permissionBroker.listSession(msg.sessionId);
-            if (shouldPromotePtyActivityToWorking(session, pendingApprovals.length)) {
-              changeSessionState(
-                sessionManager,
-                relayConnection,
-                msg.sessionId,
-                SessionState.WORKING,
-              );
-            } else if (session?.state === SessionState.WAITING_APPROVAL) {
-              serviceLogger.debug(
-                {
-                  sessionId: msg.sessionId,
-                  ptyState: msg.state,
-                  pendingApprovals: pendingApprovals.length,
-                },
-                "PTY working signal ignored while permission approval is pending",
-              );
-            }
-          }
-
-          // 如果 provider hook 等待审批时，用户在原生 PTY 里中断/拒绝，hook 不会产生
-          // tool_deny 控制消息；turn_complete 是这条路径的恢复信号，需要清理 pending 审批。
-          if (msg.state === "turn_complete") {
-            resolveInterruptedApprovals(
-              permissionBroker,
-              hookEventRouter,
-              relayConnection,
-              msg.sessionId,
-            );
-            const session = sessionManager.getSession(msg.sessionId);
-            const transitions = resolvePtySemanticSessionTransitions(session?.state, msg.state);
-            for (const next of transitions) {
-              changeSessionState(sessionManager, relayConnection, msg.sessionId, next);
-            }
-            emitAgentStatus(msg.sessionId, "idle");
-          }
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "pty_state",
-              sessionId: msg.sessionId,
-              payload: {
-                state: msg.state,
-                ...(msg.title !== undefined ? { title: msg.title } : {}),
-                ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
-              },
-            }),
-          );
-          break;
-        }
-
-        case "pty_resize": {
-          if (!sessionManager.getSession(msg.sessionId)) break;
-          // terminal → serve → relay：转发终端尺寸变化
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "terminal_resize",
-              sessionId: msg.sessionId,
-              cols: msg.cols,
-              rows: msg.rows,
-            }),
-          );
-          break;
-        }
-
-        case "session_terminate_request": {
-          const result = terminateSessionByOwnership(
-            {
-              sessionManager,
-              workerRegistry,
-              controlHandlers,
-              terminalSockets,
-              hostedPtyRegistry,
-              agentStatusRegistry,
-            },
-            msg.sessionId,
-          );
-          socket.write(
-            serializeIpc({
-              type: "session_terminate_response",
-              sessionId: msg.sessionId,
-              success: result.success,
-            }),
-          );
-          serviceLogger.info(
-            { sessionId: msg.sessionId, success: result.success, action: result.action },
-            "Session termination request handled",
-          );
-          break;
-        }
-
-        case "pty_register": {
-          if (!sessionManager.getSession(msg.sessionId)) {
-            serviceLogger.warn(
-              { sessionId: msg.sessionId },
-              "PTY register ignored: session missing",
-            );
-            break;
-          }
-          sessionManager.setPid(msg.sessionId, msg.pid);
-          terminalSockets.set(msg.sessionId, socket);
-          // 注册即告知当前 bridge 状态，避免新接入的终端要等下次状态翻转才知道
-          socket.write(
-            serializeIpc({
-              type: "bridge_status",
-              connected: relayConnection.getStatus().connected,
-            }),
-          );
-          // 通知 relay 该 session 存在，并推送会话列表给客户端
-          const session = sessionManager.getSession(msg.sessionId);
-          if (session) {
-            broadcastSessionSync(relayConnection, session);
-          }
-          broadcastSessionList(relayConnection, sessionManager);
-          serviceLogger.info({ sessionId: msg.sessionId }, "PTY session registered");
-          break;
-        }
-
-        case "pty_deregister": {
-          // 先通知客户端状态变更，再清理 session
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "pty_state",
-              sessionId: msg.sessionId,
-              payload: { state: "turn_complete" },
-            }),
-          );
-          sessionManager.terminateSession(msg.sessionId);
-          terminalSockets.delete(msg.sessionId);
-
-          controlHandlers.cleanup(msg.sessionId);
-          agentStatusRegistry.delete(msg.sessionId);
-          broadcastSessionList(relayConnection, sessionManager);
-          serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
-          break;
-        }
-
-        case "pty_input": {
-          if (!sessionManager.getSession(msg.sessionId)) break;
-          const targetSocket = terminalSockets.get(msg.sessionId);
-          if (hostedPtyRegistry.write(msg.sessionId, msg.data)) {
-            break;
-          }
-          if (targetSocket?.writable) {
-            targetSocket.write(
-              serializeIpc({
-                type: "pty_input",
-                sessionId: msg.sessionId,
-                data: msg.data,
-              }),
-            );
-          }
-          break;
-        }
-
-        case "session_status_update": {
-          changeSessionState(sessionManager, relayConnection, msg.sessionId, msg.state);
-          break;
-        }
-
-        case "pty_snapshot": {
-          if (!sessionManager.getSession(msg.sessionId)) break;
-          // terminal serialize() 结果转发给 relay → client
-          relayConnection.sendRaw(
-            JSON.stringify({
-              type: "session_snapshot",
-              sessionId: msg.sessionId,
-              cols: msg.cols,
-              rows: msg.rows,
-              data: msg.data,
-              outputSeq: msg.outputSeq,
-              requestId: msg.requestId,
-            }),
-          );
-          serviceLogger.info(
-            { sessionId: msg.sessionId, cols: msg.cols, rows: msg.rows },
-            "Session snapshot forwarded to relay",
-          );
-          break;
-        }
-
-        default: {
-          serviceLogger.warn({ type: (msg as IpcMessage).type }, "Unhandled IPC message type");
-        }
-      }
-    },
-    (sessionId, data, outputSeq) => {
-      if (!sessionManager.getSession(sessionId)) return;
-      // WebSocket binary 帧格式: [1B sessionId_len][sessionId UTF-8][4B outputSeq uint32LE][PTY data]
-      const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
-      wsFrame[0] = sessionIdBuf.length;
-      sessionIdBuf.copy(wsFrame, 1);
-      wsFrame.writeUInt32LE(outputSeq, 1 + sessionIdBuf.length);
-      data.copy(wsFrame, 1 + sessionIdBuf.length + 4);
-      relayConnection.sendBinary(wsFrame);
-    },
-  );
-
-  socket.on("close", () => {
-    for (const [sessionId, terminalSocket] of terminalSockets) {
-      if (terminalSocket === socket) {
-        terminalSockets.delete(sessionId);
-        const session = sessionManager.getSession(sessionId);
-        if (!session) {
-          // pty_deregister 已完成清理
-          serviceLogger.info({ sessionId }, "Terminal socket closed, session already cleaned");
-          continue;
-        }
-        if (session.mode === "pty" && session.pid && isProcessAlive(session.pid)) {
-          // terminal 进程仍存活，serve 正在重启，不做清理
-          serviceLogger.info(
-            { sessionId, pid: session.pid },
-            "Terminal socket closed but process alive, skipping cleanup",
-          );
-          continue;
-        }
-        // terminal 进程已死（crash），执行完整清理
-        relayConnection.sendRaw(
-          JSON.stringify({
-            type: "pty_state",
-            sessionId,
-            payload: { state: "turn_complete" },
-          }),
-        );
-        sessionManager.terminateSession(sessionId);
-        controlHandlers.cleanup(sessionId);
-        agentStatusRegistry.delete(sessionId);
-        broadcastSessionList(relayConnection, sessionManager);
-        serviceLogger.info(
-          { sessionId },
-          "PTY session cleaned up on socket close (crash fallback)",
-        );
-      }
-    }
-  });
-
-  socket.on("error", (err) => {
-    serviceLogger.warn({ error: String(err) }, "Client socket error");
-  });
-}
-
-// ---------- 服务入口 ----------
-
 export interface ServiceOptions {
   relayUrl?: string;
 }
@@ -560,14 +73,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     // STOPPED 文件不存在时忽略
   }
 
-  const hookRegistry = new HookRegistry();
   const permissionBroker = new PermissionBroker();
   const agentStatusRegistry = new AgentStatusRegistry();
+  let unregisterHookSession: (sessionId: string) => void = () => {};
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     onSessionRemoved: (id, context) => {
       if (!context?.preserveProviderHooks) {
-        hookRegistry.unregisterSession(id);
+        unregisterHookSession(id);
       }
       permissionBroker.cleanupSession(id, "session removed");
       agentStatusRegistry.delete(id);
@@ -582,20 +95,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   sessionManager.startReaper();
 
   const terminalSockets = new Map<string, Socket>();
-  // proxy 名称，优先环境变量，其次 macOS ComputerName，最后 os.hostname()
-  const proxyName = process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
-
-  function getComputerName(): string | null {
-    try {
-      return (
-        execSync("scutil --get ComputerName", { stdio: ["pipe", "pipe", "ignore"] })
-          .toString()
-          .trim() || null
-      );
-    } catch {
-      return null;
-    }
-  }
+  const proxyName = getProxyName();
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   // relay 是 proxy 存在的必要前提，未配置直接 fail-fast，不再支持"本地独立"模式
@@ -632,52 +132,15 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     changeSessionState: observerChangeState,
     emitAgentStatus,
   });
-  const hookEventRouter = new HookEventRouter({
+  const hookRuntime = await createProviderHookRuntime({
+    hookPort: proxyConfig.hookPort,
+    permissionBroker,
+    sessionManager,
     relayConnection,
     agentStatusRegistry,
     changeSessionState: observerChangeState,
   });
-  const hookServer = new HookServer({
-    port: proxyConfig.hookPort ?? 17654,
-    registry: hookRegistry,
-    permissionBroker,
-    isSessionActive: (sessionId) => !!sessionManager.getSession(sessionId),
-    onEvent: (event) => {
-      serviceLogger.info(
-        {
-          sessionId: event.sessionId,
-          provider: event.provider,
-          event: event.event,
-          requestId: event.requestId,
-        },
-        "Provider hook event received",
-      );
-      hookEventRouter.handle(event);
-    },
-  });
-
-  try {
-    await hookServer.start();
-  } catch (err) {
-    const msg = `Failed to start hook server on 127.0.0.1:${proxyConfig.hookPort ?? 17654}: ${String(err)}`;
-    serviceLogger.error(msg);
-    console.error(msg);
-    process.exit(1);
-  }
-  const hookUrl = `http://127.0.0.1:${hookServer.getListeningPort() ?? proxyConfig.hookPort ?? 17654}/hook`;
-  const createHookContext = (
-    sessionId: string,
-    provider: ProviderHookContext["provider"],
-  ): ProviderHookContext => {
-    const credentials = hookRegistry.registerSession(sessionId, provider);
-    return {
-      provider,
-      sessionId,
-      hookUrl,
-      marker: credentials.marker,
-      token: credentials.token,
-    };
-  };
+  unregisterHookSession = (sessionId) => hookRuntime.hookRegistry.unregisterSession(sessionId);
 
   // WorkerRegistry 建在 relay 之后、listener 之前；构造期订阅 envelope_dropped 事件
   const workerRegistry = new WorkerRegistry({
@@ -691,7 +154,12 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     changeSessionState: observerChangeState,
     onTurnComplete: (sessionId) => {
-      resolveInterruptedApprovals(permissionBroker, hookEventRouter, relayConnection, sessionId);
+      resolveInterruptedApprovals(
+        permissionBroker,
+        hookRuntime.hookEventRouter,
+        relayConnection,
+        sessionId,
+      );
       emitAgentStatus(sessionId, "idle");
     },
     onSessionClosed: (sessionId) => {
@@ -715,10 +183,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,
-    createHookContext,
-    cleanupHookContext: (sessionId) => hookRegistry.unregisterSession(sessionId),
+    createHookContext: hookRuntime.createHookContext,
+    cleanupHookContext: (sessionId) => hookRuntime.hookRegistry.unregisterSession(sessionId),
     permissionBroker,
-    hookEventRouter,
+    hookEventRouter: hookRuntime.hookEventRouter,
     agentStatusRegistry,
   });
 
@@ -742,8 +210,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   await workerRegistry.reconnectAll();
 
   const server = createServer((socket) => {
-    handleTerminalConnection(
-      socket,
+    handleTerminalConnection(socket, {
       sessionManager,
       workerRegistry,
       terminalSockets,
@@ -752,10 +219,17 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       controlHandlers,
       agentStatusRegistry,
       permissionBroker,
-      hookEventRouter,
-      createHookContext,
+      hookEventRouter: hookRuntime.hookEventRouter,
+      createHookContext: hookRuntime.createHookContext,
       emitAgentStatus,
-    );
+      resolveInterruptedApprovals: (sessionId) =>
+        resolveInterruptedApprovals(
+          permissionBroker,
+          hookRuntime.hookEventRouter,
+          relayConnection,
+          sessionId,
+        ),
+    });
   });
 
   server.listen(SOCK_PATH, () => {
@@ -767,7 +241,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   async function shutdown(): Promise<void> {
     serviceLogger.info("Shutting down service");
     sessionManager.stopReaper();
-    await hookServer.close();
+    await hookRuntime.hookServer.close();
     relayConnection.close();
     workerRegistry.destroyAll();
     hostedPtyRegistry.destroyAll();
