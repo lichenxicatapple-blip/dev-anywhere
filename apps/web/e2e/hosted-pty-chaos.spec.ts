@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const enabled = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS === "1";
 const chaosCwd = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD ?? "/Users/admin/test_go";
+const provider =
+  process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER === "codex" ? "codex" : "claude";
 
 async function selectFirstProxy(page: Page): Promise<void> {
   const switcher = page.locator('[data-slot="proxy-switcher-trigger"]').first();
@@ -14,7 +16,7 @@ async function selectFirstProxy(page: Page): Promise<void> {
 }
 
 test.describe("hosted PTY real chaos", () => {
-  test("removes a hosted PTY session when the provider process exits under an attached Web UI", async ({
+  test(`removes a hosted ${provider} PTY session when the provider process exits under an attached Web UI`, async ({
     page,
   }) => {
     test.skip(!enabled, "driven by scripts/dev-chaos.sh with a controlled provider binary");
@@ -25,6 +27,9 @@ test.describe("hosted PTY real chaos", () => {
     await page.locator('button:has-text("新建会话"):visible').last().click();
     await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
     await page.getByLabel("工作目录").fill(chaosCwd);
+    if (provider === "codex") {
+      await page.getByRole("button", { name: /Codex/ }).click();
+    }
     await page
       .getByRole("dialog", { name: "新建会话" })
       .getByRole("button", { name: "创建" })

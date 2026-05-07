@@ -135,7 +135,8 @@ pnpm dev:chaos
 | 协议快照扰动                  | stale requestId response    | 请求型资源、历史、agent status snapshot 不污染全局 UI          |
 | PTY 审批刷新恢复              | stale response + pty_state  | stale agent_status_response 不误触发审批，真实 PTY 状态可恢复  |
 | client WebSocket 断线重连     | 浏览器端 WebSocket close    | 断线期间显示 disconnected，重连后审批状态恢复且 pending 不重复 |
-| hosted PTY provider 异常退出  | 临时 provider CLI 主动 exit | Web 进入终止态，终端输入面消失，会话列表清掉该托管会话         |
+| client request 断线语义       | 浏览器端 WebSocket close    | request/response 创建会话断线即失败，不会重连后幽灵创建会话    |
+| hosted PTY provider 异常退出  | 临时 provider CLI 主动 exit | Claude/Codex 托管 PTY 退出后进入终止态，输入面消失并清理列表   |
 
 下一层继续补 Web/FakeRelay 的精确协议 chaos：
 
@@ -217,6 +218,24 @@ pnpm dev:chaos
 仍未完成：
 
 - session resources 的 6 小时命令刷新仍是 `command_list_push`，这是实时刷新事件，不是页面进入时的阻塞请求；当前保留 push 语义。
+
+### 2026-05-08 第七轮
+
+已完成：
+
+- WebSocket 发送语义拆清：默认 `send()` 断线即失败，不再自动排队；只有 `remote_input_raw` 显式声明 `queueWhenDisconnected`，避免 `session_create`、`dir_list_request` 等 request/response 消息在 UI 已失败后重连幽灵执行。
+- 单测锁定重连顺序：`client_register` 必须先发，再 flush 显式排队的 PTY raw input。
+- WebSocket chaos 扩展到 4 条用户可见不变量：
+  - PTY 审批横幅和列表状态跨浏览器 WebSocket 重连保持一致。
+  - JSON pending approval 资源重放后不重复。
+  - PTY 断线期间隐藏输入面，重连注册后恢复输入面。
+  - 创建会话时断线会解锁 UI 并提示失败，且不会在重连后补发 `session_create`。
+- 真实 hosted PTY chaos 扩展到 Claude 和 Codex 两个 provider：通过临时 provider CLI 主动退出，验证 Web 进入终止态、终端输入面消失、托管会话从列表移除。
+
+仍未完成：
+
+- 还没有做 UI 渲染期间“连续二进制帧 + snapshot + 用户滚动 + socket 重连”的组合 chaos；已有单项覆盖，但组合故障后续可继续加。
+- 创建会话断线失败目前是“明确失败，不自动重试”。这是正确性优先的选择；若以后要做自动重试，必须重新设计 request 幂等 token。
 
 ### 2026-05-08 第四轮
 

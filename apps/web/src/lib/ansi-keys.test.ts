@@ -21,6 +21,7 @@ describe("sendRemoteInputRaw", () => {
     expect(payload.type).toBe("remote_input_raw");
     expect(payload.sessionId).toBe("sess-1");
     expect(payload.data).toBe("\x03");
+    expect(sendSpy).toHaveBeenCalledWith(expect.any(String), { queueWhenDisconnected: true });
   });
 
   it("does not send when sessionId missing", () => {

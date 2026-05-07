@@ -1,5 +1,9 @@
 // WebSocket 连接管理器，使用原生 WebSocket，支持文本和二进制消息分发，指数退避重连
 
+type SendOptions = {
+  queueWhenDisconnected?: boolean;
+};
+
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private url = "";
@@ -62,13 +66,13 @@ export class WebSocketManager {
     this.doConnect();
   }
 
-  send(data: string): boolean {
+  send(data: string, options: SendOptions = {}): boolean {
     if (!this.ws) {
       console.warn("WebSocket send dropped: no socket");
       return false;
     }
     if (!this.connected) {
-      this.pendingQueue.push(data);
+      if (options.queueWhenDisconnected) this.pendingQueue.push(data);
       return false;
     }
     this.doSend(data);

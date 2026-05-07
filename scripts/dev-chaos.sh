@@ -150,20 +150,22 @@ run_websocket_reconnect_chaos_smoke() {
 }
 
 run_hosted_pty_exit_chaos_smoke() {
-  echo "+ UI smoke: hosted PTY provider exit while Web is attached"
+  local provider="$1"
+  echo "+ UI smoke: hosted $provider PTY provider exit while Web is attached"
   DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
+    DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER="$provider" \
     WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
     e2e/hosted-pty-chaos.spec.ts --project=desktop
 }
 
 create_hosted_pty_chaos_provider() {
   mkdir -p "$HOSTED_PTY_CHAOS_CWD"
-  HOSTED_PTY_CHAOS_BIN="$LOG_DIR/chaos-claude-${DEV_ANYWHERE_LOG_RUN_ID}.sh"
+  HOSTED_PTY_CHAOS_BIN="$LOG_DIR/chaos-agent-${DEV_ANYWHERE_LOG_RUN_ID}.sh"
   cat >"$HOSTED_PTY_CHAOS_BIN" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '\033]0;DEV Anywhere Chaos Claude\a'
+printf '\033]0;DEV Anywhere Chaos Agent\a'
 printf 'DEV Anywhere chaos PTY ready\r\n'
 printf 'type exit-chaos to terminate\r\n'
 buffer=""
@@ -375,13 +377,21 @@ run_protocol_chaos_smoke
 section "Chaos 7: client WebSocket reconnect state recovery"
 run_websocket_reconnect_chaos_smoke
 
-section "Chaos 8: hosted PTY provider exit while Web is attached"
+section "Chaos 8: hosted Claude PTY provider exit while Web is attached"
 create_hosted_pty_chaos_provider
 mark_service_log
 run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
 wait_until "proxy serve is running with hosted PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted PTY chaos provider swap" 30 proxy_relay_connected_observed
-run_hosted_pty_exit_chaos_smoke
+run_hosted_pty_exit_chaos_smoke claude
+run pnpm dev:health
+
+section "Chaos 9: hosted Codex PTY provider exit while Web is attached"
+mark_service_log
+run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+wait_until "proxy serve is running with hosted Codex PTY chaos provider" 15 proxy_service_running_observed
+wait_until "proxy serve reconnects to relay after hosted Codex PTY chaos provider swap" 30 proxy_relay_connected_observed
+run_hosted_pty_exit_chaos_smoke codex
 run pnpm dev:health
 
 section "Restore normal dev services"

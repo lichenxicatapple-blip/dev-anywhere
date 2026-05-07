@@ -24,6 +24,8 @@ declare global {
         emitPty(sessionId: string, data: string): void;
         close(): void;
       } | null;
+      holdConnections(): void;
+      releaseConnections(): void;
     };
   }
 }
@@ -95,6 +97,8 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const directories = new Set<string>(
       persistedDirectories ? (JSON.parse(persistedDirectories) as string[]) : defaultDirectories,
     );
+    const heldSockets = new Set<FakeRelayWebSocket>();
+    let holdConnections = false;
 
     function persistSessions(): void {
       localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
@@ -171,9 +175,20 @@ export async function installFakeRelay(page: Page): Promise<void> {
         this.url = url;
         window.__devAnywhereE2E!.socket = this;
         setTimeout(() => {
-          this.readyState = FakeRelayWebSocket.OPEN;
-          this.dispatchEvent(new Event("open"));
+          if (this.readyState !== FakeRelayWebSocket.CONNECTING) return;
+          if (holdConnections) {
+            heldSockets.add(this);
+            return;
+          }
+          this.open();
         }, 0);
+      }
+
+      open(): void {
+        if (this.readyState !== FakeRelayWebSocket.CONNECTING) return;
+        heldSockets.delete(this);
+        this.readyState = FakeRelayWebSocket.OPEN;
+        this.dispatchEvent(new Event("open"));
       }
 
       send(raw: string): void {
@@ -500,7 +515,19 @@ export async function installFakeRelay(page: Page): Promise<void> {
       }
     }
 
-    window.__devAnywhereE2E = { sent: [], socket: null };
+    window.__devAnywhereE2E = {
+      sent: [],
+      socket: null,
+      holdConnections() {
+        holdConnections = true;
+      },
+      releaseConnections() {
+        holdConnections = false;
+        for (const socket of [...heldSockets]) {
+          socket.open();
+        }
+      },
+    };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;
   });
 }

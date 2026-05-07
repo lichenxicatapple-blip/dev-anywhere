@@ -12,5 +12,6 @@ export function sendRemoteInputRaw(sessionId: string, data: string): void {
       sessionId,
       data,
     }),
+    { queueWhenDisconnected: true },
   );
 }

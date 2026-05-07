@@ -41,12 +41,13 @@ describe("WebSocketManager", () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it("sends reconnect registration before flushing messages queued while disconnected", () => {
+  it("sends reconnect registration before flushing explicitly queued messages", () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     const manager = new WebSocketManager();
     manager.connect("ws://relay/client");
 
-    expect(manager.send("queued-user-input")).toBe(false);
+    expect(manager.send("request-that-must-not-queue")).toBe(false);
+    expect(manager.send("queued-user-input", { queueWhenDisconnected: true })).toBe(false);
     manager.onStatusChange((connected) => {
       if (connected) manager.send("client-register");
     });
