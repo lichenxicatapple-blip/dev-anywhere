@@ -124,7 +124,7 @@ export function attachPtyScrollController(
       syncing.internal = false;
     }
     applySubpixel(0);
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     notifyScroll();
   };
 
@@ -133,6 +133,20 @@ export function attachPtyScrollController(
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollTop = maxScrollTop * clamped;
+    onContainerScroll();
+  };
+
+  const scrollByWheelDelta = (deltaY: number): void => {
+    if (deltaY === 0) return;
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (maxScrollTop <= 0) return;
+    userHasVerticalScrollIntent = true;
+    const next = Math.max(0, Math.min(maxScrollTop, container.scrollTop + deltaY));
+    if (next === container.scrollTop) {
+      notifyScroll();
+      return;
+    }
+    container.scrollTop = next;
     onContainerScroll();
   };
 
@@ -281,12 +295,19 @@ export function attachPtyScrollController(
   updateSpacer();
   scrollToBottom();
 
-  const markUserVerticalScrollIntent = (): void => {
+  const onWheel = (event: WheelEvent): void => {
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    scrollByWheelDelta(event.deltaY);
+  };
+
+  const onTouchStart = (): void => {
     userHasVerticalScrollIntent = true;
   };
 
-  container.addEventListener("wheel", markUserVerticalScrollIntent, { passive: true });
-  container.addEventListener("touchstart", markUserVerticalScrollIntent, { passive: true });
+  container.addEventListener("wheel", onWheel, { passive: false, capture: true });
+  container.addEventListener("touchstart", onTouchStart, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
@@ -297,8 +318,8 @@ export function attachPtyScrollController(
   return {
     dispose: () => {
       container.removeEventListener("scroll", onContainerScroll);
-      container.removeEventListener("wheel", markUserVerticalScrollIntent);
-      container.removeEventListener("touchstart", markUserVerticalScrollIntent);
+      container.removeEventListener("wheel", onWheel, { capture: true });
+      container.removeEventListener("touchstart", onTouchStart);
       dispScroll.dispose();
       dispRender.dispose();
       ro.disconnect();

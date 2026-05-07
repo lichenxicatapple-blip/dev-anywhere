@@ -122,6 +122,32 @@ describe("PtyScrollbar", () => {
     expect(track.setPointerCapture).toHaveBeenCalledWith(1);
     expect(track.releasePointerCapture).toHaveBeenCalledWith(1);
   });
+
+  it("does not jump when pointer starts dragging on the vertical thumb", () => {
+    const onScrollRatio = vi.fn();
+    const { container } = render(
+      <PtyScrollbar
+        state={makeScrollState({ scrollTop: 800, scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={onScrollRatio}
+      />,
+    );
+    const track = container.querySelector<HTMLElement>('[data-slot="pty-scrollbar"]');
+    const thumb = container.querySelector<HTMLElement>('[data-slot="pty-scrollbar-thumb"]');
+    if (!track || !thumb) throw new Error("missing vertical scrollbar");
+    defineTrackRect(track);
+    defineRect(thumb, { top: 260, bottom: 340, height: 80 });
+    track.setPointerCapture = vi.fn();
+    track.releasePointerCapture = vi.fn();
+
+    dispatchPointer("pointerdown", thumb, { pointerId: 1, clientY: 300 });
+    expect(onScrollRatio).not.toHaveBeenCalled();
+
+    dispatchPointer("pointermove", track, { pointerId: 1, clientY: 340 });
+    dispatchPointer("pointerup", track, { pointerId: 1, clientY: 340 });
+
+    expect(onScrollRatio).toHaveBeenCalledTimes(1);
+    expect(onScrollRatio).toHaveBeenCalledWith(0.625);
+  });
 });
 
 describe("PtyHorizontalScrollbar", () => {

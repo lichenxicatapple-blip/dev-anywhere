@@ -38,7 +38,7 @@ function createDom() {
 }
 
 function markUserVerticalScrollIntent(container: HTMLElement): void {
-  container.dispatchEvent(new Event("wheel"));
+  container.dispatchEvent(new Event("touchstart"));
 }
 
 function createTerminal(lineTextByIndex: Record<number, string> = {}) {
@@ -115,7 +115,7 @@ describe("attachPtyScrollController", () => {
     expect(host.style.width).toBe("800px");
     expect(host.style.height).toBe("400px");
     expect(host.style.paddingTop).toBe("0px");
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
   });
 
   it("maps container scroll to xterm ydisp and subpixel transform", () => {
@@ -183,14 +183,14 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
 
     terminal.buffer.active.length = 110;
     terminal.buffer.active.viewportY = 90;
     scrollHeight = 2200;
     emitScroll();
 
-    expect(container.scrollTop).toBe(2200);
+    expect(container.scrollTop).toBe(1800);
   });
 
   it("follows to bottom on render when a real new frame arrives at bottom", () => {
@@ -212,7 +212,7 @@ describe("attachPtyScrollController", () => {
     emitRender();
 
     expect(consumeNewFrame).toHaveBeenCalledTimes(1);
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
     expect(setNewFramesWhileAway).not.toHaveBeenCalled();
   });
 
@@ -238,14 +238,14 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway,
     });
 
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
 
     terminal.buffer.active.length = 110;
     scrollHeight = 2200;
     emitRender();
 
     expect(consumeNewFrame).toHaveBeenCalledTimes(1);
-    expect(container.scrollTop).toBe(2200);
+    expect(container.scrollTop).toBe(1800);
     expect(setNewFramesWhileAway).not.toHaveBeenCalled();
   });
 
@@ -294,7 +294,7 @@ describe("attachPtyScrollController", () => {
     expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
 
     controller.scrollToBottom();
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
   });
@@ -317,7 +317,7 @@ describe("attachPtyScrollController", () => {
 
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(terminal.buffer.active.viewportY).toBe(80);
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
   });
 
   it("publishes scroll state changes without duplicating identical snapshots", () => {
@@ -337,7 +337,7 @@ describe("attachPtyScrollController", () => {
     });
 
     expect(onScrollStateChange).toHaveBeenLastCalledWith({
-      scrollTop: 2000,
+      scrollTop: 1600,
       scrollLeft: 0,
       scrollHeight: 2000,
       scrollWidth: 800,
@@ -384,6 +384,29 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(800);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
+  });
+
+  it("owns wheel scrolling instead of leaving it to xterm internals", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.scrollToLine.mockClear();
+
+    const event = new WheelEvent("wheel", { deltaY: -300, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(container.scrollTop).toBe(1300);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(65);
   });
 
   it("exposes ratio scrolling for a custom horizontal terminal scrollbar", () => {
@@ -437,7 +460,7 @@ describe("attachPtyScrollController", () => {
 
     expect(spacer.style.height).toBe("3000px");
     expect(host.style.height).toBe("600px");
-    expect(container.scrollTop).toBe(2000);
+    expect(container.scrollTop).toBe(1600);
     expect(xterm.style.transform).toBe("");
   });
 
