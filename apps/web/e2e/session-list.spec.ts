@@ -44,7 +44,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.locator('[data-slot="sidebar-session-list"]')).toBeVisible();
   });
 
-  test("设置面板展示 Web 和 Relay 版本", async ({ page }) => {
+  test("设置菜单进入版本页后展示 Web 和 Relay 版本", async ({ page }) => {
     await page.route("**/health", async (route) => {
       await route.fulfill({
         json: { status: "ok", version: "9.8.7", uptime: 125 },
@@ -53,9 +53,13 @@ test.describe("CreateSessionDialog — 字段校验", () => {
 
     await page.getByRole("button", { name: "设置" }).click();
     await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
-    await expect(page.getByText("Web 版本")).toBeVisible();
-    await expect(page.getByText("0.0.2")).toBeVisible();
-    await expect(page.getByText("Relay 版本")).toBeVisible();
+    await expect(page.getByRole("button", { name: /版本/ })).toBeVisible();
+
+    await page.getByRole("button", { name: /版本/ }).click();
+    await expect(page.getByRole("heading", { name: "版本" })).toBeVisible();
+    await expect(page.getByText("Web", { exact: true })).toBeVisible();
+    await expect(page.getByText("0.0.3")).toBeVisible();
+    await expect(page.getByText("Relay", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();
   });

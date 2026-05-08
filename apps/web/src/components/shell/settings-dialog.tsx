@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { CheckCircle2, Monitor, RefreshCw, Server, WifiOff } from "lucide-react";
+import { ArrowLeft, ChevronRight, Monitor, Server } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -22,6 +21,8 @@ type RelayHealthState =
   | { kind: "idle" | "loading" }
   | { kind: "ready"; version: string; uptime: number }
   | { kind: "error"; message: string };
+
+type SettingsView = "menu" | "version";
 
 interface RelayHealthResponse {
   status?: string;
@@ -48,10 +49,8 @@ function healthUrl(relayUrl: string): string {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const connected = useAppStore((s) => s.connected);
-  const proxyOnline = useAppStore((s) => s.proxyOnline);
-  const selectedProxyName = useAppStore((s) => s.selectedProxyName);
   const relayUrl = useAppStore((s) => s.relayUrl);
+  const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
 
   const loadRelayHealth = useCallback(
@@ -76,18 +75,28 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setRelayHealth({ kind: "error", message: err instanceof Error ? err.message : "读取失败" });
+        setRelayHealth({
+          kind: "error",
+          message: err instanceof Error ? "当前 Relay 无法读取版本" : "读取失败",
+        });
       }
     },
     [relayUrl],
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setView("menu");
+      return;
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || view !== "version") return;
     const ctrl = new AbortController();
     void loadRelayHealth(ctrl.signal);
     return () => ctrl.abort();
-  }, [loadRelayHealth, open]);
+  }, [loadRelayHealth, open, view]);
 
   const relayVersion =
     relayHealth.kind === "ready"
@@ -106,79 +115,99 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]" data-slot="settings-dialog">
+      <DialogContent
+        className="sm:max-w-[440px]"
+        data-slot="settings-dialog"
+        showCloseButton={view === "menu"}
+      >
         <DialogHeader>
-          <DialogTitle>设置</DialogTitle>
-          <DialogDescription>
-            当前安装和连接状态。这里暂时只展示信息，不修改配置。
-          </DialogDescription>
+          {view === "version" ? (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="-ml-2 size-9"
+                aria-label="返回设置"
+                onClick={() => setView("menu")}
+              >
+                <ArrowLeft className="size-4" aria-hidden="true" />
+              </Button>
+              <div className="space-y-2">
+                <DialogTitle>版本</DialogTitle>
+                <DialogDescription>当前 Web 与 Relay 的版本信息。</DialogDescription>
+              </div>
+            </div>
+          ) : (
+            <>
+              <DialogTitle>设置</DialogTitle>
+              <DialogDescription>选择要查看或调整的项目。</DialogDescription>
+            </>
+          )}
         </DialogHeader>
 
-        <div className="space-y-3">
-          <SettingsRow
-            icon={<Monitor className="size-4" aria-hidden="true" />}
-            label="Web 版本"
-            value={__APP_VERSION__}
-            detail="当前浏览器加载的 DEV Anywhere Web"
-          />
-          <SettingsRow
-            icon={<Server className="size-4" aria-hidden="true" />}
-            label="Relay 版本"
-            value={relayVersion}
-            detail={relayDetail}
-            muted={relayHealth.kind === "error"}
-          />
-          <SettingsRow
-            icon={
-              connected ? (
-                <CheckCircle2 className="size-4" aria-hidden="true" />
-              ) : (
-                <WifiOff className="size-4" aria-hidden="true" />
-              )
-            }
-            label="Relay 地址"
-            value={relayUrl || "未初始化"}
-            detail={connected ? "浏览器已连接 Relay" : "浏览器未连接 Relay"}
-            muted={!connected}
-          />
-          <SettingsRow
-            icon={<Monitor className="size-4" aria-hidden="true" />}
-            label="开发机"
-            value={selectedProxyName || "未选择"}
-            detail={
-              selectedProxyName
-                ? proxyOnline
-                  ? "当前开发机在线"
-                  : "当前开发机离线"
-                : "选择开发机后才能创建或接管会话"
-            }
-            muted={!selectedProxyName || !proxyOnline}
-          />
-        </div>
-
-        <DialogFooter className="items-center sm:justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void loadRelayHealth()}
-            disabled={relayHealth.kind === "loading"}
-          >
-            <RefreshCw
-              className={cn("size-4", relayHealth.kind === "loading" && "animate-spin")}
-              aria-hidden="true"
+        {view === "version" ? (
+          <div className="space-y-3">
+            <VersionRow
+              icon={<Monitor className="size-4" aria-hidden="true" />}
+              label="Web"
+              value={__APP_VERSION__}
+              detail="当前浏览器加载的版本"
             />
-            刷新版本
-          </Button>
-          <Button type="button" onClick={() => onOpenChange(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
+            <VersionRow
+              icon={<Server className="size-4" aria-hidden="true" />}
+              label="Relay"
+              value={relayVersion}
+              detail={relayDetail}
+              muted={relayHealth.kind === "error"}
+            />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <SettingsMenuItem
+              icon={<Server className="size-4" aria-hidden="true" />}
+              label="版本"
+              detail="查看 Web 和 Relay 版本"
+              onClick={() => setView("version")}
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function SettingsRow({
+function SettingsMenuItem({
+  icon,
+  label,
+  detail,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      onClick={onClick}
+      data-slot="settings-menu-item"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+      </div>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </button>
+  );
+}
+
+function VersionRow({
   icon,
   label,
   value,
