@@ -3,16 +3,30 @@ import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared";
 import { waitForOpen, waitForMessage, getPort } from "../helpers.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const logger = createLogger({ name: "test", silent: true });
 
 describe("Relay Server Integration", () => {
   let relay: RelayServer;
   let port: number;
+  let tempRoot: string;
   const connections: WebSocket[] = [];
 
   beforeEach(async () => {
-    relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
+    tempRoot = mkdtempSync(join(tmpdir(), "dev-anywhere-relay-"));
+    const packagedFontDir = join(tempRoot, "packaged-fonts");
+    mkdirSync(join(packagedFontDir, "sarasa-fixed-sc"), { recursive: true });
+    writeFileSync(join(packagedFontDir, "sarasa-fixed-sc", "result.css"), "/* packaged font */");
+    relay = createRelayServer({
+      port: 0,
+      heartbeatInterval: 60000,
+      logger,
+      dataDir: join(tempRoot, "data"),
+      fontAssetDir: packagedFontDir,
+    });
     await new Promise<void>((resolve) => {
       relay.httpServer.listen(0, resolve);
     });
@@ -27,6 +41,7 @@ describe("Relay Server Integration", () => {
     }
     connections.length = 0;
     await relay.close();
+    rmSync(tempRoot, { recursive: true, force: true });
   });
 
   function connectProxy(): WebSocket {
@@ -136,6 +151,13 @@ describe("Relay Server Integration", () => {
     expect(body.status).toBe("ok");
     expect(body.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(typeof body.uptime).toBe("number");
+  });
+
+  it("serves bundled font assets when the persistent font volume is empty", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/fonts/sarasa-fixed-sc/result.css`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/css");
+    await expect(res.text()).resolves.toBe("/* packaged font */");
   });
 
   it("GET /status returns proxy and client counts", async () => {

@@ -17,6 +17,7 @@ RUN pnpm install --frozen-lockfile \
 # Sources
 COPY packages/shared/ packages/shared/
 COPY apps/relay/ apps/relay/
+COPY apps/proxy/assets/fonts/ apps/relay/assets/fonts/
 
 RUN pnpm --filter @dev-anywhere/shared build
 RUN pnpm --filter @dev-anywhere/relay build

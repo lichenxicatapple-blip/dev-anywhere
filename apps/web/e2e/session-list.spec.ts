@@ -95,7 +95,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.getByRole("button", { name: /版本/ }).click();
     await expect(page.getByRole("heading", { name: "版本" })).toBeVisible();
     await expect(page.getByText("Web", { exact: true })).toBeVisible();
-    await expect(page.getByText("0.0.4")).toBeVisible();
+    await expect(page.getByText("0.0.5")).toBeVisible();
     await expect(page.getByText("Relay", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();

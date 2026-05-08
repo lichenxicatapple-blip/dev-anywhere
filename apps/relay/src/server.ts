@@ -1,6 +1,9 @@
 import express from "express";
+import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import type { Logger } from "@dev-anywhere/shared";
 import { RelayRegistry } from "./registry.js";
@@ -20,6 +23,7 @@ export interface RelayServerOptions {
   // client 连接预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
   clientToken?: string;
   chaos?: RelayChaosOptions;
+  fontAssetDir?: string;
 }
 
 export interface RelayServer {
@@ -27,6 +31,9 @@ export interface RelayServer {
   registry: RelayRegistry;
   close: () => Promise<void>;
 }
+
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+const PACKAGED_FONTS_DIR = resolve(MODULE_DIR, "../assets/fonts");
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
@@ -59,8 +66,9 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
   const app = express();
 
-  // 静态文件服务：字体等资源，从 DATA_DIR/fonts 或默认 ~/.dev-anywhere/relay-data/fonts 提供
+  // 字体优先读持久化目录；Docker 镜像再回退到随包内置字体，避免空 volume 让 Web 字体 404。
   const fontsDir = dataDir ? `${dataDir}/fonts` : `${homedir()}/.dev-anywhere/relay-data/fonts`;
+  const fontAssetDir = options.fontAssetDir ?? PACKAGED_FONTS_DIR;
   app.use(
     "/fonts",
     (req, res, next) => {
@@ -72,6 +80,15 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       immutable: true,
     }),
   );
+  if (existsSync(fontAssetDir)) {
+    app.use(
+      "/fonts",
+      express.static(fontAssetDir, {
+        maxAge: "30d",
+        immutable: true,
+      }),
+    );
+  }
 
   app.use(healthRouter(registry));
 
