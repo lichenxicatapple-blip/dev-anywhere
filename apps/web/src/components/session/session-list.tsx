@@ -132,16 +132,17 @@ export function SessionList({ layout }: SessionListProps) {
     );
   }
 
-  // page 布局里 sidebar 外层没有 "活跃会话" 标签, 所以在这里补一个 inline header
-  const pageActiveHeader =
-    layout === "page" ? (
-      <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
-        活跃会话
-        {hasActive ? (
-          <span className="ml-1 text-muted-foreground/70 font-normal">· {sessions.length}</span>
-        ) : null}
-      </h3>
-    ) : null;
+  const activeHeader = (
+    <h3
+      className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground"
+      data-slot="active-section-header"
+    >
+      活跃会话
+      {hasActive ? (
+        <span className="ml-1 text-muted-foreground/70 font-normal">· {sessions.length}</span>
+      ) : null}
+    </h3>
+  );
 
   const activeListElement = hasActive ? (
     <ul role="list" className="flex flex-col w-full min-w-0">
@@ -200,7 +201,7 @@ export function SessionList({ layout }: SessionListProps) {
         {/* 用原生 overflow-y-auto 而不是 radix ScrollArea: 后者内部 `display:table` wrapper */}
         {/* 会把 history 行按内容宽度撑到 800+px, 使 `truncate` 完全失效 */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-          {pageActiveHeader}
+          {activeHeader}
           {activeListElement}
           {historyElement}
         </div>
@@ -224,11 +225,12 @@ export function SessionList({ layout }: SessionListProps) {
   }
 
   // layout === "sidebar": 列表占据 Sidebar 中段；底部 CTA 由 CreateSessionButton 承载
-  // "活跃会话" section 标签由 sidebar.tsx 外层提供, 这里只渲染行列表 / 空态 + HistoryList
+  // "活跃会话" section 标签必须和行列表 / HistoryList 同属一个滚动容器, 否则滚动历史时标题会误导当前分区。
   // 直接用 overflow-y-auto 而非 ScrollArea，避免 radix ScrollArea 内部 table-wrapper 打破 truncate 链路
   return (
     <>
       <div className="dev-sidebar-scroll h-full overflow-y-auto overscroll-contain">
+        {activeHeader}
         {activeListElement}
         {historyElement}
       </div>

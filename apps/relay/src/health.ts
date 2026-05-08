@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { RelayRegistry } from "./registry.js";
+import { RELAY_VERSION } from "./version.js";
 
 // 健康检查和状态查询路由
 export function healthRouter(registry: RelayRegistry): Router {
@@ -8,12 +9,14 @@ export function healthRouter(registry: RelayRegistry): Router {
   router.get("/health", (_req, res) => {
     res.json({
       status: "ok",
+      version: RELAY_VERSION,
       uptime: process.uptime(),
     });
   });
 
   router.get("/status", (_req, res) => {
     res.json({
+      version: RELAY_VERSION,
       proxyCount: registry.listProxies().length,
       clientCount: registry.countClients(),
       uptime: process.uptime(),
@@ -23,6 +26,7 @@ export function healthRouter(registry: RelayRegistry): Router {
   // 连接总览：proxy/client 计数、绑定关系
   router.get("/api/status", (_req, res) => {
     res.json({
+      version: RELAY_VERSION,
       proxyCount: registry.listProxies().length,
       clientCount: registry.countClients(),
       uptime: process.uptime(),

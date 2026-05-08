@@ -1,10 +1,18 @@
 import path from "path";
+import { readFileSync } from "node:fs";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as {
+  version: string;
+};
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -12,8 +20,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["brand-icon.svg"],
       manifest: {
-        name: "Dev Anywhere",
-        short_name: "Dev Anywhere",
+        name: "DEV Anywhere",
+        short_name: "DEV Anywhere",
         description: "本地 AI CLI 透明代理和远程镜像: 在浏览器中实时查看和接管本地开发会话",
         id: "/",
         start_url: "/",

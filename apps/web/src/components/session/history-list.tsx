@@ -106,11 +106,12 @@ export function HistoryList({ now }: HistoryListProps) {
       });
   }
 
-  function toggleGroup(dir: string) {
+  function toggleGroup(provider: SessionProvider, dir: string) {
+    const key = historyProjectGroupKey(provider, dir);
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(dir)) next.delete(dir);
-      else next.add(dir);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -223,12 +224,13 @@ export function HistoryList({ now }: HistoryListProps) {
                 {!providerCollapsed && (
                   <ul role="list" className="flex flex-col">
                     {providerGroup.projects.map((g) => {
-                      const expanded = expandedGroups.has(g.dir);
+                      const groupKey = historyProjectGroupKey(providerGroup.provider, g.dir);
+                      const expanded = expandedGroups.has(groupKey);
                       return (
-                        <li key={g.dir}>
+                        <li key={groupKey}>
                           <button
                             type="button"
-                            onClick={() => toggleGroup(g.dir)}
+                            onClick={() => toggleGroup(providerGroup.provider, g.dir)}
                             aria-expanded={expanded}
                             data-slot="history-group-header"
                             data-expanded={expanded}
@@ -281,4 +283,8 @@ export function HistoryList({ now }: HistoryListProps) {
       )}
     </div>
   );
+}
+
+function historyProjectGroupKey(provider: SessionProvider, dir: string): string {
+  return `${provider}:${dir}`;
 }

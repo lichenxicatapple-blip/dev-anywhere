@@ -191,9 +191,41 @@ docker compose pull
 echo "==> starting containers"
 docker compose up -d
 
+cleanup_old_images() {
+  echo "==> cleaning old DEV Anywhere images"
+
+  local keep_ids
+  keep_ids="$(docker inspect -f '{{.Image}}' dev-anywhere-relay dev-anywhere-nginx 2>/dev/null | sort -u)"
+  if [ -z "$keep_ids" ]; then
+    echo "    skip: running images not found"
+    return
+  fi
+
+  local remove_ids
+  remove_ids="$(
+    docker images --no-trunc --format '{{.Repository}} {{.Tag}} {{.ID}}' |
+      awk '$1 ~ /(dev-anywhere|cc-anywhere)/ { print $3 }' |
+      sort -u |
+      while read -r image_id; do
+        [ -z "$image_id" ] && continue
+        if ! printf '%s\n' "$keep_ids" | grep -qx "$image_id"; then
+          printf '%s\n' "$image_id"
+        fi
+      done
+  )"
+
+  if [ -z "$remove_ids" ]; then
+    echo "    no old DEV Anywhere images to remove"
+    return
+  fi
+
+  printf '%s\n' "$remove_ids" | xargs docker image rm -f
+}
+
 # Step 7: verify.
 sleep 3
 if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
+  cleanup_old_images
   echo
   echo "=== dev-anywhere deployed ==="
   echo "  Web UI:  https://$DOMAIN"

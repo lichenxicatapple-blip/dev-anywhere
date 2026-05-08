@@ -53,7 +53,7 @@ test.describe("functional browser walkthrough", () => {
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
 
     await page
-      .getByLabel("会话模式")
+      .getByLabel("交互方式")
       .getByRole("button", { name: /聊天模式/ })
       .click();
     await expect(
@@ -61,7 +61,7 @@ test.describe("functional browser walkthrough", () => {
     ).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByText("权限模式")).toBeVisible();
     await page
-      .getByLabel("会话模式")
+      .getByLabel("交互方式")
       .getByRole("button", { name: /终端模式/ })
       .click();
     await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();

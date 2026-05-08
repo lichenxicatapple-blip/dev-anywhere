@@ -1,9 +1,9 @@
+import { useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
-import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
 import { SessionList, CreateSessionButton } from "@/components/session/session-list";
-import { toast } from "@/components/toast";
+import { SettingsDialog } from "@/components/shell/settings-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -12,90 +12,96 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className }: SidebarProps) {
-  const sessionCount = useSessionStore((s) => s.sessions.length);
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   if (collapsed) {
     return (
-      <nav
-        className={cn(
-          "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 py-2",
-          className,
-        )}
-        aria-label="侧边栏"
-        data-slot="sidebar-rail"
-        data-collapsed="true"
-      >
-        <SidebarToggle collapsed onClick={toggleSidebarCollapsed} />
-        <div className="mt-3 h-px w-5 bg-border/70" aria-hidden="true" />
-        <div className="mt-auto flex flex-col gap-2">
-          <SidebarSettingsButton compact tooltipSide="right" />
-          <CreateSessionButton compact />
-        </div>
-      </nav>
+      <>
+        <nav
+          className={cn(
+            "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 py-2",
+            className,
+          )}
+          aria-label="侧边栏"
+          data-slot="sidebar-rail"
+          data-collapsed="true"
+        >
+          <SidebarToggle collapsed onClick={toggleSidebarCollapsed} />
+          <div className="mt-3 h-px w-5 bg-border/70" aria-hidden="true" />
+          <div className="mt-auto flex flex-col gap-2">
+            <SidebarSettingsButton
+              compact
+              tooltipSide="right"
+              onClick={() => setSettingsOpen(true)}
+            />
+            <CreateSessionButton compact />
+          </div>
+        </nav>
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      </>
     );
   }
 
   return (
-    <nav
-      className={cn(
-        "dev-sidebar-shell group/sidebar relative flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-visible",
-        className,
-      )}
-      aria-label="侧边栏"
-      data-slot="sidebar"
-      data-collapsed="false"
-    >
-      <div className="dev-sidebar-fade p-2.5" data-slot="sidebar-proxy-switcher">
-        <div className="dev-sidebar-chrome rounded-lg border p-3">
-          <div className="flex items-center justify-between gap-3">
-            <span
-              className="min-w-0 truncate font-mono text-[13px] font-semibold"
-              data-slot="sidebar-brand"
-            >
-              <span className="text-primary">DEV</span>
-              <span className="text-foreground/90"> Anywhere</span>
-            </span>
-            <SidebarToggle collapsed={false} onClick={toggleSidebarCollapsed} />
-          </div>
-          <div className="mt-2.5">
-            <ProxySwitcher layout="dropdown" variant="sidebarChrome" />
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="dev-sidebar-fade flex flex-col flex-1 overflow-hidden"
-        data-slot="sidebar-session-list"
+    <>
+      <nav
+        className={cn(
+          "dev-sidebar-shell group/sidebar relative flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-visible",
+          className,
+        )}
+        aria-label="侧边栏"
+        data-slot="sidebar"
+        data-collapsed="false"
       >
-        <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
-          活跃会话
-          {sessionCount > 0 ? (
-            <span className="ml-1 text-muted-foreground/70 font-normal">· {sessionCount}</span>
-          ) : null}
-        </h3>
-        <div className="flex-1 min-h-0">
-          <SessionList layout="sidebar" />
+        <div className="dev-sidebar-fade p-2.5" data-slot="sidebar-proxy-switcher">
+          <div className="dev-sidebar-chrome rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span
+                className="min-w-0 truncate font-mono text-[13px] font-semibold"
+                data-slot="sidebar-brand"
+              >
+                <span className="text-primary">DEV</span>
+                <span className="text-foreground/90"> Anywhere</span>
+              </span>
+              <SidebarToggle collapsed={false} onClick={toggleSidebarCollapsed} />
+            </div>
+            <div className="mt-2.5">
+              <ProxySwitcher layout="dropdown" variant="sidebarChrome" />
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="dev-sidebar-fade flex gap-2 px-2 py-2" data-slot="sidebar-new-session">
-        <div className="min-w-0 flex-1">
-          <CreateSessionButton />
+        <div
+          className="dev-sidebar-fade flex flex-col flex-1 overflow-hidden"
+          data-slot="sidebar-session-list"
+        >
+          <div className="flex-1 min-h-0">
+            <SessionList layout="sidebar" />
+          </div>
         </div>
-        <SidebarSettingsButton />
-      </div>
-    </nav>
+
+        <div className="dev-sidebar-fade flex gap-2 px-2 py-2" data-slot="sidebar-new-session">
+          <div className="min-w-0 flex-1">
+            <CreateSessionButton />
+          </div>
+          <SidebarSettingsButton onClick={() => setSettingsOpen(true)} />
+        </div>
+      </nav>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+    </>
   );
 }
 
 function SidebarSettingsButton({
   compact = false,
   tooltipSide = "top",
+  onClick,
 }: {
   compact?: boolean;
   tooltipSide?: "top" | "right";
+  onClick: () => void;
 }) {
   return (
     <Tooltip delayDuration={500}>
@@ -104,7 +110,7 @@ function SidebarSettingsButton({
           type="button"
           aria-label="设置"
           data-slot="sidebar-settings-trigger"
-          onClick={() => toast.info("设置暂未开放")}
+          onClick={onClick}
           className={cn(
             "inline-flex items-center justify-center shrink-0 border border-border text-muted-foreground outline-none transition-[color,background-color,border-color,box-shadow]",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
