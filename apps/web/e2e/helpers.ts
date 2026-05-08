@@ -234,8 +234,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
               requestId: msg.requestId,
               homePath: "/Users/admin",
               agentCli: {
-                claude: { available: true, command: "/usr/local/bin/claude" },
-                codex: { available: true, command: "/usr/local/bin/codex" },
+                claude: {
+                  available: true,
+                  command: "/Users/admin/.nvm/versions/node/v22.16.0/bin/claude",
+                },
+                codex: {
+                  available: true,
+                  command: "/Users/admin/.nvm/versions/node/v22.16.0/bin/codex",
+                },
               },
             });
             break;

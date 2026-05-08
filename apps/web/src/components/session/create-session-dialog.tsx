@@ -328,19 +328,23 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        className="!w-[calc(100vw-2rem)] !max-w-none max-h-[calc(100dvh-2rem)] overflow-y-auto sm:!w-[44rem]"
+        data-slot="create-session-dialog"
+      >
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>
         </DialogHeader>
         <form
-          className="flex flex-col gap-4"
+          className="flex min-w-0 flex-col gap-4"
+          data-slot="create-session-form"
           autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault();
             handleSubmit();
           }}
         >
-          <label className="flex flex-col gap-1">
+          <label className="flex min-w-0 flex-col gap-1">
             <span className="text-sm">名称（可选）</span>
             <input
               type="text"
@@ -350,13 +354,13 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               spellCheck={false}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="h-9 px-3 rounded-md bg-input border border-border text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 min-w-0 rounded-md border border-border bg-input px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder="自动生成"
             />
           </label>
           <div
             ref={cwdFieldRef}
-            className="relative flex flex-col gap-2"
+            className="relative flex min-w-0 flex-col gap-2"
             onFocus={() => setCwdPickerOpen(true)}
             onBlur={handleCwdFieldBlur}
           >
@@ -376,7 +380,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 setMissingCwd(null);
               }}
               placeholder="输入绝对路径"
-              className="h-9 px-3 rounded-md bg-input border border-border text-sm font-mono outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 min-w-0 rounded-md border border-border bg-input px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             {cwdPickerOpen ? (
               <FilePathPicker
@@ -403,20 +407,20 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{missingCwd}</p>
             </section>
           ) : null}
-          <section aria-label="交互方式" className="flex flex-col gap-2">
+          <section aria-label="交互方式" className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-sm">交互方式</span>
               <span className="text-xs text-muted-foreground">
                 {mode === "pty" ? "完整终端" : "聊天消息"}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 aria-pressed={mode === "pty"}
                 onClick={() => handleModeChange("pty")}
                 className={cn(
-                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   mode === "pty" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
                 )}
               >
@@ -428,7 +432,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 aria-pressed={mode === "json"}
                 onClick={() => handleModeChange("json")}
                 className={cn(
-                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
                 )}
               >
@@ -437,14 +441,14 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               </button>
             </div>
           </section>
-          <section aria-label="Agent CLI" className="flex flex-col gap-2">
+          <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-sm">Agent CLI</span>
               <span className="text-xs text-muted-foreground">
                 {mode === "pty" ? "选择要启动的 CLI" : "聊天模式仅支持 Claude Code"}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -454,7 +458,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                     aria-disabled={claudeStatus.disabled}
                     onClick={() => setProvider("claude")}
                     className={cn(
-                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       provider === "claude"
                         ? "border-primary/70 bg-primary/10"
                         : "border-border bg-muted/20",
@@ -490,7 +494,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                       normalizePermissionMode("codex", mode);
                     }}
                     className={cn(
-                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       mode === "json" && "cursor-not-allowed opacity-45",
                       provider === "codex"
                         ? "border-primary/70 bg-primary/10"
@@ -515,10 +519,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="rounded-md border border-border bg-muted/20 p-3">
+            <div className="min-w-0 rounded-md border border-border bg-muted/20 p-3">
               <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
               {editingCliProvider === provider ? (
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
                   <label className="min-w-0 flex-1">
                     <span className="sr-only">CLI 路径</span>
                     <input
@@ -550,29 +554,31 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                       ))}
                     </datalist>
                   </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      setEditingCliProvider(null);
-                      setCliPathInput("");
-                    }}
-                    disabled={savingCliPath}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    type="button"
-                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium"
-                    onClick={() => void saveCliPath()}
-                    disabled={savingCliPath || !cliPathInput.trim()}
-                  >
-                    {savingCliPath ? "保存中..." : "保存路径"}
-                  </Button>
+                  <div className="flex shrink-0 justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setEditingCliProvider(null);
+                        setCliPathInput("");
+                      }}
+                      disabled={savingCliPath}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      type="button"
+                      className="h-8 shrink-0 rounded px-2.5 text-xs font-medium"
+                      onClick={() => void saveCliPath()}
+                      disabled={savingCliPath || !cliPathInput.trim()}
+                    >
+                      {savingCliPath ? "保存中..." : "保存路径"}
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
                   <p
                     className={cn(
                       "flex h-10 min-w-0 flex-1 items-center truncate font-mono text-sm",
@@ -585,7 +591,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    className="h-8 shrink-0 self-end rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground sm:self-auto"
                     onClick={() => openCliPathEditor(provider)}
                     disabled={mode === "json" && provider === "codex"}
                   >
@@ -595,7 +601,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               )}
             </div>
           </section>
-          <label className="flex flex-col gap-2">
+          <label className="flex min-w-0 flex-col gap-2">
             <span className="text-sm">权限模式</span>
             <Select
               value={permissionMode}

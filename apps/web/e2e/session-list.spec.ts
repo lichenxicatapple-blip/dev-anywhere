@@ -30,6 +30,43 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.getByRole("heading", { name: "新建会话" })).not.toBeVisible();
   });
 
+  test("新建会话弹窗内容不会被长 CLI 路径撑出边框", async ({ page }) => {
+    await page.locator('button:has-text("新建会话"):visible').last().click();
+
+    const dialog = page.locator('[data-slot="create-session-dialog"]');
+    const form = page.locator('[data-slot="create-session-form"]');
+    await expect(dialog).toBeVisible();
+    await expect(
+      page.getByText("/Users/admin/.nvm/versions/node/v22.16.0/bin/claude"),
+    ).toBeVisible();
+
+    async function expectFormContained() {
+      const overflowing = await form.evaluate((formNode) => {
+        const dialogNode = formNode.closest('[data-slot="create-session-dialog"]');
+        if (!dialogNode) return ["missing dialog"];
+        const dialogRect = dialogNode.getBoundingClientRect();
+        return Array.from(formNode.querySelectorAll("*"))
+          .filter((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            if (style.display === "none" || style.visibility === "hidden") return false;
+            if (rect.width === 0 || rect.height === 0) return false;
+            return rect.left < dialogRect.left - 1 || rect.right > dialogRect.right + 1;
+          })
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            return `${element.tagName.toLowerCase()} ${Math.round(rect.left)}-${Math.round(rect.right)}`;
+          });
+      });
+
+      expect(overflowing).toEqual([]);
+    }
+
+    await expectFormContained();
+    await page.getByRole("button", { name: "指定路径" }).click();
+    await expectFormContained();
+  });
+
   test("桌面侧边栏可以显式收起和展开", async ({ page }) => {
     await expect(page.locator('[data-slot="sidebar-session-list"]')).toBeVisible();
 
@@ -58,7 +95,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.getByRole("button", { name: /版本/ }).click();
     await expect(page.getByRole("heading", { name: "版本" })).toBeVisible();
     await expect(page.getByText("Web", { exact: true })).toBeVisible();
-    await expect(page.getByText("0.0.3")).toBeVisible();
+    await expect(page.getByText("0.0.4")).toBeVisible();
     await expect(page.getByText("Relay", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();
