@@ -31,6 +31,7 @@ export interface ProviderJsonOptions {
 
 export interface ProviderTerminalOptions {
   readonly args: string[];
+  readonly permissionMode?: string;
   readonly hook?: ProviderHookContext;
 }
 

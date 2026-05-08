@@ -151,14 +151,16 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
               variant="ghost"
               size="icon-xs"
               aria-label="会话操作"
+              data-slot="session-row-menu-trigger"
               onClick={(e) => e.stopPropagation()}
             >
               <MoreHorizontal aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent align="end" data-slot="session-row-menu">
             <DropdownMenuItem
               variant={isLocalTerminalPty ? undefined : "destructive"}
+              data-slot="session-row-terminate-item"
               onSelect={(event) => {
                 event.stopPropagation();
                 onTerminate();

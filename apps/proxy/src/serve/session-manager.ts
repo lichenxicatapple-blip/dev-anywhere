@@ -55,10 +55,10 @@ const PTY_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
     SessionState.TERMINATED,
   ],
   [SessionState.WAITING_APPROVAL]: [
-    // 审批解除（用户 y/n 后 claude 继续吐字节）→ handlePtyData 回补推 working。
-    // 不能直接跳 IDLE：turn_complete 信号被 terminal.ts:348 守卫卡住 currentPtyState === "working"，
-    // 必须先过 WORKING 这道关。
+    // 审批解除后 provider 可能继续工作，也可能直接结束本轮。
+    // 真实 Claude 拒绝工具审批后会直接发 turn_complete，因此 WAITING_APPROVAL -> IDLE 是合法边。
     SessionState.WORKING,
+    SessionState.IDLE,
     // 终态兜底
     SessionState.TERMINATED,
   ],

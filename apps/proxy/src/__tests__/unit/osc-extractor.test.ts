@@ -42,6 +42,17 @@ describe("extractOscSignals", () => {
     expect(result).toEqual({ state: "mid_pause", title: "claude - working..." });
   });
 
+  it("returns approval_wait for Codex action-required OSC title", () => {
+    const data = "\x1b]0;[ ! ] Action Required | test_go\x07";
+    const result = extractOscSignals(data, "codex");
+    expect(result).toEqual({ state: "approval_wait", title: "[ ! ] Action Required | test_go" });
+  });
+
+  it("does not treat Codex action-required words as state without an OSC title", () => {
+    const result = extractOscSignals("[ ! ] Action Required | test_go", "codex");
+    expect(result).toBeNull();
+  });
+
   it("returns null when no OSC sequences present", () => {
     const data = "plain terminal output with no escapes";
     const result = extractOscSignals(data);

@@ -13,39 +13,20 @@ export function resolveSessionDisplayState(options: {
 }): SessionDisplayState {
   if (options.connected === false || options.proxyOnline === false) return "disconnected";
   if (options.routeSessionEnded || options.session?.state === "terminated") return "terminated";
-  if (
-    options.hasPendingApproval ||
-    options.ptyState?.state === "approval_wait" ||
-    options.agentStatus?.phase === "waiting_permission" ||
-    options.session?.state === "waiting_approval"
-  ) {
+  if (options.hasPendingApproval || options.session?.state === "waiting_approval") {
     return "waiting_approval";
   }
+  if (options.session?.state === "working") return "working";
+  if (options.session?.state === "idle") return "idle";
+  if (options.agentStatus?.phase === "waiting_permission") return "waiting_approval";
+  if (options.ptyState?.state === "approval_wait") return "waiting_approval";
   if (
     options.agentStatus?.phase === "thinking" ||
     options.agentStatus?.phase === "tool_use" ||
     options.agentStatus?.phase === "outputting" ||
     options.ptyState?.state === "working" ||
-    options.ptyState?.state === "mid_pause" ||
-    options.session?.state === "working"
-  ) {
+    options.ptyState?.state === "mid_pause"
+  )
     return "working";
-  }
   return "idle";
-}
-
-export function applyDisplayStateToSession(
-  session: SessionInfo,
-  displayState: SessionDisplayState,
-): SessionInfo {
-  if (session.state === "terminated" || session.mode !== "pty") return session;
-  if (
-    displayState === "idle" ||
-    displayState === "working" ||
-    displayState === "waiting_approval" ||
-    displayState === "terminated"
-  ) {
-    return session.state === displayState ? session : { ...session, state: displayState };
-  }
-  return session;
 }

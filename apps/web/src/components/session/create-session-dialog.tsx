@@ -41,6 +41,11 @@ const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> =
   { value: "plan", label: "只读规划" },
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
+const CODEX_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+  { value: "default", label: "严格审批" },
+  { value: "auto", label: "自动判定" },
+  { value: "bypassPermissions", label: "跳过全部审批" },
+];
 const SESSION_CREATE_TIMEOUT_MS = 15_000;
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
 
@@ -113,6 +118,20 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     submitSessionCreate();
   }
 
+  const permissionOptions =
+    mode === "pty" && provider === "codex"
+      ? CODEX_PERMISSION_MODE_OPTIONS
+      : PERMISSION_MODE_OPTIONS;
+
+  function normalizePermissionMode(nextProvider: "claude" | "codex", nextMode: SessionMode) {
+    if (nextMode === "pty" && nextProvider === "codex") {
+      const supported = CODEX_PERMISSION_MODE_OPTIONS.some(
+        (option) => option.value === permissionMode,
+      );
+      if (!supported) setPermissionMode("default");
+    }
+  }
+
   async function submitSessionCreate(cwdOverride?: string) {
     const targetCwd = (cwdOverride ?? cwd).trim();
     if (!targetCwd) {
@@ -135,7 +154,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           cwd: targetCwd,
           mode,
           provider,
-          ...(mode === "json" ? { permissionMode } : {}),
+          permissionMode,
         },
         SESSION_CREATE_TIMEOUT_MS,
       );
@@ -195,7 +214,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     setMode(nextMode);
     if (nextMode === "json" && provider === "codex") {
       setProvider("claude");
+      normalizePermissionMode("claude", nextMode);
+      return;
     }
+    normalizePermissionMode(provider, nextMode);
   }
 
   function handleCwdFieldBlur(event: FocusEvent<HTMLDivElement>) {
@@ -344,6 +366,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 onClick={() => {
                   if (mode === "json") return;
                   setProvider("codex");
+                  normalizePermissionMode("codex", mode);
                 }}
                 className={cn(
                   "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -360,26 +383,24 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               </button>
             </div>
           </section>
-          {mode === "json" ? (
-            <label className="flex flex-col gap-2">
-              <span className="text-sm">权限模式</span>
-              <Select
-                value={permissionMode}
-                onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERMISSION_MODE_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-          ) : null}
+          <label className="flex flex-col gap-2">
+            <span className="text-sm">权限模式</span>
+            <Select
+              value={permissionMode}
+              onValueChange={(value) => setPermissionMode(value as PermissionMode)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {permissionOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
           <DialogFooter>
             <Button
               type="button"

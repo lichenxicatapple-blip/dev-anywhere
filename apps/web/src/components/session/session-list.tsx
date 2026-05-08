@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
-import type { AgentStatusPayload, PtyStatePayload, SessionInfo } from "@dev-anywhere/shared";
+import type { SessionInfo } from "@dev-anywhere/shared";
 import { compareProvider, providerLabel, type SessionProvider } from "@/lib/session-provider";
 import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
@@ -23,10 +23,6 @@ import { CreateSessionDialog } from "./create-session-dialog";
 import { SessionTerminationDialog } from "./session-termination-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
-import {
-  applyDisplayStateToSession,
-  resolveSessionDisplayState,
-} from "@/lib/session-display-state";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -34,8 +30,6 @@ interface SessionListProps {
 
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
-  const ptyStateBySessionId = useSessionStore((s) => s.ptyStateBySessionId);
-  const agentStatusBySessionId = useSessionStore((s) => s.agentStatusBySessionId);
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
   const chatMatch = useMatch("/chat/:id");
@@ -89,14 +83,7 @@ export function SessionList({ layout }: SessionListProps) {
     });
   }
 
-  const sessionsWithPtyState = sessions.map((session) =>
-    applyLiveStateToSession(
-      session,
-      ptyStateBySessionId[session.sessionId],
-      agentStatusBySessionId[session.sessionId],
-    ),
-  );
-  const hasActive = sessionsWithPtyState.length > 0;
+  const hasActive = sessions.length > 0;
 
   // 加载中 / 无 proxy: 两个 layout 分别走各自的空态; 其他情况统一渲染 active + history 两个 section,
   // 各自内部做 "暂无..." 提示, 而不是 short-circuit 出一个大 EmptyState
@@ -151,16 +138,14 @@ export function SessionList({ layout }: SessionListProps) {
       <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
         活跃会话
         {hasActive ? (
-          <span className="ml-1 text-muted-foreground/70 font-normal">
-            · {sessionsWithPtyState.length}
-          </span>
+          <span className="ml-1 text-muted-foreground/70 font-normal">· {sessions.length}</span>
         ) : null}
       </h3>
     ) : null;
 
   const activeListElement = hasActive ? (
     <ul role="list" className="flex flex-col w-full min-w-0">
-      {groupActiveSessionsByProvider(sessionsWithPtyState).map((group) => (
+      {groupActiveSessionsByProvider(sessions).map((group) => (
         <li key={group.provider}>
           <button
             type="button"
@@ -270,22 +255,6 @@ function groupActiveSessionsByProvider(sessions: SessionInfo[]) {
   return Array.from(map.entries())
     .sort(([a], [b]) => compareProvider(a, b))
     .map(([provider, groupedSessions]) => ({ provider, sessions: groupedSessions }));
-}
-
-function applyLiveStateToSession(
-  session: SessionInfo,
-  ptyState: PtyStatePayload | undefined,
-  agentStatus: AgentStatusPayload | undefined,
-): SessionInfo {
-  return applyDisplayStateToSession(
-    session,
-    resolveSessionDisplayState({
-      session,
-      ptyState,
-      agentStatus,
-      hasPendingApproval: false,
-    }),
-  );
 }
 
 // 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因

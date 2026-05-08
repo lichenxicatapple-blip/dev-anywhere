@@ -5,53 +5,40 @@ import {
 } from "#src/common/pty-approval-state.js";
 
 describe("PTY approval state transitions", () => {
-  it("releases approval wait when the approval screen is gone and Codex keeps spinning", () => {
+  it("releases approval wait when the provider emits a new explicit semantic state", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        approvalScreenState: null,
         signalState: "mid_pause",
       }),
     ).toBe(true);
     expect(stateAfterApprovalRelease("mid_pause")).toBe("mid_pause");
   });
 
-  it("keeps approval wait while the native approval prompt is still visible", () => {
+  it("keeps approval wait while the provider still reports approval wait", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        approvalScreenState: "waiting",
-        signalState: "mid_pause",
+        signalState: "approval_wait",
       }),
     ).toBe(false);
   });
 
-  it("does not convert turn completion into working", () => {
+  it("releases approval wait when the provider directly ends the turn", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        approvalScreenState: null,
         signalState: "turn_complete",
       }),
-    ).toBe(false);
+    ).toBe(true);
+    expect(stateAfterApprovalRelease("turn_complete")).toBe("turn_complete");
   });
 
   it("keeps approval wait for plain output without explicit resolution", () => {
     expect(
       shouldReleaseApprovalWait({
         currentState: "approval_wait",
-        approvalScreenState: null,
       }),
     ).toBe(false);
-  });
-
-  it("releases approval wait when the provider screen explicitly reports resolution", () => {
-    expect(
-      shouldReleaseApprovalWait({
-        currentState: "approval_wait",
-        approvalScreenState: "resolved",
-      }),
-    ).toBe(true);
-    expect(stateAfterApprovalRelease()).toBe("working");
   });
 });

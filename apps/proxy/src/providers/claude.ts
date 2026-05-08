@@ -157,6 +157,11 @@ function withClaudeTerminalHookArgs(
   ];
 }
 
+function withClaudeTerminalPermissionArgs(args: string[], permissionMode?: string): string[] {
+  if (!permissionMode) return args;
+  return ["--permission-mode", permissionMode, ...args];
+}
+
 function withClaudeHookEnv(
   env: NodeJS.ProcessEnv,
   context: ProviderHookContext | undefined,
@@ -200,9 +205,10 @@ export const CLAUDE_PROVIDER: ProviderAdapter = {
     };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+    const args = withClaudeTerminalPermissionArgs(options.args, options.permissionMode);
     return {
       command: resolveClaudePtyCommand(env),
-      args: withClaudeTerminalHookArgs(options.args, options.hook),
+      args: withClaudeTerminalHookArgs(args, options.hook),
       env: withClaudeHookEnv(env, options.hook),
     };
   },

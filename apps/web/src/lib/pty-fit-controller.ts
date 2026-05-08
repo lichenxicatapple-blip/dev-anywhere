@@ -4,38 +4,34 @@ interface PtyFontSizeOptions {
   minFontSize?: number;
   maxFontSize?: number;
   widthCellRatio?: number;
-  heightCellRatio?: number;
 }
 
-interface PtyFitControllerOptions extends PtyFontSizeOptions {
+interface PtyFontSizeApplyOptions extends PtyFontSizeOptions {
   container: HTMLDivElement;
   term: Terminal;
-  enabled: boolean;
-  defaultFontSize?: number;
   onRelayout?: () => void;
 }
 
-interface PtyFitController {
-  dispose: () => void;
+export function applyPtyFontSize(term: Terminal, next: number, onRelayout?: () => void): boolean {
+  if (term.options.fontSize === next) return false;
+  term.options.fontSize = next;
+  term.resize(term.cols, term.rows);
+  term.refresh(0, term.rows - 1);
+  requestAnimationFrame(() => onRelayout?.());
+  return true;
 }
 
 export function computePtyFontSize(
   containerWidth: number,
-  containerHeight: number,
+  _containerHeight: number,
   cols: number,
-  rows: number,
+  _rows: number,
   options: PtyFontSizeOptions = {},
 ): number | null {
-  if (!containerWidth || !containerHeight || !cols || !rows) return null;
-  const {
-    minFontSize = 8,
-    maxFontSize = 16,
-    widthCellRatio = 0.6,
-    heightCellRatio = 1.2,
-  } = options;
+  if (!containerWidth || !cols) return null;
+  const { minFontSize = 8, maxFontSize = 16, widthCellRatio = 0.6 } = options;
   const byWidth = containerWidth / cols / widthCellRatio;
-  const byHeight = containerHeight / rows / heightCellRatio;
-  return Math.max(minFontSize, Math.min(maxFontSize, Math.floor(Math.min(byWidth, byHeight))));
+  return Math.max(minFontSize, Math.min(maxFontSize, Math.floor(byWidth)));
 }
 
 function getAvailableContainerSize(container: HTMLDivElement): {
@@ -55,47 +51,16 @@ function getAvailableContainerSize(container: HTMLDivElement): {
   };
 }
 
-export function attachPtyFitController(options: PtyFitControllerOptions): PtyFitController {
-  const {
-    container,
-    term,
-    enabled,
-    defaultFontSize = 14,
-    onRelayout,
+export function fitPtyFontSizeOnce(options: PtyFontSizeApplyOptions): number | null {
+  const { container, term, onRelayout, minFontSize, maxFontSize, widthCellRatio } = options;
+  const available = getAvailableContainerSize(container);
+  const next = computePtyFontSize(available.width, available.height, term.cols, term.rows, {
     minFontSize,
     maxFontSize,
     widthCellRatio,
-    heightCellRatio,
-  } = options;
-
-  const applyFontSize = (next: number): void => {
-    if (term.options.fontSize === next) return;
-    term.options.fontSize = next;
-    term.refresh(0, term.rows - 1);
-    requestAnimationFrame(() => onRelayout?.());
-  };
-
-  const fit = (): void => {
-    if (!enabled) {
-      applyFontSize(defaultFontSize);
-      return;
-    }
-
-    const available = getAvailableContainerSize(container);
-    const next = computePtyFontSize(available.width, available.height, term.cols, term.rows, {
-      minFontSize,
-      maxFontSize,
-      widthCellRatio,
-      heightCellRatio,
-    });
-    if (next !== null) applyFontSize(next);
-  };
-
-  fit();
-  const ro = new ResizeObserver(fit);
-  ro.observe(container);
-
-  return {
-    dispose: () => ro.disconnect(),
-  };
+  });
+  if (next !== null) {
+    applyPtyFontSize(term, next, onRelayout);
+  }
+  return next;
 }

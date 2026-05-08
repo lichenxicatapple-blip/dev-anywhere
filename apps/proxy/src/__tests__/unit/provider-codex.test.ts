@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  CODEX_HOOK_OUTPUT_EVENTS,
-  CODEX_PROVIDER,
-  getCodexHookForwarderScriptForTest,
-  resolveCodexCommand,
-} from "#src/providers/codex.js";
+import { CODEX_PROVIDER, resolveCodexCommand } from "#src/providers/codex.js";
 
 describe("Codex provider", () => {
   it("declares Codex provider capabilities", () => {
@@ -31,7 +26,7 @@ describe("Codex provider", () => {
     });
   });
 
-  it("injects session-scoped Codex hooks through process args and env", () => {
+  it("does not inject session-scoped hooks into PTY sessions", () => {
     const hook = {
       provider: "codex" as const,
       sessionId: "s1",
@@ -46,30 +41,48 @@ describe("Codex provider", () => {
     );
 
     expect(command.command).toBe("/custom/codex");
-    expect(command.env.DEV_ANYWHERE_PROVIDER).toBe("codex");
-    expect(command.env.DEV_ANYWHERE_SESSION_ID).toBe("s1");
-    expect(command.env.DEV_ANYWHERE_HOOK_URL).toBe("http://127.0.0.1:17654/hook");
-    expect(command.env.DEV_ANYWHERE_HOOK_FORWARDER).toContain(
-      ".dev-anywhere/run/provider-hook-forwarder.mjs",
-    );
-    expect(command.args).toContain("features.codex_hooks=true");
-    expect(command.args).toContain("exec");
-    expect(command.args.join(" ")).toContain("hooks={PreToolUse=");
-    expect(command.args.join(" ")).toContain("DEV_ANYWHERE_HOOK_EVENT=PreToolUse");
-    expect(command.args.join(" ")).toContain("DEV_ANYWHERE_HOOK_FORWARDER");
-    expect(command.args.join(" ")).toContain(
-      'command="DEV_ANYWHERE_HOOK_EVENT=PreToolUse node \\"$DEV_ANYWHERE_HOOK_FORWARDER\\"", timeout=5',
-    );
-    expect(command.args.join(" ")).not.toContain("DEV_ANYWHERE_HOOK_EVENT=PermissionRequest");
-    expect(command.args.join(" ")).not.toContain("timeout=31536000");
-    expect(countInlineTableBraceBalance(command.args.join(" "))).toBe(0);
-    expect(command.args.join(" ")).not.toContain(".codex/hooks.json");
-    expect(command.args.join(" ")).not.toContain("token-1");
+    expect(command.args).toEqual(["exec", "--json", "Say OK"]);
+    expect(command.env).toEqual({ CODEX_BIN: "/custom/codex" });
+    expect(command.args.join(" ")).not.toContain("features.hooks");
+    expect(command.args.join(" ")).not.toContain("hooks=");
+    expect(command.args.join(" ")).not.toContain("DEV_ANYWHERE_HOOK");
   });
 
-  it("only writes provider hook output for Codex events that consume hook decisions", () => {
-    expect(CODEX_HOOK_OUTPUT_EVENTS).toEqual(["PreToolUse", "PermissionRequest"]);
-    expect(getCodexHookForwarderScriptForTest()).toContain("if (OUTPUT_EVENTS.has(request.event))");
+  it("maps terminal permission modes to Codex approval flags", () => {
+    const strict = CODEX_PROVIDER.buildTerminalCommand(
+      { args: [], permissionMode: "default" },
+      { CODEX_BIN: "/custom/codex" },
+    );
+    expect(strict.args).toEqual(["--ask-for-approval", "untrusted"]);
+
+    const automatic = CODEX_PROVIDER.buildTerminalCommand(
+      { args: [], permissionMode: "auto" },
+      { CODEX_BIN: "/custom/codex" },
+    );
+    expect(automatic.args).toEqual(["--ask-for-approval", "on-request"]);
+
+    const bypass = CODEX_PROVIDER.buildTerminalCommand(
+      { args: [], permissionMode: "bypassPermissions" },
+      { CODEX_BIN: "/custom/codex" },
+    );
+    expect(bypass.args).toEqual(["--dangerously-bypass-approvals-and-sandbox"]);
+  });
+
+  it("keeps Codex approval flags before provider args", () => {
+    const hook = {
+      provider: "codex" as const,
+      sessionId: "s1",
+      hookUrl: "http://127.0.0.1:17654/hook",
+      marker: "marker-1",
+      token: "token-1",
+    };
+
+    const command = CODEX_PROVIDER.buildTerminalCommand(
+      { args: ["resume", "codex-session"], permissionMode: "default", hook },
+      { CODEX_BIN: "/custom/codex" },
+    );
+
+    expect(command.args).toEqual(["--ask-for-approval", "untrusted", "resume", "codex-session"]);
   });
 
   it("rejects JSON sessions until Codex stream parsing is implemented", () => {
@@ -78,12 +91,3 @@ describe("Codex provider", () => {
     );
   });
 });
-
-function countInlineTableBraceBalance(value: string): number {
-  let balance = 0;
-  for (const char of value) {
-    if (char === "{") balance++;
-    if (char === "}") balance--;
-  }
-  return balance;
-}

@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
-import { attachPtyFitController } from "@/lib/pty-fit-controller";
+import { applyPtyFontSize, fitPtyFontSizeOnce } from "@/lib/pty-fit-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
@@ -25,7 +25,7 @@ import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
-import { registerPtySerializer } from "@/test-hooks";
+import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
@@ -67,7 +67,9 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const userHasVerticalScrollIntentRef = useRef(false);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
-  const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
+  const ptyFontSize = useAppStore((s) => s.ptyFontSize);
+  const ptyFitRequestId = useAppStore((s) => s.ptyFitRequestId);
+  const setPtyFontSize = useAppStore((s) => s.setPtyFontSize);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
 
   function handleTerminalContainerMouseDown(event: MouseEvent<HTMLDivElement>): void {
@@ -90,11 +92,13 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       sessionId,
       ws,
       relay,
-      createTerminal: createXtermTerminal,
+      createTerminal: (container) =>
+        createXtermTerminal(container, { fontSize: useAppStore.getState().ptyFontSize }),
       attachRawInput: attachXtermRawInput,
       onTerminalReady: (term) => {
         terminalRef.current = term as Terminal;
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
+        registerPtyTerminal(sessionId, term as Terminal);
       },
       onFrameWritten: () => {
         pendingNewFrameRef.current = true;
@@ -114,6 +118,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     return () => {
       controller.dispose();
       registerPtySerializer(sessionId, null);
+      registerPtyTerminal(sessionId, null);
       terminalRef.current = null;
     };
   }, [
@@ -164,7 +169,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     };
   }, [
     connection.ready,
-    ptyAutoscale,
     containerEl,
     follow.handleAtBottomChange,
     follow.hasNewFramesWhileAwayRef,
@@ -173,18 +177,25 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
 
   useEffect(() => {
     if (!connection.ready) return;
+    const term = terminalRef.current;
+    if (!term) return;
+
+    applyPtyFontSize(term, ptyFontSize, () => relayoutPtyRef.current());
+  }, [connection.ready, ptyFontSize]);
+
+  useEffect(() => {
+    if (!connection.ready || ptyFitRequestId === 0) return;
     const container = containerEl;
     const term = terminalRef.current;
     if (!container || !term) return;
 
-    const controller = attachPtyFitController({
+    const next = fitPtyFontSizeOnce({
       container,
       term,
-      enabled: ptyAutoscale,
       onRelayout: () => relayoutPtyRef.current(),
     });
-    return () => controller.dispose();
-  }, [connection.ready, ptyAutoscale, containerEl]);
+    if (next !== null) setPtyFontSize(next);
+  }, [connection.ready, ptyFitRequestId, containerEl, setPtyFontSize]);
 
   useEffect(() => {
     if (!connection.ready || !webOwnsPtyGeometry) return;
@@ -202,7 +213,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       onRelayout: () => relayoutPtyRef.current(),
     });
     return () => controller.dispose();
-  }, [connection.ready, webOwnsPtyGeometry, ptyAutoscale, containerEl, sessionId]);
+  }, [connection.ready, webOwnsPtyGeometry, ptyFontSize, containerEl, sessionId]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">

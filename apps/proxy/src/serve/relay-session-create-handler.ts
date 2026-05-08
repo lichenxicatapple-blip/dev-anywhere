@@ -82,8 +82,9 @@ export class RelaySessionCreateHandler {
 
     const provider = msg.provider as ProviderId | undefined;
     const mode = (msg.mode as "json" | "pty" | undefined) ?? "json";
+    const permissionMode = msg.permissionMode as string | undefined;
     if (mode === "pty") {
-      this.createHostedPtySession(msg, sessionCwd, provider ?? "claude");
+      this.createHostedPtySession(msg, sessionCwd, provider ?? "claude", permissionMode);
       return;
     }
 
@@ -105,7 +106,6 @@ export class RelaySessionCreateHandler {
     }
 
     const resumeSessionId = msg.resumeSessionId as string | undefined;
-    const permissionMode = msg.permissionMode as string | undefined;
     const streamDelta = msg.streamDelta === true;
     const name = tildify(sessionCwd);
     const pendingId = nanoid();
@@ -186,6 +186,7 @@ export class RelaySessionCreateHandler {
     msg: Record<string, unknown>,
     cwd: string,
     provider: ProviderId,
+    permissionMode?: string,
   ): void {
     if (provider !== "claude" && provider !== "codex") {
       this.deps.relaySend(
@@ -210,6 +211,7 @@ export class RelaySessionCreateHandler {
         provider,
         cwd,
         args: buildHostedPtyArgs(provider, resumeSessionId),
+        permissionMode,
         hook,
       });
       const session = this.deps.sessionManager.createSession(

@@ -60,9 +60,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(menu.getByText("Permission mode")).toHaveCount(0);
     await expect(menu.getByText("重命名")).toHaveCount(0);
     await expect(menu.getByText("复制会话")).toHaveCount(0);
-    const terminate = page.locator('[data-slot="chat-terminate-item"]');
-    await expect(terminate).toBeVisible();
-    await expect(terminate).toHaveClass(/text-destructive/);
+    await expect(page.locator('[data-slot="chat-terminate-item"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toBeVisible();
   });
 });
 

@@ -137,6 +137,17 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
 
         case "pty_semantic_event": {
           if (!sessionManager.getSession(msg.sessionId)) break;
+          const logPayload = {
+            sessionId: msg.sessionId,
+            state: msg.state,
+            ...(msg.title !== undefined ? { title: msg.title } : {}),
+            ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
+          };
+          if (msg.state === "approval_wait" || msg.state === "turn_complete") {
+            serviceLogger.info(logPayload, "PTY semantic event received");
+          } else {
+            serviceLogger.debug(logPayload, "PTY semantic event received");
+          }
           if (msg.state === "approval_wait") {
             changeSessionState(
               sessionManager,

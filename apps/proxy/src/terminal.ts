@@ -13,7 +13,6 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "./common/osc-extractor.js";
-import { detectPtyApprovalScreen, hasPtyApprovalPrompt } from "./common/pty-approval-screen.js";
 import {
   shouldReleaseApprovalWait,
   stateAfterApprovalRelease,
@@ -296,13 +295,7 @@ class TerminalSession {
     }
 
     const oscSequences = extractOscSequences(data);
-    const signal = extractOscSignals(data);
-    const approvalScreenState =
-      detectPtyApprovalScreen(data, this.provider.id) ??
-      (this.serializeAddon
-        ? detectPtyApprovalScreen(this.serializeAddon.serialize(), this.provider.id)
-        : null);
-    const screenShowsApproval = approvalScreenState === "waiting";
+    const signal = extractOscSignals(data, this.provider.id);
     if (oscSequences.length > 0) {
       log.debug(
         {
@@ -316,7 +309,7 @@ class TerminalSession {
     if (signal?.title) {
       this.sendTerminalTitle(signal.title);
     }
-    if (signal?.state === "approval_wait" || screenShowsApproval) {
+    if (signal?.state === "approval_wait") {
       this.currentPtyState = "approval_wait";
       this.sendPtyState("approval_wait", { title: signal?.title, tool: signal?.tool });
       return;
@@ -324,7 +317,6 @@ class TerminalSession {
     if (
       shouldReleaseApprovalWait({
         currentState: this.currentPtyState,
-        approvalScreenState,
         signalState: signal?.state,
       })
     ) {
@@ -412,10 +404,6 @@ class TerminalSession {
               requestId: msg.requestId,
             }),
           );
-          if (hasPtyApprovalPrompt(data, this.provider.id)) {
-            this.currentPtyState = "approval_wait";
-            this.sendPtyState("approval_wait");
-          }
           log.info(
             {
               sessionId: this.sessionId,

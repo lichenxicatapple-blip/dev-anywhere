@@ -159,12 +159,12 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
-    it("PTY session rejects waiting_approval -> idle (必须先经 WORKING，turn_complete 守卫要求 currentPtyState==='working')", () => {
+    it("PTY session allows waiting_approval -> idle when provider ends the turn after approval", () => {
       const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
-      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
+      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(true);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("transitions working -> idle", () => {

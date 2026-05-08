@@ -17,7 +17,7 @@ interface SessionStoreState {
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
   ptyTitles: Record<string, string>;
-  // PTY 语义状态: terminal/proxy 从 OSC 9 等信号抽取, 用于实时展示 approval_wait 等非字节内容。
+  // PTY 语义元信息: terminal/proxy 从 OSC 等信号抽取。会话生命周期以 sessions[].state 为准。
   ptyStateBySessionId: Record<string, PtyStatePayload>;
   agentStatusBySessionId: Record<string, AgentStatusPayload>;
 

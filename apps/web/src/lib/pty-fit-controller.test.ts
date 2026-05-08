@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachPtyFitController, computePtyFontSize } from "./pty-fit-controller";
+import { applyPtyFontSize, computePtyFontSize, fitPtyFontSizeOnce } from "./pty-fit-controller";
 
 function defineSize(el: HTMLElement, sizes: { clientHeight: number; clientWidth: number }): void {
   Object.defineProperty(el, "clientHeight", { configurable: true, value: sizes.clientHeight });
@@ -12,31 +12,31 @@ function createTerminal(fontSize = 14) {
     cols: 80,
     rows: 20,
     options: { fontSize },
+    resize: vi.fn(),
     refresh: vi.fn(),
   } as unknown as Terminal & {
     options: { fontSize: number };
+    resize: ReturnType<typeof vi.fn>;
     refresh: ReturnType<typeof vi.fn>;
   };
 }
 
 describe("computePtyFontSize", () => {
-  it("computes a clamped font size from container and terminal geometry", () => {
+  it("computes a clamped font size from container width and terminal columns", () => {
     expect(computePtyFontSize(960, 480, 80, 20)).toBe(16);
     expect(computePtyFontSize(120, 120, 80, 20)).toBe(8);
     expect(computePtyFontSize(0, 480, 80, 20)).toBeNull();
   });
+
+  it("does not shrink font size to fit all terminal rows", () => {
+    expect(computePtyFontSize(960, 120, 80, 200)).toBe(16);
+  });
 });
 
-describe("attachPtyFitController", () => {
-  let resizeDisconnect: ReturnType<typeof vi.fn>;
+describe("pty font size helpers", () => {
   let raf: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    resizeDisconnect = vi.fn();
-    globalThis.ResizeObserver = class {
-      observe = vi.fn();
-      disconnect = resizeDisconnect;
-    } as unknown as typeof ResizeObserver;
     raf = vi
       .spyOn(globalThis, "requestAnimationFrame")
       .mockImplementation((cb: FrameRequestCallback) => {
@@ -49,62 +49,77 @@ describe("attachPtyFitController", () => {
     raf.mockRestore();
   });
 
-  it("sets autoscaled font size, refreshes xterm, and requests relayout", () => {
+  it("applies a manual font size, refreshes xterm, and requests relayout", () => {
+    const term = createTerminal(14);
+    const onRelayout = vi.fn();
+
+    expect(applyPtyFontSize(term, 16, onRelayout)).toBe(true);
+
+    expect(term.options.fontSize).toBe(16);
+    expect(term.resize).toHaveBeenCalledWith(80, 20);
+    expect(term.refresh).toHaveBeenCalledWith(0, 19);
+    expect(onRelayout).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh when manual font size is unchanged", () => {
+    const term = createTerminal(14);
+    const onRelayout = vi.fn();
+
+    expect(applyPtyFontSize(term, 14, onRelayout)).toBe(false);
+
+    expect(term.refresh).not.toHaveBeenCalled();
+    expect(term.resize).not.toHaveBeenCalled();
+    expect(onRelayout).not.toHaveBeenCalled();
+  });
+
+  it("fits font size once from current terminal geometry", () => {
     const container = document.createElement("div") as HTMLDivElement;
     defineSize(container, { clientWidth: 720, clientHeight: 360 });
     const term = createTerminal(14);
     const onRelayout = vi.fn();
 
-    attachPtyFitController({ container, term, enabled: true, onRelayout });
+    const next = fitPtyFontSizeOnce({ container, term, onRelayout });
 
+    expect(next).toBe(15);
     expect(term.options.fontSize).toBe(15);
     expect(term.refresh).toHaveBeenCalledWith(0, 19);
     expect(onRelayout).toHaveBeenCalledTimes(1);
   });
 
-  it("subtracts terminal padding before computing autoscaled font size", () => {
+  it("subtracts terminal padding before fitting font size", () => {
     const container = document.createElement("div") as HTMLDivElement;
     container.style.padding = "12px 16px";
     defineSize(container, { clientWidth: 512, clientHeight: 360 });
     const term = createTerminal(14);
 
-    attachPtyFitController({ container, term, enabled: true });
+    const next = fitPtyFontSizeOnce({ container, term });
 
+    expect(next).toBe(10);
     expect(term.options.fontSize).toBe(10);
     expect(term.refresh).toHaveBeenCalledWith(0, 19);
   });
 
-  it("resets to default font size when autoscale is disabled", () => {
-    const container = document.createElement("div") as HTMLDivElement;
-    defineSize(container, { clientWidth: 720, clientHeight: 360 });
-    const term = createTerminal(15);
-
-    attachPtyFitController({ container, term, enabled: false, defaultFontSize: 14 });
-
-    expect(term.options.fontSize).toBe(14);
-    expect(term.refresh).toHaveBeenCalledWith(0, 19);
-  });
-
-  it("does not refresh when computed font size is unchanged", () => {
+  it("does not refresh when fitted font size is unchanged", () => {
     const container = document.createElement("div") as HTMLDivElement;
     defineSize(container, { clientWidth: 720, clientHeight: 360 });
     const term = createTerminal(15);
     const onRelayout = vi.fn();
 
-    attachPtyFitController({ container, term, enabled: true, onRelayout });
+    const next = fitPtyFontSizeOnce({ container, term, onRelayout });
 
+    expect(next).toBe(15);
     expect(term.refresh).not.toHaveBeenCalled();
     expect(onRelayout).not.toHaveBeenCalled();
   });
 
-  it("disconnects resize observation", () => {
+  it("returns null when current geometry is not measurable", () => {
     const container = document.createElement("div") as HTMLDivElement;
-    defineSize(container, { clientWidth: 720, clientHeight: 360 });
+    defineSize(container, { clientWidth: 0, clientHeight: 360 });
     const term = createTerminal();
 
-    const controller = attachPtyFitController({ container, term, enabled: true });
-    controller.dispose();
+    const next = fitPtyFontSizeOnce({ container, term });
 
-    expect(resizeDisconnect).toHaveBeenCalledTimes(1);
+    expect(next).toBeNull();
+    expect(term.refresh).not.toHaveBeenCalled();
   });
 });

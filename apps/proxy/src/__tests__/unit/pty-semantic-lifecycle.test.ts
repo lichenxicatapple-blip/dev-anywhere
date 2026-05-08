@@ -9,10 +9,10 @@ describe("resolvePtySemanticSessionTransitions", () => {
     ]);
   });
 
-  it("settles PTY approval through working because waiting_approval cannot jump directly to idle", () => {
+  it("settles PTY approval directly when the provider ends the turn", () => {
     expect(
       resolvePtySemanticSessionTransitions(SessionState.WAITING_APPROVAL, "turn_complete"),
-    ).toEqual([SessionState.WORKING, SessionState.IDLE]);
+    ).toEqual([SessionState.IDLE]);
   });
 
   it("does not change idle sessions or non-terminal semantic states", () => {

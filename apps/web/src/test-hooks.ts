@@ -4,6 +4,7 @@
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { toast } from "@/components/toast";
+import type { Terminal } from "@xterm/xterm";
 
 interface CCTestHooks {
   chat: {
@@ -16,6 +17,13 @@ interface CCTestHooks {
   };
   pty: {
     serialize: (sessionId: string) => string;
+    metrics: (sessionId: string) => {
+      fontSize: number | undefined;
+      cols: number;
+      rows: number;
+      screenWidth: number;
+      screenHeight: number;
+    } | null;
   };
   toast: (message: string) => void;
 }
@@ -29,6 +37,7 @@ declare global {
 export function installTestHooks(): void {
   if (!import.meta.env.DEV) return;
   const ptySerializers = new Map<string, () => string>();
+  const ptyTerminals = new Map<string, Terminal>();
   window.__ccTest = {
     chat: {
       addUserMessage: (sid, msg) => useChatStore.getState().addUserMessage(sid, msg),
@@ -40,17 +49,31 @@ export function installTestHooks(): void {
     },
     pty: {
       serialize: (sid) => ptySerializers.get(sid)?.() ?? "",
+      metrics: (sid) => {
+        const term = ptyTerminals.get(sid);
+        const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+        if (!term || !screen) return null;
+        return {
+          fontSize: term.options.fontSize,
+          cols: term.cols,
+          rows: term.rows,
+          screenWidth: screen.clientWidth,
+          screenHeight: screen.clientHeight,
+        };
+      },
     },
     toast: (msg) => {
       toast(msg);
     },
   };
   window.__ccTestPtySerializers = ptySerializers;
+  window.__ccTestPtyTerminals = ptyTerminals;
 }
 
 declare global {
   interface Window {
     __ccTestPtySerializers?: Map<string, () => string>;
+    __ccTestPtyTerminals?: Map<string, Terminal>;
   }
 }
 
@@ -60,4 +83,12 @@ export function registerPtySerializer(sessionId: string, serialize: (() => strin
   if (!serializers) return;
   if (serialize) serializers.set(sessionId, serialize);
   else serializers.delete(sessionId);
+}
+
+export function registerPtyTerminal(sessionId: string, terminal: Terminal | null): void {
+  if (!import.meta.env.DEV) return;
+  const terminals = window.__ccTestPtyTerminals;
+  if (!terminals) return;
+  if (terminal) terminals.set(sessionId, terminal);
+  else terminals.delete(sessionId);
 }

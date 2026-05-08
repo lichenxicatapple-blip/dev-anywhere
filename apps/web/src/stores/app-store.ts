@@ -28,8 +28,8 @@ interface AppStoreState {
   proxyListLoaded: boolean;
   clientId: string;
   relayUrl: string;
-  // PTY 终端 xterm 字号自适应容器：缩字号铺满视口 vs 保 14 字号允许滚动
-  ptyAutoscale: boolean;
+  ptyFontSize: number;
+  ptyFitRequestId: number;
   // 模块级代码 (phase-machine) 想弹 toast 但 Sonner 可能还没订阅就绪时, 经由此处暂存, 等 AppShell mount 后消费
   pendingToast: PendingToast | null;
 
@@ -40,7 +40,10 @@ interface AppStoreState {
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
   resetProxyListLoaded: () => void;
-  setPtyAutoscale: (enabled: boolean) => void;
+  setPtyFontSize: (fontSize: number) => void;
+  adjustPtyFontSize: (delta: number) => void;
+  resetPtyFontSize: () => void;
+  requestPtyFit: () => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -65,6 +68,19 @@ function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
   }
 }
 
+const DEFAULT_PTY_FONT_SIZE = 14;
+export const MIN_PTY_FONT_SIZE = 8;
+export const MAX_PTY_FONT_SIZE = 24;
+
+function clampPtyFontSize(value: number): number {
+  return Math.max(MIN_PTY_FONT_SIZE, Math.min(MAX_PTY_FONT_SIZE, Math.round(value)));
+}
+
+function loadPtyFontSize(): number {
+  const stored = Number(localStorage.getItem("cc_ptyFontSize"));
+  return Number.isFinite(stored) ? clampPtyFontSize(stored) : DEFAULT_PTY_FONT_SIZE;
+}
+
 export const useAppStore = create<AppStoreState>()(
   devtools(
     (set, get) => ({
@@ -78,7 +94,8 @@ export const useAppStore = create<AppStoreState>()(
       proxyListLoaded: false,
       clientId: loadClientId(),
       relayUrl: "",
-      ptyAutoscale: localStorage.getItem("cc_ptyAutoscale") === "on",
+      ptyFontSize: loadPtyFontSize(),
+      ptyFitRequestId: 0,
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -87,9 +104,22 @@ export const useAppStore = create<AppStoreState>()(
         set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
-      setPtyAutoscale: (enabled) => {
-        localStorage.setItem("cc_ptyAutoscale", enabled ? "on" : "off");
-        set({ ptyAutoscale: enabled });
+      setPtyFontSize: (fontSize) => {
+        const next = clampPtyFontSize(fontSize);
+        localStorage.setItem("cc_ptyFontSize", String(next));
+        set({ ptyFontSize: next });
+      },
+      adjustPtyFontSize: (delta) => {
+        const next = clampPtyFontSize(get().ptyFontSize + delta);
+        localStorage.setItem("cc_ptyFontSize", String(next));
+        set({ ptyFontSize: next });
+      },
+      resetPtyFontSize: () => {
+        localStorage.setItem("cc_ptyFontSize", String(DEFAULT_PTY_FONT_SIZE));
+        set({ ptyFontSize: DEFAULT_PTY_FONT_SIZE });
+      },
+      requestPtyFit: () => {
+        set({ ptyFitRequestId: get().ptyFitRequestId + 1 });
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =

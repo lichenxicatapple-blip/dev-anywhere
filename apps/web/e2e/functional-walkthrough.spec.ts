@@ -1,5 +1,15 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "./helpers";
+
+async function terminateSessionFromList(page: Page, sessionId: string): Promise<void> {
+  await page.goto(`${page.url().split("#")[0]}#/sessions`);
+  const row = page.locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`);
+  await expect(row).toBeVisible();
+  await row.locator('[data-slot="session-row-menu-trigger"]').click();
+  await page.locator('[data-slot="session-row-terminate-item"]').click();
+  await page.locator('[data-slot="session-termination-confirm"]').click();
+  await expect(row).toHaveCount(0);
+}
 
 test.describe("functional browser walkthrough", () => {
   test.beforeEach(async ({ page }) => {
@@ -116,9 +126,7 @@ test.describe("functional browser walkthrough", () => {
     await expect(page.getByText("run a smoke check")).toBeVisible();
     await expect(page.getByText("收到。")).toBeVisible();
 
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    await page.locator('[data-slot="chat-terminate-item"]').click();
-    await page.locator('[data-slot="session-termination-confirm"]').click();
+    await terminateSessionFromList(page, "json-sess");
     await expect(page).toHaveURL(/\/sessions/);
     await page.goto(`${page.url().split("#")[0]}#/chat/json-sess?mode=json`);
     await expect(page.locator('[data-slot="terminated-session-panel"]')).toBeVisible();
@@ -130,9 +138,7 @@ test.describe("functional browser walkthrough", () => {
     await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
 
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    await page.locator('[data-slot="chat-terminate-item"]').click();
-    await page.locator('[data-slot="session-termination-confirm"]').click();
+    await terminateSessionFromList(page, "claude-pty");
     await expect(page).toHaveURL(/\/sessions/);
 
     await page.goto(`${page.url().split("#")[0]}#/chat/claude-pty?mode=pty`);
@@ -143,24 +149,24 @@ test.describe("functional browser walkthrough", () => {
     ).toHaveCount(0);
   });
 
-  test("creating a session from a missing directory creates the directory before retrying", async ({
-    page,
-  }) => {
+  test("creating a session can create a child directory before launch", async ({ page }) => {
     await selectFakeProxy(page);
     await page.locator('button:has-text("新建会话"):visible').last().click();
-    await page.getByLabel("工作目录").fill("/Users/admin/new_project_e2e");
+    await page.getByLabel("工作目录").fill("/Users/admin");
+    await page.locator('[data-slot="file-path-picker"] button:has-text("新建目录")').click();
+    await page.getByPlaceholder("目录名称").fill("new_project_e2e");
+    await page.getByRole("button", { name: "创建目录" }).click();
+    await expect(page.getByLabel("工作目录")).toHaveValue("/Users/admin/new_project_e2e/");
+
     await page
       .getByRole("dialog", { name: "新建会话" })
       .getByRole("button", { name: "创建" })
       .click();
 
-    await expect(page.getByText("这个目录还不存在")).toBeVisible();
-    await page.getByRole("button", { name: "创建目录并继续" }).click();
-
     await expect(page).toHaveURL(/\/chat\/created-claude-pty-1\?mode=pty/);
     const messages = await sentFakeRelayMessages(page);
     expect(messages.some((msg) => msg.type === "dir_create_request")).toBe(true);
-    expect(messages.filter((msg) => msg.type === "session_create")).toHaveLength(2);
+    expect(messages.filter((msg) => msg.type === "session_create")).toHaveLength(1);
   });
 
   test("PTY approval state is visible immediately and survives refresh", async ({ page }) => {

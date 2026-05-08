@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentStatusPayload, PtyStatePayload, SessionInfo } from "@dev-anywhere/shared";
-import { applyDisplayStateToSession, resolveSessionDisplayState } from "./session-display-state";
+import { resolveSessionDisplayState } from "./session-display-state";
 
 const ptySession: SessionInfo = {
   sessionId: "s1",
@@ -51,36 +51,36 @@ describe("session display state", () => {
       expected: "waiting_approval",
     },
     {
-      name: "agent waiting_permission is approval",
+      name: "session idle is authoritative over stale agent waiting_permission",
       input: {
         session: { ...ptySession, state: "idle" },
         agentStatus: agentStatus("waiting_permission"),
       },
-      expected: "waiting_approval",
+      expected: "idle",
     },
     {
-      name: "pty approval_wait is approval",
+      name: "session idle is authoritative over stale pty approval_wait",
       input: {
         session: { ...ptySession, state: "idle" },
         ptyState: { state: "approval_wait" } satisfies PtyStatePayload,
       },
-      expected: "waiting_approval",
+      expected: "idle",
     },
     {
-      name: "provider thinking is working",
+      name: "session idle is authoritative over stale provider thinking",
       input: {
         session: { ...ptySession, state: "idle" },
         agentStatus: agentStatus("thinking"),
       },
-      expected: "working",
+      expected: "idle",
     },
     {
-      name: "pty mid_pause is working",
+      name: "session idle is authoritative over stale pty mid_pause",
       input: {
         session: { ...ptySession, state: "idle" },
         ptyState: { state: "mid_pause" } satisfies PtyStatePayload,
       },
-      expected: "working",
+      expected: "idle",
     },
     {
       name: "session working is working",
@@ -108,29 +108,24 @@ describe("session display state", () => {
     ).toBe(expected);
   });
 
-  it("keeps approval above provider working phases", () => {
+  it("uses pending approval count above provider working phases", () => {
     expect(
       resolveSessionDisplayState({
         session: ptySession,
         ptyState: { state: "approval_wait" },
         agentStatus: agentStatus("tool_use"),
+        hasPendingApproval: true,
       }),
     ).toBe("waiting_approval");
   });
 
-  it("applies the same display state used by chat to PTY session rows", () => {
-    const displayState = resolveSessionDisplayState({
-      session: ptySession,
-      ptyState: { state: "approval_wait" },
-      agentStatus: agentStatus("tool_use"),
-    });
-
-    expect(applyDisplayStateToSession(ptySession, displayState).state).toBe("waiting_approval");
-  });
-
-  it("does not rewrite JSON session rows from transient PTY display state", () => {
-    const jsonSession: SessionInfo = { ...ptySession, mode: "json", state: "working" };
-
-    expect(applyDisplayStateToSession(jsonSession, "waiting_approval")).toBe(jsonSession);
+  it("derives waiting approval from server session state", () => {
+    expect(
+      resolveSessionDisplayState({
+        session: { ...ptySession, state: "waiting_approval" },
+        agentStatus: agentStatus("tool_use"),
+        ptyState: undefined,
+      }),
+    ).toBe("waiting_approval");
   });
 });

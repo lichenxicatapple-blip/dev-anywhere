@@ -5,5 +5,7 @@ export function shouldPromotePtyActivityToWorking(
   session: SessionInfo | undefined,
   pendingApprovalCount: number,
 ): boolean {
-  return session?.state === SessionState.WAITING_APPROVAL && pendingApprovalCount === 0;
+  if (!session || session.mode !== "pty") return false;
+  if (pendingApprovalCount > 0) return false;
+  return session.state === SessionState.IDLE || session.state === SessionState.WAITING_APPROVAL;
 }

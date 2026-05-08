@@ -149,6 +149,13 @@ run_websocket_reconnect_chaos_smoke() {
     e2e/websocket-chaos.spec.ts --project=desktop
 }
 
+run_real_provider_approval_smoke() {
+  echo "+ UI smoke: real Claude/Codex hosted PTY approval"
+  DEV_ANYWHERE_REAL_PROVIDER_CWD="$HOSTED_PTY_CHAOS_CWD" \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/real-provider-approval.spec.ts --project=desktop
+}
+
 run_hosted_pty_exit_chaos_smoke() {
   local provider="$1"
   echo "+ UI smoke: hosted $provider PTY provider exit while Web is attached"
@@ -377,7 +384,10 @@ run_protocol_chaos_smoke
 section "Chaos 7: client WebSocket reconnect state recovery"
 run_websocket_reconnect_chaos_smoke
 
-section "Chaos 8: hosted Claude PTY provider exit while Web is attached"
+section "Chaos 8: real Claude/Codex hosted PTY approval"
+run_real_provider_approval_smoke
+
+section "Chaos 9: hosted Claude PTY provider exit while Web is attached"
 create_hosted_pty_chaos_provider
 mark_service_log
 run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
@@ -386,7 +396,7 @@ wait_until "proxy serve reconnects to relay after hosted PTY chaos provider swap
 run_hosted_pty_exit_chaos_smoke claude
 run pnpm dev:health
 
-section "Chaos 9: hosted Codex PTY provider exit while Web is attached"
+section "Chaos 10: hosted Codex PTY provider exit while Web is attached"
 mark_service_log
 run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
 wait_until "proxy serve is running with hosted Codex PTY chaos provider" 15 proxy_service_running_observed

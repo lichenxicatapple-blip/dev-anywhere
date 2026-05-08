@@ -56,7 +56,7 @@ describe("ChatPage session lifecycle derivation", () => {
     ).toBe("disconnected");
   });
 
-  it("keeps normal active sessions on their provider/status state", () => {
+  it("keeps server idle state authoritative over stale provider/status state", () => {
     expect(
       resolveChatStatusState({
         connected: true,
@@ -67,10 +67,10 @@ describe("ChatPage session lifecycle derivation", () => {
         ptyState: undefined,
         hasPendingApproval: false,
       }),
-    ).toBe("working");
+    ).toBe("idle");
   });
 
-  it("shows PTY approval wait from pty_state even before session_status catches up", () => {
+  it("keeps server idle state authoritative over stale PTY approval state", () => {
     expect(
       resolveChatStatusState({
         connected: true,
@@ -81,7 +81,7 @@ describe("ChatPage session lifecycle derivation", () => {
         ptyState: { state: "approval_wait", tool: "Write" },
         hasPendingApproval: false,
       }),
-    ).toBe("waiting_approval");
+    ).toBe("idle");
   });
 
   it("restores approval wait from the server session state after refresh", () => {

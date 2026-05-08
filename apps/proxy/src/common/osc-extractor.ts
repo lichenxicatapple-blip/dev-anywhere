@@ -5,6 +5,7 @@
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
 export type PtySemanticState = "working" | "turn_complete" | "approval_wait" | "mid_pause";
+type PtySignalProvider = "claude" | "codex";
 
 interface PtyStateEvent {
   state: PtySemanticState;
@@ -36,9 +37,16 @@ function lastSequence(matches: OscSequence[], code: number): OscSequence | undef
   return undefined;
 }
 
+function isCodexActionRequiredTitle(title: string): boolean {
+  return /\bAction Required\b/i.test(title);
+}
+
 // 从 PTY 原始数据中提取 OSC 语义信号。
 // OSC 9 优先级高于 OSC 0，无匹配时返回 null。
-export function extractOscSignals(rawData: string): PtyStateEvent | null {
+export function extractOscSignals(
+  rawData: string,
+  provider?: PtySignalProvider,
+): PtyStateEvent | null {
   const matches = extractOscSequences(rawData);
 
   if (matches.length === 0) return null;
@@ -59,6 +67,10 @@ export function extractOscSignals(rawData: string): PtyStateEvent | null {
         ...(toolMatch?.[1] ? { tool: toolMatch[1] } : {}),
       };
     }
+  }
+
+  if (provider === "codex" && osc0 && isCodexActionRequiredTitle(osc0.text)) {
+    return { state: "approval_wait", title: osc0.text };
   }
 
   // 仅有 OSC 0（标题/spinner 变化）时视为 MID_PAUSE

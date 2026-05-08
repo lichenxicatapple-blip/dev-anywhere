@@ -15,15 +15,22 @@ interface CreateXtermResult {
   dispose: () => void;
 }
 
+interface CreateXtermOptions {
+  fontSize?: number;
+}
+
 // 创建 xterm 实例并挂载到 container
-export async function createXtermTerminal(container: HTMLDivElement): Promise<CreateXtermResult> {
+export async function createXtermTerminal(
+  container: HTMLDivElement,
+  options: CreateXtermOptions = {},
+): Promise<CreateXtermResult> {
   await document.fonts.ready;
 
   const terminal = new Terminal({
     scrollback: 5000,
     fontFamily:
       '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-    fontSize: 14,
+    fontSize: options.fontSize ?? 14,
     cursorBlink: true,
     cursorStyle: "block",
     cursorInactiveStyle: "outline",

@@ -49,6 +49,18 @@ function requestSessionHistory(relay: RelayClient): void {
     .catch(() => undefined);
 }
 
+async function restoreSelectedProxyBinding(relay: RelayClient, proxy: ProxyInfo): Promise<boolean> {
+  const result = await ensureBinding(relay, { proxyId: proxy.proxyId });
+  if (isBindingError(result)) return false;
+
+  localStorage.setItem("cc_proxyId", proxy.proxyId);
+  useAppStore.getState().setProxy(proxy.proxyId, proxy.name ?? null);
+  useAppStore.getState().setProxyOnline(true);
+  requestProxyState(relay);
+  requestSessionHistory(relay);
+  return true;
+}
+
 function bindingErrorMessage(code: string): string {
   switch (code) {
     case ControlErrorCode.SESSION_NOT_FOUND:
@@ -72,9 +84,6 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
 
     if (s.phase === "reconnecting") {
       relay.listProxies();
-      if (s.selectedProxyId) {
-        void relay.selectProxy(s.selectedProxyId);
-      }
     }
 
     if (timers.reconnect) {
@@ -86,15 +95,19 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
     useAppStore.getState().setProxies([]);
     useAppStore.getState().resetProxyListLoaded();
     if (s.phase !== "connecting") {
-      useAppStore.getState().setPhase("reconnecting");
-      timers.reconnect = setTimeout(() => {
-        timers.reconnect = null;
-        timers.coldStartDone = false;
-        useAppStore.getState().setProxies([]);
-        useAppStore.getState().resetProxyListLoaded();
-        useAppStore.getState().transitionToPhase("connecting");
-        router.navigate("/");
-      }, 10000);
+      if (s.phase !== "reconnecting") {
+        useAppStore.getState().setPhase("reconnecting");
+      }
+      if (!timers.reconnect) {
+        timers.reconnect = setTimeout(() => {
+          timers.reconnect = null;
+          timers.coldStartDone = false;
+          useAppStore.getState().setProxies([]);
+          useAppStore.getState().resetProxyListLoaded();
+          useAppStore.getState().transitionToPhase("connecting");
+          router.navigate("/");
+        }, 10000);
+      }
     }
   }
 }
@@ -129,7 +142,12 @@ export async function handleRelayMessage(
   if (msg.type === "proxy_online") {
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
-      useAppStore.getState().setProxyOnline(true);
+      const proxy = useAppStore.getState().proxies.find((p) => p.proxyId === msg.proxyId);
+      if (proxy) {
+        void restoreSelectedProxyBinding(relay, { ...proxy, online: true });
+      } else {
+        useAppStore.getState().setProxyOnline(true);
+      }
       toast.success("当前电脑已恢复连接");
     }
     return;
@@ -205,20 +223,18 @@ export async function handleRelayMessage(
 
       if (s.phase === "reconnecting") {
         if (selected?.online) {
-          useAppStore.getState().transitionToPhase(s.phaseBeforeDisconnect ?? "session_browsing");
-        } else {
-          useAppStore.getState().transitionToPhase("proxy_selecting");
-          router.navigate("/");
+          const restored = await restoreSelectedProxyBinding(relay, selected);
+          if (restored) {
+            useAppStore.getState().transitionToPhase(s.phaseBeforeDisconnect ?? "session_browsing");
+          }
         }
+        return;
       }
 
       // relay 重启后 proxy 延迟上线：phase 已到 proxy_selecting 但 proxy 现在上线了，自动重新绑定
       if (s.phase === "proxy_selecting" && selected?.online) {
-        const result = await ensureBinding(relay, { proxyId: s.selectedProxyId });
-        if (!isBindingError(result)) {
-          useAppStore.getState().setProxyOnline(true);
-          requestProxyState(relay);
-          requestSessionHistory(relay);
+        const restored = await restoreSelectedProxyBinding(relay, selected);
+        if (restored) {
           const savedSessionId = localStorage.getItem("cc_sessionId");
           const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);
           if (savedSessionId && sessionStillExists) {

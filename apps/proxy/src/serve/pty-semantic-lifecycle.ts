@@ -8,7 +8,7 @@ export function resolvePtySemanticSessionTransitions(
   if (semanticState !== "turn_complete") return [];
 
   if (currentState === SessionState.WAITING_APPROVAL) {
-    return [SessionState.WORKING, SessionState.IDLE];
+    return [SessionState.IDLE];
   }
 
   if (currentState === SessionState.WORKING) {

@@ -23,13 +23,15 @@ describe("PTY state guard", () => {
     );
   });
 
-  it("allows PTY activity to resume working after approval has been cleared", () => {
+  it("allows PTY activity to move active PTY sessions into working", () => {
+    expect(shouldPromotePtyActivityToWorking(session(SessionState.IDLE), 0)).toBe(true);
     expect(shouldPromotePtyActivityToWorking(session(SessionState.WAITING_APPROVAL), 0)).toBe(true);
   });
 
-  it("does not promote non-approval sessions", () => {
-    expect(shouldPromotePtyActivityToWorking(session(SessionState.IDLE), 0)).toBe(false);
+  it("does not promote sessions that are already working or terminal states", () => {
     expect(shouldPromotePtyActivityToWorking(session(SessionState.WORKING), 0)).toBe(false);
+    expect(shouldPromotePtyActivityToWorking(session(SessionState.ERROR), 0)).toBe(false);
+    expect(shouldPromotePtyActivityToWorking(session(SessionState.TERMINATED), 0)).toBe(false);
     expect(shouldPromotePtyActivityToWorking(undefined, 0)).toBe(false);
   });
 });

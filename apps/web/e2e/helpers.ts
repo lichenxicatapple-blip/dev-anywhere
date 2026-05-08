@@ -311,7 +311,8 @@ export async function installFakeRelay(page: Page): Promise<void> {
             const provider = msg.provider === "codex" ? "codex" : "claude";
             const mode = msg.mode === "json" ? "json" : "pty";
             const cwd = String(msg.cwd ?? "");
-            if (!directories.has(cwd)) {
+            const cwdKey = cwd.replace(/\/+$/, "") || "/";
+            if (!directories.has(cwdKey)) {
               this.emitJson({
                 type: "session_create_response",
                 requestId: msg.requestId,

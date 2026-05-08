@@ -103,6 +103,15 @@ describe("Claude provider", () => {
     });
   });
 
+  it("maps terminal permission mode to Claude CLI args", () => {
+    const command = CLAUDE_PROVIDER.buildTerminalCommand(
+      { args: ["--continue"], permissionMode: "default" },
+      { CLAUDE_BIN: "/custom/claude" },
+    );
+
+    expect(command.args).toEqual(["--permission-mode", "default", "--continue"]);
+  });
+
   it("injects session-scoped Claude hook settings and env", () => {
     const hook = {
       provider: "claude" as const,

@@ -1,124 +1,28 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { RUN_DIR } from "../common/paths.js";
 import type {
   ProviderAdapter,
   ProviderCommand,
-  ProviderHookContext,
   ProviderJsonOptions,
   ProviderTerminalOptions,
 } from "./types.js";
 
-const CODEX_HOOK_EVENTS = [
-  "PreToolUse",
-  "PostToolUse",
-  "Stop",
-  "PermissionRequest",
-  "UserPromptSubmit",
-  "SessionStart",
-] as const;
-
-export const CODEX_HOOK_OUTPUT_EVENTS = ["PreToolUse", "PermissionRequest"] as const;
-
-// PermissionRequest hooks mirror native approval behavior and may wait for the user.
-// PreToolUse stays short and non-blocking: it is telemetry/policy, not a remote approval gate.
-const PERMISSION_HOOK_TIMEOUT_SECONDS = 365 * 24 * 60 * 60;
-
-const HOOK_FORWARDER_SCRIPT = `
-const OUTPUT_EVENTS = new Set(${JSON.stringify(CODEX_HOOK_OUTPUT_EVENTS)});
-let body = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => { body += chunk; });
-process.stdin.on("end", async () => {
-  let payload = {};
-  try { payload = body ? JSON.parse(body) : {}; } catch { payload = { raw: body }; }
-  const request = {
-    sessionId: process.env.DEV_ANYWHERE_SESSION_ID,
-    provider: process.env.DEV_ANYWHERE_PROVIDER,
-    marker: process.env.DEV_ANYWHERE_HOOK_MARKER,
-    event: process.env.DEV_ANYWHERE_HOOK_EVENT || payload.hook_event_name || payload.event_name || "unknown",
-    requestId: payload.request_id || payload.requestId || payload.tool_use_id,
-    payload,
-  };
-  try {
-    const response = await fetch(process.env.DEV_ANYWHERE_HOOK_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + process.env.DEV_ANYWHERE_HOOK_TOKEN,
-      },
-      body: JSON.stringify(request),
-    });
-    const text = await response.text();
-    if (OUTPUT_EVENTS.has(request.event)) {
-      process.stdout.write(text);
-    }
-  } catch {
-    process.exit(0);
+function codexApprovalArgs(permissionMode?: string): string[] {
+  switch (permissionMode) {
+    case undefined:
+      return [];
+    case "default":
+      return ["--ask-for-approval", "untrusted"];
+    case "auto":
+      return ["--ask-for-approval", "on-request"];
+    case "bypassPermissions":
+      return ["--dangerously-bypass-approvals-and-sandbox"];
+    default:
+      return ["--ask-for-approval", "untrusted"];
   }
-});
-`.trim();
-
-export function getCodexHookForwarderScriptForTest(): string {
-  return HOOK_FORWARDER_SCRIPT;
 }
 
-const HOOK_FORWARDER_PATH = `${RUN_DIR}/provider-hook-forwarder.mjs`;
-
-function ensureHookForwarder(): string {
-  mkdirSync(RUN_DIR, { recursive: true });
-  writeFileSync(HOOK_FORWARDER_PATH, `${HOOK_FORWARDER_SCRIPT}\n`, { mode: 0o600 });
-  return HOOK_FORWARDER_PATH;
-}
-
-function buildHookForwardCommand(event: string): string {
-  return `DEV_ANYWHERE_HOOK_EVENT=${event} node "$DEV_ANYWHERE_HOOK_FORWARDER"`;
-}
-
-function tomlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function buildCodexHookEntry(event: string): string {
-  const timeoutConfig =
-    event === "PermissionRequest" ? `, timeout=${PERMISSION_HOOK_TIMEOUT_SECONDS}` : ", timeout=5";
-  return `${event}=[{matcher="", hooks=[{type="command", command=${tomlString(
-    buildHookForwardCommand(event),
-  )}${timeoutConfig}}]}]`;
-}
-
-function buildCodexHooksConfig(options?: { includePermissionRequest?: boolean }): string {
-  const includePermissionRequest = options?.includePermissionRequest ?? true;
-  const events = CODEX_HOOK_EVENTS.filter(
-    (event) => includePermissionRequest || event !== "PermissionRequest",
-  );
-  return `hooks={${events.map((event) => buildCodexHookEntry(event)).join(", ")}}`;
-}
-
-function withCodexHookArgs(
-  args: string[],
-  context: ProviderHookContext | undefined,
-  options?: { includePermissionRequest?: boolean },
-): string[] {
-  if (!context) return args;
-  return ["-c", "features.codex_hooks=true", "-c", buildCodexHooksConfig(options), ...args];
-}
-
-function withCodexHookEnv(
-  env: NodeJS.ProcessEnv,
-  context: ProviderHookContext | undefined,
-): NodeJS.ProcessEnv {
-  if (!context) return env;
-  const forwarder = ensureHookForwarder();
-  return {
-    ...env,
-    DEV_ANYWHERE_PROVIDER: context.provider,
-    DEV_ANYWHERE_SESSION_ID: context.sessionId,
-    DEV_ANYWHERE_HOOK_URL: context.hookUrl,
-    DEV_ANYWHERE_HOOK_MARKER: context.marker,
-    DEV_ANYWHERE_HOOK_TOKEN: context.token,
-    DEV_ANYWHERE_HOOK_FORWARDER: forwarder,
-  };
+function withCodexTerminalPermissionArgs(args: string[], permissionMode?: string): string[] {
+  return [...codexApprovalArgs(permissionMode), ...args];
 }
 
 export function resolveCodexCommand(env: NodeJS.ProcessEnv): string {
@@ -144,10 +48,11 @@ export const CODEX_PROVIDER: ProviderAdapter = {
     throw new Error("Codex JSON sessions are not supported yet; use PTY mode.");
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+    const args = withCodexTerminalPermissionArgs(options.args, options.permissionMode);
     return {
       command: resolveCodexCommand(env),
-      args: withCodexHookArgs(options.args, options.hook, { includePermissionRequest: false }),
-      env: withCodexHookEnv(env, options.hook),
+      args,
+      env,
     };
   },
 };
