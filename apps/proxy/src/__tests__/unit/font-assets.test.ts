@@ -51,25 +51,21 @@ describe("font asset installation", () => {
     expect(readFileSync(join(target, FAMILY, "result.css"), "utf8")).toBe("user");
   });
 
-  it("uses the first available source so legacy fonts win over bundled defaults", () => {
+  it("skips missing sources and installs the bundled font family", () => {
     const missing = makeTempDir();
-    const legacy = makeTempDir();
     const bundled = makeTempDir();
     const target = makeTempDir();
-    tempDirs.push(missing, legacy, bundled, target);
+    tempDirs.push(missing, bundled, target);
 
-    mkdirSync(join(legacy, FAMILY), { recursive: true });
     mkdirSync(join(bundled, FAMILY), { recursive: true });
-    writeFileSync(join(legacy, FAMILY, "result.css"), "legacy");
     writeFileSync(join(bundled, FAMILY, "result.css"), "bundled");
 
     const installed = installFontAssetsFromSources(target, [
       { dir: missing, family: FAMILY },
-      { dir: legacy, family: FAMILY },
       { dir: bundled, family: FAMILY },
     ]);
 
     expect(installed).toBe(true);
-    expect(readFileSync(join(target, FAMILY, "result.css"), "utf8")).toBe("legacy");
+    expect(readFileSync(join(target, FAMILY, "result.css"), "utf8")).toBe("bundled");
   });
 });

@@ -96,7 +96,7 @@ export class RelaySessionCreateHandler {
           errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error:
             provider === "codex"
-              ? "Codex JSON sessions are not supported yet; start a Codex PTY session locally."
+              ? "Codex chat sessions are not supported yet; start a Codex terminal session instead."
               : "Unsupported provider for JSON session.",
         }),
       );

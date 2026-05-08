@@ -1,6 +1,6 @@
 # 本地真实链路冒烟清单
 
-这份清单用于在人工测试前确认真实 `relay + proxy serve + web + Claude/Codex PTY` 链路健康。Fake relay e2e 负责自动化主路径，本文只覆盖本机真实进程和真实 Agent CLI。
+这份清单用于在人工测试前确认真实 `relay + proxy serve + web + Claude/Codex 终端会话` 链路健康。Fake relay e2e 负责自动化主路径，本文只覆盖本机真实进程和真实 Claude/Codex CLI。
 
 ## 启动与诊断
 
@@ -25,11 +25,11 @@ pnpm dev:health
 - Proxy serve 显示 `Relay: connected`，且 queue depth 为 `0`。
 - `service.log` 最近没有 `hook failed`、`invalid JSON`、`failed to start`。
 
-## Claude PTY
+## Claude 终端会话
 
 1. 打开 `http://localhost:5173`。
 2. 新建会话。
-3. 交互模式选择 `PTY`。
+3. 会话模式选择「终端」。
 4. Agent CLI 选择 `Claude Code`。
 5. 工作目录选择一个小项目目录。
 6. 创建会话。
@@ -39,11 +39,11 @@ pnpm dev:health
 10. 回看历史输出，再触发新输出，确认不会被强行拉到底部。
 11. 终止会话，确认页面显示“会话已终止”，且不能继续输入。
 
-## Codex PTY
+## Codex 终端会话
 
 1. 打开 `http://localhost:5173`。
 2. 新建会话。
-3. 交互模式选择 `PTY`。
+3. 会话模式选择「终端」。
 4. Agent CLI 选择 `Codex`。
 5. 工作目录选择一个小项目目录。
 6. 创建会话。
@@ -52,6 +52,16 @@ pnpm dev:health
 9. 终止会话，确认页面显示“会话已终止”，且不能继续输入。
 10. 回到全部会话，确认 Codex 会话在 Codex 分组下展示。
 
+## Claude 聊天会话
+
+1. 打开 `http://localhost:5173`。
+2. 新建会话。
+3. 会话模式选择「聊天」。
+4. Agent CLI 选择 `Claude Code`。
+5. 输入一条短消息并发送。
+6. 如果触发工具审批，确认审批卡片只出现在聊天会话里，允许/拒绝后状态能回到正确阶段。
+7. 刷新页面，确认消息历史和状态恢复正常。
+
 ## 日志定位
 
 常用日志：
@@ -59,7 +69,7 @@ pnpm dev:health
 - Relay: `~/.dev-anywhere/logs/relay-dev.log`
 - Web: `~/.dev-anywhere/logs/web-dev.log`
 - Proxy serve: `~/.dev-anywhere/logs/service.log`
-- 本地 terminal/proxy attach: `~/.dev-anywhere/logs/terminal.log`
+- 本地终端 attach: `~/.dev-anywhere/logs/terminal.log`
 
 常见异常关键词：
 

@@ -8,8 +8,8 @@
 | ---------------------- | ------------------------------------------------------------------------ |
 | `pnpm dev:restart`     | 重启本地真实链路：先构建 shared 协议包，再启动 relay、web、proxy serve。 |
 | `pnpm dev:health`      | 只读健康检查：端口、relay HTTP、proxy serve 状态、当前进程日志。         |
-| `pnpm proxy -- claude` | 从本地终端 attach 一个 Claude PTY 会话。                                 |
-| `pnpm proxy -- codex`  | 从本地终端 attach 一个 Codex PTY 会话。                                  |
+| `pnpm proxy -- claude` | 开发态启动/attach 一个 Claude 终端会话。                                 |
+| `pnpm proxy -- codex`  | 开发态启动/attach 一个 Codex 终端会话。                                  |
 
 Agent CLI 二进制路径可通过环境变量覆盖：
 
@@ -19,6 +19,25 @@ Agent CLI 二进制路径可通过环境变量覆盖：
 | `CODEX_BIN`  | 指定 Codex CLI 的二进制路径       |
 
 ## 生产部署
+
+发布后的本地命令不经过 pnpm：
+
+| 命令                            | 用途                                      |
+| ------------------------------- | ----------------------------------------- |
+| `dev-anywhere init`             | 初始化 `~/.dev-anywhere/config.json`。    |
+| `dev-anywhere serve start`      | 启动本机 proxy daemon。                   |
+| `dev-anywhere serve status`     | 查看本机 proxy daemon 和 relay 连接状态。 |
+| `dev-anywhere serve restart`    | 重启本机 proxy daemon。                   |
+| `dev-anywhere serve stop`       | 停止本机 proxy daemon。                   |
+| `dev-anywhere claude [...参数]` | 启动/attach Claude Code 终端会话。        |
+| `dev-anywhere codex [...参数]`  | 启动/attach Codex 终端会话。              |
+
+`claude` 或 `codex` 后面的参数会原样传给真实 CLI，例如：
+
+```bash
+dev-anywhere claude -c
+dev-anywhere codex --model gpt-5.5
+```
 
 | 脚本                       | 用途                                                                        |
 | -------------------------- | --------------------------------------------------------------------------- |
@@ -35,6 +54,7 @@ Agent CLI 二进制路径可通过环境变量覆盖：
 | `pnpm format:check`     | Prettier 格式检查。                                |
 | `pnpm typecheck`        | TypeScript build mode 检查。                       |
 | `pnpm knip`             | 未使用依赖、入口和导出检查。                       |
+| `pnpm release:check`    | 构建发布产物、检查 npm 包内容、用隔离 HOME 冒烟。  |
 
 ## 专项验证与采样
 

@@ -1,4 +1,4 @@
-# dev-anywhere
+# DEV Anywhere
 
 Transparent local proxy for AI coding CLIs that bridges local sessions to a mobile/web SPA via a relay server.
 
@@ -10,7 +10,7 @@ npm install -g @dev-anywhere/proxy
 
 This installs the `dev-anywhere` command globally.
 
-Requires Node.js >= 20 and a supported local AI coding CLI installed locally. The first supported provider is Claude Code; Codex support is part of the provider-adapter workstream.
+Requires Node.js >= 20 and at least one supported local AI coding CLI installed locally: Claude Code or Codex.
 
 ## Quick start
 
@@ -24,7 +24,11 @@ dev-anywhere init
 # 3. Start background daemon
 dev-anywhere serve start
 
-# 4. Open the web SPA served by your relay, pick your proxy, create a session
+# 4. Start or attach a terminal session from any directory
+dev-anywhere claude
+dev-anywhere codex
+
+# 5. Open the web SPA served by your relay, pick your computer, create or resume a session
 ```
 
 ## Commands
@@ -35,10 +39,19 @@ dev-anywhere serve stop       # stop daemon
 dev-anywhere serve restart    # restart daemon
 dev-anywhere serve status     # show daemon status
 dev-anywhere init             # create default config at ~/.dev-anywhere/config.json
+dev-anywhere claude [...args] # start/attach a Claude Code terminal session
+dev-anywhere codex [...args]  # start/attach a Codex terminal session
 dev-anywhere --help
 ```
 
 The daemon connects to the relay server over WebSocket and manages local AI CLI sessions. A mobile/web client connected to the same relay can then see and drive those sessions.
+
+Arguments after `claude` or `codex` are passed through to the real CLI:
+
+```bash
+dev-anywhere claude -c
+dev-anywhere codex --model gpt-5.5
+```
 
 ## Relay server
 
@@ -47,7 +60,7 @@ You need a relay server reachable from both your local machine and your mobile/w
 ```bash
 # On any VPS with ports 80/443 reachable:
 npm install -g @dev-anywhere/relay
-dev-anywhere-relay --port 3100
+PORT=3100 dev-anywhere-relay
 ```
 
 For a turnkey setup with TLS and nginx, see the `install-relay.sh` script in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
@@ -67,12 +80,14 @@ Environment variables override config:
 
 - `RELAY_URL` — relay WebSocket URL
 - `RELAY_PROXY_TOKEN` — auth token
+- `CLAUDE_BIN` — Claude Code CLI path
+- `CODEX_BIN` — Codex CLI path
 
 ## How it works
 
-- Local daemon wraps Claude Code CLI with `node-pty` (transparent terminal) and/or `claude --output-format stream-json --input-format stream-json` (programmatic control).
+- Local daemon wraps Claude Code and Codex CLI sessions with `node-pty` for transparent terminal control. Claude Code also supports a structured chat-message mode.
 - IPC socket at `~/.dev-anywhere/run/dev-anywhere.sock` for terminal attachment.
-- Binary PTY frames + structured control messages forwarded to relay over WebSocket.
+- Terminal bytes + structured control messages are forwarded to relay over WebSocket.
 - Relay is a pure passthrough; state lives on the proxy side.
 
 ## License

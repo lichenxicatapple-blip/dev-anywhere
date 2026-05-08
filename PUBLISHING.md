@@ -1,4 +1,4 @@
-# Publishing dev-anywhere
+# Publishing DEV Anywhere
 
 ## Release artifacts
 
@@ -42,25 +42,18 @@ The workflow publishes npm packages and GHCR images; no manual publish step.
 ## Local dry-run (before pushing a tag)
 
 ```bash
-pnpm -r build
-
-# Validate npm packages
-(cd apps/proxy && pnpm pack --pack-destination /tmp)
-(cd apps/relay && pnpm pack --pack-destination /tmp)
-
-rm -rf /tmp/cc-test
-npm install --prefix /tmp/cc-test --global \
-  /tmp/dev-anywhere-*.tgz /tmp/dev-anywhere-relay-*.tgz
-
-/tmp/cc-test/bin/dev-anywhere --version
-PORT=3199 /tmp/cc-test/bin/dev-anywhere-relay &   # ^C to stop
-
-rm -rf /tmp/cc-test /tmp/dev-anywhere-*.tgz
+pnpm typecheck
+pnpm test
+pnpm format:check
+pnpm knip
+pnpm release:check
 
 # Validate Docker images build (optional)
 docker buildx build -f apps/relay/Dockerfile -t dev-anywhere-relay:dry .
 docker buildx build -f apps/web/Dockerfile   -t dev-anywhere-web:dry   .
 ```
+
+`pnpm release:check` builds the workspace, validates npm pack contents for proxy and relay, verifies the bundled terminal font shards, and runs `dev-anywhere init` in an isolated `HOME`.
 
 ## First-time repo setup
 

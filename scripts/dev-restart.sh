@@ -16,7 +16,6 @@ export DEV_ANYWHERE_LOG_RETENTION
 
 RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
-LEGACY_FONT_DIR="$HOME/.cc-anywhere/relay-data/fonts"
 FONT_DIR="$HOME/.dev-anywhere/relay-data/fonts"
 PACKAGE_FONT_DIR="$ROOT/apps/proxy/assets/fonts"
 
@@ -108,11 +107,7 @@ start_detached() {
   disown "$pid" 2>/dev/null || true
 }
 
-if [ ! -d "$FONT_DIR/sarasa-fixed-sc" ] && [ -d "$LEGACY_FONT_DIR/sarasa-fixed-sc" ]; then
-  echo "Migrating font shards from ~/.cc-anywhere to ~/.dev-anywhere"
-  mkdir -p "$FONT_DIR"
-  cp -R "$LEGACY_FONT_DIR/sarasa-fixed-sc" "$FONT_DIR/"
-elif [ ! -d "$FONT_DIR/sarasa-fixed-sc" ] && [ -d "$PACKAGE_FONT_DIR/sarasa-fixed-sc" ]; then
+if [ ! -d "$FONT_DIR/sarasa-fixed-sc" ] && [ -d "$PACKAGE_FONT_DIR/sarasa-fixed-sc" ]; then
   echo "Installing bundled font shards to ~/.dev-anywhere"
   mkdir -p "$FONT_DIR"
   cp -R "$PACKAGE_FONT_DIR/sarasa-fixed-sc" "$FONT_DIR/"

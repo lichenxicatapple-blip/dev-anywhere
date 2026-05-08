@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 // 相比 process.env.HOME，不会在缺失环境变量时构造出 "undefined/.dev-anywhere"。
 const HOME = homedir();
 const APP_DIR = `${HOME}/.dev-anywhere`;
-const LEGACY_APP_DIR = `${HOME}/.cc-anywhere`;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const PACKAGE_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../../assets/fonts");
+const SOURCE_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../../assets/fonts");
+const DIST_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../assets/fonts");
 const DEFAULT_FONT_FAMILY = "sarasa-fixed-sc";
 
 // 把 cwd 前缀替换为 ~，HOME 为空时原样返回（避免 replace("", "~") 把 ~ 前缀到所有路径）
@@ -92,8 +92,8 @@ export function installFontAssetsFromSources(
 
 function installFontAssets(): void {
   installFontAssetsFromSources(FONT_DIR, [
-    { dir: `${LEGACY_APP_DIR}/relay-data/fonts`, family: DEFAULT_FONT_FAMILY },
-    { dir: PACKAGE_FONT_ASSETS_DIR, family: DEFAULT_FONT_FAMILY },
+    { dir: SOURCE_FONT_ASSETS_DIR, family: DEFAULT_FONT_FAMILY },
+    { dir: DIST_FONT_ASSETS_DIR, family: DEFAULT_FONT_FAMILY },
   ]);
 }
 
