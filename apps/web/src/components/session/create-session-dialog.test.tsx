@@ -1,25 +1,43 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { sendControl, onMessage, createSession, createDirectory, requestProxyInfo, toastError } =
-  vi.hoisted(() => ({
-    sendControl: vi.fn(),
-    onMessage: vi.fn(),
-    createSession: vi.fn(),
-    createDirectory: vi.fn(),
-    requestProxyInfo: vi.fn(),
-    toastError: vi.fn(),
-  }));
+const {
+  sendControl,
+  onMessage,
+  createSession,
+  createDirectory,
+  requestDirectoryList,
+  requestProxyInfo,
+  toastError,
+  toastSuccess,
+} = vi.hoisted(() => ({
+  sendControl: vi.fn(),
+  onMessage: vi.fn(),
+  createSession: vi.fn(),
+  createDirectory: vi.fn(),
+  requestDirectoryList: vi.fn(),
+  requestProxyInfo: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { sendControl, onMessage, createSession, createDirectory, requestProxyInfo },
+  relayClientRef: {
+    sendControl,
+    onMessage,
+    createSession,
+    createDirectory,
+    requestDirectoryList,
+    requestProxyInfo,
+  },
   wsManagerRef: null,
 }));
 
 vi.mock("@/components/toast", () => ({
   toast: {
     error: toastError,
+    success: toastSuccess,
   },
 }));
 
@@ -38,15 +56,22 @@ function renderDialog() {
 }
 
 describe("CreateSessionDialog", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     sendControl.mockClear();
     onMessage.mockReset();
     onMessage.mockReturnValue(vi.fn());
     createSession.mockReset();
     createDirectory.mockReset();
+    requestDirectoryList.mockReset();
+    requestDirectoryList.mockResolvedValue({ path: "/Users/admin", entries: [] });
     requestProxyInfo.mockReset();
     requestProxyInfo.mockResolvedValue({ homePath: "/Users/admin" });
     toastError.mockClear();
+    toastSuccess.mockClear();
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
@@ -97,23 +122,12 @@ describe("CreateSessionDialog", () => {
     expect(toastError).toHaveBeenCalledWith("创建超时，请检查本机连接后重试");
   });
 
-  it("offers to create a missing working directory and retries session creation", async () => {
-    createSession
-      .mockResolvedValueOnce({
-        type: "session_create_response",
-        sessionId: "",
-        errorCode: "PATH_NOT_FOUND",
-        error: "工作目录不存在或不可访问: /Users/admin/missing-project",
-      })
-      .mockResolvedValueOnce({
-        type: "session_create_response",
-        sessionId: "created-1",
-        mode: "pty",
-        provider: "claude",
-      });
-    createDirectory.mockResolvedValue({
-      success: true,
-      path: "/Users/admin/missing-project",
+  it("does not create a missing working directory as a side effect of session creation", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "",
+      errorCode: "PATH_NOT_FOUND",
+      error: "工作目录不存在或不可访问: /Users/admin/missing-project",
     });
     useFileStore.setState({
       tree: new Map(),
@@ -131,15 +145,50 @@ describe("CreateSessionDialog", () => {
     fireEvent.click(getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
-      expect(getByText("这个目录还不存在")).toBeTruthy();
+      expect(getByText("工作目录不存在")).toBeTruthy();
     });
-    fireEvent.click(getByRole("button", { name: "创建目录并继续" }));
+    expect(toastError).toHaveBeenCalledWith("找不到这个工作目录");
+    expect(createDirectory).not.toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a directory from the directory picker without creating a session", async () => {
+    createDirectory.mockResolvedValue({
+      success: true,
+      path: "/Users/admin/new-project",
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/Users/admin",
+    });
+
+    const { getByLabelText, getByPlaceholderText } = renderDialog();
+
+    const cwdInput = getByLabelText("工作目录") as HTMLInputElement;
+    await waitFor(() => {
+      expect(cwdInput.value).toBe("/Users/admin");
+    });
+    fireEvent.focusIn(cwdInput);
+    let picker: HTMLElement | null = null;
+    await waitFor(() => {
+      picker = document.querySelector<HTMLElement>('[data-slot="file-path-picker"]');
+      expect(picker).toBeTruthy();
+    });
+    if (!picker) throw new Error("directory picker did not open");
+    fireEvent.click(within(picker).getByRole("button", { name: "新建目录" }));
+    fireEvent.change(getByPlaceholderText("目录名称"), {
+      target: { value: "new-project" },
+    });
+    fireEvent.click(within(picker).getByRole("button", { name: "创建目录" }));
 
     await waitFor(() => {
-      expect(createDirectory).toHaveBeenCalledWith("/Users/admin/missing-project");
+      expect(createDirectory).toHaveBeenCalledWith("/Users/admin/new-project");
     });
     await waitFor(() => {
-      expect(createSession).toHaveBeenCalledTimes(2);
+      expect(cwdInput.value).toBe("/Users/admin/new-project/");
     });
+    expect(createSession).not.toHaveBeenCalled();
+    expect(toastSuccess).toHaveBeenCalledWith("目录已创建");
   });
 });

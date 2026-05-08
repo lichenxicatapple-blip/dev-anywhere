@@ -27,6 +27,7 @@ interface FilePathPickerProps {
   mode?: PickerMode;
   placement?: "floating" | "inline";
   onSelect: (path: string) => void;
+  onCreateDirectory?: (path: string) => Promise<string | null>;
   dirsOnly?: boolean;
   title?: string;
 }
@@ -47,8 +48,24 @@ function joinPickerPath(currentPath: string, entry: { name: string; isDir: boole
   return `${withTrailingSlash(currentPath)}${entry.name}${entry.isDir ? "/" : ""}`;
 }
 
+function joinChildDirectory(parent: string, child: string): string | null {
+  const base = parent.trim().replace(/\/+$/, "") || "/";
+  const name = child.trim().replace(/^\/+|\/+$/g, "");
+  if (!base.startsWith("/") || !name || child.trim().startsWith("/")) return null;
+  if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return null;
+  return base === "/" ? `/${name}` : `${base}/${name}`;
+}
+
 export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(function FilePathPicker(
-  { filter, onSelect, mode = "insert", placement = "floating", dirsOnly = false, title },
+  {
+    filter,
+    onSelect,
+    onCreateDirectory,
+    mode = "insert",
+    placement = "floating",
+    dirsOnly = false,
+    title,
+  },
   ref,
 ) {
   const tree = useFileStore((s) => s.tree);
@@ -66,6 +83,9 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const absolutePath = useMemo(() => toAbsolutePath(baseCwd, currentPath), [baseCwd, currentPath]);
   const query = target.query;
   const pendingDirRequestsRef = useRef(new Set<string>());
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newDirName, setNewDirName] = useState("");
+  const [creatingDir, setCreatingDir] = useState(false);
 
   useEffect(() => {
     if (!absolutePath) return;
@@ -107,6 +127,10 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   // filter 或所在目录变化时重置高亮到首项
   useEffect(() => setIndex(0), [currentPath, query]);
   useEffect(() => {
+    setCreateOpen(false);
+    setNewDirName("");
+  }, [absolutePath]);
+  useEffect(() => {
     if (index >= filteredEntries.length && filteredEntries.length > 0) {
       setIndex(filteredEntries.length - 1);
     }
@@ -132,6 +156,21 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     },
     [currentPath, mode],
   );
+
+  async function handleCreateDirectory() {
+    const targetPath = joinChildDirectory(absolutePath, newDirName);
+    if (!targetPath || !onCreateDirectory) return;
+    setCreatingDir(true);
+    try {
+      const createdPath = await onCreateDirectory(targetPath);
+      if (!createdPath) return;
+      setNewDirName("");
+      setCreateOpen(false);
+      onSelect(withTrailingSlash(createdPath));
+    } finally {
+      setCreatingDir(false);
+    }
+  }
 
   useImperativeHandle(
     ref,
@@ -179,8 +218,52 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
       data-placement={placement}
     >
       {mode === "select" && title ? (
-        <div className="border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
-          {title}
+        <div className="border-b border-border/70 px-3 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">{title}</span>
+            {onCreateDirectory ? (
+              <button
+                type="button"
+                className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!absolutePath || creatingDir}
+                onClick={() => setCreateOpen((value) => !value)}
+              >
+                新建目录
+              </button>
+            ) : null}
+          </div>
+          {createOpen ? (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="text"
+                value={newDirName}
+                onChange={(e) => setNewDirName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void handleCreateDirectory();
+                  }
+                  if (e.key === "Escape") {
+                    setCreateOpen(false);
+                    setNewDirName("");
+                  }
+                }}
+                placeholder="目录名称"
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-input px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="h-8 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!joinChildDirectory(absolutePath, newDirName) || creatingDir}
+                onClick={() => void handleCreateDirectory()}
+              >
+                {creatingDir ? "创建中..." : "创建目录"}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       <div className={listClass}>

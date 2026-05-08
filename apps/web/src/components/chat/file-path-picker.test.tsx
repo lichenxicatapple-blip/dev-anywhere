@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { requestDirectoryList } = vi.hoisted(() => ({
@@ -39,5 +39,34 @@ describe("FilePathPicker", () => {
       expect(requestDirectoryList).toHaveBeenCalledWith("/Users/admin");
     });
     expect(requestDirectoryList).not.toHaveBeenCalledWith("/Users");
+  });
+
+  it("creates a child directory from the select-mode directory picker", async () => {
+    const onCreateDirectory = vi.fn().mockResolvedValue("/Users/admin/new-project");
+    const onSelect = vi.fn();
+
+    const { getByRole, getByPlaceholderText } = render(
+      <FilePathPicker
+        mode="select"
+        dirsOnly
+        filter="/Users/admin"
+        onSelect={onSelect}
+        onCreateDirectory={onCreateDirectory}
+        title="选择下一级目录"
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "新建目录" }));
+    fireEvent.change(getByPlaceholderText("目录名称"), {
+      target: { value: "new-project" },
+    });
+    fireEvent.click(getByRole("button", { name: "创建目录" }));
+
+    await waitFor(() => {
+      expect(onCreateDirectory).toHaveBeenCalledWith("/Users/admin/new-project");
+    });
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith("/Users/admin/new-project/");
+    });
   });
 });

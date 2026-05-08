@@ -59,7 +59,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [mode, setMode] = useState<SessionMode>("pty");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [submitting, setSubmitting] = useState(false);
-  const [creatingDir, setCreatingDir] = useState(false);
   const [missingCwd, setMissingCwd] = useState<string | null>(null);
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
@@ -144,6 +143,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         const missingPath = extractMissingCwd(ctrl.error ?? "", ctrl.errorCode);
         if (missingPath) {
           setMissingCwd(missingPath);
+          toast.error("找不到这个工作目录");
           return;
         }
         toast.error(`创建失败：${ctrl.error ?? "未知错误"}`);
@@ -169,26 +169,25 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
   }
 
-  async function handleCreateMissingDirectory() {
+  async function handleCreateDirectory(path: string): Promise<string | null> {
     const relay = relayClientRef;
-    if (!relay || !missingCwd) {
+    if (!relay) {
       toast.error("连接尚未就绪");
-      return;
+      return null;
     }
-    setCreatingDir(true);
     try {
-      const result = await relay.createDirectory(missingCwd);
+      const result = await relay.createDirectory(path);
       if (!result.success) {
         toast.error(`目录创建失败：${result.error ?? "未知错误"}`);
-        return;
+        return null;
       }
       setCwd(result.path);
       setMissingCwd(null);
-      submitSessionCreate(result.path);
+      toast.success("目录已创建");
+      return result.path;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreatingDir(false);
+      return null;
     }
   }
 
@@ -263,6 +262,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 dirsOnly
                 filter={cwd}
                 title="选择下一级目录"
+                onCreateDirectory={handleCreateDirectory}
                 onSelect={(path) => {
                   setCwd(path);
                   setMissingCwd(null);
@@ -275,33 +275,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <section
               role="status"
               aria-live="polite"
-              className="flex flex-col gap-3 rounded-md border border-primary/50 bg-primary/10 p-3"
+              className="rounded-md border border-primary/50 bg-primary/10 p-3"
             >
-              <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium">这个目录还不存在</span>
-                <span className="break-all font-mono text-xs text-muted-foreground">
-                  {missingCwd}
-                </span>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setMissingCwd(null)}
-                  disabled={creatingDir || submitting}
-                >
-                  先不创建
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleCreateMissingDirectory}
-                  disabled={creatingDir || submitting}
-                >
-                  {creatingDir ? "创建中..." : "创建目录并继续"}
-                </Button>
-              </div>
+              <p className="text-sm font-medium">工作目录不存在</p>
+              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{missingCwd}</p>
             </section>
           ) : null}
           <section aria-label="会话模式" className="flex flex-col gap-2">
