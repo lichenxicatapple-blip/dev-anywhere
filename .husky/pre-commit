@@ -1,5 +1,2 @@
 #!/bin/sh
-pnpm format:check
-pnpm lint
-pnpm -r run typecheck
-pnpm knip
+pnpm quality:check

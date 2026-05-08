@@ -13,6 +13,7 @@
     "test:integration": "TEST_SCOPE=integration vitest run",
     "typecheck": "tsc -b",
     "knip": "knip",
+    "quality:check": "bash scripts/quality-check.sh",
     "release:check": "bash scripts/release-check.sh",
     "dev:restart": "scripts/dev-restart.sh",
     "dev:health": "scripts/dev-health.sh",
