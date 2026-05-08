@@ -24,6 +24,13 @@ interface CCTestHooks {
   };
   pty: {
     serialize: (sessionId: string) => string;
+    metrics: (sessionId: string) => {
+      fontSize: number | undefined;
+      cols: number;
+      rows: number;
+      screenWidth: number;
+      screenHeight: number;
+    } | null;
   };
   toast: (message: string) => void;
 }
@@ -31,6 +38,17 @@ interface CCTestHooks {
 declare global {
   interface Window {
     __ccTest?: CCTestHooks;
+    __ccTestPtyTerminals?: Map<
+      string,
+      {
+        buffer: {
+          active: {
+            viewportY: number;
+            baseY: number;
+          };
+        };
+      }
+    >;
     __ptySmoke: {
       sent: string[];
       socket: {
