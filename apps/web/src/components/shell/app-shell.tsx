@@ -1,5 +1,3 @@
-// 应用顶层布局；/chat/* 路由隐藏本 header, 由 ChatHeader 接管。
-// Settings 齿轮挂在本 header 右侧, 不随 Sidebar 移动。
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router";
 import { Settings } from "lucide-react";
@@ -9,7 +7,6 @@ import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/stores/app-store";
 
-// 移动端顶栏品牌: 打字机 loop, 挂在 AppShell header (Outlet 之外) 保证 `/` 与 `/sessions` 间切换不重挂
 const BRAND_TEXTS = ["DEV Anywhere", "/unlimited @anytime"];
 
 export function AppShell() {
@@ -18,7 +15,7 @@ export function AppShell() {
   const pendingToast = useAppStore((s) => s.pendingToast);
   const setPendingToast = useAppStore((s) => s.setPendingToast);
 
-  // 消费模块级代码暂存的 toast (phase-machine 冷启动失败等无法直接访问 Sonner 的场景)
+  // 通知容器挂载后，消费启动阶段暂存的消息。
   useEffect(() => {
     if (!pendingToast) return;
     const fns = { error: toast.error, info: toast.info, success: toast.success };
@@ -30,19 +27,18 @@ export function AppShell() {
     <div className="flex flex-col h-dvh bg-background text-foreground">
       {!isChatRoute && (
         <header
-          className="sticky top-0 z-10 flex items-center gap-2 px-4 min-h-12 pt-[env(safe-area-inset-top)] bg-card border-b border-border"
+          className="sticky top-0 z-10 flex items-center gap-2 px-4 min-h-12 pt-[env(safe-area-inset-top)] bg-card border-b border-border md:hidden"
           role="banner"
           data-slot="app-shell-header"
         >
-          <Typewriter texts={BRAND_TEXTS} className="text-sm font-semibold md:hidden" />
-          <span className="hidden md:inline text-sm font-semibold">DEV Anywhere</span>
+          <Typewriter texts={BRAND_TEXTS} className="text-sm font-semibold" />
           <div className="ml-auto">
             <Button
               variant="ghost"
               size="icon-sm"
               aria-label="设置"
-              data-slot="app-shell-settings-trigger"
-              onClick={() => toast.info("Settings coming soon")}
+              data-slot="mobile-settings-trigger"
+              onClick={() => toast.info("设置暂未开放")}
             >
               <Settings aria-hidden="true" />
             </Button>

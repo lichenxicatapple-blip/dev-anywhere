@@ -20,33 +20,6 @@ interface InputBarProps {
   sessionId: string;
 }
 
-const INPUT_HISTORY_LIMIT = 50;
-
-function inputHistoryKey(sessionId: string): string {
-  return `cc_inputHistory:${sessionId}`;
-}
-
-function readInputHistory(sessionId: string): string[] {
-  try {
-    const raw = localStorage.getItem(inputHistoryKey(sessionId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeInputHistory(sessionId: string, entry: string): void {
-  const trimmed = entry.trim();
-  if (!trimmed) return;
-  const previous = readInputHistory(sessionId).filter((item) => item !== trimmed);
-  const next = [...previous, trimmed].slice(-INPUT_HISTORY_LIMIT);
-  localStorage.setItem(inputHistoryKey(sessionId), JSON.stringify(next));
-}
-
 export function InputBar({ sessionId }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashPickerRef = useRef<PickerHandle>(null);
@@ -76,16 +49,11 @@ export function InputBar({ sessionId }: InputBarProps) {
   const [argumentHint, setArgumentHint] = useState("");
   // 记录上次的 value, 用于 onChange 对比推断删除方向
   const prevTextRef = useRef(value);
-  // null 表示当前没有浏览历史；number 表示正在查看 readInputHistory(sessionId)[index]
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const draftBeforeHistoryRef = useRef("");
 
   // 会话切换时重置 token 跟踪 (argumentHint 随之失效, insertedTokens 作废)
   useEffect(() => {
     setInsertedTokens([]);
     setArgumentHint("");
-    setHistoryIndex(null);
-    draftBeforeHistoryRef.current = "";
   }, [sessionId]);
 
   // value 变化时保持 prevTextRef 同步: 覆盖外部触发的 draft 更新
@@ -116,7 +84,6 @@ export function InputBar({ sessionId }: InputBarProps) {
     const relay = relayClientRef;
     if (!relay) return;
     const now = Date.now();
-    writeInputHistory(sessionId, trimmed);
     // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
     addUserMessage(sessionId, {
       id: `${sessionId}-user-${now}`,
@@ -138,8 +105,6 @@ export function InputBar({ sessionId }: InputBarProps) {
       version: "1",
     });
     applyInputDraft("");
-    setHistoryIndex(null);
-    draftBeforeHistoryRef.current = "";
     clearTrackingState();
   }, [
     canSend,
@@ -160,47 +125,10 @@ export function InputBar({ sessionId }: InputBarProps) {
       // 删掉的是 slash 命令 (以 "/" 开头), 参数提示也同步清空
       if (removedToken.startsWith("/")) setArgumentHint("");
       applyInputDraft(cleaned);
-      setHistoryIndex(null);
       return;
     }
     applyInputDraft(nextVal);
-    setHistoryIndex(null);
   };
-
-  const recallHistory = useCallback(
-    (direction: "previous" | "next") => {
-      const history = readInputHistory(sessionId);
-      if (history.length === 0) return false;
-
-      if (direction === "previous") {
-        if (historyIndex === null) {
-          if (value.trim() !== "") return false;
-          draftBeforeHistoryRef.current = value;
-          const nextIndex = history.length - 1;
-          setHistoryIndex(nextIndex);
-          applyInputDraft(history[nextIndex]);
-          return true;
-        }
-        const nextIndex = Math.max(0, historyIndex - 1);
-        setHistoryIndex(nextIndex);
-        applyInputDraft(history[nextIndex]);
-        return true;
-      }
-
-      if (historyIndex === null) return false;
-      if (historyIndex >= history.length - 1) {
-        setHistoryIndex(null);
-        applyInputDraft(draftBeforeHistoryRef.current);
-        draftBeforeHistoryRef.current = "";
-        return true;
-      }
-      const nextIndex = historyIndex + 1;
-      setHistoryIndex(nextIndex);
-      applyInputDraft(history[nextIndex]);
-      return true;
-    },
-    [applyInputDraft, historyIndex, sessionId, value],
-  );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // picker 打开时优先把 ↑↓/Enter 转给 picker, 未消费再走默认流程
@@ -224,12 +152,7 @@ export function InputBar({ sessionId }: InputBarProps) {
         e.preventDefault();
         const cleaned = value.replace(/\/\S*$/, "").replace(/@\S*$/, "");
         applyInputDraft(cleaned);
-        setHistoryIndex(null);
       }
-    } else if (e.key === "ArrowUp") {
-      if (recallHistory("previous")) e.preventDefault();
-    } else if (e.key === "ArrowDown") {
-      if (recallHistory("next")) e.preventDefault();
     }
   };
 
@@ -246,7 +169,6 @@ export function InputBar({ sessionId }: InputBarProps) {
             const token = cmd.name;
             const newVal = value.replace(/\/[^\s]*$/, `${token} `);
             applyInputDraft(newVal);
-            setHistoryIndex(null);
             setInsertedTokens((prev) => [...prev, token]);
             setArgumentHint(cmd.argumentHint ?? "");
             textareaRef.current?.focus();
@@ -265,7 +187,6 @@ export function InputBar({ sessionId }: InputBarProps) {
             const token = `@${path}`;
             const newVal = value.replace(/@[^\s]*$/, isDir ? token : `${token} `);
             applyInputDraft(newVal);
-            setHistoryIndex(null);
             if (!isDir) setInsertedTokens((prev) => [...prev, token]);
             textareaRef.current?.focus();
           }}

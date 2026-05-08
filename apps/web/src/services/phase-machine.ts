@@ -66,7 +66,7 @@ function bindingErrorMessage(code: string): string {
     case ControlErrorCode.SESSION_NOT_FOUND:
       return "会话不存在或已关闭";
     case ControlErrorCode.PROXY_OFFLINE:
-      return "电脑已离线";
+      return "开发机已离线";
     default:
       return "无法打开会话";
   }
@@ -133,7 +133,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       useAppStore.getState().setProxyOnline(false);
-      toast.warning("当前电脑已离线");
+      toast.warning("当前开发机已离线");
     }
     return;
   }
@@ -148,7 +148,7 @@ export async function handleRelayMessage(
       } else {
         useAppStore.getState().setProxyOnline(true);
       }
-      toast.success("当前电脑已恢复连接");
+      toast.success("当前开发机已恢复连接");
     }
     return;
   }

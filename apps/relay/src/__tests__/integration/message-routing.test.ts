@@ -86,17 +86,13 @@ describe("Message routing integration", () => {
     expect(received.payload.text).toBe("hello");
   });
 
-  it("routes tool_approve with whitelistTool from client to proxy", async () => {
+  it("routes tool_approve control with whitelistTool from client to proxy", async () => {
     const { proxy, client } = await setupBoundPair();
 
     const msgPromise = waitForMessage(proxy);
     client.send(
       JSON.stringify({
-        seq: 1,
         sessionId: "s1",
-        timestamp: Date.now(),
-        source: "client",
-        version: "1.0",
         type: "tool_approve",
         payload: { toolId: "t1", whitelistTool: true },
       }),

@@ -70,7 +70,7 @@ describe("RelayClient request handling", () => {
     try {
       const { relay } = createClient();
       const promise = relay.requestProxyList(100);
-      const assertion = expect(promise).rejects.toThrow("请求电脑列表超时");
+      const assertion = expect(promise).rejects.toThrow("请求开发机列表超时");
 
       await vi.advanceTimersByTimeAsync(100);
 

@@ -122,6 +122,36 @@ describe("RelayRouter hook permission decisions", () => {
     });
   });
 
+  it("uses the broker-owned tool name for worker session whitelist decisions", () => {
+    const permissionBroker = new PermissionBroker();
+    const workerSend = vi.fn().mockReturnValue(true);
+    const hookResolved = vi.fn();
+    const decisions: unknown[] = [];
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "worker-req-whitelist",
+        sessionId: "s1",
+        provider: "claude",
+        toolName: "Write",
+        input: { file_path: "/tmp/a" },
+      },
+      (decision) => decisions.push(decision),
+    );
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "worker-req-whitelist", whitelistTool: true },
+    });
+
+    expect(decisions).toEqual([{ behavior: "allow" }]);
+    expect(workerSend).toHaveBeenCalledWith("s1", {
+      type: "worker_whitelist_add",
+      toolName: "Write",
+    });
+  });
+
   it("records permission request delivery acknowledgements", async () => {
     const permissionBroker = new PermissionBroker();
     const workerSend = vi.fn();

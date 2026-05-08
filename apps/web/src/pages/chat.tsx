@@ -134,11 +134,9 @@ function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {
       role="status"
       aria-live="polite"
     >
-      <h2 className="text-lg font-semibold">{mode === "pty" ? "远程视图已断开" : "会话已终止"}</h2>
+      <h2 className="text-lg font-semibold">{mode === "pty" ? "终端连接已断开" : "会话已终止"}</h2>
       <p className="max-w-sm text-sm text-muted-foreground">
-        {mode === "pty"
-          ? "此终端会话已从远程视图断开，远端输入已停止。"
-          : "当前会话已经结束，输入已停止。"}
+        {mode === "pty" ? "页面已停止接收终端画面和输入。" : "当前会话已经结束，输入已停止。"}
       </p>
     </div>
   );

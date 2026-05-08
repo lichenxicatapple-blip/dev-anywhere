@@ -4,12 +4,7 @@ import {
   AssistantMessagePayloadSchema,
   ThinkingPayloadSchema,
 } from "./chat.js";
-import {
-  ToolUseRequestPayloadSchema,
-  ToolApprovePayloadSchema,
-  ToolDenyPayloadSchema,
-  ToolResultPayloadSchema,
-} from "./tool.js";
+import { ToolUseRequestPayloadSchema, ToolResultPayloadSchema } from "./tool.js";
 import {
   SessionCreatePayloadSchema,
   SessionListPayloadSchema,
@@ -51,22 +46,12 @@ export const MessageEnvelopeSchema = z.discriminatedUnion("type", [
     type: z.literal("thinking"),
     payload: ThinkingPayloadSchema,
   }),
-  // tool (6)
+  // tool (4): 工具审批决策属于 relay control，不进入会话消息信封。
   // tool_use_request: 审批流请求（proxy → client），toolId 是 approval requestId
   z.object({
     ...BaseEnvelopeFields,
     type: z.literal("tool_use_request"),
     payload: ToolUseRequestPayloadSchema,
-  }),
-  z.object({
-    ...BaseEnvelopeFields,
-    type: z.literal("tool_approve"),
-    payload: ToolApprovePayloadSchema,
-  }),
-  z.object({
-    ...BaseEnvelopeFields,
-    type: z.literal("tool_deny"),
-    payload: ToolDenyPayloadSchema,
   }),
   // tool_result: 工具执行结果（proxy → client），toolId 对应 assistant_tool_use / tool_use_request 的 toolId
   z.object({

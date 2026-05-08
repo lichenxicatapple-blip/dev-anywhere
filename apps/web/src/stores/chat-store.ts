@@ -63,6 +63,7 @@ interface ChatStoreState {
   ) => void;
   toggleToolCollapse: (sessionId: string, messageId: string, toolIndex: number) => void;
   addApprovalRequest: (sessionId: string, request: ToolApprovalRequest) => void;
+  replacePendingApprovals: (sessionId: string, requests: ToolApprovalRequest[]) => void;
   updateApprovalStatus: (
     sessionId: string,
     requestId: string,
@@ -188,6 +189,14 @@ export const useChatStore = create<ChatStoreState>()(
             if (existing) return slice;
             return { ...slice, pendingApprovals: [...slice.pendingApprovals, request] };
           }),
+        ),
+
+      replacePendingApprovals: (sessionId, requests) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            pendingApprovals: requests,
+          })),
         ),
 
       updateApprovalStatus: (sessionId, requestId, status) =>

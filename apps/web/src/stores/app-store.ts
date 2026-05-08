@@ -30,7 +30,8 @@ interface AppStoreState {
   relayUrl: string;
   ptyFontSize: number;
   ptyFitRequestId: number;
-  // 模块级代码 (phase-machine) 想弹 toast 但 Sonner 可能还没订阅就绪时, 经由此处暂存, 等 AppShell mount 后消费
+  sidebarCollapsed: boolean;
+  // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
 
   setConnected: (connected: boolean) => void;
@@ -44,6 +45,8 @@ interface AppStoreState {
   adjustPtyFontSize: (delta: number) => void;
   resetPtyFontSize: () => void;
   requestPtyFit: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  toggleSidebarCollapsed: () => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -71,6 +74,7 @@ function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
 const DEFAULT_PTY_FONT_SIZE = 14;
 export const MIN_PTY_FONT_SIZE = 8;
 export const MAX_PTY_FONT_SIZE = 24;
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "dev_anywhere_sidebarCollapsed";
 
 function clampPtyFontSize(value: number): number {
   return Math.max(MIN_PTY_FONT_SIZE, Math.min(MAX_PTY_FONT_SIZE, Math.round(value)));
@@ -79,6 +83,10 @@ function clampPtyFontSize(value: number): number {
 function loadPtyFontSize(): number {
   const stored = Number(localStorage.getItem("cc_ptyFontSize"));
   return Number.isFinite(stored) ? clampPtyFontSize(stored) : DEFAULT_PTY_FONT_SIZE;
+}
+
+function loadSidebarCollapsed(): boolean {
+  return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
 }
 
 export const useAppStore = create<AppStoreState>()(
@@ -96,6 +104,7 @@ export const useAppStore = create<AppStoreState>()(
       relayUrl: "",
       ptyFontSize: loadPtyFontSize(),
       ptyFitRequestId: 0,
+      sidebarCollapsed: loadSidebarCollapsed(),
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -120,6 +129,15 @@ export const useAppStore = create<AppStoreState>()(
       },
       requestPtyFit: () => {
         set({ ptyFitRequestId: get().ptyFitRequestId + 1 });
+      },
+      setSidebarCollapsed: (collapsed) => {
+        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+        set({ sidebarCollapsed: collapsed });
+      },
+      toggleSidebarCollapsed: () => {
+        const next = !get().sidebarCollapsed;
+        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+        set({ sidebarCollapsed: next });
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =

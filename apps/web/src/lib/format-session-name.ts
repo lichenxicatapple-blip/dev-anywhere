@@ -1,5 +1,6 @@
 // 格式化 session 名称：将长路径截断为易读的短路径
 // ~/workspace/dev-anywhere/apps/proxy → ~/…/apps/proxy
+// ~/my-project/ → ~/my-project
 // ~/my-project → ~/my-project
 // /tmp/test → /tmp/test
 export function formatSessionName(name: string | undefined): string {
@@ -7,7 +8,8 @@ export function formatSessionName(name: string | undefined): string {
 
   if (!name.startsWith("/") && !name.startsWith("~")) return name;
 
-  const normalized = name.replace(/^\/Users\/[^/]+/, "~");
+  const tildified = name.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+  const normalized = tildified.replace(/\/+$/, "") || "/";
   const parts = normalized.split("/").filter(Boolean);
 
   if (parts.length <= 3) return normalized;

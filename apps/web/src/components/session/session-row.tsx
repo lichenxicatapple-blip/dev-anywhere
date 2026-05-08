@@ -1,7 +1,5 @@
-// 会话列表单行：selected 时带 amber 左边条 + amber/8 背景
 // meta 行所有 pill (mode / 状态 / 相对时间) 统一 h-5 text-xs 对齐，避免 shadcn Badge rounded-full 跟裸 span 撞不齐的锯齿感
-// 状态点走 UI-SPEC --color-status-* tokens
-// 操作菜单（终止会话等）走 shadcn DropdownMenu —— 不移植 Feishu 的 swipe-to-terminate 手势
+// 状态点走 --color-status-* tokens; 选中态走侧栏结构光带, 不复用状态色。
 import { MoreHorizontal } from "lucide-react";
 import type { SessionInfo } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
@@ -60,7 +58,7 @@ function StateDot({ state }: { state: SessionInfo["state"] }) {
   return (
     <span
       className={cn("inline-block size-2 rounded-full shrink-0", style.dot)}
-      aria-label={`Session state: ${state}`}
+      aria-label={`会话状态：${style.label}`}
       role="status"
     />
   );
@@ -87,14 +85,17 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
         "relative flex items-center gap-2 px-4 py-2 w-full min-w-0 transition-colors",
         "min-h-[44px]",
         "hover:bg-accent",
-        selected && "bg-[color-mix(in_srgb,var(--primary)_8%,transparent)]",
+        selected && "dev-sidebar-active-row",
       )}
       data-slot="session-row"
       data-session-id={session.sessionId}
       data-selected={selected}
     >
       {selected && (
-        <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-primary" aria-hidden="true" />
+        <span
+          className="dev-sidebar-active-indicator absolute left-0 top-0 bottom-0 w-[2px]"
+          aria-hidden="true"
+        />
       )}
       <button
         type="button"

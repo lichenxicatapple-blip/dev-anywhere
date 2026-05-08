@@ -1,11 +1,3 @@
-// 工具审批卡, 完整 input 可见 + 三动作主次分明 + 会话白名单记忆
-// 发送审批结果走 MessageEnvelope tool_approve / tool_deny (见 packages/shared/src/schemas/tool.ts):
-//   relayClientRef.sendEnvelope({
-//     seq, sessionId, timestamp, source: "client", version,
-//     type: "tool_approve", payload: { toolId, whitelistTool? }
-//   })
-//   或 type: "tool_deny", payload: { toolId, reason? }
-// 注意: 这些是 envelope 不是 RelayControl, sendEnvelope 而非 sendControl.
 import { useRef, useState, type ComponentType } from "react";
 import {
   ChevronDown,
@@ -22,6 +14,8 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { Button } from "@/components/ui/button";
 import { summarizeToolInput } from "@/utils/summarize-tool-input";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/stores/app-store";
+import { toast } from "@/components/toast";
 
 // 工具名到图标的映射, 未知工具兜底 Wrench
 const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
@@ -49,39 +43,10 @@ interface ToolApprovalCardProps {
   container: "inline" | "floating";
 }
 
-function whitelistKey(sessionId: string): string {
-  return `cc_toolWhitelist:${sessionId}`;
-}
-
-function readWhitelist(sessionId: string): string[] {
-  try {
-    const raw = localStorage.getItem(whitelistKey(sessionId));
-    return raw ? (JSON.parse(raw) as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function addToWhitelist(sessionId: string, toolName: string): void {
-  const current = readWhitelist(sessionId);
-  if (current.includes(toolName)) return;
-  localStorage.setItem(whitelistKey(sessionId), JSON.stringify([...current, toolName]));
-}
-
-// 构造一个满足 MessageEnvelope BaseEnvelopeFields 的工具函数, 由本组件消费
-function buildEnvelopeBase(sessionId: string) {
-  return {
-    seq: 0,
-    sessionId,
-    timestamp: Date.now(),
-    source: "client" as const,
-    version: "1",
-  };
-}
-
 export function ToolApprovalCard({ approval, sessionId, container }: ToolApprovalCardProps) {
   const [acted, setActed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const transportReady = useAppStore((state) => state.connected && state.proxyOnline);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const summary = summarizeToolInput(approval.toolName, approval.input);
@@ -92,22 +57,27 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
     if (acted || isResolved) return;
     const relay = relayClientRef;
     if (!relay) return;
-    setActed(true);
-    const base = buildEnvelopeBase(sessionId);
-    if (decision === "allow") {
-      relay.sendEnvelope({
-        ...base,
-        type: "tool_approve",
-        payload: { toolId: approval.requestId, whitelistTool },
-      });
-      if (whitelistTool) addToWhitelist(sessionId, approval.toolName);
-    } else {
-      relay.sendEnvelope({
-        ...base,
-        type: "tool_deny",
-        payload: { toolId: approval.requestId },
-      });
+    if (!transportReady) {
+      toast.warning("连接恢复后再审批");
+      return;
     }
+    const sent =
+      decision === "allow"
+        ? relay.sendControl({
+            type: "tool_approve",
+            sessionId,
+            payload: { toolId: approval.requestId, whitelistTool },
+          })
+        : relay.sendControl({
+            type: "tool_deny",
+            sessionId,
+            payload: { toolId: approval.requestId },
+          });
+    if (!sent) {
+      toast.warning("连接恢复后再审批");
+      return;
+    }
+    setActed(true);
     // 状态由 proxy 的 permission_decision_result 回写，避免 UI 本地假定 provider/worker 已收到决策。
   }
 
@@ -172,6 +142,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
           variant="ghost"
           size="sm"
           className="text-muted-foreground"
+          disabled={acted || !transportReady}
           onClick={() => send("allow", true)}
           data-action="always"
         >
@@ -182,12 +153,18 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            disabled={acted || !transportReady}
             onClick={() => send("deny")}
             data-action="deny"
           >
             拒绝
           </Button>
-          <Button size="sm" onClick={() => send("allow")} data-action="allow">
+          <Button
+            size="sm"
+            disabled={acted || !transportReady}
+            onClick={() => send("allow")}
+            data-action="allow"
+          >
             允许
           </Button>
         </div>

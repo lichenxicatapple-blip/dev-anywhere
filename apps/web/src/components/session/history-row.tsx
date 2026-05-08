@@ -34,7 +34,7 @@ export function HistoryRow({ session, now, disabled, loading, onClick }: History
           "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
           "disabled:opacity-50 disabled:cursor-wait disabled:hover:bg-transparent",
         )}
-        aria-label={`恢复会话: ${session.title}`}
+        aria-label={`恢复会话：${session.title}`}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-sm font-normal truncate min-w-0">{session.title}</span>

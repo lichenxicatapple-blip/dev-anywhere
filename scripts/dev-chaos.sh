@@ -16,9 +16,13 @@ export DEV_ANYWHERE_LOG_RETENTION
 mkdir -p "$LOG_DIR"
 SERVICE_LOG_CURSOR=0
 STARTED_PROXY_PID=""
-RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,session_snapshot}"
+RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,permission_request_delivered,tool_approve,tool_deny,session_snapshot}"
 HOSTED_PTY_CHAOS_BIN=""
 HOSTED_PTY_CHAOS_CWD="${DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD:-/Users/admin/test_go}"
+LOCAL_PTY_CHAOS_BIN=""
+LOCAL_PTY_CHAOS_CWD="${DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD:-/Users/admin/test_go}"
+JSON_WORKER_CHAOS_BIN=""
+JSON_WORKER_CHAOS_CWD="${DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD:-/Users/admin/test_go}"
 
 section() {
   echo ""
@@ -166,6 +170,25 @@ run_hosted_pty_exit_chaos_smoke() {
     e2e/hosted-pty-chaos.spec.ts --project=desktop
 }
 
+run_local_runtime_pty_chaos_smoke() {
+  local provider="$1"
+  echo "+ UI smoke: local runtime $provider PTY reconnect and detach"
+  DEV_ANYWHERE_LOCAL_PTY_CHAOS=1 \
+    DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD="$LOCAL_PTY_CHAOS_CWD" \
+    DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN="$LOCAL_PTY_CHAOS_BIN" \
+    DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER="$provider" \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/real-local-pty-chaos.spec.ts --project=desktop
+}
+
+run_json_worker_chaos_smoke() {
+  echo "+ UI smoke: real Claude JSON worker approval and relay restart"
+  DEV_ANYWHERE_JSON_WORKER_CHAOS=1 \
+    DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD="$JSON_WORKER_CHAOS_CWD" \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    e2e/real-json-worker-chaos.spec.ts --project=desktop
+}
+
 create_hosted_pty_chaos_provider() {
   mkdir -p "$HOSTED_PTY_CHAOS_CWD"
   HOSTED_PTY_CHAOS_BIN="$LOG_DIR/chaos-agent-${DEV_ANYWHERE_LOG_RUN_ID}.sh"
@@ -203,6 +226,18 @@ done
 EOF
   chmod +x "$HOSTED_PTY_CHAOS_BIN"
   ok "hosted PTY chaos provider ready: $HOSTED_PTY_CHAOS_BIN"
+}
+
+create_local_pty_chaos_provider() {
+  mkdir -p "$LOCAL_PTY_CHAOS_CWD"
+  LOCAL_PTY_CHAOS_BIN="$ROOT/apps/web/e2e/fixtures/local-pty-chaos-agent.mjs"
+  ok "local PTY chaos provider ready: $LOCAL_PTY_CHAOS_BIN"
+}
+
+create_json_worker_chaos_provider() {
+  mkdir -p "$JSON_WORKER_CHAOS_CWD"
+  JSON_WORKER_CHAOS_BIN="$ROOT/apps/web/e2e/fixtures/json-worker-chaos-agent.mjs"
+  ok "JSON worker chaos provider ready: $JSON_WORKER_CHAOS_BIN"
 }
 
 kill_port() {
@@ -299,9 +334,23 @@ proxy_service_not_running() {
 
 start_proxy_serve() {
   local output
-  output="$(env INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve start 2>&1)"
-  printf '%s\n' "$output"
-  STARTED_PROXY_PID="$(printf '%s\n' "$output" | sed -n 's/.*Service started in background (PID \([0-9][0-9]*\)).*/\1/p' | tail -n 1)"
+  local code
+  for attempt in 1 2 3; do
+    set +e
+    output="$(env INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve start 2>&1)"
+    code=$?
+    set -e
+    printf '%s\n' "$output"
+    STARTED_PROXY_PID="$(
+      printf '%s\n' "$output" | sed -n 's/.*Service started in background (PID \([0-9][0-9]*\)).*/\1/p' | tail -n 1
+    )"
+    if [ "$code" -eq 0 ] && [ -n "$STARTED_PROXY_PID" ]; then
+      return 0
+    fi
+    echo "serve start attempt $attempt failed or did not report a PID; retrying..." >&2
+    sleep "$attempt"
+  done
+  return 1
 }
 
 start_relay_only() {
@@ -402,6 +451,21 @@ run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-an
 wait_until "proxy serve is running with hosted Codex PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted Codex PTY chaos provider swap" 30 proxy_relay_connected_observed
 run_hosted_pty_exit_chaos_smoke codex
+run pnpm dev:health
+
+section "Chaos 11: local runtime Claude/Codex PTY across serve restart"
+create_local_pty_chaos_provider
+run_local_runtime_pty_chaos_smoke claude
+run_local_runtime_pty_chaos_smoke codex
+run pnpm dev:health
+
+section "Chaos 12: real Claude JSON worker approval across relay restart"
+create_json_worker_chaos_provider
+mark_service_log
+run env CLAUDE_BIN="$JSON_WORKER_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+wait_until "proxy serve is running with JSON worker chaos provider" 15 proxy_service_running_observed
+wait_until "proxy serve reconnects to relay after JSON worker provider swap" 30 proxy_relay_connected_observed
+run_json_worker_chaos_smoke
 run pnpm dev:health
 
 section "Restore normal dev services"

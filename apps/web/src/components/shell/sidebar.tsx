@@ -1,12 +1,10 @@
-// 桌面端侧栏：固定 280px 宽，md 断点及以上可见（由 AppShell 传入 hidden md:flex 控制）
-// Breadcrumb 语义分层：
-//   顶部 proxy chip card（scope 选择器，视觉上独立）
-//   中部 session list（工作对象，行式列表，edge-to-edge 选中条贴左边）
-//   底部 + 新建会话 card（行动号召）
+import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
-import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
+import { useAppStore } from "@/stores/app-store";
 import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
 import { SessionList, CreateSessionButton } from "@/components/session/session-list";
+import { toast } from "@/components/toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -14,40 +12,160 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className }: SidebarProps) {
-  const { collapsed } = useSidebarCollapsed();
   const sessionCount = useSessionStore((s) => s.sessions.length);
+  const collapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
 
   if (collapsed) {
-    return null;
+    return (
+      <nav
+        className={cn(
+          "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 py-2",
+          className,
+        )}
+        aria-label="侧边栏"
+        data-slot="sidebar-rail"
+        data-collapsed="true"
+      >
+        <SidebarToggle collapsed onClick={toggleSidebarCollapsed} />
+        <div className="mt-3 h-px w-5 bg-border/70" aria-hidden="true" />
+        <div className="mt-auto flex flex-col gap-2">
+          <SidebarSettingsButton compact tooltipSide="right" />
+          <CreateSessionButton compact />
+        </div>
+      </nav>
+    );
   }
 
   return (
     <nav
       className={cn(
-        "flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-hidden",
+        "dev-sidebar-shell group/sidebar relative flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-visible",
         className,
       )}
-      aria-label="Sidebar navigation"
+      aria-label="侧边栏"
+      data-slot="sidebar"
+      data-collapsed="false"
     >
-      {/* Proxy scope chip —— 带边框的 card，视觉上与下方 session list 拉开层级 */}
-      <div className="px-2 py-2" data-slot="sidebar-proxy-switcher">
-        <ProxySwitcher layout="dropdown" />
+      <div className="dev-sidebar-fade p-2.5" data-slot="sidebar-proxy-switcher">
+        <div className="dev-sidebar-chrome rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span
+              className="min-w-0 truncate font-mono text-[13px] font-semibold"
+              data-slot="sidebar-brand"
+            >
+              <span className="text-primary">DEV</span>
+              <span className="text-foreground/90"> Anywhere</span>
+            </span>
+            <SidebarToggle collapsed={false} onClick={toggleSidebarCollapsed} />
+          </div>
+          <div className="mt-2.5">
+            <ProxySwitcher layout="dropdown" variant="sidebarChrome" />
+          </div>
+        </div>
       </div>
 
-      {/* Session list section —— section label 用 text-sm semibold foreground，与空态文案拉开层级 */}
-      <div className="flex flex-col flex-1 overflow-hidden" data-slot="sidebar-session-list">
-        <div className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
-          活跃会话{sessionCount > 0 ? ` · ${sessionCount}` : ""}
-        </div>
+      <div
+        className="dev-sidebar-fade flex flex-col flex-1 overflow-hidden"
+        data-slot="sidebar-session-list"
+      >
+        <h3 className="px-4 pt-3 pb-2 text-sm font-semibold text-foreground">
+          活跃会话
+          {sessionCount > 0 ? (
+            <span className="ml-1 text-muted-foreground/70 font-normal">· {sessionCount}</span>
+          ) : null}
+        </h3>
         <div className="flex-1 overflow-auto">
           <SessionList layout="sidebar" />
         </div>
       </div>
 
-      {/* 底部行动区: 仅 + 新建会话 card；Settings 齿轮在 AppShell 顶栏。 */}
-      <div className="px-2 py-2" data-slot="sidebar-new-session">
-        <CreateSessionButton />
+      <div className="dev-sidebar-fade flex gap-2 px-2 py-2" data-slot="sidebar-new-session">
+        <div className="min-w-0 flex-1">
+          <CreateSessionButton />
+        </div>
+        <SidebarSettingsButton />
       </div>
     </nav>
+  );
+}
+
+function SidebarSettingsButton({
+  compact = false,
+  tooltipSide = "top",
+}: {
+  compact?: boolean;
+  tooltipSide?: "top" | "right";
+}) {
+  return (
+    <Tooltip delayDuration={500}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="设置"
+          data-slot="sidebar-settings-trigger"
+          onClick={() => toast.info("设置暂未开放")}
+          className={cn(
+            "inline-flex items-center justify-center shrink-0 border border-border text-muted-foreground outline-none transition-[color,background-color,border-color,box-shadow]",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            compact
+              ? "h-9 w-9 rounded-md bg-card/70 hover:border-primary/60 hover:bg-accent hover:text-foreground"
+              : "h-10 w-10 rounded-md bg-background hover:bg-accent hover:text-foreground",
+          )}
+        >
+          <Settings className="size-4" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side={tooltipSide}
+        sideOffset={10}
+        hideArrow
+        className="border border-border/80 bg-card/95 px-2.5 py-1 text-muted-foreground shadow-sm backdrop-blur"
+      >
+        设置
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SidebarToggle({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  const label = collapsed ? "展开侧边栏" : "收起侧边栏";
+  const Icon = collapsed ? PanelLeftOpen : PanelLeftClose;
+
+  return (
+    <Tooltip delayDuration={500}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          data-slot={collapsed ? "sidebar-expand-trigger" : "sidebar-collapse-trigger"}
+          onClick={onClick}
+          className={cn(
+            "group inline-flex items-center justify-center text-muted-foreground outline-none transition-[opacity,color,background-color,border-color,box-shadow,transform]",
+            "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            collapsed
+              ? "h-9 w-9 rounded-md border border-border/80 bg-card/70 hover:border-primary/60 hover:bg-accent hover:text-foreground"
+              : "h-9 w-9 rounded-full border border-primary/25 bg-primary/10 hover:border-primary/60 hover:bg-primary/15 hover:text-foreground",
+          )}
+        >
+          <Icon
+            className={cn(
+              "size-3.5 transition-transform",
+              collapsed && "group-hover:translate-x-0.5",
+              !collapsed && "group-hover:-translate-x-0.5",
+            )}
+            aria-hidden="true"
+          />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side={collapsed ? "right" : "top"}
+        sideOffset={10}
+        hideArrow
+        className="border border-border/80 bg-card/95 px-2.5 py-1 text-muted-foreground shadow-sm backdrop-blur"
+      >
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }

@@ -1,5 +1,5 @@
 // layout=page 用于移动端/空壳页，选中后进入 /sessions。
-// layout=dropdown 用于桌面侧栏顶部，只切换当前绑定的本机 proxy。
+// layout=dropdown 用于桌面侧栏顶部，只切换当前绑定的开发机 proxy。
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";
@@ -9,13 +9,15 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { EmptyState } from "@/components/shell/empty-state";
+import { cn } from "@/lib/utils";
 import { ProxyStatusDot } from "./proxy-status-dot";
 
 interface ProxySwitcherProps {
   layout: "page" | "dropdown";
+  variant?: "default" | "sidebarChrome";
 }
 
-export function ProxySwitcher({ layout }: ProxySwitcherProps) {
+export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProps) {
   const proxies = useAppStore((s) => s.proxies);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
@@ -25,7 +27,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
   async function handleSelect(proxyId: string, proxyName: string | undefined): Promise<void> {
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("连接尚未就绪");
+      toast.error("请先连接开发机");
       return;
     }
     const displayName = proxyName ?? proxyId;
@@ -75,7 +77,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     return (
       <div className="flex flex-col gap-3 p-4 h-full overflow-auto">
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          可连接电脑
+          可连接开发机
         </h3>
         <ul role="list" className="flex flex-col gap-2">
           {proxies.map((p) => (
@@ -89,7 +91,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                 onClick={() => handleSelect(p.proxyId, p.name)}
                 className="w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border border-border bg-card hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card"
                 aria-pressed={selectedProxyId === p.proxyId}
-                title={!p.online ? "这台电脑离线，暂时无法连接" : undefined}
+                title={!p.online ? "这台开发机离线，暂时无法连接" : undefined}
               >
                 <ProxyStatusDot status={p.online ? "online" : "offline"} />
                 <span className="text-sm font-normal flex-1 truncate min-w-0">
@@ -104,21 +106,33 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
     );
   }
 
-  // layout === "dropdown" —— proxy scope chip: card 样式，边框 + 右侧 chevron
+  // layout === "dropdown": desktop sidebar proxy selector.
   const currentProxy = proxies.find((p) => p.proxyId === selectedProxyId);
+  const currentProxyName = currentProxy?.name ?? currentProxy?.proxyId ?? "未选择开发机";
   return (
     <Popover open={dropdownOpen} onOpenChange={setDropdownOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           data-slot="proxy-switcher-trigger"
-          className="group w-full flex items-center gap-2 px-4 h-10 rounded-md border border-border bg-background hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`当前连接：${currentProxy?.name ?? "未选择电脑"}`}
+          className={cn(
+            "group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            variant === "sidebarChrome"
+              ? "inline-flex min-h-9 min-w-0 max-w-full items-center justify-start gap-1.5 rounded-md text-left text-foreground hover:text-primary"
+              : "flex h-10 w-full items-center gap-2 rounded-md border border-border bg-background px-4 hover:bg-accent",
+          )}
+          aria-label={`当前连接：${currentProxyName}`}
         >
-          {/* 左侧 placeholder 与右侧 chevron 等宽, 让 name 真正居中 */}
-          <span className="h-4 w-4 shrink-0" aria-hidden />
-          <span className="text-sm font-normal truncate flex-1 text-center">
-            {currentProxy?.name ?? currentProxy?.proxyId ?? "未选择电脑"}
+          {variant === "default" && <span className="h-4 w-4 shrink-0" aria-hidden />}
+          <span
+            className={cn(
+              "truncate",
+              variant === "sidebarChrome"
+                ? "min-w-0 text-base font-semibold leading-none"
+                : "flex-1 text-center text-sm font-normal",
+            )}
+          >
+            {currentProxyName}
           </span>
           <ChevronDown
             className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
@@ -128,7 +142,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[260px] p-1">
         {proxies.length === 0 ? (
-          <div className="text-xs text-muted-foreground p-2">没有可连接电脑</div>
+          <div className="text-xs text-muted-foreground p-2">暂无可连接开发机</div>
         ) : (
           <ul role="list" className="flex flex-col">
             {proxies.map((p) => (
@@ -142,7 +156,7 @@ export function ProxySwitcher({ layout }: ProxySwitcherProps) {
                   onClick={() => handleSelect(p.proxyId, p.name)}
                   className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-pressed={selectedProxyId === p.proxyId}
-                  title={!p.online ? "这台电脑离线" : undefined}
+                  title={!p.online ? "这台开发机离线" : undefined}
                 >
                   <ProxyStatusDot status={p.online ? "online" : "offline"} />
                   <span className="text-sm font-normal flex-1 truncate min-w-0">

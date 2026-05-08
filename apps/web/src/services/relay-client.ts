@@ -105,7 +105,7 @@ export class RelayClient {
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_list_response" }> =>
         msg.type === "proxy_list_response" && msg.requestId === requestId,
       () => this.ws.send(JSON.stringify({ type: "proxy_list_request", requestId })),
-      "请求电脑列表超时",
+      "请求开发机列表超时",
       timeoutMs,
     ).then((msg) => msg.proxies as ProxyInfoResult);
   }
@@ -120,7 +120,7 @@ export class RelayClient {
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_select_response" }> =>
         msg.type === "proxy_select_response" && msg.requestId === requestId,
       () => this.ws.send(JSON.stringify({ type: "proxy_select", requestId, proxyId })),
-      "连接电脑超时",
+      "连接开发机超时",
       timeoutMs,
     ).then((resp) => {
       if (resp.success) {
@@ -179,7 +179,7 @@ export class RelayClient {
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_info" }> =>
         msg.type === "proxy_info" && msg.requestId === requestId,
       () => this.ws.send(JSON.stringify({ type: "proxy_info_request", requestId })),
-      "读取本机信息超时",
+      "读取开发机信息超时",
       timeoutMs,
     ).then((resp) => ({ homePath: resp.homePath }));
   }
@@ -278,19 +278,19 @@ export class RelayClient {
             ...request,
           }),
         ),
-      "创建超时，请检查本机连接后重试",
+      "创建超时，请检查开发机连接后重试",
       timeoutMs,
     );
   }
 
   // 发送 MessageEnvelope
-  sendEnvelope(envelope: MessageEnvelope): void {
-    this.ws.send(JSON.stringify(envelope));
+  sendEnvelope(envelope: MessageEnvelope): boolean {
+    return this.ws.send(JSON.stringify(envelope));
   }
 
   // 发送控制消息
-  sendControl(msg: RelayControlMessage): void {
-    this.ws.send(JSON.stringify(msg));
+  sendControl(msg: RelayControlMessage): boolean {
+    return this.ws.send(JSON.stringify(msg));
   }
 
   private waitForMessage<T extends InboundMessage>(

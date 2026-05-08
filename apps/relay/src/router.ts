@@ -73,7 +73,6 @@ export function routeProxyMessage(
 
 // 将 client 发来的 MessageEnvelope 转发给绑定的 proxy
 // proxyId 由调用方从 clientId 绑定中解析后传入
-// tool_approve/tool_deny 等信封消息直接发送到 proxy WS，不经过任何队列或缓冲
 export function routeClientMessage(
   raw: string,
   proxyId: string,

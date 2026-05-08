@@ -6,9 +6,11 @@ dist/
 reference/
 .claude/
 .playwright-mcp/
+.planning/
 coverage/
 dist-h5/
 test-results/
+docs/sketches/
 *.png
 # PWA 图标必须入库 (generator 生成, 供 deploy.sh 同步到 nginx)
 !apps/web/public/*.png

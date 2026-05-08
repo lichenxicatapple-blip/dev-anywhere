@@ -58,18 +58,15 @@ function handlePendingApprovalsPush(
   msg: Extract<RelayControlMessage, { type: "pending_approvals_push" }>,
   relay: Pick<RelayClient, "sendControl"> | null,
 ) {
-  // 重连后 relay 推送 proxy 当前 pending 审批全量, 增量补齐未知项, 不重复入队已有项
   const store = useChatStore.getState();
-  const existing = store.bySessionId[msg.sessionId]?.pendingApprovals ?? [];
-  const existingIds = new Set(existing.map((a) => a.requestId));
-  for (const appr of msg.approvals) {
-    if (existingIds.has(appr.requestId)) continue;
-    store.addApprovalRequest(msg.sessionId, {
-      requestId: appr.requestId,
-      toolName: appr.toolName,
-      input: appr.input,
-      status: "pending",
-    });
+  const approvals = msg.approvals.map((appr) => ({
+    requestId: appr.requestId,
+    toolName: appr.toolName,
+    input: appr.input,
+    status: "pending" as const,
+  }));
+  store.replacePendingApprovals(msg.sessionId, approvals);
+  for (const appr of approvals) {
     relay?.sendControl({
       type: "permission_request_delivered",
       sessionId: msg.sessionId,

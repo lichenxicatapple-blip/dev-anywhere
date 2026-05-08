@@ -29,6 +29,20 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.getByRole("button", { name: "取消" }).click();
     await expect(page.getByRole("heading", { name: "新建会话" })).not.toBeVisible();
   });
+
+  test("桌面侧边栏可以显式收起和展开", async ({ page }) => {
+    await expect(page.locator('[data-slot="sidebar-session-list"]')).toBeVisible();
+
+    await page.getByRole("button", { name: "收起侧边栏" }).click();
+    await expect(page.locator('[data-slot="sidebar-session-list"]')).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "展开侧边栏" })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: "展开侧边栏" })).toBeVisible();
+
+    await page.getByRole("button", { name: "展开侧边栏" }).click();
+    await expect(page.locator('[data-slot="sidebar-session-list"]')).toBeVisible();
+  });
 });
 
 test.describe("SessionList — layout=page（移动端）", () => {

@@ -13,8 +13,8 @@ interface EmptyStateProps {
 
 const COPY: Record<Variant, { heading: string; body: string }> = {
   "no-proxy": {
-    heading: "还没有连接本机",
-    body: "在电脑上启动 dev-anywhere，本页会显示可连接的电脑。",
+    heading: "还没有连接开发机",
+    body: "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机。",
   },
   "no-session": {
     heading: "没有选中的会话",

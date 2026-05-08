@@ -12,10 +12,10 @@ export function SessionListPage() {
   const sessionCount = useSessionStore((s) => s.sessions.length);
 
   let subtitle: string;
-  if (proxies.length === 0) subtitle = "在电脑上启动 dev-anywhere，本页会显示可连接的电脑。";
-  else if (!hasProxy) subtitle = "选择要连接的电脑。";
-  else if (sessionCount === 0) subtitle = "从本地终端接入，或新建一个会话。";
-  else subtitle = "选择一个会话继续，或新建。";
+  if (proxies.length === 0) subtitle = "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机。";
+  else if (!hasProxy) subtitle = "选择要连接的开发机。";
+  else if (sessionCount === 0) subtitle = "还没有会话。可以从本地终端接入，也可以新建会话。";
+  else subtitle = "从左侧打开会话，或新建会话开始新的任务。";
 
   return (
     <>

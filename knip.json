@@ -7,7 +7,7 @@
       "ignoreDependencies": ["pino", "zod"]
     },
     "apps/web": {
-      "entry": ["pwa-assets.config.ts", "e2e/**/*.{ts,d.ts}"],
+      "entry": ["pwa-assets.config.ts", "e2e/**/*.{ts,d.ts,mjs}"],
       "ignore": ["src/components/ui/**"]
     }
   }

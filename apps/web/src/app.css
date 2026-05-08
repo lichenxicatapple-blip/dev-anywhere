@@ -140,6 +140,111 @@ code.hljs,
   accent-color: var(--primary);
 }
 
+.dev-sidebar-chrome {
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--primary) 12%, transparent),
+      color-mix(in srgb, var(--color-status-success) 5%, transparent)
+    ),
+    color-mix(in srgb, var(--card) 92%, black);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--foreground) 5%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--primary) 7%, transparent);
+}
+
+.dev-sidebar-rail::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 68%, transparent),
+    color-mix(in srgb, var(--color-status-success) 28%, transparent) 50%,
+    color-mix(in srgb, var(--primary) 58%, transparent)
+  );
+  content: "";
+  transform-origin: top;
+  animation: dev-sidebar-rail-scale 220ms ease-out both;
+}
+
+.dev-sidebar-active-row {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--primary) 13%, transparent),
+      color-mix(in srgb, var(--color-status-success) 5%, transparent) 38%,
+      transparent 78%
+    ),
+    color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.dev-sidebar-active-indicator {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 74%, transparent),
+    color-mix(in srgb, var(--color-status-success) 30%, transparent) 48%,
+    color-mix(in srgb, var(--primary) 66%, transparent)
+  );
+  box-shadow: 7px 0 18px color-mix(in srgb, var(--color-status-success) 12%, transparent);
+  transform-origin: center;
+  animation: dev-sidebar-active-indicator-scale 180ms ease-out both;
+}
+
+.dev-sidebar-shell {
+  transition:
+    width 180ms ease-out,
+    border-color 180ms ease-out;
+}
+
+.dev-sidebar-fade {
+  animation: dev-sidebar-fade-in 170ms ease-out both;
+}
+
+@keyframes dev-sidebar-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes dev-sidebar-rail-scale {
+  from {
+    opacity: 0.7;
+    transform: scaleY(0.16);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes dev-sidebar-active-indicator-scale {
+  from {
+    opacity: 0.75;
+    transform: scaleY(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-sidebar-fade,
+  .dev-sidebar-rail::before,
+  .dev-sidebar-active-indicator {
+    animation: none;
+  }
+}
+
 /* 用户气泡在 primary 背景上，不能沿用 prose-invert 的浅色正文，否则对比度不足。 */
 .cc-markdown-on-primary {
   --tw-prose-invert-body: var(--primary-foreground);

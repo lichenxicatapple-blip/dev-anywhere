@@ -2,16 +2,18 @@ import { test, expect } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "./helpers";
 
 test.describe("AppShell header visibility by route", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
   test.beforeEach(async ({ page }) => {
     await page.goto(BASE_URL);
   });
 
-  test("AppShell header visible on /sessions", async ({ page }) => {
+  test("AppShell header is mobile-only on /sessions", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${BASE_URL}/#/sessions`);
     const header = page.locator('[data-slot="app-shell-header"]');
     await expect(header).toBeVisible();
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(header).toBeHidden();
   });
 
   test("AppShell header HIDDEN on /chat/*", async ({ page }) => {
@@ -29,19 +31,19 @@ test.describe("ChatHeader compact navigation controls", () => {
     await gotoWithFakeProxy(page, "/#/chat/d51-sess?mode=json");
   });
 
-  test("has three direct children: back button + title + overflow", async ({ page }) => {
+  test("desktop header shows centered title and overflow", async ({ page }) => {
     const header = page.locator('[data-slot="chat-header"]');
     await expect(header).toBeVisible();
-    await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-back-button"]')).toBeHidden();
     await expect(page.locator('[data-slot="chat-session-title"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-overflow-trigger"]')).toBeVisible();
   });
 
-  test("back button is visible at ALL viewports (no md:hidden)", async ({ page }) => {
+  test("back button is mobile-only", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-back-button"]')).toBeHidden();
   });
 
   test("no standalone permission-mode button or sidebar-toggle", async ({ page }) => {
@@ -66,11 +68,14 @@ test.describe("ChatHeader compact navigation controls", () => {
 });
 
 test.describe("AppShell Settings slot", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test("AppShell header has Settings gear on non-chat routes", async ({ page }) => {
+  test("Settings gear is available on mobile header and desktop sidebar", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${BASE_URL}/#/sessions`);
-    const settings = page.locator('[data-slot="app-shell-settings-trigger"]');
-    await expect(settings).toBeVisible();
+    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).toBeVisible();
+    await expect(page.locator('[data-slot="sidebar-settings-trigger"]')).toBeHidden();
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).toBeHidden();
+    await expect(page.locator('[data-slot="sidebar-settings-trigger"]')).toBeVisible();
   });
 });

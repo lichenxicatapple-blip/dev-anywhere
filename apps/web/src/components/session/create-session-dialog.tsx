@@ -1,5 +1,5 @@
-// 新建会话入口：选择工作目录、会话模式和本机 Agent CLI。
-// 终端模式由本机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
+// 新建会话入口：选择工作目录、交互方式和开发机上的 Agent CLI。
+// 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { SessionInfo } from "@dev-anywhere/shared";
@@ -140,7 +140,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("连接尚未就绪");
+      toast.error("请先连接开发机");
       return;
     }
     const submittedName = name.trim();
@@ -191,7 +191,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   async function handleCreateDirectory(path: string): Promise<string | null> {
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("连接尚未就绪");
+      toast.error("请先连接开发机");
       return null;
     }
     try {
@@ -303,11 +303,11 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{missingCwd}</p>
             </section>
           ) : null}
-          <section aria-label="会话模式" className="flex flex-col gap-2">
+          <section aria-label="交互方式" className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm">会话模式</span>
+              <span className="text-sm">交互方式</span>
               <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "完整 CLI 终端" : "消息式对话"}
+                {mode === "pty" ? "完整终端" : "聊天消息"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -321,7 +321,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 )}
               >
                 <span className="text-sm font-medium">终端模式</span>
-                <span className="text-xs text-muted-foreground">像本地 CLI 一样操作</span>
+                <span className="text-xs text-muted-foreground">像本地终端一样操作</span>
               </button>
               <button
                 type="button"
@@ -341,7 +341,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <div className="flex items-center justify-between">
               <span className="text-sm">Agent CLI</span>
               <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "选择本机 CLI" : "Codex 不可用"}
+                {mode === "pty" ? "选择要启动的 CLI" : "聊天模式仅支持 Claude Code"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -378,7 +378,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               >
                 <span className="text-sm font-medium">Codex</span>
                 <span className="text-xs text-muted-foreground">
-                  {mode === "pty" ? "可用" : "聊天模式暂不可用"}
+                  {mode === "pty" ? "可用" : "仅支持终端模式"}
                 </span>
               </button>
             </div>

@@ -1,5 +1,4 @@
-// Chat 页顶栏: 返回按钮 | 会话标题 flex-1 truncate + mode badge | overflow 菜单
-// PTY 模式没有下方 InputBar，终端级控制入口归这里。
+// 桌面端有常驻侧栏，返回入口只在移动端显示。
 import { ArrowLeft, Minus, MoreVertical, Plus } from "lucide-react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -69,18 +68,21 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
 
   return (
     <div
-      className="grid grid-cols-[auto_1fr_auto] items-center min-h-12 px-3 pt-[env(safe-area-inset-top)] border-b border-border bg-card shrink-0"
+      className="grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center min-h-12 px-3 pt-[env(safe-area-inset-top)] border-b border-border bg-card shrink-0"
       data-slot="chat-header"
     >
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={() => navigate("/sessions")}
-        aria-label="返回会话列表"
-        data-slot="chat-back-button"
-      >
-        <ArrowLeft aria-hidden="true" />
-      </Button>
+      <div className="flex justify-start">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden"
+          onClick={() => navigate("/sessions")}
+          aria-label="返回会话列表"
+          data-slot="chat-back-button"
+        >
+          <ArrowLeft aria-hidden="true" />
+        </Button>
+      </div>
       {/* 中间列 text-center + truncate: 长标题省略号, 短标题居中 */}
       <span
         className="text-sm font-semibold truncate text-center px-2"

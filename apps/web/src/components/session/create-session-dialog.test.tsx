@@ -103,7 +103,7 @@ describe("CreateSessionDialog", () => {
   });
 
   it("unblocks the create button when session creation times out", async () => {
-    createSession.mockRejectedValue(new Error("创建超时，请检查本机连接后重试"));
+    createSession.mockRejectedValue(new Error("创建超时，请检查开发机连接后重试"));
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
@@ -119,7 +119,7 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(false);
     });
-    expect(toastError).toHaveBeenCalledWith("创建超时，请检查本机连接后重试");
+    expect(toastError).toHaveBeenCalledWith("创建超时，请检查开发机连接后重试");
   });
 
   it("does not create a missing working directory as a side effect of session creation", async () => {

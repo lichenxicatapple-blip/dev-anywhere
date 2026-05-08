@@ -16,9 +16,7 @@ export class RelayPermissionHandlers {
 
   onToolApprove(msg: Record<string, unknown>): void {
     const sessionId = msg.sessionId as string | undefined;
-    const payload = msg.payload as
-      | { toolId?: string; whitelistTool?: boolean; toolName?: string }
-      | undefined;
+    const payload = msg.payload as { toolId?: string; whitelistTool?: boolean } | undefined;
     if (!sessionId || !payload?.toolId) return;
 
     const pending = this.deps.permissionBroker.get(payload.toolId);
@@ -51,7 +49,7 @@ export class RelayPermissionHandlers {
     );
 
     if (pending.source === "worker" && payload.whitelistTool) {
-      const toolName = payload.toolName ?? "";
+      const toolName = pending.toolName;
       if (toolName) {
         const whitelisted = this.deps.workerRegistry.send(pending.sessionId, {
           type: "worker_whitelist_add",

@@ -14,9 +14,9 @@ const DOT_CLASS: Record<ProxyStatusDotProps["status"], string> = {
 };
 
 const STATUS_LABEL: Record<ProxyStatusDotProps["status"], string> = {
-  online: "电脑在线",
-  offline: "电脑离线",
-  connecting: "正在连接电脑",
+  online: "开发机在线",
+  offline: "开发机离线",
+  connecting: "正在连接开发机",
 };
 
 export function ProxyStatusDot({ status, className }: ProxyStatusDotProps) {

@@ -64,7 +64,7 @@ export function HistoryList({ now }: HistoryListProps) {
     if (resumingId) return;
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("连接尚未就绪");
+      toast.error("请先连接开发机");
       return;
     }
     setResumingId(h.id);
@@ -77,7 +77,7 @@ export function HistoryList({ now }: HistoryListProps) {
         resumeSessionId: h.id,
       });
       if (ctrl.error || !ctrl.sessionId) {
-        toast.error(`恢复失败: ${ctrl.error ?? "unknown"}`);
+        toast.error(`恢复失败：${ctrl.error ?? "未知错误"}`);
         return;
       }
       const newSession: SessionInfo = {
@@ -89,7 +89,7 @@ export function HistoryList({ now }: HistoryListProps) {
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? "pty"}`);
     } catch (err) {
-      toast.error(`恢复失败: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`恢复失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setResumingId(null);
     }

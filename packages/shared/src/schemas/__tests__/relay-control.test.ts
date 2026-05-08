@@ -27,6 +27,8 @@ describe("RelayControlSchema", () => {
   it("derives client-to-proxy control routing from protocol metadata", () => {
     expect(isClientToProxyRelayControlType("agent_status_request")).toBe(true);
     expect(isClientToProxyRelayControlType("permission_request_delivered")).toBe(true);
+    expect(isClientToProxyRelayControlType("tool_approve")).toBe(true);
+    expect(isClientToProxyRelayControlType("tool_deny")).toBe(true);
     expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
     expect(isClientToProxyRelayControlType("session_list")).toBe(true);
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);

@@ -65,11 +65,9 @@ export class RelayHistoryHandlers {
       toolName: approval.toolName,
       input: approval.input,
     }));
-    if (approvals.length > 0) {
-      this.deps.relaySend(
-        JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),
-      );
-      serviceLogger.info({ sessionId: sid, count: approvals.length }, "Pending approvals pushed");
-    }
+    this.deps.relaySend(
+      JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),
+    );
+    serviceLogger.info({ sessionId: sid, count: approvals.length }, "Pending approvals pushed");
   }
 }

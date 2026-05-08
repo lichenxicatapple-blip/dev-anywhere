@@ -61,7 +61,7 @@ export function SessionList({ layout }: SessionListProps) {
     const sessionId = session.sessionId;
     const relay = relayClientRef;
     if (!relay) {
-      toast.error("连接尚未就绪");
+      toast.error("请先连接开发机");
       return;
     }
     relay.sendControl({ type: "session_terminate", sessionId });
@@ -69,7 +69,7 @@ export function SessionList({ layout }: SessionListProps) {
     if (sessionId === activeSessionId) navigate("/sessions");
     toast.info(
       session?.mode === "pty" && session.ptyOwner === "local-terminal"
-        ? "已断开远程连接，本地终端仍在运行"
+        ? "已断开页面连接，本地终端仍在运行"
         : "正在终止会话",
     );
   }
@@ -91,7 +91,7 @@ export function SessionList({ layout }: SessionListProps) {
     return (
       <>
         <div className="px-4 py-3 text-sm text-muted-foreground/70">
-          {isLoading ? "连接中..." : "请先选择要连接的电脑"}
+          {isLoading ? "连接中..." : "请先连接开发机"}
         </div>
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         <SessionTerminationDialog
@@ -258,7 +258,7 @@ function groupActiveSessionsByProvider(sessions: SessionInfo[]) {
 }
 
 // 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因
-export function CreateSessionButton() {
+export function CreateSessionButton({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [tipOpen, setTipOpen] = useState(false);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
@@ -276,25 +276,31 @@ export function CreateSessionButton() {
     <Button
       variant="outline"
       className={cn(
-        "w-full justify-start gap-2 h-10 border-border",
+        compact
+          ? "h-9 w-9 justify-center border-border px-0"
+          : "w-full justify-start gap-2 h-10 border-border",
         !hasProxy && "opacity-50 hover:bg-background",
       )}
+      aria-label={compact ? "新建会话" : undefined}
       aria-disabled={!hasProxy}
       onClick={handleClick}
     >
       <Plus aria-hidden="true" />
-      新建会话
+      {!compact && "新建会话"}
     </Button>
   );
 
   return (
     <>
-      {hasProxy ? (
+      {hasProxy && !compact ? (
         button
       ) : (
-        <Tooltip open={tipOpen} onOpenChange={setTipOpen}>
+        <Tooltip
+          open={!hasProxy ? tipOpen : undefined}
+          onOpenChange={!hasProxy ? setTipOpen : undefined}
+        >
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent side="top">请先选择要连接的电脑</TooltipContent>
+          <TooltipContent side="top">{hasProxy ? "新建会话" : "请先连接开发机"}</TooltipContent>
         </Tooltip>
       )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />

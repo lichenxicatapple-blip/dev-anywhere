@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
+import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
 
@@ -327,6 +328,16 @@ const relayControlDefinitions = [
   control(
     "permission_request_delivered",
     { sessionId: z.string(), requestId: z.string() },
+    "client_to_proxy",
+  ),
+  control(
+    "tool_approve",
+    { sessionId: z.string(), payload: ToolApprovePayloadSchema },
+    "client_to_proxy",
+  ),
+  control(
+    "tool_deny",
+    { sessionId: z.string(), payload: ToolDenyPayloadSchema },
     "client_to_proxy",
   ),
 
