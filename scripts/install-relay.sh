@@ -60,7 +60,6 @@ fi
 DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh <host> <domain>}"
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/dev-anywhere"
-OLD_INSTALL_DIR="/opt/cc-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
 # REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from the
 # Aliyun ACR personal instance (requires `docker login` on the VPS first):
@@ -169,9 +168,6 @@ if [ -z "$TOKEN" ]; then
   if [ -f .env ] && grep -q '^RELAY_PROXY_TOKEN=' .env; then
     TOKEN=$(grep '^RELAY_PROXY_TOKEN=' .env | cut -d= -f2-)
     echo "==> reusing existing RELAY_PROXY_TOKEN from $INSTALL_DIR/.env"
-  elif [ -f "$OLD_INSTALL_DIR/.env" ] && grep -q '^RELAY_PROXY_TOKEN=' "$OLD_INSTALL_DIR/.env"; then
-    TOKEN=$(grep '^RELAY_PROXY_TOKEN=' "$OLD_INSTALL_DIR/.env" | cut -d= -f2-)
-    echo "==> reusing existing RELAY_PROXY_TOKEN from $OLD_INSTALL_DIR/.env"
   else
     TOKEN=$(openssl rand -hex 24)
     echo "==> generated a new RELAY_PROXY_TOKEN"
@@ -188,13 +184,10 @@ EOF
 chmod 600 .env
 
 # Step 6: pull images and start the stack.
-# Remove pre-existing containers from both current and pre-rename deployments.
+# Remove pre-existing dev-anywhere containers.
 # `docker compose down` alone only sees the compose project in the current dir.
 docker compose down --remove-orphans 2>/dev/null || true
-if [ -f "$OLD_INSTALL_DIR/docker-compose.yml" ]; then
-  (cd "$OLD_INSTALL_DIR" && docker compose down --remove-orphans 2>/dev/null || true)
-fi
-docker rm -f dev-anywhere-relay dev-anywhere-nginx cc-anywhere-relay cc-anywhere-nginx 2>/dev/null || true
+docker rm -f dev-anywhere-relay dev-anywhere-nginx 2>/dev/null || true
 
 if [ "$SKIP_PULL" = "1" ]; then
   echo "==> skipping image pull"
@@ -208,10 +201,6 @@ docker compose up -d
 # Step 7: verify.
 sleep 3
 if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
-  if [ -d "$OLD_INSTALL_DIR" ]; then
-    rm -rf "$OLD_INSTALL_DIR"
-    echo "==> removed old install dir $OLD_INSTALL_DIR"
-  fi
   echo
   echo "=== dev-anywhere deployed ==="
   echo "  Web UI:  https://$DOMAIN"
