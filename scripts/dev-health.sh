@@ -176,7 +176,7 @@ scan_log "proxy terminal" "$LOG_DIR/terminal.log" "$TERMINAL_PIDS"
 
 section "Manual Smoke"
 echo "Open: http://localhost:$WEB_PORT"
-echo "Create a real hosted PTY from Web:"
+echo "Create a real hosted terminal from Web:"
 echo "  1. 新建会话 -> 会话模式选择「终端模式」-> Agent CLI 选择 Claude Code 或 Codex"
 echo "  2. 输入一条短消息，确认逐键输入、Shift+Enter、Ctrl+C 菜单、终止会话"
 echo ""

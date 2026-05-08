@@ -99,6 +99,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     );
     const heldSockets = new Set<FakeRelayWebSocket>();
     let holdConnections = false;
+    const ptyBuffers = new Map<string, string>();
 
     function persistSessions(): void {
       localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
@@ -297,7 +298,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               requestId: String(msg.requestId ?? ""),
               cols: 80,
               rows: 24,
-              data: "Dev Anywhere PTY ready\r\n$ ",
+              data: ptyBuffers.get(String(msg.sessionId)) ?? "Dev Anywhere PTY ready\r\n$ ",
               outputSeq: currentOutputSeq(String(msg.sessionId)),
             });
             this.emitJson({
@@ -433,6 +434,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       }
 
       emitPty(sessionId: string, data: string): void {
+        ptyBuffers.set(sessionId, `${ptyBuffers.get(sessionId) ?? ""}${data}`);
         this.dispatchEvent(new MessageEvent("message", { data: encodePtyFrame(sessionId, data) }));
       }
 

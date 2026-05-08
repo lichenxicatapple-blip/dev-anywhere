@@ -12,6 +12,8 @@ interface PtyScrollControllerOptions {
   setNewFramesWhileAway: (value: boolean) => void;
   onAtBottomChange?: (value: boolean) => void;
   onScrollStateChange?: (state: PtyScrollState) => void;
+  initialUserHasVerticalScrollIntent?: boolean;
+  onUserVerticalScrollIntentChange?: (value: boolean) => void;
   atBottomThreshold?: number;
 }
 
@@ -48,6 +50,8 @@ export function attachPtyScrollController(
     setNewFramesWhileAway,
     onAtBottomChange,
     onScrollStateChange,
+    initialUserHasVerticalScrollIntent = false,
+    onUserVerticalScrollIntentChange,
     atBottomThreshold = 8,
   } = options;
 
@@ -63,7 +67,13 @@ export function attachPtyScrollController(
   const syncing = { external: false, internal: false };
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
-  let userHasVerticalScrollIntent = false;
+  let userHasVerticalScrollIntent = initialUserHasVerticalScrollIntent;
+
+  const setUserHasVerticalScrollIntent = (value: boolean): void => {
+    if (userHasVerticalScrollIntent === value) return;
+    userHasVerticalScrollIntent = value;
+    onUserVerticalScrollIntentChange?.(value);
+  };
 
   const getScrollState = (): PtyScrollState => ({
     scrollTop: container.scrollTop,
@@ -99,6 +109,7 @@ export function attachPtyScrollController(
 
   const notifyAtBottom = (): void => {
     const next = computeIsAtBottom();
+    if (next) setUserHasVerticalScrollIntent(false);
     if (lastAtBottom === next) return;
     lastAtBottom = next;
     onAtBottomChange?.(next);
@@ -116,6 +127,7 @@ export function attachPtyScrollController(
   };
 
   const scrollToBottom = (): void => {
+    setUserHasVerticalScrollIntent(false);
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
     syncing.internal = true;
     try {
@@ -129,7 +141,7 @@ export function attachPtyScrollController(
   };
 
   const scrollToRatio = (ratio: number): void => {
-    userHasVerticalScrollIntent = true;
+    setUserHasVerticalScrollIntent(true);
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollTop = maxScrollTop * clamped;
@@ -140,7 +152,7 @@ export function attachPtyScrollController(
     if (deltaY === 0) return;
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     if (maxScrollTop <= 0) return;
-    userHasVerticalScrollIntent = true;
+    setUserHasVerticalScrollIntent(true);
     const next = Math.max(0, Math.min(maxScrollTop, container.scrollTop + deltaY));
     if (next === container.scrollTop) {
       notifyScroll();
@@ -199,10 +211,12 @@ export function attachPtyScrollController(
     }
   };
 
-  const handlePendingNewFrame = (wasAtBottom: boolean): boolean => {
+  const handlePendingNewFrame = (): boolean => {
     if (!hasNewFrame()) return false;
     consumeNewFrame();
-    if (wasAtBottom || !userHasVerticalScrollIntent) {
+    // 重连或 snapshot 重放时 DOM 尺寸会短暂变化，computeIsAtBottom 可能误判。
+    // 用户已经表达过回看历史时，以用户意图为准，避免新输出把视图强行拉到底。
+    if (!userHasVerticalScrollIntent) {
       scrollToBottom();
     } else if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
@@ -239,12 +253,12 @@ export function attachPtyScrollController(
     syncing.external = true;
     try {
       updateSpacer();
-      if (wasAtBottom || !userHasVerticalScrollIntent) {
-        scrollToBottom();
+      const handledNewFrame = handlePendingNewFrame();
+      if (handledNewFrame) {
         return;
       }
-      const handledNewFrame = handlePendingNewFrame(wasAtBottom);
-      if (handledNewFrame) {
+      if (wasAtBottom || !userHasVerticalScrollIntent) {
+        scrollToBottom();
         return;
       }
       const { cellH } = getDims();
@@ -272,6 +286,7 @@ export function attachPtyScrollController(
   const relayout = (): void => {
     const wasAtBottom = computeIsAtBottom();
     updateSpacer();
+    if (handlePendingNewFrame()) return;
     if (wasAtBottom || !userHasVerticalScrollIntent) {
       scrollToBottom();
       return;
@@ -286,14 +301,17 @@ export function attachPtyScrollController(
   };
 
   const onRender = (): void => {
-    const wasAtBottom = computeIsAtBottom();
     updateSpacer();
-    handlePendingNewFrame(wasAtBottom);
+    handlePendingNewFrame();
     notifyScroll();
   };
 
   updateSpacer();
-  scrollToBottom();
+  if (userHasVerticalScrollIntent) {
+    notifyScroll();
+  } else {
+    scrollToBottom();
+  }
 
   const onWheel = (event: WheelEvent): void => {
     if (event.deltaY === 0) return;
@@ -303,7 +321,7 @@ export function attachPtyScrollController(
   };
 
   const onTouchStart = (): void => {
-    userHasVerticalScrollIntent = true;
+    setUserHasVerticalScrollIntent(true);
   };
 
   container.addEventListener("wheel", onWheel, { passive: false, capture: true });

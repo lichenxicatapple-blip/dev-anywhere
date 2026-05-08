@@ -136,6 +136,57 @@ test.describe("WebSocket reconnect chaos", () => {
     ).toBeVisible();
   });
 
+  test("does not force-follow PTY output after reconnect when user is reviewing history", async ({
+    page,
+  }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty(
+        "claude-pty",
+        Array.from(
+          { length: 120 },
+          (_, i) => `history line ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
+
+    const terminal = page.locator('[data-slot="pty-terminal"]');
+    await terminal.evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollTop = 0;
+      node.dispatchEvent(new Event("scroll"));
+      node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -600 }));
+    });
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
+    const scrollTopBeforeReconnect = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+
+    await holdNextConnectionAndDropSocket(page);
+    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
+      "data-state",
+      "disconnected",
+    );
+    await releaseHeldConnections(page);
+    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle", {
+      timeout: 5_000,
+    });
+
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty("claude-pty", "new output after reconnect\r\n");
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
+      .toContain("new output after reconnect");
+    await expect(page.locator('[aria-label="有新消息"]')).toBeVisible();
+    const scrollTopAfterReconnectOutput = await terminal.evaluate(
+      (el) => (el as HTMLElement).scrollTop,
+    );
+    expect(scrollTopAfterReconnectOutput).toBeLessThanOrEqual(scrollTopBeforeReconnect + 8);
+  });
+
   test("does not queue request-response session creation while disconnected", async ({ page }) => {
     await selectFakeProxy(page);
     await page.getByRole("button", { name: "新建会话" }).first().click();

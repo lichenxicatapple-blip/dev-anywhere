@@ -237,6 +237,21 @@ pnpm dev:chaos
 - 还没有做 UI 渲染期间“连续二进制帧 + snapshot + 用户滚动 + socket 重连”的组合 chaos；已有单项覆盖，但组合故障后续可继续加。
 - 创建会话断线失败目前是“明确失败，不自动重试”。这是正确性优先的选择；若以后要做自动重试，必须重新设计 request 幂等 token。
 
+### 2026-05-08 第八轮
+
+已完成：
+
+- 增加组合型 PTY UI chaos：用户正在回看终端历史时，浏览器 WebSocket 断开、重连、再收到新 PTY 输出，UI 必须继续停留在用户回看的位置，并显示“有新消息”入口。
+- 修复滚动层两个根因：
+  - `PtyScrollController` 的用户垂直滚动意图现在由 `ChatPtyView` 持有，可跨连接重建保留，不再因 controller 重挂载无条件贴底。
+  - 新 PTY 帧到达后会直接触发 scroll relayout；不再依赖 xterm 可见区域 render 事件，否则用户回看历史时隐藏帧可能漏掉“有新消息”提示。
+- FakeRelay 的 PTY snapshot 现在会携带测试期间已经输出的 PTY buffer，用来覆盖更接近真实重连的 scrollback 恢复路径。
+- 本地健康检查手册里的用户可见文案从 “hosted PTY” 改为“托管终端”，减少协议词泄漏。
+
+仍未完成：
+
+- 组合 chaos 目前覆盖 PTY 输出 + 用户滚动 + WebSocket 重连；还没有把审批横幅出现/消失叠加进同一场景。
+
 ### 2026-05-08 第四轮
 
 已完成：

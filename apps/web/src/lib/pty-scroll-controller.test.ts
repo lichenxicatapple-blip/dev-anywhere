@@ -271,6 +271,50 @@ describe("attachPtyScrollController", () => {
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
   });
 
+  it("preserves user scroll intent when controller is reattached", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    container.scrollTop = 100;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    expect(container.scrollTop).toBe(100);
+  });
+
+  it("marks unseen frames on relayout even when xterm does not render the hidden frame", () => {
+    const { container, spacer, host } = createDom();
+    const consumeNewFrame = vi.fn();
+    const setNewFramesWhileAway = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => true,
+      consumeNewFrame,
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    controller.relayout();
+
+    expect(consumeNewFrame).toHaveBeenCalledTimes(1);
+    expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
+    expect(container.scrollTop).toBe(0);
+  });
+
   it("owns at-bottom state and exposes scrollToBottom", () => {
     const { container, spacer, host } = createDom();
     const onAtBottomChange = vi.fn();

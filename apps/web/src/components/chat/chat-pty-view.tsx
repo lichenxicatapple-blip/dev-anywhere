@@ -64,6 +64,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   // 不做来源区分会把"scroll 触发的 render"误判为"新帧到达" → 红点虚亮 / scroll 被 follow 拉回.
   // 用 ref flag 标记 "真的有新帧到达", subscribeBinary 收到数据时 set, onRender 消费后清零.
   const pendingNewFrameRef = useRef(false);
+  const userHasVerticalScrollIntentRef = useRef(false);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyAutoscale = useAppStore((s) => s.ptyAutoscale);
@@ -97,6 +98,9 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       },
       onFrameWritten: () => {
         pendingNewFrameRef.current = true;
+        requestAnimationFrame(() => {
+          relayoutPtyRef.current();
+        });
       },
       onRawInput: () => {
         requestAnimationFrame(() => {
@@ -142,6 +146,10 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       setNewFramesWhileAway: follow.setHasNewFramesWhileAway,
       onAtBottomChange: follow.handleAtBottomChange,
       onScrollStateChange: setScrollState,
+      initialUserHasVerticalScrollIntent: userHasVerticalScrollIntentRef.current,
+      onUserVerticalScrollIntentChange: (value) => {
+        userHasVerticalScrollIntentRef.current = value;
+      },
     });
     relayoutPtyRef.current = controller.relayout;
     scrollToBottomRef.current = controller.scrollToBottom;
