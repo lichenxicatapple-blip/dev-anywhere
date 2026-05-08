@@ -27,7 +27,6 @@
 #                   → 实例 → 访问凭证; don't assume cn-hangzhou or the shared
 #                   `registry.cn-*.aliyuncs.com` URL — personal ACR is different.
 #   IMAGE_TAG     — image tag to pull (default: latest).
-#   SKIP_PULL     — set to 1 when images are already built on the VPS.
 #
 # Layout created on the VPS:
 #   /opt/dev-anywhere/
@@ -66,7 +65,6 @@ CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
 #   REGISTRY_BASE=crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
 REGISTRY_BASE="${REGISTRY_BASE:-ghcr.io/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-SKIP_PULL="${SKIP_PULL:-0}"
 RELAY_IMAGE="${REGISTRY_BASE}/dev-anywhere-relay:${IMAGE_TAG}"
 WEB_IMAGE="${REGISTRY_BASE}/dev-anywhere-web:${IMAGE_TAG}"
 
@@ -79,7 +77,6 @@ echo "==> domain:       $DOMAIN"
 echo "==> install dir:  $INSTALL_DIR"
 echo "==> relay image:  $RELAY_IMAGE"
 echo "==> web image:    $WEB_IMAGE"
-echo "==> skip pull:    $SKIP_PULL"
 
 # Step 1: install docker if missing.
 if ! command -v docker >/dev/null 2>&1; then
@@ -189,12 +186,8 @@ chmod 600 .env
 docker compose down --remove-orphans 2>/dev/null || true
 docker rm -f dev-anywhere-relay dev-anywhere-nginx 2>/dev/null || true
 
-if [ "$SKIP_PULL" = "1" ]; then
-  echo "==> skipping image pull"
-else
-  echo "==> pulling images"
-  docker compose pull
-fi
+echo "==> pulling images"
+docker compose pull
 echo "==> starting containers"
 docker compose up -d
 

@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+echo "=== Check release scripts ==="
+bash -n scripts/install-relay.sh
+if grep -R "SKIP_PULL" scripts/install-relay.sh .github/workflows/release.yml >/dev/null; then
+  echo "Release installer must always pull published images; SKIP_PULL is not allowed" >&2
+  exit 1
+fi
+
+echo ""
 echo "=== Build release artifacts ==="
 pnpm build
 

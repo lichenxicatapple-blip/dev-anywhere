@@ -15,9 +15,9 @@ A single `vX.Y.Z` git tag produces four artifacts:
 
 ## Release pipeline
 
-`.github/workflows/release.yml` triggers on any `v*.*.*` tag push (or manual `workflow_dispatch`) and runs two jobs in parallel:
+`.github/workflows/release.yml` triggers on any `v*.*.*` tag push and runs two jobs in parallel:
 
-1. **publish-images** — matrix over `dev-anywhere-relay` and `dev-anywhere-web`. Each job uses `docker/build-push-action` with buildx + GHA cache and pushes image tags `latest`, `X.Y.Z`, `X.Y`, `X` to GHCR.
+1. **publish-images** — matrix over `dev-anywhere-relay` and `dev-anywhere-web`. Each job uses `docker/build-push-action` with buildx + GHA cache and pushes image tags `latest`, `vX.Y.Z`, `X.Y.Z`, `X.Y`, `X` to GHCR.
 2. **publish-npm** — `pnpm -r build` then `pnpm publish` for each npm package. Requires `NPM_TOKEN` repo secret.
 
 GHCR auth uses the workflow's `GITHUB_TOKEN` (no extra secret needed). `packages: write` permission is set on the workflow.
@@ -80,7 +80,7 @@ dev-anywhere serve start --env cloud
 
 ### Self-hosted relay + web (VPS, turnkey)
 
-`scripts/install-relay.sh` uses pre-built GHCR images — no source clone, no build on the VPS, ~30s cold start.
+`scripts/install-relay.sh` uses pre-built GHCR images — no source clone, no build on the VPS, ~30s cold start. Our own cloud deployment must use this same path; do not deploy from local-only images or installer bypasses.
 
 ```bash
 # A) From your laptop, auto-ssh:
