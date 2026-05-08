@@ -74,8 +74,8 @@ docker buildx build -f apps/web/Dockerfile   -t dev-anywhere-web:dry   .
 ```bash
 npm install -g @dev-anywhere/proxy
 dev-anywhere init
-# edit ~/.dev-anywhere/config.json: { "relayUrl": "wss://...", "relayToken": "..." }
-dev-anywhere serve start
+# edit ~/.dev-anywhere/config.json: set envs.cloud.relayToken from RELAY_PROXY_TOKEN
+dev-anywhere serve start --env cloud
 ```
 
 ### Self-hosted relay + web (VPS, turnkey)
@@ -84,11 +84,11 @@ dev-anywhere serve start
 
 ```bash
 # A) From your laptop, auto-ssh:
-./scripts/install-relay.sh --ssh user@vps-host dev-anywhere.example.com
+./scripts/install-relay.sh --ssh user@vps-host dev-anywhere.vita-tools.top
 
 # B) On the VPS directly:
 curl -fsSL https://raw.githubusercontent.com/<owner>/dev-anywhere/main/scripts/install-relay.sh \
-  | sudo bash -s -- dev-anywhere.example.com
+  | sudo bash -s -- dev-anywhere.vita-tools.top
 ```
 
 Upgrade later:

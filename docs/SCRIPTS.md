@@ -22,15 +22,17 @@ Agent CLI 二进制路径可通过环境变量覆盖：
 
 发布后的本地命令不经过 pnpm：
 
-| 命令                            | 用途                                      |
-| ------------------------------- | ----------------------------------------- |
-| `dev-anywhere init`             | 初始化 `~/.dev-anywhere/config.json`。    |
-| `dev-anywhere serve start`      | 启动本机 proxy daemon。                   |
-| `dev-anywhere serve status`     | 查看本机 proxy daemon 和 relay 连接状态。 |
-| `dev-anywhere serve restart`    | 重启本机 proxy daemon。                   |
-| `dev-anywhere serve stop`       | 停止本机 proxy daemon。                   |
-| `dev-anywhere claude [...参数]` | 启动/attach Claude Code 终端会话。        |
-| `dev-anywhere codex [...参数]`  | 启动/attach Codex 终端会话。              |
+| 命令                                     | 用途                                      |
+| ---------------------------------------- | ----------------------------------------- |
+| `dev-anywhere init`                      | 初始化 `~/.dev-anywhere/config.json`。    |
+| `dev-anywhere serve start`               | 用 `defaultEnv` 启动本机 proxy daemon。   |
+| `dev-anywhere serve start --env cloud`   | 用指定环境启动本机 proxy daemon。         |
+| `dev-anywhere serve status`              | 查看本机 proxy daemon 和 relay 连接状态。 |
+| `dev-anywhere serve restart`             | 用 `defaultEnv` 重启本机 proxy daemon。   |
+| `dev-anywhere serve restart --env cloud` | 切换到指定环境并重启。                    |
+| `dev-anywhere serve stop`                | 停止本机 proxy daemon。                   |
+| `dev-anywhere claude [...参数]`          | 启动/attach Claude Code 终端会话。        |
+| `dev-anywhere codex [...参数]`           | 启动/attach Codex 终端会话。              |
 
 `claude` 或 `codex` 后面的参数会原样传给真实 CLI，例如：
 

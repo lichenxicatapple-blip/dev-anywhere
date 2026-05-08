@@ -4,12 +4,12 @@
  * 验证 relay server 的核心功能：WebSocket 连接、proxy 注册、client 查询、双向消息路由
  *
  * Usage: npx tsx apps/relay/scripts/verify-relay.ts [relay-url]
- * Example: npx tsx apps/relay/scripts/verify-relay.ts wss://relay.vita-tools.top
+ * Example: npx tsx apps/relay/scripts/verify-relay.ts wss://dev-anywhere.vita-tools.top
  */
 
 import WebSocket from "ws";
 
-const RELAY_URL = process.argv[2] ?? "wss://relay.vita-tools.top";
+const RELAY_URL = process.argv[2] ?? "wss://dev-anywhere.vita-tools.top";
 
 async function waitOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {

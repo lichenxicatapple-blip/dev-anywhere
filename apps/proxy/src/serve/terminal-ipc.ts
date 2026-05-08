@@ -37,6 +37,7 @@ interface TerminalConnectionDeps {
   ) => ProviderHookContext;
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   resolveInterruptedApprovals: (sessionId: string) => void;
+  config: Extract<IpcMessage, { type: "service_status_response" }>["config"];
 }
 
 export function handleTerminalConnection(socket: Socket, deps: TerminalConnectionDeps): void {
@@ -52,6 +53,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     createHookContext,
     emitAgentStatus,
     resolveInterruptedApprovals,
+    config,
   } = deps;
 
   createIpcReader(
@@ -105,6 +107,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           socket.write(
             serializeIpc({
               type: "service_status_response",
+              config,
               relay: relayStatus,
               sessions: sessions.map((s) => ({
                 id: s.id,

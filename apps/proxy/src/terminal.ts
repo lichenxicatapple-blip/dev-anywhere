@@ -21,6 +21,7 @@ import {
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { SOCK_PATH, STOPPED_PATH, SERVICE_LOG_PATH, tildify } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
+import { daemonEnvArgs } from "./common/daemon-env.js";
 import {
   createIpcReader,
   serializeIpc,
@@ -81,7 +82,7 @@ async function ensureService(autoStart = true): Promise<Socket> {
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
   log.info("Auto-starting serve daemon");
-  const child = spawnScript(new URL("./serve", import.meta.url), [], { logger: log });
+  const child = spawnScript(new URL("./serve", import.meta.url), daemonEnvArgs(), { logger: log });
 
   // 监听 daemon 失败信号，让下面的 tryConnect 轮询能在 daemon 启动时就崩的场景下立刻抛诊断。
   // - 'exit'：进程启动成功后又退出（配置错误、端口占用、内部崩溃），带 code/signal。

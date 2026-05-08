@@ -63,6 +63,29 @@ function resolveInterruptedApprovals(
 
 export interface ServiceOptions {
   relayUrl?: string;
+  envName?: string;
+}
+
+function parseServiceOptions(argv: readonly string[]): ServiceOptions {
+  const options: ServiceOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--env") {
+      const envName = argv[i + 1];
+      if (!envName || envName.startsWith("-")) {
+        throw new Error("Missing value for --env");
+      }
+      options.envName = envName;
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--env=")) {
+      const envName = arg.slice("--env=".length);
+      if (!envName) throw new Error("Missing value for --env");
+      options.envName = envName;
+    }
+  }
+  return options;
 }
 
 export async function startService(options?: ServiceOptions): Promise<void> {
@@ -99,12 +122,21 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   // relay 是 proxy 存在的必要前提，未配置直接 fail-fast，不再支持"本地独立"模式
-  const proxyConfig = loadConfig();
+  const proxyConfig = loadConfig({ envName: options?.envName });
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;
+  const statusConfig = {
+    envName: proxyConfig.envName,
+    envNameSource: proxyConfig.sources.envName,
+    relayUrl,
+    relayUrlSource: proxyConfig.sources.relayUrl,
+    relayTokenSource: proxyConfig.sources.relayToken,
+    hookPort: proxyConfig.hookPort ?? 17654,
+    hookPortSource: proxyConfig.sources.hookPort,
+  };
   if (!relayUrl) {
     const msg =
-      'RELAY_URL is required. Set it via $RELAY_URL or ~/.dev-anywhere/config.json {"relayUrl": "ws://..."}';
+      'Relay URL is required. Set it via RELAY_URL or ~/.dev-anywhere/config.json {"defaultEnv":"local","envs":{"local":{"relayUrl":"ws://..."}}}.';
     serviceLogger.error(msg);
     console.error(msg);
     process.exit(1);
@@ -170,7 +202,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
 
   relayConnection.connect();
-  serviceLogger.info({ relayUrl, proxyName, tokenSet: !!relayToken }, "Connecting to relay server");
+  serviceLogger.info(
+    {
+      envName: proxyConfig.envName ?? "(single)",
+      relayUrl,
+      proxyName,
+      tokenSet: !!relayToken,
+      relayUrlSource: proxyConfig.sources.relayUrl,
+    },
+    "Connecting to relay server",
+  );
 
   const relayRouter = new RelayRouter({
     sessionManager,
@@ -222,6 +263,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       hookEventRouter: hookRuntime.hookEventRouter,
       createHookContext: hookRuntime.createHookContext,
       emitAgentStatus,
+      config: statusConfig,
       resolveInterruptedApprovals: (sessionId) =>
         resolveInterruptedApprovals(
           permissionBroker,
@@ -271,5 +313,10 @@ const isMainModule =
   process.argv[1] && (process.argv[1].endsWith("serve.js") || process.argv[1].endsWith("serve.ts"));
 
 if (isMainModule) {
-  startService();
+  startService(parseServiceOptions(process.argv.slice(2))).catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    serviceLogger.error({ err: message }, "Service failed to start");
+    console.error(message);
+    process.exit(1);
+  });
 }

@@ -19,10 +19,13 @@ Requires Node.js >= 20 and at least one supported local AI coding CLI installed 
 dev-anywhere init
 
 # 2. Edit ~/.dev-anywhere/config.json:
-#   { "relayUrl": "wss://your-relay.example.com", "relayToken": "<token>" }
+#   set cloud.relayToken when your cloud relay requires auth
 
 # 3. Start background daemon
 dev-anywhere serve start
+
+# Or switch relay env while restarting the daemon
+dev-anywhere serve restart --env cloud
 
 # 4. Start or attach a terminal session from any directory
 dev-anywhere claude
@@ -36,7 +39,8 @@ dev-anywhere codex
 ```
 dev-anywhere serve start      # start background daemon
 dev-anywhere serve stop       # stop daemon
-dev-anywhere serve restart    # restart daemon
+dev-anywhere serve restart    # restart daemon using defaultEnv
+dev-anywhere serve restart --env cloud
 dev-anywhere serve status     # show daemon status
 dev-anywhere init             # create default config at ~/.dev-anywhere/config.json
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
@@ -71,12 +75,26 @@ Config file: `~/.dev-anywhere/config.json`
 
 ```json
 {
-  "relayUrl": "wss://your-relay.example.com",
-  "relayToken": "<token from relay RELAY_PROXY_TOKEN env>"
+  "defaultEnv": "local",
+  "envs": {
+    "local": {
+      "relayUrl": "ws://localhost:3100"
+    },
+    "cloud": {
+      "relayUrl": "wss://dev-anywhere.vita-tools.top",
+      "relayToken": ""
+    }
+  }
 }
 ```
 
-Environment variables override config:
+The hosted relay rejects proxy connections without the `RELAY_PROXY_TOKEN`. Fill
+`envs.cloud.relayToken` from the relay server's `.env` before switching to
+cloud.
+
+`dev-anywhere serve start --env cloud` and `dev-anywhere serve restart --env cloud` use a named env without editing the file each time.
+
+Environment variables are reserved for temporary overrides:
 
 - `RELAY_URL` — relay WebSocket URL
 - `RELAY_PROXY_TOKEN` — auth token

@@ -14,6 +14,7 @@ import {
   initWorkspace,
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
+import { daemonEnvArgs, setDesiredDaemonEnv } from "./common/daemon-env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs } from "./cli-args.js";
 
@@ -80,7 +81,9 @@ function showStatus(): Promise<number> {
     sock.on("connect", () => {
       createIpcReader(sock, (msg) => {
         if (msg.type === "service_status_response") {
-          // 显示 relay 连接状态
+          const config = msg.config;
+          log(`Env:     ${config.envName ?? "single"} (${config.envNameSource})`);
+          log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
           const relay = msg.relay;
           if (!relay) {
             log("Relay:   not configured");
@@ -137,7 +140,7 @@ async function waitForServeReady(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function startDaemon(): Promise<void> {
+async function startDaemon(options?: { envName?: string }): Promise<void> {
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
     try {
@@ -152,8 +155,9 @@ async function startDaemon(): Promise<void> {
 
   // stderr 走 pipe 由父 CLI 订阅：子进程 ready 前（pino logger 未接管）的启动错误
   // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。
-  // unref: false 保持父对子的 refcount，让父进程在 readiness handshake 期间不会提前退。
-  const child = spawnScript(new URL("./serve", import.meta.url), [], {
+  // start 命令必须等 daemon socket 可连接后再退出；否则用户会看到“启动成功”，实际服务还没就绪。
+  const serveArgs = daemonEnvArgs(options?.envName);
+  const child = spawnScript(new URL("./serve", import.meta.url), serveArgs, {
     stdio: ["ignore", "ignore", "pipe"],
     unref: false,
   });
@@ -248,6 +252,7 @@ const serve = new Command("serve")
       process.exit(1);
     }
     if (opts.daemon) {
+      setDesiredDaemonEnv(undefined);
       await startDaemon();
     } else {
       // 延迟导入 serve: daemon 模式只需要 startDaemon（纯 spawn），不需要加载 70KB 的 serve bundle
@@ -259,12 +264,14 @@ const serve = new Command("serve")
 serve
   .command("start")
   .description("Start the background service")
-  .action(async () => {
+  .option("--env <name>", "Use a named config environment")
+  .action(async (opts) => {
     if (!isInitialized()) {
       console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
-    await startDaemon();
+    setDesiredDaemonEnv(opts.env);
+    await startDaemon({ envName: opts.env });
   });
 
 serve
@@ -297,9 +304,11 @@ serve
 serve
   .command("restart")
   .description("Restart the background service")
-  .action(async () => {
+  .option("--env <name>", "Use a named config environment")
+  .action(async (opts) => {
+    setDesiredDaemonEnv(opts.env);
     stopService();
-    await startDaemon();
+    await startDaemon({ envName: opts.env });
   });
 
 program.addCommand(serve);

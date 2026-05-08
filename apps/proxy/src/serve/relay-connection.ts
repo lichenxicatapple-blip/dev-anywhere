@@ -134,7 +134,10 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("open", () => {
         // open 属异步回调，若同步 close() 已先切 CLOSED，REGISTERING 会被拒，需跳过后续 register
         if (!this.fsm.tryTransitionTo(RelayConnectionState.REGISTERING)) return;
-        serviceLogger.info({ proxyId: this.proxyId, url }, "Connected to relay server");
+        serviceLogger.info(
+          { proxyId: this.proxyId, url: base, tokenSet: !!this.token },
+          "Connected to relay server",
+        );
         this.ws!.send(
           JSON.stringify({
             type: "proxy_register",

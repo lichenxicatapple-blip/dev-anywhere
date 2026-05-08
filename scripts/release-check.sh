@@ -74,6 +74,8 @@ HOME="$TMP_HOME" node apps/proxy/dist/index.js init
 HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status >/dev/null
 
 test -f "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"defaultEnv": "local"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"envs"' "$TMP_HOME/.dev-anywhere/config.json"
 test -f "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
 grep -q "U+2022" "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
 

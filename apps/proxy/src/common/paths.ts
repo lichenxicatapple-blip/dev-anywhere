@@ -30,6 +30,7 @@ export const PID_PATH = `${RUN_DIR}/dev-anywhere.pid`;
 // 这与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会立即把它重新拉起。
 // 解决办法是 stop 落下此标记，terminal 重连逻辑先检查标记：存在则仅 tryConnect，不 spawn。
 export const STOPPED_PATH = `${RUN_DIR}/stopped`;
+export const DESIRED_ENV_PATH = `${RUN_DIR}/desired-env`;
 
 // 持久化状态
 const STATE_DIR = `${APP_DIR}/state`;
@@ -61,7 +62,16 @@ export function isInitialized(): boolean {
 }
 
 const DEFAULT_CONFIG = `{
-  "relayUrl": "ws://localhost:3100"
+  "defaultEnv": "local",
+  "envs": {
+    "local": {
+      "relayUrl": "ws://localhost:3100"
+    },
+    "cloud": {
+      "relayUrl": "wss://dev-anywhere.vita-tools.top",
+      "relayToken": ""
+    }
+  }
 }
 `;
 

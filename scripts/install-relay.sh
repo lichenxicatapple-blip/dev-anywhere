@@ -4,13 +4,13 @@
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./install-relay.sh --ssh user@vps-host dev-anywhere.example.com
+#        ./install-relay.sh --ssh user@vps-host dev-anywhere.vita-tools.top
 #      Requires ssh-key access to the remote host and sudo for that user.
 #
 #   2) Run directly on the VPS:
-#        sudo ./install-relay.sh dev-anywhere.example.com
+#        sudo ./install-relay.sh dev-anywhere.vita-tools.top
 #      Or:
-#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- dev-anywhere.example.com
+#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- dev-anywhere.vita-tools.top
 #
 # Arguments:
 #   domain — public DNS name with an A record pointing at the VPS.
@@ -27,6 +27,7 @@
 #                   → 实例 → 访问凭证; don't assume cn-hangzhou or the shared
 #                   `registry.cn-*.aliyuncs.com` URL — personal ACR is different.
 #   IMAGE_TAG     — image tag to pull (default: latest).
+#   SKIP_PULL     — set to 1 when images are already built on the VPS.
 #
 # Layout created on the VPS:
 #   /opt/dev-anywhere/
@@ -59,12 +60,14 @@ fi
 DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh <host> <domain>}"
 TOKEN="${2:-}"
 INSTALL_DIR="/opt/dev-anywhere"
+OLD_INSTALL_DIR="/opt/cc-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
 # REGISTRY_BASE is the "registry/namespace" prefix. Override to pull from the
 # Aliyun ACR personal instance (requires `docker login` on the VPS first):
 #   REGISTRY_BASE=crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
 REGISTRY_BASE="${REGISTRY_BASE:-ghcr.io/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+SKIP_PULL="${SKIP_PULL:-0}"
 RELAY_IMAGE="${REGISTRY_BASE}/dev-anywhere-relay:${IMAGE_TAG}"
 WEB_IMAGE="${REGISTRY_BASE}/dev-anywhere-web:${IMAGE_TAG}"
 
@@ -77,6 +80,7 @@ echo "==> domain:       $DOMAIN"
 echo "==> install dir:  $INSTALL_DIR"
 echo "==> relay image:  $RELAY_IMAGE"
 echo "==> web image:    $WEB_IMAGE"
+echo "==> skip pull:    $SKIP_PULL"
 
 # Step 1: install docker if missing.
 if ! command -v docker >/dev/null 2>&1; then
@@ -102,15 +106,24 @@ if ! command -v certbot >/dev/null 2>&1; then
 fi
 
 # Step 3: obtain the SSL certificate via certbot standalone.
-if [ ! -d "/etc/letsencrypt/live/$CERT_NAME" ]; then
+CERT_PATH="/etc/letsencrypt/live/$CERT_NAME/fullchain.pem"
+NEED_CERT=0
+if [ ! -f "$CERT_PATH" ]; then
+  NEED_CERT=1
+elif ! openssl x509 -in "$CERT_PATH" -noout -checkhost "$DOMAIN" >/dev/null 2>&1; then
+  echo "==> existing cert name '$CERT_NAME' does not cover $DOMAIN; renewing"
+  NEED_CERT=1
+else
+  echo "==> cert already covers $DOMAIN at /etc/letsencrypt/live/$CERT_NAME"
+fi
+
+if [ "$NEED_CERT" -eq 1 ]; then
   echo "==> requesting SSL cert for $DOMAIN (cert name: $CERT_NAME)"
   if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
     (cd "$INSTALL_DIR" && docker compose down 2>/dev/null || true)
   fi
   certbot certonly --standalone -d "$DOMAIN" --non-interactive --agree-tos \
-    --email "admin@$DOMAIN" --cert-name "$CERT_NAME"
-else
-  echo "==> cert already exists at /etc/letsencrypt/live/$CERT_NAME"
+    --email "admin@$DOMAIN" --cert-name "$CERT_NAME" --force-renewal
 fi
 
 # Step 4: write the deployment manifest. No build, no Dockerfile.
@@ -156,6 +169,9 @@ if [ -z "$TOKEN" ]; then
   if [ -f .env ] && grep -q '^RELAY_PROXY_TOKEN=' .env; then
     TOKEN=$(grep '^RELAY_PROXY_TOKEN=' .env | cut -d= -f2-)
     echo "==> reusing existing RELAY_PROXY_TOKEN from $INSTALL_DIR/.env"
+  elif [ -f "$OLD_INSTALL_DIR/.env" ] && grep -q '^RELAY_PROXY_TOKEN=' "$OLD_INSTALL_DIR/.env"; then
+    TOKEN=$(grep '^RELAY_PROXY_TOKEN=' "$OLD_INSTALL_DIR/.env" | cut -d= -f2-)
+    echo "==> reusing existing RELAY_PROXY_TOKEN from $OLD_INSTALL_DIR/.env"
   else
     TOKEN=$(openssl rand -hex 24)
     echo "==> generated a new RELAY_PROXY_TOKEN"
@@ -172,20 +188,30 @@ EOF
 chmod 600 .env
 
 # Step 6: pull images and start the stack.
-# Remove any pre-existing containers with the same names (e.g. from a previous
-# source-build deployment). `docker compose down` alone won't catch them when
-# the old stack was created under a different project name.
+# Remove pre-existing containers from both current and pre-rename deployments.
+# `docker compose down` alone only sees the compose project in the current dir.
 docker compose down --remove-orphans 2>/dev/null || true
-docker rm -f dev-anywhere-relay dev-anywhere-nginx 2>/dev/null || true
+if [ -f "$OLD_INSTALL_DIR/docker-compose.yml" ]; then
+  (cd "$OLD_INSTALL_DIR" && docker compose down --remove-orphans 2>/dev/null || true)
+fi
+docker rm -f dev-anywhere-relay dev-anywhere-nginx cc-anywhere-relay cc-anywhere-nginx 2>/dev/null || true
 
-echo "==> pulling images"
-docker compose pull
+if [ "$SKIP_PULL" = "1" ]; then
+  echo "==> skipping image pull"
+else
+  echo "==> pulling images"
+  docker compose pull
+fi
 echo "==> starting containers"
 docker compose up -d
 
 # Step 7: verify.
 sleep 3
 if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
+  if [ -d "$OLD_INSTALL_DIR" ]; then
+    rm -rf "$OLD_INSTALL_DIR"
+    echo "==> removed old install dir $OLD_INSTALL_DIR"
+  fi
   echo
   echo "=== dev-anywhere deployed ==="
   echo "  Web UI:  https://$DOMAIN"
@@ -197,8 +223,8 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo "  npm install -g @dev-anywhere/proxy"
   echo "  dev-anywhere init"
   echo "  # edit ~/.dev-anywhere/config.json:"
-  echo "  #   { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$TOKEN\" }"
-  echo "  dev-anywhere serve start"
+  echo "  #   { \"defaultEnv\": \"cloud\", \"envs\": { \"cloud\": { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$TOKEN\" } } }"
+  echo "  dev-anywhere serve start --env cloud"
   echo
   echo "To upgrade later:"
   echo "  cd $INSTALL_DIR && docker compose pull && docker compose up -d"
