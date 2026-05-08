@@ -23,14 +23,20 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={makeMessage({ id: "u1", role: "user", text: "hello" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("user");
-    expect(bubble.className).toContain("justify-end");
+    const row = bubble.querySelector('[data-slot="message-row"]');
+    expect(row?.className).toContain("justify-end");
+    expect(row?.className).toContain("dev-message-rail");
   });
 
   it("renders assistant role with data-role=assistant (left alignment)", () => {
     render(<MessageBubble message={makeMessage({ id: "a1", role: "assistant", text: "hi" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("assistant");
-    expect(bubble.className).toContain("justify-start");
+    const row = bubble.querySelector('[data-slot="message-row"]');
+    expect(row?.className).toContain("justify-start");
+    expect(row?.className).toContain("dev-message-rail");
+    expect(row?.firstElementChild?.className).toContain("w-fit");
+    expect(row?.firstElementChild?.className).toContain("max-w-[88%]");
   });
 
   it("shows streaming cursor when assistant isPartial=true", () => {
@@ -59,5 +65,17 @@ describe("MessageBubble", () => {
       />,
     );
     expect(screen.queryByLabelText("streaming")).toBeNull();
+  });
+
+  it("applies JSON content font size to the bubble body", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({ id: "a3", role: "assistant", text: "sized" })}
+        contentFontSize={18}
+      />,
+    );
+
+    const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
+    expect(body?.style.fontSize).toBe("18px");
   });
 });

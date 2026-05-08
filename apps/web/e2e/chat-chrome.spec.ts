@@ -64,6 +64,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(menu.getByText("复制会话")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-terminate-item"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
   });
 });
 

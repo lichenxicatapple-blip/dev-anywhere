@@ -13,6 +13,20 @@ export const ProxyInfoSchema = z.object({
 });
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
+export const AgentCliAvailabilitySchema = z.object({
+  available: z.boolean(),
+  command: z.string().optional(),
+  error: z.string().optional(),
+  suggestions: z.array(z.string()).optional(),
+});
+export type AgentCliAvailability = z.infer<typeof AgentCliAvailabilitySchema>;
+
+export const AgentCliStatusSchema = z.object({
+  claude: AgentCliAvailabilitySchema,
+  codex: AgentCliAvailabilitySchema,
+});
+export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
+
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
 export type DirEntry = z.infer<typeof DirEntrySchema>;
 
@@ -253,7 +267,26 @@ const relayControlDefinitions = [
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
   control("proxy_info_request", RequestIdShape, "client_to_proxy"),
-  control("proxy_info", { ...RequestIdShape, homePath: z.string() }, "proxy_to_client"),
+  control(
+    "proxy_info",
+    { ...RequestIdShape, homePath: z.string(), agentCli: AgentCliStatusSchema },
+    "proxy_to_client",
+  ),
+  control(
+    "agent_cli_config_update",
+    { ...RequestIdShape, provider: z.enum(["claude", "codex"]), path: z.string().min(1) },
+    "client_to_proxy",
+  ),
+  control(
+    "agent_cli_config_update_response",
+    {
+      ...RequestIdShape,
+      provider: z.enum(["claude", "codex"]),
+      agentCli: AgentCliStatusSchema.optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
 
   // 远程创建 JSON 会话，client -> proxy -> response
   control(

@@ -1,0 +1,4 @@
+export const MIN_CHAT_FONT_SIZE = 8;
+export const MAX_CHAT_FONT_SIZE = 24;
+export const DEFAULT_TERMINAL_FONT_SIZE = 14;
+export const DEFAULT_CHAT_CONTENT_FONT_SIZE = 14;

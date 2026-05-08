@@ -75,7 +75,7 @@ export function Sidebar({ className }: SidebarProps) {
             <span className="ml-1 text-muted-foreground/70 font-normal">· {sessionCount}</span>
           ) : null}
         </h3>
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 min-h-0">
           <SessionList layout="sidebar" />
         </div>
       </div>

@@ -2,7 +2,7 @@
 // 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { SessionInfo } from "@dev-anywhere/shared";
+import type { AgentCliStatus, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
 
 interface CreateSessionDialogProps {
@@ -32,6 +33,7 @@ interface CreateSessionDialogProps {
 }
 
 type SessionMode = "pty" | "json";
+type ProviderId = "claude" | "codex";
 type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
@@ -48,6 +50,10 @@ const CODEX_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: strin
 ];
 const SESSION_CREATE_TIMEOUT_MS = 15_000;
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
+const PROVIDER_LABEL: Record<ProviderId, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+};
 
 function extractMissingCwd(error: string, errorCode?: string): string | null {
   if (errorCode !== ControlErrorCode.PATH_NOT_FOUND || !error.startsWith(MISSING_CWD_PREFIX)) {
@@ -57,18 +63,49 @@ function extractMissingCwd(error: string, errorCode?: string): string | null {
   return path || null;
 }
 
+function providerStatus(
+  provider: ProviderId,
+  mode: SessionMode,
+  agentCli: AgentCliStatus | null,
+): { label: string; disabled: boolean; title?: string } {
+  if (mode === "json" && provider === "codex") {
+    return { label: "仅支持终端模式", disabled: true };
+  }
+  if (!agentCli) {
+    return { label: "检测中", disabled: true };
+  }
+  const status = agentCli[provider];
+  if (status.available) {
+    return { label: "可用", disabled: false, title: status.command };
+  }
+  return { label: "未找到", disabled: true, title: status.error };
+}
+
+function providerTooltip(provider: ProviderId, status: ReturnType<typeof providerStatus>): string {
+  if (status.title) {
+    return status.disabled
+      ? `${PROVIDER_LABEL[provider]}：${status.title}`
+      : `${PROVIDER_LABEL[provider]} 路径：${status.title}`;
+  }
+  return `${PROVIDER_LABEL[provider]}：${status.label}`;
+}
+
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
-  const [provider, setProvider] = useState<"claude" | "codex">("claude");
+  const [provider, setProvider] = useState<ProviderId>("claude");
   const [mode, setMode] = useState<SessionMode>("pty");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [submitting, setSubmitting] = useState(false);
   const [missingCwd, setMissingCwd] = useState<string | null>(null);
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
+  const [editingCliProvider, setEditingCliProvider] = useState<ProviderId | null>(null);
+  const [cliPathInput, setCliPathInput] = useState("");
+  const [savingCliPath, setSavingCliPath] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
+  const agentCli = useFileStore((s) => s.agentCli);
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -77,19 +114,29 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
   }, [open, homePath, cwd]);
 
-  // proxy_info 是创建会话目录选择的基础状态。HMR/重连后前端 store 可能丢失 homePath,
-  // 这里在弹窗打开时补拉一次，避免只能靠硬刷新重新走完整绑定流程。
   useEffect(() => {
-    if (!open || homePath) return;
-    if (useFileStore.getState().homePath) return;
+    if (!open) return;
+    if (homePath && agentCli) return;
     const request = relayClientRef?.requestProxyInfo();
     if (!request) return;
     void request
       .then((info) => {
-        useFileStore.getState().setHomePath(info.homePath);
+        const store = useFileStore.getState();
+        store.setHomePath(info.homePath);
+        store.setAgentCli(info.agentCli);
       })
       .catch(() => undefined);
-  }, [open, homePath]);
+  }, [open, homePath, agentCli]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (mode === "json") {
+      if (provider === "codex") {
+        setProvider("claude");
+        normalizePermissionMode("claude", mode);
+      }
+    }
+  }, [open, mode, provider]);
 
   useEffect(() => {
     if (!cwdPickerOpen) return;
@@ -112,6 +159,9 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     setMode("pty");
     setPermissionMode("default");
     setMissingCwd(null);
+    setEditingCliProvider(null);
+    setCliPathInput("");
+    setSavingCliPath(false);
   }
 
   function handleSubmit() {
@@ -122,8 +172,13 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     mode === "pty" && provider === "codex"
       ? CODEX_PERMISSION_MODE_OPTIONS
       : PERMISSION_MODE_OPTIONS;
+  const claudeStatus = providerStatus("claude", mode, agentCli);
+  const codexStatus = providerStatus("codex", mode, agentCli);
+  const selectedStatus = providerStatus(provider, mode, agentCli);
+  const createDisabled = submitting || savingCliPath || selectedStatus.disabled;
+  const selectedCli = agentCli?.[provider];
 
-  function normalizePermissionMode(nextProvider: "claude" | "codex", nextMode: SessionMode) {
+  function normalizePermissionMode(nextProvider: ProviderId, nextMode: SessionMode) {
     if (nextMode === "pty" && nextProvider === "codex") {
       const supported = CODEX_PERMISSION_MODE_OPTIONS.some(
         (option) => option.value === permissionMode,
@@ -146,6 +201,15 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     const submittedName = name.trim();
     const submittedMode = mode;
     const submittedProvider = provider;
+    if (selectedStatus.disabled) {
+      const reason = agentCli?.[provider]?.error;
+      toast.error(
+        reason
+          ? `${PROVIDER_LABEL[provider]} 不可用：${reason}`
+          : `${PROVIDER_LABEL[provider]} 暂不可用`,
+      );
+      return;
+    }
     setMissingCwd(null);
     setSubmitting(true);
     try {
@@ -207,6 +271,42 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
       return null;
+    }
+  }
+
+  function openCliPathEditor(targetProvider: ProviderId) {
+    const status = agentCli?.[targetProvider];
+    setEditingCliProvider(targetProvider);
+    setCliPathInput(status?.command ?? status?.suggestions?.[0] ?? "");
+  }
+
+  async function saveCliPath() {
+    if (!editingCliProvider) return;
+    const path = cliPathInput.trim();
+    if (!path) {
+      toast.error("请输入 Agent CLI 路径");
+      return;
+    }
+    const relay = relayClientRef;
+    if (!relay) {
+      toast.error("请先连接开发机");
+      return;
+    }
+    setSavingCliPath(true);
+    try {
+      const result = await relay.updateAgentCliPath(editingCliProvider, path);
+      if (result.error || !result.agentCli) {
+        toast.error(`路径保存失败：${result.error ?? "未知错误"}`);
+        return;
+      }
+      useFileStore.getState().setAgentCli(result.agentCli);
+      toast.success(`${PROVIDER_LABEL[editingCliProvider]} 路径已保存`);
+      setEditingCliProvider(null);
+      setCliPathInput("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingCliPath(false);
     }
   }
 
@@ -345,42 +445,154 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                aria-pressed={provider === "claude"}
-                onClick={() => setProvider("claude")}
-                className={cn(
-                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  provider === "claude"
-                    ? "border-primary/70 bg-primary/10"
-                    : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">Claude Code</span>
-                <span className="text-xs text-muted-foreground">可用</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={provider === "codex"}
-                aria-disabled={mode === "json"}
-                onClick={() => {
-                  if (mode === "json") return;
-                  setProvider("codex");
-                  normalizePermissionMode("codex", mode);
-                }}
-                className={cn(
-                  "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  mode === "json" && "cursor-not-allowed opacity-45",
-                  provider === "codex"
-                    ? "border-primary/70 bg-primary/10"
-                    : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">Codex</span>
-                <span className="text-xs text-muted-foreground">
-                  {mode === "pty" ? "可用" : "仅支持终端模式"}
-                </span>
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-pressed={provider === "claude"}
+                    aria-label="Claude Code"
+                    aria-disabled={claudeStatus.disabled}
+                    onClick={() => setProvider("claude")}
+                    className={cn(
+                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      provider === "claude"
+                        ? "border-primary/70 bg-primary/10"
+                        : "border-border bg-muted/20",
+                    )}
+                  >
+                    <span className="text-sm font-medium">Claude Code</span>
+                    <span
+                      className={cn(
+                        "text-xs text-muted-foreground",
+                        claudeStatus.disabled && agentCli && "text-destructive",
+                      )}
+                    >
+                      {claudeStatus.label}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
+                  <span className="break-all font-mono text-xs">
+                    {providerTooltip("claude", claudeStatus)}
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-pressed={provider === "codex"}
+                    aria-label="Codex"
+                    aria-disabled={codexStatus.disabled || mode === "json"}
+                    onClick={() => {
+                      if (mode === "json") return;
+                      setProvider("codex");
+                      normalizePermissionMode("codex", mode);
+                    }}
+                    className={cn(
+                      "flex min-h-14 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      mode === "json" && "cursor-not-allowed opacity-45",
+                      provider === "codex"
+                        ? "border-primary/70 bg-primary/10"
+                        : "border-border bg-muted/20",
+                    )}
+                  >
+                    <span className="text-sm font-medium">Codex</span>
+                    <span
+                      className={cn(
+                        "text-xs text-muted-foreground",
+                        codexStatus.disabled && agentCli && mode === "pty" && "text-destructive",
+                      )}
+                    >
+                      {codexStatus.label}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
+                  <span className="break-all font-mono text-xs">
+                    {providerTooltip("codex", codexStatus)}
+                  </span>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
+              {editingCliProvider === provider ? (
+                <div className="flex items-center gap-2">
+                  <label className="min-w-0 flex-1">
+                    <span className="sr-only">CLI 路径</span>
+                    <input
+                      type="text"
+                      list={`agent-cli-path-${editingCliProvider}`}
+                      value={cliPathInput}
+                      onChange={(event) => setCliPathInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveCliPath();
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setEditingCliProvider(null);
+                          setCliPathInput("");
+                        }
+                      }}
+                      placeholder={
+                        editingCliProvider === "claude"
+                          ? "/Users/admin/.local/bin/claude"
+                          : "/Users/admin/.local/bin/codex"
+                      }
+                      className="h-10 w-full rounded-md border border-border bg-input px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <datalist id={`agent-cli-path-${editingCliProvider}`}>
+                      {(agentCli?.[editingCliProvider].suggestions ?? []).map((path) => (
+                        <option key={path} value={path} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setEditingCliProvider(null);
+                      setCliPathInput("");
+                    }}
+                    disabled={savingCliPath}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium"
+                    onClick={() => void saveCliPath()}
+                    disabled={savingCliPath || !cliPathInput.trim()}
+                  >
+                    {savingCliPath ? "保存中..." : "保存路径"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p
+                    className={cn(
+                      "flex h-10 min-w-0 flex-1 items-center truncate font-mono text-sm",
+                      selectedCli?.available ? "text-foreground" : "text-destructive",
+                    )}
+                    title={selectedCli?.command ?? selectedCli?.error}
+                  >
+                    {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    onClick={() => openCliPathEditor(provider)}
+                    disabled={mode === "json" && provider === "codex"}
+                  >
+                    指定路径
+                  </Button>
+                </div>
+              )}
             </div>
           </section>
           <label className="flex flex-col gap-2">
@@ -410,7 +622,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             >
               取消
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={createDisabled}>
               {submitting ? "创建中..." : "创建"}
             </Button>
           </DialogFooter>

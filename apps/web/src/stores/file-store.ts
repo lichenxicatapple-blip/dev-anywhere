@@ -3,17 +3,19 @@
 // proxy 的 isPathSafe 只接受绝对路径, 相对路径会被直接拒绝
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { DirEntry } from "@dev-anywhere/shared";
+import type { AgentCliStatus, DirEntry } from "@dev-anywhere/shared";
 
 interface FileStoreState {
   tree: Map<string, DirEntry[]>;
   cwd: string;
   // proxy 启动时回传的 process.env.HOME, 新建会话 picker 的默认起点
   homePath: string;
+  agentCli: AgentCliStatus | null;
 
   setDirEntries: (path: string, entries: DirEntry[]) => void;
   setCwd: (cwd: string) => void;
   setHomePath: (homePath: string) => void;
+  setAgentCli: (agentCli: AgentCliStatus) => void;
   clearTree: () => void;
 }
 
@@ -23,6 +25,7 @@ export const useFileStore = create<FileStoreState>()(
       tree: new Map(),
       cwd: "",
       homePath: "",
+      agentCli: null,
 
       setDirEntries: (path, entries) => {
         const next = new Map(get().tree);
@@ -31,6 +34,7 @@ export const useFileStore = create<FileStoreState>()(
       },
       setCwd: (cwd) => set({ cwd }),
       setHomePath: (homePath) => set({ homePath }),
+      setAgentCli: (agentCli) => set({ agentCli }),
       clearTree: () => set({ tree: new Map(), cwd: "" }),
     }),
     { name: "file-store" },

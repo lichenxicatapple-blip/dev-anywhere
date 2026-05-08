@@ -5,6 +5,7 @@ interface PtyScrollMetrics {
   viewportY: number;
   cellH: number;
   cellW: number;
+  visibleContentHeight?: number;
 }
 
 interface PtyHostLayout {
@@ -28,11 +29,15 @@ export function computePtyHostLayout(
     return null;
   }
   const blankRows = canvasLastY < 0 ? metrics.rows - 1 : metrics.rows - 1 - canvasLastY;
+  const hostHeight = metrics.rows * metrics.cellH;
+  const maxYdisp = Math.max(0, metrics.bufferLength - metrics.rows);
+  const visibleContentHeight = Math.max(0, metrics.visibleContentHeight ?? 0);
+  const minSpacerHeightForLastViewport = maxYdisp * metrics.cellH + visibleContentHeight;
   return {
-    spacerHeight: metrics.bufferLength * metrics.cellH,
+    spacerHeight: Math.max(metrics.bufferLength * metrics.cellH, minSpacerHeightForLastViewport),
     spacerWidth: metrics.cols * metrics.cellW,
     hostWidth: metrics.cols * metrics.cellW,
-    hostHeight: metrics.rows * metrics.cellH,
+    hostHeight,
     hostPaddingTop: Math.max(0, blankRows) * metrics.cellH,
   };
 }

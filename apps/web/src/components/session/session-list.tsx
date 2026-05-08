@@ -228,7 +228,7 @@ export function SessionList({ layout }: SessionListProps) {
   // 直接用 overflow-y-auto 而非 ScrollArea，避免 radix ScrollArea 内部 table-wrapper 打破 truncate 链路
   return (
     <>
-      <div className="h-full overflow-y-auto">
+      <div className="dev-sidebar-scroll h-full overflow-y-auto overscroll-contain">
         {activeListElement}
         {historyElement}
       </div>

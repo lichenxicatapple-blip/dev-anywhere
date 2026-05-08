@@ -43,6 +43,7 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       permissionBroker,
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
       nextSeq: () => 1,
     });
 

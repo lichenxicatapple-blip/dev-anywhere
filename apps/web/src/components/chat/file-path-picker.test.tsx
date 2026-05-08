@@ -21,6 +21,7 @@ describe("FilePathPicker", () => {
       tree: new Map(),
       cwd: "/Users/admin/test_go",
       homePath: "/Users/admin",
+      agentCli: null,
     });
   });
 

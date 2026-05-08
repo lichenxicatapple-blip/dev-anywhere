@@ -97,7 +97,7 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
     >
       <div
         className={cn(
-          "absolute top-0 right-2 bottom-0 w-2 rounded-full bg-foreground/5 opacity-0 transition-opacity",
+          "dev-render-scrollbar-track absolute top-0 right-2 bottom-0 w-2 rounded-full opacity-0 transition-opacity",
           (dragging || geometry.visible) && "group-hover:opacity-100",
           dragging && "opacity-100",
         )}
@@ -106,9 +106,9 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
         ref={thumbRef}
         data-slot="pty-scrollbar-thumb"
         className={cn(
-          "absolute right-2 w-2 rounded-full bg-foreground/35 transition-[background-color,width,right]",
-          "group-hover:right-1.5 group-hover:w-2.5 group-hover:bg-foreground/55",
-          dragging && "right-1.5 w-2.5 bg-foreground/70",
+          "dev-render-scrollbar-thumb absolute right-2 w-2 rounded-full transition-[background,width,right,border-color,box-shadow]",
+          "group-hover:right-1.5 group-hover:w-2.5",
+          dragging && "dev-render-scrollbar-thumb-active right-1.5 w-2.5",
         )}
         style={{
           top: `${geometry.topPercent}%`,
@@ -200,7 +200,7 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
     >
       <div
         className={cn(
-          "absolute left-0 right-0 bottom-2 h-2 rounded-full bg-foreground/5 opacity-0 transition-opacity",
+          "dev-render-scrollbar-track absolute left-0 right-0 bottom-2 h-2 rounded-full opacity-0 transition-opacity",
           (dragging || geometry.visible) && "group-hover:opacity-100",
           dragging && "opacity-100",
         )}
@@ -209,9 +209,9 @@ export function PtyHorizontalScrollbar({ state, onScrollRatio }: PtyHorizontalSc
         ref={thumbRef}
         data-slot="pty-horizontal-scrollbar-thumb"
         className={cn(
-          "absolute bottom-2 h-2 rounded-full bg-foreground/35 transition-[background-color,height,bottom]",
-          "group-hover:bottom-1.5 group-hover:h-2.5 group-hover:bg-foreground/55",
-          dragging && "bottom-1.5 h-2.5 bg-foreground/70",
+          "dev-render-scrollbar-thumb absolute bottom-2 h-2 rounded-full transition-[background,height,bottom,border-color,box-shadow]",
+          "group-hover:bottom-1.5 group-hover:h-2.5",
+          dragging && "dev-render-scrollbar-thumb-active bottom-1.5 h-2.5",
         )}
         style={{
           left: `${geometry.leftPercent}%`,

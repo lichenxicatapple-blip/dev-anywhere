@@ -32,6 +32,7 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
       permissionBroker,
       relayConnection: relay,
       jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
     });
     // 引用以避免 lint unused
     void registry;

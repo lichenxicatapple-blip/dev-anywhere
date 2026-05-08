@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import type {
   ProviderAdapter,
   ProviderCommand,
   ProviderJsonOptions,
   ProviderTerminalOptions,
 } from "./types.js";
+import { resolveExecutable } from "./path-resolver.js";
 
 function codexApprovalArgs(permissionMode?: string): string[] {
   switch (permissionMode) {
@@ -26,13 +26,12 @@ function withCodexTerminalPermissionArgs(args: string[], permissionMode?: string
 }
 
 export function resolveCodexCommand(env: NodeJS.ProcessEnv): string {
-  const custom = env.CODEX_BIN;
-  if (custom) return custom;
-  try {
-    return execFileSync("which", ["codex"], { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error("codex not found in PATH. Set CODEX_BIN or install Codex CLI.");
-  }
+  return resolveExecutable(
+    "codex",
+    env,
+    "CODEX_BIN",
+    "codex not found in PATH. Set CODEX_BIN or install Codex CLI.",
+  );
 }
 
 export const CODEX_PROVIDER: ProviderAdapter = {

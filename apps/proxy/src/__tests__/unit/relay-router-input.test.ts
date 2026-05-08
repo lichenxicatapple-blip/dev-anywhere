@@ -80,6 +80,9 @@ function createRouter(options: {
     permissionBroker: new PermissionBroker(),
     hookEventRouter: {} as never,
     agentStatusRegistry: new AgentStatusRegistry(),
+    getProviderEnv: () => ({}),
+    getAgentCliSuggestions: () => ({}),
+    setAgentCliPath: () => {},
   });
 }
 

@@ -2,6 +2,7 @@
 import type { WebSocketManager } from "@/services/websocket";
 import type {
   AgentStatusPayload,
+  AgentCliStatus,
   CommandEntry,
   DirEntry,
   FileTreeGroup,
@@ -173,7 +174,9 @@ export class RelayClient {
     }));
   }
 
-  requestProxyInfo(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<{ homePath: string }> {
+  requestProxyInfo(
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<{ homePath: string; agentCli: AgentCliStatus }> {
     const requestId = nextRequestId("proxy-info");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_info" }> =>
@@ -181,7 +184,35 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "proxy_info_request", requestId })),
       "读取开发机信息超时",
       timeoutMs,
-    ).then((resp) => ({ homePath: resp.homePath }));
+    ).then((resp) => ({ homePath: resp.homePath, agentCli: resp.agentCli }));
+  }
+
+  updateAgentCliPath(
+    provider: "claude" | "codex",
+    path: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<{ provider: "claude" | "codex"; agentCli?: AgentCliStatus } & RequestError> {
+    const requestId = nextRequestId("agent-cli-config");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "agent_cli_config_update_response" }> =>
+        msg.type === "agent_cli_config_update_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "agent_cli_config_update",
+            requestId,
+            provider,
+            path,
+          }),
+        ),
+      "保存 Agent CLI 路径超时",
+      timeoutMs,
+    ).then((resp) => ({
+      provider: resp.provider,
+      agentCli: resp.agentCli,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
   }
 
   requestSessionHistory(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<HistorySession[]> {

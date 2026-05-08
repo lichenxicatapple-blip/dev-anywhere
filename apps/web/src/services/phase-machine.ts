@@ -26,7 +26,9 @@ function requestProxyState(relay: RelayClient): void {
   const proxyInfoRequest = relay.requestProxyInfo();
   void proxyInfoRequest
     .then((info) => {
-      useFileStore.getState().setHomePath(info.homePath);
+      const fileStore = useFileStore.getState();
+      fileStore.setHomePath(info.homePath);
+      fileStore.setAgentCli(info.agentCli);
     })
     .catch(() => undefined);
   void relay

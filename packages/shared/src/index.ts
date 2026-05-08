@@ -61,6 +61,8 @@ export { buildMessage } from "./builders/index.js";
 // relay control
 export {
   ProxyInfoSchema,
+  AgentCliAvailabilitySchema,
+  AgentCliStatusSchema,
   DirEntrySchema,
   FileTreeGroupSchema,
   CommandEntrySchema,
@@ -73,6 +75,8 @@ export {
 } from "./schemas/relay-control.js";
 export type {
   ProxyInfo,
+  AgentCliAvailability,
+  AgentCliStatus,
   DirEntry,
   FileTreeGroup,
   CommandEntry,

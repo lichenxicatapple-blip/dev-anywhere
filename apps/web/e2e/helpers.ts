@@ -233,6 +233,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
               type: "proxy_info",
               requestId: msg.requestId,
               homePath: "/Users/admin",
+              agentCli: {
+                claude: { available: true, command: "/usr/local/bin/claude" },
+                codex: { available: true, command: "/usr/local/bin/codex" },
+              },
             });
             break;
           case "dir_list_request":

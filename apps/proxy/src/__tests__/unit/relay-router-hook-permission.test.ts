@@ -31,6 +31,9 @@ describe("RelayRouter hook permission decisions", () => {
         onPermissionResolved: options.hookResolved,
       } as never,
       agentStatusRegistry: new AgentStatusRegistry(),
+      getProviderEnv: () => ({}),
+      getAgentCliSuggestions: () => ({}),
+      setAgentCliPath: () => {},
     });
   }
 

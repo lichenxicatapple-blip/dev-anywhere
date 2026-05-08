@@ -40,6 +40,7 @@ const HOSTED_PTY_COLORTERM = "truecolor";
 interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
+  getProviderEnv: () => NodeJS.ProcessEnv;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
   onTurnComplete: (sessionId: string) => void;
   onSessionClosed: (sessionId: string) => void;
@@ -100,7 +101,7 @@ export class HostedPtyRegistry {
     const rows = options.rows ?? DEFAULT_ROWS;
     const command = provider.buildTerminalCommand(
       { args: options.args, permissionMode: options.permissionMode, hook: options.hook },
-      process.env,
+      this.deps.getProviderEnv(),
     );
     const env = normalizeHostedPtyEnv(command.env);
     const child = pty.spawn(command.command, command.args, {
@@ -145,6 +146,7 @@ export class HostedPtyRegistry {
       {
         sessionId: options.sessionId,
         provider: options.provider,
+        command: command.command,
         pid: child.pid,
         cwd: options.cwd,
         cols,

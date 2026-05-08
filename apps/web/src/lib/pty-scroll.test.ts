@@ -26,6 +26,40 @@ describe("PTY scroll geometry", () => {
     ).toBe(380);
   });
 
+  it("extends scroll space when the terminal screen is shorter than the viewport", () => {
+    expect(
+      computePtyHostLayout(
+        {
+          bufferLength: 371,
+          rows: 48,
+          cols: 212,
+          viewportY: 270,
+          cellH: 12,
+          cellW: 6,
+          visibleContentHeight: 1212,
+        },
+        47,
+      )?.spacerHeight,
+    ).toBe(5088);
+  });
+
+  it("keeps the sticky release range when the terminal screen is taller than the viewport", () => {
+    expect(
+      computePtyHostLayout(
+        {
+          bufferLength: 120,
+          rows: 40,
+          cols: 80,
+          viewportY: 0,
+          cellH: 20,
+          cellW: 10,
+          visibleContentHeight: 500,
+        },
+        39,
+      )?.spacerHeight,
+    ).toBe(2400);
+  });
+
   it("treats an empty viewport as all but the last row blank", () => {
     expect(
       computePtyHostLayout(

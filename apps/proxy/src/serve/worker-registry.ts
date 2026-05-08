@@ -25,6 +25,7 @@ interface WorkerRegistryDeps {
   relayConnection: RelayConnection;
   // JSON 观察通道状态机；forwardEvent / forwardApprovalRequest 据此推状态变迁
   jsonObserver: JsonObserver;
+  getProviderEnv: () => NodeJS.ProcessEnv;
   nextSeq?: (sessionId: string) => number;
 }
 
@@ -116,11 +117,12 @@ export class WorkerRegistry {
     }
     args.push("--");
 
+    const providerEnv = this.deps.getProviderEnv();
     const child = spawnScript(new URL("../session-worker", import.meta.url), args, {
       logger: serviceLogger,
       env: options?.hook
-        ? { ...process.env, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }
-        : process.env,
+        ? { ...providerEnv, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }
+        : providerEnv,
     });
     const workerPid = child.pid!;
     this.children.set(sessionId, child);

@@ -23,6 +23,7 @@ interface RelaySessionCreateHandlerDeps {
   controlHandlers: ControlMessageHandlers;
   permissionBroker: PermissionBroker;
   agentStatusRegistry: AgentStatusRegistry;
+  getProviderEnv: () => NodeJS.ProcessEnv;
   createHookContext: (
     sessionId: string,
     provider: ProviderHookContext["provider"],
@@ -242,16 +243,28 @@ export class RelaySessionCreateHandler {
       this.deps.broadcastSessionList();
       serviceLogger.info({ sessionId: session.id, provider, cwd }, "Hosted PTY session created");
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       this.deps.relaySend(
         JSON.stringify({
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: "",
           errorCode: ControlErrorCode.PROCESS_START_FAILED,
-          error: String(err),
+          error,
         }),
       );
-      serviceLogger.warn({ provider, cwd, error: String(err) }, "Hosted PTY session create failed");
+      const providerEnv = this.deps.getProviderEnv();
+      serviceLogger.warn(
+        {
+          provider,
+          cwd,
+          error,
+          claudeBin: providerEnv.CLAUDE_BIN,
+          codexBin: providerEnv.CODEX_BIN,
+          path: providerEnv.PATH,
+        },
+        "Hosted PTY session create failed",
+      );
     }
   }
 

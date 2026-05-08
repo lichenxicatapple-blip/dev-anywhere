@@ -11,6 +11,10 @@ interface CCTestHooks {
     addUserMessage: (sessionId: string, message: ChatMessage) => void;
     appendAssistantText: (sessionId: string, text: string) => void;
     markTurnComplete: (sessionId: string) => void;
+    loadHistory: (
+      sessionId: string,
+      messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>,
+    ) => void;
   };
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
@@ -43,6 +47,7 @@ export function installTestHooks(): void {
       addUserMessage: (sid, msg) => useChatStore.getState().addUserMessage(sid, msg),
       appendAssistantText: (sid, text) => useChatStore.getState().appendAssistantText(sid, text),
       markTurnComplete: (sid) => useChatStore.getState().markTurnComplete(sid),
+      loadHistory: (sid, messages) => useChatStore.getState().loadHistory(sid, messages),
     },
     session: {
       setPtyTitle: (sid, title) => useSessionStore.getState().setPtyTitle(sid, title),

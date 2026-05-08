@@ -64,6 +64,18 @@ export function attachPtyScrollController(
     };
   };
 
+  const getVerticalInsets = (): { paddingTop: number; paddingBottom: number } => {
+    const style = getComputedStyle(container);
+    const parsePx = (value: string): number => {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    return {
+      paddingTop: parsePx(style.paddingTop),
+      paddingBottom: parsePx(style.paddingBottom),
+    };
+  };
+
   const syncing = { external: false, internal: false };
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
@@ -172,6 +184,8 @@ export function attachPtyScrollController(
   const updateSpacer = (): void => {
     const { cellH, cellW } = getDims();
     if (cellH === 0 || cellW === 0) return;
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const buffer = term.buffer.active;
     let canvasLastY = -1;
     for (let ry = term.rows - 1; ry >= 0; ry--) {
@@ -191,6 +205,7 @@ export function attachPtyScrollController(
         viewportY: buffer.viewportY,
         cellH,
         cellW,
+        visibleContentHeight,
       },
       canvasLastY,
     );
@@ -200,6 +215,10 @@ export function attachPtyScrollController(
     host.style.width = `${layout.hostWidth}px`;
     host.style.height = `${layout.hostHeight}px`;
     host.style.paddingTop = `${layout.hostPaddingTop}px`;
+    host.style.top =
+      layout.hostHeight < visibleContentHeight
+        ? `${paddingTop + visibleContentHeight - layout.hostHeight}px`
+        : "0px";
   };
 
   const scrollToYdisp = (ydisp: number): void => {

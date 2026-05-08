@@ -1,23 +1,11 @@
-// PTY 模式 Chat 视图: 自包含 xterm + 内联 status 条 + follow-to-bottom
-// 工具审批: PTY 模式优先保留 provider 原生 TUI; 结构化审批卡片只用于 JSON 模式。
-// 滚动交由浏览器原生: 外层 .pty-terminal (overflow-auto) 做 scrollable, spacer 撑出 buffer.length*cellH,
-// xterm 挂在 position:sticky 的 host. scroll 事件 -> term.scrollToLine(ydisp), term.onScroll -> 同步 scrollTop.
-// canvas 比容器高时 (autoscale off 手机竖屏常见), sticky release 阶段自然暴露 canvas 底部, 代替老 pinBottom.
-// 好处: touch/wheel/fling/momentum/edge bounce 全部走浏览器合成线程, 无 JS jank, 和原生 app 手感一致.
-//
-// 冷启动贴底: Claude Code TUI 纯 append 模式, 启动初期只画前 N 行, canvas 下半是 PTY 空白行.
-// updateSpacer 扫出 canvasLastY, 给 host paddingTop = (rows-1-canvasLastY)*cellH 把 canvas 推到 host 底部,
-// host overflow:hidden 裁掉 canvas 超出 host 底的空白部分. host.height 保持 rows*cellH 让 sticky release 机制照常工作.
-// scrollTop=max 时 sticky release → host 底贴 container 底 → canvas 有效内容贴 container 底.
-// 累积到 canvasLastY=rows-1 后 paddingTop=0, 回到原状态无任何视觉影响.
-//
-// follow 语义与 JSON 模式对齐: 在底时 onRender 自动 scrollTop=scrollHeight 追随;
-// 离底时置 newFramesWhileAway 红点, 用户点按钮或自然滚回即清零.
+// PTY 模式保留 provider 原生 TUI，Web 只负责滚动和输入转发。
+// 浏览器滚动容器映射到 xterm viewportY；当真实 PTY 屏幕比 Web 可视区矮时，
+// scroll spacer 仍保证底部位置能映射到 xterm baseY，而不是伪造额外终端行。
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
-import { applyPtyFontSize, fitPtyFontSizeOnce } from "@/lib/pty-fit-controller";
+import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
@@ -68,8 +56,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
-  const ptyFitRequestId = useAppStore((s) => s.ptyFitRequestId);
-  const setPtyFontSize = useAppStore((s) => s.setPtyFontSize);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
 
   function handleTerminalContainerMouseDown(event: MouseEvent<HTMLDivElement>): void {
@@ -182,20 +168,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
 
     applyPtyFontSize(term, ptyFontSize, () => relayoutPtyRef.current());
   }, [connection.ready, ptyFontSize]);
-
-  useEffect(() => {
-    if (!connection.ready || ptyFitRequestId === 0) return;
-    const container = containerEl;
-    const term = terminalRef.current;
-    if (!container || !term) return;
-
-    const next = fitPtyFontSizeOnce({
-      container,
-      term,
-      onRelayout: () => relayoutPtyRef.current(),
-    });
-    if (next !== null) setPtyFontSize(next);
-  }, [connection.ready, ptyFitRequestId, containerEl, setPtyFontSize]);
 
   useEffect(() => {
     if (!connection.ready || !webOwnsPtyGeometry) return;

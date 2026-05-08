@@ -68,6 +68,7 @@ export function registerResourceDispatcher(): () => void {
         break;
       case "proxy_info":
         useFileStore.getState().setHomePath(msg.homePath);
+        useFileStore.getState().setAgentCli(msg.agentCli);
         break;
       default:
         break;

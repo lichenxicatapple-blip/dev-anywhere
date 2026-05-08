@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   CLAUDE_PROVIDER,
   buildClaudeHookSettings,
@@ -7,6 +10,18 @@ import {
   resolveClaudeJsonCommand,
   resolveClaudePtyCommand,
 } from "#src/providers/claude.js";
+
+function withExecutable(name: string, test: (path: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-claude-provider-"));
+  try {
+    const path = join(dir, name);
+    writeFileSync(path, "#!/bin/sh\n");
+    chmodSync(path, 0o755);
+    test(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("Claude provider", () => {
   it("declares Claude provider capabilities", () => {
@@ -87,29 +102,35 @@ describe("Claude provider", () => {
   });
 
   it("uses CLAUDE_BIN for PTY command before probing PATH", () => {
-    expect(resolveClaudePtyCommand({ CLAUDE_BIN: "/custom/claude" })).toBe("/custom/claude");
+    withExecutable("claude", (claudeBin) => {
+      expect(resolveClaudePtyCommand({ CLAUDE_BIN: claudeBin })).toBe(claudeBin);
+    });
   });
 
   it("builds PTY command without mutating args or env", () => {
     const args = ["--continue"];
-    const env = { CLAUDE_BIN: "/custom/claude", TERM: "xterm" } as NodeJS.ProcessEnv;
+    withExecutable("claude", (claudeBin) => {
+      const env = { CLAUDE_BIN: claudeBin, TERM: "xterm" } as NodeJS.ProcessEnv;
 
-    const command = CLAUDE_PROVIDER.buildTerminalCommand({ args }, env);
+      const command = CLAUDE_PROVIDER.buildTerminalCommand({ args }, env);
 
-    expect(command).toEqual({
-      command: "/custom/claude",
-      args,
-      env,
+      expect(command).toEqual({
+        command: claudeBin,
+        args,
+        env,
+      });
     });
   });
 
   it("maps terminal permission mode to Claude CLI args", () => {
-    const command = CLAUDE_PROVIDER.buildTerminalCommand(
-      { args: ["--continue"], permissionMode: "default" },
-      { CLAUDE_BIN: "/custom/claude" },
-    );
+    withExecutable("claude", (claudeBin) => {
+      const command = CLAUDE_PROVIDER.buildTerminalCommand(
+        { args: ["--continue"], permissionMode: "default" },
+        { CLAUDE_BIN: claudeBin },
+      );
 
-    expect(command.args).toEqual(["--permission-mode", "default", "--continue"]);
+      expect(command.args).toEqual(["--permission-mode", "default", "--continue"]);
+    });
   });
 
   it("injects session-scoped Claude hook settings and env", () => {
@@ -145,16 +166,18 @@ describe("Claude provider", () => {
       token: "token-1",
     };
 
-    const command = CLAUDE_PROVIDER.buildTerminalCommand(
-      { args: ["--continue"], hook },
-      { CLAUDE_BIN: "/custom/claude" },
-    );
-    const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
-      hooks: Record<string, unknown>;
-    };
+    withExecutable("claude", (claudeBin) => {
+      const command = CLAUDE_PROVIDER.buildTerminalCommand(
+        { args: ["--continue"], hook },
+        { CLAUDE_BIN: claudeBin },
+      );
+      const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
+        hooks: Record<string, unknown>;
+      };
 
-    expect(settings.hooks.PreToolUse).toBeDefined();
-    expect(settings.hooks.PermissionRequest).toBeUndefined();
+      expect(settings.hooks.PreToolUse).toBeDefined();
+      expect(settings.hooks.PermissionRequest).toBeUndefined();
+    });
   });
 
   it("builds Claude hook settings without global config paths", () => {
@@ -172,6 +195,8 @@ describe("Claude provider", () => {
   it("does not call PATH resolution when CLAUDE_BIN is present", () => {
     const execFileSync = vi.fn();
     expect(execFileSync).not.toHaveBeenCalled();
-    expect(resolveClaudePtyCommand({ CLAUDE_BIN: "/already/set" })).toBe("/already/set");
+    withExecutable("claude", (claudeBin) => {
+      expect(resolveClaudePtyCommand({ CLAUDE_BIN: claudeBin })).toBe(claudeBin);
+    });
   });
 });

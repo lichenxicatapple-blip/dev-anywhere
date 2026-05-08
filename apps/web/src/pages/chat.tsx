@@ -92,7 +92,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
       data-keyboard-offset={kbOffset}
     >
-      <ChatHeader sessionId={id} />
+      <ChatHeader sessionId={id} mode={mode} />
       <StatusLine state={statusState} />
       <div className="flex-1 min-h-0 relative">
         {mode === "pty" && statusState === "waiting_approval" && (
@@ -117,8 +117,10 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       {mode === "json" && !routeSessionEnded && (
         <>
           <QuotePreviewBar sessionId={id} />
-          <div className="p-2" data-slot="input-bar-region">
-            <InputBar sessionId={id} />
+          <div className="px-4 py-2" data-slot="input-bar-region">
+            <div className="dev-message-rail mx-auto w-full">
+              <InputBar sessionId={id} />
+            </div>
           </div>
         </>
       )}

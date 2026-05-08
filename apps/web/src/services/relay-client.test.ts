@@ -143,11 +143,34 @@ describe("RelayClient request handling", () => {
     const { relay, ws } = createClient();
     const promise = relay.requestProxyInfo();
     const requestId = sentRequestId(ws);
+    const agentCli = {
+      claude: { available: true, command: "/usr/local/bin/claude" },
+      codex: { available: false, error: "codex not found" },
+    };
 
-    ws.emit({ type: "proxy_info", requestId: "other-request", homePath: "/tmp" });
-    ws.emit({ type: "proxy_info", requestId, homePath: "/Users/admin" });
+    ws.emit({ type: "proxy_info", requestId: "other-request", homePath: "/tmp", agentCli });
+    ws.emit({ type: "proxy_info", requestId, homePath: "/Users/admin", agentCli });
 
-    await expect(promise).resolves.toEqual({ homePath: "/Users/admin" });
+    await expect(promise).resolves.toEqual({ homePath: "/Users/admin", agentCli });
+  });
+
+  it("updates an Agent CLI path through the selected proxy", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.updateAgentCliPath("claude", "/Users/admin/.local/bin/claude");
+    const requestId = sentRequestId(ws);
+    const agentCli = {
+      claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+      codex: { available: true, command: "/usr/local/bin/codex" },
+    };
+
+    ws.emit({
+      type: "agent_cli_config_update_response",
+      requestId,
+      provider: "claude",
+      agentCli,
+    });
+
+    await expect(promise).resolves.toEqual({ provider: "claude", agentCli });
   });
 
   it("waits for matching session history responses", async () => {

@@ -41,6 +41,9 @@ describe("RelayRouter agent_status_request", () => {
       permissionBroker: new PermissionBroker(),
       hookEventRouter: {} as never,
       agentStatusRegistry: options.registry,
+      getProviderEnv: () => ({}),
+      getAgentCliSuggestions: () => ({}),
+      setAgentCliPath: () => {},
     });
   }
 

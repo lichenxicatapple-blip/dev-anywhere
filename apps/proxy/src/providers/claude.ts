@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import type {
   ProviderAdapter,
   ProviderCommand,
@@ -6,6 +5,7 @@ import type {
   ProviderJsonOptions,
   ProviderTerminalOptions,
 } from "./types.js";
+import { resolveExecutable } from "./path-resolver.js";
 
 export type ClaudePermissionMode =
   | "default"
@@ -48,15 +48,12 @@ export function buildClaudeArgs(options: {
 }
 
 export function resolveClaudePtyCommand(env: NodeJS.ProcessEnv): string {
-  const custom = env.CLAUDE_BIN;
-  if (custom) return custom;
-  try {
-    return execFileSync("which", ["claude"], { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error(
-      "claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download",
-    );
-  }
+  return resolveExecutable(
+    "claude",
+    env,
+    "CLAUDE_BIN",
+    "claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download",
+  );
 }
 
 export function resolveClaudeJsonCommand(env: NodeJS.ProcessEnv): string {

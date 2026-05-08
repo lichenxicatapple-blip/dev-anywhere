@@ -40,6 +40,10 @@ interface RelayRouterDeps {
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   agentStatusRegistry: AgentStatusRegistry;
+  envName?: string;
+  getProviderEnv: () => NodeJS.ProcessEnv;
+  getAgentCliSuggestions: () => Partial<Record<ProviderHookContext["provider"], string[]>>;
+  setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -67,6 +71,10 @@ export class RelayRouter {
       relaySend: deps.relaySend,
       controlHandlers: deps.controlHandlers,
       sessionManager: deps.sessionManager,
+      envName: deps.envName,
+      getProviderEnv: deps.getProviderEnv,
+      getAgentCliSuggestions: deps.getAgentCliSuggestions,
+      setAgentCliPath: deps.setAgentCliPath,
     });
     this.permissionHandlers = new RelayPermissionHandlers({
       relaySend: deps.relaySend,
@@ -82,6 +90,7 @@ export class RelayRouter {
       controlHandlers: deps.controlHandlers,
       permissionBroker: deps.permissionBroker,
       agentStatusRegistry: deps.agentStatusRegistry,
+      getProviderEnv: deps.getProviderEnv,
       createHookContext: deps.createHookContext,
       cleanupHookContext: deps.cleanupHookContext,
       broadcastSessionSync: deps.broadcastSessionSync,
@@ -115,6 +124,7 @@ export class RelayRouter {
     tool_approve: (msg) => this.permissionHandlers.onToolApprove(msg),
     tool_deny: (msg) => this.permissionHandlers.onToolDeny(msg),
     proxy_info_request: (msg) => this.resourceHandlers.onProxyInfoRequest(msg),
+    agent_cli_config_update: (msg) => this.resourceHandlers.onAgentCliConfigUpdate(msg),
     dir_list_request: (msg) => this.resourceHandlers.onDirListRequest(msg),
     dir_create_request: (msg) => this.resourceHandlers.onDirCreateRequest(msg),
     session_create: (msg) => this.sessionCreateHandler.onSessionCreate(msg),

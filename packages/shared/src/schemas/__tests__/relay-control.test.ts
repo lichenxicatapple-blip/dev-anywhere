@@ -201,11 +201,55 @@ describe("RelayControlSchema", () => {
         type: "proxy_info",
         requestId: "info-1",
         homePath: "/Users/admin",
+        agentCli: {
+          claude: { available: true, command: "/usr/local/bin/claude" },
+          codex: { available: false, error: "codex not found" },
+        },
       }),
     ).toEqual({
       type: "proxy_info",
       requestId: "info-1",
       homePath: "/Users/admin",
+      agentCli: {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: false, error: "codex not found" },
+      },
+    });
+  });
+
+  it("parses agent CLI path update request/response", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "agent_cli_config_update",
+        requestId: "agent-cli-1",
+        provider: "claude",
+        path: "/Users/admin/.local/bin/claude",
+      }),
+    ).toEqual({
+      type: "agent_cli_config_update",
+      requestId: "agent-cli-1",
+      provider: "claude",
+      path: "/Users/admin/.local/bin/claude",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "agent_cli_config_update_response",
+        requestId: "agent-cli-1",
+        provider: "claude",
+        agentCli: {
+          claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+          codex: { available: true, command: "/usr/local/bin/codex" },
+        },
+      }),
+    ).toEqual({
+      type: "agent_cli_config_update_response",
+      requestId: "agent-cli-1",
+      provider: "claude",
+      agentCli: {
+        claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      },
     });
   });
 

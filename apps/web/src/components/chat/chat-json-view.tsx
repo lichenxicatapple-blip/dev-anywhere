@@ -1,6 +1,6 @@
 // JSON 模式主视图: 虚拟滚动消息列表 + 内联 ToolApprovalCard
 // StatusLine / QuotePreviewBar / InputBar 由 chat.tsx 统一承载，此文件只负责消息区
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -29,6 +29,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   );
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
+  const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
@@ -60,14 +61,40 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
       .catch(() => undefined);
   }, [sessionId, connected, proxyOnline]);
 
+  const getMessageItemKey = useCallback(
+    (index: number) => messages[index]?.id ?? index,
+    [messages],
+  );
+
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollEl,
     estimateSize: () => 120,
     overscan: 5,
+    getItemKey: getMessageItemKey,
   });
 
   const lastMsg = messages[messages.length - 1];
+  const messageCountRef = useRef(messages.length);
+  useEffect(() => {
+    messageCountRef.current = messages.length;
+  }, [messages.length]);
+
+  useLayoutEffect(() => {
+    virtualizer.measure();
+    const messageCount = messageCountRef.current;
+    if (!scrollEl || !isAtBottomSnapshot.current || messageCount === 0) return;
+    let secondRaf = 0;
+    const firstRaf = requestAnimationFrame(() => {
+      secondRaf = requestAnimationFrame(() => {
+        virtualizer.scrollToIndex(messageCount - 1, { align: "end", behavior: "auto" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstRaf);
+      cancelAnimationFrame(secondRaf);
+    };
+  }, [chatContentFontSize, scrollEl, virtualizer]);
 
   // 首屏 messages 从 0 到非 0 时强制滚到底: virtualizer.scrollToIndex 在
   // estimate→measure 过渡期定位不稳 (target 可能被 clamp 到 0), 直接设
@@ -132,7 +159,11 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 relative min-h-0">
-        <div ref={setScrollEl} className="absolute inset-0 overflow-auto" data-slot="message-list">
+        <div
+          ref={setScrollEl}
+          className="dev-render-scroll absolute inset-0 overflow-auto"
+          data-slot="message-list"
+        >
           {scrollEl && (
             // min-h-full + flex-1 filler 让 totalSize<clientHeight 时内容贴底显示,
             // 溢出时 filler basis=0 shrink→0, virtualizer 从顶部开始正常滚动
@@ -158,7 +189,10 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                       transform: `translateY(${vi.start}px)`,
                     }}
                   >
-                    <MessageBubble message={messages[vi.index]} />
+                    <MessageBubble
+                      message={messages[vi.index]}
+                      contentFontSize={chatContentFontSize}
+                    />
                   </div>
                 ))}
               </div>

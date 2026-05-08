@@ -178,6 +178,19 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         },
         setPtyState(state: "working" | "turn_complete" | "approval_wait" | "mid_pause") {
           this.socket?.emitJson({ type: "pty_state", sessionId, payload: { state } });
+          this.socket?.emitJson({
+            type: "session_status",
+            payload: {
+              sessionId,
+              state:
+                state === "approval_wait"
+                  ? "waiting_approval"
+                  : state === "turn_complete"
+                    ? "idle"
+                    : "working",
+              lastActive: Date.now(),
+            },
+          });
         },
       };
       window.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
@@ -374,5 +387,66 @@ test.describe("PTY browser smoke", () => {
         ),
       )
       .toBeGreaterThanOrEqual(2);
+  });
+
+  test("keeps xterm at the real last viewport when small fonts leave extra vertical space", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("cc_ptyFontSize", "10");
+    });
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+    await resetLocalState(page);
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+
+    await expectTerminalMounted(page);
+    await page.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from(
+          { length: 220 },
+          (_, i) => `small font line ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.__ccTest?.pty.metrics("pty-smoke")?.fontSize))
+      .toBe(10);
+
+    await page.locator('[data-slot="pty-terminal"]').hover();
+    await page.mouse.wheel(0, -1800);
+    await expect
+      .poll(() =>
+        page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
+          const node = el as HTMLElement;
+          return node.scrollHeight - node.clientHeight - node.scrollTop;
+        }),
+      )
+      .toBeGreaterThan(0);
+
+    await page.mouse.wheel(0, 5000);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const node = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+          const term = window.__ccTestPtyTerminals?.get("pty-smoke");
+          if (!node || !term) return null;
+          return {
+            bottomGap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop),
+            viewportY: term.buffer.active.viewportY,
+            baseY: term.buffer.active.baseY,
+          };
+        }),
+      )
+      .toEqual(expect.objectContaining({ bottomGap: 0, viewportY: expect.any(Number) }));
+
+    const metrics = await page.evaluate(() => {
+      const term = window.__ccTestPtyTerminals?.get("pty-smoke");
+      return term
+        ? { viewportY: term.buffer.active.viewportY, baseY: term.buffer.active.baseY }
+        : null;
+    });
+    expect(metrics?.viewportY).toBe(metrics?.baseY);
   });
 });

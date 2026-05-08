@@ -2,6 +2,12 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import type { ProxyInfo } from "@dev-anywhere/shared";
+import {
+  DEFAULT_CHAT_CONTENT_FONT_SIZE,
+  DEFAULT_TERMINAL_FONT_SIZE,
+  MAX_CHAT_FONT_SIZE,
+  MIN_CHAT_FONT_SIZE,
+} from "@/lib/chat-font-size";
 
 type AppPhase =
   | "connecting"
@@ -29,7 +35,7 @@ interface AppStoreState {
   clientId: string;
   relayUrl: string;
   ptyFontSize: number;
-  ptyFitRequestId: number;
+  chatContentFontSize: number;
   sidebarCollapsed: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
@@ -44,7 +50,9 @@ interface AppStoreState {
   setPtyFontSize: (fontSize: number) => void;
   adjustPtyFontSize: (delta: number) => void;
   resetPtyFontSize: () => void;
-  requestPtyFit: () => void;
+  setChatContentFontSize: (fontSize: number) => void;
+  adjustChatContentFontSize: (delta: number) => void;
+  resetChatContentFontSize: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
   setPendingToast: (toast: PendingToast | null) => void;
@@ -71,18 +79,21 @@ function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
   }
 }
 
-const DEFAULT_PTY_FONT_SIZE = 14;
-export const MIN_PTY_FONT_SIZE = 8;
-export const MAX_PTY_FONT_SIZE = 24;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "dev_anywhere_sidebarCollapsed";
+const CHAT_CONTENT_FONT_SIZE_STORAGE_KEY = "dev_anywhere_chatContentFontSize";
 
-function clampPtyFontSize(value: number): number {
-  return Math.max(MIN_PTY_FONT_SIZE, Math.min(MAX_PTY_FONT_SIZE, Math.round(value)));
+function clampChatFontSize(value: number): number {
+  return Math.max(MIN_CHAT_FONT_SIZE, Math.min(MAX_CHAT_FONT_SIZE, Math.round(value)));
 }
 
 function loadPtyFontSize(): number {
   const stored = Number(localStorage.getItem("cc_ptyFontSize"));
-  return Number.isFinite(stored) ? clampPtyFontSize(stored) : DEFAULT_PTY_FONT_SIZE;
+  return Number.isFinite(stored) ? clampChatFontSize(stored) : DEFAULT_TERMINAL_FONT_SIZE;
+}
+
+function loadChatContentFontSize(): number {
+  const stored = Number(localStorage.getItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY));
+  return Number.isFinite(stored) ? clampChatFontSize(stored) : DEFAULT_CHAT_CONTENT_FONT_SIZE;
 }
 
 function loadSidebarCollapsed(): boolean {
@@ -103,7 +114,7 @@ export const useAppStore = create<AppStoreState>()(
       clientId: loadClientId(),
       relayUrl: "",
       ptyFontSize: loadPtyFontSize(),
-      ptyFitRequestId: 0,
+      chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
       pendingToast: null,
 
@@ -114,21 +125,35 @@ export const useAppStore = create<AppStoreState>()(
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
       setPtyFontSize: (fontSize) => {
-        const next = clampPtyFontSize(fontSize);
+        const next = clampChatFontSize(fontSize);
         localStorage.setItem("cc_ptyFontSize", String(next));
         set({ ptyFontSize: next });
       },
       adjustPtyFontSize: (delta) => {
-        const next = clampPtyFontSize(get().ptyFontSize + delta);
+        const next = clampChatFontSize(get().ptyFontSize + delta);
         localStorage.setItem("cc_ptyFontSize", String(next));
         set({ ptyFontSize: next });
       },
       resetPtyFontSize: () => {
-        localStorage.setItem("cc_ptyFontSize", String(DEFAULT_PTY_FONT_SIZE));
-        set({ ptyFontSize: DEFAULT_PTY_FONT_SIZE });
+        localStorage.setItem("cc_ptyFontSize", String(DEFAULT_TERMINAL_FONT_SIZE));
+        set({ ptyFontSize: DEFAULT_TERMINAL_FONT_SIZE });
       },
-      requestPtyFit: () => {
-        set({ ptyFitRequestId: get().ptyFitRequestId + 1 });
+      setChatContentFontSize: (fontSize) => {
+        const next = clampChatFontSize(fontSize);
+        localStorage.setItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        set({ chatContentFontSize: next });
+      },
+      adjustChatContentFontSize: (delta) => {
+        const next = clampChatFontSize(get().chatContentFontSize + delta);
+        localStorage.setItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        set({ chatContentFontSize: next });
+      },
+      resetChatContentFontSize: () => {
+        localStorage.setItem(
+          CHAT_CONTENT_FONT_SIZE_STORAGE_KEY,
+          String(DEFAULT_CHAT_CONTENT_FONT_SIZE),
+        );
+        set({ chatContentFontSize: DEFAULT_CHAT_CONTENT_FONT_SIZE });
       },
       setSidebarCollapsed: (collapsed) => {
         localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");

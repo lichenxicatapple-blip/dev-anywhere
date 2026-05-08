@@ -11,12 +11,14 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useSessionStore } from "@/stores/session-store";
-import { MAX_PTY_FONT_SIZE, MIN_PTY_FONT_SIZE, useAppStore } from "@/stores/app-store";
+import { MAX_CHAT_FONT_SIZE, MIN_CHAT_FONT_SIZE } from "@/lib/chat-font-size";
+import { useAppStore } from "@/stores/app-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 
 interface ChatHeaderProps {
   sessionId: string;
+  mode?: "json" | "pty";
 }
 
 function splitPtyTitle(title: string): { indicator?: string; label: string } {
@@ -45,18 +47,23 @@ function ChatSessionTitle({ title, isPtyTitle }: { title: string; isPtyTitle: bo
   );
 }
 
-export function ChatHeader({ sessionId }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const navigate = useNavigate();
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
   // proxy 转发为 terminal_title, dispatcher 写到 ptyTitles, 这里优先展示
   const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
+  const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const adjustPtyFontSize = useAppStore((s) => s.adjustPtyFontSize);
+  const adjustChatContentFontSize = useAppStore((s) => s.adjustChatContentFontSize);
   const resetPtyFontSize = useAppStore((s) => s.resetPtyFontSize);
-  const requestPtyFit = useAppStore((s) => s.requestPtyFit);
-  const isPty = session?.mode === "pty";
+  const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
+  const isPty = mode === "pty" || session?.mode === "pty";
   const title = (isPty && ptyTitle) || session?.name || sessionId.slice(0, 8);
+  const fontSize = isPty ? ptyFontSize : chatContentFontSize;
+  const adjustFontSize = isPty ? adjustPtyFontSize : adjustChatContentFontSize;
+  const resetFontSize = isPty ? resetPtyFontSize : resetChatContentFontSize;
 
   function handlePermissionModeCycle() {
     relayClientRef?.sendControl({
@@ -117,53 +124,47 @@ export function ChatHeader({ sessionId }: ChatHeaderProps) {
               >
                 发送 Ctrl+C
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-muted-foreground">字号</DropdownMenuLabel>
-              <div
-                className="flex items-center gap-2 px-2 py-1.5"
-                data-slot="chat-menu-font-control"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={ptyFontSize <= MIN_PTY_FONT_SIZE}
-                  aria-label="字号变小"
-                  data-slot="chat-menu-font-smaller"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    adjustPtyFontSize(-1);
-                  }}
-                >
-                  <Minus aria-hidden="true" />
-                </Button>
-                <span
-                  className="min-w-11 text-center text-sm tabular-nums"
-                  data-slot="chat-menu-font-size"
-                >
-                  {ptyFontSize}px
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={ptyFontSize >= MAX_PTY_FONT_SIZE}
-                  aria-label="字号变大"
-                  data-slot="chat-menu-font-larger"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    adjustPtyFontSize(1);
-                  }}
-                >
-                  <Plus aria-hidden="true" />
-                </Button>
-              </div>
-              <DropdownMenuItem data-slot="chat-menu-font-fit" onClick={requestPtyFit}>
-                适应窗口
-              </DropdownMenuItem>
-              <DropdownMenuItem data-slot="chat-menu-font-reset" onClick={resetPtyFontSize}>
-                恢复默认
-              </DropdownMenuItem>
             </>
           ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-muted-foreground">字号</DropdownMenuLabel>
+          <div className="flex items-center gap-2 px-2 py-1.5" data-slot="chat-menu-font-control">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={fontSize <= MIN_CHAT_FONT_SIZE}
+              aria-label="字号变小"
+              data-slot="chat-menu-font-smaller"
+              onClick={(event) => {
+                event.stopPropagation();
+                adjustFontSize(-1);
+              }}
+            >
+              <Minus aria-hidden="true" />
+            </Button>
+            <span
+              className="min-w-11 text-center text-sm tabular-nums"
+              data-slot="chat-menu-font-size"
+            >
+              {fontSize}px
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={fontSize >= MAX_CHAT_FONT_SIZE}
+              aria-label="字号变大"
+              data-slot="chat-menu-font-larger"
+              onClick={(event) => {
+                event.stopPropagation();
+                adjustFontSize(1);
+              }}
+            >
+              <Plus aria-hidden="true" />
+            </Button>
+          </div>
+          <DropdownMenuItem data-slot="chat-menu-font-reset" onClick={resetFontSize}>
+            恢复默认
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

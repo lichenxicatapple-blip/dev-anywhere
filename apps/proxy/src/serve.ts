@@ -5,7 +5,7 @@ import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
 import { SOCK_PATH, PID_PATH, STOPPED_PATH, SESSIONS_PATH, sessionPaths } from "./common/paths.js";
-import { loadConfig } from "./common/config.js";
+import { buildProviderEnv, loadConfig } from "./common/config.js";
 import { serializeIpc } from "./ipc/ipc-protocol.js";
 import { createControlMessageHandlers } from "./serve/handlers/control-messages.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
@@ -24,6 +24,7 @@ import {
 import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
 import { handleTerminalConnection } from "./serve/terminal-ipc.js";
 import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
+import type { ProviderId } from "./providers/types.js";
 
 function resolveInterruptedApprovals(
   permissionBroker: PermissionBroker,
@@ -122,7 +123,26 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   // relay 是 proxy 存在的必要前提，未配置直接 fail-fast，不再支持"本地独立"模式
-  const proxyConfig = loadConfig({ envName: options?.envName });
+  let proxyConfig = loadConfig({ envName: options?.envName });
+  const getProviderEnv = (): NodeJS.ProcessEnv => buildProviderEnv(proxyConfig, process.env);
+  const getAgentCliSuggestions = (): Partial<Record<ProviderId, string[]>> =>
+    proxyConfig.agentCliSuggestions;
+  const setAgentCliPath = (provider: ProviderId, path: string): void => {
+    const field = provider === "claude" ? "claudeBin" : "codexBin";
+    const existing = proxyConfig.agentCliSuggestions[provider] ?? [];
+    proxyConfig = {
+      ...proxyConfig,
+      [field]: path,
+      agentCliSuggestions: {
+        ...proxyConfig.agentCliSuggestions,
+        [provider]: [path, ...existing.filter((candidate) => candidate !== path)],
+      },
+      sources: {
+        ...proxyConfig.sources,
+        [field]: "file",
+      },
+    };
+  };
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;
   const statusConfig = {
@@ -180,10 +200,12 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     permissionBroker,
     relayConnection,
     jsonObserver,
+    getProviderEnv,
   });
   const hostedPtyRegistry = new HostedPtyRegistry({
     sessionManager,
     relayConnection,
+    getProviderEnv,
     changeSessionState: observerChangeState,
     onTurnComplete: (sessionId) => {
       resolveInterruptedApprovals(
@@ -229,6 +251,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     permissionBroker,
     hookEventRouter: hookRuntime.hookEventRouter,
     agentStatusRegistry,
+    envName: proxyConfig.envName,
+    getProviderEnv,
+    getAgentCliSuggestions,
+    setAgentCliPath,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));

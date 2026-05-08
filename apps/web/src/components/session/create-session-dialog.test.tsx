@@ -9,6 +9,7 @@ const {
   createDirectory,
   requestDirectoryList,
   requestProxyInfo,
+  updateAgentCliPath,
   toastError,
   toastSuccess,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
   createDirectory: vi.fn(),
   requestDirectoryList: vi.fn(),
   requestProxyInfo: vi.fn(),
+  updateAgentCliPath: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock("@/hooks/use-relay-setup", () => ({
     createDirectory,
     requestDirectoryList,
     requestProxyInfo,
+    updateAgentCliPath,
   },
   wsManagerRef: null,
 }));
@@ -44,6 +47,15 @@ vi.mock("@/components/toast", () => ({
 import { useFileStore } from "@/stores/file-store";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CreateSessionDialog } from "./create-session-dialog";
+
+const availableAgentCli = {
+  claude: {
+    available: true,
+    command: "/usr/local/bin/claude",
+    suggestions: ["/usr/local/bin/claude", "/Users/admin/.local/bin/claude"],
+  },
+  codex: { available: true, command: "/usr/local/bin/codex" },
+};
 
 function renderDialog() {
   return render(
@@ -69,13 +81,15 @@ describe("CreateSessionDialog", () => {
     requestDirectoryList.mockReset();
     requestDirectoryList.mockResolvedValue({ path: "/Users/admin", entries: [] });
     requestProxyInfo.mockReset();
-    requestProxyInfo.mockResolvedValue({ homePath: "/Users/admin" });
+    requestProxyInfo.mockResolvedValue({ homePath: "/Users/admin", agentCli: availableAgentCli });
+    updateAgentCliPath.mockReset();
     toastError.mockClear();
     toastSuccess.mockClear();
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
       homePath: "",
+      agentCli: null,
     });
   });
 
@@ -85,6 +99,7 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect(requestProxyInfo).toHaveBeenCalled();
       expect(useFileStore.getState().homePath).toBe("/Users/admin");
+      expect(useFileStore.getState().agentCli).toEqual(availableAgentCli);
     });
   });
 
@@ -93,6 +108,7 @@ describe("CreateSessionDialog", () => {
       tree: new Map(),
       cwd: "",
       homePath: "/Users/admin",
+      agentCli: availableAgentCli,
     });
 
     const { getByLabelText } = renderDialog();
@@ -108,6 +124,7 @@ describe("CreateSessionDialog", () => {
       tree: new Map(),
       cwd: "",
       homePath: "/Users/admin",
+      agentCli: availableAgentCli,
     });
 
     const { getByRole } = renderDialog();
@@ -133,6 +150,7 @@ describe("CreateSessionDialog", () => {
       tree: new Map(),
       cwd: "",
       homePath: "/Users/admin",
+      agentCli: availableAgentCli,
     });
 
     const { getByLabelText, getByRole, getByText } = renderDialog();
@@ -161,6 +179,7 @@ describe("CreateSessionDialog", () => {
       tree: new Map(),
       cwd: "",
       homePath: "/Users/admin",
+      agentCli: availableAgentCli,
     });
 
     const { getByLabelText, getByPlaceholderText } = renderDialog();
@@ -190,5 +209,88 @@ describe("CreateSessionDialog", () => {
     });
     expect(createSession).not.toHaveBeenCalled();
     expect(toastSuccess).toHaveBeenCalledWith("目录已创建");
+  });
+
+  it("disables an unavailable Agent CLI before creating a session", async () => {
+    requestProxyInfo.mockResolvedValueOnce({
+      homePath: "/Users/admin",
+      agentCli: {
+        claude: { available: false, error: "claude not found in PATH" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      },
+    });
+
+    const { getByRole, getByText } = renderDialog();
+
+    await waitFor(() => {
+      expect(getByText("未找到")).toBeTruthy();
+    });
+    const claudeButton = getByRole("button", { name: "Claude Code" }) as HTMLButtonElement;
+    expect(claudeButton.disabled).toBe(false);
+    expect(claudeButton.getAttribute("aria-disabled")).toBe("true");
+    expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("lets the user set a missing Agent CLI path from the dialog", async () => {
+    requestProxyInfo.mockResolvedValueOnce({
+      homePath: "/Users/admin",
+      agentCli: {
+        claude: { available: false, error: "claude not found in PATH" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      },
+    });
+    updateAgentCliPath.mockResolvedValueOnce({
+      provider: "claude",
+      agentCli: {
+        claude: {
+          available: true,
+          command: "/Users/admin/.local/bin/claude",
+          suggestions: ["/Users/admin/.local/bin/claude"],
+        },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      },
+    });
+
+    const { getByLabelText, getByRole, getByText } = renderDialog();
+
+    await waitFor(() => {
+      expect(getByText("未找到")).toBeTruthy();
+    });
+    fireEvent.click(getByRole("button", { name: "Claude Code" }));
+    fireEvent.click(getByRole("button", { name: "指定路径" }));
+    fireEvent.change(getByLabelText("CLI 路径"), {
+      target: { value: "/Users/admin/.local/bin/claude" },
+    });
+    fireEvent.click(getByRole("button", { name: "保存路径" }));
+
+    await waitFor(() => {
+      expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/Users/admin/.local/bin/claude");
+    });
+    expect(useFileStore.getState().agentCli?.claude.command).toBe("/Users/admin/.local/bin/claude");
+    expect(useFileStore.getState().agentCli?.claude.suggestions).toContain(
+      "/Users/admin/.local/bin/claude",
+    );
+    expect(toastSuccess).toHaveBeenCalledWith("Claude Code 路径已保存");
+  });
+
+  it("lets the user choose from discovered Agent CLI path suggestions", async () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/Users/admin",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByLabelText, getByRole } = renderDialog();
+
+    fireEvent.click(getByRole("button", { name: "指定路径" }));
+
+    await waitFor(() => {
+      expect(getByLabelText("CLI 路径")).toBeTruthy();
+    });
+    const options = Array.from(document.querySelectorAll("datalist option")).map((option) =>
+      option.getAttribute("value"),
+    );
+    expect(options).toEqual(["/usr/local/bin/claude", "/Users/admin/.local/bin/claude"]);
   });
 });

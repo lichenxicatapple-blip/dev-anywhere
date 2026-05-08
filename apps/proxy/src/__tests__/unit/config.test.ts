@@ -28,6 +28,8 @@ describe("proxy config env selection", () => {
     delete process.env.RELAY_URL;
     delete process.env.RELAY_PROXY_TOKEN;
     delete process.env.DEV_ANYWHERE_HOOK_PORT;
+    delete process.env.CLAUDE_BIN;
+    delete process.env.CODEX_BIN;
   });
 
   afterEach(() => {
@@ -87,6 +89,71 @@ describe("proxy config env selection", () => {
     expect(config.relayToken).toBe("file-token");
     expect(config.sources.relayUrl).toBe("env");
     expect(config.sources.relayToken).toBe("file");
+  });
+
+  it("loads Agent CLI paths from the selected env and lets env vars override them", async () => {
+    writeConfig({
+      defaultEnv: "local",
+      envs: {
+        local: {
+          relayUrl: "ws://localhost:3100",
+          claudeBin: "/file/bin/claude",
+          codexBin: "/file/bin/codex",
+        },
+      },
+    });
+    process.env.CLAUDE_BIN = "/env/bin/claude";
+
+    const { buildProviderEnv, loadConfig } = await importConfig();
+    const config = loadConfig();
+    const providerEnv = buildProviderEnv(config, { PATH: "/usr/bin" });
+
+    expect(config.claudeBin).toBe("/env/bin/claude");
+    expect(config.codexBin).toBe("/file/bin/codex");
+    expect(config.sources.claudeBin).toBe("env");
+    expect(config.sources.codexBin).toBe("file");
+    expect(providerEnv.CLAUDE_BIN).toBe("/env/bin/claude");
+    expect(providerEnv.CODEX_BIN).toBe("/file/bin/codex");
+    expect(config.agentCliSuggestions.claude).toEqual(["/env/bin/claude", "/file/bin/claude"]);
+    expect(config.agentCliSuggestions.codex).toEqual(["/file/bin/codex"]);
+  });
+
+  it("persists Agent CLI paths into the selected env config", async () => {
+    writeConfig({
+      defaultEnv: "local",
+      envs: {
+        local: { relayUrl: "ws://localhost:3100" },
+        cloud: { relayUrl: "wss://cloud.example.com" },
+      },
+    });
+
+    const { loadConfig, saveAgentCliPath } = await importConfig();
+    saveAgentCliPath("claude", "/Users/admin/.local/bin/claude", { envName: "local" });
+
+    const config = loadConfig();
+    expect(config.claudeBin).toBe("/Users/admin/.local/bin/claude");
+    expect(config.sources.claudeBin).toBe("file");
+    expect(config.agentCliSuggestions.claude).toEqual(["/Users/admin/.local/bin/claude"]);
+  });
+
+  it("keeps user-entered Agent CLI paths as future suggestions", async () => {
+    writeConfig({
+      defaultEnv: "local",
+      envs: {
+        local: { relayUrl: "ws://localhost:3100" },
+      },
+    });
+
+    const { loadConfig, saveAgentCliPath } = await importConfig();
+    saveAgentCliPath("claude", "/opt/claude/v1/claude", { envName: "local" });
+    saveAgentCliPath("claude", "/opt/claude/v2/claude", { envName: "local" });
+
+    const config = loadConfig();
+    expect(config.claudeBin).toBe("/opt/claude/v2/claude");
+    expect(config.agentCliSuggestions.claude).toEqual([
+      "/opt/claude/v2/claude",
+      "/opt/claude/v1/claude",
+    ]);
   });
 
   it("still reads the single-env config shape", async () => {
