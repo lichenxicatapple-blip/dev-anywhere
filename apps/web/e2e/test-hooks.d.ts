@@ -35,6 +35,10 @@ interface CCTestHooks {
   toast: (message: string) => void;
 }
 
+interface DevAnywherePtyScrollTraceEntry {
+  event?: string;
+}
+
 declare global {
   interface Window {
     __ccTest?: CCTestHooks;
@@ -62,6 +66,7 @@ declare global {
       resize: (cols: number, rows: number) => void;
       setPtyState: (state: "working" | "turn_complete" | "approval_wait" | "mid_pause") => void;
     };
+    __devAnywherePtyScrollTrace?: DevAnywherePtyScrollTraceEntry[];
   }
 }
 

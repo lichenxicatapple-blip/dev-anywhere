@@ -66,6 +66,7 @@ describe("attachPtySessionTransport", () => {
   it("requests snapshot, buffers binary frames, applies snapshot, and reports ready", () => {
     const harness = createHarness();
     const target = createTarget();
+    const onFramePending = vi.fn();
     const onFrameWritten = vi.fn();
     const onReady = vi.fn();
     attachPtySessionTransport({
@@ -74,6 +75,7 @@ describe("attachPtySessionTransport", () => {
       relay: harness.relay,
       target,
       scheduleReady: (cb) => cb(),
+      onFramePending,
       onFrameWritten,
       onReady,
     });
@@ -91,6 +93,16 @@ describe("attachPtySessionTransport", () => {
       data: "snapshot",
       outputSeq: 0,
     });
+
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "snapshot"],
+    ]);
+    expect(onFramePending).toHaveBeenCalledTimes(1);
+    expect(onFrameWritten).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(16);
 
     expect(target.calls).toEqual([
       ["reset", null],

@@ -43,6 +43,7 @@ export function InputMenu() {
             type="button"
             variant="ghost"
             size="icon"
+            className="size-11 md:size-9"
             aria-label="更多"
             data-slot="input-menu-trigger"
           >
@@ -63,6 +64,7 @@ export function InputMenu() {
           type="button"
           variant="ghost"
           size="icon"
+          className="size-11 md:size-9"
           aria-label="更多"
           data-slot="input-menu-trigger"
         >

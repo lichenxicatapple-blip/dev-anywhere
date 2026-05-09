@@ -38,6 +38,7 @@ interface PtyTerminalControllerOptions {
   ) => Disposable;
   attachTransport?: typeof attachPtySessionTransport;
   onTerminalReady?: (term: PtyControlledTerminal) => void;
+  onFramePending?: () => void;
   onFrameWritten?: () => void;
   onRawInput?: (data: string) => void;
   onReady?: () => void;
@@ -47,6 +48,8 @@ interface PtyTerminalControllerOptions {
 
 interface PtyTerminalController {
   dispose: () => void;
+  flushOutput: () => void;
+  setOutputPaused: (value: boolean) => void;
 }
 
 export function attachPtyTerminalController(
@@ -61,6 +64,7 @@ export function attachPtyTerminalController(
     attachRawInput,
     attachTransport = attachPtySessionTransport,
     onTerminalReady,
+    onFramePending,
     onFrameWritten,
     onRawInput,
     onReady,
@@ -71,8 +75,9 @@ export function attachPtyTerminalController(
   let disposed = false;
   let disposeTerminal: (() => void) | null = null;
   let disposeRawInput: (() => void) | null = null;
-  let disposeTransport: (() => void) | null = null;
+  let transport: ReturnType<typeof attachPtySessionTransport> | null = null;
   let removeFocusHandler: (() => void) | null = null;
+  let outputPaused = false;
 
   void (async () => {
     const result = await createTerminal(host);
@@ -92,23 +97,29 @@ export function attachPtyTerminalController(
       if (!disposed) focusTerminal();
     });
 
-    const transport = attachTransport({
+    transport = attachTransport({
       sessionId,
       ws,
       relay,
       target: result.terminal,
+      onFramePending,
       onFrameWritten,
       onReady,
       onSubscribeStarted,
       onSubscribeExhausted,
     });
-    disposeTransport = transport.dispose;
+    transport.setOutputPaused(outputPaused);
   })();
 
   return {
+    flushOutput: () => transport?.flushOutput(),
+    setOutputPaused: (value) => {
+      outputPaused = value;
+      transport?.setOutputPaused(value);
+    },
     dispose: () => {
       disposed = true;
-      disposeTransport?.();
+      transport?.dispose();
       removeFocusHandler?.();
       disposeRawInput?.();
       disposeTerminal?.();

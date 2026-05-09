@@ -53,6 +53,13 @@ export const HistorySessionSchema = z.object({
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
+const SessionHistoryMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  text: z.string(),
+  timestamp: z.number().optional(),
+  cursor: z.string().optional(),
+});
+
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
 const RequestIdShape = { requestId: z.string().min(1).optional() };
@@ -320,7 +327,12 @@ const relayControlDefinitions = [
   // 客户端请求会话历史消息，client -> proxy
   control(
     "session_messages_request",
-    { ...RequestIdShape, sessionId: z.string() },
+    {
+      ...RequestIdShape,
+      sessionId: z.string(),
+      limit: z.number().int().min(1).max(200).optional(),
+      before: z.string().optional(),
+    },
     "client_to_proxy",
   ),
 
@@ -409,13 +421,10 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       sessionId: z.string(),
-      messages: z.array(
-        z.object({
-          role: z.enum(["user", "assistant"]),
-          text: z.string(),
-          timestamp: z.number().optional(),
-        }),
-      ),
+      before: z.string().optional(),
+      messages: z.array(SessionHistoryMessageSchema),
+      hasMore: z.boolean().optional(),
+      nextBefore: z.string().optional(),
     },
     "proxy_to_client",
   ),

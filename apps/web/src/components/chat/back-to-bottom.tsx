@@ -1,4 +1,4 @@
-// 回到底部按钮, 始终渲染: visible=false 时 opacity:0 + translate-y + pointer-events:none
+// 回到底部按钮, 始终渲染: visible=false 时 opacity:0 + pointer-events:none
 // 真正卸载会让 transition-out 没机会跑, 不卸载也能脱离 tab 序与屏幕阅读器
 import { ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,10 @@ interface BackToBottomProps {
   visible: boolean;
   hasNewMessages?: boolean;
   onClick: () => void;
+  className?: string;
 }
 
-export function BackToBottom({ visible, hasNewMessages, onClick }: BackToBottomProps) {
+export function BackToBottom({ visible, hasNewMessages, onClick, className }: BackToBottomProps) {
   return (
     <Button
       size="icon"
@@ -22,10 +23,9 @@ export function BackToBottom({ visible, hasNewMessages, onClick }: BackToBottomP
       data-slot="back-to-bottom"
       className={cn(
         "absolute bottom-4 right-4 rounded-full shadow-md z-10",
-        "transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-        visible
-          ? "opacity-100 translate-y-0 pointer-events-auto"
-          : "opacity-0 translate-y-2 pointer-events-none",
+        "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+        visible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        className,
       )}
     >
       <ArrowDown aria-hidden="true" />

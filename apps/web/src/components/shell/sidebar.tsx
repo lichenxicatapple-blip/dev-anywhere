@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
+import { BrandMark } from "@/components/brand/brand-mark";
 import { useAppStore } from "@/stores/app-store";
 import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
 import { SessionList, CreateSessionButton } from "@/components/session/session-list";
@@ -58,13 +59,7 @@ export function Sidebar({ className }: SidebarProps) {
         <div className="dev-sidebar-fade p-2.5" data-slot="sidebar-proxy-switcher">
           <div className="dev-sidebar-chrome rounded-lg border p-3">
             <div className="flex items-center justify-between gap-3">
-              <span
-                className="min-w-0 truncate font-mono text-[13px] font-semibold"
-                data-slot="sidebar-brand"
-              >
-                <span className="text-primary">DEV</span>
-                <span className="text-foreground/90"> Anywhere</span>
-              </span>
+              <BrandMark className="text-[13px]" slot="sidebar-brand" />
               <SidebarToggle collapsed={false} onClick={toggleSidebarCollapsed} />
             </div>
             <div className="mt-2.5">

@@ -140,6 +140,64 @@ export async function installFakeRelay(page: Page): Promise<void> {
       };
     }
 
+    type FakeHistoryMessage = {
+      role: "user" | "assistant";
+      text: string;
+      timestamp: number;
+      cursor: string;
+    };
+
+    function makeHistoryMessage(index: number, label: string): FakeHistoryMessage {
+      const role = index % 2 === 0 ? "assistant" : "user";
+      return {
+        role,
+        text:
+          index === 27
+            ? "移动端历史问题：请检查 JSON 渲染。"
+            : index === 28
+              ? "移动端历史回复：历史消息已经加载。"
+              : `${label} ${String(index).padStart(2, "0")}\n这是一条用于移动端上滑分页冒烟的 JSON 历史消息，内容较长以形成真实滚动高度。`,
+        timestamp: now - (30 - index) * 1_000,
+        cursor: `hist-${String(index).padStart(2, "0")}`,
+      };
+    }
+
+    function emitHistoryPage(socket: FakeRelayWebSocket, msg: FakeRelayMessage): void {
+      const sessionId = String(msg.sessionId);
+      const before = typeof msg.before === "string" ? msg.before : undefined;
+      if (sessionId !== "hist-sess") {
+        socket.emitJson({
+          type: "session_history_messages",
+          requestId: msg.requestId,
+          sessionId,
+          messages: [],
+          hasMore: false,
+        });
+        return;
+      }
+
+      if (before === "hist-before-13") {
+        socket.emitJson({
+          type: "session_history_messages",
+          requestId: msg.requestId,
+          sessionId,
+          before,
+          messages: Array.from({ length: 12 }, (_, i) => makeHistoryMessage(i + 1, "更早历史")),
+          hasMore: false,
+        });
+        return;
+      }
+
+      socket.emitJson({
+        type: "session_history_messages",
+        requestId: msg.requestId,
+        sessionId,
+        messages: Array.from({ length: 16 }, (_, i) => makeHistoryMessage(i + 13, "最近历史")),
+        hasMore: true,
+        nextBefore: "hist-before-13",
+      });
+    }
+
     const outputSeqBySession = new Map<string, number>();
 
     function nextOutputSeq(sessionId: string): number {
@@ -296,12 +354,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "session_messages_request":
-            this.emitJson({
-              type: "session_history_messages",
-              requestId: msg.requestId,
-              sessionId: String(msg.sessionId),
-              messages: [],
-            });
+            emitHistoryPage(this, msg);
             break;
           case "session_subscribe":
             this.emitJson({
@@ -373,6 +426,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "user_input":
+            this.emitJson(
+              envelope("user_input", String(msg.sessionId), {
+                text: String((msg.payload as { text?: string } | undefined)?.text ?? ""),
+                messageId:
+                  (msg.payload as { messageId?: string } | undefined)?.messageId ??
+                  `${String(msg.sessionId)}-user-${Date.now()}`,
+              }),
+            );
             this.emitJson(
               envelope("session_status", String(msg.sessionId), {
                 sessionId: String(msg.sessionId),

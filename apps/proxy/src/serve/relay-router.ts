@@ -63,6 +63,7 @@ export class RelayRouter {
     this.inputHandlers = new RelayInputHandlers({
       sessionManager: deps.sessionManager,
       workerRegistry: deps.workerRegistry,
+      relayConnection: deps.relayConnection,
       terminalSockets: deps.terminalSockets,
       hostedPtyRegistry: deps.hostedPtyRegistry,
       jsonObserver: deps.jsonObserver,

@@ -1,4 +1,5 @@
 import { serviceLogger } from "../common/logger.js";
+import { HOOK_REGISTRY_PATH } from "../common/paths.js";
 import type { ProviderHookContext } from "../providers/index.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { HookEventRouter } from "./hook-event-router.js";
@@ -31,7 +32,7 @@ interface ProviderHookRuntime {
 export async function createProviderHookRuntime(
   options: ProviderHookRuntimeOptions,
 ): Promise<ProviderHookRuntime> {
-  const hookRegistry = new HookRegistry();
+  const hookRegistry = new HookRegistry({ persistPath: HOOK_REGISTRY_PATH });
   const hookEventRouter = new HookEventRouter({
     relayConnection: options.relayConnection,
     agentStatusRegistry: options.agentStatusRegistry,

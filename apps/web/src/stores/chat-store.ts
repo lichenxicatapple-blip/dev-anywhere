@@ -33,6 +33,10 @@ export interface ChatMessage {
 
 interface ChatSessionSlice {
   messages: ChatMessage[];
+  historyInitialized: boolean;
+  historyHasMore: boolean;
+  historyNextBefore: string | null;
+  historyLoading: boolean;
   // workingToolName 保留：session.state 只到 working 粒度，承载不了具体工具名
   workingToolName: string;
   pendingApprovals: ToolApprovalRequest[];
@@ -42,6 +46,10 @@ interface ChatSessionSlice {
 
 export const EMPTY_SLICE: ChatSessionSlice = {
   messages: [],
+  historyInitialized: false,
+  historyHasMore: false,
+  historyNextBefore: null,
+  historyLoading: false,
   workingToolName: "",
   pendingApprovals: [],
   quotedMessage: null,
@@ -74,8 +82,28 @@ interface ChatStoreState {
   setInputDraft: (sessionId: string, draft: string) => void;
   loadHistory: (
     sessionId: string,
-    messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>,
+    messages: Array<{
+      role: "user" | "assistant";
+      text: string;
+      timestamp?: number;
+      cursor?: string;
+    }>,
   ) => void;
+  loadHistoryPage: (
+    sessionId: string,
+    page: {
+      mode: "replace" | "prepend";
+      messages: Array<{
+        role: "user" | "assistant";
+        text: string;
+        timestamp?: number;
+        cursor?: string;
+      }>;
+      hasMore?: boolean;
+      nextBefore?: string;
+    },
+  ) => void;
+  setHistoryLoading: (sessionId: string, loading: boolean) => void;
   clearSession: (sessionId: string) => void;
   clearAllSessions: () => void;
 }
@@ -89,6 +117,44 @@ function updateSlice(
   const current = state.bySessionId[sessionId] ?? EMPTY_SLICE;
   const next = updater(current);
   return { bySessionId: { ...state.bySessionId, [sessionId]: next } };
+}
+
+function hashHistoryText(text: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function historyMessageId(
+  sessionId: string,
+  message: { role: "user" | "assistant"; text: string; timestamp?: number; cursor?: string },
+): string {
+  if (message.cursor) return `history-${sessionId}-${message.cursor}`;
+  return `history-${sessionId}-${message.timestamp ?? "na"}-${message.role}-${hashHistoryText(
+    message.text,
+  )}`;
+}
+
+function toHistoryChatMessage(
+  sessionId: string,
+  message: { role: "user" | "assistant"; text: string; timestamp?: number; cursor?: string },
+): ChatMessage {
+  return {
+    id: historyMessageId(sessionId, message),
+    role: message.role,
+    text: message.text,
+    isPartial: false,
+    timestamp: message.timestamp || 0,
+    toolCalls: [],
+  };
+}
+
+function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const existingIds = new Set(existing.map((message) => message.id));
+  return [...incoming.filter((message) => !existingIds.has(message.id)), ...existing];
 }
 
 export const useChatStore = create<ChatStoreState>()(
@@ -118,10 +184,13 @@ export const useChatStore = create<ChatStoreState>()(
 
       addUserMessage: (sessionId, message) =>
         set((state) =>
-          updateSlice(state, sessionId, (slice) => ({
-            ...slice,
-            messages: [...slice.messages, message],
-          })),
+          updateSlice(state, sessionId, (slice) => {
+            if (slice.messages.some((m) => m.id === message.id)) return slice;
+            return {
+              ...slice,
+              messages: [...slice.messages, message],
+            };
+          }),
         ),
 
       markTurnComplete: (sessionId) =>
@@ -225,24 +294,49 @@ export const useChatStore = create<ChatStoreState>()(
       loadHistory: (sessionId, historyMessages) =>
         set((state) =>
           updateSlice(state, sessionId, (slice) => {
-            // proxy 每次订阅都重发全量 history, 必须替换而非 append, 否则刷新一次就翻倍
-            const historyPrefix = `history-${sessionId}-`;
-            const liveMessages = slice.messages.filter((m) => !m.id.startsWith(historyPrefix));
+            const historyMessagesNext = historyMessages.map((m) =>
+              toHistoryChatMessage(sessionId, m),
+            );
+            const liveMessages = slice.messages.filter(
+              (m) => !m.id.startsWith(`history-${sessionId}-`),
+            );
             return {
               ...slice,
-              messages: [
-                ...historyMessages.map((m, i) => ({
-                  id: `${historyPrefix}${i}`,
-                  role: m.role,
-                  text: m.text,
-                  isPartial: false,
-                  timestamp: m.timestamp || 0,
-                  toolCalls: [],
-                })),
-                ...liveMessages,
-              ],
+              messages: [...historyMessagesNext, ...liveMessages],
+              historyInitialized: true,
+              historyHasMore: false,
+              historyNextBefore: null,
+              historyLoading: false,
             };
           }),
+        ),
+
+      loadHistoryPage: (sessionId, page) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const historyPrefix = `history-${sessionId}-`;
+            const historyMessages = page.messages.map((m) => toHistoryChatMessage(sessionId, m));
+            const nextMessages =
+              page.mode === "replace"
+                ? [
+                    ...historyMessages,
+                    ...slice.messages.filter((m) => !m.id.startsWith(historyPrefix)),
+                  ]
+                : mergeMessages(slice.messages, historyMessages);
+            return {
+              ...slice,
+              messages: nextMessages,
+              historyInitialized: true,
+              historyHasMore: page.hasMore ?? false,
+              historyNextBefore: page.nextBefore ?? null,
+              historyLoading: false,
+            };
+          }),
+        ),
+
+      setHistoryLoading: (sessionId, loading) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, historyLoading: loading })),
         ),
 
       clearSession: (sessionId) =>

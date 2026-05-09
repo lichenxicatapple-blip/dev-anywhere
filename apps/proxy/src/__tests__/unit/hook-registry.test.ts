@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { HookRegistry } from "#src/serve/hook-registry.js";
 
@@ -56,5 +59,28 @@ describe("HookRegistry", () => {
         now: 1200,
       }),
     ).toBeNull();
+  });
+
+  it("restores session credentials across registry instances without persisting raw tokens", () => {
+    const persistPath = join(mkdtempSync(join(tmpdir(), "hook-registry-test-")), "hooks.json");
+    const registry = new HookRegistry({ persistPath });
+    const credentials = registry.registerSession("s1", "claude", { now: 1000 });
+
+    const restored = new HookRegistry({ persistPath });
+
+    expect(
+      restored.verify({
+        sessionId: credentials.sessionId,
+        provider: credentials.provider,
+        marker: credentials.marker,
+        token: credentials.token,
+        now: 1000,
+      }),
+    ).toMatchObject({
+      sessionId: "s1",
+      provider: "claude",
+      marker: credentials.marker,
+    });
+    expect(readFileSync(persistPath, "utf8")).not.toContain(credentials.token);
   });
 });

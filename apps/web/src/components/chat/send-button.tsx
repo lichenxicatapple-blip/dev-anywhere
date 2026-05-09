@@ -22,6 +22,7 @@ export function SendButton({ sessionId, isWorking, canSend, onSend }: SendButton
         type="button"
         size="icon"
         variant="secondary"
+        className="size-11 md:size-9"
         onClick={handleStop}
         aria-label="停止响应"
         data-slot="send-button"
@@ -36,6 +37,7 @@ export function SendButton({ sessionId, isWorking, canSend, onSend }: SendButton
     <Button
       type="submit"
       size="icon"
+      className="size-11 md:size-9"
       disabled={!canSend}
       onClick={(e) => {
         e.preventDefault();

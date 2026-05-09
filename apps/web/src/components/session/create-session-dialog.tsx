@@ -2,6 +2,7 @@
 // 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { PencilLine } from "lucide-react";
 import type { AgentCliStatus, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
@@ -16,6 +17,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -26,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 interface CreateSessionDialogProps {
   open: boolean;
@@ -106,6 +109,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const agentCli = useFileStore((s) => s.agentCli);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -133,7 +137,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     if (mode === "json") {
       if (provider === "codex") {
         setProvider("claude");
-        normalizePermissionMode("claude", mode);
       }
     }
   }, [open, mode, provider]);
@@ -326,6 +329,361 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     window.setTimeout(() => setCwdPickerOpen(false), 0);
   }
 
+  const form = (
+    <form
+      className="flex min-w-0 flex-col gap-4"
+      data-slot="create-session-form"
+      autoComplete="off"
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+    >
+      <label className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm">名称（可选）</span>
+        <input
+          type="text"
+          name="dev-anywhere-session-name"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
+          placeholder="自动生成"
+        />
+      </label>
+      <div
+        ref={cwdFieldRef}
+        className="relative flex min-w-0 flex-col gap-2"
+        onFocus={() => setCwdPickerOpen(true)}
+        onBlur={handleCwdFieldBlur}
+      >
+        <label htmlFor="create-session-cwd" className="text-sm">
+          工作目录
+        </label>
+        <input
+          id="create-session-cwd"
+          type="text"
+          name="dev-anywhere-session-cwd"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          value={cwd}
+          onChange={(e) => {
+            setCwd(e.target.value);
+            setMissingCwd(null);
+          }}
+          placeholder="输入绝对路径"
+          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
+        />
+        {cwdPickerOpen ? (
+          <FilePathPicker
+            mode="select"
+            dirsOnly
+            filter={cwd}
+            title="选择下一级目录"
+            onCreateDirectory={handleCreateDirectory}
+            onSelect={(path) => {
+              setCwd(path);
+              setMissingCwd(null);
+              setCwdPickerOpen(true);
+            }}
+          />
+        ) : null}
+      </div>
+      {missingCwd ? (
+        <section
+          role="status"
+          aria-live="polite"
+          className="rounded-md border border-primary/50 bg-primary/10 p-3"
+        >
+          <p className="text-sm font-medium">工作目录不存在</p>
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{missingCwd}</p>
+        </section>
+      ) : null}
+      <section aria-label="交互方式" className="flex min-w-0 flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm">交互方式</span>
+          <span className="text-xs text-muted-foreground">
+            {mode === "pty" ? "完整终端" : "聊天消息"}
+          </span>
+        </div>
+        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            aria-pressed={mode === "pty"}
+            onClick={() => handleModeChange("pty")}
+            className={cn(
+              "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mode === "pty" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
+            )}
+          >
+            <span className="text-sm font-medium">终端模式</span>
+            <span className="text-xs text-muted-foreground">像本地终端一样操作</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === "json"}
+            onClick={() => handleModeChange("json")}
+            className={cn(
+              "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
+            )}
+          >
+            <span className="text-sm font-medium">聊天模式</span>
+            <span className="text-xs text-muted-foreground">按消息发送和显示</span>
+          </button>
+        </div>
+      </section>
+      <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm">Agent CLI</span>
+          <span className="text-xs text-muted-foreground">
+            {mode === "pty" ? "选择要启动的 CLI" : "聊天模式仅支持 Claude Code"}
+          </span>
+        </div>
+        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-pressed={provider === "claude"}
+                aria-label="Claude Code"
+                aria-disabled={claudeStatus.disabled}
+                onClick={() => setProvider("claude")}
+                className={cn(
+                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  provider === "claude"
+                    ? "border-primary/70 bg-primary/10"
+                    : "border-border bg-muted/20",
+                )}
+              >
+                <span className="text-sm font-medium">Claude Code</span>
+                <span
+                  className={cn(
+                    "text-xs text-muted-foreground",
+                    claudeStatus.disabled && agentCli && "text-destructive",
+                  )}
+                >
+                  {claudeStatus.label}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
+              <span className="break-all font-mono text-xs">
+                {providerTooltip("claude", claudeStatus)}
+              </span>
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-pressed={provider === "codex"}
+                aria-label="Codex"
+                aria-disabled={codexStatus.disabled || mode === "json"}
+                onClick={() => {
+                  if (mode === "json") return;
+                  setProvider("codex");
+                  normalizePermissionMode("codex", mode);
+                }}
+                className={cn(
+                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  mode === "json" && "cursor-not-allowed opacity-45",
+                  provider === "codex"
+                    ? "border-primary/70 bg-primary/10"
+                    : "border-border bg-muted/20",
+                )}
+              >
+                <span className="text-sm font-medium">Codex</span>
+                <span
+                  className={cn(
+                    "text-xs text-muted-foreground",
+                    codexStatus.disabled && agentCli && mode === "pty" && "text-destructive",
+                  )}
+                >
+                  {codexStatus.label}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
+              <span className="break-all font-mono text-xs">
+                {providerTooltip("codex", codexStatus)}
+              </span>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <div
+          className="relative min-w-0 rounded-md border border-border bg-muted/20 px-3 py-2.5 md:p-3"
+          data-slot="agent-cli-path-card"
+        >
+          {editingCliProvider === provider ? (
+            <>
+              <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="min-w-0 flex-1">
+                  <span className="sr-only">CLI 路径</span>
+                  <input
+                    type="text"
+                    list={`agent-cli-path-${editingCliProvider}`}
+                    value={cliPathInput}
+                    onChange={(event) => setCliPathInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveCliPath();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setEditingCliProvider(null);
+                        setCliPathInput("");
+                      }
+                    }}
+                    placeholder={
+                      editingCliProvider === "claude"
+                        ? "/Users/admin/.local/bin/claude"
+                        : "/Users/admin/.local/bin/codex"
+                    }
+                    className="min-h-11 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-10 md:min-h-0 md:text-sm"
+                  />
+                  <datalist id={`agent-cli-path-${editingCliProvider}`}>
+                    {(agentCli?.[editingCliProvider].suggestions ?? []).map((path) => (
+                      <option key={path} value={path} />
+                    ))}
+                  </datalist>
+                </label>
+                <div className="flex shrink-0 justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="min-h-11 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground md:h-8 md:min-h-0"
+                    onClick={() => {
+                      setEditingCliProvider(null);
+                      setCliPathInput("");
+                    }}
+                    disabled={savingCliPath}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="button"
+                    className="min-h-11 shrink-0 rounded px-2.5 text-xs font-medium md:h-8 md:min-h-0"
+                    onClick={() => void saveCliPath()}
+                    disabled={savingCliPath || !cliPathInput.trim()}
+                  >
+                    {savingCliPath ? "保存中..." : "保存路径"}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {isDesktop ? (
+                <>
+                  <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
+                  <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
+                    <p
+                      className={cn(
+                        "flex h-10 min-w-0 flex-1 items-center truncate font-mono text-sm",
+                        selectedCli?.available ? "text-foreground" : "text-destructive",
+                      )}
+                      title={selectedCli?.command ?? selectedCli?.error}
+                    >
+                      {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 min-h-0 shrink-0 self-end rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground sm:self-auto"
+                      onClick={() => openCliPathEditor(provider)}
+                      disabled={mode === "json" && provider === "codex"}
+                    >
+                      指定路径
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="pr-11 text-xs text-muted-foreground">CLI 路径</p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 size-11 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                    aria-label="指定路径"
+                    onClick={() => openCliPathEditor(provider)}
+                    disabled={mode === "json" && provider === "codex"}
+                  >
+                    <PencilLine className="size-4" aria-hidden="true" />
+                  </Button>
+                  <p
+                    className={cn(
+                      "mt-1 min-w-0 break-all pr-11 font-mono text-sm leading-5",
+                      selectedCli?.available ? "text-foreground" : "text-destructive",
+                    )}
+                    title={selectedCli?.command ?? selectedCli?.error}
+                  >
+                    {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
+                  </p>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+      <label className="flex min-w-0 flex-col gap-2">
+        <span className="text-sm">权限模式</span>
+        <Select
+          value={permissionMode}
+          onValueChange={(value) => setPermissionMode(value as PermissionMode)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {permissionOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11 md:min-h-0"
+          onClick={() => onOpenChange(false)}
+          disabled={submitting}
+        >
+          取消
+        </Button>
+        <Button type="submit" className="min-h-11 md:min-h-0" disabled={createDisabled}>
+          {submitting ? "创建中..." : "创建"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+
+  if (!isDesktop) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[calc(100dvh-0.75rem)] overflow-y-auto rounded-t-xl border-t bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
+          data-slot="create-session-dialog"
+        >
+          <SheetHeader className="px-0 pb-1 pt-0 text-left">
+            <SheetTitle>新建会话</SheetTitle>
+          </SheetHeader>
+          {form}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -335,304 +693,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>
         </DialogHeader>
-        <form
-          className="flex min-w-0 flex-col gap-4"
-          data-slot="create-session-form"
-          autoComplete="off"
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSubmit();
-          }}
-        >
-          <label className="flex min-w-0 flex-col gap-1">
-            <span className="text-sm">名称（可选）</span>
-            <input
-              type="text"
-              name="dev-anywhere-session-name"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-9 min-w-0 rounded-md border border-border bg-input px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder="自动生成"
-            />
-          </label>
-          <div
-            ref={cwdFieldRef}
-            className="relative flex min-w-0 flex-col gap-2"
-            onFocus={() => setCwdPickerOpen(true)}
-            onBlur={handleCwdFieldBlur}
-          >
-            <label htmlFor="create-session-cwd" className="text-sm">
-              工作目录
-            </label>
-            <input
-              id="create-session-cwd"
-              type="text"
-              name="dev-anywhere-session-cwd"
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              value={cwd}
-              onChange={(e) => {
-                setCwd(e.target.value);
-                setMissingCwd(null);
-              }}
-              placeholder="输入绝对路径"
-              className="h-9 min-w-0 rounded-md border border-border bg-input px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            {cwdPickerOpen ? (
-              <FilePathPicker
-                mode="select"
-                dirsOnly
-                filter={cwd}
-                title="选择下一级目录"
-                onCreateDirectory={handleCreateDirectory}
-                onSelect={(path) => {
-                  setCwd(path);
-                  setMissingCwd(null);
-                  setCwdPickerOpen(true);
-                }}
-              />
-            ) : null}
-          </div>
-          {missingCwd ? (
-            <section
-              role="status"
-              aria-live="polite"
-              className="rounded-md border border-primary/50 bg-primary/10 p-3"
-            >
-              <p className="text-sm font-medium">工作目录不存在</p>
-              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{missingCwd}</p>
-            </section>
-          ) : null}
-          <section aria-label="交互方式" className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">交互方式</span>
-              <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "完整终端" : "聊天消息"}
-              </span>
-            </div>
-            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                aria-pressed={mode === "pty"}
-                onClick={() => handleModeChange("pty")}
-                className={cn(
-                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  mode === "pty" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">终端模式</span>
-                <span className="text-xs text-muted-foreground">像本地终端一样操作</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={mode === "json"}
-                onClick={() => handleModeChange("json")}
-                className={cn(
-                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">聊天模式</span>
-                <span className="text-xs text-muted-foreground">按消息发送和显示</span>
-              </button>
-            </div>
-          </section>
-          <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Agent CLI</span>
-              <span className="text-xs text-muted-foreground">
-                {mode === "pty" ? "选择要启动的 CLI" : "聊天模式仅支持 Claude Code"}
-              </span>
-            </div>
-            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-pressed={provider === "claude"}
-                    aria-label="Claude Code"
-                    aria-disabled={claudeStatus.disabled}
-                    onClick={() => setProvider("claude")}
-                    className={cn(
-                      "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      provider === "claude"
-                        ? "border-primary/70 bg-primary/10"
-                        : "border-border bg-muted/20",
-                    )}
-                  >
-                    <span className="text-sm font-medium">Claude Code</span>
-                    <span
-                      className={cn(
-                        "text-xs text-muted-foreground",
-                        claudeStatus.disabled && agentCli && "text-destructive",
-                      )}
-                    >
-                      {claudeStatus.label}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
-                  <span className="break-all font-mono text-xs">
-                    {providerTooltip("claude", claudeStatus)}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-pressed={provider === "codex"}
-                    aria-label="Codex"
-                    aria-disabled={codexStatus.disabled || mode === "json"}
-                    onClick={() => {
-                      if (mode === "json") return;
-                      setProvider("codex");
-                      normalizePermissionMode("codex", mode);
-                    }}
-                    className={cn(
-                      "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      mode === "json" && "cursor-not-allowed opacity-45",
-                      provider === "codex"
-                        ? "border-primary/70 bg-primary/10"
-                        : "border-border bg-muted/20",
-                    )}
-                  >
-                    <span className="text-sm font-medium">Codex</span>
-                    <span
-                      className={cn(
-                        "text-xs text-muted-foreground",
-                        codexStatus.disabled && agentCli && mode === "pty" && "text-destructive",
-                      )}
-                    >
-                      {codexStatus.label}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
-                  <span className="break-all font-mono text-xs">
-                    {providerTooltip("codex", codexStatus)}
-                  </span>
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="min-w-0 rounded-md border border-border bg-muted/20 p-3">
-              <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
-              {editingCliProvider === provider ? (
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                  <label className="min-w-0 flex-1">
-                    <span className="sr-only">CLI 路径</span>
-                    <input
-                      type="text"
-                      list={`agent-cli-path-${editingCliProvider}`}
-                      value={cliPathInput}
-                      onChange={(event) => setCliPathInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void saveCliPath();
-                        }
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          setEditingCliProvider(null);
-                          setCliPathInput("");
-                        }
-                      }}
-                      placeholder={
-                        editingCliProvider === "claude"
-                          ? "/Users/admin/.local/bin/claude"
-                          : "/Users/admin/.local/bin/codex"
-                      }
-                      className="h-10 w-full rounded-md border border-border bg-input px-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                    <datalist id={`agent-cli-path-${editingCliProvider}`}>
-                      {(agentCli?.[editingCliProvider].suggestions ?? []).map((path) => (
-                        <option key={path} value={path} />
-                      ))}
-                    </datalist>
-                  </label>
-                  <div className="flex shrink-0 justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-8 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setEditingCliProvider(null);
-                        setCliPathInput("");
-                      }}
-                      disabled={savingCliPath}
-                    >
-                      取消
-                    </Button>
-                    <Button
-                      type="button"
-                      className="h-8 shrink-0 rounded px-2.5 text-xs font-medium"
-                      onClick={() => void saveCliPath()}
-                      disabled={savingCliPath || !cliPathInput.trim()}
-                    >
-                      {savingCliPath ? "保存中..." : "保存路径"}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                  <p
-                    className={cn(
-                      "flex h-10 min-w-0 flex-1 items-center truncate font-mono text-sm",
-                      selectedCli?.available ? "text-foreground" : "text-destructive",
-                    )}
-                    title={selectedCli?.command ?? selectedCli?.error}
-                  >
-                    {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-8 shrink-0 self-end rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground sm:self-auto"
-                    onClick={() => openCliPathEditor(provider)}
-                    disabled={mode === "json" && provider === "codex"}
-                  >
-                    指定路径
-                  </Button>
-                </div>
-              )}
-            </div>
-          </section>
-          <label className="flex min-w-0 flex-col gap-2">
-            <span className="text-sm">权限模式</span>
-            <Select
-              value={permissionMode}
-              onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {permissionOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              disabled={submitting}
-            >
-              取消
-            </Button>
-            <Button type="submit" disabled={createDisabled}>
-              {submitting ? "创建中..." : "创建"}
-            </Button>
-          </DialogFooter>
-        </form>
+        {form}
       </DialogContent>
     </Dialog>
   );

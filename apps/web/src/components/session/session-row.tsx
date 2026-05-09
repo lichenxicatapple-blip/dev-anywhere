@@ -100,7 +100,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
       <button
         type="button"
         onClick={onClick}
-        className="flex flex-col gap-1 flex-1 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+        className="flex min-h-11 flex-col justify-center gap-1 flex-1 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm md:min-h-0"
         aria-pressed={selected}
       >
         <span className="flex items-center gap-2 min-w-0">
@@ -151,6 +151,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
             <Button
               variant="ghost"
               size="icon-xs"
+              className="size-11 md:size-6"
               aria-label="会话操作"
               data-slot="session-row-menu-trigger"
               onClick={(e) => e.stopPropagation()}

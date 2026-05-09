@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { useAppStore } from "@/stores/app-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -15,6 +16,7 @@ import { FilePathPicker } from "./file-path-picker";
 import { InputMenu } from "./input-menu";
 import { SendButton } from "./send-button";
 import type { PickerHandle } from "./picker-handle";
+import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 
 interface InputBarProps {
   sessionId: string;
@@ -27,6 +29,12 @@ export function InputBar({ sessionId }: InputBarProps) {
   const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
+  const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
+  const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
+  const effectiveChatContentFontSize = getEffectiveChatContentFontSize(
+    chatContentFontSize,
+    touchEditingSurface,
+  );
   // 发送按钮的 working 态直接读 session.state（proxy 推的单一权威信号）
   const sessionState = useSessionStore(
     (s) => s.sessions.find((x) => x.sessionId === sessionId)?.state,
@@ -34,6 +42,7 @@ export function InputBar({ sessionId }: InputBarProps) {
   const updateSessionState = useSessionStore((s) => s.updateSessionState);
   // 桌面 placeholder 带物理键盘快捷键提示, 手机软键盘上没 Shift / 方向键, 且 320px 会折两行
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const submitOnPlainEnter = isDesktop && !touchEditingSurface;
 
   const value = slice.inputDraft;
   const isWorking = sessionState === "working";
@@ -84,9 +93,10 @@ export function InputBar({ sessionId }: InputBarProps) {
     const relay = relayClientRef;
     if (!relay) return;
     const now = Date.now();
+    const messageId = `${sessionId}-user-${now}`;
     // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
     addUserMessage(sessionId, {
-      id: `${sessionId}-user-${now}`,
+      id: messageId,
       role: "user",
       text: trimmed,
       isPartial: false,
@@ -98,7 +108,7 @@ export function InputBar({ sessionId }: InputBarProps) {
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
-      payload: { text: trimmed },
+      payload: { text: trimmed, messageId },
       seq: 0,
       timestamp: now,
       source: "client",
@@ -143,7 +153,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       // IME 组合输入中 (中日韩输入法候选栏), Enter 语义是"确认候选", 让输入法消化
       // 不拦截, 也不 preventDefault, 避免把候选残留在 textarea 里同时又发送
       if (e.nativeEvent.isComposing) return;
-      if (pickerMode === "none") {
+      if (pickerMode === "none" && submitOnPlainEnter) {
         e.preventDefault();
         send();
       }
@@ -156,7 +166,9 @@ export function InputBar({ sessionId }: InputBarProps) {
     }
   };
 
-  const placeholder = isDesktop ? "输入消息... (Enter 发送，Shift+Enter 换行)" : "输入消息...";
+  const placeholder = submitOnPlainEnter
+    ? "输入消息... (Enter 发送，Shift+Enter 换行)"
+    : "输入消息...";
 
   return (
     <div className="relative w-full" data-slot="input-bar" data-mode="json">
@@ -214,8 +226,10 @@ export function InputBar({ sessionId }: InputBarProps) {
             value={value}
             onChange={(e) => handleValueChange(e.target.value)}
             onKeyDown={onKeyDown}
+            enterKeyHint={submitOnPlainEnter ? "send" : "enter"}
             placeholder={placeholder}
-            className="flex-1 resize-none font-normal border-0 bg-transparent shadow-none rounded-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent min-h-0 max-h-60"
+            className="flex-1 resize-none rounded-none border-0 bg-transparent font-normal shadow-none max-h-60 min-h-11 focus-visible:border-0 focus-visible:ring-0 md:min-h-0 dark:bg-transparent"
+            style={{ fontSize: effectiveChatContentFontSize }}
             rows={1}
             aria-label="输入聊天消息"
           />

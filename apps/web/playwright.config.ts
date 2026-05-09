@@ -11,10 +11,20 @@ export default defineConfig({
     baseURL: BASE_URL,
   },
   projects: [
-    // 移动端视口覆盖抽屉、软键盘和窄屏滚动路径。
+    // 小屏手机覆盖旧 iPhone / SE 类尺寸，防止只在大手机上通过。
+    {
+      name: "mobile-small",
+      use: { viewport: { width: 375, height: 667 }, hasTouch: true },
+    },
+    // 标准手机视口覆盖抽屉、软键盘和窄屏滚动路径。
     {
       name: "mobile",
       use: { viewport: { width: 390, height: 844 }, hasTouch: true },
+    },
+    // 手机横屏覆盖 PTY、输入栏和弹层在低高度下的布局。
+    {
+      name: "mobile-landscape",
+      use: { viewport: { width: 844, height: 390 }, hasTouch: true },
     },
     // 桌面视口覆盖 master-detail、侧栏和宽屏终端路径。
     {

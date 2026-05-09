@@ -33,19 +33,20 @@ test.describe("AppShell layout — desktop (≥ md)", () => {
   });
 
   test("sidebar is visible on desktop viewport", async ({ page }) => {
-    const nav = page.locator("nav[aria-label='Sidebar navigation']");
+    const nav = page.locator('nav[data-slot="sidebar"]');
     await expect(nav).toBeVisible();
+    await expect(nav).toHaveAttribute("aria-label", "侧边栏");
   });
 
   test("sidebar width is 280px", async ({ page }) => {
-    const nav = page.locator("nav[aria-label='Sidebar navigation']");
+    const nav = page.locator('nav[data-slot="sidebar"]');
     const box = await nav.boundingBox();
     expect(box?.width).toBe(280);
   });
 
-  test("header is 48px high", async ({ page }) => {
-    const header = page.locator("header[role='banner']");
-    const box = await header.boundingBox();
-    expect(box?.height).toBe(48);
+  test("desktop keeps the mobile top-level chrome hidden", async ({ page }) => {
+    await expect(page.locator('[data-slot="mobile-brand-hero"]')).not.toBeVisible();
+    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).not.toBeVisible();
+    await expect(page.locator('[data-slot="sidebar-brand"]')).toBeVisible();
   });
 });

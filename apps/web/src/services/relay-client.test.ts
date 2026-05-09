@@ -221,6 +221,40 @@ describe("RelayClient request handling", () => {
     await expect(promise).resolves.toEqual([{ role: "assistant", text: "hello" }]);
   });
 
+  it("requests paginated session message pages", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestSessionMessagesPage("s1", { limit: 25, before: "b:2000" });
+    const request = JSON.parse(ws.sent[0] ?? "{}") as {
+      type?: string;
+      limit?: number;
+      before?: string;
+      requestId?: string;
+    };
+
+    expect(request).toMatchObject({
+      type: "session_messages_request",
+      limit: 25,
+      before: "b:2000",
+    });
+
+    ws.emit({
+      type: "session_history_messages",
+      requestId: request.requestId,
+      sessionId: "s1",
+      before: "b:2000",
+      hasMore: true,
+      nextBefore: "b:1200",
+      messages: [{ role: "user", text: "older", cursor: "b:1500" }],
+    });
+
+    await expect(promise).resolves.toEqual({
+      messages: [{ role: "user", text: "older", cursor: "b:1500" }],
+      hasMore: true,
+      nextBefore: "b:1200",
+      before: "b:2000",
+    });
+  });
+
   it("waits for matching agent status snapshots", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestAgentStatuses("s1");

@@ -1,7 +1,7 @@
 import { serviceLogger } from "../common/logger.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
-import { readSessionMessages } from "./session-history.js";
+import { readSessionMessagesPage } from "./session-history.js";
 import type { SessionManager } from "./session-manager.js";
 
 interface RelayHistoryHandlersDeps {
@@ -17,35 +17,48 @@ export class RelayHistoryHandlers {
     const sid = msg.sessionId as string | undefined;
     if (!sid) return;
     const requestId = msg.requestId as string | undefined;
+    const before = msg.before as string | undefined;
+    const limit = msg.limit as number | undefined;
 
     const session = this.deps.sessionManager.getSession(sid);
     if (session?.claudeSessionId) {
-      readSessionMessages(session.claudeSessionId)
-        .then((messages) => {
+      readSessionMessagesPage(session.claudeSessionId, { before, limit })
+        .then((page) => {
           this.deps.relaySend(
             JSON.stringify({
               type: "session_history_messages",
               requestId,
               sessionId: sid,
-              messages,
+              ...(before !== undefined ? { before } : {}),
+              messages: page.messages,
+              hasMore: page.hasMore,
+              ...(page.nextBefore !== undefined ? { nextBefore: page.nextBefore } : {}),
             }),
           );
           serviceLogger.info(
-            { sessionId: sid, messageCount: messages.length },
-            "History messages sent on request",
+            {
+              sessionId: sid,
+              before,
+              hasMore: page.hasMore,
+              nextBefore: page.nextBefore,
+              messageCount: page.messages.length,
+            },
+            "History message page sent on request",
           );
         })
         .catch((err) => {
           serviceLogger.warn(
             { sessionId: sid, error: String(err) },
-            "Failed to read session history messages on request",
+            "Failed to read session history page on request",
           );
           this.deps.relaySend(
             JSON.stringify({
               type: "session_history_messages",
               requestId,
               sessionId: sid,
+              ...(before !== undefined ? { before } : {}),
               messages: [],
+              hasMore: false,
             }),
           );
         });
@@ -55,7 +68,9 @@ export class RelayHistoryHandlers {
           type: "session_history_messages",
           requestId,
           sessionId: sid,
+          ...(before !== undefined ? { before } : {}),
           messages: [],
+          hasMore: false,
         }),
       );
     }

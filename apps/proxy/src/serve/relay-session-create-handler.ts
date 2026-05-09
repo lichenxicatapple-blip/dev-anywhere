@@ -10,7 +10,7 @@ import { buildHostedPtyArgs, type HostedPtyRegistry } from "./hosted-pty-registr
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
-import { readSessionMessages } from "./session-history.js";
+import { readSessionMessagesPage } from "./session-history.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { classifyPathError } from "./path-errors.js";
@@ -269,21 +269,32 @@ export class RelaySessionCreateHandler {
   }
 
   private pushHistoryMessages(sessionId: string, resumeSessionId: string): void {
-    readSessionMessages(resumeSessionId)
-      .then((messages) => {
-        if (messages.length === 0) return;
+    readSessionMessagesPage(resumeSessionId)
+      .then((page) => {
+        if (page.messages.length === 0) return;
         this.deps.relaySend(
-          JSON.stringify({ type: "session_history_messages", sessionId, messages }),
+          JSON.stringify({
+            type: "session_history_messages",
+            sessionId,
+            messages: page.messages,
+            hasMore: page.hasMore,
+            ...(page.nextBefore !== undefined ? { nextBefore: page.nextBefore } : {}),
+          }),
         );
         serviceLogger.info(
-          { sessionId, resumeSessionId, messageCount: messages.length },
-          "History messages sent for resumed session",
+          {
+            sessionId,
+            resumeSessionId,
+            messageCount: page.messages.length,
+            hasMore: page.hasMore,
+          },
+          "History message page sent for resumed session",
         );
       })
       .catch((err) => {
         serviceLogger.warn(
           { sessionId, error: String(err) },
-          "Failed to read session history messages",
+          "Failed to read session history page",
         );
       });
   }

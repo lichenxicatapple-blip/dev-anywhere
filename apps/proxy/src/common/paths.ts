@@ -35,6 +35,7 @@ export const DESIRED_ENV_PATH = `${RUN_DIR}/desired-env`;
 // 持久化状态
 const STATE_DIR = `${APP_DIR}/state`;
 export const SESSIONS_PATH = `${STATE_DIR}/sessions.json`;
+export const HOOK_REGISTRY_PATH = `${STATE_DIR}/hooks.json`;
 
 // 会话数据
 export const DATA_DIR = `${APP_DIR}/data`;

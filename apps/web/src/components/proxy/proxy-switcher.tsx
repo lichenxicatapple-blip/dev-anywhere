@@ -97,6 +97,9 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                 <span className="text-sm font-normal flex-1 truncate min-w-0">
                   {p.name ?? p.proxyId}
                 </span>
+                {selectedProxyId === p.proxyId && (
+                  <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
+                )}
                 {!p.online && <span className="text-xs text-muted-foreground shrink-0">离线</span>}
               </button>
             </li>

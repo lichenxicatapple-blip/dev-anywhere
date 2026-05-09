@@ -6,6 +6,13 @@ import {
 } from "../chat.js";
 
 describe("UserInputPayloadSchema", () => {
+  it("accepts stable message IDs for cross-client dedupe", () => {
+    expect(UserInputPayloadSchema.parse({ text: "hello", messageId: "msg-1" })).toEqual({
+      text: "hello",
+      messageId: "msg-1",
+    });
+  });
+
   it("rejects empty text", () => {
     expect(() => UserInputPayloadSchema.parse({ text: "" })).toThrow();
   });

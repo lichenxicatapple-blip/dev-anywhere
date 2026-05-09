@@ -249,14 +249,14 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                   }
                 }}
                 placeholder="目录名称"
-                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-input px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-input px-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-8 md:min-h-0 md:text-sm"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
               />
               <button
                 type="button"
-                className="h-8 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-h-11 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 md:h-8 md:min-h-0"
                 disabled={!joinChildDirectory(absolutePath, newDirName) || creatingDir}
                 onClick={() => void handleCreateDirectory()}
               >
@@ -280,7 +280,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                   onClick={() => onSelect(emitPath(e))}
                   onMouseEnter={() => setIndex(i)}
                   className={cn(
-                    "w-full flex items-center gap-2 px-3 h-9 text-sm text-left transition-colors",
+                    "w-full flex min-h-11 items-center gap-2 px-3 py-2 text-sm text-left transition-colors md:h-9 md:min-h-0 md:py-0",
                     // --accent 和 --popover 同为 #2D2D2D, bg-accent 在 picker 里跟底色撞;
                     // 用 primary 15% 混透明色凑对比, 同时沿用品牌色语言
                     i === index && "bg-[color-mix(in_srgb,var(--primary)_15%,transparent)]",

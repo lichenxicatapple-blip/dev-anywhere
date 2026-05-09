@@ -1,6 +1,6 @@
 {
   "name": "@dev-anywhere/web",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "bash ../../scripts/web-e2e.sh",
+    "test:e2e:desktop": "bash ../../scripts/web-e2e.sh e2e/shell.spec.ts e2e/proxy-switcher.spec.ts e2e/session-list.spec.ts e2e/input-bar.spec.ts e2e/functional-walkthrough.spec.ts e2e/chat-chrome.spec.ts --project=desktop",
+    "test:e2e:mobile": "pnpm run test:e2e:mobile:contract",
+    "test:e2e:mobile:contract": "bash ../../scripts/web-e2e.sh e2e/mobile-contract.spec.ts --project=mobile-small --project=mobile --project=mobile-landscape",
+    "test:e2e:mobile:real": "bash ../../scripts/web-e2e.sh e2e/real-local-smoke.spec.ts --project=mobile",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {

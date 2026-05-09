@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+source "$ROOT/scripts/lib/smoke-common.sh"
+smoke_use_stable_node
+
 RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
 WEB_BASE_URL="${WEB_BASE_URL:-http://localhost:$WEB_PORT}"
@@ -126,37 +129,37 @@ web_http_ok() {
 run_real_ui_smoke() {
   local label="$1"
   echo "+ UI smoke: $label"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test e2e/real-chaos.spec.ts --project=desktop
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-chaos.spec.ts --project=desktop
 }
 
 run_relay_down_ui_smoke() {
   echo "+ UI smoke: relay down state"
   DEV_ANYWHERE_EXPECT_RELAY_DOWN=1 WEB_BASE_URL="$WEB_BASE_URL" \
-    pnpm --filter @dev-anywhere/web exec playwright test e2e/real-chaos.spec.ts --project=desktop
+    pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-chaos.spec.ts --project=desktop
 }
 
 run_render_chaos_smoke() {
   echo "+ UI smoke: PTY render-time stale snapshot and duplicate frame handling"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/pty-smoke.spec.ts --project=desktop --grep "stale render"
 }
 
 run_protocol_chaos_smoke() {
   echo "+ UI smoke: requestId snapshot and approval recovery chaos"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/protocol-chaos.spec.ts --project=desktop
 }
 
 run_websocket_reconnect_chaos_smoke() {
   echo "+ UI smoke: client WebSocket reconnect state recovery"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/websocket-chaos.spec.ts --project=desktop
 }
 
 run_real_provider_approval_smoke() {
   echo "+ UI smoke: real Claude/Codex hosted PTY approval"
   DEV_ANYWHERE_REAL_PROVIDER_CWD="$HOSTED_PTY_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/real-provider-approval.spec.ts --project=desktop
 }
 
@@ -166,7 +169,7 @@ run_hosted_pty_exit_chaos_smoke() {
   DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/hosted-pty-chaos.spec.ts --project=desktop
 }
 
@@ -177,7 +180,7 @@ run_local_runtime_pty_chaos_smoke() {
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD="$LOCAL_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN="$LOCAL_PTY_CHAOS_BIN" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/real-local-pty-chaos.spec.ts --project=desktop
 }
 
@@ -185,7 +188,7 @@ run_json_worker_chaos_smoke() {
   echo "+ UI smoke: real Claude JSON worker approval and relay restart"
   DEV_ANYWHERE_JSON_WORKER_CHAOS=1 \
     DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD="$JSON_WORKER_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web exec playwright test \
+    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
     e2e/real-json-worker-chaos.spec.ts --project=desktop
 }
 
@@ -365,7 +368,7 @@ start_relay_only() {
     DEV_ANYWHERE_RELAY_CHAOS_DUPLICATE_DELAY_MS="${DEV_ANYWHERE_RELAY_CHAOS_DUPLICATE_DELAY_MS:-20}" \
     DEV_ANYWHERE_RELAY_CHAOS_REORDER="${DEV_ANYWHERE_RELAY_CHAOS_REORDER:-1}" \
     DEV_ANYWHERE_RELAY_CHAOS_REORDER_DELAY_MS="${DEV_ANYWHERE_RELAY_CHAOS_REORDER_DELAY_MS:-60}" \
-    "$ROOT/apps/relay/node_modules/.bin/tsx" src/index.ts
+    "$ROOT/node_modules/.bin/tsx" src/index.ts
   wait_until "relay listens on :$RELAY_PORT" 10 port_has_listener "$RELAY_PORT"
   wait_until "relay HTTP status responds" 10 relay_http_ok
 }

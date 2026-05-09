@@ -24,6 +24,19 @@ function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant
   }
 }
 
+function handleUserInput(env: Extract<MessageEnvelope, { type: "user_input" }>) {
+  const timestamp = Number.isFinite(env.timestamp) ? env.timestamp : Date.now();
+  const messageId = env.payload.messageId ?? `${env.sessionId}-user-${timestamp}`;
+  useChatStore.getState().addUserMessage(env.sessionId, {
+    id: messageId,
+    role: "user",
+    text: env.payload.text,
+    isPartial: false,
+    timestamp,
+    toolCalls: [],
+  });
+}
+
 function handleToolUseRequest(
   env: Extract<MessageEnvelope, { type: "tool_use_request" }>,
   relay: Pick<RelayClient, "sendControl"> | null,
@@ -92,7 +105,12 @@ function handleSessionHistoryMessages(
   msg: Extract<RelayControlMessage, { type: "session_history_messages" }>,
 ) {
   const store = useChatStore.getState();
-  store.loadHistory(msg.sessionId, msg.messages);
+  store.loadHistoryPage(msg.sessionId, {
+    mode: msg.before ? "prepend" : "replace",
+    messages: msg.messages,
+    hasMore: msg.hasMore,
+    nextBefore: msg.nextBefore,
+  });
 }
 
 function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result" }>) {
@@ -144,7 +162,7 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         // thinking 文本不进入聊天流；UI 只通过 agent_status/session_status 展示响应状态。
         break;
       case "user_input":
-        // Echo: 本端已乐观入 store, 此处不重复追加
+        handleUserInput(msg);
         break;
       case "pending_approvals_push":
         handlePendingApprovalsPush(msg, relay);

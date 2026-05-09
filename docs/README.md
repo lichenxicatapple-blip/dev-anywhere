@@ -4,13 +4,15 @@
 
 ## 当前入口
 
-| 文档                        | 用途                                    |
-| --------------------------- | --------------------------------------- |
-| `CLAUDE.md`                 | 当前开发约定、架构摘要、部署提示。      |
-| `PUBLISHING.md`             | 发布版本、镜像、npm 与 VPS 部署流程。   |
-| `docs/SCRIPTS.md`           | 本地开发、生产部署、治理脚本入口说明。  |
-| `docs/LOCAL-SMOKE.md`       | 本机真实 relay/proxy/web/终端手测清单。 |
-| `docs/RELEASE-CHECKLIST.md` | 发布前构建、打包、安装冒烟清单。        |
+| 文档                        | 用途                                       |
+| --------------------------- | ------------------------------------------ |
+| `CLAUDE.md`                 | 当前开发约定、架构摘要、部署提示。         |
+| `PUBLISHING.md`             | 发布版本、镜像、npm 与 VPS 部署流程。      |
+| `docs/SCRIPTS.md`           | 本地开发、生产部署、治理脚本入口说明。     |
+| `docs/LOCAL-SMOKE.md`       | 本机真实 relay/proxy/web/终端手测清单。    |
+| `docs/MOBILE-REDESIGN.md`   | 移动端产品形态、组件适配矩阵和重构规则。   |
+| `docs/MOBILE-SMOKE.md`      | 移动端自动化 smoke 和 iOS Simulator 冒烟。 |
+| `docs/RELEASE-CHECKLIST.md` | 发布前构建、打包、安装冒烟清单。           |
 
 ## 当前治理规则
 

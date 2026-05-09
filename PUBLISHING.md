@@ -2,102 +2,115 @@
 
 ## Release artifacts
 
-A single `vX.Y.Z` git tag produces four artifacts:
+A single `vX.Y.Z` git tag produces four public artifacts:
 
 | Kind   | Name                                       | What it's for                                         |
 | ------ | ------------------------------------------ | ----------------------------------------------------- |
 | npm    | `@dev-anywhere/proxy`                      | Local proxy CLI end-users install on their laptop     |
 | npm    | `@dev-anywhere/relay`                      | Standalone relay binary for local/dev use             |
 | Docker | `ghcr.io/<owner>/dev-anywhere-relay:<tag>` | Production relay container                            |
-| Docker | `ghcr.io/<owner>/dev-anywhere-web:<tag>`   | Nginx + web SPA container (reverse-proxies the relay) |
+| Docker | `ghcr.io/<owner>/dev-anywhere-web:<tag>`   | Nginx + web SPA container, reverse-proxying the relay |
 
-`@dev-anywhere/shared` stays `private: true` and is bundled into both npm packages via tsup `noExternal`.
+`@dev-anywhere/shared` stays `private: true` and is bundled into the published npm packages via tsup `noExternal`.
 
 ## Release pipeline
 
-`.github/workflows/release.yml` triggers on any `v*.*.*` tag push and runs two jobs in parallel:
+`.github/workflows/release.yml` triggers on `v*.*.*` tag pushes and runs two jobs:
 
-1. **publish-images** — matrix over `dev-anywhere-relay` and `dev-anywhere-web`. Each job uses `docker/build-push-action` with buildx + GHA cache and pushes image tags `latest`, `vX.Y.Z`, `X.Y.Z`, `X.Y`, `X` to GHCR.
-2. **publish-npm** — `pnpm -r build` then `pnpm publish` for each npm package. Requires `NPM_TOKEN` repo secret.
+1. `publish-images`: builds `dev-anywhere-relay` and `dev-anywhere-web`, then pushes `latest`, `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `X` tags to GHCR. If Aliyun ACR secrets are configured, the same tags are pushed there too.
+2. `publish-npm`: builds the workspace and publishes `@dev-anywhere/proxy` and `@dev-anywhere/relay`. This requires the `NPM_TOKEN` repo secret.
 
-GHCR auth uses the workflow's `GITHUB_TOKEN` (no extra secret needed). `packages: write` permission is set on the workflow.
+GHCR auth uses the workflow `GITHUB_TOKEN`; the workflow requests `packages: write`.
 
 ## Cutting a release
 
-```bash
-# 1. Bump versions in lockstep
-pnpm -r exec npm version <patch|minor|major>
-
-# 2. Commit and tag
-git add apps/proxy/package.json apps/relay/package.json
-git commit -m "chore: bump to vX.Y.Z"
-git tag vX.Y.Z
-
-# 3. Push — tag push triggers the workflow
-git push && git push --tags
-```
-
-The workflow publishes npm packages and GHCR images; no manual publish step.
-
-## Local dry-run (before pushing a tag)
+Keep proxy, relay, and web versions in lockstep:
 
 ```bash
+# 1. Bump versions together
+$EDITOR apps/proxy/package.json apps/relay/package.json apps/web/package.json
+
+# 2. Run local verification
+pnpm format:check
 pnpm typecheck
 pnpm test
-pnpm format:check
-pnpm knip
 pnpm release:check
+pnpm desktop:smoke
+pnpm mobile:smoke
 
-# Validate Docker images build (optional)
-docker buildx build -f apps/relay/Dockerfile -t dev-anywhere-relay:dry .
-docker buildx build -f apps/web/Dockerfile   -t dev-anywhere-web:dry   .
+# 3. Commit, tag, and push
+git add -A
+git commit -m "release: prepare vX.Y.Z"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin main
+git push origin vX.Y.Z
 ```
 
-`pnpm release:check` builds the workspace, validates npm pack contents for proxy and relay, verifies the bundled terminal font shards, and runs `dev-anywhere init` in an isolated `HOME`.
+Use `pnpm mobile:smoke --full` when the release changes mobile chat, PTY, history loading, session creation, or provider routing. It touches the real local relay/proxy chain and can create temporary sessions.
+
+After pushing the tag, wait for the release workflow:
+
+```bash
+gh run list --workflow Release --limit 5
+gh run watch <run-id> --exit-status
+```
+
+If a release workflow fails before publishing completes, fix the failure, commit again, and create a new unused tag. Do not retag a version that may already have published npm packages or images.
 
 ## First-time repo setup
 
-1. In the GitHub repo Settings → Secrets and variables → Actions, add:
-   - `NPM_TOKEN` with publish permission on both packages (`npm token create` on npmjs.com).
-2. Settings → Actions → General → Workflow permissions: ensure "Read and write permissions" is enabled (or the workflow's `packages: write` is respected).
-3. First push to main creates the GHCR packages on-demand. After the first publish, go to the GHCR package pages and set them to **public** so unauthenticated `docker pull` works.
+1. In GitHub repo Settings -> Secrets and variables -> Actions, add `NPM_TOKEN` with publish permission on both npm packages.
+2. Settings -> Actions -> General -> Workflow permissions must allow write permissions, or the workflow `packages: write` permission must be respected.
+3. First image publish creates the GHCR package pages. Set them to public so unauthenticated VPS `docker pull` works.
+4. Optional Aliyun ACR publishing needs `ACR_REGISTRY`, `ACR_NAMESPACE`, `ACR_USERNAME`, and `ACR_PASSWORD`.
 
 ## Version policy
 
-- Both npm packages and both Docker images bumped together, even if only one changed. Rationale: protocol lives in `shared`; version skew risks silent envelope shape drift between relay and proxy.
-- Pre-`1.0.0`: minor bumps may include breaking changes (document in CHANGELOG). Once stable, move to strict semver.
+- Bump both npm packages and both Docker images together. The shared protocol lives in `@dev-anywhere/shared`; version skew can otherwise create silent envelope drift between proxy, relay, and web.
+- Pre-`1.0.0`: minor bumps may include breaking changes. Document user-facing breakage in release notes or the changelog.
 
-## User-facing install flows
+## VPS deploy
 
-### Local proxy CLI (end-user laptop)
+Production deploys must use published images. Do not deploy from local-only images or installer bypasses.
+
+```bash
+IMAGE_TAG=X.Y.Z ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.vita-tools.top dev-anywhere.vita-tools.top
+```
+
+The installer reuses `/opt/dev-anywhere/.env` when `RELAY_PROXY_TOKEN` already exists, pulls the requested image tag, restarts Docker Compose, and verifies:
+
+```bash
+curl -fsS https://dev-anywhere.vita-tools.top/health
+```
+
+Direct VPS mode is also supported:
+
+```bash
+sudo ./scripts/install-relay.sh dev-anywhere.vita-tools.top
+```
+
+## Local proxy update
+
+After npm publish succeeds, update the local CLI and reconnect the local runtime to cloud:
+
+```bash
+npm install -g @dev-anywhere/proxy@X.Y.Z
+dev-anywhere serve restart --env cloud
+dev-anywhere serve status
+```
+
+For first-time local setup:
 
 ```bash
 npm install -g @dev-anywhere/proxy
 dev-anywhere init
-# edit ~/.dev-anywhere/config.json: set envs.cloud.relayToken from RELAY_PROXY_TOKEN
+# edit ~/.dev-anywhere/config.json: set envs.cloud.relayUrl and envs.cloud.relayToken
 dev-anywhere serve start --env cloud
 ```
 
-### Self-hosted relay + web (VPS, turnkey)
+## Standalone relay without TLS
 
-`scripts/install-relay.sh` uses pre-built GHCR images — no source clone, no build on the VPS, ~30s cold start. Our own cloud deployment must use this same path; do not deploy from local-only images or installer bypasses.
-
-```bash
-# A) From your laptop, auto-ssh:
-./scripts/install-relay.sh --ssh user@vps-host dev-anywhere.vita-tools.top
-
-# B) On the VPS directly:
-curl -fsSL https://raw.githubusercontent.com/<owner>/dev-anywhere/main/scripts/install-relay.sh \
-  | sudo bash -s -- dev-anywhere.vita-tools.top
-```
-
-Upgrade later:
-
-```bash
-cd /opt/dev-anywhere && docker compose pull && docker compose up -d
-```
-
-### Standalone relay without TLS (dev)
+For local development only:
 
 ```bash
 npm install -g @dev-anywhere/relay

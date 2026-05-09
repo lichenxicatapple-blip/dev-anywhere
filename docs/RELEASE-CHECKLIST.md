@@ -4,11 +4,23 @@
 
 ## 必跑命令
 
+先确认本地真实链路运行在 `local` 环境：
+
+```bash
+pnpm dev:restart
+INIT_CWD="$PWD" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env local
+pnpm dev:health
+```
+
+再执行工程检查：
+
 ```bash
 pnpm typecheck
 pnpm test
 pnpm format:check
 pnpm knip
+pnpm mobile:smoke
+pnpm desktop:smoke
 pnpm release:check
 ```
 
@@ -23,12 +35,22 @@ pnpm release:check
 
 ## 手工确认
 
-发布包验证通过后，再跑本机真实链路：
+发布包验证通过后，再跑混沌和人工本地冒烟：
 
 ```bash
-pnpm dev:restart
-pnpm dev:health
 pnpm dev:chaos
+```
+
+如果本次发布改动了 chat、PTY、弹层、文件选择器、输入栏或全局布局，再跑一次 iOS Simulator 截图冒烟：
+
+```bash
+pnpm mobile:smoke:simulator
+```
+
+如果本次发布改动了 session 创建、chat 输入、PTY 或 provider wiring，跑完整移动真实链路：
+
+```bash
+pnpm mobile:smoke:full
 ```
 
 最后按 `docs/LOCAL-SMOKE.md` 做一次 Claude 终端会话、Codex 终端会话、Claude 聊天会话的人工确认。

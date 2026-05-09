@@ -127,6 +127,38 @@ describe("RelayControlSchema", () => {
     }
   });
 
+  it("parses paginated session history messages", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "session_messages_request",
+        requestId: "history-1",
+        sessionId: "sess-json",
+        limit: 50,
+        before: "b:2048",
+      }),
+    ).toMatchObject({
+      type: "session_messages_request",
+      limit: 50,
+      before: "b:2048",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "session_history_messages",
+        requestId: "history-1",
+        sessionId: "sess-json",
+        before: "b:2048",
+        messages: [{ role: "user", text: "older prompt", timestamp: 123, cursor: "b:1024" }],
+        hasMore: true,
+        nextBefore: "b:1024",
+      }),
+    ).toMatchObject({
+      type: "session_history_messages",
+      hasMore: true,
+      nextBefore: "b:1024",
+    });
+  });
+
   it("rejects terminal_frame (removed from schema)", () => {
     expect(() =>
       RelayControlSchema.parse({

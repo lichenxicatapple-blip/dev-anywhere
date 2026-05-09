@@ -91,6 +91,34 @@ describe("chat-dispatcher permission flow", () => {
     });
   });
 
+  it("loads session history messages into chat store", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle({
+      type: "session_history_messages",
+      sessionId: "s1",
+      messages: [
+        { role: "user", text: "历史问题", timestamp: 100, cursor: "b:100" },
+        { role: "assistant", text: "历史回复", timestamp: 200, cursor: "b:200" },
+      ],
+    } as RelayControlMessage);
+
+    const messages = useChatStore.getState().bySessionId.s1.messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      id: "history-s1-b:100",
+      role: "user",
+      text: "历史问题",
+      timestamp: 100,
+    });
+    expect(messages[1]).toMatchObject({
+      id: "history-s1-b:200",
+      role: "assistant",
+      text: "历史回复",
+      timestamp: 200,
+    });
+  });
+
   it("does not duplicate turn_result.result after streamed assistant text", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
 
@@ -114,6 +142,30 @@ describe("chat-dispatcher permission flow", () => {
       role: "assistant",
       text: "OK",
       isPartial: false,
+    });
+  });
+
+  it("renders accepted user_input envelopes idempotently across clients", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    const acceptedInput = envelope({
+      type: "user_input",
+      sessionId: "s1",
+      timestamp: 1234,
+      source: "proxy",
+      payload: { text: "hello from phone", messageId: "s1-user-client-1" },
+    });
+
+    handle(acceptedInput);
+    handle(acceptedInput);
+
+    const messages = useChatStore.getState().bySessionId.s1.messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: "s1-user-client-1",
+      role: "user",
+      text: "hello from phone",
+      isPartial: false,
+      timestamp: 1234,
     });
   });
 });

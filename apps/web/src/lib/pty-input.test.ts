@@ -95,4 +95,22 @@ describe("attachXtermRawInput", () => {
     expect(emitKey(event)).toBe(true);
     expect(sendSpy).not.toHaveBeenCalled();
   });
+
+  it("can map plain Enter to LF for mobile soft-keyboard newline", () => {
+    const { terminal, emitKey } = createTerminal();
+    const onRawInput = vi.fn();
+    const event = new KeyboardEvent("keydown", { key: "Enter" });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", {
+      onRawInput,
+      plainEnterBehavior: "linefeed",
+    });
+    const shouldContinue = emitKey(event);
+
+    expect(shouldContinue).toBe(false);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "\n");
+    expect(onRawInput).toHaveBeenCalledWith("\n");
+  });
 });

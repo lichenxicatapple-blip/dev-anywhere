@@ -3,12 +3,12 @@ import { useEffect, useState } from "react";
 // 订阅 media query，返回当前匹配状态；SSR 安全
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
     return window.matchMedia(query).matches;
   });
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const mql = window.matchMedia(query);
     const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
     setMatches(mql.matches);

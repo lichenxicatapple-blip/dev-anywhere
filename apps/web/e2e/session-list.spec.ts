@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, installFakeRelay, selectFakeProxy } from "./helpers";
+import webPackage from "../package.json" with { type: "json" };
+
+const WEB_VERSION = webPackage.version;
 
 test.describe("CreateSessionDialog — 字段校验", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -95,7 +98,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.getByRole("button", { name: /版本/ }).click();
     await expect(page.getByRole("heading", { name: "版本" })).toBeVisible();
     await expect(page.getByText("Web", { exact: true })).toBeVisible();
-    await expect(page.getByText("0.0.5")).toBeVisible();
+    await expect(page.getByText(WEB_VERSION)).toBeVisible();
     await expect(page.getByText("Relay", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();

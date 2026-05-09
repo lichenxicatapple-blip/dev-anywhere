@@ -1,4 +1,4 @@
-import { readdir, stat, access } from "node:fs/promises";
+import { readdir, stat, access, open } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -124,61 +124,199 @@ interface SessionMessage {
   role: "user" | "assistant";
   text: string;
   timestamp?: number;
+  cursor?: string;
 }
 
-// 从 JSONL 文件中提取 user/assistant 对话消息用于恢复时展示历史
-export async function readSessionMessages(claudeSessionId: string): Promise<SessionMessage[]> {
+interface SessionMessagesPage {
+  messages: SessionMessage[];
+  hasMore: boolean;
+  nextBefore?: string;
+}
+
+interface SessionMessagesPageOptions {
+  limit?: number;
+  before?: string;
+}
+
+const DEFAULT_HISTORY_PAGE_LIMIT = 50;
+const MAX_HISTORY_PAGE_LIMIT = 200;
+const HISTORY_READ_CHUNK_BYTES = 64 * 1024;
+const HISTORY_CURSOR_PREFIX = "b:";
+
+function normalizeHistoryPageLimit(limit: unknown): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return DEFAULT_HISTORY_PAGE_LIMIT;
+  return Math.max(1, Math.min(MAX_HISTORY_PAGE_LIMIT, Math.floor(limit)));
+}
+
+function encodeHistoryCursor(offset: number): string {
+  return `${HISTORY_CURSOR_PREFIX}${Math.max(0, Math.floor(offset))}`;
+}
+
+function decodeHistoryCursor(cursor: string | undefined, fileSize: number): number {
+  if (!cursor) return fileSize;
+  const raw = cursor.startsWith(HISTORY_CURSOR_PREFIX)
+    ? cursor.slice(HISTORY_CURSOR_PREFIX.length)
+    : cursor;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return fileSize;
+  return Math.min(parsed, fileSize);
+}
+
+async function findClaudeSessionFile(claudeSessionId: string): Promise<string | null> {
   let projectDirs: string[];
   try {
     projectDirs = await readdir(claudeProjectsDir());
   } catch {
-    return [];
+    return null;
   }
 
-  // 在所有项目目录中搜索匹配的 session 文件
   for (const encodedDir of projectDirs) {
     const filePath = join(claudeProjectsDir(), encodedDir, `${claudeSessionId}.jsonl`);
     try {
       await access(filePath);
+      return filePath;
     } catch {
       continue;
     }
-
-    const messages: SessionMessage[] = [];
-    return new Promise((resolve) => {
-      const rl = createInterface({
-        input: createReadStream(filePath, { encoding: "utf-8" }),
-        crlfDelay: Infinity,
-      });
-
-      rl.on("line", (line) => {
-        if (!line.trim()) return;
-        try {
-          const obj = JSON.parse(line);
-          if (obj.type === "user") {
-            if (obj.isMeta) return;
-            const text = extractConversationText(obj.message);
-            if (!text) return;
-            const ts =
-              typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
-            messages.push({ role: "user", text, timestamp: ts });
-          } else if (obj.type === "assistant") {
-            const text = extractConversationText(obj.message);
-            const ts =
-              typeof obj.timestamp === "string" ? new Date(obj.timestamp).getTime() : undefined;
-            if (text) messages.push({ role: "assistant", text, timestamp: ts });
-          }
-        } catch {
-          /* skip */
-        }
-      });
-
-      rl.on("close", () => resolve(messages));
-      rl.on("error", () => resolve(messages));
-    });
   }
 
-  return [];
+  return null;
+}
+
+function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, "cursor"> | null {
+  if (!obj || typeof obj !== "object") return null;
+  const record = obj as {
+    type?: unknown;
+    isMeta?: unknown;
+    message?: unknown;
+    timestamp?: unknown;
+  };
+  if (record.type === "user") {
+    if (record.isMeta) return null;
+    const text = extractConversationText(record.message);
+    if (!text) return null;
+    const ts =
+      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
+    return { role: "user", text, timestamp: ts };
+  }
+  if (record.type === "assistant") {
+    const text = extractConversationText(record.message);
+    if (!text) return null;
+    const ts =
+      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
+    return { role: "assistant", text, timestamp: ts };
+  }
+  return null;
+}
+
+function splitLineSegments(
+  block: Buffer,
+  blockStart: number,
+): Array<{ start: number; line: Buffer }> {
+  const segments: Array<{ start: number; line: Buffer }> = [];
+  let start = 0;
+  for (let i = 0; i < block.length; i += 1) {
+    if (block[i] !== 10) continue;
+    segments.push({ start: blockStart + start, line: block.subarray(start, i) });
+    start = i + 1;
+  }
+  segments.push({ start: blockStart + start, line: block.subarray(start) });
+  return segments;
+}
+
+function stripCarriageReturn(line: Buffer): Buffer {
+  return line.length > 0 && line[line.length - 1] === 13 ? line.subarray(0, -1) : line;
+}
+
+async function readSessionMessagesPageFromFile(
+  filePath: string,
+  options: SessionMessagesPageOptions = {},
+): Promise<SessionMessagesPage> {
+  const limit = normalizeHistoryPageLimit(options.limit);
+  const file = await open(filePath, "r");
+  try {
+    const fileStat = await file.stat();
+    const endOffset = decodeHistoryCursor(options.before, fileStat.size);
+    if (endOffset <= 0) return { messages: [], hasMore: false };
+
+    let position = endOffset;
+    let carry: Buffer = Buffer.alloc(0);
+    const collected: SessionMessage[] = [];
+
+    while (position > 0 && collected.length <= limit) {
+      const readSize = Math.min(HISTORY_READ_CHUNK_BYTES, position);
+      position -= readSize;
+      const chunk = Buffer.alloc(readSize);
+      await file.read(chunk, 0, readSize, position);
+
+      const block = carry.length > 0 ? Buffer.concat([chunk, carry]) : chunk;
+      const segments = splitLineSegments(block, position);
+      const firstCompleteIndex = position > 0 ? 1 : 0;
+      carry = position > 0 ? (segments[0]?.line ?? Buffer.alloc(0)) : Buffer.alloc(0);
+
+      for (let i = segments.length - 1; i >= firstCompleteIndex; i -= 1) {
+        const segment = segments[i];
+        if (!segment) continue;
+        const line = stripCarriageReturn(segment.line);
+        if (line.length === 0) continue;
+        try {
+          const parsed = JSON.parse(line.toString("utf-8"));
+          const message = extractConversationMessageFromJson(parsed);
+          if (!message) continue;
+          collected.push({ ...message, cursor: encodeHistoryCursor(segment.start) });
+          if (collected.length > limit) break;
+        } catch {
+          /* skip malformed lines */
+        }
+      }
+    }
+
+    const page = collected.slice(0, limit).reverse();
+    const hasMore = collected.length > limit;
+    return {
+      messages: page,
+      hasMore,
+      ...(hasMore && page[0]?.cursor ? { nextBefore: page[0].cursor } : {}),
+    };
+  } finally {
+    await file.close();
+  }
+}
+
+// 从 JSONL 文件中提取 user/assistant 对话消息用于恢复时展示历史
+export async function readSessionMessages(claudeSessionId: string): Promise<SessionMessage[]> {
+  const filePath = await findClaudeSessionFile(claudeSessionId);
+  if (!filePath) return [];
+
+  const messages: SessionMessage[] = [];
+  return new Promise((resolve) => {
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity,
+    });
+
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      try {
+        const message = extractConversationMessageFromJson(JSON.parse(line));
+        if (message) messages.push(message);
+      } catch {
+        /* skip */
+      }
+    });
+
+    rl.on("close", () => resolve(messages));
+    rl.on("error", () => resolve(messages));
+  });
+}
+
+export async function readSessionMessagesPage(
+  claudeSessionId: string,
+  options: SessionMessagesPageOptions = {},
+): Promise<SessionMessagesPage> {
+  const filePath = await findClaudeSessionFile(claudeSessionId);
+  if (!filePath) return { messages: [], hasMore: false };
+  return readSessionMessagesPageFromFile(filePath, options);
 }
 
 // 从 message 字段提取文本，统一处理多种格式

@@ -59,23 +59,72 @@ interface AppStoreState {
   transitionToPhase: (next: AppPhase) => void;
 }
 
+type StorageKind = "local" | "session";
+
+function getStorage(kind: StorageKind): Storage | null {
+  try {
+    const storage = kind === "local" ? globalThis.localStorage : globalThis.sessionStorage;
+    if (
+      !storage ||
+      typeof storage.getItem !== "function" ||
+      typeof storage.setItem !== "function" ||
+      typeof storage.removeItem !== "function"
+    ) {
+      return null;
+    }
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readStorage(kind: StorageKind, key: string): string | null {
+  const storage = getStorage(kind);
+  if (!storage) return null;
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(kind: StorageKind, key: string, value: string): void {
+  const storage = getStorage(kind);
+  if (!storage) return;
+  try {
+    storage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in private browsing, tests, or embedded webviews.
+  }
+}
+
+function removeStorage(kind: StorageKind, key: string): void {
+  const storage = getStorage(kind);
+  if (!storage) return;
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Ignore transient storage failures; app state remains in memory.
+  }
+}
+
 // clientId 必须 per-tab 独立，否则同 origin 多 tab 共享同 id 时，后连的
 // client_register 会在 relay 侧覆盖 binding.ws，导致 broadcast 只到最后一个 tab
 function loadClientId(): string {
-  const stored = sessionStorage.getItem("cc_clientId");
+  const stored = readStorage("session", "cc_clientId");
   if (stored) return stored;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  sessionStorage.setItem("cc_clientId", id);
+  writeStorage("session", "cc_clientId", id);
   return id;
 }
 
 function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
   if (next === "proxy_selecting") {
-    localStorage.removeItem("cc_proxyId");
-    localStorage.removeItem("cc_sessionId");
+    removeStorage("local", "cc_proxyId");
+    removeStorage("local", "cc_sessionId");
   }
   if (next === "session_browsing" && prev === "chatting") {
-    localStorage.removeItem("cc_sessionId");
+    removeStorage("local", "cc_sessionId");
   }
 }
 
@@ -86,18 +135,23 @@ function clampChatFontSize(value: number): number {
   return Math.max(MIN_CHAT_FONT_SIZE, Math.min(MAX_CHAT_FONT_SIZE, Math.round(value)));
 }
 
+function loadStoredFontSize(key: string, fallback: number): number {
+  const raw = readStorage("local", key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const stored = Number(raw);
+  return Number.isFinite(stored) ? clampChatFontSize(stored) : fallback;
+}
+
 function loadPtyFontSize(): number {
-  const stored = Number(localStorage.getItem("cc_ptyFontSize"));
-  return Number.isFinite(stored) ? clampChatFontSize(stored) : DEFAULT_TERMINAL_FONT_SIZE;
+  return loadStoredFontSize("cc_ptyFontSize", DEFAULT_TERMINAL_FONT_SIZE);
 }
 
 function loadChatContentFontSize(): number {
-  const stored = Number(localStorage.getItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY));
-  return Number.isFinite(stored) ? clampChatFontSize(stored) : DEFAULT_CHAT_CONTENT_FONT_SIZE;
+  return loadStoredFontSize(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, DEFAULT_CHAT_CONTENT_FONT_SIZE);
 }
 
 function loadSidebarCollapsed(): boolean {
-  return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+  return readStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
 }
 
 export const useAppStore = create<AppStoreState>()(
@@ -126,42 +180,43 @@ export const useAppStore = create<AppStoreState>()(
       setRelayUrl: (url) => set({ relayUrl: url }),
       setPtyFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
-        localStorage.setItem("cc_ptyFontSize", String(next));
+        writeStorage("local", "cc_ptyFontSize", String(next));
         set({ ptyFontSize: next });
       },
       adjustPtyFontSize: (delta) => {
         const next = clampChatFontSize(get().ptyFontSize + delta);
-        localStorage.setItem("cc_ptyFontSize", String(next));
+        writeStorage("local", "cc_ptyFontSize", String(next));
         set({ ptyFontSize: next });
       },
       resetPtyFontSize: () => {
-        localStorage.setItem("cc_ptyFontSize", String(DEFAULT_TERMINAL_FONT_SIZE));
+        writeStorage("local", "cc_ptyFontSize", String(DEFAULT_TERMINAL_FONT_SIZE));
         set({ ptyFontSize: DEFAULT_TERMINAL_FONT_SIZE });
       },
       setChatContentFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
-        localStorage.setItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        writeStorage("local", CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
         set({ chatContentFontSize: next });
       },
       adjustChatContentFontSize: (delta) => {
         const next = clampChatFontSize(get().chatContentFontSize + delta);
-        localStorage.setItem(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        writeStorage("local", CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
         set({ chatContentFontSize: next });
       },
       resetChatContentFontSize: () => {
-        localStorage.setItem(
+        writeStorage(
+          "local",
           CHAT_CONTENT_FONT_SIZE_STORAGE_KEY,
           String(DEFAULT_CHAT_CONTENT_FONT_SIZE),
         );
         set({ chatContentFontSize: DEFAULT_CHAT_CONTENT_FONT_SIZE });
       },
       setSidebarCollapsed: (collapsed) => {
-        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+        writeStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
         set({ sidebarCollapsed: collapsed });
       },
       toggleSidebarCollapsed: () => {
         const next = !get().sidebarCollapsed;
-        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+        writeStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
         set({ sidebarCollapsed: next });
       },
       setPhase: (phase) => {

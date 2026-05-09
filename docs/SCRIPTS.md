@@ -4,12 +4,16 @@
 
 ## 日常开发
 
-| 命令                   | 用途                                                                     |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `pnpm dev:restart`     | 重启本地真实链路：先构建 shared 协议包，再启动 relay、web、proxy serve。 |
-| `pnpm dev:health`      | 只读健康检查：端口、relay HTTP、proxy serve 状态、当前进程日志。         |
-| `pnpm proxy -- claude` | 开发态启动/attach 一个 Claude 终端会话。                                 |
-| `pnpm proxy -- codex`  | 开发态启动/attach 一个 Codex 终端会话。                                  |
+| 命令                          | 用途                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `pnpm dev:restart`            | 重启本地真实链路：先构建 shared 协议包，再启动 relay、web、proxy serve。 |
+| `pnpm dev:health`             | 只读健康检查：端口、relay HTTP、proxy serve 状态、当前进程日志。         |
+| `pnpm mobile:smoke`           | 运行本地优先的移动端 smoke：UI 合同 + 本地真实 relay/proxy 只读链路。    |
+| `pnpm mobile:smoke:full`      | 在移动端 smoke 基础上创建/终止真实会话并等待模型回复。                   |
+| `pnpm mobile:smoke:simulator` | 在移动端 smoke 基础上追加 iOS Simulator Safari 截图。                    |
+| `pnpm desktop:smoke`          | 运行本地桌面 guard，保护共享 shell/session/input 改动不破坏 PC。         |
+| `pnpm proxy -- claude`        | 开发态启动/attach 一个 Claude 终端会话。                                 |
+| `pnpm proxy -- codex`         | 开发态启动/attach 一个 Codex 终端会话。                                  |
 
 Agent CLI 二进制路径可通过环境变量覆盖：
 
@@ -60,9 +64,10 @@ dev-anywhere codex --model gpt-5.5
 
 ## 专项验证与采样
 
-| 命令                                                                             | 用途                                                          |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts <relay-url>` | 对远端 relay 做 WebSocket 路由验证。                          |
-| `pnpm --filter @dev-anywhere/proxy run sample:stream-json`                       | 采样真实 Claude stream-json 输出，更新 schema drift fixture。 |
+| 命令                                                                             | 用途                                                                 |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts <relay-url>` | 对远端 relay 做 WebSocket 路由验证。                                 |
+| `pnpm mobile:smoke:simulator`                                                    | 本地移动 smoke 后，在 iOS Simulator Safari 打开当前 Web 并保存截图。 |
+| `pnpm --filter @dev-anywhere/proxy run sample:stream-json`                       | 采样真实 Claude stream-json 输出，更新 schema drift fixture。        |
 
 这些不是日常开发入口，只有在验证远端 relay 或更新 fixture 时使用。

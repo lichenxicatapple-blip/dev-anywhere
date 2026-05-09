@@ -1,3 +1,4 @@
+import { createPtyFrameWriteBuffer } from "./pty-frame-write-buffer";
 import { PtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
 
 type RelayMessage = Record<string, unknown>;
@@ -22,6 +23,9 @@ interface PtySessionTransportOptions {
   retryDelayMs?: number;
   maxRetries?: number;
   scheduleReady?: (callback: () => void) => void;
+  scheduleFrameFlush?: (callback: FrameRequestCallback) => number;
+  cancelFrameFlush?: (handle: number) => void;
+  onFramePending?: () => void;
   onFrameWritten?: () => void;
   onReady?: () => void;
   onSubscribeExhausted?: () => void;
@@ -30,6 +34,8 @@ interface PtySessionTransportOptions {
 
 interface PtySessionTransport {
   dispose: () => void;
+  flushOutput: () => void;
+  setOutputPaused: (value: boolean) => void;
 }
 
 export function attachPtySessionTransport(
@@ -43,6 +49,9 @@ export function attachPtySessionTransport(
     retryDelayMs = 3000,
     maxRetries = 3,
     scheduleReady = (callback) => requestAnimationFrame(callback),
+    scheduleFrameFlush,
+    cancelFrameFlush,
+    onFramePending,
     onFrameWritten,
     onReady,
     onSubscribeExhausted,
@@ -50,6 +59,12 @@ export function attachPtySessionTransport(
   } = options;
 
   const recovery = new PtyRecoveryController();
+  const frameWriter = createPtyFrameWriteBuffer(target, {
+    onFramePending,
+    onFrameWritten,
+    schedule: scheduleFrameFlush,
+    cancel: cancelFrameFlush,
+  });
   let disposed = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryCount = 0;
@@ -82,6 +97,7 @@ export function attachPtySessionTransport(
   const startSnapshotSubscribe = (): void => {
     if (disposed) return;
     clearRetry();
+    frameWriter.clear();
     retryCount = 0;
     onSubscribeStarted?.();
     scheduleSnapshotRetry();
@@ -89,14 +105,13 @@ export function attachPtySessionTransport(
 
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
     if (disposed) return;
-    const result = recovery.handleBinaryFrame({ data, outputSeq }, target);
-    if (result.written) onFrameWritten?.();
+    recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
   });
 
   const unsubRelay = relay.onMessage((msg) => {
     if (disposed || msg.sessionId !== sessionId) return;
     if (msg.type === "terminal_resize") {
-      target.resize(msg.cols as number, msg.rows as number);
+      frameWriter.target.resize(msg.cols as number, msg.rows as number);
       startSnapshotSubscribe();
       return;
     }
@@ -110,10 +125,9 @@ export function attachPtySessionTransport(
         data: msg.data as string,
         outputSeq: msg.outputSeq as number,
       },
-      target,
+      frameWriter.target,
     );
     if (!result.applied) return;
-    if (result.replayedFrames > 0) onFrameWritten?.();
     clearRetry();
     scheduleReady(() => {
       if (!disposed) onReady?.();
@@ -123,9 +137,12 @@ export function attachPtySessionTransport(
   startSnapshotSubscribe();
 
   return {
+    flushOutput: () => frameWriter.flush(),
+    setOutputPaused: (value) => frameWriter.setPaused(value),
     dispose: () => {
       disposed = true;
       clearRetry();
+      frameWriter.dispose();
       unsubBinary();
       unsubRelay();
     },

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
+import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { Socket } from "node:net";
@@ -89,6 +90,58 @@ function createRouter(options: {
 describe("RelayRouter input routing", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("echoes accepted JSON user_input back through relay for other clients", () => {
+    const workerSend = vi.fn(() => true);
+    const relay = createRelayConnectionFake();
+    const jsonObserver = { onTurnStart: vi.fn() };
+    const handlers = new RelayInputHandlers({
+      sessionManager: {
+        getSession: (sessionId: string) =>
+          sessionId === "s1"
+            ? {
+                id: "s1",
+                mode: "json",
+                provider: "claude",
+                state: SessionState.IDLE,
+                cwd: "/tmp",
+                pid: 1,
+              }
+            : undefined,
+      } as never,
+      workerRegistry: createWorkerRegistryFake({ send: workerSend }),
+      terminalSockets: new Map(),
+      hostedPtyRegistry: {
+        write: vi.fn(() => false),
+      } as never,
+      jsonObserver: jsonObserver as never,
+      relayConnection: relay.relayConnection,
+    });
+
+    handlers.onUserInput({
+      type: "user_input",
+      sessionId: "s1",
+      seq: 7,
+      timestamp: 1234,
+      source: "client",
+      version: "1",
+      payload: { text: "hello", messageId: "s1-user-client-1" },
+    });
+
+    expect(workerSend).toHaveBeenCalledWith("s1", {
+      type: "worker_input",
+      content: "hello",
+    });
+    expect(relay.sendEnvelope).toHaveBeenCalledTimes(1);
+    expect(relay.envelopes[0]).toMatchObject({
+      type: "user_input",
+      sessionId: "s1",
+      seq: 7,
+      timestamp: 1234,
+      source: "proxy",
+      payload: { text: "hello", messageId: "s1-user-client-1" },
+    });
   });
 
   it("keeps JSON sessions on batch user_input", () => {

@@ -389,6 +389,24 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     expect(Math.abs((first!.x ?? 0) - (second!.x ?? 0))).toBeLessThan(2);
   });
 
+  test("button geometry stays stable when it fades out at bottom", async ({ page }) => {
+    await scrollBy(page, 200);
+    const btb = page.locator('[data-slot="back-to-bottom"]');
+    await expect(btb).toHaveAttribute("aria-hidden", "false");
+    const visibleBox = await btb.boundingBox();
+    expect(visibleBox).not.toBeNull();
+
+    await scrollToBottom(page);
+    await expect(btb).toHaveAttribute("aria-hidden", "true");
+    const hiddenBox = await btb.boundingBox();
+    expect(hiddenBox).not.toBeNull();
+
+    expect(Math.abs((visibleBox!.x ?? 0) - (hiddenBox!.x ?? 0))).toBeLessThan(1);
+    expect(Math.abs((visibleBox!.y ?? 0) - (hiddenBox!.y ?? 0))).toBeLessThan(1);
+    expect(Math.abs((visibleBox!.width ?? 0) - (hiddenBox!.width ?? 0))).toBeLessThan(1);
+    expect(Math.abs((visibleBox!.height ?? 0) - (hiddenBox!.height ?? 0))).toBeLessThan(1);
+  });
+
   test("click scrolls to bottom and hides button", async ({ page }) => {
     await scrollBy(page, 500);
     const btb = page.locator('[data-slot="back-to-bottom"]');

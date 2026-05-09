@@ -2,8 +2,7 @@
 // 横贯所有非 chat 空态, 让 funnel 过程中 brand 常驻, 只切 subtitle
 import type { ReactNode } from "react";
 import { Typewriter } from "./typewriter";
-
-const BRAND_TEXTS = ["DEV Anywhere", "/unlimited @anytime"];
+import { BRAND_TEXTS } from "./constants";
 
 interface Props {
   subtitle: string;

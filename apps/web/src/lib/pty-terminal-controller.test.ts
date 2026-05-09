@@ -16,6 +16,8 @@ function createHarness() {
   const disposeTerminal = vi.fn();
   const disposeRawInput = vi.fn();
   const disposeTransport = vi.fn();
+  const flushOutput = vi.fn();
+  const setOutputPaused = vi.fn();
   const host = document.createElement("div") as HTMLDivElement;
   return {
     host,
@@ -32,7 +34,9 @@ function createHarness() {
     },
     createTerminal: vi.fn(async () => ({ terminal, dispose: disposeTerminal })),
     attachRawInput: vi.fn(() => ({ dispose: disposeRawInput })),
-    attachTransport: vi.fn(() => ({ dispose: disposeTransport })),
+    attachTransport: vi.fn(() => ({ dispose: disposeTransport, flushOutput, setOutputPaused })),
+    flushOutput,
+    setOutputPaused,
   };
 }
 
@@ -158,6 +162,28 @@ describe("attachPtyTerminalController", () => {
     expect(h.disposeRawInput).toHaveBeenCalledTimes(1);
     expect(h.disposeTerminal).toHaveBeenCalledTimes(1);
     expect(h.terminal.focus).not.toHaveBeenCalled();
+  });
+
+  it("forwards output pause and flush controls to transport", async () => {
+    const h = createHarness();
+    const controller = attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+
+    controller.setOutputPaused(true);
+    await Promise.resolve();
+    controller.flushOutput();
+    controller.setOutputPaused(false);
+
+    expect(h.setOutputPaused).toHaveBeenNthCalledWith(1, true);
+    expect(h.flushOutput).toHaveBeenCalledTimes(1);
+    expect(h.setOutputPaused).toHaveBeenLastCalledWith(false);
   });
 
   it("disposes an async-created terminal when cancelled before creation completes", async () => {

@@ -25,6 +25,12 @@ type SessionHistoryMessage = Extract<
   RelayControlMessage,
   { type: "session_history_messages" }
 >["messages"][number];
+type SessionHistoryPage = {
+  messages: SessionHistoryMessage[];
+  hasMore: boolean;
+  nextBefore?: string;
+  before?: string;
+};
 type AgentStatusSnapshot = Array<{ sessionId: string; payload: AgentStatusPayload }>;
 type SessionResourcesSnapshot = {
   sessionId: string;
@@ -230,6 +236,14 @@ export class RelayClient {
     sessionId: string,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   ): Promise<SessionHistoryMessage[]> {
+    return this.requestSessionMessagesPage(sessionId, {}, timeoutMs).then((resp) => resp.messages);
+  }
+
+  requestSessionMessagesPage(
+    sessionId: string,
+    options: { limit?: number; before?: string } = {},
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<SessionHistoryPage> {
     const requestId = nextRequestId("session-messages");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "session_history_messages" }> =>
@@ -237,10 +251,23 @@ export class RelayClient {
         msg.requestId === requestId &&
         msg.sessionId === sessionId,
       () =>
-        this.ws.send(JSON.stringify({ type: "session_messages_request", requestId, sessionId })),
+        this.ws.send(
+          JSON.stringify({
+            type: "session_messages_request",
+            requestId,
+            sessionId,
+            ...(options.limit !== undefined ? { limit: options.limit } : {}),
+            ...(options.before !== undefined ? { before: options.before } : {}),
+          }),
+        ),
       "读取会话消息超时",
       timeoutMs,
-    ).then((resp) => resp.messages);
+    ).then((resp) => ({
+      messages: resp.messages,
+      hasMore: resp.hasMore ?? false,
+      ...(resp.nextBefore !== undefined ? { nextBefore: resp.nextBefore } : {}),
+      ...(resp.before !== undefined ? { before: resp.before } : {}),
+    }));
   }
 
   requestAgentStatuses(

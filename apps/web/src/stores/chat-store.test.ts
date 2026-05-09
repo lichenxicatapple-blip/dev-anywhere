@@ -136,4 +136,43 @@ describe("chat-store per-session", () => {
     useChatStore.getState().clearAllSessions();
     expect(useChatStore.getState().bySessionId).toEqual({});
   });
+
+  it("prepends older history pages without duplicating existing or live messages", () => {
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      hasMore: true,
+      nextBefore: "b:200",
+      messages: [
+        { role: "user", text: "recent user", cursor: "b:300" },
+        { role: "assistant", text: "recent assistant", cursor: "b:400" },
+      ],
+    });
+    useChatStore.getState().addUserMessage("s1", {
+      id: "s1-live-1",
+      role: "user",
+      text: "live",
+      isPartial: false,
+      timestamp: 500,
+      toolCalls: [],
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "prepend",
+      hasMore: false,
+      messages: [
+        { role: "user", text: "oldest", cursor: "b:100" },
+        { role: "user", text: "recent user duplicate", cursor: "b:300" },
+      ],
+    });
+
+    const slice = useChatStore.getState().bySessionId.s1;
+    expect(slice.historyHasMore).toBe(false);
+    expect(slice.historyNextBefore).toBeNull();
+    expect(slice.messages.map((m) => m.text)).toEqual([
+      "oldest",
+      "recent user",
+      "recent assistant",
+      "live",
+    ]);
+  });
 });

@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachPtyScrollController, type PtyScrollState } from "./pty-scroll-controller";
 
 type Handler = () => void;
@@ -39,6 +39,15 @@ function createDom() {
 
 function markUserVerticalScrollIntent(container: HTMLElement): void {
   container.dispatchEvent(new Event("touchstart"));
+}
+
+function touchEvent(type: string, clientY: number): TouchEvent {
+  const event = new Event(type, { bubbles: true }) as TouchEvent;
+  Object.defineProperty(event, "touches", {
+    configurable: true,
+    value: type === "touchend" || type === "touchcancel" ? [] : [{ clientY }],
+  });
+  return event;
 }
 
 function createTerminal(lineTextByIndex: Record<number, string> = {}) {
@@ -95,6 +104,10 @@ describe("attachPtyScrollController", () => {
     } as unknown as typeof ResizeObserver;
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("initializes spacer and host layout from xterm metrics", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -118,7 +131,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1600);
   });
 
-  it("maps container scroll to xterm ydisp and subpixel transform", () => {
+  it("maps container scroll to xterm ydisp while browser owns subpixel motion", () => {
     const { container, spacer, host, xterm } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
@@ -136,7 +149,46 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
 
     expect(terminal.scrollToLine).toHaveBeenCalledWith(2);
-    expect(xterm.style.transform).toBe("translate3d(0,-5px,0)");
+    expect(host.style.top).toBe("40px");
+    expect(xterm.style.transform).toBe("");
+  });
+
+  it("syncs native touch scroll to the matching terminal row immediately", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host, xterm } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    container.scrollTop = 145;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(0);
+    expect(terminal.scrollToLine).toHaveBeenCalledTimes(2);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(7);
+    expect(host.style.top).toBe("140px");
+    expect(xterm.style.transform).toBe("");
   });
 
   it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
@@ -161,6 +213,38 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(100);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
+    expect(host.style.top).toBe("100px");
+    expect(xterm.style.transform).toBe("");
+  });
+
+  it("keeps the xterm viewport on the reviewed history when new output scrolls the terminal", () => {
+    const { container, spacer, host, xterm } = createDom();
+    const setNewFramesWhileAway = vi.fn();
+    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    let hasNewFrame = true;
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+    });
+
+    terminal.scrollToLine.mockClear();
+    xterm.style.transform = "translate3d(0,-5px,0)";
+    container.scrollTop = 100;
+    markUserVerticalScrollIntent(container);
+    terminal.buffer.active.viewportY = 80;
+    emitScroll();
+
+    expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
+    expect(host.style.top).toBe("100px");
     expect(xterm.style.transform).toBe("");
   });
 
@@ -271,6 +355,90 @@ describe("attachPtyScrollController", () => {
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
   });
 
+  it("keeps touch review intent through output that renders before native scroll moves", () => {
+    const { container, spacer, host } = createDom();
+    const setNewFramesWhileAway = vi.fn();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    let hasNewFrame = true;
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+      onUserVerticalScrollIntentChange,
+    });
+
+    container.dispatchEvent(new Event("touchstart"));
+    emitRender();
+
+    expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("notifies when a touch gesture becomes vertical terminal review", () => {
+    const { container, spacer, host } = createDom();
+    const onTouchReviewStart = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onTouchReviewStart,
+    });
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 295));
+    expect(onTouchReviewStart).not.toHaveBeenCalled();
+
+    container.dispatchEvent(touchEvent("touchmove", 280));
+    container.dispatchEvent(touchEvent("touchmove", 250));
+    expect(onTouchReviewStart).toHaveBeenCalledTimes(1);
+
+    container.dispatchEvent(touchEvent("touchend", 250));
+    container.dispatchEvent(touchEvent("touchstart", 250));
+    container.dispatchEvent(touchEvent("touchmove", 270));
+    expect(onTouchReviewStart).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats native container scrolling away from bottom as user review intent", () => {
+    const { container, spacer, host } = createDom();
+    const setNewFramesWhileAway = vi.fn();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    let hasNewFrame = false;
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+    });
+
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    hasNewFrame = true;
+    emitRender();
+
+    expect(container.scrollTop).toBe(100);
+    expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
+  });
+
   it("preserves user scroll intent when controller is reattached", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -362,6 +530,7 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(terminal.buffer.active.viewportY).toBe(80);
     expect(container.scrollTop).toBe(1600);
+    expect(host.style.top).toBe("1600px");
   });
 
   it("publishes scroll state changes without duplicating identical snapshots", () => {
@@ -505,6 +674,7 @@ describe("attachPtyScrollController", () => {
     expect(spacer.style.height).toBe("3000px");
     expect(host.style.height).toBe("600px");
     expect(container.scrollTop).toBe(1600);
+    expect(host.style.top).toBe("2400px");
     expect(xterm.style.transform).toBe("");
   });
 
@@ -533,6 +703,7 @@ describe("attachPtyScrollController", () => {
 
     expect(spacer.style.height).toBe("3000px");
     expect(container.scrollTop).toBe(210);
+    expect(host.style.top).toBe("210px");
     expect(xterm.style.transform).toBe("");
   });
 

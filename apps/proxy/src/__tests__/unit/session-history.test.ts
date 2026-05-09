@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
   normalizeHistoryTitle,
+  readSessionMessagesPage,
   readSessionMessages,
   scanSessionHistory,
 } from "#src/serve/session-history.js";
@@ -472,5 +473,61 @@ describe("readSessionMessages", () => {
       role: "assistant",
       text: "| 维度 | Rust | Go |\n|---|---|---|\n| 内存 | 所有权 | GC |",
     });
+  });
+
+  it("reads Claude conversation history in reverse pages with stable cursors", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "session-paged.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-05-09T00:00:01.000Z",
+          message: { role: "user", content: "prompt 1" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-05-09T00:00:02.000Z",
+          message: { role: "assistant", content: "answer 1" },
+        }),
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-05-09T00:00:03.000Z",
+          message: { role: "user", content: "prompt 2" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-05-09T00:00:04.000Z",
+          message: { role: "assistant", content: "answer 2" },
+        }),
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-05-09T00:00:05.000Z",
+          message: { role: "user", content: "prompt 3" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const latest = await readSessionMessagesPage("session-paged", { limit: 2 });
+    expect(latest.messages.map((m) => m.text)).toEqual(["answer 2", "prompt 3"]);
+    expect(latest.hasMore).toBe(true);
+    expect(latest.nextBefore).toBe(latest.messages[0].cursor);
+
+    const older = await readSessionMessagesPage("session-paged", {
+      limit: 2,
+      before: latest.nextBefore,
+    });
+    expect(older.messages.map((m) => m.text)).toEqual(["answer 1", "prompt 2"]);
+    expect(older.hasMore).toBe(true);
+    expect(older.nextBefore).toBe(older.messages[0].cursor);
+
+    const oldest = await readSessionMessagesPage("session-paged", {
+      limit: 2,
+      before: older.nextBefore,
+    });
+    expect(oldest.messages.map((m) => m.text)).toEqual(["prompt 1"]);
+    expect(oldest.hasMore).toBe(false);
+    expect(oldest.nextBefore).toBeUndefined();
   });
 });

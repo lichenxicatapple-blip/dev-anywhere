@@ -11,10 +11,15 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { useSessionStore } from "@/stores/session-store";
-import { MAX_CHAT_FONT_SIZE, MIN_CHAT_FONT_SIZE } from "@/lib/chat-font-size";
+import {
+  getEffectiveChatContentFontSize,
+  MAX_CHAT_FONT_SIZE,
+  MIN_CHAT_FONT_SIZE,
+  MOBILE_CHAT_CONTENT_FONT_SIZE_MIN,
+} from "@/lib/chat-font-size";
 import { useAppStore } from "@/stores/app-store";
-import { relayClientRef } from "@/hooks/use-relay-setup";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -57,20 +62,29 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const adjustPtyFontSize = useAppStore((s) => s.adjustPtyFontSize);
   const adjustChatContentFontSize = useAppStore((s) => s.adjustChatContentFontSize);
+  const setChatContentFontSize = useAppStore((s) => s.setChatContentFontSize);
   const resetPtyFontSize = useAppStore((s) => s.resetPtyFontSize);
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
+  const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const isPty = mode === "pty" || session?.mode === "pty";
   const title = (isPty && ptyTitle) || session?.name || sessionId.slice(0, 8);
-  const fontSize = isPty ? ptyFontSize : chatContentFontSize;
-  const adjustFontSize = isPty ? adjustPtyFontSize : adjustChatContentFontSize;
+  const fontSize = isPty
+    ? ptyFontSize
+    : getEffectiveChatContentFontSize(chatContentFontSize, touchEditingSurface);
+  const minFontSize =
+    !isPty && touchEditingSurface ? MOBILE_CHAT_CONTENT_FONT_SIZE_MIN : MIN_CHAT_FONT_SIZE;
   const resetFontSize = isPty ? resetPtyFontSize : resetChatContentFontSize;
 
-  function handlePermissionModeCycle() {
-    relayClientRef?.sendControl({
-      type: "permission_mode_change",
-      mode: "default",
-      sessionId,
-    });
+  function adjustFontSize(delta: number) {
+    if (isPty) {
+      adjustPtyFontSize(delta);
+      return;
+    }
+    if (touchEditingSurface) {
+      setChatContentFontSize(fontSize + delta);
+      return;
+    }
+    adjustChatContentFontSize(delta);
   }
 
   return (
@@ -108,31 +122,41 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
             <MoreVertical aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" data-slot="chat-overflow-menu">
-          <DropdownMenuLabel className="text-muted-foreground">会话</DropdownMenuLabel>
-          <DropdownMenuItem
-            data-slot="chat-menu-permission-mode"
-            onClick={handlePermissionModeCycle}
-          >
-            切换权限模式
-          </DropdownMenuItem>
+        <DropdownMenuContent
+          align="end"
+          style={{ minWidth: "12rem", maxWidth: "calc(100vw - 1rem)" }}
+          data-slot="chat-overflow-menu"
+        >
           {isPty ? (
             <>
+              <DropdownMenuLabel className="text-muted-foreground">快捷键</DropdownMenuLabel>
+              <DropdownMenuItem
+                data-slot="chat-menu-send-ctrl-t"
+                onClick={() => sendRemoteInputRaw(sessionId, "\x14")}
+              >
+                发送 Ctrl+T
+              </DropdownMenuItem>
               <DropdownMenuItem
                 data-slot="chat-menu-send-ctrl-c"
                 onClick={() => sendRemoteInputRaw(sessionId, "\x03")}
               >
                 发送 Ctrl+C
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
             </>
           ) : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-muted-foreground">字号</DropdownMenuLabel>
-          <div className="flex items-center gap-2 px-2 py-1.5" data-slot="chat-menu-font-control">
+          <DropdownMenuLabel className="text-muted-foreground">
+            {isPty ? "终端字号" : "聊天字号"}
+          </DropdownMenuLabel>
+          <div
+            className="flex items-center justify-between gap-2 px-2 py-1.5"
+            data-slot="chat-menu-font-control"
+          >
             <Button
               variant="ghost"
               size="icon-sm"
-              disabled={fontSize <= MIN_CHAT_FONT_SIZE}
+              className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
+              disabled={fontSize <= minFontSize}
               aria-label="字号变小"
               data-slot="chat-menu-font-smaller"
               onClick={(event) => {
@@ -151,6 +175,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
             <Button
               variant="ghost"
               size="icon-sm"
+              className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
               disabled={fontSize >= MAX_CHAT_FONT_SIZE}
               aria-label="字号变大"
               data-slot="chat-menu-font-larger"

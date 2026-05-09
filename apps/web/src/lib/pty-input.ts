@@ -11,6 +11,7 @@ interface RawInputTerminal {
 
 interface XtermRawInputOptions {
   onRawInput?: (data: string) => void;
+  plainEnterBehavior?: "submit" | "linefeed";
 }
 
 export function attachXtermRawInput(
@@ -18,14 +19,18 @@ export function attachXtermRawInput(
   sessionId: string,
   options: XtermRawInputOptions = {},
 ): Disposable {
-  const dataDisposable = term.onData((data) => {
+  const sendRawInput = (data: string): void => {
     sendRemoteInputRaw(sessionId, data);
     options.onRawInput?.(data);
+  };
+
+  const dataDisposable = term.onData((data) => {
+    sendRawInput(data);
   });
   term.attachCustomKeyEventHandler?.((event) => {
-    if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
-      sendRemoteInputRaw(sessionId, "\n");
-      options.onRawInput?.("\n");
+    if (event.type !== "keydown" || event.key !== "Enter") return true;
+    if (event.shiftKey || options.plainEnterBehavior === "linefeed") {
+      sendRawInput("\n");
       event.preventDefault();
       return false;
     }

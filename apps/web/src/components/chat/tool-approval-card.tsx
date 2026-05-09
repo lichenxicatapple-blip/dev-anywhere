@@ -119,7 +119,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
         aria-label={expanded ? "收起详情" : "展开详情"}
-        className="flex items-center gap-2 min-w-0 text-left -m-1 p-1 rounded hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-h-11 min-w-0 items-center gap-2 rounded p-2 text-left -m-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0 md:p-1 md:-m-1"
       >
         <Icon className="size-4 shrink-0 text-[var(--color-status-warning)]" aria-hidden="true" />
         <span className="font-semibold text-sm">{approval.toolName}</span>
@@ -141,7 +141,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
         <Button
           variant="ghost"
           size="sm"
-          className="text-muted-foreground"
+          className="h-11 text-muted-foreground md:h-8"
           disabled={acted || !transportReady}
           onClick={() => send("allow", true)}
           data-action="always"
@@ -152,7 +152,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
           <Button
             variant="ghost"
             size="sm"
-            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="h-11 text-destructive hover:bg-destructive/10 hover:text-destructive md:h-8"
             disabled={acted || !transportReady}
             onClick={() => send("deny")}
             data-action="deny"
@@ -161,6 +161,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
           </Button>
           <Button
             size="sm"
+            className="h-11 md:h-8"
             disabled={acted || !transportReady}
             onClick={() => send("allow")}
             data-action="allow"

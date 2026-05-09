@@ -3,6 +3,7 @@ import { z } from "zod";
 // 用户输入消息
 export const UserInputPayloadSchema = z.object({
   text: z.string().min(1),
+  messageId: z.string().min(1).optional(),
 });
 
 export type UserInputPayload = z.infer<typeof UserInputPayloadSchema>;

@@ -206,7 +206,7 @@ export function SessionList({ layout }: SessionListProps) {
           {historyElement}
         </div>
         <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] border-t border-border">
-          <Button className="w-full" onClick={() => setCreateOpen(true)}>
+          <Button className="min-h-11 w-full md:min-h-0" onClick={() => setCreateOpen(true)}>
             <Plus aria-hidden="true" />
             新建会话
           </Button>

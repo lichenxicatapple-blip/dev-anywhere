@@ -25,5 +25,6 @@ export default defineConfig({
     root: __dirname,
     include,
     environment: "jsdom",
+    setupFiles: ["src/test/setup-storage.ts"],
   },
 });

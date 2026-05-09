@@ -3,9 +3,15 @@ import { buildMessage } from "../index.js";
 
 describe("buildMessage", () => {
   it("builds a valid user_input envelope with provided seq", () => {
-    const msg = buildMessage("user_input", "sess-1", 1, { text: "hello" }, "client");
+    const msg = buildMessage(
+      "user_input",
+      "sess-1",
+      1,
+      { text: "hello", messageId: "sess-1-user-1" },
+      "client",
+    );
     expect(msg.type).toBe("user_input");
-    expect(msg.payload).toEqual({ text: "hello" });
+    expect(msg.payload).toEqual({ text: "hello", messageId: "sess-1-user-1" });
     expect(msg.sessionId).toBe("sess-1");
     expect(msg.source).toBe("client");
     expect(msg.version).toBe("1.0");
