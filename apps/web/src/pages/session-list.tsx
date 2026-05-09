@@ -6,13 +6,14 @@ import { BrandHero } from "@/components/brand/brand-hero";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { getTopLevelSubtitle } from "@/lib/top-level-copy";
+import { readStorageValue, STORAGE_KEYS } from "@/lib/storage-keys";
 import { Navigate } from "react-router";
 
 export function SessionListPage() {
   const proxies = useAppStore((s) => s.proxies);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const sessionCount = useSessionStore((s) => s.sessions.length);
-  const hasRestorableProxy = localStorage.getItem("cc_proxyId") !== null;
+  const hasRestorableProxy = readStorageValue("local", STORAGE_KEYS.proxyId) !== null;
 
   if (!hasProxy && !hasRestorableProxy) {
     return <Navigate to="/" replace />;

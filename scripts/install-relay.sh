@@ -4,17 +4,18 @@
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./install-relay.sh --ssh user@vps-host dev-anywhere.vita-tools.top
+#        ./install-relay.sh --ssh user@vps-host dev-anywhere.example.com
 #      Requires ssh-key access to the remote host and sudo for that user.
 #
 #   2) Run directly on the VPS:
-#        sudo ./install-relay.sh dev-anywhere.vita-tools.top
+#        sudo ./install-relay.sh dev-anywhere.example.com
 #      Or:
-#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- dev-anywhere.vita-tools.top
+#        curl -fsSL https://.../install-relay.sh | sudo bash -s -- dev-anywhere.example.com
 #
 # Arguments:
 #   domain — public DNS name with an A record pointing at the VPS.
-#   token  — optional; a fresh RELAY_PROXY_TOKEN is generated when omitted.
+#   proxy_token  — optional; a fresh RELAY_PROXY_TOKEN is generated when omitted.
+#   client_token — optional; a fresh RELAY_CLIENT_TOKEN is generated when omitted.
 #
 # Environment overrides:
 #   REGISTRY_BASE — registry + namespace prefix for the images
@@ -27,7 +28,7 @@
 # Layout created on the VPS:
 #   /opt/dev-anywhere/
 #     ├─ docker-compose.yml
-#     └─ .env                # RELAY_PROXY_TOKEN, chmod 600
+#     └─ .env                # RELAY_PROXY_TOKEN + RELAY_CLIENT_TOKEN, chmod 600
 #
 # Two services come up: `relay` (Node WebSocket server) and `nginx` (reverse
 # proxy + static web SPA). TLS certs live under /etc/letsencrypt/live/relay/
@@ -38,9 +39,10 @@ set -euo pipefail
 # --ssh mode: feed this very script over stdin to a remote bash.
 if [ "${1:-}" = "--ssh" ]; then
   shift
-  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain> [token]}"
-  DOMAIN_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain> [token]}"
-  TOKEN_ARG="${3:-}"
+  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain> [proxy_token] [client_token]}"
+  DOMAIN_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain> [proxy_token] [client_token]}"
+  PROXY_TOKEN_ARG="${3:-}"
+  CLIENT_TOKEN_ARG="${4:-}"
   SELF_PATH="${BASH_SOURCE[0]}"
   if [ ! -f "$SELF_PATH" ]; then
     echo "error: --ssh mode needs the script on disk (can't pipe from curl)" >&2
@@ -48,12 +50,13 @@ if [ "${1:-}" = "--ssh" ]; then
   fi
   echo "==> deploying to $SSH_HOST (domain: $DOMAIN_ARG)"
   # sudo strips env vars; use `sudo env VAR=val` to thread REGISTRY_BASE / IMAGE_TAG through
-  ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' bash -s -- '$DOMAIN_ARG' '$TOKEN_ARG'" < "$SELF_PATH"
+  ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' bash -s -- '$DOMAIN_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'" < "$SELF_PATH"
   exit $?
 fi
 
-DOMAIN="${1:?Usage: install-relay.sh <domain> [token]  |  install-relay.sh --ssh <host> <domain>}"
-TOKEN="${2:-}"
+DOMAIN="${1:?Usage: install-relay.sh <domain> [proxy_token] [client_token]  |  install-relay.sh --ssh <host> <domain> [proxy_token] [client_token]}"
+PROXY_TOKEN="${2:-}"
+CLIENT_TOKEN="${3:-}"
 INSTALL_DIR="/opt/dev-anywhere"
 CERT_NAME="relay"   # baked into apps/relay/nginx.conf; keep in sync
 # REGISTRY_BASE is the "registry/namespace" prefix. Production defaults to the
@@ -155,19 +158,29 @@ volumes:
   relay-data:
 EOF
 
-# Step 5: reuse or generate the proxy token.
-if [ -z "$TOKEN" ]; then
+# Step 5: reuse or generate relay tokens.
+if [ -z "$PROXY_TOKEN" ]; then
   if [ -f .env ] && grep -q '^RELAY_PROXY_TOKEN=' .env; then
-    TOKEN=$(grep '^RELAY_PROXY_TOKEN=' .env | cut -d= -f2-)
+    PROXY_TOKEN=$(grep '^RELAY_PROXY_TOKEN=' .env | cut -d= -f2-)
     echo "==> reusing existing RELAY_PROXY_TOKEN from $INSTALL_DIR/.env"
   else
-    TOKEN=$(openssl rand -hex 24)
+    PROXY_TOKEN=$(openssl rand -hex 24)
     echo "==> generated a new RELAY_PROXY_TOKEN"
+  fi
+fi
+if [ -z "$CLIENT_TOKEN" ]; then
+  if [ -f .env ] && grep -q '^RELAY_CLIENT_TOKEN=' .env; then
+    CLIENT_TOKEN=$(grep '^RELAY_CLIENT_TOKEN=' .env | cut -d= -f2-)
+    echo "==> reusing existing RELAY_CLIENT_TOKEN from $INSTALL_DIR/.env"
+  else
+    CLIENT_TOKEN=$(openssl rand -hex 24)
+    echo "==> generated a new RELAY_CLIENT_TOKEN"
   fi
 fi
 umask 077
 cat > .env <<EOF
-RELAY_PROXY_TOKEN=$TOKEN
+RELAY_PROXY_TOKEN=$PROXY_TOKEN
+RELAY_CLIENT_TOKEN=$CLIENT_TOKEN
 PORT=3100
 LOG_LEVEL=info
 DATA_DIR=/data
@@ -199,7 +212,7 @@ cleanup_old_images() {
   local remove_ids
   remove_ids="$(
     docker images --no-trunc --format '{{.Repository}} {{.Tag}} {{.ID}}' |
-      awk '$1 ~ /(dev-anywhere|cc-anywhere)/ { print $3 }' |
+      awk '$1 ~ /dev-anywhere/ { print $3 }' |
       sort -u |
       while read -r image_id; do
         [ -z "$image_id" ] && continue
@@ -223,17 +236,19 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   cleanup_old_images
   echo
   echo "=== dev-anywhere deployed ==="
-  echo "  Web UI:  https://$DOMAIN"
+  echo "  Web UI:  https://$DOMAIN/?relayToken=$CLIENT_TOKEN"
   echo "  Health:  https://$DOMAIN/health"
-  echo "  Proxy:   wss://$DOMAIN/proxy?token=$TOKEN"
-  echo "  Client:  wss://$DOMAIN/client"
+  echo "  Proxy:   wss://$DOMAIN/proxy?token=$PROXY_TOKEN"
+  echo "  Client:  wss://$DOMAIN/client?token=$CLIENT_TOKEN"
   echo
   echo "Next, on your local machine:"
   echo "  npm install -g @dev-anywhere/proxy"
   echo "  dev-anywhere init"
   echo "  # edit ~/.dev-anywhere/config.json:"
-  echo "  #   { \"defaultEnv\": \"cloud\", \"envs\": { \"cloud\": { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$TOKEN\" } } }"
+  echo "  #   { \"defaultEnv\": \"cloud\", \"envs\": { \"cloud\": { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$PROXY_TOKEN\" } } }"
   echo "  dev-anywhere serve start --env cloud"
+  echo
+  echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."
   echo
   echo "To upgrade later:"
   echo "  cd $INSTALL_DIR && docker compose pull && docker compose up -d"

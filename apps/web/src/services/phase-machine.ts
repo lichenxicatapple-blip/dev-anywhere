@@ -8,6 +8,12 @@ import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
+import {
+  readStorageValue,
+  removeStorageValue,
+  STORAGE_KEYS,
+  writeStorageValue,
+} from "@/lib/storage-keys";
 
 export interface Timers {
   reconnect: ReturnType<typeof setTimeout> | null;
@@ -55,7 +61,7 @@ async function restoreSelectedProxyBinding(relay: RelayClient, proxy: ProxyInfo)
   const result = await ensureBinding(relay, { proxyId: proxy.proxyId });
   if (isBindingError(result)) return false;
 
-  localStorage.setItem("cc_proxyId", proxy.proxyId);
+  writeStorageValue("local", STORAGE_KEYS.proxyId, proxy.proxyId);
   useAppStore.getState().setProxy(proxy.proxyId, proxy.name ?? null);
   useAppStore.getState().setProxyOnline(true);
   requestProxyState(relay);
@@ -162,11 +168,11 @@ export async function handleRelayMessage(
     // 冷启动：首次 proxy_list_response 时在 proxy_selecting 阶段执行
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {
       timers.coldStartDone = true;
-      const savedProxyId = localStorage.getItem("cc_proxyId");
+      const savedProxyId = readStorageValue("local", STORAGE_KEYS.proxyId);
       const urlSessionId = savedProxyId ? null : extractSessionIdFromHash();
 
       if (!savedProxyId && urlSessionId) {
-        // URL 粘贴场景: 无 cc_proxyId 但 URL 里有 /chat/:id, 让 relay 按 sessionId 反查 proxy 自动绑
+        // URL 粘贴场景: 无已保存 proxy 但 URL 里有 /chat/:id, 让 relay 按 sessionId 反查 proxy 自动绑
         const result = await ensureBinding(relay, { sessionId: urlSessionId });
         if (isBindingError(result)) {
           const errMsg = bindingErrorMessage(result.code);
@@ -178,7 +184,7 @@ export async function handleRelayMessage(
         const proxyInfo = proxies.find((p) => p.proxyId === result.proxyId);
         useAppStore.getState().setProxy(result.proxyId, proxyInfo?.name || null);
         useAppStore.getState().setProxyOnline(true);
-        localStorage.setItem("cc_proxyId", result.proxyId);
+        writeStorageValue("local", STORAGE_KEYS.proxyId, result.proxyId);
         useAppStore.getState().setPhase("chatting");
         requestProxyState(relay);
         return;
@@ -195,20 +201,20 @@ export async function handleRelayMessage(
           // 冷启动绑定成功后拉取 session 列表 + 历史
           requestProxyState(relay);
           requestSessionHistory(relay);
-          const savedSessionId = localStorage.getItem("cc_sessionId");
+          const savedSessionId = readStorageValue("local", STORAGE_KEYS.sessionId);
           const currentHash = window.location.hash;
           const sessionStillExists =
             savedSessionId && proxyInfo?.sessions?.includes(savedSessionId);
           if (savedSessionId && sessionStillExists) {
-            const mode = localStorage.getItem("cc_sessionMode") || "json";
+            const mode = readStorageValue("local", STORAGE_KEYS.sessionMode) || "json";
             useAppStore.getState().setPhase("chatting");
             if (!currentHash.includes("/chat/")) {
               router.navigate(`/chat/${savedSessionId}?mode=${mode}`);
             }
           } else {
             if (savedSessionId && !sessionStillExists) {
-              localStorage.removeItem("cc_sessionId");
-              localStorage.removeItem("cc_sessionMode");
+              removeStorageValue("local", STORAGE_KEYS.sessionId);
+              removeStorageValue("local", STORAGE_KEYS.sessionMode);
             }
             useAppStore.getState().setPhase("session_browsing");
           }
@@ -237,10 +243,10 @@ export async function handleRelayMessage(
       if (s.phase === "proxy_selecting" && selected?.online) {
         const restored = await restoreSelectedProxyBinding(relay, selected);
         if (restored) {
-          const savedSessionId = localStorage.getItem("cc_sessionId");
+          const savedSessionId = readStorageValue("local", STORAGE_KEYS.sessionId);
           const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);
           if (savedSessionId && sessionStillExists) {
-            const mode = localStorage.getItem("cc_sessionMode") || "json";
+            const mode = readStorageValue("local", STORAGE_KEYS.sessionMode) || "json";
             useAppStore.getState().transitionToPhase("chatting");
             router.navigate(`/chat/${savedSessionId}?mode=${mode}`);
           } else {

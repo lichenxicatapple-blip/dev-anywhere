@@ -61,7 +61,7 @@ export default defineConfig({
             urlPattern: /^\/fonts\/.*\.(woff2|woff|ttf|otf|css)$/,
             handler: "CacheFirst",
             options: {
-              cacheName: "cc-fonts",
+              cacheName: "dev-anywhere-fonts",
               expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 180 },
             },
           },

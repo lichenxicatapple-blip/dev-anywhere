@@ -10,6 +10,7 @@ import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
+import { STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { ProxyStatusDot } from "./proxy-status-dot";
 
 interface ProxySwitcherProps {
@@ -36,7 +37,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
       return;
     }
-    localStorage.setItem("cc_proxyId", proxyId);
+    writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
     useAppStore.getState().setProxy(proxyId, proxyName ?? null);
     useAppStore.getState().setProxyOnline(true);
     useAppStore.getState().transitionToPhase("session_browsing");

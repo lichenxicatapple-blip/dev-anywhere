@@ -1,15 +1,29 @@
 /**
- * Relay server 端到端验证脚本
+ * End-to-end relay verification script.
  *
- * 验证 relay server 的核心功能：WebSocket 连接、proxy 注册、client 查询、双向消息路由
+ * Usage:
+ *   pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts [relay-url]
  *
- * Usage: npx tsx apps/relay/scripts/verify-relay.ts [relay-url]
- * Example: npx tsx apps/relay/scripts/verify-relay.ts wss://dev-anywhere.vita-tools.top
+ * Authenticated relay:
+ *   RELAY_PROXY_TOKEN=... RELAY_CLIENT_TOKEN=... \
+ *     pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts wss://dev-anywhere.example.com
  */
 
 import WebSocket from "ws";
 
-const RELAY_URL = process.argv[2] ?? "wss://dev-anywhere.vita-tools.top";
+const RELAY_URL = process.argv[2] ?? "ws://localhost:3100";
+const RELAY_PROXY_TOKEN = process.env.RELAY_PROXY_TOKEN;
+const RELAY_CLIENT_TOKEN = process.env.RELAY_CLIENT_TOKEN;
+
+function normalizeRelayUrl(rawUrl: string): string {
+  return rawUrl.replace(/\/(?:proxy|client)(?:\?.*)?$/, "").replace(/\/$/, "");
+}
+
+function withToken(baseUrl: string, path: "/proxy" | "/client", token: string | undefined): string {
+  const url = new URL(`${baseUrl}${path}`);
+  if (token) url.searchParams.set("token", token);
+  return url.toString();
+}
 
 async function waitOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -25,18 +39,19 @@ async function waitMessage(ws: WebSocket): Promise<unknown> {
 }
 
 async function verify(): Promise<void> {
-  console.log(`Verifying relay at ${RELAY_URL}\n`);
+  const relayBaseUrl = normalizeRelayUrl(RELAY_URL);
+  console.log(`Verifying relay at ${relayBaseUrl}\n`);
   const passed: string[] = [];
 
   // 1. Health check (HTTP)
-  const healthUrl = RELAY_URL.replace("wss://", "https://").replace("ws://", "http://");
+  const healthUrl = relayBaseUrl.replace("wss://", "https://").replace("ws://", "http://");
   const healthRes = await fetch(`${healthUrl}/health`);
   const health = await healthRes.json();
   console.log(`1. Health: ${JSON.stringify(health)}`);
   passed.push("health check");
 
-  // 2. Proxy 连接并注册
-  const proxy = new WebSocket(`${RELAY_URL}/proxy`);
+  // 2. Connect and register a proxy.
+  const proxy = new WebSocket(withToken(relayBaseUrl, "/proxy", RELAY_PROXY_TOKEN));
   await waitOpen(proxy);
   proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "verify-proxy" }));
   console.log("2. Proxy connected and registered");
@@ -44,8 +59,8 @@ async function verify(): Promise<void> {
 
   await new Promise((r) => setTimeout(r, 1500));
 
-  // 3. Client 连接并查询 proxy 列表
-  const client = new WebSocket(`${RELAY_URL}/client`);
+  // 3. Connect a client and request the proxy list.
+  const client = new WebSocket(withToken(relayBaseUrl, "/client", RELAY_CLIENT_TOKEN));
   await waitOpen(client);
   const listPromise = waitMessage(client);
   client.send(JSON.stringify({ type: "proxy_list_request" }));
@@ -56,13 +71,13 @@ async function verify(): Promise<void> {
   if (!found) throw new Error("Proxy not found in list");
   passed.push("proxy list");
 
-  // 4. Client 选择 proxy
+  // 4. Select the registered proxy.
   client.send(JSON.stringify({ type: "proxy_select", proxyId: "verify-proxy" }));
   await new Promise((r) => setTimeout(r, 300));
   console.log("4. Client selected proxy");
   passed.push("proxy select");
 
-  // 5. Client -> Relay -> Proxy (双向验证)
+  // 5. Client -> relay -> proxy.
   const proxyMsgPromise = waitMessage(proxy);
   client.send(
     JSON.stringify({
@@ -79,7 +94,7 @@ async function verify(): Promise<void> {
   console.log(`5. Proxy received: type=${fromClient.type}, text=${fromClient.payload.text}`);
   passed.push("client -> proxy routing");
 
-  // 6. Proxy -> Relay -> Client
+  // 6. Proxy -> relay -> client.
   const clientMsgPromise = waitMessage(client);
   proxy.send(
     JSON.stringify({

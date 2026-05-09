@@ -128,12 +128,12 @@ describe("proxy config env selection", () => {
     });
 
     const { loadConfig, saveAgentCliPath } = await importConfig();
-    saveAgentCliPath("claude", "/Users/admin/.local/bin/claude", { envName: "local" });
+    saveAgentCliPath("claude", "/home/dev/.local/bin/claude", { envName: "local" });
 
     const config = loadConfig();
-    expect(config.claudeBin).toBe("/Users/admin/.local/bin/claude");
+    expect(config.claudeBin).toBe("/home/dev/.local/bin/claude");
     expect(config.sources.claudeBin).toBe("file");
-    expect(config.agentCliSuggestions.claude).toEqual(["/Users/admin/.local/bin/claude"]);
+    expect(config.agentCliSuggestions.claude).toEqual(["/home/dev/.local/bin/claude"]);
   });
 
   it("keeps user-entered Agent CLI paths as future suggestions", async () => {

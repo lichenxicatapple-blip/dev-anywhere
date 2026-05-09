@@ -8,6 +8,12 @@ import {
   MAX_CHAT_FONT_SIZE,
   MIN_CHAT_FONT_SIZE,
 } from "@/lib/chat-font-size";
+import {
+  readStorageValue,
+  removeStorageValue,
+  STORAGE_KEYS,
+  writeStorageValue,
+} from "@/lib/storage-keys";
 
 type AppPhase =
   | "connecting"
@@ -59,99 +65,47 @@ interface AppStoreState {
   transitionToPhase: (next: AppPhase) => void;
 }
 
-type StorageKind = "local" | "session";
-
-function getStorage(kind: StorageKind): Storage | null {
-  try {
-    const storage = kind === "local" ? globalThis.localStorage : globalThis.sessionStorage;
-    if (
-      !storage ||
-      typeof storage.getItem !== "function" ||
-      typeof storage.setItem !== "function" ||
-      typeof storage.removeItem !== "function"
-    ) {
-      return null;
-    }
-    return storage;
-  } catch {
-    return null;
-  }
-}
-
-function readStorage(kind: StorageKind, key: string): string | null {
-  const storage = getStorage(kind);
-  if (!storage) return null;
-  try {
-    return storage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(kind: StorageKind, key: string, value: string): void {
-  const storage = getStorage(kind);
-  if (!storage) return;
-  try {
-    storage.setItem(key, value);
-  } catch {
-    // Storage can be unavailable in private browsing, tests, or embedded webviews.
-  }
-}
-
-function removeStorage(kind: StorageKind, key: string): void {
-  const storage = getStorage(kind);
-  if (!storage) return;
-  try {
-    storage.removeItem(key);
-  } catch {
-    // Ignore transient storage failures; app state remains in memory.
-  }
-}
-
 // clientId 必须 per-tab 独立，否则同 origin 多 tab 共享同 id 时，后连的
 // client_register 会在 relay 侧覆盖 binding.ws，导致 broadcast 只到最后一个 tab
 function loadClientId(): string {
-  const stored = readStorage("session", "cc_clientId");
+  const stored = readStorageValue("session", STORAGE_KEYS.clientId);
   if (stored) return stored;
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  writeStorage("session", "cc_clientId", id);
+  writeStorageValue("session", STORAGE_KEYS.clientId, id);
   return id;
 }
 
 function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
   if (next === "proxy_selecting") {
-    removeStorage("local", "cc_proxyId");
-    removeStorage("local", "cc_sessionId");
+    removeStorageValue("local", STORAGE_KEYS.proxyId);
+    removeStorageValue("local", STORAGE_KEYS.sessionId);
   }
   if (next === "session_browsing" && prev === "chatting") {
-    removeStorage("local", "cc_sessionId");
+    removeStorageValue("local", STORAGE_KEYS.sessionId);
   }
 }
-
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "dev_anywhere_sidebarCollapsed";
-const CHAT_CONTENT_FONT_SIZE_STORAGE_KEY = "dev_anywhere_chatContentFontSize";
 
 function clampChatFontSize(value: number): number {
   return Math.max(MIN_CHAT_FONT_SIZE, Math.min(MAX_CHAT_FONT_SIZE, Math.round(value)));
 }
 
 function loadStoredFontSize(key: string, fallback: number): number {
-  const raw = readStorage("local", key);
+  const raw = readStorageValue("local", key);
   if (raw === null || raw.trim() === "") return fallback;
   const stored = Number(raw);
   return Number.isFinite(stored) ? clampChatFontSize(stored) : fallback;
 }
 
 function loadPtyFontSize(): number {
-  return loadStoredFontSize("cc_ptyFontSize", DEFAULT_TERMINAL_FONT_SIZE);
+  return loadStoredFontSize(STORAGE_KEYS.ptyFontSize, DEFAULT_TERMINAL_FONT_SIZE);
 }
 
 function loadChatContentFontSize(): number {
-  return loadStoredFontSize(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, DEFAULT_CHAT_CONTENT_FONT_SIZE);
+  return loadStoredFontSize(STORAGE_KEYS.chatContentFontSize, DEFAULT_CHAT_CONTENT_FONT_SIZE);
 }
 
 function loadSidebarCollapsed(): boolean {
-  return readStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
+  return readStorageValue("local", STORAGE_KEYS.sidebarCollapsed) === "1";
 }
 
 export const useAppStore = create<AppStoreState>()(
@@ -180,43 +134,43 @@ export const useAppStore = create<AppStoreState>()(
       setRelayUrl: (url) => set({ relayUrl: url }),
       setPtyFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
-        writeStorage("local", "cc_ptyFontSize", String(next));
+        writeStorageValue("local", STORAGE_KEYS.ptyFontSize, String(next));
         set({ ptyFontSize: next });
       },
       adjustPtyFontSize: (delta) => {
         const next = clampChatFontSize(get().ptyFontSize + delta);
-        writeStorage("local", "cc_ptyFontSize", String(next));
+        writeStorageValue("local", STORAGE_KEYS.ptyFontSize, String(next));
         set({ ptyFontSize: next });
       },
       resetPtyFontSize: () => {
-        writeStorage("local", "cc_ptyFontSize", String(DEFAULT_TERMINAL_FONT_SIZE));
+        writeStorageValue("local", STORAGE_KEYS.ptyFontSize, String(DEFAULT_TERMINAL_FONT_SIZE));
         set({ ptyFontSize: DEFAULT_TERMINAL_FONT_SIZE });
       },
       setChatContentFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
-        writeStorage("local", CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        writeStorageValue("local", STORAGE_KEYS.chatContentFontSize, String(next));
         set({ chatContentFontSize: next });
       },
       adjustChatContentFontSize: (delta) => {
         const next = clampChatFontSize(get().chatContentFontSize + delta);
-        writeStorage("local", CHAT_CONTENT_FONT_SIZE_STORAGE_KEY, String(next));
+        writeStorageValue("local", STORAGE_KEYS.chatContentFontSize, String(next));
         set({ chatContentFontSize: next });
       },
       resetChatContentFontSize: () => {
-        writeStorage(
+        writeStorageValue(
           "local",
-          CHAT_CONTENT_FONT_SIZE_STORAGE_KEY,
+          STORAGE_KEYS.chatContentFontSize,
           String(DEFAULT_CHAT_CONTENT_FONT_SIZE),
         );
         set({ chatContentFontSize: DEFAULT_CHAT_CONTENT_FONT_SIZE });
       },
       setSidebarCollapsed: (collapsed) => {
-        writeStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+        writeStorageValue("local", STORAGE_KEYS.sidebarCollapsed, collapsed ? "1" : "0");
         set({ sidebarCollapsed: collapsed });
       },
       toggleSidebarCollapsed: () => {
         const next = !get().sidebarCollapsed;
-        writeStorage("local", SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+        writeStorageValue("local", STORAGE_KEYS.sidebarCollapsed, next ? "1" : "0");
         set({ sidebarCollapsed: next });
       },
       setPhase: (phase) => {

@@ -11,6 +11,7 @@ services:
       - DATA_DIR=/data
       - HEARTBEAT_INTERVAL=30000
       - RELAY_PROXY_TOKEN=${RELAY_PROXY_TOKEN:-}
+      - RELAY_CLIENT_TOKEN=${RELAY_CLIENT_TOKEN:-}
     volumes:
       - relay-data:/data
     expose:

@@ -9,6 +9,7 @@ import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
 import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { loadFontCSS } from "@/lib/font-assets";
+import { toClientWsUrl } from "@/lib/relay-client-token";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 const RELAY_RUNTIME_KEY = "__devAnywhereRelayRuntime";
@@ -33,28 +34,6 @@ function setRuntimeRefs(refs: RelayRuntime): void {
   runtime.relayClientRef = refs.relayClientRef;
   wsManagerRef = refs.wsManagerRef;
   relayClientRef = refs.relayClientRef;
-}
-
-// 将用户配置的 relayUrl 规整为 /client WebSocket 端点:
-// 同域部署默认取 window.location.origin (https://...), 需要转 ws scheme 并补 /client 路径
-function toClientWsUrl(relayUrl: string): string {
-  const withWsScheme = relayUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
-  const trimmed = withWsScheme.replace(/\/$/, "");
-  const token = getRelayClientToken();
-  const base = /\/client$/.test(trimmed) ? trimmed : `${trimmed.replace(/\/proxy$/, "")}/client`;
-  if (!token) return base;
-  const separator = base.includes("?") ? "&" : "?";
-  return `${base}${separator}token=${encodeURIComponent(token)}`;
-}
-
-function getRelayClientToken(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get("relayToken");
-  if (fromUrl) {
-    sessionStorage.setItem("cc_relayClientToken", fromUrl);
-    return fromUrl;
-  }
-  return sessionStorage.getItem("cc_relayClientToken");
 }
 
 export function useRelaySetup(): void {

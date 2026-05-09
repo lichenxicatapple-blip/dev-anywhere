@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
+import { DEFAULT_TERMINAL_FONT_SIZE } from "@/lib/chat-font-size";
 import { xtermTheme } from "@/lib/xterm-theme";
 
 interface CreateXtermResult {
@@ -30,7 +31,7 @@ export async function createXtermTerminal(
     scrollback: 5000,
     fontFamily:
       '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-    fontSize: options.fontSize ?? 14,
+    fontSize: options.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
     cursorBlink: true,
     cursorStyle: "block",
     cursorInactiveStyle: "outline",

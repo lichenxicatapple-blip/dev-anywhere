@@ -69,7 +69,7 @@ const DEFAULT_CONFIG = `{
       "relayUrl": "ws://localhost:3100"
     },
     "cloud": {
-      "relayUrl": "wss://dev-anywhere.vita-tools.top",
+      "relayUrl": "wss://dev-anywhere.example.com",
       "relayToken": ""
     }
   }
