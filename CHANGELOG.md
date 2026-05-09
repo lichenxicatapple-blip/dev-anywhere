@@ -13,8 +13,25 @@ This project follows Semantic Versioning before `1.0.0`: minor versions may incl
 - React web/PWA client for session selection, chat rendering, hosted PTY control, reconnect recovery, and mobile layouts.
 - Shared protocol schemas for relay, chat, session, control, system, and tool messages.
 - Release workflow for npm packages and Docker images.
-- Smoke-test and release-check scripts for local and published artifacts.
+- Bilingual open-source README, deployment guide, PWA guide, script guide, and public screenshot assets.
+- Clipboard image paste for JSON and PTY sessions, backed by relay/proxy upload messages and local proxy-side file storage.
+- Relay client token support for public web/PWA deployments.
+- Release smoke gate covering desktop, mobile, PTY, clipboard, real provider, and chaos scenarios.
+
+### Changed
+
+- Default desktop chat and terminal font size is now 16px.
+- Session activity now updates while PTY/JSON sessions continue producing output.
+- Long session and history titles expose their full text via hover titles.
+- Public examples and test fixtures no longer use private local project names or machine paths.
+
+### Fixed
+
+- PTY raw input preserves IME-transformed punctuation such as Chinese commas and periods.
+- Hosted PTY provider-exit chaos no longer duplicates punctuation input.
+- Slow clipboard image uploads stay scoped to the session where the paste started.
 
 ### Security
 
 - Documented production requirement to configure both proxy and client relay tokens.
+- Clipboard image uploads reject unsupported formats, oversized payloads, and invalid session paths.
