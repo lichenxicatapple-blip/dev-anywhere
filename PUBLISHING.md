@@ -96,7 +96,7 @@ sudo ./scripts/install-relay.sh dev-anywhere.example.com
 
 The installer prints two credentials:
 
-- `RELAY_PROXY_TOKEN`: put this in each developer machine's `~/.dev-anywhere/config.json` as `envs.cloud.relayToken`.
+- `RELAY_PROXY_TOKEN`: put this in each developer machine's `~/.dev-anywhere/config.json` as `relays.cloud.proxyToken`.
 - `RELAY_CLIENT_TOKEN`: open the web client once with `https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>`.
 
 ## Local proxy update
@@ -105,7 +105,7 @@ After npm publish succeeds, update the local CLI and reconnect the local runtime
 
 ```bash
 npm install -g @dev-anywhere/proxy@X.Y.Z
-dev-anywhere serve restart --env cloud
+dev-anywhere serve restart --relay cloud
 dev-anywhere serve status
 ```
 
@@ -114,8 +114,8 @@ For first-time local setup:
 ```bash
 npm install -g @dev-anywhere/proxy
 dev-anywhere init
-# edit ~/.dev-anywhere/config.json: set envs.cloud.relayUrl and envs.cloud.relayToken
-dev-anywhere serve start --env cloud
+# edit ~/.dev-anywhere/config.json: set relays.cloud.url and relays.cloud.proxyToken
+dev-anywhere serve start --relay cloud
 ```
 
 ## Standalone relay without TLS

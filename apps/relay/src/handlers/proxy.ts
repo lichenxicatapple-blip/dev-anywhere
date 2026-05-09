@@ -131,8 +131,11 @@ export function handleProxyConnection(
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
-        registry.markProxyOffline(proxyWs.proxyId);
-        logger.info({ proxyId: proxyWs.proxyId }, "Proxy gracefully disconnected, marked offline");
+        registry.unregisterProxy(proxyWs.proxyId);
+        logger.info(
+          { proxyId: proxyWs.proxyId },
+          "Proxy gracefully disconnected, resources cleaned",
+        );
         proxyWs.proxyId = undefined;
         broadcastProxyList(registry, chaos);
       }

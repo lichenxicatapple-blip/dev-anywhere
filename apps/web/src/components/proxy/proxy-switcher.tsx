@@ -21,6 +21,7 @@ interface ProxySwitcherProps {
 export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProps) {
   const proxies = useAppStore((s) => s.proxies);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
+  const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -63,6 +64,12 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
   }
 
   if (layout === "page") {
+    if (relayClientAuthIssue === "missing_client_token") {
+      return <EmptyState variant="client-token-missing" />;
+    }
+    if (relayClientAuthIssue === "invalid_client_token") {
+      return <EmptyState variant="client-token-invalid" />;
+    }
     // 冷启动/重连期间 WS 未回 proxy_list_response 前, proxies=[] 但不是"真的没有", 显示加载态避免空态一闪而过
     if (!proxyListLoaded) {
       return (

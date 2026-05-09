@@ -6,10 +6,70 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
-LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
-DEV_ANYWHERE_LOG_RUN_ID="${DEV_ANYWHERE_LOG_RUN_ID:-$(date +%Y%m%d-%H%M%S)-relay-$$}"
-DEV_ANYWHERE_LOG_RETENTION="${DEV_ANYWHERE_LOG_RETENTION:-50}"
+RELAY_PORT="3100"
+LOG_DIR="$HOME/.dev-anywhere/logs"
+LOG_RETENTION="50"
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  scripts/dev-relay-restart.sh [--relay-port <port>]
+
+Defaults:
+  --relay-port 3100
+EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --)
+      shift
+      ;;
+    --relay-port)
+      RELAY_PORT="${2:-}"
+      [[ -n "$RELAY_PORT" ]] || { echo "ERROR: missing value for --relay-port" >&2; exit 2; }
+      shift 2
+      ;;
+    --relay-port=*)
+      RELAY_PORT="${1#--relay-port=}"
+      shift
+      ;;
+    --log-dir)
+      LOG_DIR="${2:-}"
+      [[ -n "$LOG_DIR" ]] || { echo "ERROR: missing value for --log-dir" >&2; exit 2; }
+      shift 2
+      ;;
+    --log-dir=*)
+      LOG_DIR="${1#--log-dir=}"
+      shift
+      ;;
+    --log-retention)
+      LOG_RETENTION="${2:-}"
+      [[ -n "$LOG_RETENTION" ]] || { echo "ERROR: missing value for --log-retention" >&2; exit 2; }
+      shift 2
+      ;;
+    --log-retention=*)
+      LOG_RETENTION="${1#--log-retention=}"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if ! [[ "$RELAY_PORT" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --relay-port must be numeric" >&2
+  exit 2
+fi
+
+LOG_RUN_ID="$(date +%Y%m%d-%H%M%S)-relay-$$"
 mkdir -p "$LOG_DIR"
 
 kill_port() {
@@ -33,7 +93,7 @@ prune_run_logs() {
   local dir="$1"
   local stem="$2"
   local current_file="$3"
-  local keep="$DEV_ANYWHERE_LOG_RETENTION"
+  local keep="$LOG_RETENTION"
   if [ "$keep" = "0" ]; then
     return
   fi
@@ -53,10 +113,10 @@ prepare_run_log() {
   dir="$(dirname "$stable_file")"
   base="$(basename "$stable_file")"
   stem="${base%.log}"
-  run_file="$dir/${stem}-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+  run_file="$dir/${stem}-${LOG_RUN_ID}.log"
 
   if [ -e "$stable_file" ] && [ ! -L "$stable_file" ]; then
-    mv "$stable_file" "$dir/${stem}-legacy-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+    mv "$stable_file" "$dir/${stem}-legacy-${LOG_RUN_ID}.log"
   fi
 
   ln -sfn "$(basename "$run_file")" "$stable_file"

@@ -1,9 +1,10 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalEnv = { ...process.env };
+const originalArgv = [...process.argv];
 let homeDir = "";
 
 async function importConfig() {
@@ -21,7 +22,19 @@ function writeConfig(content: unknown): void {
   writeFileSync(join(configDir, "config.json"), JSON.stringify(content), "utf8");
 }
 
-describe("proxy config env selection", () => {
+const currentConfig = {
+  defaultProfile: "default",
+  profiles: {
+    default: { relay: "cloud" },
+    local: { relay: "local" },
+  },
+  relays: {
+    local: { url: "ws://localhost:3100" },
+    cloud: { url: "wss://cloud.example.com", proxyToken: "secret" },
+  },
+};
+
+describe("proxy config relay selection", () => {
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), "dev-anywhere-config-"));
     process.env = { ...originalEnv, HOME: homeDir };
@@ -30,76 +43,89 @@ describe("proxy config env selection", () => {
     delete process.env.DEV_ANYWHERE_HOOK_PORT;
     delete process.env.CLAUDE_BIN;
     delete process.env.CODEX_BIN;
+    process.argv = ["node", "dev-anywhere"];
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    process.argv = [...originalArgv];
     vi.doUnmock("node:os");
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it("uses defaultEnv when --env is not provided", async () => {
+  it("uses defaultProfile and its bound relay when no CLI profile or relay override is provided", async () => {
+    writeConfig(currentConfig);
+
+    const { loadConfig } = await importConfig();
+    const config = loadConfig();
+
+    expect(config.profileName).toBe("default");
+    expect(config.relayName).toBe("cloud");
+    expect(config.relayUrl).toBe("wss://cloud.example.com");
+    expect(config.relayToken).toBe("secret");
+    expect(config.sources.relayName).toBe("profile");
+  });
+
+  it("uses --profile to select another profile and that profile's relay", async () => {
+    writeConfig(currentConfig);
+
+    process.argv = ["node", "dev-anywhere", "--profile", "local", "serve", "status"];
+    const { loadConfig } = await importConfig();
+    const config = loadConfig();
+
+    expect(config.profileName).toBe("local");
+    expect(config.relayName).toBe("local");
+    expect(config.relayUrl).toBe("ws://localhost:3100");
+    expect(config.relayToken).toBeUndefined();
+    expect(config.sources.relayName).toBe("profile");
+  });
+
+  it("uses defaultProfile from config when no CLI or env profile is provided", async () => {
     writeConfig({
-      defaultEnv: "cloud",
-      envs: {
-        local: { relayUrl: "ws://localhost:3100" },
-        cloud: { relayUrl: "wss://cloud.example.com", relayToken: "secret" },
-      },
+      ...currentConfig,
+      defaultProfile: "local",
     });
 
     const { loadConfig } = await importConfig();
     const config = loadConfig();
 
-    expect(config.envName).toBe("cloud");
-    expect(config.relayUrl).toBe("wss://cloud.example.com");
-    expect(config.relayToken).toBe("secret");
-    expect(config.sources.envName).toBe("file");
+    expect(config.profileName).toBe("local");
+    expect(config.relayName).toBe("local");
   });
 
-  it("uses requested env from serve --env", async () => {
-    writeConfig({
-      defaultEnv: "local",
-      envs: {
-        local: { relayUrl: "ws://localhost:3100" },
-        cloud: { relayUrl: "wss://cloud.example.com" },
-      },
-    });
+  it("lets serve --relay override the profile-bound relay", async () => {
+    writeConfig(currentConfig);
+    process.argv = ["node", "dev-anywhere", "--profile", "local", "serve", "start"];
 
     const { loadConfig } = await importConfig();
-    const config = loadConfig({ envName: "cloud" });
+    const config = loadConfig({ relayName: "cloud" });
 
-    expect(config.envName).toBe("cloud");
+    expect(config.profileName).toBe("local");
+    expect(config.relayName).toBe("cloud");
     expect(config.relayUrl).toBe("wss://cloud.example.com");
-    expect(config.sources.envName).toBe("cli");
+    expect(config.sources.relayName).toBe("cli");
   });
 
-  it("lets RELAY_URL temporarily override the selected env", async () => {
-    writeConfig({
-      defaultEnv: "cloud",
-      envs: {
-        cloud: { relayUrl: "wss://cloud.example.com", relayToken: "file-token" },
-      },
-    });
+  it("lets RELAY_URL temporarily override the selected relay URL", async () => {
+    writeConfig(currentConfig);
     process.env.RELAY_URL = "ws://override.local:3100";
 
     const { loadConfig } = await importConfig();
     const config = loadConfig();
 
+    expect(config.relayName).toBe("cloud");
     expect(config.relayUrl).toBe("ws://override.local:3100");
-    expect(config.relayToken).toBe("file-token");
+    expect(config.relayToken).toBe("secret");
     expect(config.sources.relayUrl).toBe("env");
     expect(config.sources.relayToken).toBe("file");
   });
 
-  it("loads Agent CLI paths from the selected env and lets env vars override them", async () => {
+  it("loads Agent CLI paths from top-level agentCli and lets env vars override them", async () => {
     writeConfig({
-      defaultEnv: "local",
-      envs: {
-        local: {
-          relayUrl: "ws://localhost:3100",
-          claudeBin: "/file/bin/claude",
-          codexBin: "/file/bin/codex",
-        },
+      ...currentConfig,
+      agentCli: {
+        claudeBin: "/file/bin/claude",
+        codexBin: "/file/bin/codex",
       },
     });
     process.env.CLAUDE_BIN = "/env/bin/claude";
@@ -118,17 +144,17 @@ describe("proxy config env selection", () => {
     expect(config.agentCliSuggestions.codex).toEqual(["/file/bin/codex"]);
   });
 
-  it("persists Agent CLI paths into the selected env config", async () => {
-    writeConfig({
-      defaultEnv: "local",
-      envs: {
-        local: { relayUrl: "ws://localhost:3100" },
-        cloud: { relayUrl: "wss://cloud.example.com" },
-      },
-    });
+  it("persists Agent CLI paths into top-level agentCli config", async () => {
+    writeConfig(currentConfig);
 
     const { loadConfig, saveAgentCliPath } = await importConfig();
-    saveAgentCliPath("claude", "/home/dev/.local/bin/claude", { envName: "local" });
+    saveAgentCliPath("claude", "/home/dev/.local/bin/claude");
+
+    const configFile = JSON.parse(
+      readFileSync(join(homeDir, ".dev-anywhere", "config.json"), "utf8"),
+    );
+
+    expect(configFile.agentCli.claudeBin).toBe("/home/dev/.local/bin/claude");
 
     const config = loadConfig();
     expect(config.claudeBin).toBe("/home/dev/.local/bin/claude");
@@ -137,16 +163,11 @@ describe("proxy config env selection", () => {
   });
 
   it("keeps user-entered Agent CLI paths as future suggestions", async () => {
-    writeConfig({
-      defaultEnv: "local",
-      envs: {
-        local: { relayUrl: "ws://localhost:3100" },
-      },
-    });
+    writeConfig(currentConfig);
 
     const { loadConfig, saveAgentCliPath } = await importConfig();
-    saveAgentCliPath("claude", "/opt/claude/v1/claude", { envName: "local" });
-    saveAgentCliPath("claude", "/opt/claude/v2/claude", { envName: "local" });
+    saveAgentCliPath("claude", "/opt/claude/v1/claude");
+    saveAgentCliPath("claude", "/opt/claude/v2/claude");
 
     const config = loadConfig();
     expect(config.claudeBin).toBe("/opt/claude/v2/claude");
@@ -156,18 +177,7 @@ describe("proxy config env selection", () => {
     ]);
   });
 
-  it("still reads the single-env config shape", async () => {
-    writeConfig({ relayUrl: "ws://single.local:3100" });
-
-    const { loadConfig } = await importConfig();
-    const config = loadConfig();
-
-    expect(config.envName).toBeUndefined();
-    expect(config.relayUrl).toBe("ws://single.local:3100");
-    expect(config.sources.envName).toBe("single");
-  });
-
-  it("throws a clear error for unknown env names", async () => {
+  it("rejects the legacy envs/defaultEnv config shape", async () => {
     writeConfig({
       defaultEnv: "local",
       envs: {
@@ -177,8 +187,16 @@ describe("proxy config env selection", () => {
 
     const { loadConfig } = await importConfig();
 
-    expect(() => loadConfig({ envName: "cloud" })).toThrow(
-      'Unknown config env "cloud". Available envs: local',
+    expect(() => loadConfig()).toThrow(/expected "profiles" and "relays"/);
+  });
+
+  it("throws a clear error for unknown relay names", async () => {
+    writeConfig(currentConfig);
+
+    const { loadConfig } = await importConfig();
+
+    expect(() => loadConfig({ relayName: "staging" })).toThrow(
+      'Unknown relay "staging". Available relays: cloud, local',
     );
   });
 });

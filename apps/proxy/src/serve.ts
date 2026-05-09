@@ -4,7 +4,16 @@ import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
-import { SOCK_PATH, PID_PATH, STOPPED_PATH, SESSIONS_PATH, sessionPaths } from "./common/paths.js";
+import {
+  SOCK_PATH,
+  PID_PATH,
+  STOPPED_PATH,
+  SESSIONS_PATH,
+  PROXY_ID_PATH,
+  PROFILE_NAME,
+  ensureProfileWorkspace,
+  sessionPaths,
+} from "./common/paths.js";
 import { buildProviderEnv, loadConfig } from "./common/config.js";
 import { serializeIpc } from "./ipc/ipc-protocol.js";
 import { createControlMessageHandlers } from "./serve/handlers/control-messages.js";
@@ -65,32 +74,33 @@ function resolveInterruptedApprovals(
 
 export interface ServiceOptions {
   relayUrl?: string;
-  envName?: string;
+  relayName?: string;
 }
 
 function parseServiceOptions(argv: readonly string[]): ServiceOptions {
   const options: ServiceOptions = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--env") {
-      const envName = argv[i + 1];
-      if (!envName || envName.startsWith("-")) {
-        throw new Error("Missing value for --env");
+    if (arg === "--relay") {
+      const relayName = argv[i + 1];
+      if (!relayName || relayName.startsWith("-")) {
+        throw new Error("Missing value for --relay");
       }
-      options.envName = envName;
+      options.relayName = relayName;
       i++;
       continue;
     }
-    if (arg.startsWith("--env=")) {
-      const envName = arg.slice("--env=".length);
-      if (!envName) throw new Error("Missing value for --env");
-      options.envName = envName;
+    if (arg.startsWith("--relay=")) {
+      const relayName = arg.slice("--relay=".length);
+      if (!relayName) throw new Error("Missing value for --relay");
+      options.relayName = relayName;
     }
   }
   return options;
 }
 
 export async function startService(options?: ServiceOptions): Promise<void> {
+  ensureProfileWorkspace();
   await cleanupStaleResources();
   try {
     unlinkSync(STOPPED_PATH);
@@ -124,7 +134,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
   // relay 是 proxy 存在的必要前提，未配置直接 fail-fast，不再支持"本地独立"模式
-  let proxyConfig = loadConfig({ envName: options?.envName });
+  let proxyConfig = loadConfig({ relayName: options?.relayName });
   const getProviderEnv = (): NodeJS.ProcessEnv => buildProviderEnv(proxyConfig, process.env);
   const getAgentCliSuggestions = (): Partial<Record<ProviderId, string[]>> =>
     proxyConfig.agentCliSuggestions;
@@ -147,8 +157,9 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relayUrl = options?.relayUrl ?? proxyConfig.relayUrl;
   const relayToken = proxyConfig.relayToken;
   const statusConfig = {
-    envName: proxyConfig.envName,
-    envNameSource: proxyConfig.sources.envName,
+    profile: PROFILE_NAME,
+    relayName: proxyConfig.relayName,
+    relayNameSource: proxyConfig.sources.relayName,
     relayUrl,
     relayUrlSource: proxyConfig.sources.relayUrl,
     relayTokenSource: proxyConfig.sources.relayToken,
@@ -156,13 +167,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     hookPortSource: proxyConfig.sources.hookPort,
   };
   if (!relayUrl) {
-    const msg =
-      'Relay URL is required. Set it via RELAY_URL or ~/.dev-anywhere/config.json {"defaultEnv":"local","envs":{"local":{"relayUrl":"ws://..."}}}.';
+    const msg = `Relay URL is required. Set relays.${proxyConfig.relayName}.url in ~/.dev-anywhere/config.json or pass --relay <name>.`;
     serviceLogger.error(msg);
     console.error(msg);
     process.exit(1);
   }
-  const relayConnection = new RelayConnection(relayUrl, { name: proxyName, token: relayToken });
+  const relayConnection = new RelayConnection(relayUrl, {
+    name: proxyName,
+    token: relayToken,
+    proxyIdPath: PROXY_ID_PATH,
+  });
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
@@ -231,7 +245,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   relayConnection.connect();
   serviceLogger.info(
     {
-      envName: proxyConfig.envName ?? "(single)",
+      relayName: proxyConfig.relayName,
+      profile: PROFILE_NAME,
       relayUrl,
       proxyName,
       tokenSet: !!relayToken,
@@ -256,7 +271,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     permissionBroker,
     hookEventRouter: hookRuntime.hookEventRouter,
     agentStatusRegistry,
-    envName: proxyConfig.envName,
     getProviderEnv,
     getAgentCliSuggestions,
     setAgentCliPath,

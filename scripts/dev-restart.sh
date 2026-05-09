@@ -7,16 +7,107 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
-mkdir -p "$LOG_DIR"
-DEV_ANYWHERE_LOG_RUN_ID="${DEV_ANYWHERE_LOG_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
-DEV_ANYWHERE_LOG_RETENTION="${DEV_ANYWHERE_LOG_RETENTION:-50}"
-export DEV_ANYWHERE_LOG_RUN_ID
-export DEV_ANYWHERE_LOG_RETENTION
+LOG_DIR="$HOME/.dev-anywhere/logs"
+LOG_RETENTION="50"
+RELAY_PORT="3100"
+WEB_PORT="5173"
+DEV_RELAY="local"
+DEV_PROFILE="local"
 
-RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
-WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
-DEV_ENV="${DEV_ANYWHERE_DEV_ENV:-local}"
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  scripts/dev-restart.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>]
+
+Defaults:
+  --profile local
+  --relay local
+  --relay-port 3100
+  --web-port 5173
+EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --)
+      shift
+      ;;
+    --profile)
+      DEV_PROFILE="${2:-}"
+      [[ -n "$DEV_PROFILE" ]] || { echo "ERROR: missing value for --profile" >&2; exit 2; }
+      shift 2
+      ;;
+    --profile=*)
+      DEV_PROFILE="${1#--profile=}"
+      shift
+      ;;
+    --relay)
+      DEV_RELAY="${2:-}"
+      [[ -n "$DEV_RELAY" ]] || { echo "ERROR: missing value for --relay" >&2; exit 2; }
+      shift 2
+      ;;
+    --relay=*)
+      DEV_RELAY="${1#--relay=}"
+      shift
+      ;;
+    --relay-port)
+      RELAY_PORT="${2:-}"
+      [[ -n "$RELAY_PORT" ]] || { echo "ERROR: missing value for --relay-port" >&2; exit 2; }
+      shift 2
+      ;;
+    --relay-port=*)
+      RELAY_PORT="${1#--relay-port=}"
+      shift
+      ;;
+    --web-port)
+      WEB_PORT="${2:-}"
+      [[ -n "$WEB_PORT" ]] || { echo "ERROR: missing value for --web-port" >&2; exit 2; }
+      shift 2
+      ;;
+    --web-port=*)
+      WEB_PORT="${1#--web-port=}"
+      shift
+      ;;
+    --log-dir)
+      LOG_DIR="${2:-}"
+      [[ -n "$LOG_DIR" ]] || { echo "ERROR: missing value for --log-dir" >&2; exit 2; }
+      shift 2
+      ;;
+    --log-dir=*)
+      LOG_DIR="${1#--log-dir=}"
+      shift
+      ;;
+    --log-retention)
+      LOG_RETENTION="${2:-}"
+      [[ -n "$LOG_RETENTION" ]] || { echo "ERROR: missing value for --log-retention" >&2; exit 2; }
+      shift 2
+      ;;
+    --log-retention=*)
+      LOG_RETENTION="${1#--log-retention=}"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+for port in "$RELAY_PORT" "$WEB_PORT"; do
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: ports must be numeric" >&2
+    exit 2
+  fi
+done
+
+mkdir -p "$LOG_DIR"
+LOG_RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+
 FONT_DIR="$HOME/.dev-anywhere/relay-data/fonts"
 PACKAGE_FONT_DIR="$ROOT/apps/proxy/assets/fonts"
 
@@ -63,10 +154,10 @@ prepare_run_log() {
   dir="$(dirname "$stable_file")"
   base="$(basename "$stable_file")"
   stem="${base%.log}"
-  run_file="$dir/${stem}-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+  run_file="$dir/${stem}-${LOG_RUN_ID}.log"
 
   if [ -e "$stable_file" ] && [ ! -L "$stable_file" ]; then
-    mv "$stable_file" "$dir/${stem}-legacy-${DEV_ANYWHERE_LOG_RUN_ID}.log"
+    mv "$stable_file" "$dir/${stem}-legacy-${LOG_RUN_ID}.log"
   fi
 
   ln -sfn "$(basename "$run_file")" "$stable_file"
@@ -79,7 +170,7 @@ prune_run_logs() {
   local dir="$1"
   local stem="$2"
   local current_file="$3"
-  local keep="$DEV_ANYWHERE_LOG_RETENTION"
+  local keep="$LOG_RETENTION"
   if [ "$keep" = "0" ]; then
     return
   fi
@@ -129,22 +220,24 @@ echo ""
 echo "=== Restarting web ==="
 kill_port "$WEB_PORT" "web"
 WEB_LOG="$(prepare_run_log "$LOG_DIR/web-dev.log")"
-start_detached "$ROOT/apps/web" "$WEB_LOG" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
+start_detached "$ROOT/apps/web" "$WEB_LOG" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
 wait_port "$WEB_PORT" "Web" "$WEB_LOG"
 
 echo ""
 echo "=== Restarting proxy serve daemon ==="
-INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env "$DEV_ENV"
+INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
+  --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
 
 echo ""
 echo "=== All services restarted ==="
-echo "  Log run: $DEV_ANYWHERE_LOG_RUN_ID"
+echo "  Log run: $LOG_RUN_ID"
 echo "  Relay: http://localhost:$RELAY_PORT"
 echo "  Web:   http://localhost:$WEB_PORT"
-echo "  Proxy env: $DEV_ENV"
+echo "  Proxy profile: $DEV_PROFILE"
+echo "  Proxy relay: $DEV_RELAY"
 echo ""
 echo "Check local chain health:"
-echo "  pnpm dev:health"
+echo "  pnpm dev:health -- --profile $DEV_PROFILE --relay-port $RELAY_PORT --web-port $WEB_PORT"
 echo ""
 echo "Start a real PTY session in your terminal:"
-echo "  pnpm proxy -- claude"
+echo "  pnpm --filter @dev-anywhere/proxy run dev -- --profile $DEV_PROFILE claude"

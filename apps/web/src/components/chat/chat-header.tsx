@@ -124,7 +124,8 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          style={{ minWidth: "12rem", maxWidth: "calc(100vw - 1rem)" }}
+          className="w-44"
+          style={{ maxWidth: "calc(100vw - 1rem)" }}
           data-slot="chat-overflow-menu"
         >
           {isPty ? (
@@ -148,44 +149,46 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           <DropdownMenuLabel className="text-muted-foreground">
             {isPty ? "终端字号" : "聊天字号"}
           </DropdownMenuLabel>
-          <div
-            className="flex items-center justify-between gap-2 px-2 py-1.5"
-            data-slot="chat-menu-font-control"
-          >
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
-              disabled={fontSize <= minFontSize}
-              aria-label="字号变小"
-              data-slot="chat-menu-font-smaller"
-              onClick={(event) => {
-                event.stopPropagation();
-                adjustFontSize(-1);
-              }}
+          <div className="px-2 pb-1.5" data-slot="chat-menu-font-control">
+            <div
+              className="grid h-11 grid-cols-[2.75rem_minmax(3.25rem,1fr)_2.75rem] items-center overflow-hidden rounded-md border border-border bg-muted/20 md:h-9 md:grid-cols-[2.25rem_minmax(3rem,1fr)_2.25rem]"
+              data-slot="chat-menu-font-stepper"
             >
-              <Minus aria-hidden="true" />
-            </Button>
-            <span
-              className="min-w-11 text-center text-sm tabular-nums"
-              data-slot="chat-menu-font-size"
-            >
-              {fontSize}px
-            </span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="min-h-11 min-w-11 md:min-h-8 md:min-w-8"
-              disabled={fontSize >= MAX_CHAT_FONT_SIZE}
-              aria-label="字号变大"
-              data-slot="chat-menu-font-larger"
-              onClick={(event) => {
-                event.stopPropagation();
-                adjustFontSize(1);
-              }}
-            >
-              <Plus aria-hidden="true" />
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-11 rounded-none md:size-9"
+                disabled={fontSize <= minFontSize}
+                aria-label="字号变小"
+                data-slot="chat-menu-font-smaller"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  adjustFontSize(-1);
+                }}
+              >
+                <Minus aria-hidden="true" />
+              </Button>
+              <span
+                className="flex h-full items-center justify-center border-x border-border text-sm tabular-nums"
+                data-slot="chat-menu-font-size"
+              >
+                {fontSize}px
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-11 rounded-none md:size-9"
+                disabled={fontSize >= MAX_CHAT_FONT_SIZE}
+                aria-label="字号变大"
+                data-slot="chat-menu-font-larger"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  adjustFontSize(1);
+                }}
+              >
+                <Plus aria-hidden="true" />
+              </Button>
+            </div>
           </div>
           <DropdownMenuItem data-slot="chat-menu-font-reset" onClick={resetFontSize}>
             恢复默认

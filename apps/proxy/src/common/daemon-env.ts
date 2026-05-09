@@ -1,26 +1,28 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { DESIRED_ENV_PATH } from "./paths.js";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { DESIRED_RELAY_PATH } from "./paths.js";
 
-export function setDesiredDaemonEnv(envName: string | undefined): void {
-  const normalized = envName?.trim();
+export function setDesiredDaemonRelay(relayName: string | undefined): void {
+  const normalized = relayName?.trim();
   if (normalized) {
-    writeFileSync(DESIRED_ENV_PATH, `${normalized}\n`);
+    mkdirSync(dirname(DESIRED_RELAY_PATH), { recursive: true });
+    writeFileSync(DESIRED_RELAY_PATH, `${normalized}\n`);
     return;
   }
   try {
-    unlinkSync(DESIRED_ENV_PATH);
+    unlinkSync(DESIRED_RELAY_PATH);
   } catch {
-    // Missing desired-env file means "use config default".
+    // Missing desired-relay file means "use the selected profile's relay".
   }
 }
 
-function readDesiredDaemonEnv(): string | undefined {
-  if (!existsSync(DESIRED_ENV_PATH)) return undefined;
-  const value = readFileSync(DESIRED_ENV_PATH, "utf-8").trim();
+function readDesiredDaemonRelay(): string | undefined {
+  if (!existsSync(DESIRED_RELAY_PATH)) return undefined;
+  const value = readFileSync(DESIRED_RELAY_PATH, "utf-8").trim();
   return value || undefined;
 }
 
-export function daemonEnvArgs(envName?: string): string[] {
-  const selected = envName?.trim() || readDesiredDaemonEnv();
-  return selected ? ["--env", selected] : [];
+export function daemonRelayArgs(relayName?: string): string[] {
+  const selected = relayName?.trim() || readDesiredDaemonRelay();
+  return selected ? ["--relay", selected] : [];
 }

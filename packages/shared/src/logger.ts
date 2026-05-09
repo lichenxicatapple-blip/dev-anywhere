@@ -17,6 +17,7 @@ export interface CreateLoggerOptions {
   name: string;
   level?: string;
   logDir?: string;
+  retention?: number;
   stdout?: boolean;
   silent?: boolean;
 }
@@ -25,8 +26,7 @@ const DEFAULT_LOG_DIR = `${homedir()}/.dev-anywhere/logs`;
 const DEFAULT_LOG_RETENTION = 50;
 
 const PROCESS_LOG_RUN_ID = sanitizeRunId(
-  process.env.DEV_ANYWHERE_LOG_RUN_ID ??
-    `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`,
+  `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`,
 );
 
 function sanitizeRunId(runId: string): string {
@@ -55,15 +55,20 @@ function linkLatestLog(logDir: string, name: string, filePath: string, runId: st
   }
 }
 
-function resolveRetention(): number {
-  const raw = process.env.DEV_ANYWHERE_LOG_RETENTION;
-  if (!raw) return DEFAULT_LOG_RETENTION;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_LOG_RETENTION;
+function resolveRetention(retention: number | undefined): number {
+  if (retention === undefined) return DEFAULT_LOG_RETENTION;
+  return Number.isFinite(retention) && retention >= 0
+    ? Math.floor(retention)
+    : DEFAULT_LOG_RETENTION;
 }
 
-function pruneOldLogs(logDir: string, name: string, currentFilePath: string): void {
-  const keep = resolveRetention();
+function pruneOldLogs(
+  logDir: string,
+  name: string,
+  currentFilePath: string,
+  retention: number | undefined,
+): void {
+  const keep = resolveRetention(retention);
   if (keep === 0) return;
 
   const currentFileName = basename(currentFilePath);
@@ -97,6 +102,7 @@ export function createLogger(options: CreateLoggerOptions): pino.Logger {
     name,
     level = "info",
     logDir = DEFAULT_LOG_DIR,
+    retention,
     stdout = false,
     silent = false,
   } = options;
@@ -110,7 +116,7 @@ export function createLogger(options: CreateLoggerOptions): pino.Logger {
   const runId = PROCESS_LOG_RUN_ID;
   const filePath = join(logDir, `${name}-${runId}.log`);
   linkLatestLog(logDir, name, filePath, runId);
-  pruneOldLogs(logDir, name, filePath);
+  pruneOldLogs(logDir, name, filePath, retention);
   const streams: pino.StreamEntry[] = [{ stream: pino.destination(filePath) }];
 
   if (stdout) {

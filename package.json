@@ -16,6 +16,7 @@
     "quality:check": "bash scripts/quality-check.sh",
     "release:check": "bash scripts/release-check.sh",
     "release:smoke": "bash scripts/release-smoke.sh",
+    "dev:web": "bash scripts/dev-web.sh",
     "dev:restart": "scripts/dev-restart.sh",
     "dev:health": "scripts/dev-health.sh",
     "dev:relay:restart": "bash scripts/dev-relay-restart.sh",
@@ -25,7 +26,7 @@
     "mobile:smoke:simulator": "bash scripts/mobile-smoke.sh --simulator",
     "desktop:smoke": "bash scripts/desktop-smoke.sh",
     "dev-anywhere": "node apps/proxy/dist/index.js",
-    "proxy": "DEV_ANYWHERE_CWD=${DEV_ANYWHERE_CWD:-${INIT_CWD:-$PWD}} pnpm --filter @dev-anywhere/proxy run dev --",
+    "proxy": "pnpm --filter @dev-anywhere/proxy run dev --",
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"
   },
   "devDependencies": {

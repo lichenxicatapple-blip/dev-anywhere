@@ -50,13 +50,13 @@ The default image registry is the public Aliyun ACR mirror used by this project.
 From your laptop:
 
 ```bash
-IMAGE_TAG=0.1.0 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=0.1.1 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 Or run directly on the VPS:
 
 ```bash
-sudo env IMAGE_TAG=0.1.0 ./scripts/install-relay.sh dev-anywhere.example.com
+sudo env IMAGE_TAG=0.1.1 ./scripts/install-relay.sh dev-anywhere.example.com
 ```
 
 The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
@@ -85,11 +85,16 @@ Edit `~/.dev-anywhere/config.json`:
 
 ```json
 {
-  "defaultEnv": "cloud",
-  "envs": {
+  "defaultProfile": "default",
+  "profiles": {
+    "default": {
+      "relay": "cloud"
+    }
+  },
+  "relays": {
     "cloud": {
-      "relayUrl": "wss://dev-anywhere.example.com",
-      "relayToken": "<RELAY_PROXY_TOKEN>"
+      "url": "wss://dev-anywhere.example.com",
+      "proxyToken": "<RELAY_PROXY_TOKEN>"
     }
   }
 }
@@ -98,7 +103,7 @@ Edit `~/.dev-anywhere/config.json`:
 Start the daemon:
 
 ```bash
-dev-anywhere serve start --env cloud
+dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 

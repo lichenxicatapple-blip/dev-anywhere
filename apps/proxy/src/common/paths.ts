@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,44 +7,167 @@ import { fileURLToPath } from "node:url";
 // 使用 os.homedir()：POSIX 走 HOME，Windows 走 USERPROFILE；未设置时回退到 getpwuid。
 // 相比 process.env.HOME，不会在缺失环境变量时构造出 "undefined/.dev-anywhere"。
 const HOME = homedir();
-const APP_DIR = `${HOME}/.dev-anywhere`;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const SOURCE_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../../assets/fonts");
 const DIST_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../assets/fonts");
 const DEFAULT_FONT_FAMILY = "sarasa-fixed-sc";
+export const DEFAULT_PROXY_PROFILE = "default";
+
+export interface ProxyProfilePaths {
+  profileName: string;
+  isDefaultProfile: boolean;
+  appDir: string;
+  profileDir: string;
+  configPath: string;
+  runDir: string;
+  sockPath: string;
+  pidPath: string;
+  stoppedPath: string;
+  desiredRelayPath: string;
+  stateDir: string;
+  sessionsPath: string;
+  hookRegistryPath: string;
+  dataDir: string;
+  proxyIdPath: string;
+  logDir: string;
+  serviceLogPath: string;
+  relayDataDir: string;
+  fontDir: string;
+}
+
+export function normalizeProxyProfileName(value: string | undefined): string {
+  const normalized = value?.trim() || DEFAULT_PROXY_PROFILE;
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(normalized)
+  ) {
+    throw new Error(
+      `Invalid dev-anywhere profile "${normalized}". Use 1-64 letters, numbers, ".", "_" or "-".`,
+    );
+  }
+  return normalized;
+}
+
+function readProxyProfileNameFromArgv(argv: readonly string[]): string | undefined {
+  const args = [...argv];
+  while (args[0] === "--") args.shift();
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "claude" || arg === "codex") return undefined;
+    if (arg === "--profile") {
+      const next = args[i + 1];
+      return next && !next.startsWith("-") ? next : undefined;
+    }
+    if (arg.startsWith("--profile=")) {
+      return arg.slice("--profile=".length);
+    }
+  }
+  return undefined;
+}
+
+export function resolveProxyProfileName(
+  argv: readonly string[] = process.argv.slice(2),
+  home: string = HOME,
+): string {
+  return normalizeProxyProfileName(
+    readProxyProfileNameFromArgv(argv) ?? readDefaultProfileFromConfig(home),
+  );
+}
+
+function readDefaultProfileFromConfig(home: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(`${home}/.dev-anywhere/config.json`, "utf-8")) as {
+      defaultProfile?: unknown;
+    };
+    return typeof parsed.defaultProfile === "string" ? parsed.defaultProfile : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function buildProxyProfilePaths(home: string, profileName: string): ProxyProfilePaths {
+  const normalizedProfile = normalizeProxyProfileName(profileName);
+  const appDir = `${home}/.dev-anywhere`;
+  const isDefaultProfile = normalizedProfile === DEFAULT_PROXY_PROFILE;
+  const profileDir = isDefaultProfile ? appDir : `${appDir}/profiles/${normalizedProfile}`;
+  const runDir = isDefaultProfile ? `${appDir}/run` : `${profileDir}/run`;
+  const stateDir = isDefaultProfile ? `${appDir}/state` : `${profileDir}/state`;
+  const dataDir = isDefaultProfile ? `${appDir}/data` : `${profileDir}/data`;
+  const logDir = isDefaultProfile ? `${appDir}/logs` : `${profileDir}/logs`;
+  const relayDataDir = `${appDir}/relay-data`;
+
+  return {
+    profileName: normalizedProfile,
+    isDefaultProfile,
+    appDir,
+    profileDir,
+    configPath: `${appDir}/config.json`,
+    runDir,
+    sockPath: `${runDir}/dev-anywhere.sock`,
+    pidPath: `${runDir}/dev-anywhere.pid`,
+    stoppedPath: `${runDir}/stopped`,
+    desiredRelayPath: `${runDir}/desired-relay`,
+    stateDir,
+    sessionsPath: `${stateDir}/sessions.json`,
+    hookRegistryPath: `${stateDir}/hooks.json`,
+    dataDir,
+    proxyIdPath: isDefaultProfile ? `${appDir}/proxy-id` : `${profileDir}/proxy-id`,
+    logDir,
+    serviceLogPath: `${logDir}/service.log`,
+    relayDataDir,
+    fontDir: `${relayDataDir}/fonts`,
+  };
+}
+
+export function defaultHookPortForProfile(profileName: string): number {
+  const normalizedProfile = normalizeProxyProfileName(profileName);
+  if (normalizedProfile === DEFAULT_PROXY_PROFILE) return 17654;
+
+  let hash = 0;
+  for (const char of normalizedProfile) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 1000;
+  }
+  return 17655 + hash;
+}
+
+export const PROFILE_NAME = resolveProxyProfileName();
+const PROFILE_PATHS = buildProxyProfilePaths(HOME, PROFILE_NAME);
 
 // 把 cwd 前缀替换为 ~，HOME 为空时原样返回（避免 replace("", "~") 把 ~ 前缀到所有路径）
 export function tildify(cwd: string): string {
   return HOME ? cwd.replace(HOME, "~") : cwd;
 }
-export const CONFIG_PATH = `${APP_DIR}/config.json`;
+export const CONFIG_PATH = PROFILE_PATHS.configPath;
 
 // 运行时文件
-export const RUN_DIR = `${APP_DIR}/run`;
-export const SOCK_PATH = `${RUN_DIR}/dev-anywhere.sock`;
-export const PID_PATH = `${RUN_DIR}/dev-anywhere.pid`;
+export const RUN_DIR = PROFILE_PATHS.runDir;
+export const SOCK_PATH = PROFILE_PATHS.sockPath;
+export const PID_PATH = PROFILE_PATHS.pidPath;
 // 停机标记文件。用户执行 `dev-anywhere stop` 时创建，其它时候不存在。文件内容无意义。
 // 作用：告诉 terminal 不要在此期间自动重启 daemon。
 //
 // 背景：terminal 在与 serve 的连接断开时，默认会 spawn 新 daemon 把连接修复。
 // 这与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会立即把它重新拉起。
 // 解决办法是 stop 落下此标记，terminal 重连逻辑先检查标记：存在则仅 tryConnect，不 spawn。
-export const STOPPED_PATH = `${RUN_DIR}/stopped`;
-export const DESIRED_ENV_PATH = `${RUN_DIR}/desired-env`;
+export const STOPPED_PATH = PROFILE_PATHS.stoppedPath;
+export const DESIRED_RELAY_PATH = PROFILE_PATHS.desiredRelayPath;
 
 // 持久化状态
-const STATE_DIR = `${APP_DIR}/state`;
-export const SESSIONS_PATH = `${STATE_DIR}/sessions.json`;
-export const HOOK_REGISTRY_PATH = `${STATE_DIR}/hooks.json`;
+const STATE_DIR = PROFILE_PATHS.stateDir;
+export const SESSIONS_PATH = PROFILE_PATHS.sessionsPath;
+export const HOOK_REGISTRY_PATH = PROFILE_PATHS.hookRegistryPath;
 
 // 会话数据
-export const DATA_DIR = `${APP_DIR}/data`;
-const RELAY_DATA_DIR = `${APP_DIR}/relay-data`;
-const FONT_DIR = `${RELAY_DATA_DIR}/fonts`;
+export const DATA_DIR = PROFILE_PATHS.dataDir;
+export const PROXY_ID_PATH = PROFILE_PATHS.proxyIdPath;
+const RELAY_DATA_DIR = PROFILE_PATHS.relayDataDir;
+const FONT_DIR = PROFILE_PATHS.fontDir;
 
 // 日志
-export const LOG_DIR = `${APP_DIR}/logs`;
-export const SERVICE_LOG_PATH = `${LOG_DIR}/service.log`;
+export const LOG_DIR = PROFILE_PATHS.logDir;
+export const SERVICE_LOG_PATH = PROFILE_PATHS.serviceLogPath;
 
 function sessionDir(sessionId: string): string {
   return `${DATA_DIR}/${sessionId}`;
@@ -63,14 +186,22 @@ export function isInitialized(): boolean {
 }
 
 const DEFAULT_CONFIG = `{
-  "defaultEnv": "local",
-  "envs": {
-    "local": {
-      "relayUrl": "ws://localhost:3100"
+  "defaultProfile": "default",
+  "profiles": {
+    "default": {
+      "relay": "cloud"
     },
+    "local": {
+      "relay": "local"
+    }
+  },
+  "relays": {
     "cloud": {
-      "relayUrl": "wss://dev-anywhere.example.com",
-      "relayToken": ""
+      "url": "wss://dev-anywhere.example.com",
+      "proxyToken": ""
+    },
+    "local": {
+      "url": "ws://localhost:3100"
     }
   }
 }
@@ -109,13 +240,17 @@ function installFontAssets(): void {
 }
 
 export function initWorkspace(): void {
-  mkdirSync(RUN_DIR, { recursive: true });
-  mkdirSync(STATE_DIR, { recursive: true });
-  mkdirSync(DATA_DIR, { recursive: true });
+  ensureProfileWorkspace();
   mkdirSync(RELAY_DATA_DIR, { recursive: true });
-  mkdirSync(LOG_DIR, { recursive: true });
   installFontAssets();
   if (!existsSync(CONFIG_PATH)) {
     writeFileSync(CONFIG_PATH, DEFAULT_CONFIG);
   }
+}
+
+export function ensureProfileWorkspace(): void {
+  mkdirSync(RUN_DIR, { recursive: true });
+  mkdirSync(STATE_DIR, { recursive: true });
+  mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true });
 }

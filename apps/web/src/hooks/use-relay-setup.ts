@@ -9,7 +9,9 @@ import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
 import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { loadFontCSS } from "@/lib/font-assets";
-import { toClientWsUrl } from "@/lib/relay-client-token";
+import { checkRelayClientAuth } from "@/lib/relay-client-auth";
+import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
+import { getRelayClientToken, toClientWsUrl } from "@/lib/relay-client-token";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 const RELAY_RUNTIME_KEY = "__devAnywhereRelayRuntime";
@@ -42,11 +44,12 @@ export function useRelaySetup(): void {
   const timersRef = useRef<Timers | null>(null);
 
   useEffect(() => {
+    const abort = new AbortController();
+    let disposed = false;
     // dev 经 vite.config.ts server.proxy 把 /client /fonts 反代到 localhost:3100, prod 同域部署走 nginx 分流
     const relayUrl = window.location.origin;
     useAppStore.getState().setRelayUrl(relayUrl);
     loadFontCSS(relayUrl);
-    const wsUrl = toClientWsUrl(relayUrl);
 
     const ws = new WebSocketManager();
     wsRef.current = ws;
@@ -79,9 +82,34 @@ export function useRelaySetup(): void {
     // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
     const unregisterResource = registerResourceDispatcher();
 
-    ws.connect(wsUrl);
+    async function connectWithAuthPreflight(): Promise<void> {
+      const token = getRelayClientToken();
+      let authIssue: RelayClientAuthIssue | null = null;
+      try {
+        authIssue = await checkRelayClientAuth(relayUrl, token, abort.signal);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      }
+      if (disposed) return;
+      if (authIssue) {
+        const store = useAppStore.getState();
+        store.setRelayClientAuthIssue(authIssue);
+        store.setConnected(false);
+        store.setProxyOnline(false);
+        store.setProxy(null, null);
+        store.setProxies([]);
+        store.setPhase("proxy_selecting");
+        return;
+      }
+      useAppStore.getState().setRelayClientAuthIssue(null);
+      ws.connect(toClientWsUrl(relayUrl));
+    }
+
+    void connectWithAuthPreflight();
 
     return () => {
+      disposed = true;
+      abort.abort();
       unsubStatus();
       unsubRelay();
       unregisterChat();

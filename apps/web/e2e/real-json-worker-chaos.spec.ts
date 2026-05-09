@@ -8,8 +8,9 @@ import { expect, test, type Page } from "@playwright/test";
 const enabled = process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS === "1";
 const chaosRoot =
   process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/json-worker";
-const relayPort = process.env.DEV_ANYWHERE_RELAY_PORT ?? "3100";
-const proxyEnv = process.env.DEV_ANYWHERE_DEV_ENV ?? "local";
+const relayPort = "3100";
+const proxyProfile = "local";
+const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -24,20 +25,29 @@ async function selectFirstProxy(page: Page): Promise<void> {
 }
 
 async function restartRelayOnly(): Promise<void> {
-  await execFileAsync("bash", ["scripts/dev-relay-restart.sh"], {
+  await execFileAsync("bash", ["scripts/dev-relay-restart.sh", "--relay-port", relayPort], {
     cwd: repoRoot,
     timeout: 30_000,
-    env: {
-      ...process.env,
-      DEV_ANYWHERE_LOG_RUN_ID: `${new Date().toISOString().replace(/[-:.TZ]/g, "")}-json-chaos`,
-    },
+    env: process.env,
   });
 }
 
 async function restartProxyServeWithFixture(): Promise<void> {
   await execFileAsync(
     "pnpm",
-    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart", "--env", proxyEnv],
+    [
+      "--filter",
+      "@dev-anywhere/proxy",
+      "run",
+      "dev",
+      "--",
+      "--profile",
+      proxyProfile,
+      "serve",
+      "restart",
+      "--relay",
+      proxyRelay,
+    ],
     {
       cwd: repoRoot,
       timeout: 30_000,
@@ -45,7 +55,6 @@ async function restartProxyServeWithFixture(): Promise<void> {
         ...process.env,
         INIT_CWD: repoRoot,
         CLAUDE_BIN: resolve(repoRoot, "apps/web/e2e/fixtures/json-worker-chaos-agent.mjs"),
-        DEV_ANYWHERE_LOG_RUN_ID: `${new Date().toISOString().replace(/[-:.TZ]/g, "")}-json-proxy-chaos`,
       },
     },
   );

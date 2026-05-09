@@ -2,16 +2,46 @@ import { Router } from "express";
 import type { RelayRegistry } from "./registry.js";
 import { RELAY_VERSION } from "./version.js";
 
+interface HealthRouterOptions {
+  proxyTokenRequired?: boolean;
+  clientTokenRequired?: boolean;
+  validateClientToken?: (token: string | null) => boolean;
+}
+
+function bearerToken(authHeader: string | undefined): string | null {
+  const match = /^Bearer\s+(.+)$/i.exec(authHeader ?? "");
+  return match?.[1] ?? null;
+}
+
 // 健康检查和状态查询路由
-export function healthRouter(registry: RelayRegistry): Router {
+export function healthRouter(registry: RelayRegistry, options: HealthRouterOptions = {}): Router {
   const router = Router();
+  const proxyTokenRequired = options.proxyTokenRequired ?? false;
+  const clientTokenRequired = options.clientTokenRequired ?? false;
 
   router.get("/health", (_req, res) => {
     res.json({
       status: "ok",
       version: RELAY_VERSION,
       uptime: process.uptime(),
+      auth: {
+        proxyTokenRequired,
+        clientTokenRequired,
+      },
     });
+  });
+
+  router.get("/auth/client", (req, res) => {
+    if (!clientTokenRequired) {
+      res.status(204).end();
+      return;
+    }
+    const token = bearerToken(req.get("authorization"));
+    if (options.validateClientToken?.(token)) {
+      res.status(204).end();
+      return;
+    }
+    res.status(401).json({ error: "invalid_client_token" });
   });
 
   router.get("/status", (_req, res) => {

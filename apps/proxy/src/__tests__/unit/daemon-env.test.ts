@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("daemon env selection", () => {
+describe("daemon relay selection", () => {
   let homeDir: string;
 
   beforeEach(() => {
@@ -20,27 +20,27 @@ describe("daemon env selection", () => {
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it("returns explicit env args before persisted desired env", async () => {
+  it("returns explicit relay args before persisted desired relay", async () => {
     const { mkdirSync } = await import("node:fs");
     const { RUN_DIR } = await import("#src/common/paths.js");
-    const { daemonEnvArgs, setDesiredDaemonEnv } = await import("#src/common/daemon-env.js");
+    const { daemonRelayArgs, setDesiredDaemonRelay } = await import("#src/common/daemon-env.js");
     mkdirSync(RUN_DIR, { recursive: true });
 
-    setDesiredDaemonEnv("cloud");
+    setDesiredDaemonRelay("cloud");
 
-    expect(daemonEnvArgs()).toEqual(["--env", "cloud"]);
-    expect(daemonEnvArgs("local")).toEqual(["--env", "local"]);
+    expect(daemonRelayArgs()).toEqual(["--relay", "cloud"]);
+    expect(daemonRelayArgs("local")).toEqual(["--relay", "local"]);
   });
 
-  it("clears persisted desired env when env is omitted", async () => {
+  it("clears persisted desired relay when relay is omitted", async () => {
     const { mkdirSync } = await import("node:fs");
     const { RUN_DIR } = await import("#src/common/paths.js");
-    const { daemonEnvArgs, setDesiredDaemonEnv } = await import("#src/common/daemon-env.js");
+    const { daemonRelayArgs, setDesiredDaemonRelay } = await import("#src/common/daemon-env.js");
     mkdirSync(RUN_DIR, { recursive: true });
 
-    setDesiredDaemonEnv("cloud");
-    setDesiredDaemonEnv(undefined);
+    setDesiredDaemonRelay("cloud");
+    setDesiredDaemonRelay(undefined);
 
-    expect(daemonEnvArgs()).toEqual([]);
+    expect(daemonRelayArgs()).toEqual([]);
   });
 });

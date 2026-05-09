@@ -6,6 +6,9 @@ cd "$ROOT"
 
 echo "=== Check release scripts ==="
 bash -n scripts/install-relay.sh
+bash -n scripts/dev-restart.sh
+bash -n scripts/dev-health.sh
+bash -n scripts/dev-relay-restart.sh
 if ! grep -F 'REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"' scripts/install-relay.sh >/dev/null; then
   echo "Release installer must default to the Aliyun ACR deployment registry" >&2
   exit 1
@@ -86,8 +89,11 @@ HOME="$TMP_HOME" node apps/proxy/dist/index.js init
 HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status >/dev/null
 
 test -f "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"defaultEnv": "local"' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"envs"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"defaultProfile": "default"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"profiles"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"relays"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"relay": "cloud"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"url": "ws://localhost:3100"' "$TMP_HOME/.dev-anywhere/config.json"
 test -f "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
 grep -q "U+2022" "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
 

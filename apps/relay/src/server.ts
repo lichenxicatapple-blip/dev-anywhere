@@ -90,7 +90,13 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     );
   }
 
-  app.use(healthRouter(registry));
+  app.use(
+    healthRouter(registry, {
+      proxyTokenRequired,
+      clientTokenRequired,
+      validateClientToken: (token) => token === clientToken,
+    }),
+  );
 
   // 使用 createServer 而非 app.listen，确保 WebSocket upgrade 可在同一端口上处理
   const httpServer = createServer(app);

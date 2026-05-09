@@ -21,6 +21,7 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const proxiesLength = useAppStore((s) => s.proxies.length);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
+  const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const selectedProxyName = useAppStore((s) => s.selectedProxyName);
@@ -34,6 +35,7 @@ export function AppShell() {
     proxiesLength,
     hasProxy,
     sessionCount,
+    relayClientAuthIssue,
   });
   const selectedProxyLabel = selectedProxyName ?? selectedProxyId;
   const showSwitchProxyAction =

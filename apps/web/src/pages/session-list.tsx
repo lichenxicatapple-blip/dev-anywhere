@@ -12,6 +12,7 @@ import { Navigate } from "react-router";
 export function SessionListPage() {
   const proxies = useAppStore((s) => s.proxies);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+  const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const sessionCount = useSessionStore((s) => s.sessions.length);
   const hasRestorableProxy = readStorageValue("local", STORAGE_KEYS.proxyId) !== null;
 
@@ -25,6 +26,7 @@ export function SessionListPage() {
     proxiesLength: proxies.length,
     hasProxy,
     sessionCount,
+    relayClientAuthIssue,
   });
 
   return (

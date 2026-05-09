@@ -9,6 +9,16 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
   version: string;
 };
 
+function normalizeRelayTarget(target: string | undefined): { http: string; ws: string } {
+  const raw = (target || "http://localhost:3100").trim().replace(/\/$/, "");
+  return {
+    http: raw.replace(/^ws:/, "http:").replace(/^wss:/, "https:"),
+    ws: raw.replace(/^http:/, "ws:").replace(/^https:/, "wss:"),
+  };
+}
+
+const relayTarget = normalizeRelayTarget(process.env.DEV_ANYWHERE_WEB_RELAY_TARGET);
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -79,18 +89,26 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/client": {
-        target: "ws://localhost:3100",
+        target: relayTarget.ws,
         ws: true,
+        changeOrigin: true,
       },
       "/proxy": {
-        target: "ws://localhost:3100",
+        target: relayTarget.ws,
         ws: true,
+        changeOrigin: true,
       },
       "/fonts": {
-        target: "http://localhost:3100",
+        target: relayTarget.http,
+        changeOrigin: true,
       },
       "/health": {
-        target: "http://localhost:3100",
+        target: relayTarget.http,
+        changeOrigin: true,
+      },
+      "/auth": {
+        target: relayTarget.http,
+        changeOrigin: true,
       },
     },
   },

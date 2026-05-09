@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.1] - 2026-05-09
+
+### Changed
+
+- Proxy configuration now uses explicit `profiles` and `relays` with `--relay <name>` commands; the old `defaultEnv`/`envs` shape is rejected.
+- Local Web development now requires an explicit relay target, for example `pnpm dev:web -- --relay cloud --port 5174`.
+
+### Fixed
+
+- Local development can now run isolated proxy profiles, so local relay testing no longer has to interrupt a cloud-connected proxy.
+- Vite development servers can target local, cloud, or custom relay backends without restarting the proxy daemon.
+- Public web clients now show an explicit client-token prompt before opening the relay WebSocket.
+- Chat and terminal font-size menus now use an aligned compact stepper layout.
+- Active relay verification no longer leaves the temporary `verify-proxy` entry in public proxy lists.
+- Graceful proxy disconnects now clean relay resources instead of preserving an offline proxy record.
+
 ## [0.1.0] - 2026-05-09
 
 ### Added

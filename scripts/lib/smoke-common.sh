@@ -57,14 +57,14 @@ smoke_report_web_entry_error() {
   curl --noproxy '*' -sS "$entry_url" >"$artifact_dir/web-entry-error.html" 2>/dev/null || true
   echo "ERROR: Web dev server responds at $web_base_url but cannot compile the app entry." >&2
   echo "Saved the Vite error response to: $artifact_dir/web-entry-error.html" >&2
-  echo "Restart the stale dev server, or set WEB_BASE_URL and DEV_ANYWHERE_WEB_PORT to a clean local port." >&2
+  echo "Restart the stale dev server, or pass --base-url with a clean local port." >&2
 }
 
 smoke_start_vite_if_needed() {
   local root="$1"
   local artifact_dir="$2"
   local web_base_url="$3"
-  local web_port="${DEV_ANYWHERE_WEB_PORT:-5173}"
+  local web_port="${4:-}"
 
   if curl --noproxy '*' -fsS "$web_base_url" >/dev/null 2>&1; then
     if smoke_check_web_entry "$web_base_url"; then
@@ -82,10 +82,11 @@ smoke_start_vite_if_needed() {
   if [[ "$web_base_url" =~ :([0-9]+)(/|$) ]]; then
     web_port="${BASH_REMATCH[1]}"
   fi
+  web_port="${web_port:-5173}"
 
   if lsof -nP -iTCP:"$web_port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "ERROR: Port $web_port is already in use, but $web_base_url is not healthy." >&2
-    echo "Set WEB_BASE_URL and DEV_ANYWHERE_WEB_PORT to a clean local port." >&2
+    echo "Pass --base-url with a clean local port." >&2
     exit 1
   fi
 
@@ -112,7 +113,9 @@ smoke_start_vite_if_needed() {
 
 smoke_require_local_real_chain() {
   local root="$1"
-  local relay_port="${DEV_ANYWHERE_RELAY_PORT:-3100}"
+  local relay_port="${2:-3100}"
+  local profile="${3:-local}"
+  local relay="${4:-local}"
   local status
 
   if ! curl --noproxy '*' -fsS "http://127.0.0.1:$relay_port/health" >/dev/null 2>&1; then
@@ -122,7 +125,7 @@ smoke_require_local_real_chain() {
   fi
 
   if ! status="$(
-    INIT_CWD="$root" pnpm --filter @dev-anywhere/proxy run dev -- serve status 2>&1
+    INIT_CWD="$root" pnpm --filter @dev-anywhere/proxy run dev -- --profile "$profile" serve status 2>&1
   )"; then
     echo "ERROR: proxy serve status failed" >&2
     printf '%s\n' "$status" >&2
@@ -136,11 +139,11 @@ smoke_require_local_real_chain() {
     exit 1
   fi
 
-  if ! printf '%s\n' "$status" | grep -qE "Env:[[:space:]]+local"; then
-    echo "ERROR: proxy serve is not using the local environment" >&2
+  if ! printf '%s\n' "$status" | grep -qE "Relay:[[:space:]]+$relay[[:space:]]+\\("; then
+    echo "ERROR: proxy serve is not using relay $relay" >&2
     printf '%s\n' "$status" >&2
     echo "Run: INIT_CWD=\"$root\" pnpm --filter @dev-anywhere/proxy run dev --" >&2
-    echo "       serve restart --env local" >&2
+    echo "       --profile $profile serve restart --relay $relay" >&2
     exit 1
   fi
 

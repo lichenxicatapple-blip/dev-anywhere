@@ -10,13 +10,15 @@ import {
   STOPPED_PATH,
   SERVICE_LOG_PATH,
   CONFIG_PATH,
+  PROFILE_NAME,
+  ensureProfileWorkspace,
   isInitialized,
   initWorkspace,
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
-import { daemonEnvArgs, setDesiredDaemonEnv } from "./common/daemon-env.js";
+import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
-import { extractAgentInvocation, normalizeCliArgs } from "./cli-args.js";
+import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as {
@@ -50,6 +52,7 @@ function showStatus(): Promise<number> {
     };
 
     if (!existsSync(PID_PATH)) {
+      log(`Profile: ${PROFILE_NAME}`);
       log("Service: not running");
       resolve(lines);
       return;
@@ -69,6 +72,7 @@ function showStatus(): Promise<number> {
       return;
     }
 
+    log(`Profile: ${PROFILE_NAME}`);
     log(`Service: running (PID ${pid})`);
     log(`Socket:  ${SOCK_PATH}`);
     log(`Log:     ${SERVICE_LOG_PATH}`);
@@ -76,13 +80,15 @@ function showStatus(): Promise<number> {
     const sock = connect(SOCK_PATH);
     sock.on("error", () => {
       log("Sessions: unable to connect");
+      sock.destroy();
       resolve(lines);
     });
     sock.on("connect", () => {
       createIpcReader(sock, (msg) => {
         if (msg.type === "service_status_response") {
           const config = msg.config;
-          log(`Env:     ${config.envName ?? "single"} (${config.envNameSource})`);
+          log(`Daemon:  profile ${config.profile ?? PROFILE_NAME}`);
+          log(`Relay:   ${config.relayName} (${config.relayNameSource})`);
           log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
           const relay = msg.relay;
           if (!relay) {
@@ -140,7 +146,8 @@ async function waitForServeReady(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function startDaemon(options?: { envName?: string }): Promise<void> {
+async function startDaemon(options?: { relayName?: string }): Promise<void> {
+  ensureProfileWorkspace();
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
     try {
@@ -156,8 +163,9 @@ async function startDaemon(options?: { envName?: string }): Promise<void> {
   // stderr 走 pipe 由父 CLI 订阅：子进程 ready 前（pino logger 未接管）的启动错误
   // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。
   // start 命令必须等 daemon socket 可连接后再退出；否则用户会看到“启动成功”，实际服务还没就绪。
-  const serveArgs = daemonEnvArgs(options?.envName);
+  const serveArgs = ["--profile", PROFILE_NAME, ...daemonRelayArgs(options?.relayName)];
   const child = spawnScript(new URL("./serve", import.meta.url), serveArgs, {
+    env: { ...process.env },
     stdio: ["ignore", "ignore", "pipe"],
     unref: false,
   });
@@ -221,6 +229,7 @@ async function startDaemon(options?: { envName?: string }): Promise<void> {
 const program = new Command("dev-anywhere")
   .description("Dev Anywhere - transparent local AI CLI proxy with remote control")
   .version(pkg.version)
+  .option("--profile <name>", "Use an isolated local proxy profile")
   .allowUnknownOption()
   .allowExcessArguments()
   .action(async () => {
@@ -233,7 +242,7 @@ const program = new Command("dev-anywhere")
     const { startTerminal } = await import("./terminal.js");
     let invocation: ReturnType<typeof extractAgentInvocation>;
     try {
-      invocation = extractAgentInvocation(cliArgs);
+      invocation = extractAgentInvocation(cliArgsWithoutProfile);
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
@@ -245,6 +254,7 @@ const program = new Command("dev-anywhere")
 // serve 子命令组
 const serve = new Command("serve")
   .description("Manage the dev-anywhere background service")
+  .option("--profile <name>", "Use an isolated local proxy profile")
   .option("-d, --daemon", "Run in background")
   .action(async (opts) => {
     if (!isInitialized()) {
@@ -252,7 +262,7 @@ const serve = new Command("serve")
       process.exit(1);
     }
     if (opts.daemon) {
-      setDesiredDaemonEnv(undefined);
+      setDesiredDaemonRelay(undefined);
       await startDaemon();
     } else {
       // 延迟导入 serve: daemon 模式只需要 startDaemon（纯 spawn），不需要加载 70KB 的 serve bundle
@@ -264,14 +274,14 @@ const serve = new Command("serve")
 serve
   .command("start")
   .description("Start the background service")
-  .option("--env <name>", "Use a named config environment")
+  .option("--relay <name>", "Use a named relay from config")
   .action(async (opts) => {
     if (!isInitialized()) {
       console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
-    setDesiredDaemonEnv(opts.env);
-    await startDaemon({ envName: opts.env });
+    setDesiredDaemonRelay(opts.relay);
+    await startDaemon({ relayName: opts.relay });
   });
 
 serve
@@ -304,11 +314,11 @@ serve
 serve
   .command("restart")
   .description("Restart the background service")
-  .option("--env <name>", "Use a named config environment")
+  .option("--relay <name>", "Use a named relay from config")
   .action(async (opts) => {
-    setDesiredDaemonEnv(opts.env);
+    setDesiredDaemonRelay(opts.relay);
     stopService();
-    await startDaemon({ envName: opts.env });
+    await startDaemon({ relayName: opts.relay });
   });
 
 program.addCommand(serve);
@@ -329,5 +339,6 @@ program
 // pnpm run dev -- args 会在参数前插入 "--"。根脚本和用户命令都可能再加一层
 // 分隔符，所以这里过滤所有前导分隔符，再交给 Commander 和 provider 参数解析。
 const cliArgs = normalizeCliArgs(process.argv.slice(2));
+const cliArgsWithoutProfile = stripProxyProfileArgs(cliArgs);
 
-program.parse(cliArgs, { from: "user" });
+program.parse(cliArgsWithoutProfile, { from: "user" });

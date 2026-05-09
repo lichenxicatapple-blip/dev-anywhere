@@ -314,8 +314,7 @@ describe("proxy lifecycle", () => {
         proxyCount: number;
         proxies?: Array<{ proxyId: string; online: boolean }>;
       };
-      // proxy_disconnect 标记离线但保留 state，proxyCount 不变
-      expect(afterStatus.proxyCount).toBe(beforeStatus.proxyCount);
+      expect(afterStatus.proxyCount).toBe(beforeStatus.proxyCount - 1);
     },
     E2E_TIMEOUT,
   );

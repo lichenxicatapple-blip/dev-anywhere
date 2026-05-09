@@ -73,6 +73,34 @@ describe("proxy endpoint token auth", () => {
   describe("with clientToken configured", () => {
     beforeEach(() => start(undefined, "client-secret"));
 
+    it("exposes client auth requirement without exposing the token", async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        auth?: { proxyTokenRequired?: boolean; clientTokenRequired?: boolean };
+      };
+      expect(body.auth).toEqual({
+        proxyTokenRequired: false,
+        clientTokenRequired: true,
+      });
+      expect(JSON.stringify(body)).not.toContain("client-secret");
+    });
+
+    it("validates client tokens over HTTP for explicit browser errors", async () => {
+      const missing = await fetch(`http://127.0.0.1:${port}/auth/client`);
+      expect(missing.status).toBe(401);
+
+      const invalid = await fetch(`http://127.0.0.1:${port}/auth/client`, {
+        headers: { authorization: "Bearer wrong" },
+      });
+      expect(invalid.status).toBe(401);
+
+      const valid = await fetch(`http://127.0.0.1:${port}/auth/client`, {
+        headers: { authorization: "Bearer client-secret" },
+      });
+      expect(valid.status).toBe(204);
+    });
+
     it("accepts /client with correct ?token=", async () => {
       const ok = await tryConnect(`ws://127.0.0.1:${port}/client?token=client-secret`);
       expect(ok).toBe(true);

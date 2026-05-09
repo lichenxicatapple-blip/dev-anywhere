@@ -7,7 +7,10 @@ import { promisify } from "node:util";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE === "1";
-const relayPort = process.env.DEV_ANYWHERE_RELAY_PORT ?? "3100";
+const relayPort = "3100";
+const proxyProfile = "local";
+const proxyRelay = "local";
+const proxyName = "DEV Anywhere Clipboard Smoke";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const fixtureRoot = resolve(repoRoot, "apps/web/e2e/fixtures");
 const jsonFixture = resolve(fixtureRoot, "json-worker-chaos-agent.mjs");
@@ -15,15 +18,6 @@ const ptyFixture = resolve(fixtureRoot, "local-pty-chaos-agent.mjs");
 const smokeRoot =
   process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_CWD ?? "/tmp/dev-anywhere-chaos/clipboard-image";
 const execFileAsync = promisify(execFile);
-let previousProxyRuntime: ProxyRuntimeSnapshot | null = null;
-
-type ProxyRuntimeSnapshot = {
-  running: boolean;
-  envName?: string;
-  envNameSource?: string;
-  relayUrl?: string;
-  relayUrlSource?: string;
-};
 
 test.setTimeout(120_000);
 
@@ -31,91 +25,79 @@ async function run(command: string, args: string[], env: NodeJS.ProcessEnv = {})
   await execFileAsync(command, args, {
     cwd: repoRoot,
     timeout: 45_000,
-    env: {
-      ...process.env,
-      ...env,
-      DEV_ANYWHERE_LOG_RUN_ID:
-        env.DEV_ANYWHERE_LOG_RUN_ID ??
-        `${new Date().toISOString().replace(/[-:.TZ]/g, "")}-clipboard-image`,
-    },
+    env: { ...process.env, ...env },
   });
 }
 
 async function restartRelay(): Promise<void> {
-  await run("bash", ["scripts/dev-relay-restart.sh"]);
+  await run("bash", ["scripts/dev-relay-restart.sh", "--relay-port", relayPort]);
 }
 
 async function ensureProxyInitialized(): Promise<void> {
   await run("pnpm", ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "init"]);
 }
 
-async function readProxyRuntime(): Promise<ProxyRuntimeSnapshot> {
-  const { stdout } = await execFileAsync(
-    "pnpm",
-    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "status"],
-    {
-      cwd: repoRoot,
-      timeout: 10_000,
-      env: { ...process.env, INIT_CWD: repoRoot },
-    },
-  ).catch((err: unknown) => ({ stdout: String(err) }));
-
-  const envMatch = stdout.match(/^Env:\s+(\S+)\s+\(([^)]+)\)/m);
-  const relayMatch = stdout.match(/^Config:\s+relay\s+(\S+)\s+\(([^)]+)\)/m);
-  return {
-    running: stdout.includes("Service: running"),
-    ...(envMatch && envMatch[1] !== "single"
-      ? { envName: envMatch[1], envNameSource: envMatch[2] }
-      : {}),
-    ...(relayMatch && relayMatch[1] !== "(unset)"
-      ? { relayUrl: relayMatch[1], relayUrlSource: relayMatch[2] }
-      : {}),
-  };
-}
-
 async function restartProxyWithFixtures(): Promise<void> {
-  await run("pnpm", ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart"], {
-    INIT_CWD: repoRoot,
-    RELAY_URL: `ws://localhost:${relayPort}`,
-    CLAUDE_BIN: jsonFixture,
-    CODEX_BIN: ptyFixture,
-  });
+  await run(
+    "pnpm",
+    [
+      "--filter",
+      "@dev-anywhere/proxy",
+      "run",
+      "dev",
+      "--",
+      "--profile",
+      proxyProfile,
+      "serve",
+      "restart",
+      "--relay",
+      proxyRelay,
+    ],
+    {
+      INIT_CWD: repoRoot,
+      DEV_ANYWHERE_PROXY_NAME: proxyName,
+      CLAUDE_BIN: jsonFixture,
+      CODEX_BIN: ptyFixture,
+    },
+  );
   await waitForProxyRelayConnected();
 }
 
-async function restoreProxyServe(): Promise<void> {
-  if (process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_RESTORE === "0") return;
-  const previous = previousProxyRuntime;
-  if (!previous?.running) {
-    await run("pnpm", ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "stop"], {
-      INIT_CWD: repoRoot,
-    }).catch(() => undefined);
-    return;
-  }
-
-  const restartArgs = [
-    "--filter",
-    "@dev-anywhere/proxy",
-    "run",
-    "dev",
-    "--",
-    "serve",
-    "restart",
-    ...(previous.envName && previous.envNameSource !== "file" ? ["--env", previous.envName] : []),
-  ];
-  await run("pnpm", restartArgs, {
-    INIT_CWD: repoRoot,
-    ...(previous.relayUrl && previous.relayUrlSource === "env"
-      ? { RELAY_URL: previous.relayUrl }
-      : {}),
-  }).catch(() => undefined);
+async function restartNormalProxyProfile(): Promise<void> {
+  await run(
+    "pnpm",
+    [
+      "--filter",
+      "@dev-anywhere/proxy",
+      "run",
+      "dev",
+      "--",
+      "--profile",
+      proxyProfile,
+      "serve",
+      "restart",
+      "--relay",
+      proxyRelay,
+    ],
+    { INIT_CWD: repoRoot },
+  );
 }
 
 async function waitForProxyRelayConnected(): Promise<void> {
   for (let i = 0; i < 60; i += 1) {
     const { stdout } = await execFileAsync(
       "pnpm",
-      ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "status"],
+      [
+        "--filter",
+        "@dev-anywhere/proxy",
+        "run",
+        "dev",
+        "--",
+        "--profile",
+        proxyProfile,
+        "serve",
+        "status",
+      ],
       {
         cwd: repoRoot,
         timeout: 10_000,
@@ -134,9 +116,11 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await expect(switcher).toBeVisible({ timeout: 30_000 });
   await switcher.click();
 
-  const firstProxy = page.locator('[data-slot="proxy-item"][data-online="true"]:visible').first();
-  await expect(firstProxy).toBeVisible({ timeout: 30_000 });
-  await firstProxy.click();
+  const proxy = page
+    .locator('[data-slot="proxy-item"][data-online="true"]:visible')
+    .filter({ hasText: proxyName });
+  await expect(proxy).toBeVisible({ timeout: 30_000 });
+  await proxy.click();
 }
 
 async function createSession(
@@ -202,8 +186,12 @@ async function dispatchImagePaste(target: Locator): Promise<void> {
   });
 }
 
+function proxyDataRoot(): string {
+  return join(homedir(), ".dev-anywhere", "profiles", proxyProfile, "data");
+}
+
 function clipboardDir(sessionId: string): string {
-  return join(homedir(), ".dev-anywhere", "data", sessionId, "clipboard");
+  return join(proxyDataRoot(), sessionId, "clipboard");
 }
 
 async function waitForUploadedImage(sessionId: string): Promise<string> {
@@ -223,7 +211,7 @@ function expectUploadedBytes(path: string): void {
 }
 
 function cleanupSessionData(sessionId: string): void {
-  rmSync(join(homedir(), ".dev-anywhere", "data", sessionId), { recursive: true, force: true });
+  rmSync(join(proxyDataRoot(), sessionId), { recursive: true, force: true });
 }
 
 async function terminalText(page: Page, sessionId: string): Promise<string> {
@@ -238,14 +226,13 @@ test.describe("real clipboard image chain", () => {
   test.skip(!enabled, "set DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 to run real relay/proxy");
 
   test.beforeAll(async () => {
-    previousProxyRuntime = await readProxyRuntime();
     await restartRelay();
     await ensureProxyInitialized();
     await restartProxyWithFixtures();
   });
 
   test.afterAll(async () => {
-    await restoreProxyServe();
+    await restartNormalProxyProfile().catch(() => undefined);
   });
 
   test("uploads JSON and PTY pasted images through real relay/proxy and writes real files", async ({

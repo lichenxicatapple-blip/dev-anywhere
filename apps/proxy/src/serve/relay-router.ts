@@ -40,7 +40,6 @@ interface RelayRouterDeps {
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   agentStatusRegistry: AgentStatusRegistry;
-  envName?: string;
   getProviderEnv: () => NodeJS.ProcessEnv;
   getAgentCliSuggestions: () => Partial<Record<ProviderHookContext["provider"], string[]>>;
   setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
@@ -72,7 +71,6 @@ export class RelayRouter {
       relaySend: deps.relaySend,
       controlHandlers: deps.controlHandlers,
       sessionManager: deps.sessionManager,
-      envName: deps.envName,
       getProviderEnv: deps.getProviderEnv,
       getAgentCliSuggestions: deps.getAgentCliSuggestions,
       setAgentCliPath: deps.setAgentCliPath,

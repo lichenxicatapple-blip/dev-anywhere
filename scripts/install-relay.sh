@@ -245,8 +245,8 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo "  npm install -g @dev-anywhere/proxy"
   echo "  dev-anywhere init"
   echo "  # edit ~/.dev-anywhere/config.json:"
-  echo "  #   { \"defaultEnv\": \"cloud\", \"envs\": { \"cloud\": { \"relayUrl\": \"wss://$DOMAIN\", \"relayToken\": \"$PROXY_TOKEN\" } } }"
-  echo "  dev-anywhere serve start --env cloud"
+  echo "  #   { \"defaultProfile\": \"default\", \"profiles\": { \"default\": { \"relay\": \"cloud\" } }, \"relays\": { \"cloud\": { \"url\": \"wss://$DOMAIN\", \"proxyToken\": \"$PROXY_TOKEN\" } } }"
+  echo "  dev-anywhere serve start --relay cloud"
   echo
   echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."
   echo

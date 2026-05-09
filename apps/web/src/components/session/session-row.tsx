@@ -17,7 +17,7 @@ import { providerLabel } from "@/lib/session-provider";
 interface SessionRowProps {
   session: SessionInfo;
   selected: boolean;
-  // 由父层每 60s 推进的参考 now，驱动 "最近活动 N 分钟前" 自刷新；省略时 formatRelativeTime 回退到 Date.now()
+  // 由父层每 60s 推进的参考 now，驱动相对时间自刷新；省略时 formatRelativeTime 回退到 Date.now()
   now?: number;
   onClick: () => void;
   onTerminate?: () => void;
@@ -78,12 +78,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
       ? session.sessionId.slice(0, 8)
       : formatSessionName(session.name);
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
-  const lastActiveLabel =
-    lastActive !== undefined ? `最近活动 ${formatRelativeTime(lastActive, now)}` : null;
-  const lastActiveTitle =
-    lastActive !== undefined
-      ? new Date(lastActive).toLocaleString("zh-CN", { hour12: false })
-      : undefined;
+  const lastActiveLabel = lastActive !== undefined ? formatRelativeTime(lastActive, now) : null;
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
   const terminateLabel = isLocalTerminalPty ? "断开远程连接" : "终止会话";
   return (
@@ -146,10 +141,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
                 <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                   ·
                 </span>
-                <span
-                  className="text-muted-foreground shrink-0 tabular-nums"
-                  title={lastActiveTitle}
-                >
+                <span className="text-muted-foreground shrink-0 tabular-nums">
                   {lastActiveLabel}
                 </span>
               </>

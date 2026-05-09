@@ -17,6 +17,7 @@ function resetAppStore(): void {
     selectedProxyName: "DEV Mac",
     proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
     proxyListLoaded: true,
+    relayClientAuthIssue: null,
     pendingToast: null,
   });
 }

@@ -59,7 +59,7 @@ Desktop / iPad / iPhone / Browser
 1. Deploy the relay and web client to a VPS:
 
 ```bash
-IMAGE_TAG=0.1.0 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=0.1.1 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 The installer prints a `RELAY_PROXY_TOKEN`, a `RELAY_CLIENT_TOKEN`, and a Web UI URL.
@@ -75,11 +75,16 @@ Edit `~/.dev-anywhere/config.json`:
 
 ```json
 {
-  "defaultEnv": "cloud",
-  "envs": {
+  "defaultProfile": "default",
+  "profiles": {
+    "default": {
+      "relay": "cloud"
+    }
+  },
+  "relays": {
     "cloud": {
-      "relayUrl": "wss://dev-anywhere.example.com",
-      "relayToken": "<RELAY_PROXY_TOKEN>"
+      "url": "wss://dev-anywhere.example.com",
+      "proxyToken": "<RELAY_PROXY_TOKEN>"
     }
   }
 }
@@ -88,7 +93,7 @@ Edit `~/.dev-anywhere/config.json`:
 3. Start the local daemon and attach an AI CLI session:
 
 ```bash
-dev-anywhere serve start --env cloud
+dev-anywhere serve start --relay cloud
 dev-anywhere claude
 dev-anywhere codex
 ```
@@ -118,7 +123,7 @@ The npm relay package does not serve the production web client by itself. For a 
 
 ## Daily Use
 
-1. Keep `dev-anywhere serve start --env cloud` running on the developer machine.
+1. Keep `dev-anywhere serve start --relay cloud` running on the developer machine.
 2. Start sessions from the repository you want to work on with `dev-anywhere claude` or `dev-anywhere codex`.
 3. Open the web client on desktop, iPad, or iPhone.
 4. Select the machine, resume a session, approve tools, and follow terminal or JSON-mode output.
@@ -161,7 +166,7 @@ pnpm test
 pnpm release:check
 ```
 
-Use `pnpm dev:restart` and `pnpm dev:health` when working on the full local proxy/relay/web loop.
+Use `pnpm dev:web -- --relay cloud --port 5174` to run local Web code against a cloud relay without touching the proxy daemon. Use `pnpm dev:restart` and `pnpm dev:health` for the full local proxy/relay/web loop; both default to the isolated `local` proxy profile so they can coexist with a cloud proxy profile.
 
 ## Documentation
 

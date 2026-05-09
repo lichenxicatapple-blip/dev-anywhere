@@ -13,7 +13,8 @@ const provider: Provider =
 const chaosBin = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN;
 const chaosRoot =
   process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/local-pty";
-const proxyEnv = process.env.DEV_ANYWHERE_DEV_ENV ?? "local";
+const proxyProfile = "local";
+const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -44,8 +45,13 @@ async function startLocalRuntime(cwd: string, screenName: string): Promise<void>
       "pnpm",
       "--dir",
       repoRoot,
-      "proxy",
+      "--filter",
+      "@dev-anywhere/proxy",
+      "run",
+      "dev",
       "--",
+      "--profile",
+      proxyProfile,
       provider,
     ],
     { cwd: repoRoot, timeout: 10_000, env: process.env },
@@ -62,7 +68,19 @@ async function stopLocalRuntime(screenName: string): Promise<void> {
 async function restartServeOnly(): Promise<void> {
   await execFileAsync(
     "pnpm",
-    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart", "--env", proxyEnv],
+    [
+      "--filter",
+      "@dev-anywhere/proxy",
+      "run",
+      "dev",
+      "--",
+      "--profile",
+      proxyProfile,
+      "serve",
+      "restart",
+      "--relay",
+      proxyRelay,
+    ],
     {
       cwd: repoRoot,
       timeout: 30_000,

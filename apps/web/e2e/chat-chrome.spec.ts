@@ -80,6 +80,43 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
   });
 
+  test("font controls are aligned as a compact stepper", async ({ page }) => {
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+
+    const stepper = page.locator('[data-slot="chat-menu-font-stepper"]');
+    const smaller = page.locator('[data-slot="chat-menu-font-smaller"]');
+    const value = page.locator('[data-slot="chat-menu-font-size"]');
+    const larger = page.locator('[data-slot="chat-menu-font-larger"]');
+    const reset = page.locator('[data-slot="chat-menu-font-reset"]');
+
+    await expect(stepper).toBeVisible();
+
+    const [stepperBox, smallerBox, valueBox, largerBox, resetBox] = await Promise.all([
+      stepper.boundingBox(),
+      smaller.boundingBox(),
+      value.boundingBox(),
+      larger.boundingBox(),
+      reset.boundingBox(),
+    ]);
+
+    expect(stepperBox).not.toBeNull();
+    expect(smallerBox).not.toBeNull();
+    expect(valueBox).not.toBeNull();
+    expect(largerBox).not.toBeNull();
+    expect(resetBox).not.toBeNull();
+
+    if (!stepperBox || !smallerBox || !valueBox || !largerBox || !resetBox) {
+      return;
+    }
+
+    expect(Math.abs(smallerBox.width - largerBox.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(smallerBox.height - valueBox.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(largerBox.height - valueBox.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(valueBox.x - (smallerBox.x + smallerBox.width))).toBeLessThanOrEqual(1);
+    expect(Math.abs(largerBox.x - (valueBox.x + valueBox.width))).toBeLessThanOrEqual(1);
+    expect(Math.abs(stepperBox.x - (resetBox.x + 8))).toBeLessThanOrEqual(2);
+  });
+
   test("PTY overflow menu exposes terminal shortcuts", async ({ page }) => {
     await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
 

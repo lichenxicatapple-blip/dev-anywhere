@@ -12,6 +12,7 @@ const smokeCwd =
 const approvalTimeoutMs = Number(
   process.env.DEV_ANYWHERE_REAL_PROVIDER_APPROVAL_TIMEOUT_MS ?? 60_000,
 );
+const relayPort = "3100";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -173,13 +174,10 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
 }
 
 async function restartRelayOnly(): Promise<void> {
-  await execFileAsync("bash", ["scripts/dev-relay-restart.sh"], {
+  await execFileAsync("bash", ["scripts/dev-relay-restart.sh", "--relay-port", relayPort], {
     cwd: repoRoot,
     timeout: 30_000,
-    env: {
-      ...process.env,
-      DEV_ANYWHERE_LOG_RUN_ID: `${new Date().toISOString().replace(/[-:.TZ]/g, "")}-approval-chaos`,
-    },
+    env: process.env,
   });
 }
 

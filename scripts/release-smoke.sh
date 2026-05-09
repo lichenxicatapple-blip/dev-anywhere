@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Release smoke gate. Real-chain checks run under local proxy env and restore the previous env.
+# Release smoke gate. Real-chain checks own the local profile explicitly.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,13 +7,10 @@ cd "$ROOT"
 
 pnpm desktop:smoke
 
-scripts/with-proxy-env.sh local -- bash -lc '
-  set -euo pipefail
-  pnpm dev:restart
-  pnpm mobile:smoke
-  bash scripts/web-e2e.sh e2e/pty-smoke.spec.ts e2e/clipboard-image.spec.ts --project=desktop
-  DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 \
-    WEB_BASE_URL=http://localhost:5173 \
-    pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-clipboard-image.spec.ts --project=desktop
-  pnpm dev:chaos
-'
+pnpm dev:restart -- --profile local --relay local --relay-port 3100 --web-port 5173
+pnpm mobile:smoke -- --profile local --relay local --relay-port 3100 --base-url http://localhost:5173
+bash scripts/web-e2e.sh --base-url http://localhost:5173 -- e2e/pty-smoke.spec.ts e2e/clipboard-image.spec.ts --project=desktop
+DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 \
+  WEB_BASE_URL=http://localhost:5173 \
+  pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-clipboard-image.spec.ts --project=desktop
+pnpm dev:chaos -- --profile local --relay local --relay-port 3100 --web-port 5173 --base-url http://localhost:5173

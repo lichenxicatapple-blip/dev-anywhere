@@ -14,6 +14,7 @@ import {
   STORAGE_KEYS,
   writeStorageValue,
 } from "@/lib/storage-keys";
+import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
 
 type AppPhase =
   | "connecting"
@@ -40,6 +41,7 @@ interface AppStoreState {
   proxyListLoaded: boolean;
   clientId: string;
   relayUrl: string;
+  relayClientAuthIssue: RelayClientAuthIssue | null;
   ptyFontSize: number;
   chatContentFontSize: number;
   sidebarCollapsed: boolean;
@@ -50,6 +52,7 @@ interface AppStoreState {
   setProxy: (proxyId: string | null, proxyName: string | null) => void;
   setProxyOnline: (online: boolean) => void;
   setRelayUrl: (url: string) => void;
+  setRelayClientAuthIssue: (issue: RelayClientAuthIssue | null) => void;
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
   resetProxyListLoaded: () => void;
@@ -121,6 +124,7 @@ export const useAppStore = create<AppStoreState>()(
       proxyListLoaded: false,
       clientId: loadClientId(),
       relayUrl: "",
+      relayClientAuthIssue: null,
       ptyFontSize: loadPtyFontSize(),
       chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
@@ -132,6 +136,7 @@ export const useAppStore = create<AppStoreState>()(
         set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
+      setRelayClientAuthIssue: (issue) => set({ relayClientAuthIssue: issue }),
       setPtyFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
         writeStorageValue("local", STORAGE_KEYS.ptyFontSize, String(next));

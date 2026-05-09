@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT_DIR="${ROOT}/artifacts/web-e2e"
-WEB_BASE_URL="${WEB_BASE_URL:-http://127.0.0.1:5173}"
+BASE_URL="http://127.0.0.1:5173"
 
 source "$ROOT/scripts/lib/smoke-common.sh"
 
@@ -19,13 +19,33 @@ if [[ "$NODE_MAJOR" -ge 25 ]]; then
   exit 2
 fi
 
-if [[ "${1:-}" == "--" ]]; then
-  shift
-fi
+PLAYWRIGHT_ARGS=()
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --base-url)
+      BASE_URL="${2:-}"
+      [[ -n "$BASE_URL" ]] || { echo "ERROR: missing value for --base-url" >&2; exit 2; }
+      shift 2
+      ;;
+    --base-url=*)
+      BASE_URL="${1#--base-url=}"
+      shift
+      ;;
+    --)
+      shift
+      PLAYWRIGHT_ARGS+=("$@")
+      break
+      ;;
+    *)
+      PLAYWRIGHT_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
 
-if smoke_is_local_url "$WEB_BASE_URL"; then
-  smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$WEB_BASE_URL"
+if smoke_is_local_url "$BASE_URL"; then
+  smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL"
 fi
 
 cd "$ROOT/apps/web"
-WEB_BASE_URL="$WEB_BASE_URL" exec ./node_modules/.bin/playwright test "$@"
+WEB_BASE_URL="$BASE_URL" exec ./node_modules/.bin/playwright test "${PLAYWRIGHT_ARGS[@]}"

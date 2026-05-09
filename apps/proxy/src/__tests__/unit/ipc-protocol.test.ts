@@ -99,6 +99,27 @@ describe("IPC Protocol", () => {
         }).success,
       ).toBe(true);
     });
+
+    it("accepts service status responses with relay naming", async () => {
+      const { IpcMessageSchema } = await importIpc();
+      const result = IpcMessageSchema.safeParse({
+        type: "service_status_response",
+        config: {
+          profile: "local",
+          relayName: "local",
+          relayNameSource: "profile",
+          relayUrl: "ws://localhost:3100",
+          relayUrlSource: "file",
+          relayTokenSource: "none",
+          hookPort: 17978,
+          hookPortSource: "default",
+        },
+        relay: null,
+        sessions: [],
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

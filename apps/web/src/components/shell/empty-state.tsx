@@ -1,10 +1,16 @@
 // 统一空状态容器, 桌面主 panel 的"入场类"空态走 BrandHero, 这里只保留边缘/下钻场景:
 //   no-proxy     — 移动端 ProxySwitcher layout=page 列表空
+//   client-token-missing / client-token-invalid — relay client token auth failure
 //   no-session   — ChatPage 未拿到 :id 的 fallback (异常导航)
 //   no-messages  — 会话内消息为空
 import type { ReactNode } from "react";
 
-type Variant = "no-proxy" | "no-session" | "no-messages";
+type Variant =
+  | "no-proxy"
+  | "client-token-missing"
+  | "client-token-invalid"
+  | "no-session"
+  | "no-messages";
 
 interface EmptyStateProps {
   variant: Variant;
@@ -15,6 +21,14 @@ const COPY: Record<Variant, { heading: string; body: string }> = {
   "no-proxy": {
     heading: "还没有连接开发机",
     body: "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机。",
+  },
+  "client-token-missing": {
+    heading: "需要 client token",
+    body: "这个 Relay 已启用客户端访问控制。请使用部署输出里的 ?relayToken=... 链接打开一次。",
+  },
+  "client-token-invalid": {
+    heading: "client token 无效",
+    body: "当前浏览器保存的 client token 无效或已过期。请使用新的 ?relayToken=... 链接重新打开。",
   },
   "no-session": {
     heading: "没有选中的会话",

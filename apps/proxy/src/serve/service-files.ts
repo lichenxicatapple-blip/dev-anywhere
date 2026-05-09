@@ -3,7 +3,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { connect, type Socket } from "node:net";
 import { serviceLogger } from "../common/logger.js";
-import { PID_PATH, SOCK_PATH } from "../common/paths.js";
+import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
 
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -50,8 +50,15 @@ export async function cleanupStaleResources(): Promise<void> {
   }
 }
 
+export function formatProxyNameForProfile(baseName: string, profileName = PROFILE_NAME): string {
+  return profileName === DEFAULT_PROXY_PROFILE ? baseName : `${baseName} (${profileName})`;
+}
+
 export function getProxyName(): string {
-  return process.env.DEV_ANYWHERE_PROXY_NAME || getComputerName() || hostname();
+  const explicitName = process.env.DEV_ANYWHERE_PROXY_NAME?.trim();
+  if (explicitName) return explicitName;
+
+  return formatProxyNameForProfile(getComputerName() || hostname());
 }
 
 function getComputerName(): string | null {

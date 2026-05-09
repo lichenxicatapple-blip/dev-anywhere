@@ -6,9 +6,99 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
-WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
-LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
+RELAY_PORT="3100"
+WEB_PORT="5173"
+DEV_PROFILE="local"
+DEV_SERVER_LOG_DIR="$HOME/.dev-anywhere/logs"
+PROXY_LOG_DIR=""
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  scripts/dev-health.sh [--profile <name>] [--relay-port <port>] [--web-port <port>]
+
+Defaults:
+  --profile local
+  --relay-port 3100
+  --web-port 5173
+EOF
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --)
+      shift
+      ;;
+    --profile)
+      DEV_PROFILE="${2:-}"
+      [[ -n "$DEV_PROFILE" ]] || { echo "ERROR: missing value for --profile" >&2; exit 2; }
+      shift 2
+      ;;
+    --profile=*)
+      DEV_PROFILE="${1#--profile=}"
+      shift
+      ;;
+    --relay-port)
+      RELAY_PORT="${2:-}"
+      [[ -n "$RELAY_PORT" ]] || { echo "ERROR: missing value for --relay-port" >&2; exit 2; }
+      shift 2
+      ;;
+    --relay-port=*)
+      RELAY_PORT="${1#--relay-port=}"
+      shift
+      ;;
+    --web-port)
+      WEB_PORT="${2:-}"
+      [[ -n "$WEB_PORT" ]] || { echo "ERROR: missing value for --web-port" >&2; exit 2; }
+      shift 2
+      ;;
+    --web-port=*)
+      WEB_PORT="${1#--web-port=}"
+      shift
+      ;;
+    --log-dir)
+      DEV_SERVER_LOG_DIR="${2:-}"
+      [[ -n "$DEV_SERVER_LOG_DIR" ]] || { echo "ERROR: missing value for --log-dir" >&2; exit 2; }
+      shift 2
+      ;;
+    --log-dir=*)
+      DEV_SERVER_LOG_DIR="${1#--log-dir=}"
+      shift
+      ;;
+    --proxy-log-dir)
+      PROXY_LOG_DIR="${2:-}"
+      [[ -n "$PROXY_LOG_DIR" ]] || { echo "ERROR: missing value for --proxy-log-dir" >&2; exit 2; }
+      shift 2
+      ;;
+    --proxy-log-dir=*)
+      PROXY_LOG_DIR="${1#--proxy-log-dir=}"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+for port in "$RELAY_PORT" "$WEB_PORT"; do
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: ports must be numeric" >&2
+    exit 2
+  fi
+done
+
+if [ "$DEV_PROFILE" = "default" ]; then
+  DEFAULT_PROXY_LOG_DIR="$HOME/.dev-anywhere/logs"
+else
+  DEFAULT_PROXY_LOG_DIR="$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs"
+fi
+PROXY_LOG_DIR="${PROXY_LOG_DIR:-$DEFAULT_PROXY_LOG_DIR}"
 
 EXIT_CODE=0
 RELAY_PIDS=""
@@ -81,7 +171,10 @@ check_http() {
 
 check_proxy_status() {
   local output
-  if ! output="$(INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve status 2>&1)"; then
+  if ! output="$(
+    INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
+      --profile "$DEV_PROFILE" serve status 2>&1
+  )"; then
     fail "proxy serve status command failed"
     printf '%s\n' "$output" | indent
     return
@@ -169,10 +262,10 @@ check_proxy_status
 
 section "Logs"
 detect_terminal_pids
-scan_log "relay dev" "$LOG_DIR/relay-dev.log" "$RELAY_PIDS"
-scan_log "web dev" "$LOG_DIR/web-dev.log"
-scan_log "proxy service" "$LOG_DIR/service.log" "$SERVICE_PID"
-scan_log "proxy terminal" "$LOG_DIR/terminal.log" "$TERMINAL_PIDS"
+scan_log "relay dev" "$DEV_SERVER_LOG_DIR/relay-dev.log" "$RELAY_PIDS"
+scan_log "web dev" "$DEV_SERVER_LOG_DIR/web-dev.log"
+scan_log "proxy service" "$PROXY_LOG_DIR/service.log" "$SERVICE_PID"
+scan_log "proxy terminal" "$PROXY_LOG_DIR/terminal.log" "$TERMINAL_PIDS"
 
 section "Manual Smoke"
 echo "Open: http://localhost:$WEB_PORT"
@@ -181,7 +274,7 @@ echo "  1. 新建会话 -> 会话模式选择「终端模式」-> Agent CLI 选�
 echo "  2. 输入一条短消息，确认逐键输入、Shift+Enter、Ctrl+C 菜单、终止会话"
 echo ""
 echo "Or attach from local terminal:"
-echo "  pnpm proxy -- claude"
-echo "  pnpm proxy -- codex"
+echo "  pnpm --filter @dev-anywhere/proxy run dev -- --profile $DEV_PROFILE claude"
+echo "  pnpm --filter @dev-anywhere/proxy run dev -- --profile $DEV_PROFILE codex"
 
 exit "$EXIT_CODE"

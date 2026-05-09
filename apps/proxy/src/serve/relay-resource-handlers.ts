@@ -13,7 +13,6 @@ interface RelayResourceHandlersDeps {
   relaySend: RelaySend;
   controlHandlers: ControlMessageHandlers;
   sessionManager: SessionManager;
-  envName?: string;
   getProviderEnv: () => NodeJS.ProcessEnv;
   getAgentCliSuggestions: () => Partial<Record<ProviderId, string[]>>;
   setAgentCliPath: (provider: ProviderId, path: string) => void;
@@ -68,7 +67,7 @@ export class RelayResourceHandlers {
 
     try {
       const path = validateExecutablePath(rawPath ?? "");
-      saveAgentCliPath(provider, path, { envName: this.deps.envName });
+      saveAgentCliPath(provider, path);
       this.deps.setAgentCliPath(provider, path);
       const agentCli = detectAgentCliStatus(this.deps.getProviderEnv(), {
         suggestions: this.deps.getAgentCliSuggestions(),

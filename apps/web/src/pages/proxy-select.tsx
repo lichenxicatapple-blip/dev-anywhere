@@ -10,6 +10,7 @@ import { getTopLevelSubtitle } from "@/lib/top-level-copy";
 export function ProxySelectPage() {
   const proxies = useAppStore((s) => s.proxies);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+  const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const sessionCount = useSessionStore((s) => s.sessions.length);
 
   const desktopSubtitle = getTopLevelSubtitle({
@@ -18,6 +19,7 @@ export function ProxySelectPage() {
     proxiesLength: proxies.length,
     hasProxy,
     sessionCount,
+    relayClientAuthIssue,
   });
 
   return (

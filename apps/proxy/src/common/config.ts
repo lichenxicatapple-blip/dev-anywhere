@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
-import { CONFIG_PATH } from "./paths.js";
+import { CONFIG_PATH, PROFILE_NAME, defaultHookPortForProfile } from "./paths.js";
 import { serviceLogger } from "./logger.js";
 import type { ProviderId } from "../providers/types.js";
 
 export interface ProxyConfig {
-  envName?: string;
+  profileName: string;
+  relayName: string;
   relayUrl?: string;
   // /proxy 端点的预共享 token, 和 relay 侧 RELAY_PROXY_TOKEN 对应. 公网 relay 必须设置
   relayToken?: string;
@@ -14,28 +15,36 @@ export interface ProxyConfig {
   codexBin?: string;
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
-    envName: "cli" | "file" | "single" | "default" | "none";
+    relayName: "cli" | "profile";
     relayUrl: "env" | "file" | "none";
     relayToken: "env" | "file" | "none";
-    hookPort: "env" | "file" | "default";
+    hookPort: "env" | "default";
     claudeBin: "env" | "file" | "none";
     codexBin: "env" | "file" | "none";
   };
 }
 
-interface ProxyEnvConfig {
-  relayUrl?: string;
-  relayToken?: string;
-  hookPort?: number;
+interface ProxyProfileConfig {
+  relay?: string;
+}
+
+interface RelayTargetConfig {
+  url?: string;
+  proxyToken?: string;
+}
+
+interface ProxyConfigFile {
+  defaultProfile?: string;
+  profiles: Record<string, ProxyProfileConfig | undefined>;
+  relays: Record<string, RelayTargetConfig | undefined>;
+  agentCli?: AgentCliConfig;
+}
+
+interface AgentCliConfig {
   claudeBin?: string;
   codexBin?: string;
   claudeBinHistory?: string[];
   codexBinHistory?: string[];
-}
-
-interface ProxyConfigFile extends ProxyEnvConfig {
-  defaultEnv?: string;
-  envs?: Record<string, ProxyEnvConfig | undefined>;
 }
 
 function parsePort(value: string | undefined, source: string): number | undefined {
@@ -47,42 +56,22 @@ function parsePort(value: string | undefined, source: string): number | undefine
   return port;
 }
 
-function resolveFileConfig(
-  fromFile: ProxyConfigFile,
-  requestedEnv?: string,
-): {
-  envName?: string;
-  envNameSource: ProxyConfig["sources"]["envName"];
-  config: ProxyEnvConfig;
-} {
-  if (!fromFile.envs) {
-    return {
-      envName: undefined,
-      envNameSource:
-        fromFile.relayUrl || fromFile.relayToken || fromFile.hookPort ? "single" : "none",
-      config: fromFile,
-    };
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-  const envName = requestedEnv ?? fromFile.defaultEnv ?? "local";
-  const config = fromFile.envs[envName];
-  if (!config) {
-    const available = Object.keys(fromFile.envs).sort();
-    throw new Error(
-      `Unknown config env "${envName}". Available envs: ${available.length > 0 ? available.join(", ") : "(none)"}`,
-    );
+function validateConfigShape(value: unknown): ProxyConfigFile {
+  if (!isRecord(value) || !isRecord(value.profiles) || !isRecord(value.relays)) {
+    throw new Error(`Invalid config shape in ${CONFIG_PATH}: expected "profiles" and "relays".`);
   }
-
-  return {
-    envName,
-    envNameSource: requestedEnv ? "cli" : fromFile.defaultEnv ? "file" : "default",
-    config,
-  };
+  return value as unknown as ProxyConfigFile;
 }
 
 function readConfigFile(): ProxyConfigFile {
-  if (!existsSync(CONFIG_PATH)) return {};
-  return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as ProxyConfigFile;
+  if (!existsSync(CONFIG_PATH)) {
+    throw new Error(`Dev Anywhere config not found at ${CONFIG_PATH}. Run "dev-anywhere init".`);
+  }
+  return validateConfigShape(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")));
 }
 
 function agentCliField(provider: ProviderId): "claudeBin" | "codexBin" {
@@ -112,82 +101,89 @@ function uniqueAbsolutePaths(paths: Array<string | undefined>): string[] {
   return result;
 }
 
-function updateAgentCliPathInEnvConfig(
-  config: ProxyEnvConfig,
-  provider: ProviderId,
-  path: string,
-): ProxyEnvConfig {
-  const field = agentCliField(provider);
-  const historyField = agentCliHistoryField(provider);
-  const history = uniqueAbsolutePaths([path, ...(config[historyField] ?? [])]).slice(0, 8);
+function resolveRelayConfig(
+  fromFile: ProxyConfigFile,
+  requestedRelayName?: string,
+): {
+  relayName: string;
+  relayNameSource: ProxyConfig["sources"]["relayName"];
+  relay: RelayTargetConfig;
+} {
+  const profile = fromFile.profiles[PROFILE_NAME];
+  if (!profile) {
+    const available = Object.keys(fromFile.profiles).sort();
+    throw new Error(
+      `Unknown profile "${PROFILE_NAME}". Available profiles: ${available.length > 0 ? available.join(", ") : "(none)"}`,
+    );
+  }
+
+  const relayName = requestedRelayName?.trim() || profile.relay?.trim();
+  if (!relayName) {
+    throw new Error(`Profile "${PROFILE_NAME}" must specify a relay.`);
+  }
+
+  const relay = fromFile.relays[relayName];
+  if (!relay) {
+    const available = Object.keys(fromFile.relays).sort();
+    throw new Error(
+      `Unknown relay "${relayName}". Available relays: ${available.length > 0 ? available.join(", ") : "(none)"}`,
+    );
+  }
+
   return {
-    ...config,
-    [field]: path,
-    [historyField]: history,
+    relayName,
+    relayNameSource: requestedRelayName?.trim() ? "cli" : "profile",
+    relay,
   };
 }
 
-export function loadConfig(options?: { envName?: string }): ProxyConfig {
-  let fromFile: ProxyConfigFile = {};
-  if (existsSync(CONFIG_PATH)) {
-    try {
-      fromFile = readConfigFile();
-    } catch (err) {
-      serviceLogger.warn(
-        { path: CONFIG_PATH, err: err instanceof Error ? err.message : String(err) },
-        "Failed to parse config file, falling back to env-only",
-      );
-    }
-  } else {
-    serviceLogger.debug({ path: CONFIG_PATH }, "Config file not found, using env-only");
-  }
-
-  const resolved = resolveFileConfig(fromFile, options?.envName);
-  const hookPortFromFile = resolved.config.hookPort ?? fromFile.hookPort;
-  const claudeBinFromFile = resolved.config.claudeBin ?? fromFile.claudeBin;
-  const codexBinFromFile = resolved.config.codexBin ?? fromFile.codexBin;
-  const claudeBinHistory = [
-    ...(resolved.config.claudeBinHistory ?? []),
-    ...(fromFile.claudeBinHistory ?? []),
-  ];
-  const codexBinHistory = [
-    ...(resolved.config.codexBinHistory ?? []),
-    ...(fromFile.codexBinHistory ?? []),
-  ];
-  const claudeBin = process.env.CLAUDE_BIN ?? claudeBinFromFile;
-  const codexBin = process.env.CODEX_BIN ?? codexBinFromFile;
+export function loadConfig(options?: { relayName?: string }): ProxyConfig {
+  const fromFile = readConfigFile();
+  const agentCli = fromFile.agentCli ?? {};
+  const resolved = resolveRelayConfig(fromFile, options?.relayName);
+  const claudeBin = process.env.CLAUDE_BIN ?? agentCli.claudeBin;
+  const codexBin = process.env.CODEX_BIN ?? agentCli.codexBin;
   const config: ProxyConfig = {
-    envName: resolved.envName,
-    relayUrl: process.env.RELAY_URL ?? resolved.config.relayUrl,
-    relayToken: process.env.RELAY_PROXY_TOKEN ?? resolved.config.relayToken,
+    profileName: PROFILE_NAME,
+    relayName: resolved.relayName,
+    relayUrl: process.env.RELAY_URL ?? resolved.relay.url,
+    relayToken: process.env.RELAY_PROXY_TOKEN ?? resolved.relay.proxyToken,
     hookPort:
       parsePort(process.env.DEV_ANYWHERE_HOOK_PORT, "DEV_ANYWHERE_HOOK_PORT") ??
-      hookPortFromFile ??
-      17654,
+      defaultHookPortForProfile(PROFILE_NAME),
     claudeBin,
     codexBin,
     agentCliSuggestions: {
-      claude: uniqueAbsolutePaths([process.env.CLAUDE_BIN, claudeBinFromFile, ...claudeBinHistory]),
-      codex: uniqueAbsolutePaths([process.env.CODEX_BIN, codexBinFromFile, ...codexBinHistory]),
+      claude: uniqueAbsolutePaths([
+        process.env.CLAUDE_BIN,
+        agentCli.claudeBin,
+        ...(agentCli.claudeBinHistory ?? []),
+      ]),
+      codex: uniqueAbsolutePaths([
+        process.env.CODEX_BIN,
+        agentCli.codexBin,
+        ...(agentCli.codexBinHistory ?? []),
+      ]),
     },
     sources: {
-      envName: resolved.envNameSource,
-      relayUrl: process.env.RELAY_URL ? "env" : resolved.config.relayUrl ? "file" : "none",
+      relayName: resolved.relayNameSource,
+      relayUrl: process.env.RELAY_URL ? "env" : resolved.relay.url ? "file" : "none",
       relayToken: process.env.RELAY_PROXY_TOKEN
         ? "env"
-        : resolved.config.relayToken
+        : resolved.relay.proxyToken
           ? "file"
           : "none",
-      hookPort: process.env.DEV_ANYWHERE_HOOK_PORT ? "env" : hookPortFromFile ? "file" : "default",
-      claudeBin: process.env.CLAUDE_BIN ? "env" : claudeBinFromFile ? "file" : "none",
-      codexBin: process.env.CODEX_BIN ? "env" : codexBinFromFile ? "file" : "none",
+      hookPort: process.env.DEV_ANYWHERE_HOOK_PORT ? "env" : "default",
+      claudeBin: process.env.CLAUDE_BIN ? "env" : agentCli.claudeBin ? "file" : "none",
+      codexBin: process.env.CODEX_BIN ? "env" : agentCli.codexBin ? "file" : "none",
     },
   };
 
   serviceLogger.info(
     {
-      envName: config.envName ?? "(single)",
-      envNameSource: config.sources.envName,
+      profile: config.profileName,
+      relayName: config.relayName,
+      relayNameSource: config.sources.relayName,
       relayUrl: config.relayUrl ?? "(unset)",
       relayUrlSource: config.sources.relayUrl,
       relayTokenSource: config.sources.relayToken,
@@ -213,26 +209,25 @@ export function buildProviderEnv(
   };
 }
 
-export function saveAgentCliPath(
+function updateAgentCliConfig(
+  config: AgentCliConfig,
   provider: ProviderId,
   path: string,
-  options?: { envName?: string },
-): void {
+): AgentCliConfig {
+  const field = agentCliField(provider);
+  const historyField = agentCliHistoryField(provider);
+  const history = uniqueAbsolutePaths([path, ...(config[historyField] ?? [])]).slice(0, 8);
+  return {
+    ...config,
+    [field]: path,
+    [historyField]: history,
+  };
+}
+
+export function saveAgentCliPath(provider: ProviderId, path: string): void {
   const normalized = validateAgentCliPath(path);
   const fromFile = readConfigFile();
-
-  const resolved = resolveFileConfig(fromFile, options?.envName);
-  if (fromFile.envs) {
-    const envName = resolved.envName ?? options?.envName ?? fromFile.defaultEnv ?? "local";
-    fromFile.envs[envName] = updateAgentCliPathInEnvConfig(
-      fromFile.envs[envName] ?? {},
-      provider,
-      normalized,
-    );
-  } else {
-    Object.assign(fromFile, updateAgentCliPathInEnvConfig(fromFile, provider, normalized));
-  }
-
+  fromFile.agentCli = updateAgentCliConfig(fromFile.agentCli ?? {}, provider, normalized);
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
   writeFileSync(CONFIG_PATH, `${JSON.stringify(fromFile, null, 2)}\n`, "utf-8");
 }
