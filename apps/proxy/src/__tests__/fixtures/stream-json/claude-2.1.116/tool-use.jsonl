@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"fixture-session","model":"claude-fixture"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fixture_read","name":"Read","input":{"file_path":"package.json"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fixture_read","content":"{\"name\":\"dev-anywhere\"}","is_error":false}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"The package name is dev-anywhere."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"The package name is dev-anywhere.","session_id":"fixture-session"}

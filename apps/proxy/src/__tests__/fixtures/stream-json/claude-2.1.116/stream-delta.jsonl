@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"fixture-session","model":"claude-fixture"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"Synthetic delta for parser coverage."}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"redacted-fixture-signature"}}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Hello from a synthetic stream fixture."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"Hello from a synthetic stream fixture.","session_id":"fixture-session"}

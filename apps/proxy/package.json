@@ -1,0 +1,69 @@
+{
+  "name": "@dev-anywhere/proxy",
+  "version": "0.0.6",
+  "description": "Transparent local proxy for AI coding CLIs that bridges local sessions to a web/PWA client via a relay server.",
+  "keywords": [
+    "claude-code",
+    "cli",
+    "proxy",
+    "remote",
+    "mobile",
+    "pty",
+    "websocket"
+  ],
+  "license": "MIT",
+  "author": "catli <catli@futunn.com>",
+  "homepage": "https://github.com/lichenxicatapple-blip/dev-anywhere",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lichenxicatapple-blip/dev-anywhere.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lichenxicatapple-blip/dev-anywhere/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "dev-anywhere": "./dist/index.js"
+  },
+  "imports": {
+    "#src/*": "./src/*"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "serve": "tsx src/serve.ts",
+    "sample:stream-json": "tsx scripts/sample-stream-json.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/addon-unicode-graphemes": "^0.4.0",
+    "@xterm/headless": "^6.0.0",
+    "commander": "^14.0.3",
+    "nanoid": "^5.1.7",
+    "node-pty": "^1.1.0",
+    "pino": "^10.3.1",
+    "ws": "^8.20.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@dev-anywhere/shared": "workspace:*",
+    "@dev-anywhere/relay": "workspace:*",
+    "@types/node": "^25.5.2",
+    "@types/ws": "^8.18.1",
+    "vitest": "^4.1.2"
+  }
+}

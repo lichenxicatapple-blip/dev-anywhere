@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"fixture-session","model":"claude-fixture"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"2"}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"2","session_id":"fixture-session"}

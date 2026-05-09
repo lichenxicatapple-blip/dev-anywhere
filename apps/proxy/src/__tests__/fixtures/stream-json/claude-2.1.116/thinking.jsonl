@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"fixture-session","model":"claude-fixture"}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"redacted-fixture-signature"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"The fixture answer is ready."}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"The fixture answer is ready.","session_id":"fixture-session"}

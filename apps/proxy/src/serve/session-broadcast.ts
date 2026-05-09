@@ -1,0 +1,80 @@
+import { buildMessage, SessionState } from "@dev-anywhere/shared";
+import { serviceLogger } from "../common/logger.js";
+import type { RelayConnection } from "./relay-connection.js";
+import type { SessionInfo, SessionManager } from "./session-manager.js";
+
+function toSessionListPayload(s: SessionInfo) {
+  return {
+    sessionId: s.id,
+    mode: s.mode,
+    provider: s.provider,
+    ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
+    state: s.state,
+    lastActive: s.updatedAt,
+    ...(s.name !== undefined ? { name: s.name } : {}),
+  };
+}
+
+function pushSessionStatus(
+  relay: RelayConnection,
+  sessionManager: SessionManager,
+  sessionId: string,
+): void {
+  const session = sessionManager.getSession(sessionId);
+  if (!session) return;
+  try {
+    const envelope = buildMessage(
+      "session_status",
+      session.id,
+      Date.now(),
+      { sessionId: session.id, state: session.state, lastActive: session.updatedAt },
+      "proxy",
+    );
+    relay.sendEnvelope(envelope);
+  } catch (err) {
+    serviceLogger.debug({ sessionId, error: String(err) }, "Failed to push session_status");
+  }
+}
+
+export function broadcastSessionList(relay: RelayConnection, sessionManager: SessionManager): void {
+  relay.sendRaw(
+    JSON.stringify({
+      type: "session_list",
+      sessionId: "",
+      seq: 0,
+      timestamp: Date.now(),
+      source: "proxy",
+      version: "1",
+      payload: { sessions: sessionManager.listSessions().map(toSessionListPayload) },
+    }),
+  );
+}
+
+export function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): void {
+  relay.sendRaw(
+    JSON.stringify({
+      type: "session_sync",
+      sessions: [
+        {
+          id: session.id,
+          mode: session.mode,
+          provider: session.provider,
+          ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
+          state: session.state,
+        },
+      ],
+    }),
+  );
+}
+
+export function changeSessionState(
+  sessionManager: SessionManager,
+  relay: RelayConnection,
+  sessionId: string,
+  next: SessionState,
+): boolean {
+  if (!sessionManager.getSession(sessionId)) return false;
+  const changed = sessionManager.updateState(sessionId, next);
+  if (changed) pushSessionStatus(relay, sessionManager, sessionId);
+  return changed;
+}

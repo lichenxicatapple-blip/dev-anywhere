@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"fixture-session","model":"claude-fixture"}
+{"type":"control_request","request_id":"req_fixture_write","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/tmp/dev-anywhere-fixture.txt","content":"fixture"}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"req_fixture_write","response":{"behavior":"allow","updatedInput":{"file_path":"/tmp/dev-anywhere-fixture.txt","content":"fixture"}}}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fixture_write","name":"Write","input":{"file_path":"/tmp/dev-anywhere-fixture.txt","content":"fixture"}}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"fixture written","session_id":"fixture-session"}
