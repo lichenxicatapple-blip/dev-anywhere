@@ -490,6 +490,12 @@ export class RelayClient {
     return this.boundProxyId;
   }
 
+  clearBoundProxy(proxyId?: string): void {
+    if (!proxyId || this.boundProxyId === proxyId) {
+      this.boundProxyId = null;
+    }
+  }
+
   // 注册收到消息的回调，返回取消注册函数
   onMessage(handler: (msg: InboundMessage) => void): () => void {
     this.messageHandlers.add(handler);

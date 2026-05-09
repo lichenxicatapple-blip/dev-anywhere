@@ -136,6 +136,51 @@ test.describe("WebSocket reconnect chaos", () => {
     ).toBeVisible();
   });
 
+  test("reselects and resubscribes PTY after a graceful proxy restart", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+    await expect(
+      page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
+    ).toBeVisible();
+    const beforeRestartMessageCount = (await sentFakeRelayMessages(page)).length;
+
+    await page.evaluate(() => {
+      const socket = window.__devAnywhereE2E?.socket;
+      socket?.emitJson({ type: "proxy_offline", proxyId: "proxy-1" });
+      socket?.emitJson({
+        type: "proxy_list_response",
+        proxies: [
+          {
+            proxyId: "proxy-1",
+            name: "Local Mac",
+            online: true,
+            sessions: ["claude-pty", "codex-pty", "json-sess"],
+          },
+        ],
+      });
+    });
+
+    await expect
+      .poll(async () => {
+        const sent = (await sentFakeRelayMessages(page)).slice(beforeRestartMessageCount);
+        return sent.some((msg) => msg.type === "proxy_select");
+      })
+      .toBeTruthy();
+    await expect
+      .poll(async () => {
+        const sent = (await sentFakeRelayMessages(page)).slice(beforeRestartMessageCount);
+        return sent.some(
+          (msg) => msg.type === "session_subscribe" && msg.sessionId === "claude-pty",
+        );
+      })
+      .toBeTruthy();
+    await expect(page.locator('[data-slot="pty-subscribe-delayed"]')).toHaveCount(0);
+    await expect(
+      page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
+    ).toBeVisible();
+  });
+
   test("does not force-follow PTY output after reconnect when user is reviewing history", async ({
     page,
   }) => {

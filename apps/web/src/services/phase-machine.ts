@@ -140,6 +140,7 @@ export async function handleRelayMessage(
   if (msg.type === "proxy_offline") {
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
+      relay.clearBoundProxy(typeof msg.proxyId === "string" ? msg.proxyId : undefined);
       useAppStore.getState().setProxyOnline(false);
       toast.warning("当前开发机已离线");
     }
@@ -228,6 +229,8 @@ export async function handleRelayMessage(
     if (s.selectedProxyId) {
       const selected = proxies.find((p) => p.proxyId === s.selectedProxyId);
       useAppStore.getState().setProxyOnline(selected?.online ?? false);
+      const needsBindingRestore =
+        selected?.online === true && relay.getBoundProxyId() !== selected.proxyId;
 
       if (s.phase === "reconnecting") {
         if (selected?.online) {
@@ -254,6 +257,11 @@ export async function handleRelayMessage(
             router.navigate("/sessions");
           }
         }
+        return;
+      }
+
+      if (needsBindingRestore) {
+        await restoreSelectedProxyBinding(relay, selected);
       }
     }
   }
