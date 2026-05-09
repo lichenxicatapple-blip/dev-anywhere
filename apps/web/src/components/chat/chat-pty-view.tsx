@@ -410,8 +410,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         hasNewMessages={follow.hasNewFramesWhileAway}
         className={
           showMobilePtyControls
-            ? "right-14 bottom-[calc(env(safe-area-inset-bottom)+4rem)]"
-            : "right-14"
+            ? "right-12 bottom-[calc(env(safe-area-inset-bottom)+4rem)]"
+            : "right-12"
         }
         onClick={() => {
           scrollToBottomRef.current();
