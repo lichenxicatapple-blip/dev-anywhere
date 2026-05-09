@@ -52,7 +52,7 @@ const availableAgentCli = {
   claude: {
     available: true,
     command: "/usr/local/bin/claude",
-    suggestions: ["/usr/local/bin/claude", "/Users/admin/.local/bin/claude"],
+    suggestions: ["/usr/local/bin/claude", "/home/dev/.local/bin/claude"],
   },
   codex: { available: true, command: "/usr/local/bin/codex" },
 };
@@ -79,9 +79,9 @@ describe("CreateSessionDialog", () => {
     createSession.mockReset();
     createDirectory.mockReset();
     requestDirectoryList.mockReset();
-    requestDirectoryList.mockResolvedValue({ path: "/Users/admin", entries: [] });
+    requestDirectoryList.mockResolvedValue({ path: "/home/dev", entries: [] });
     requestProxyInfo.mockReset();
-    requestProxyInfo.mockResolvedValue({ homePath: "/Users/admin", agentCli: availableAgentCli });
+    requestProxyInfo.mockResolvedValue({ homePath: "/home/dev", agentCli: availableAgentCli });
     updateAgentCliPath.mockReset();
     toastError.mockClear();
     toastSuccess.mockClear();
@@ -98,7 +98,7 @@ describe("CreateSessionDialog", () => {
 
     await waitFor(() => {
       expect(requestProxyInfo).toHaveBeenCalled();
-      expect(useFileStore.getState().homePath).toBe("/Users/admin");
+      expect(useFileStore.getState().homePath).toBe("/home/dev");
       expect(useFileStore.getState().agentCli).toEqual(availableAgentCli);
     });
   });
@@ -107,14 +107,14 @@ describe("CreateSessionDialog", () => {
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: availableAgentCli,
     });
 
     const { getByLabelText } = renderDialog();
 
     await waitFor(() => {
-      expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/Users/admin");
+      expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/home/dev");
     });
   });
 
@@ -123,7 +123,7 @@ describe("CreateSessionDialog", () => {
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: availableAgentCli,
     });
 
@@ -144,12 +144,12 @@ describe("CreateSessionDialog", () => {
       type: "session_create_response",
       sessionId: "",
       errorCode: "PATH_NOT_FOUND",
-      error: "工作目录不存在或不可访问: /Users/admin/missing-project",
+      error: "工作目录不存在或不可访问: /home/dev/missing-project",
     });
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: availableAgentCli,
     });
 
@@ -157,9 +157,9 @@ describe("CreateSessionDialog", () => {
 
     const cwdInput = getByLabelText("工作目录") as HTMLInputElement;
     await waitFor(() => {
-      expect(cwdInput.value).toBe("/Users/admin");
+      expect(cwdInput.value).toBe("/home/dev");
     });
-    fireEvent.change(cwdInput, { target: { value: "/Users/admin/missing-project" } });
+    fireEvent.change(cwdInput, { target: { value: "/home/dev/missing-project" } });
     fireEvent.click(getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
@@ -173,12 +173,12 @@ describe("CreateSessionDialog", () => {
   it("creates a directory from the directory picker without creating a session", async () => {
     createDirectory.mockResolvedValue({
       success: true,
-      path: "/Users/admin/new-project",
+      path: "/home/dev/new-project",
     });
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: availableAgentCli,
     });
 
@@ -186,7 +186,7 @@ describe("CreateSessionDialog", () => {
 
     const cwdInput = getByLabelText("工作目录") as HTMLInputElement;
     await waitFor(() => {
-      expect(cwdInput.value).toBe("/Users/admin");
+      expect(cwdInput.value).toBe("/home/dev");
     });
     fireEvent.focusIn(cwdInput);
     let picker: HTMLElement | null = null;
@@ -202,10 +202,10 @@ describe("CreateSessionDialog", () => {
     fireEvent.click(within(picker).getByRole("button", { name: "创建目录" }));
 
     await waitFor(() => {
-      expect(createDirectory).toHaveBeenCalledWith("/Users/admin/new-project");
+      expect(createDirectory).toHaveBeenCalledWith("/home/dev/new-project");
     });
     await waitFor(() => {
-      expect(cwdInput.value).toBe("/Users/admin/new-project/");
+      expect(cwdInput.value).toBe("/home/dev/new-project/");
     });
     expect(createSession).not.toHaveBeenCalled();
     expect(toastSuccess).toHaveBeenCalledWith("目录已创建");
@@ -213,7 +213,7 @@ describe("CreateSessionDialog", () => {
 
   it("disables an unavailable Agent CLI before creating a session", async () => {
     requestProxyInfo.mockResolvedValueOnce({
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
@@ -233,7 +233,7 @@ describe("CreateSessionDialog", () => {
 
   it("lets the user set a missing Agent CLI path from the dialog", async () => {
     requestProxyInfo.mockResolvedValueOnce({
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
@@ -244,8 +244,8 @@ describe("CreateSessionDialog", () => {
       agentCli: {
         claude: {
           available: true,
-          command: "/Users/admin/.local/bin/claude",
-          suggestions: ["/Users/admin/.local/bin/claude"],
+          command: "/home/dev/.local/bin/claude",
+          suggestions: ["/home/dev/.local/bin/claude"],
         },
         codex: { available: true, command: "/usr/local/bin/codex" },
       },
@@ -259,16 +259,16 @@ describe("CreateSessionDialog", () => {
     fireEvent.click(getByRole("button", { name: "Claude Code" }));
     fireEvent.click(getByRole("button", { name: "指定路径" }));
     fireEvent.change(getByLabelText("CLI 路径"), {
-      target: { value: "/Users/admin/.local/bin/claude" },
+      target: { value: "/home/dev/.local/bin/claude" },
     });
     fireEvent.click(getByRole("button", { name: "保存路径" }));
 
     await waitFor(() => {
-      expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/Users/admin/.local/bin/claude");
+      expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/home/dev/.local/bin/claude");
     });
-    expect(useFileStore.getState().agentCli?.claude.command).toBe("/Users/admin/.local/bin/claude");
+    expect(useFileStore.getState().agentCli?.claude.command).toBe("/home/dev/.local/bin/claude");
     expect(useFileStore.getState().agentCli?.claude.suggestions).toContain(
-      "/Users/admin/.local/bin/claude",
+      "/home/dev/.local/bin/claude",
     );
     expect(toastSuccess).toHaveBeenCalledWith("Claude Code 路径已保存");
   });
@@ -277,7 +277,7 @@ describe("CreateSessionDialog", () => {
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: availableAgentCli,
     });
 
@@ -291,6 +291,6 @@ describe("CreateSessionDialog", () => {
     const options = Array.from(document.querySelectorAll("datalist option")).map((option) =>
       option.getAttribute("value"),
     );
-    expect(options).toEqual(["/usr/local/bin/claude", "/Users/admin/.local/bin/claude"]);
+    expect(options).toEqual(["/usr/local/bin/claude", "/home/dev/.local/bin/claude"]);
   });
 });

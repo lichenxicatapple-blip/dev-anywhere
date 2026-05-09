@@ -44,7 +44,7 @@ export function SessionList({ layout }: SessionListProps) {
   const [collapsedActiveProviders, setCollapsedActiveProviders] = useState<Set<SessionProvider>>(
     new Set(),
   );
-  // 每分钟推一次 now，让 SessionRow 里的 "N 分钟前" 跟着走；store 不动也能滚
+  // 每分钟推一次 now，让 SessionRow 里的 "最近活动 N 分钟前" 跟着走；store 不动也能滚
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);

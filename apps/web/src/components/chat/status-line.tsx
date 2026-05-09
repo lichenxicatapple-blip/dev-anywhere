@@ -24,16 +24,18 @@ const ARIA_LABEL: Record<StatusLineState, string> = {
 export function StatusLine({ state }: StatusLineProps) {
   return (
     <div
-      className={`cc-status-line cc-status-line-${state}`}
+      className={`dev-status-line dev-status-line-${state}`}
       data-slot="status-line"
       data-state={state}
       role="status"
       aria-label={ARIA_LABEL[state]}
     >
-      {state === "idle" && <div className="cc-status-line-sweep cc-status-line-sweep-idle" />}
-      {state === "working" && <div className="cc-status-line-sweep cc-status-line-sweep-working" />}
+      {state === "idle" && <div className="dev-status-line-sweep dev-status-line-sweep-idle" />}
+      {state === "working" && (
+        <div className="dev-status-line-sweep dev-status-line-sweep-working" />
+      )}
       {state === "waiting_approval" && (
-        <div className="cc-status-line-sweep cc-status-line-sweep-waiting" />
+        <div className="dev-status-line-sweep dev-status-line-sweep-waiting" />
       )}
     </div>
   );

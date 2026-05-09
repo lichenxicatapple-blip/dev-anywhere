@@ -20,6 +20,7 @@ import {
   broadcastSessionList,
   broadcastSessionSync,
   changeSessionState,
+  touchSessionActivity,
 } from "./serve/session-broadcast.js";
 import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
 import { handleTerminalConnection } from "./serve/terminal-ipc.js";
@@ -168,6 +169,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
   const observerChangeState = (sessionId: string, next: SessionState): boolean =>
     changeSessionState(sessionManager, relayConnection, sessionId, next);
+  const observerTouchActivity = (sessionId: string): boolean =>
+    touchSessionActivity(sessionManager, relayConnection, sessionId);
   const emitAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
     const session = sessionManager.getSession(sessionId);
     if (!session) return;
@@ -200,6 +203,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     permissionBroker,
     relayConnection,
     jsonObserver,
+    touchSessionActivity: observerTouchActivity,
     getProviderEnv,
   });
   const hostedPtyRegistry = new HostedPtyRegistry({
@@ -207,6 +211,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     getProviderEnv,
     changeSessionState: observerChangeState,
+    touchSessionActivity: observerTouchActivity,
     onTurnComplete: (sessionId) => {
       resolveInterruptedApprovals(
         permissionBroker,

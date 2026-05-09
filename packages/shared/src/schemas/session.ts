@@ -13,7 +13,7 @@ const agentStatusPhaseValues = [
 ] as const;
 
 // 会话信息，用于会话列表展示
-// lastActive: 最近一次状态变更/消息时间戳 (ms), 用于列表"N 分钟前"显示, 可选
+// lastActive: 最近一次状态变更或运行时活动时间戳 (ms), 用于列表"最近活动 N 分钟前"显示, 可选
 export const SessionInfoSchema = z.object({
   sessionId: z.string(),
   name: z.string().optional(),
@@ -60,7 +60,7 @@ export const SessionTerminatePayloadSchema = z.object({
 export type SessionTerminatePayload = z.infer<typeof SessionTerminatePayloadSchema>;
 
 // 会话状态变更
-// lastActive: 触发本次状态迁移的时间戳 (ms)，用于列表相对时间显示。
+// lastActive: 触发本次状态迁移或活动刷新的时间戳 (ms)，用于列表相对时间显示。
 export const SessionStatusPayloadSchema = z.object({
   sessionId: z.string(),
   state: z.enum(sessionStateValues),

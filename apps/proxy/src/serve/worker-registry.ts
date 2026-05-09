@@ -25,6 +25,7 @@ interface WorkerRegistryDeps {
   relayConnection: RelayConnection;
   // JSON 观察通道状态机；forwardEvent / forwardApprovalRequest 据此推状态变迁
   jsonObserver: JsonObserver;
+  touchSessionActivity?: (sessionId: string) => boolean;
   getProviderEnv: () => NodeJS.ProcessEnv;
   nextSeq?: (sessionId: string) => number;
 }
@@ -289,6 +290,7 @@ export class WorkerRegistry {
       return;
     }
     const ev = parsed.data;
+    this.deps.touchSessionActivity?.(sessionId);
     const isStreamDeltaSession = this.streamDeltaSessions.has(sessionId);
 
     if (ev.type === "stream_event") {

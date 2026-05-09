@@ -39,7 +39,7 @@ export const MessageBubble = memo(function MessageBubble({
           <MarkdownView text={message.text} />
           {message.isPartial && (
             <span
-              className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] cc-cursor-blink align-middle"
+              className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
               aria-label="streaming"
             />
           )}

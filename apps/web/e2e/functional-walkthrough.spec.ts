@@ -34,12 +34,12 @@ test.describe("functional browser walkthrough", () => {
     await expect(providerHeaders.filter({ hasText: "Codex" })).toBeVisible();
     await providerHeaders.filter({ hasText: "Claude" }).click();
     await expect(
-      page.locator('[data-slot="history-group-header"]:visible').filter({ hasText: "test_go" }),
+      page.locator('[data-slot="history-group-header"]:visible').filter({ hasText: "sample-app" }),
     ).toHaveCount(0);
     await providerHeaders.filter({ hasText: "Claude" }).click();
     await page
       .locator('[data-slot="history-group-header"]:visible')
-      .filter({ hasText: "test_go" })
+      .filter({ hasText: "sample-app" })
       .click();
     await expect(
       page.locator('[data-slot="history-row"][data-session-id="hist-claude-1"]:visible'),
@@ -65,7 +65,7 @@ test.describe("functional browser walkthrough", () => {
       .getByRole("button", { name: /终端模式/ })
       .click();
     await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
-    await page.getByLabel("工作目录").fill("/Users/admin/test_go");
+    await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
     await page
       .getByRole("dialog", { name: "新建会话" })
       .getByRole("button", { name: "创建" })
@@ -161,11 +161,11 @@ test.describe("functional browser walkthrough", () => {
   test("creating a session can create a child directory before launch", async ({ page }) => {
     await selectFakeProxy(page);
     await page.locator('button:has-text("新建会话"):visible').last().click();
-    await page.getByLabel("工作目录").fill("/Users/admin");
+    await page.getByLabel("工作目录").fill("/home/dev");
     await page.locator('[data-slot="file-path-picker"] button:has-text("新建目录")').click();
-    await page.getByPlaceholder("目录名称").fill("new_project_e2e");
+    await page.getByPlaceholder("目录名称").fill("new-project-e2e");
     await page.getByRole("button", { name: "创建目录" }).click();
-    await expect(page.getByLabel("工作目录")).toHaveValue("/Users/admin/new_project_e2e/");
+    await expect(page.getByLabel("工作目录")).toHaveValue("/home/dev/new-project-e2e/");
 
     await page
       .getByRole("dialog", { name: "新建会话" })

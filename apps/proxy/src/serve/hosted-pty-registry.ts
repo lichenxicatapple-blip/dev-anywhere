@@ -42,6 +42,7 @@ interface HostedPtyRegistryDeps {
   relayConnection: RelayConnection;
   getProviderEnv: () => NodeJS.ProcessEnv;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
+  touchSessionActivity: (sessionId: string) => boolean;
   onTurnComplete: (sessionId: string) => void;
   onSessionClosed: (sessionId: string) => void;
 }
@@ -218,6 +219,7 @@ export class HostedPtyRegistry {
     hosted.lastOutputTime = Date.now();
     hosted.outputSeq += 1;
     hosted.terminal.write(data);
+    this.deps.touchSessionActivity(sessionId);
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
     const oscSequences = extractOscSequences(data);

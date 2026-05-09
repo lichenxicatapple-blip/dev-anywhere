@@ -3,6 +3,8 @@ import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 
+const ACTIVITY_STATUS_PUSH_INTERVAL_MS = 15_000;
+
 function toSessionListPayload(s: SessionInfo) {
   return {
     sessionId: s.id,
@@ -77,4 +79,15 @@ export function changeSessionState(
   const changed = sessionManager.updateState(sessionId, next);
   if (changed) pushSessionStatus(relay, sessionManager, sessionId);
   return changed;
+}
+
+export function touchSessionActivity(
+  sessionManager: SessionManager,
+  relay: RelayConnection,
+  sessionId: string,
+  now: number = Date.now(),
+): boolean {
+  const touched = sessionManager.touchSession(sessionId, now, ACTIVITY_STATUS_PUSH_INTERVAL_MS);
+  if (touched) pushSessionStatus(relay, sessionManager, sessionId);
+  return touched;
 }

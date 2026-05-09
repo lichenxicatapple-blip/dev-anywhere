@@ -7,7 +7,7 @@
      terminated        — 灰色静态 (已结束)
 */
 
-.cc-status-line {
+.dev-status-line {
   height: 4px;
   width: 100%;
   position: relative;
@@ -16,68 +16,68 @@
   pointer-events: none;
 }
 
-.cc-status-line-idle {
+.dev-status-line-idle {
   background-color: var(--color-status-success);
 }
 
-.cc-status-line-working {
+.dev-status-line-working {
   background-color: var(--color-status-working);
 }
 
-.cc-status-line-waiting_approval {
+.dev-status-line-waiting_approval {
   background-color: var(--color-status-warning);
-  animation: cc-status-breathe 2s ease-in-out infinite;
+  animation: dev-status-breathe 2s ease-in-out infinite;
 }
 
-.cc-status-line-terminated {
+.dev-status-line-terminated {
   background-color: var(--muted-foreground);
 }
 
-.cc-status-line-disconnected {
+.dev-status-line-disconnected {
   background-color: var(--destructive);
-  animation: cc-status-breathe 1.5s ease-in-out infinite;
+  animation: dev-status-breathe 1.5s ease-in-out infinite;
 }
 
 /* sweep 基类: 绝对定位覆盖色带, 白色渐变带水平位移
    不同 intensity 通过 alpha / duration 差异化 */
-.cc-status-line-sweep {
+.dev-status-line-sweep {
   position: absolute;
   inset: 0;
   background-size: 50% 100%;
   background-repeat: no-repeat;
 }
 
-.cc-status-line-sweep-idle {
+.dev-status-line-sweep-idle {
   background: linear-gradient(
     90deg,
     transparent 0%,
     rgba(255, 255, 255, 0.15) 50%,
     transparent 100%
   );
-  animation: cc-status-sweep 3s linear infinite;
+  animation: dev-status-sweep 3s linear infinite;
 }
 
-.cc-status-line-sweep-working {
+.dev-status-line-sweep-working {
   background: linear-gradient(
     90deg,
     transparent 0%,
     rgba(255, 255, 255, 0.4) 50%,
     transparent 100%
   );
-  animation: cc-status-sweep 1.5s linear infinite;
+  animation: dev-status-sweep 1.5s linear infinite;
 }
 
-.cc-status-line-sweep-waiting {
+.dev-status-line-sweep-waiting {
   background: linear-gradient(
     90deg,
     transparent 0%,
     rgba(255, 255, 255, 0.35) 50%,
     transparent 100%
   );
-  animation: cc-status-sweep 1.2s linear infinite;
+  animation: dev-status-sweep 1.2s linear infinite;
 }
 
-@keyframes cc-status-sweep {
+@keyframes dev-status-sweep {
   0% {
     background-position: -100% 0;
   }
@@ -86,7 +86,7 @@
   }
 }
 
-@keyframes cc-status-breathe {
+@keyframes dev-status-breathe {
   0%,
   100% {
     opacity: 0.4;

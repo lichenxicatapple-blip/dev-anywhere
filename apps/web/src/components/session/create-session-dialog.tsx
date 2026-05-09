@@ -542,8 +542,8 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                     }}
                     placeholder={
                       editingCliProvider === "claude"
-                        ? "/Users/admin/.local/bin/claude"
-                        : "/Users/admin/.local/bin/codex"
+                        ? "/home/dev/.local/bin/claude"
+                        : "/home/dev/.local/bin/codex"
                     }
                     className="min-h-11 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-10 md:min-h-0 md:text-sm"
                   />

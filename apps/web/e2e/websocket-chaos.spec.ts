@@ -191,7 +191,7 @@ test.describe("WebSocket reconnect chaos", () => {
     await selectFakeProxy(page);
     await page.getByRole("button", { name: "新建会话" }).first().click();
     await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
-    await page.getByLabel("工作目录").fill("/Users/admin/test_go");
+    await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
 
     await holdNextConnectionAndDropSocket(page);
     await page

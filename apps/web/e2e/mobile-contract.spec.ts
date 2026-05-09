@@ -84,7 +84,7 @@ test.describe("mobile UX contract", () => {
     page,
   }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("cc_proxyId", "proxy-1");
+      localStorage.setItem("dev_anywhere_proxyId", "proxy-1");
     });
     await page.goto("/#/sessions");
 

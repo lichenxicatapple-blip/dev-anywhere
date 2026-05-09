@@ -32,7 +32,7 @@ export const MarkdownView = memo(function MarkdownView({
     <div
       className={cn(
         "prose prose-invert prose-sm max-w-none",
-        tone === "on-primary" && "cc-markdown-on-primary",
+        tone === "on-primary" && "dev-markdown-on-primary",
       )}
       style={{ fontSize: "inherit" }}
     >

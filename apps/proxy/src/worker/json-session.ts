@@ -13,7 +13,7 @@ import type { ProviderHookContext } from "../providers/index.js";
 export { buildClaudeArgs, filterClaudeEnvVars };
 export type { ClaudePermissionMode };
 
-// stream-json 事件类型定义，基于 cc-connect 验证的结构
+// stream-json event types observed from provider output.
 export type StreamJsonEventType =
   | "system"
   | "assistant"

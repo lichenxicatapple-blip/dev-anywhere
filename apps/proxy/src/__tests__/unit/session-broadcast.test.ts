@@ -4,7 +4,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SessionState } from "@dev-anywhere/shared";
 import { SessionManager } from "#src/serve/session-manager.js";
-import { broadcastSessionList, changeSessionState } from "#src/serve/session-broadcast.js";
+import {
+  broadcastSessionList,
+  changeSessionState,
+  touchSessionActivity,
+} from "#src/serve/session-broadcast.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 
 function makeSessionManager(): SessionManager {
@@ -66,5 +70,28 @@ describe("session broadcast state source", () => {
         }),
       }),
     );
+  });
+
+  it("throttles repeated activity touches while still pushing fresh activity", () => {
+    manager = makeSessionManager();
+    const session = manager.createSession("pty", "/tmp/project", process.pid);
+    const originalUpdatedAt = session.updatedAt;
+    const envelopes: Array<{ type: string; payload: { sessionId: string; lastActive: number } }> =
+      [];
+    const relay = {
+      sendEnvelope: (envelope: (typeof envelopes)[number]) => envelopes.push(envelope),
+    } as unknown as RelayConnection;
+
+    expect(touchSessionActivity(manager, relay, session.id, originalUpdatedAt + 1_000)).toBe(false);
+    expect(touchSessionActivity(manager, relay, session.id, originalUpdatedAt + 16_000)).toBe(true);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]).toMatchObject({
+      type: "session_status",
+      payload: {
+        sessionId: session.id,
+        lastActive: originalUpdatedAt + 16_000,
+      },
+    });
   });
 });

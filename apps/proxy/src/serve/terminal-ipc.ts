@@ -15,6 +15,7 @@ import {
   broadcastSessionList,
   broadcastSessionSync,
   changeSessionState,
+  touchSessionActivity,
 } from "./session-broadcast.js";
 import type { SessionManager } from "./session-manager.js";
 import { terminateSessionByOwnership } from "./session-termination.js";
@@ -332,6 +333,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     },
     (sessionId, data, outputSeq) => {
       if (!sessionManager.getSession(sessionId)) return;
+      touchSessionActivity(sessionManager, relayConnection, sessionId);
       const sessionIdBuf = Buffer.from(sessionId, "utf-8");
       const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
       wsFrame[0] = sessionIdBuf.length;

@@ -37,7 +37,9 @@ export function HistoryRow({ session, now, disabled, loading, onClick }: History
         aria-label={`恢复会话：${session.title}`}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-sm font-normal truncate min-w-0">{session.title}</span>
+          <span className="text-sm font-normal truncate min-w-0" title={session.title}>
+            {session.title}
+          </span>
           <span className="text-xs text-muted-foreground tabular-nums">
             {formatRelativeTime(session.updatedAt, now)}
           </span>

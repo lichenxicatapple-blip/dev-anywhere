@@ -168,7 +168,7 @@ describe("scanSessionHistory", () => {
         message: {
           role: "user",
           content:
-            "<environment_context><cwd>/Users/admin/test_go</cwd><shell>zsh</shell></environment_context>",
+            "<environment_context><cwd>/home/dev/projects/sample-app</cwd><shell>zsh</shell></environment_context>",
         },
       }),
       JSON.stringify({
@@ -184,10 +184,10 @@ describe("scanSessionHistory", () => {
 
   it("reads cwd from JSONL instead of decoding directory name", async () => {
     // 模拟 Claude Code 的编码：下划线和路径分隔符都变成连字符
-    writeSession("-Users-admin-workspace-bmo_intraday_statement-airflow_dags_sbl", "sess1", [
+    writeSession("-home-dev-projects-analytics-demo-jobs", "sess1", [
       JSON.stringify({
         type: "progress",
-        cwd: "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl",
+        cwd: "/home/dev/projects/analytics-demo/jobs",
         sessionId: "sess1",
       }),
       JSON.stringify({ type: "user", message: { role: "user", content: "Check the DAG" } }),
@@ -195,9 +195,7 @@ describe("scanSessionHistory", () => {
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
-    expect(result[0].projectDir).toBe(
-      "/Users/admin/workspace/bmo_intraday_statement/airflow_dags_sbl",
-    );
+    expect(result[0].projectDir).toBe("/home/dev/projects/analytics-demo/jobs");
     expect(result[0].title).toBe("Check the DAG");
   });
 
@@ -211,7 +209,7 @@ describe("scanSessionHistory", () => {
           content: [
             {
               type: "text",
-              text: "Base directory for this skill: /Users/admin/.claude/skills/gsd",
+              text: "Base directory for this skill: /home/dev/.claude/skills/gsd",
             },
           ],
         },
@@ -245,7 +243,7 @@ describe("scanSessionHistory", () => {
   });
 
   it("does NOT dedup when all user messages are isMeta and titles fall back to unique session IDs", async () => {
-    // 模拟 MaoGe 场景：所有 user 消息都是 isMeta，title 回退到 sessionId 前缀
+    // All user messages are metadata, so the title falls back to the sessionId prefix.
     writeSession("-test-proj", "aaaaaaaa-1111", [
       JSON.stringify({
         type: "user",
@@ -291,7 +289,7 @@ describe("scanSessionHistory", () => {
         type: "session_meta",
         payload: {
           id: "019dfc36-cd43-71d1-bf52-ce65cd40b61d",
-          cwd: "/Users/admin/workspace/cc_anywhere",
+          cwd: "/home/dev/projects/dev-anywhere",
         },
       }),
       JSON.stringify({
@@ -309,7 +307,7 @@ describe("scanSessionHistory", () => {
     expect(result[0]).toMatchObject({
       id: "019dfc36-cd43-71d1-bf52-ce65cd40b61d",
       provider: "codex",
-      projectDir: "/Users/admin/workspace/cc_anywhere",
+      projectDir: "/home/dev/projects/dev-anywhere",
       title: "Use shell to run pwd, then answer DONE.",
     });
   });
@@ -318,7 +316,7 @@ describe("scanSessionHistory", () => {
     writeCodexSession("codex-env", [
       JSON.stringify({
         type: "session_meta",
-        payload: { id: "codex-env", cwd: "/Users/admin/test_go" },
+        payload: { id: "codex-env", cwd: "/home/dev/projects/sample-app" },
       }),
       JSON.stringify({
         type: "response_item",
@@ -328,7 +326,7 @@ describe("scanSessionHistory", () => {
           content: [
             {
               type: "input_text",
-              text: "<environment_context><cwd>/Users/admin/test_go</cwd></environment_context>",
+              text: "<environment_context><cwd>/home/dev/projects/sample-app</cwd></environment_context>",
             },
           ],
         },
@@ -352,7 +350,7 @@ describe("scanSessionHistory", () => {
     writeCodexSession("codex-summary", [
       JSON.stringify({
         type: "session_meta",
-        payload: { id: "codex-summary", cwd: "/Users/admin/workspace/MaoGe" },
+        payload: { id: "codex-summary", cwd: "/home/dev/projects/sample-notes" },
       }),
       JSON.stringify({
         type: "response_item",

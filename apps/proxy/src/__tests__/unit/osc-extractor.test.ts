@@ -43,13 +43,13 @@ describe("extractOscSignals", () => {
   });
 
   it("returns approval_wait for Codex action-required OSC title", () => {
-    const data = "\x1b]0;[ ! ] Action Required | test_go\x07";
+    const data = "\x1b]0;[ ! ] Action Required | sample-app\x07";
     const result = extractOscSignals(data, "codex");
-    expect(result).toEqual({ state: "approval_wait", title: "[ ! ] Action Required | test_go" });
+    expect(result).toEqual({ state: "approval_wait", title: "[ ! ] Action Required | sample-app" });
   });
 
   it("does not treat Codex action-required words as state without an OSC title", () => {
-    const result = extractOscSignals("[ ! ] Action Required | test_go", "codex");
+    const result = extractOscSignals("[ ! ] Action Required | sample-app", "codex");
     expect(result).toBeNull();
   });
 

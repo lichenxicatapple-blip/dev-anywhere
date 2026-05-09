@@ -10,9 +10,9 @@ export function ThinkingIndicator() {
       aria-label="Claude 正在思考"
     >
       <div className="flex w-fit items-center gap-1.5 rounded-[8px_24px_24px_24px] bg-foreground/8 px-5 py-3">
-        <span className="cc-thinking-dot" />
-        <span className="cc-thinking-dot" />
-        <span className="cc-thinking-dot" />
+        <span className="dev-thinking-dot" />
+        <span className="dev-thinking-dot" />
+        <span className="dev-thinking-dot" />
       </div>
     </div>
   );

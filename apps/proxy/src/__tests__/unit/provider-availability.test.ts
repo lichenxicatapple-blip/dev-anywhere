@@ -44,11 +44,11 @@ describe("provider availability", () => {
   it("returns saved path suggestions even when detection fails", () => {
     const status = detectAgentCliStatus(
       { PATH: "/definitely/not/a/bin" },
-      { suggestions: { claude: ["/Users/admin/.local/bin/claude"] } },
+      { suggestions: { claude: ["/home/dev/.local/bin/claude"] } },
     );
 
     expect(status.claude.available).toBe(false);
-    expect(status.claude.suggestions).toEqual(["/Users/admin/.local/bin/claude"]);
+    expect(status.claude.suggestions).toEqual(["/home/dev/.local/bin/claude"]);
   });
 
   it("discovers multiple provider binaries from PATH as selectable suggestions", () => {

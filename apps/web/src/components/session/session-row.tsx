@@ -17,7 +17,7 @@ import { providerLabel } from "@/lib/session-provider";
 interface SessionRowProps {
   session: SessionInfo;
   selected: boolean;
-  // 由父层每 60s 推进的参考 now，驱动 "N 分钟前" 自刷新；省略时 formatRelativeTime 回退到 Date.now()
+  // 由父层每 60s 推进的参考 now，驱动 "最近活动 N 分钟前" 自刷新；省略时 formatRelativeTime 回退到 Date.now()
   now?: number;
   onClick: () => void;
   onTerminate?: () => void;
@@ -72,11 +72,18 @@ function sessionModeLabel(mode: SessionInfo["mode"]): string {
 
 export function SessionRow({ session, selected, now, onClick, onTerminate }: SessionRowProps) {
   const lastActive = session.lastActive;
+  const rawName = session.name ?? session.sessionId;
   const displayName =
     formatSessionName(session.name) === "New Session"
       ? session.sessionId.slice(0, 8)
       : formatSessionName(session.name);
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
+  const lastActiveLabel =
+    lastActive !== undefined ? `最近活动 ${formatRelativeTime(lastActive, now)}` : null;
+  const lastActiveTitle =
+    lastActive !== undefined
+      ? new Date(lastActive).toLocaleString("zh-CN", { hour12: false })
+      : undefined;
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
   const terminateLabel = isLocalTerminalPty ? "断开远程连接" : "终止会话";
   return (
@@ -105,7 +112,9 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
       >
         <span className="flex items-center gap-2 min-w-0">
           <StateDot state={session.state} />
-          <span className="text-sm font-normal truncate flex-1">{displayName}</span>
+          <span className="text-sm font-normal truncate flex-1" title={rawName}>
+            {displayName}
+          </span>
         </span>
         {hasMeta && (
           <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
@@ -132,13 +141,16 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
             <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
               {STATE_STYLE[session.state].label}
             </span>
-            {lastActive !== undefined && (
+            {lastActiveLabel && (
               <>
                 <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                   ·
                 </span>
-                <span className="text-muted-foreground shrink-0 tabular-nums">
-                  {formatRelativeTime(lastActive, now)}
+                <span
+                  className="text-muted-foreground shrink-0 tabular-nums"
+                  title={lastActiveTitle}
+                >
+                  {lastActiveLabel}
                 </span>
               </>
             )}

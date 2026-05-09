@@ -16,11 +16,11 @@ import { useFileStore } from "@/stores/file-store";
 describe("FilePathPicker", () => {
   beforeEach(() => {
     requestDirectoryList.mockReset();
-    requestDirectoryList.mockResolvedValue({ path: "/Users/admin", entries: [] });
+    requestDirectoryList.mockResolvedValue({ path: "/home/dev", entries: [] });
     useFileStore.setState({
       tree: new Map(),
-      cwd: "/Users/admin/test_go",
-      homePath: "/Users/admin",
+      cwd: "/home/dev/projects/sample-app",
+      homePath: "/home/dev",
       agentCli: null,
     });
   });
@@ -30,27 +30,27 @@ describe("FilePathPicker", () => {
       <FilePathPicker
         mode="select"
         dirsOnly
-        filter="/Users/admin"
+        filter="/home/dev"
         onSelect={vi.fn()}
         title="选择下一级目录"
       />,
     );
 
     await waitFor(() => {
-      expect(requestDirectoryList).toHaveBeenCalledWith("/Users/admin");
+      expect(requestDirectoryList).toHaveBeenCalledWith("/home/dev");
     });
     expect(requestDirectoryList).not.toHaveBeenCalledWith("/Users");
   });
 
   it("creates a child directory from the select-mode directory picker", async () => {
-    const onCreateDirectory = vi.fn().mockResolvedValue("/Users/admin/new-project");
+    const onCreateDirectory = vi.fn().mockResolvedValue("/home/dev/new-project");
     const onSelect = vi.fn();
 
     const { getByRole, getByPlaceholderText } = render(
       <FilePathPicker
         mode="select"
         dirsOnly
-        filter="/Users/admin"
+        filter="/home/dev"
         onSelect={onSelect}
         onCreateDirectory={onCreateDirectory}
         title="选择下一级目录"
@@ -64,10 +64,10 @@ describe("FilePathPicker", () => {
     fireEvent.click(getByRole("button", { name: "创建目录" }));
 
     await waitFor(() => {
-      expect(onCreateDirectory).toHaveBeenCalledWith("/Users/admin/new-project");
+      expect(onCreateDirectory).toHaveBeenCalledWith("/home/dev/new-project");
     });
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith("/Users/admin/new-project/");
+      expect(onSelect).toHaveBeenCalledWith("/home/dev/new-project/");
     });
   });
 });

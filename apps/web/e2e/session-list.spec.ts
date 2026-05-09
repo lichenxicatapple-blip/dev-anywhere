@@ -39,9 +39,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     const form = page.locator('[data-slot="create-session-form"]');
     await expect(dialog).toBeVisible();
-    await expect(
-      page.getByText("/Users/admin/.nvm/versions/node/v22.16.0/bin/claude"),
-    ).toBeVisible();
+    await expect(page.getByText("/home/dev/.local/bin/claude")).toBeVisible();
 
     async function expectFormContained() {
       const overflowing = await form.evaluate((formNode) => {
@@ -112,14 +110,14 @@ test.describe("CreateSessionDialog — 字段校验", () => {
           {
             id: "hist-claude-same-dir",
             title: "Claude same dir",
-            projectDir: "/Users/admin/workspace/cc_anywhere",
+            projectDir: "/home/dev/projects/dev-anywhere",
             updatedAt: Date.now() - 1_000,
             provider: "claude",
           },
           {
             id: "hist-codex-same-dir",
             title: "Codex same dir",
-            projectDir: "/Users/admin/workspace/cc_anywhere",
+            projectDir: "/home/dev/projects/dev-anywhere",
             updatedAt: Date.now() - 2_000,
             provider: "codex",
           },
@@ -134,7 +132,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await codexHeader
       .locator("xpath=following-sibling::ul[1]")
       .locator('[data-slot="history-group-header"]:visible')
-      .filter({ hasText: "cc_anywhere" })
+      .filter({ hasText: "dev-anywhere" })
       .click();
 
     await expect(
@@ -143,6 +141,36 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(
       page.locator('[data-slot="history-row"][data-session-id="hist-claude-same-dir"]:visible'),
     ).toHaveCount(0);
+  });
+
+  test("全部会话被截断的标题可通过 hover title 查看全名", async ({ page }) => {
+    const longTitle =
+      "A very long restored session title for checking the complete hover label in the history list";
+    await page.evaluate((title) => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_history_response",
+        sessions: [
+          {
+            id: "hist-long-title",
+            title,
+            projectDir: "/home/dev/projects/sample-app",
+            updatedAt: Date.now() - 1_000,
+            provider: "claude",
+          },
+        ],
+      });
+    }, longTitle);
+
+    await page.locator('[data-slot="history-section-header"]:visible').click();
+    await page
+      .locator('[data-slot="history-group-header"]:visible')
+      .filter({ hasText: "sample-app" })
+      .click();
+
+    const title = page
+      .locator('[data-slot="history-row"][data-session-id="hist-long-title"]:visible span[title]')
+      .first();
+    await expect(title).toHaveAttribute("title", longTitle);
   });
 
   test("桌面侧栏的活跃会话标题和全部会话在同一个滚动容器中", async ({ page }) => {

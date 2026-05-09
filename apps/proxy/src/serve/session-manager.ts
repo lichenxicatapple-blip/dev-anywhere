@@ -195,6 +195,15 @@ export class SessionManager {
     return true;
   }
 
+  touchSession(id: string, now: number = Date.now(), minIntervalMs = 0): boolean {
+    const session = this.sessions.get(id);
+    if (!session) return false;
+    if (now - session.updatedAt < minIntervalMs) return false;
+    session.updatedAt = now;
+    this.save();
+    return true;
+  }
+
   terminateSession(id: string, context?: SessionRemoveContext): { success: boolean; pid?: number } {
     const session = this.sessions.get(id);
     if (!session) {

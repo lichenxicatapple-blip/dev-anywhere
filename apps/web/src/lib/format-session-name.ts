@@ -8,7 +8,7 @@ export function formatSessionName(name: string | undefined): string {
 
   if (!name.startsWith("/") && !name.startsWith("~")) return name;
 
-  const tildified = name.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
+  const tildified = name.replace(/^(?:\/Users\/[^/]+|\/home\/[^/]+)(?=\/|$)/, "~");
   const normalized = tildified.replace(/\/+$/, "") || "/";
   const parts = normalized.split("/").filter(Boolean);
 
