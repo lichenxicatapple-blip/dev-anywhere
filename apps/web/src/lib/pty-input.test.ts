@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachXtermRawInput } from "./pty-input";
 
 const sendSpy = vi.fn();
@@ -11,11 +11,17 @@ describe("attachXtermRawInput", () => {
     sendSpy.mockClear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function createTerminal() {
     let dataHandler: ((data: string) => void) | undefined;
     let keyHandler: ((event: KeyboardEvent) => boolean) | undefined;
     const disposeSpy = vi.fn();
+    const textarea = document.createElement("textarea");
     const terminal = {
+      textarea,
       onData: vi.fn((next: (data: string) => void) => {
         dataHandler = next;
         return { dispose: disposeSpy };
@@ -27,8 +33,19 @@ describe("attachXtermRawInput", () => {
     return {
       terminal,
       disposeSpy,
+      textarea,
       emitData: (data: string) => dataHandler?.(data),
       emitKey: (event: KeyboardEvent) => keyHandler?.(event),
+      emitTextInput: (data: string) => {
+        textarea.dispatchEvent(
+          new InputEvent("input", {
+            data,
+            inputType: "insertText",
+            bubbles: true,
+            composed: true,
+          }),
+        );
+      },
     };
   }
 
@@ -94,6 +111,153 @@ describe("attachXtermRawInput", () => {
 
     expect(emitKey(event)).toBe(true);
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("routes printable punctuation through native text input so IME punctuation is preserved", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
+  });
+
+  it("keeps ASCII punctuation working when no IME transforms it", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    emitTextInput(",");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
+  });
+
+  it("does not start a second punctuation probe from the matching keypress event", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const keydownContinue = emitKey(new KeyboardEvent("keydown", { key: "-" }));
+    const keypressContinue = emitKey(new KeyboardEvent("keypress", { key: "-" }));
+    emitTextInput("-");
+    vi.runAllTimers();
+
+    expect(keydownContinue).toBe(false);
+    expect(keypressContinue).toBe(true);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "-");
+  });
+
+  it("preserves input order when xterm emits text after routed punctuation", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "/" }));
+    emitData("tmp");
+    emitTextInput("/");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "sess-1", "/");
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "tmp");
+  });
+
+  it("does not duplicate routed punctuation when xterm also emits the native text", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "-" }));
+    emitData("-chaos");
+    emitTextInput("-");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "sess-1", "-");
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "chaos");
+  });
+
+  it("drops a late xterm echo after native punctuation has already been forwarded", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "-" }));
+    emitTextInput("-");
+    emitData("-");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "-");
+  });
+
+  it("keeps late xterm text after dropping a native punctuation echo", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "-" }));
+    emitTextInput("-");
+    emitData("-chaos");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "sess-1", "-");
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "chaos");
+  });
+
+  it("does not strip later xterm input after the native echo window expires", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "-" }));
+    emitTextInput("-");
+    vi.advanceTimersByTime(20);
+    emitData("-pasted");
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "sess-1", "-");
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "-pasted");
+  });
+
+  it("prefers IME-transformed punctuation over a buffered ASCII xterm echo", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    emitData(",后续");
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenNthCalledWith(1, "sess-1", "，");
+    expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "后续");
+  });
+
+  it("does not duplicate native text input when xterm already emitted the same text", () => {
+    vi.useFakeTimers();
+    const { terminal, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    emitData("你好");
+    emitTextInput("你好");
+    vi.runAllTimers();
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
   });
 
   it("can map plain Enter to LF for mobile soft-keyboard newline", () => {

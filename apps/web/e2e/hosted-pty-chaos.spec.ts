@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const enabled = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS === "1";
-const chaosCwd = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD ?? "/Users/admin/test_go";
+const chaosCwd =
+  process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/hosted-pty";
 const provider =
   process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER === "codex" ? "codex" : "claude";
 
@@ -10,9 +11,13 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await expect(switcher).toBeVisible({ timeout: 15_000 });
   await switcher.click();
 
-  const firstProxy = page.locator('[data-slot="proxy-item"]').first();
+  const firstProxy = page.locator('[data-slot="proxy-item"]:visible').first();
   await expect(firstProxy).toBeVisible({ timeout: 15_000 });
   await firstProxy.click();
+}
+
+async function terminalText(page: Page, sessionId: string): Promise<string> {
+  return page.evaluate((id) => window.__ccTest?.pty.serialize(id) ?? "", sessionId);
 }
 
 test.describe("hosted PTY real chaos", () => {
@@ -40,12 +45,16 @@ test.describe("hosted PTY real chaos", () => {
     expect(sessionId).toBeTruthy();
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
     await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await expect
+      .poll(() => terminalText(page, sessionId!), { timeout: 15_000 })
+      .toContain("type exit-chaos to terminate");
 
     const terminalInput = page.locator(
       '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
     );
-    await terminalInput.focus();
-    await page.keyboard.type("exit-chaos");
+    await page.locator('[data-slot="pty-terminal"]').click();
+    await expect(terminalInput).toBeFocused();
+    await page.keyboard.type("exit-chaos", { delay: 10 });
     await page.keyboard.press("Enter");
 
     await expect(page.locator('[data-slot="terminated-session-panel"]')).toBeVisible({

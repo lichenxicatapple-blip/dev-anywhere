@@ -552,7 +552,7 @@ test.describe("PTY browser smoke", () => {
     page,
   }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("cc_ptyFontSize", "10");
+      localStorage.setItem("dev_anywhere_ptyFontSize", "10");
     });
     await installFakeRelay(page);
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
@@ -607,5 +607,56 @@ test.describe("PTY browser smoke", () => {
         : null;
     });
     expect(metrics?.viewportY).toBe(metrics?.baseY);
+  });
+
+  test("preserves IME-transformed full-width punctuation in raw PTY input", async ({ page }) => {
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+    await resetLocalState(page);
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+
+    await expectTerminalMounted(page);
+    const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+    await input.focus();
+    await input.evaluate((el) => {
+      el.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: ",",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      el.dispatchEvent(
+        new InputEvent("input", {
+          data: "，",
+          inputType: "insertText",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+
+    await expect.poll(() => readRawPtyInput(page)).toBe("，");
+
+    await input.evaluate((el) => {
+      el.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: ".",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      el.dispatchEvent(
+        new InputEvent("input", {
+          data: ".",
+          inputType: "insertText",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+
+    await expect.poll(() => readRawPtyInput(page)).toBe("，.");
   });
 });
