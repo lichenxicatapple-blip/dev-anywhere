@@ -122,6 +122,7 @@ export class RelayRouter {
   private readonly handlers: Record<string, (msg: Record<string, unknown>) => void> = {
     user_input: (msg) => this.inputHandlers.onUserInput(msg),
     remote_input_raw: (msg) => this.inputHandlers.onRemoteInputRaw(msg),
+    clipboard_image_upload: (msg) => this.inputHandlers.onClipboardImageUpload(msg),
     tool_approve: (msg) => this.permissionHandlers.onToolApprove(msg),
     tool_deny: (msg) => this.permissionHandlers.onToolDeny(msg),
     proxy_info_request: (msg) => this.resourceHandlers.onProxyInfoRequest(msg),

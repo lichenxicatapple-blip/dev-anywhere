@@ -2,7 +2,7 @@
 // 浏览器滚动容器映射到 xterm viewportY；当真实 PTY 屏幕比 Web 可视区矮时，
 // scroll spacer 仍保证底部位置能映射到 xterm baseY，而不是伪造额外终端行。
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FocusEvent, MouseEvent, PointerEvent } from "react";
+import type { ClipboardEvent, FocusEvent, MouseEvent, PointerEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "lucide-react";
 import { createXtermTerminal } from "@/lib/create-xterm";
@@ -19,7 +19,10 @@ import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { getClipboardImageFile } from "@/lib/clipboard-image";
+import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
+import { toast } from "@/components/toast";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
@@ -179,6 +182,35 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   function handleTerminalBlurCapture(): void {
     window.setTimeout(syncPtyInputFocus, 0);
   }
+
+  const handleTerminalPasteCapture = useCallback(
+    async (event: ClipboardEvent<HTMLDivElement>): Promise<void> => {
+      if (!getClipboardImageFile(event.clipboardData)) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const relay = relayClientRef;
+      if (!relay) {
+        toast.error("请先连接开发机");
+        return;
+      }
+
+      try {
+        const result = await uploadClipboardImageFromPaste({
+          clipboardData: event.clipboardData,
+          relay,
+          sessionId,
+        });
+        if (!result) return;
+        sendRemoteInputRaw(sessionId, result.token);
+        rawInputFollowSchedulerRef.current?.schedule();
+        terminalRef.current?.focus();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
     if (!connected || !proxyOnline) return;
@@ -355,6 +387,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         onPointerMoveCapture={handleTerminalPointerMoveCapture}
         onPointerUpCapture={handleTerminalPointerUpCapture}
         onPointerCancelCapture={handleTerminalPointerCancelCapture}
+        onPasteCapture={handleTerminalPasteCapture}
         onFocusCapture={handleTerminalFocusCapture}
         onBlurCapture={handleTerminalBlurCapture}
         data-slot="pty-terminal"

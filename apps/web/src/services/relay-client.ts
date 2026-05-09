@@ -37,6 +37,19 @@ type SessionResourcesSnapshot = {
   commands: CommandEntry[];
   groups: FileTreeGroup[];
 } & RequestError;
+type ClipboardImageUploadResponse = Extract<
+  RelayControlMessage,
+  { type: "clipboard_image_upload_response" }
+>;
+type ClipboardImageUploadResult = {
+  sessionId: string;
+  success: boolean;
+  path: string;
+} & RequestError;
+type ClipboardImageUploadRequest = Omit<
+  Extract<RelayControlMessage, { type: "clipboard_image_upload" }>,
+  "type" | "requestId" | "sessionId"
+>;
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -175,6 +188,37 @@ export class RelayClient {
     ).then((resp) => ({
       path: resp.path,
       entries: resp.entries,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  uploadClipboardImage(
+    sessionId: string,
+    image: ClipboardImageUploadRequest,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<ClipboardImageUploadResult> {
+    const requestId = nextRequestId("clipboard-image");
+    return this.waitForMessage(
+      (msg): msg is ClipboardImageUploadResponse =>
+        msg.type === "clipboard_image_upload_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "clipboard_image_upload",
+            requestId,
+            sessionId,
+            ...image,
+          }),
+        ),
+      "上传剪贴板图片超时",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      success: resp.success,
+      path: resp.path,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

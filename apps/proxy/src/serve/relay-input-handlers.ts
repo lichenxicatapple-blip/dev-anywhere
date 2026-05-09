@@ -1,6 +1,7 @@
 import type { Socket } from "node:net";
-import { MessageEnvelopeSchema } from "@dev-anywhere/shared";
+import { ControlErrorCode, MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { saveClipboardImageUpload } from "./clipboard-image-upload.js";
 import { serializeRawPtyInput } from "./pty-input.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -94,5 +95,45 @@ export class RelayInputHandlers {
     }
     ts.write(serializeRawPtyInput(sessionId, data));
     serviceLogger.info({ sessionId, bytes: data.length }, "Raw PTY input forwarded");
+  }
+
+  onClipboardImageUpload(msg: Record<string, unknown>): void {
+    const sessionId = msg.sessionId as string | undefined;
+    const requestId = msg.requestId as string | undefined;
+    if (!sessionId) return;
+
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.deps.relayConnection.sendRaw(
+        JSON.stringify({
+          type: "clipboard_image_upload_response",
+          requestId,
+          sessionId,
+          success: false,
+          path: "",
+          error: "会话不存在",
+          errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+        }),
+      );
+      serviceLogger.warn({ sessionId }, "Clipboard image upload rejected: session not found");
+      return;
+    }
+
+    const result = saveClipboardImageUpload({
+      sessionId,
+      mimeType: typeof msg.mimeType === "string" ? msg.mimeType : "",
+      dataBase64: typeof msg.dataBase64 === "string" ? msg.dataBase64 : "",
+      fileName: typeof msg.fileName === "string" ? msg.fileName : undefined,
+    });
+
+    this.deps.relayConnection.sendRaw(
+      JSON.stringify({
+        type: "clipboard_image_upload_response",
+        requestId,
+        sessionId,
+        ...result,
+      }),
+    );
+    serviceLogger.info({ sessionId, success: result.success }, "Clipboard image upload handled");
   }
 }

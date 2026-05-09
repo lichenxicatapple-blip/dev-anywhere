@@ -89,24 +89,24 @@ describe("RelayClient request handling", () => {
 
   it("waits for the matching directory create response", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.createDirectory("/Users/admin/new-project");
+    const promise = relay.createDirectory("/home/dev/new-project");
     const requestId = sentRequestId(ws);
 
     ws.emit({
       type: "dir_create_response",
       requestId: "other-request",
-      path: "/Users/admin/new-project",
+      path: "/home/dev/new-project",
       success: true,
     });
     ws.emit({
       type: "dir_create_response",
       requestId,
-      path: "/Users/admin/new-project",
+      path: "/home/dev/new-project",
       success: true,
     });
 
     await expect(promise).resolves.toEqual({
-      path: "/Users/admin/new-project",
+      path: "/home/dev/new-project",
       success: true,
       error: undefined,
       errorCode: undefined,
@@ -115,25 +115,73 @@ describe("RelayClient request handling", () => {
 
   it("waits for the matching directory list response", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.requestDirectoryList("/Users/admin");
+    const promise = relay.requestDirectoryList("/home/dev");
     const requestId = sentRequestId(ws);
 
     ws.emit({
       type: "dir_list_response",
       requestId: "other-request",
-      path: "/Users/admin",
+      path: "/home/dev",
       entries: [{ name: "wrong", isDir: true }],
     });
     ws.emit({
       type: "dir_list_response",
       requestId,
-      path: "/Users/admin",
+      path: "/home/dev",
       entries: [{ name: "workspace", isDir: true }],
     });
 
     await expect(promise).resolves.toEqual({
-      path: "/Users/admin",
+      path: "/home/dev",
       entries: [{ name: "workspace", isDir: true }],
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("waits for matching clipboard image upload responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.uploadClipboardImage("s1", {
+      mimeType: "image/png",
+      dataBase64: "AQID",
+      fileName: "shot.png",
+    });
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "clipboard_image_upload_response",
+      requestId: "other-request",
+      sessionId: "s1",
+      success: true,
+      path: "/wrong.png",
+    });
+    ws.emit({
+      type: "clipboard_image_upload_response",
+      requestId,
+      sessionId: "other-session",
+      success: true,
+      path: "/wrong-session.png",
+    });
+    ws.emit({
+      type: "clipboard_image_upload_response",
+      requestId,
+      sessionId: "s1",
+      success: true,
+      path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "clipboard_image_upload",
+      requestId,
+      sessionId: "s1",
+      mimeType: "image/png",
+      dataBase64: "AQID",
+      fileName: "shot.png",
+    });
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      success: true,
+      path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
       error: undefined,
       errorCode: undefined,
     });
@@ -149,17 +197,17 @@ describe("RelayClient request handling", () => {
     };
 
     ws.emit({ type: "proxy_info", requestId: "other-request", homePath: "/tmp", agentCli });
-    ws.emit({ type: "proxy_info", requestId, homePath: "/Users/admin", agentCli });
+    ws.emit({ type: "proxy_info", requestId, homePath: "/home/dev", agentCli });
 
-    await expect(promise).resolves.toEqual({ homePath: "/Users/admin", agentCli });
+    await expect(promise).resolves.toEqual({ homePath: "/home/dev", agentCli });
   });
 
   it("updates an Agent CLI path through the selected proxy", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.updateAgentCliPath("claude", "/Users/admin/.local/bin/claude");
+    const promise = relay.updateAgentCliPath("claude", "/home/dev/.local/bin/claude");
     const requestId = sentRequestId(ws);
     const agentCli = {
-      claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+      claude: { available: true, command: "/home/dev/.local/bin/claude" },
       codex: { available: true, command: "/usr/local/bin/codex" },
     };
 

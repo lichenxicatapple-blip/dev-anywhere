@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
+import { ControlErrorCode, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
@@ -23,6 +23,7 @@ function createRouter(options: {
   hostedWrite?: ReturnType<typeof vi.fn>;
   jsonTurnStart?: ReturnType<typeof vi.fn>;
   relaySend?: (data: string) => void;
+  relayConnection?: ReturnType<typeof createRelayConnectionFake>;
   workerSpawn?: () => number;
   workerConnect?: () => Promise<Socket | null>;
   workerTerminateProcess?: (sessionId: string) => boolean;
@@ -56,7 +57,7 @@ function createRouter(options: {
         : undefined,
     }),
     controlHandlers: {} as never,
-    relayConnection: createRelayConnectionFake().relayConnection,
+    relayConnection: (options.relayConnection ?? createRelayConnectionFake()).relayConnection,
     relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
     hostedPtyRegistry: {
@@ -180,7 +181,7 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
-      cwd: "/Users/admin/path-that-should-not-exist-dev-anywhere-test",
+      cwd: "/home/dev/path-that-should-not-exist-dev-anywhere-test",
       provider: "claude",
       mode: "json",
     });
@@ -298,5 +299,29 @@ describe("RelayRouter input routing", () => {
     });
 
     expect(hostedWrite).toHaveBeenCalledWith("s1", "abc");
+  });
+
+  it("rejects clipboard image uploads for missing sessions", () => {
+    const relay = createRelayConnectionFake();
+    const router = createRouter({ mode: "json", relayConnection: relay });
+
+    router.handle({
+      type: "clipboard_image_upload",
+      requestId: "clip-1",
+      sessionId: "missing",
+      mimeType: "image/png",
+      dataBase64: "AQID",
+    });
+
+    expect(relay.raw).toHaveLength(1);
+    const msg = RelayControlSchema.parse(JSON.parse(relay.raw[0]!));
+    expect(msg.type).toBe("clipboard_image_upload_response");
+    if (msg.type === "clipboard_image_upload_response") {
+      expect(msg.requestId).toBe("clip-1");
+      expect(msg.sessionId).toBe("missing");
+      expect(msg.success).toBe(false);
+      expect(msg.path).toBe("");
+      expect(msg.errorCode).toBe(ControlErrorCode.SESSION_NOT_FOUND);
+    }
   });
 });

@@ -70,6 +70,7 @@ const RequestErrorShape = {
   error: z.string().optional(),
   errorCode: ControlErrorCodeSchema.optional(),
 };
+const ClipboardImageMimeTypeSchema = z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
   type: T;
@@ -269,6 +270,28 @@ const relayControlDefinitions = [
     "remote_input_raw",
     { sessionId: z.string().min(1), data: z.string() },
     "client_to_proxy",
+  ),
+  control(
+    "clipboard_image_upload",
+    {
+      ...RequestIdShape,
+      sessionId: z.string().min(1),
+      mimeType: ClipboardImageMimeTypeSchema,
+      dataBase64: z.string().min(1),
+      fileName: z.string().optional(),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "clipboard_image_upload_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: z.string().min(1),
+      success: z.boolean(),
+      path: z.string(),
+    },
+    "proxy_to_client",
   ),
 
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response

@@ -26,6 +26,7 @@ describe("RelayControlSchema", () => {
 
   it("derives client-to-proxy control routing from protocol metadata", () => {
     expect(isClientToProxyRelayControlType("agent_status_request")).toBe(true);
+    expect(isClientToProxyRelayControlType("clipboard_image_upload")).toBe(true);
     expect(isClientToProxyRelayControlType("permission_request_delivered")).toBe(true);
     expect(isClientToProxyRelayControlType("tool_approve")).toBe(true);
     expect(isClientToProxyRelayControlType("tool_deny")).toBe(true);
@@ -34,6 +35,42 @@ describe("RelayControlSchema", () => {
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
     expect(isClientToProxyRelayControlType("permission_decision_result")).toBe(false);
     expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
+  });
+
+  it("parses clipboard image upload request/response with requestId correlation", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "clipboard_image_upload",
+        requestId: "clip-1",
+        sessionId: "sess-1",
+        mimeType: "image/png",
+        dataBase64: "AQID",
+        fileName: "shot.png",
+      }),
+    ).toEqual({
+      type: "clipboard_image_upload",
+      requestId: "clip-1",
+      sessionId: "sess-1",
+      mimeType: "image/png",
+      dataBase64: "AQID",
+      fileName: "shot.png",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "clipboard_image_upload_response",
+        requestId: "clip-1",
+        sessionId: "sess-1",
+        success: true,
+        path: "/home/dev/.dev-anywhere/data/sess-1/clipboard/shot.png",
+      }),
+    ).toMatchObject({
+      type: "clipboard_image_upload_response",
+      requestId: "clip-1",
+      sessionId: "sess-1",
+      success: true,
+    });
+    expect(isProxyToClientRelayControlType("clipboard_image_upload_response")).toBe(true);
   });
 
   it("rejects proxy_select with empty proxyId", () => {
@@ -232,7 +269,7 @@ describe("RelayControlSchema", () => {
       RelayControlSchema.parse({
         type: "proxy_info",
         requestId: "info-1",
-        homePath: "/Users/admin",
+        homePath: "/home/dev",
         agentCli: {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: false, error: "codex not found" },
@@ -241,7 +278,7 @@ describe("RelayControlSchema", () => {
     ).toEqual({
       type: "proxy_info",
       requestId: "info-1",
-      homePath: "/Users/admin",
+      homePath: "/home/dev",
       agentCli: {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: false, error: "codex not found" },
@@ -255,13 +292,13 @@ describe("RelayControlSchema", () => {
         type: "agent_cli_config_update",
         requestId: "agent-cli-1",
         provider: "claude",
-        path: "/Users/admin/.local/bin/claude",
+        path: "/home/dev/.local/bin/claude",
       }),
     ).toEqual({
       type: "agent_cli_config_update",
       requestId: "agent-cli-1",
       provider: "claude",
-      path: "/Users/admin/.local/bin/claude",
+      path: "/home/dev/.local/bin/claude",
     });
 
     expect(
@@ -270,7 +307,7 @@ describe("RelayControlSchema", () => {
         requestId: "agent-cli-1",
         provider: "claude",
         agentCli: {
-          claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+          claude: { available: true, command: "/home/dev/.local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
         },
       }),
@@ -279,7 +316,7 @@ describe("RelayControlSchema", () => {
       requestId: "agent-cli-1",
       provider: "claude",
       agentCli: {
-        claude: { available: true, command: "/Users/admin/.local/bin/claude" },
+        claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
       },
     });

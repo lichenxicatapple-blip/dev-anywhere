@@ -7,9 +7,7 @@ export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
 // 清理 DEV Anywhere 写入的 localStorage key 并刷新页面，恢复到首次访问状态
 export async function resetLocalState(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const keys = Object.keys(localStorage).filter(
-      (k) => k.startsWith("cc_") || k.startsWith("dev_anywhere_"),
-    );
+    const keys = Object.keys(localStorage).filter((k) => k.startsWith("dev_anywhere_"));
     keys.forEach((k) => localStorage.removeItem(k));
   });
   await page.reload();
@@ -60,7 +58,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const defaultSessions: FakeSession[] = [
       {
         sessionId: "claude-pty",
-        name: "/Users/admin/test_go/",
+        name: "/home/dev/projects/sample-app/",
         state: "idle",
         mode: "pty",
         provider: "claude",
@@ -68,7 +66,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       {
         sessionId: "codex-pty",
-        name: "/Users/admin/workspace/dev-anywhere/",
+        name: "/home/dev/projects/dev-anywhere/",
         state: "working",
         mode: "pty",
         provider: "codex",
@@ -90,10 +88,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
       ? (JSON.parse(persistedSessions) as FakeSession[])
       : defaultSessions;
     const defaultDirectories = [
-      "/Users/admin",
-      "/Users/admin/test_go",
-      "/Users/admin/workspace",
-      "/Users/admin/workspace/dev-anywhere",
+      "/home/dev",
+      "/home/dev/projects/sample-app",
+      "/home/dev/projects",
+      "/home/dev/projects/dev-anywhere",
     ];
     const persistedDirectories = localStorage.getItem(directoryStorageKey);
     const directories = new Set<string>(
@@ -115,14 +113,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
       {
         id: "hist-claude-1",
         title: "Claude history",
-        projectDir: "/Users/admin/test_go",
+        projectDir: "/home/dev/projects/sample-app",
         updatedAt: now - 300_000,
         provider: "claude",
       },
       {
         id: "hist-codex-1",
         title: "Codex history",
-        projectDir: "/Users/admin/workspace/dev-anywhere",
+        projectDir: "/home/dev/projects/dev-anywhere",
         updatedAt: now - 600_000,
         provider: "codex",
       },
@@ -290,15 +288,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
             this.emitJson({
               type: "proxy_info",
               requestId: msg.requestId,
-              homePath: "/Users/admin",
+              homePath: "/home/dev",
               agentCli: {
                 claude: {
                   available: true,
-                  command: "/Users/admin/.nvm/versions/node/v22.16.0/bin/claude",
+                  command: "/home/dev/.local/bin/claude",
                 },
                 codex: {
                   available: true,
-                  command: "/Users/admin/.nvm/versions/node/v22.16.0/bin/codex",
+                  command: "/home/dev/.local/bin/codex",
                 },
               },
             });
@@ -309,10 +307,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
               requestId: msg.requestId,
               path: String(msg.path),
               entries:
-                msg.path === "/Users/admin"
+                msg.path === "/home/dev"
                   ? [
-                      { name: "test_go", isDir: true },
-                      { name: "workspace", isDir: true },
+                      { name: "sample-app", isDir: true },
+                      { name: "projects", isDir: true },
                       { name: "notes.md", isDir: false },
                     ]
                   : [
@@ -333,6 +331,17 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           }
+          case "clipboard_image_upload":
+            this.emitJson({
+              type: "clipboard_image_upload_response",
+              requestId: msg.requestId,
+              sessionId: String(msg.sessionId),
+              success: true,
+              path: `/home/dev/.dev-anywhere/data/${String(
+                msg.sessionId,
+              )}/clipboard/pasted-e2e.png`,
+            });
+            break;
           case "session_resources_request":
             this.emitResources(String(msg.sessionId ?? ""), String(msg.requestId ?? ""));
             break;
@@ -543,7 +552,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
           ],
           groups: [
             {
-              path: "/Users/admin/test_go",
+              path: "/home/dev/projects/sample-app",
               entries: [
                 { name: "src", isDir: true },
                 { name: "README.md", isDir: false },
@@ -567,7 +576,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
           type: "file_tree_push",
           groups: [
             {
-              path: "/Users/admin/test_go",
+              path: "/home/dev/projects/sample-app",
               entries: [
                 { name: "src", isDir: true },
                 { name: "README.md", isDir: false },

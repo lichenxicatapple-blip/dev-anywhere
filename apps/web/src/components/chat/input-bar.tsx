@@ -17,6 +17,9 @@ import { InputMenu } from "./input-menu";
 import { SendButton } from "./send-button";
 import type { PickerHandle } from "./picker-handle";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
+import { getClipboardImageFile, insertTextAtSelection } from "@/lib/clipboard-image";
+import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
+import { toast } from "@/components/toast";
 
 interface InputBarProps {
   sessionId: string;
@@ -54,10 +57,13 @@ export function InputBar({ sessionId }: InputBarProps) {
 
   // 已插入 token (slash 命令 or @路径) 列表, 用于 backspace 整体删除
   const [insertedTokens, setInsertedTokens] = useState<string[]>([]);
+  const [clipboardImageUploading, setClipboardImageUploading] = useState(false);
   // 选中 slash 命令后的参数提示 (argumentHint), 显示在输入栏上方
   const [argumentHint, setArgumentHint] = useState("");
   // 记录上次的 value, 用于 onChange 对比推断删除方向
   const prevTextRef = useRef(value);
+  const currentSessionIdRef = useRef(sessionId);
+  currentSessionIdRef.current = sessionId;
 
   // 会话切换时重置 token 跟踪 (argumentHint 随之失效, insertedTokens 作废)
   useEffect(() => {
@@ -166,6 +172,60 @@ export function InputBar({ sessionId }: InputBarProps) {
     }
   };
 
+  const handlePaste = useCallback(
+    async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!getClipboardImageFile(event.clipboardData)) return;
+      event.preventDefault();
+
+      const relay = relayClientRef;
+      if (!relay) {
+        toast.error("请先连接开发机");
+        return;
+      }
+
+      const pasteSessionId = sessionId;
+      setClipboardImageUploading(true);
+      try {
+        const result = await uploadClipboardImageFromPaste({
+          clipboardData: event.clipboardData,
+          relay,
+          sessionId: pasteSessionId,
+        });
+        if (!result) return;
+
+        const activeTextarea =
+          currentSessionIdRef.current === pasteSessionId ? textareaRef.current : null;
+        const currentValue =
+          activeTextarea?.value ??
+          useChatStore.getState().bySessionId[pasteSessionId]?.inputDraft ??
+          "";
+        const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
+        const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
+        const next = insertTextAtSelection(
+          currentValue,
+          result.token,
+          selectionStart,
+          selectionEnd,
+        );
+        if (activeTextarea) {
+          applyInputDraft(next.value);
+          setInsertedTokens((tokens) => [...tokens, result.token.trim()]);
+          requestAnimationFrame(() => {
+            textareaRef.current?.focus();
+            textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+          });
+        } else {
+          setInputDraft(pasteSessionId, next.value);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setClipboardImageUploading(false);
+      }
+    },
+    [applyInputDraft, sessionId, setInputDraft],
+  );
+
   const placeholder = submitOnPlainEnter
     ? "输入消息... (Enter 发送，Shift+Enter 换行)"
     : "输入消息...";
@@ -225,6 +285,7 @@ export function InputBar({ sessionId }: InputBarProps) {
             ref={textareaRef}
             value={value}
             onChange={(e) => handleValueChange(e.target.value)}
+            onPaste={handlePaste}
             onKeyDown={onKeyDown}
             enterKeyHint={submitOnPlainEnter ? "send" : "enter"}
             placeholder={placeholder}
@@ -232,6 +293,7 @@ export function InputBar({ sessionId }: InputBarProps) {
             style={{ fontSize: effectiveChatContentFontSize }}
             rows={1}
             aria-label="输入聊天消息"
+            aria-busy={clipboardImageUploading}
           />
           <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
             <InputMenu />
