@@ -1,0 +1,495 @@
+import { z } from "zod";
+import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
+import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import { RelayErrorCode } from "../constants/relay-errors.js";
+import { ControlErrorCode } from "../constants/control-errors.js";
+
+// 控制消息中复用的子类型
+export const ProxyInfoSchema = z.object({
+  proxyId: z.string(),
+  name: z.string().optional(),
+  online: z.boolean(),
+  sessions: z.array(z.string()).optional(),
+});
+export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
+
+export const AgentCliAvailabilitySchema = z.object({
+  available: z.boolean(),
+  command: z.string().optional(),
+  error: z.string().optional(),
+  suggestions: z.array(z.string()).optional(),
+});
+export type AgentCliAvailability = z.infer<typeof AgentCliAvailabilitySchema>;
+
+export const AgentCliStatusSchema = z.object({
+  claude: AgentCliAvailabilitySchema,
+  codex: AgentCliAvailabilitySchema,
+});
+export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
+
+export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
+export type DirEntry = z.infer<typeof DirEntrySchema>;
+
+export const FileTreeGroupSchema = z.object({
+  path: z.string(),
+  entries: z.array(DirEntrySchema),
+});
+export type FileTreeGroup = z.infer<typeof FileTreeGroupSchema>;
+
+export const CommandEntrySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  argumentHint: z.string().optional(),
+  source: z.string(),
+});
+export type CommandEntry = z.infer<typeof CommandEntrySchema>;
+
+export const HistorySessionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  projectDir: z.string(),
+  updatedAt: z.number(),
+  provider: z.enum(["claude", "codex"]).optional(),
+});
+export type HistorySession = z.infer<typeof HistorySessionSchema>;
+
+const SessionHistoryMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  text: z.string(),
+  timestamp: z.number().optional(),
+  cursor: z.string().optional(),
+});
+
+type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
+type EmptyShape = Record<never, never>;
+const RequestIdShape = { requestId: z.string().min(1).optional() };
+const ControlErrorCodeSchema = z.enum(
+  Object.values(ControlErrorCode) as [ControlErrorCode, ...ControlErrorCode[]],
+);
+const RequestErrorShape = {
+  error: z.string().optional(),
+  errorCode: ControlErrorCodeSchema.optional(),
+};
+
+type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
+  type: T;
+  directions: ReadonlySet<RelayControlDirection>;
+  schema: z.ZodObject<{ type: z.ZodLiteral<T> } & S>;
+};
+
+function control<T extends string>(type: T): ControlDefinition<T, EmptyShape>;
+function control<T extends string>(
+  type: T,
+  shape: undefined,
+  directions: RelayControlDirection | RelayControlDirection[],
+): ControlDefinition<T, EmptyShape>;
+function control<T extends string, S extends z.ZodRawShape>(
+  type: T,
+  shape: S,
+  directions?: RelayControlDirection | RelayControlDirection[],
+): ControlDefinition<T, S>;
+function control<T extends string, S extends z.ZodRawShape>(
+  type: T,
+  shape?: S,
+  directions?: RelayControlDirection | RelayControlDirection[],
+): ControlDefinition<T, S | EmptyShape> {
+  return {
+    type,
+    directions: new Set(Array.isArray(directions) ? directions : directions ? [directions] : []),
+    schema: z.object({
+      type: z.literal(type),
+      ...(shape ?? {}),
+    }) as z.ZodObject<{ type: z.ZodLiteral<T> } & (S | EmptyShape)>,
+  };
+}
+
+// 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
+const relayControlDefinitions = [
+  control("proxy_register", {
+    proxyId: z.string().min(1),
+    name: z.string().optional(),
+  }),
+  control("proxy_register_response", {
+    status: z.enum(["new", "reconnected"]),
+  }),
+  control("proxy_list_request", RequestIdShape),
+  control("proxy_list_response", {
+    ...RequestIdShape,
+    proxies: z.array(ProxyInfoSchema),
+  }),
+  control("proxy_select", { ...RequestIdShape, proxyId: z.string().min(1) }),
+  control("proxy_select_response", {
+    ...RequestIdShape,
+    success: z.boolean(),
+    proxyId: z.string().optional(),
+    ...RequestErrorShape,
+  }),
+  control("relay_error", {
+    code: z.enum(Object.values(RelayErrorCode) as [RelayErrorCode, ...RelayErrorCode[]]),
+    message: z.string(),
+  }),
+
+  // 客户端注册协议
+  control("client_register", {
+    clientId: z.string().min(1),
+  }),
+  control("client_register_response", {
+    status: z.enum(["restored", "proxy_offline", "new"]),
+    proxyId: z.string().optional(),
+  }),
+
+  // Proxy 离线通知
+  control("proxy_offline", {
+    proxyId: z.string(),
+  }),
+
+  // Proxy 主动断开，relay 立即清理资源
+  control("proxy_disconnect", {
+    proxyId: z.string().min(1),
+  }),
+
+  // Proxy 重连后通知 client 恢复
+  control("proxy_online", {
+    proxyId: z.string().min(1),
+  }),
+
+  // 目录列表请求与响应
+  control(
+    "dir_list_request",
+    {
+      proxyId: z.string().min(1).optional(),
+      ...RequestIdShape,
+      path: z.string(),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "dir_list_response",
+    { ...RequestIdShape, ...RequestErrorShape, entries: z.array(DirEntrySchema), path: z.string() },
+    "proxy_to_client",
+  ),
+
+  // 目录创建请求与响应
+  control("dir_create_request", { ...RequestIdShape, path: z.string() }, "client_to_proxy"),
+  control(
+    "dir_create_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      path: z.string(),
+      success: z.boolean(),
+    },
+    "proxy_to_client",
+  ),
+
+  // 命令列表推送，proxy 将可用命令列表推给 client
+  control("command_list_push", { commands: z.array(CommandEntrySchema) }, "proxy_to_client"),
+
+  // 文件树推送: 按目录分组, 首组 path 即为 session cwd
+  // 前端直接把每组写入 tree[path], 与 dir_list_response 共享 cache slot
+  control(
+    "file_tree_push",
+    {
+      groups: z.array(FileTreeGroupSchema),
+    },
+    "proxy_to_client",
+  ),
+
+  // 会话列表请求与权限模式变更
+  control("session_list", undefined, ["client_to_proxy", "proxy_to_client"]),
+  control(
+    "permission_mode_change",
+    {
+      mode: z.enum(["default", "auto_accept", "plan"]),
+      // sessionId 可选：传入时 proxy 按该会话的 mode 分叉（PTY 发 Tab ANSI），未传走全局日志行为
+      sessionId: z.string().optional(),
+    },
+    "client_to_proxy",
+  ),
+
+  // 会话历史浏览
+  control("session_history_request", RequestIdShape, "client_to_proxy"),
+  control(
+    "session_history_response",
+    { ...RequestIdShape, sessions: z.array(HistorySessionSchema) },
+    "proxy_to_client",
+  ),
+
+  // PTY 语义状态，从 Envelope 迁移到 Control 层
+  control(
+    "pty_state",
+    { sessionId: z.string(), payload: PtyStatePayloadSchema },
+    "proxy_to_client",
+  ),
+
+  // Provider 语义状态，来自 Claude/Codex hook 等结构化事件，不从 PTY 字节推断
+  control(
+    "agent_status",
+    { sessionId: z.string(), payload: AgentStatusPayloadSchema },
+    "proxy_to_client",
+  ),
+
+  // 终端标题变化，proxy -> client
+  control("terminal_title", { sessionId: z.string(), title: z.string() }, "proxy_to_client"),
+
+  // 终端尺寸变化，proxy -> client
+  control(
+    "terminal_resize",
+    { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
+    "proxy_to_client",
+  ),
+  control(
+    "terminal_resize_request",
+    { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
+    "client_to_proxy",
+  ),
+
+  // 远程终止 JSON 会话，client -> proxy
+  control("session_terminate", { sessionId: z.string() }, "client_to_proxy"),
+
+  // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
+  control("session_worker_abort", { sessionId: z.string() }, "client_to_proxy"),
+
+  // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件
+  control(
+    "turn_result",
+    {
+      sessionId: z.string(),
+      success: z.boolean(),
+      isError: z.boolean(),
+      // stream-json result.result 是本轮最终文本。assistant_message 流丢失或 CLI 未发增量时，
+      // Web 用它作为 JSON 模式兜底展示，避免 turn 已结束但界面空白。
+      result: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
+
+  // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
+  control(
+    "remote_input_raw",
+    { sessionId: z.string().min(1), data: z.string() },
+    "client_to_proxy",
+  ),
+
+  // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
+  // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
+  control("proxy_info_request", RequestIdShape, "client_to_proxy"),
+  control(
+    "proxy_info",
+    { ...RequestIdShape, homePath: z.string(), agentCli: AgentCliStatusSchema },
+    "proxy_to_client",
+  ),
+  control(
+    "agent_cli_config_update",
+    { ...RequestIdShape, provider: z.enum(["claude", "codex"]), path: z.string().min(1) },
+    "client_to_proxy",
+  ),
+  control(
+    "agent_cli_config_update_response",
+    {
+      ...RequestIdShape,
+      provider: z.enum(["claude", "codex"]),
+      agentCli: AgentCliStatusSchema.optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+
+  // 远程创建 JSON 会话，client -> proxy -> response
+  control(
+    "session_create",
+    {
+      ...RequestIdShape,
+      cwd: z.string(),
+      provider: z.enum(["claude", "codex"]),
+      mode: z.enum(["json", "pty"]).optional(),
+      resumeSessionId: z.string().optional(),
+      // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
+      permissionMode: z
+        .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+        .optional(),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "session_create_response",
+    {
+      ...RequestIdShape,
+      sessionId: z.string(),
+      mode: z.enum(["json", "pty"]).optional(),
+      provider: z.enum(["claude", "codex"]).optional(),
+      ptyOwner: z.enum(["local-terminal", "proxy-hosted"]).optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+
+  // 客户端请求会话历史消息，client -> proxy
+  control(
+    "session_messages_request",
+    {
+      ...RequestIdShape,
+      sessionId: z.string(),
+      limit: z.number().int().min(1).max(200).optional(),
+      before: z.string().optional(),
+    },
+    "client_to_proxy",
+  ),
+
+  // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
+  control(
+    "session_resources_request",
+    { ...RequestIdShape, sessionId: z.string() },
+    "client_to_proxy",
+  ),
+  control(
+    "session_resources_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: z.string(),
+      commands: z.array(CommandEntrySchema),
+      groups: z.array(FileTreeGroupSchema),
+    },
+    "proxy_to_client",
+  ),
+
+  // 客户端请求当前 provider 语义状态；不经 relay 缓存，由 proxy 返回当前值
+  control(
+    "agent_status_request",
+    { ...RequestIdShape, sessionId: z.string().optional() },
+    "client_to_proxy",
+  ),
+  control(
+    "agent_status_response",
+    {
+      ...RequestIdShape,
+      statuses: z.array(z.object({ sessionId: z.string(), payload: AgentStatusPayloadSchema })),
+    },
+    "proxy_to_client",
+  ),
+
+  // 客户端确认已收到审批请求；proxy 只记录送达状态，不把它当成用户决策
+  control(
+    "permission_request_delivered",
+    { sessionId: z.string(), requestId: z.string() },
+    "client_to_proxy",
+  ),
+  control(
+    "tool_approve",
+    { sessionId: z.string(), payload: ToolApprovePayloadSchema },
+    "client_to_proxy",
+  ),
+  control(
+    "tool_deny",
+    { sessionId: z.string(), payload: ToolDenyPayloadSchema },
+    "client_to_proxy",
+  ),
+
+  // proxy 确认用户决策已进入 provider/worker 路径；web 用它更新审批卡片状态
+  control(
+    "permission_decision_result",
+    {
+      sessionId: z.string(),
+      requestId: z.string(),
+      outcome: z.enum(["allow", "deny"]),
+      delivered: z.boolean(),
+      message: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
+
+  // proxy 推送当前 pending 的工具审批列表，client 据此恢复审批卡片
+  control(
+    "pending_approvals_push",
+    {
+      sessionId: z.string(),
+      approvals: z.array(
+        z.object({
+          requestId: z.string(),
+          toolName: z.string(),
+          input: z.record(z.string(), z.unknown()),
+        }),
+      ),
+    },
+    "proxy_to_client",
+  ),
+
+  // 恢复会话时推送历史消息，proxy -> client
+  control(
+    "session_history_messages",
+    {
+      ...RequestIdShape,
+      sessionId: z.string(),
+      before: z.string().optional(),
+      messages: z.array(SessionHistoryMessageSchema),
+      hasMore: z.boolean().optional(),
+      nextBefore: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
+
+  // proxy 重连后同步活跃 session 列表给 relay
+  control("session_sync", {
+    sessions: z.array(
+      z.object({
+        id: z.string(),
+        mode: z.enum(["pty", "json"]),
+        provider: z.enum(["claude", "codex"]),
+        ptyOwner: z.enum(["local-terminal", "proxy-hosted"]).optional(),
+        state: z.string(),
+      }),
+    ),
+  }),
+
+  // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态
+  control(
+    "session_subscribe",
+    { sessionId: z.string(), requestId: z.string().optional() },
+    "client_to_proxy",
+  ),
+
+  // PTY 会话快照，proxy -> client，serialize() 的全量终端状态
+  control(
+    "session_snapshot",
+    {
+      sessionId: z.string(),
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+      data: z.string(),
+      outputSeq: z.number().int().nonnegative(),
+      requestId: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
+] as const;
+
+const relayControlSchemas = relayControlDefinitions.map((definition) => definition.schema) as [
+  (typeof relayControlDefinitions)[number]["schema"],
+  ...Array<(typeof relayControlDefinitions)[number]["schema"]>,
+];
+
+export const RelayControlSchema = z.discriminatedUnion("type", relayControlSchemas);
+
+export type RelayControlMessage = z.infer<typeof RelayControlSchema>;
+export type RelayControlType = RelayControlMessage["type"];
+
+export const ProxyToClientRelayControlTypes = new Set(
+  relayControlDefinitions
+    .filter((definition) => definition.directions.has("proxy_to_client"))
+    .map((definition) => definition.type),
+);
+
+export function isProxyToClientRelayControlType(type: RelayControlType): boolean {
+  return ProxyToClientRelayControlTypes.has(type);
+}
+
+export const ClientToProxyRelayControlTypes = new Set(
+  relayControlDefinitions
+    .filter((definition) => definition.directions.has("client_to_proxy"))
+    .map((definition) => definition.type),
+);
+
+export function isClientToProxyRelayControlType(type: RelayControlType): boolean {
+  return ClientToProxyRelayControlTypes.has(type);
+}

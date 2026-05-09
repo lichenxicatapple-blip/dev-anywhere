@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": ["scripts/dev-restart.sh", "scripts/dev-health.sh"],
+  "workspaces": {
+    "apps/relay": {
+      "entry": ["scripts/verify-relay.ts"],
+      "ignoreDependencies": ["pino", "zod"]
+    },
+    "apps/web": {
+      "entry": ["pwa-assets.config.ts", "e2e/**/*.{ts,d.ts,mjs}"],
+      "ignore": ["src/components/ui/**"]
+    }
+  }
+}

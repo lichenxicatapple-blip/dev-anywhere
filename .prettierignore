@@ -1,0 +1,7 @@
+node_modules
+dist
+build
+pnpm-lock.yaml
+.planning
+.claude
+apps/proxy/assets/fonts/
