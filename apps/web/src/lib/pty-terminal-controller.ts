@@ -44,6 +44,7 @@ interface PtyTerminalControllerOptions {
   onReady?: () => void;
   onSubscribeStarted?: () => void;
   onSubscribeDelayed?: () => void;
+  shouldFocusOnPointerDown?: () => boolean;
 }
 
 interface PtyTerminalController {
@@ -70,6 +71,7 @@ export function attachPtyTerminalController(
     onReady,
     onSubscribeStarted,
     onSubscribeDelayed,
+    shouldFocusOnPointerDown,
   } = options;
 
   let disposed = false;
@@ -89,7 +91,10 @@ export function attachPtyTerminalController(
     disposeTerminal = result.dispose;
     disposeRawInput = attachRawInput(result.terminal, sessionId, { onRawInput }).dispose;
 
-    const focusTerminal = (): void => result.terminal.focus();
+    const focusTerminal = (): void => {
+      if (shouldFocusOnPointerDown?.() === false) return;
+      result.terminal.focus();
+    };
     host.addEventListener("pointerdown", focusTerminal, { passive: true });
     removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
     onTerminalReady?.(result.terminal);

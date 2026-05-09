@@ -85,6 +85,26 @@ describe("attachPtyTerminalController", () => {
     expect(h.terminal.focus).toHaveBeenCalledTimes(1);
   });
 
+  it("can suppress pointerdown focus while the user is reviewing history", async () => {
+    const h = createHarness();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+      shouldFocusOnPointerDown: () => false,
+    });
+    await Promise.resolve();
+
+    h.host.dispatchEvent(new Event("pointerdown"));
+
+    expect(h.terminal.focus).not.toHaveBeenCalled();
+  });
+
   it("focuses the terminal once it is ready so keyboard input works after navigation", async () => {
     vi.useFakeTimers();
     const h = createHarness();
