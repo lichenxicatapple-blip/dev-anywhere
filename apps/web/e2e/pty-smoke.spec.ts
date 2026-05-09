@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, resetLocalState } from "./helpers";
-import { expectTouchTarget } from "./mobile-helpers";
+import { expectTouchTarget, installVisualViewportMock } from "./mobile-helpers";
 
 const SESSION_ID = "pty-smoke";
 
@@ -288,6 +288,7 @@ test.describe("PTY browser smoke", () => {
   test("renders terminal, sends raw input, scrolls, and recovers after resize", async ({
     page,
   }) => {
+    await installVisualViewportMock(page);
     await installFakeRelay(page);
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
     await resetLocalState(page);
@@ -331,6 +332,24 @@ test.describe("PTY browser smoke", () => {
         .poll(() => readRawPtyInput(page))
         .toContain("abc\n\x15\x1b[D\x1b[C\x1b[A\x1b[B\r");
 
+      await page.evaluate(() =>
+        window.__devAnywhereSetVisualViewport?.({
+          height: Math.floor(window.innerHeight * 0.55),
+          offsetTop: 0,
+        }),
+      );
+      await expect(controls).toBeVisible();
+      await page.evaluate(() =>
+        window.__devAnywhereSetVisualViewport?.({
+          height: window.innerHeight,
+          offsetTop: 0,
+        }),
+      );
+      await expect
+        .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
+        .toBe("Terminal input");
+      await expect(controls).toHaveCount(0);
+
       await page
         .locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]')
         .evaluate((el) => (el as HTMLTextAreaElement).blur());
@@ -359,8 +378,19 @@ test.describe("PTY browser smoke", () => {
       if (!button || !scrollbar) return -1;
       return Math.round(scrollbar.x - (button.x + button.width));
     };
-    await expect.poll(backToBottomScrollbarGap).toBeGreaterThanOrEqual(12);
-    await expect.poll(backToBottomScrollbarGap).toBeLessThanOrEqual(20);
+    const backToBottomViewportGap = async () => {
+      const button = await page.locator('[data-slot="back-to-bottom"]').boundingBox();
+      const viewport = page.viewportSize();
+      if (!button || !viewport) return -1;
+      return Math.round(viewport.width - (button.x + button.width));
+    };
+    if (touchEditingSurface) {
+      await expect.poll(backToBottomViewportGap).toBeGreaterThanOrEqual(20);
+      await expect.poll(backToBottomViewportGap).toBeLessThanOrEqual(32);
+    } else {
+      await expect.poll(backToBottomScrollbarGap).toBeGreaterThanOrEqual(12);
+      await expect.poll(backToBottomScrollbarGap).toBeLessThanOrEqual(20);
+    }
     const scrollTopBeforeNewFrame = await page
       .locator('[data-slot="pty-terminal"]')
       .evaluate((el) => {

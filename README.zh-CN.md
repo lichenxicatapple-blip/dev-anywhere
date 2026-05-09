@@ -59,7 +59,7 @@ Desktop / iPad / iPhone / Browser
 1. 把 Relay 和 Web 客户端部署到 VPS：
 
 ```bash
-IMAGE_TAG=0.1.1 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=latest ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 安装脚本会输出 `RELAY_PROXY_TOKEN`、`RELAY_CLIENT_TOKEN` 和 Web UI 地址。

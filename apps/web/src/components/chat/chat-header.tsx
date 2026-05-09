@@ -6,6 +6,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -20,6 +21,8 @@ import {
 import { useAppStore } from "@/stores/app-store";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
+import { toast } from "@/components/toast";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -67,6 +70,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const isPty = mode === "pty" || session?.mode === "pty";
+  const screenWakeLock = useScreenWakeLockScope(sessionId);
   const title = (isPty && ptyTitle) || session?.name || sessionId.slice(0, 8);
   const fontSize = isPty
     ? ptyFontSize
@@ -85,6 +89,12 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
       return;
     }
     adjustChatContentFontSize(delta);
+  }
+
+  function toggleScreenWakeLock() {
+    void screenWakeLock.toggle().catch((err: unknown) => {
+      toast.error(err instanceof Error ? err.message : String(err));
+    });
   }
 
   return (
@@ -146,6 +156,15 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               <DropdownMenuSeparator />
             </>
           ) : null}
+          <DropdownMenuCheckboxItem
+            checked={screenWakeLock.active}
+            disabled={screenWakeLock.pending}
+            data-slot="chat-menu-screen-wake-lock-item"
+            onCheckedChange={toggleScreenWakeLock}
+          >
+            {screenWakeLock.supported ? "屏幕常亮" : "屏幕常亮（浏览器不支持）"}
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-muted-foreground">
             {isPty ? "终端字号" : "聊天字号"}
           </DropdownMenuLabel>

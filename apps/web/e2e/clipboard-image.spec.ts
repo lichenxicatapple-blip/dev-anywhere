@@ -29,7 +29,7 @@ test.describe("clipboard image paste", () => {
     await input.fill("inspect ");
     await dispatchImagePaste(input);
 
-    const expectedPath = "/home/dev/.dev-anywhere/data/test-sess/clipboard/pasted-e2e.png";
+    const expectedPath = ".dev-anywhere/clipboard/test-sess/pasted-e2e.png";
     await expect(input).toHaveValue(`inspect @${expectedPath} `);
 
     const sent = await sentFakeRelayMessages(page);
@@ -54,7 +54,7 @@ test.describe("clipboard image paste", () => {
 
     await dispatchImagePaste(page.locator('[data-slot="pty-terminal"]'));
 
-    const expectedPath = "/home/dev/.dev-anywhere/data/claude-pty/clipboard/pasted-e2e.png";
+    const expectedPath = ".dev-anywhere/clipboard/claude-pty/pasted-e2e.png";
     await expect
       .poll(async () => {
         const sent = await sentFakeRelayMessages(page);

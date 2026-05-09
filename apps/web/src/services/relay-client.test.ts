@@ -167,7 +167,7 @@ describe("RelayClient request handling", () => {
       requestId,
       sessionId: "s1",
       success: true,
-      path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
+      path: ".dev-anywhere/clipboard/s1/shot.png",
     });
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
@@ -181,7 +181,7 @@ describe("RelayClient request handling", () => {
     await expect(promise).resolves.toEqual({
       sessionId: "s1",
       success: true,
-      path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
+      path: ".dev-anywhere/clipboard/s1/shot.png",
       error: undefined,
       errorCode: undefined,
     });

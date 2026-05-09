@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.2] - 2026-05-09
+
+### Added
+
+- Chat and PTY pages now expose a per-session screen wake lock toggle in the overflow menu.
+
+### Fixed
+
+- Clipboard image paste now stores files inside the active session working directory when possible and appends `.dev-anywhere/` to an existing project `.gitignore`.
+- Screen wake lock is released when leaving the current chat page, switching sessions, or resolving a pending wake-lock request after navigation.
+- Mobile PTY auxiliary controls now hide when the soft keyboard is dismissed by the system keyboard.
+- Mobile PTY back-to-bottom control now sits closer to the right edge while desktop still avoids the terminal scrollbar.
+
 ## [0.1.1] - 2026-05-09
 
 ### Changed

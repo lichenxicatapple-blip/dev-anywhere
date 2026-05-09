@@ -59,7 +59,10 @@ describe("InputBar clipboard image paste", () => {
 
   beforeEach(() => {
     uploadClipboardImage.mockReset();
-    uploadClipboardImage.mockResolvedValue({ success: true, path: "/tmp/dev-anywhere/shot.png" });
+    uploadClipboardImage.mockResolvedValue({
+      success: true,
+      path: ".dev-anywhere/clipboard/s1/shot.png",
+    });
     sendEnvelope.mockReset();
     toastError.mockReset();
     useChatStore.setState({
@@ -89,7 +92,7 @@ describe("InputBar clipboard image paste", () => {
       });
     });
     await waitFor(() => {
-      expect(textarea.value).toBe("inspect @/tmp/dev-anywhere/shot.png ");
+      expect(textarea.value).toBe("inspect @.dev-anywhere/clipboard/s1/shot.png ");
     });
     expect(toastError).not.toHaveBeenCalled();
   });
@@ -105,10 +108,10 @@ describe("InputBar clipboard image paste", () => {
     dispatchImagePaste(textarea, file);
     fireEvent.change(textarea, { target: { value: "inspect this screenshot " } });
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    upload.resolve({ success: true, path: "/tmp/dev-anywhere/shot.png" });
+    upload.resolve({ success: true, path: ".dev-anywhere/clipboard/s1/shot.png" });
 
     await waitFor(() => {
-      expect(textarea.value).toBe("inspect this screenshot @/tmp/dev-anywhere/shot.png ");
+      expect(textarea.value).toBe("inspect this screenshot @.dev-anywhere/clipboard/s1/shot.png ");
     });
   });
 
@@ -136,11 +139,11 @@ describe("InputBar clipboard image paste", () => {
     rerender(<InputBar sessionId="s2" />);
     const switchedTextarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
     expect(switchedTextarea.value).toBe("new session ");
-    upload.resolve({ success: true, path: "/tmp/dev-anywhere/shot.png" });
+    upload.resolve({ success: true, path: ".dev-anywhere/clipboard/s1/shot.png" });
 
     await waitFor(() => {
       expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
-        "inspect @/tmp/dev-anywhere/shot.png ",
+        "inspect @.dev-anywhere/clipboard/s1/shot.png ",
       );
     });
     expect(useChatStore.getState().bySessionId.s2?.inputDraft).toBe("new session ");

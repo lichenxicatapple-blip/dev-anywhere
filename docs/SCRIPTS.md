@@ -57,7 +57,7 @@ Configuration sources are intentionally split:
 | `pnpm proxy -- claude`                                                             | Run the default proxy profile command and attach Claude Code.                                                                    |
 | `pnpm proxy -- codex`                                                              | Run the default proxy profile command and attach Codex.                                                                          |
 
-Proxy profiles isolate local daemon state. `default` keeps the historical paths under `~/.dev-anywhere/`, while non-default profiles use `~/.dev-anywhere/profiles/<name>/` for socket, PID, sessions, clipboard files, logs, and proxy ID. Use `dev-anywhere --profile local claude` or `dev-anywhere --profile local serve status` when working against the local relay without disturbing a cloud-connected proxy.
+Proxy profiles isolate local daemon state. `default` keeps the historical paths under `~/.dev-anywhere/`, while non-default profiles use `~/.dev-anywhere/profiles/<name>/` for socket, PID, sessions, fallback clipboard files, logs, and proxy ID. Clipboard images are saved under the active session working directory when possible. Use `dev-anywhere --profile local claude` or `dev-anywhere --profile local serve status` when working against the local relay without disturbing a cloud-connected proxy.
 
 Agent CLI paths can be overridden:
 

@@ -50,13 +50,13 @@ The default image registry is the public Aliyun ACR mirror used by this project.
 From your laptop:
 
 ```bash
-IMAGE_TAG=0.1.1 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=latest ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 Or run directly on the VPS:
 
 ```bash
-sudo env IMAGE_TAG=0.1.1 ./scripts/install-relay.sh dev-anywhere.example.com
+sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
 ```
 
 The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
@@ -135,7 +135,7 @@ Then open the web client, choose the connected machine, and create or resume a s
 Upgrade to a new published image tag:
 
 ```bash
-sudo env IMAGE_TAG=0.1.1 ./scripts/install-relay.sh dev-anywhere.example.com
+sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
 ```
 
 Check service health:

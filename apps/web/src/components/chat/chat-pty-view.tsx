@@ -18,6 +18,7 @@ import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
@@ -85,7 +86,13 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const ptyPlainEnterBehavior = touchEditingSurface ? "linefeed" : "submit";
-  const showMobilePtyControls = touchEditingSurface && ptyInputFocused;
+  const keyboardOffset = useVisualViewportBottomOffset();
+  const [hasSeenSoftKeyboard, setHasSeenSoftKeyboard] = useState(false);
+  useEffect(() => {
+    if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
+  }, [keyboardOffset]);
+  const softKeyboardOpenOrUnknown = !hasSeenSoftKeyboard || keyboardOffset > 0;
+  const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
 
   if (!relayoutSchedulerRef.current) {
     relayoutSchedulerRef.current = createRafScheduler(() => {
@@ -410,8 +417,10 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         hasNewMessages={follow.hasNewFramesWhileAway}
         className={
           showMobilePtyControls
-            ? "right-12 bottom-[calc(env(safe-area-inset-bottom)+4rem)]"
-            : "right-12"
+            ? "right-6 bottom-[calc(env(safe-area-inset-bottom)+4rem)]"
+            : touchEditingSurface
+              ? "right-6"
+              : "right-12"
         }
         onClick={() => {
           scrollToBottomRef.current();

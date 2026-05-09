@@ -62,7 +62,7 @@ describe("RelayControlSchema", () => {
         requestId: "clip-1",
         sessionId: "sess-1",
         success: true,
-        path: "/home/dev/.dev-anywhere/data/sess-1/clipboard/shot.png",
+        path: ".dev-anywhere/clipboard/sess-1/shot.png",
       }),
     ).toMatchObject({
       type: "clipboard_image_upload_response",

@@ -337,9 +337,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               requestId: msg.requestId,
               sessionId: String(msg.sessionId),
               success: true,
-              path: `/home/dev/.dev-anywhere/data/${String(
-                msg.sessionId,
-              )}/clipboard/pasted-e2e.png`,
+              path: `.dev-anywhere/clipboard/${String(msg.sessionId)}/pasted-e2e.png`,
             });
             break;
           case "session_resources_request":

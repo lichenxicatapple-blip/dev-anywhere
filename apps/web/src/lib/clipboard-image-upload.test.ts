@@ -7,7 +7,7 @@ describe("clipboard image upload flow", () => {
     const relay = {
       uploadClipboardImage: vi.fn().mockResolvedValue({
         success: true,
-        path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
+        path: ".dev-anywhere/clipboard/s1/shot.png",
       }),
     };
 
@@ -20,8 +20,8 @@ describe("clipboard image upload flow", () => {
         sessionId: "s1",
       }),
     ).resolves.toEqual({
-      path: "/home/dev/.dev-anywhere/data/s1/clipboard/shot.png",
-      token: "@/home/dev/.dev-anywhere/data/s1/clipboard/shot.png ",
+      path: ".dev-anywhere/clipboard/s1/shot.png",
+      token: "@.dev-anywhere/clipboard/s1/shot.png ",
     });
     expect(relay.uploadClipboardImage).toHaveBeenCalledWith("s1", {
       mimeType: "image/png",

@@ -119,12 +119,17 @@ export class RelayInputHandlers {
       return;
     }
 
-    const result = saveClipboardImageUpload({
-      sessionId,
-      mimeType: typeof msg.mimeType === "string" ? msg.mimeType : "",
-      dataBase64: typeof msg.dataBase64 === "string" ? msg.dataBase64 : "",
-      fileName: typeof msg.fileName === "string" ? msg.fileName : undefined,
-    });
+    const result = saveClipboardImageUpload(
+      {
+        sessionId,
+        mimeType: typeof msg.mimeType === "string" ? msg.mimeType : "",
+        dataBase64: typeof msg.dataBase64 === "string" ? msg.dataBase64 : "",
+        fileName: typeof msg.fileName === "string" ? msg.fileName : undefined,
+      },
+      {
+        cwd: session.cwd,
+      },
+    );
 
     this.deps.relayConnection.sendRaw(
       JSON.stringify({

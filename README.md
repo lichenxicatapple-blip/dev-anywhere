@@ -59,7 +59,7 @@ Desktop / iPad / iPhone / Browser
 1. Deploy the relay and web client to a VPS:
 
 ```bash
-IMAGE_TAG=0.1.1 ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=latest ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 The installer prints a `RELAY_PROXY_TOKEN`, a `RELAY_CLIENT_TOKEN`, and a Web UI URL.

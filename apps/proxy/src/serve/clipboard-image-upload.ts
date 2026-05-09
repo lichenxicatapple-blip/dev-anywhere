@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import { ControlErrorCode } from "@dev-anywhere/shared";
@@ -29,6 +29,7 @@ type ClipboardImageUploadResult = {
 
 type ClipboardImageUploadOptions = {
   dataDir?: string;
+  cwd?: string;
   now?: () => number;
   randomSuffix?: () => string;
 };
@@ -61,14 +62,64 @@ function decodeBase64Image(dataBase64: string): Buffer {
   return buffer;
 }
 
-function resolveSessionClipboardDir(dataDir: string, sessionId: string): string {
-  const root = resolve(dataDir);
-  const uploadDir = resolve(root, sessionId, "clipboard");
+function resolveChildDir(rootPath: string, ...segments: string[]): string {
+  const root = resolve(rootPath);
+  const uploadDir = resolve(root, ...segments);
   const relativePath = relative(root, uploadDir);
   if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
     throw new Error("会话路径无效");
   }
   return uploadDir;
+}
+
+function resolveSessionClipboardDir(dataDir: string, sessionId: string): string {
+  return resolveChildDir(dataDir, sessionId, "clipboard");
+}
+
+function normalizeGitignoreLine(line: string): string {
+  return line.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function ensureProjectClipboardIgnored(cwd: string): void {
+  const gitignorePath = join(cwd, ".gitignore");
+  if (!existsSync(gitignorePath)) return;
+
+  try {
+    const current = readFileSync(gitignorePath, "utf-8");
+    const alreadyIgnored = current
+      .split(/\r?\n/)
+      .some((line) => normalizeGitignoreLine(line) === ".dev-anywhere");
+    if (alreadyIgnored) return;
+
+    const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
+    writeFileSync(gitignorePath, `${current}${separator}.dev-anywhere/\n`);
+  } catch {
+    // Ignore-file updates are best-effort; image upload should still succeed.
+  }
+}
+
+function trySaveProjectClipboardImage(options: {
+  cwd?: string;
+  sessionId: string;
+  fileName: string;
+  buffer: Buffer;
+}): ClipboardImageUploadResult | null {
+  if (!options.cwd) return null;
+
+  try {
+    const cwd = resolve(options.cwd);
+    if (!statSync(cwd).isDirectory()) return null;
+    const clipboardRoot = resolve(cwd, ".dev-anywhere", "clipboard");
+    const uploadDir = resolveChildDir(clipboardRoot, options.sessionId);
+    const path = join(uploadDir, options.fileName);
+
+    mkdirSync(uploadDir, { recursive: true });
+    writeFileSync(path, options.buffer, { mode: 0o600 });
+    ensureProjectClipboardIgnored(cwd);
+    return { success: true, path: relative(cwd, path) };
+  } catch {
+    return null;
+  }
 }
 
 export function saveClipboardImageUpload(
@@ -86,12 +137,20 @@ export function saveClipboardImageUpload(
   }
 
   try {
-    const dataDir = options.dataDir ?? DATA_DIR;
-    const uploadDir = resolveSessionClipboardDir(dataDir, request.sessionId);
     const buffer = decodeBase64Image(request.dataBase64);
     const now = options.now ?? Date.now;
     const suffix = options.randomSuffix?.() ?? nanoid(6);
     const fileName = `pasted-${formatTimestamp(now())}-${suffix}.${extension}`;
+    const projectResult = trySaveProjectClipboardImage({
+      cwd: options.cwd,
+      sessionId: request.sessionId,
+      fileName,
+      buffer,
+    });
+    if (projectResult) return projectResult;
+
+    const dataDir = options.dataDir ?? DATA_DIR;
+    const uploadDir = resolveSessionClipboardDir(dataDir, request.sessionId);
     const path = join(uploadDir, fileName);
 
     mkdirSync(uploadDir, { recursive: true });

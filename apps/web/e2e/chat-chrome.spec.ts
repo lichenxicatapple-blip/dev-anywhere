@@ -2,6 +2,69 @@ import { test, expect } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "./helpers";
 import { expectTouchTarget } from "./mobile-helpers";
 
+async function installWakeLockMock(page: import("@playwright/test").Page): Promise<void> {
+  await page.addInitScript(() => {
+    const state = {
+      delayRequest: false,
+      requests: 0,
+      releases: 0,
+      resolveRequest: null as (() => void) | null,
+      sentinel: null as
+        | (EventTarget & {
+            released: boolean;
+            release: () => Promise<void>;
+          })
+        | null,
+    };
+    Object.defineProperty(window, "__devAnywhereWakeLockTest", {
+      configurable: true,
+      value: state,
+    });
+    Object.defineProperty(navigator, "wakeLock", {
+      configurable: true,
+      value: {
+        async request(type: "screen") {
+          if (type !== "screen") throw new Error(`unexpected wake lock type: ${type}`);
+          state.requests += 1;
+          if (state.delayRequest) {
+            await new Promise<void>((resolve) => {
+              state.resolveRequest = resolve;
+            });
+          }
+          const sentinel = new EventTarget() as EventTarget & {
+            released: boolean;
+            release: () => Promise<void>;
+          };
+          sentinel.released = false;
+          sentinel.release = async () => {
+            if (sentinel.released) return;
+            sentinel.released = true;
+            state.releases += 1;
+            sentinel.dispatchEvent(new Event("release"));
+          };
+          state.sentinel = sentinel;
+          return sentinel;
+        },
+      },
+    });
+  });
+}
+
+async function wakeLockTestCount(
+  page: import("@playwright/test").Page,
+  key: "requests" | "releases",
+): Promise<number> {
+  return page.evaluate(
+    (stateKey) =>
+      (
+        window as Window & {
+          __devAnywhereWakeLockTest?: Record<"requests" | "releases", number>;
+        }
+      ).__devAnywhereWakeLockTest?.[stateKey] ?? 0,
+    key,
+  );
+}
+
 test.describe("AppShell top-level mobile chrome", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(BASE_URL);
@@ -75,6 +138,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(menu.getByText("重命名")).toHaveCount(0);
     await expect(menu.getByText("复制会话")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-terminate-item"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
@@ -116,7 +180,6 @@ test.describe("ChatHeader compact navigation controls", () => {
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
     ).toBeLessThanOrEqual(1);
     expect(Math.abs(stepperBox.x - (resetBox.x + 8))).toBeLessThanOrEqual(2);
-
   });
 
   test("PTY overflow menu exposes terminal shortcuts", async ({ page }) => {
@@ -131,6 +194,84 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
+  });
+});
+
+test.describe("ChatHeader screen wake lock", () => {
+  test("screen wake lock follows the chat page lifecycle", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installWakeLockMock(page);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    const item = page.locator('[data-slot="chat-menu-screen-wake-lock-item"]');
+    await expect(item).toBeVisible();
+    await expect(item).toHaveAttribute("data-state", "unchecked");
+
+    await item.click();
+    await expect.poll(() => wakeLockTestCount(page, "requests")).toBe(1);
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await expect(item).toHaveAttribute("data-state", "checked");
+
+    await page.locator('[data-slot="chat-back-button"]').click();
+    await expect(page).toHaveURL(/\/sessions/);
+    await expect.poll(() => wakeLockTestCount(page, "releases")).toBe(1);
+  });
+
+  test("screen wake lock is released when switching sessions", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installWakeLockMock(page);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await page.locator('[data-slot="chat-menu-screen-wake-lock-item"]').click();
+    await expect.poll(() => wakeLockTestCount(page, "requests")).toBe(1);
+
+    await page
+      .locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible')
+      .locator("button")
+      .first()
+      .click();
+
+    await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
+    await expect.poll(() => wakeLockTestCount(page, "releases")).toBe(1);
+  });
+
+  test("pending screen wake lock request is released after leaving chat", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installWakeLockMock(page);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+    await page.evaluate(() => {
+      const state = (
+        window as Window & {
+          __devAnywhereWakeLockTest?: {
+            delayRequest: boolean;
+          };
+        }
+      ).__devAnywhereWakeLockTest;
+      if (state) state.delayRequest = true;
+    });
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await page.locator('[data-slot="chat-menu-screen-wake-lock-item"]').click();
+    await expect.poll(() => wakeLockTestCount(page, "requests")).toBe(1);
+
+    await page.goto(`${BASE_URL}/#/sessions`);
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __devAnywhereWakeLockTest?: {
+            resolveRequest: (() => void) | null;
+          };
+        }
+      ).__devAnywhereWakeLockTest?.resolveRequest?.();
+    });
+
+    await expect.poll(() => wakeLockTestCount(page, "releases")).toBe(1);
   });
 });
 

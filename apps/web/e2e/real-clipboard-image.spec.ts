@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -190,12 +190,12 @@ function proxyDataRoot(): string {
   return join(homedir(), ".dev-anywhere", "profiles", proxyProfile, "data");
 }
 
-function clipboardDir(sessionId: string): string {
-  return join(proxyDataRoot(), sessionId, "clipboard");
+function clipboardDir(cwd: string, sessionId: string): string {
+  return join(cwd, ".dev-anywhere", "clipboard", sessionId);
 }
 
-async function waitForUploadedImage(sessionId: string): Promise<string> {
-  const dir = clipboardDir(sessionId);
+async function waitForUploadedImage(cwd: string, sessionId: string): Promise<string> {
+  const dir = clipboardDir(cwd, sessionId);
   for (let i = 0; i < 80; i += 1) {
     if (existsSync(dir)) {
       const file = readdirSync(dir).find((entry) => entry.endsWith(".png"));
@@ -212,6 +212,11 @@ function expectUploadedBytes(path: string): void {
 
 function cleanupSessionData(sessionId: string): void {
   rmSync(join(proxyDataRoot(), sessionId), { recursive: true, force: true });
+}
+
+function expectProjectClipboardIgnored(cwd: string): void {
+  const lines = readFileSync(join(cwd, ".gitignore"), "utf-8").split(/\r?\n/).filter(Boolean);
+  expect(lines.filter((line) => line.trim() === ".dev-anywhere/")).toHaveLength(1);
 }
 
 async function terminalText(page: Page, sessionId: string): Promise<string> {
@@ -242,6 +247,8 @@ test.describe("real clipboard image chain", () => {
     const ptyCwd = join(smokeRoot, `pty-${Date.now()}`);
     mkdirSync(jsonCwd, { recursive: true });
     mkdirSync(ptyCwd, { recursive: true });
+    writeFileSync(join(jsonCwd, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(ptyCwd, ".gitignore"), "node_modules/\n");
 
     let jsonSessionId: string | undefined;
     let ptySessionId: string | undefined;
@@ -255,17 +262,19 @@ test.describe("real clipboard image chain", () => {
       await input.fill("inspect ");
       await dispatchImagePaste(input);
 
-      const jsonUpload = await waitForUploadedImage(jsonSessionId);
+      const jsonUpload = await waitForUploadedImage(jsonCwd, jsonSessionId);
       expectUploadedBytes(jsonUpload);
-      await expect(input).toHaveValue(`inspect @${jsonUpload} `);
+      expectProjectClipboardIgnored(jsonCwd);
+      await expect(input).toHaveValue(`inspect @${relative(jsonCwd, jsonUpload)} `);
 
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
       await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible({ timeout: 20_000 });
       await dispatchImagePaste(page.locator('[data-slot="pty-terminal"]'));
 
-      const ptyUpload = await waitForUploadedImage(ptySessionId);
+      const ptyUpload = await waitForUploadedImage(ptyCwd, ptySessionId);
       expectUploadedBytes(ptyUpload);
+      expectProjectClipboardIgnored(ptyCwd);
       await expect
         .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
           timeout: 20_000,
@@ -276,10 +285,12 @@ test.describe("real clipboard image chain", () => {
         await terminateSession(page, jsonSessionId).catch(() => undefined);
         cleanupSessionData(jsonSessionId);
       }
+      rmSync(jsonCwd, { recursive: true, force: true });
       if (ptySessionId) {
         await terminateSession(page, ptySessionId).catch(() => undefined);
         cleanupSessionData(ptySessionId);
       }
+      rmSync(ptyCwd, { recursive: true, force: true });
     }
   });
 });
