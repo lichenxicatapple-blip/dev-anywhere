@@ -60,9 +60,12 @@ test.describe("real local chaos UI", () => {
     await page.goto("/#/sessions");
 
     await expect(
-      page.getByText(
-        /在开发机上启动 DEV Anywhere|暂无可连接开发机|请先连接开发机|选择要连接的开发机/,
-      ),
+      page
+        .locator("h1:visible,h2:visible,p:visible,span:visible,button:visible")
+        .filter({
+          hasText: /在开发机上启动 DEV Anywhere|暂无可连接开发机|请先连接开发机|选择要连接的开发机/,
+        })
+        .first(),
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-slot="session-row"]').first()).toHaveCount(0);
   });

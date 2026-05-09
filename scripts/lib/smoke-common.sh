@@ -32,6 +32,34 @@ smoke_require_local_base_url() {
   exit 2
 }
 
+smoke_check_web_entry() {
+  local web_base_url="$1"
+  local entry_url="${web_base_url%/}/src/app.tsx"
+  local body
+
+  if ! body="$(curl --noproxy '*' -fsS "$entry_url" 2>/dev/null)"; then
+    return 2
+  fi
+
+  if printf '%s\n' "$body" | grep -qE 'Internal Server Error|Failed to resolve import|vite:import-analysis|ErrorOverlay'; then
+    return 1
+  fi
+
+  return 0
+}
+
+smoke_report_web_entry_error() {
+  local web_base_url="$1"
+  local artifact_dir="$2"
+  local entry_url="${web_base_url%/}/src/app.tsx"
+
+  mkdir -p "$artifact_dir"
+  curl --noproxy '*' -sS "$entry_url" >"$artifact_dir/web-entry-error.html" 2>/dev/null || true
+  echo "ERROR: Web dev server responds at $web_base_url but cannot compile the app entry." >&2
+  echo "Saved the Vite error response to: $artifact_dir/web-entry-error.html" >&2
+  echo "Restart the stale dev server, or set WEB_BASE_URL and DEV_ANYWHERE_WEB_PORT to a clean local port." >&2
+}
+
 smoke_start_vite_if_needed() {
   local root="$1"
   local artifact_dir="$2"
@@ -39,7 +67,26 @@ smoke_start_vite_if_needed() {
   local web_port="${DEV_ANYWHERE_WEB_PORT:-5173}"
 
   if curl --noproxy '*' -fsS "$web_base_url" >/dev/null 2>&1; then
-    return
+    if smoke_check_web_entry "$web_base_url"; then
+      return
+    fi
+    smoke_report_web_entry_error "$web_base_url" "$artifact_dir"
+    exit 1
+  fi
+
+  if ! smoke_is_local_url "$web_base_url"; then
+    echo "ERROR: Web server is not reachable at $web_base_url" >&2
+    exit 1
+  fi
+
+  if [[ "$web_base_url" =~ :([0-9]+)(/|$) ]]; then
+    web_port="${BASH_REMATCH[1]}"
+  fi
+
+  if lsof -nP -iTCP:"$web_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "ERROR: Port $web_port is already in use, but $web_base_url is not healthy." >&2
+    echo "Set WEB_BASE_URL and DEV_ANYWHERE_WEB_PORT to a clean local port." >&2
+    exit 1
   fi
 
   mkdir -p "$artifact_dir"
@@ -48,13 +95,17 @@ smoke_start_vite_if_needed() {
   SMOKE_STARTED_VITE_PID="$!"
 
   for _ in {1..40}; do
-    if curl --noproxy '*' -fsS "$web_base_url" >/dev/null 2>&1; then
+    if smoke_check_web_entry "$web_base_url"; then
       return
     fi
     sleep 0.25
   done
 
-  echo "ERROR: Vite did not respond at $web_base_url" >&2
+  if curl --noproxy '*' -fsS "$web_base_url" >/dev/null 2>&1; then
+    smoke_report_web_entry_error "$web_base_url" "$artifact_dir"
+  else
+    echo "ERROR: Vite did not respond at $web_base_url" >&2
+  fi
   tail -n 80 "$artifact_dir/vite.log" 2>/dev/null || true
   exit 1
 }

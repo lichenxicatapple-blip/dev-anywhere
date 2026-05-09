@@ -6,8 +6,10 @@ import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
 
 const enabled = process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS === "1";
-const chaosRoot = process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD ?? "/Users/admin/test_go";
+const chaosRoot =
+  process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/json-worker";
 const relayPort = process.env.DEV_ANYWHERE_RELAY_PORT ?? "3100";
+const proxyEnv = process.env.DEV_ANYWHERE_DEV_ENV ?? "local";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -16,7 +18,7 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await expect(switcher).toBeVisible({ timeout: 15_000 });
   await switcher.click();
 
-  const firstProxy = page.locator('[data-slot="proxy-item"]').first();
+  const firstProxy = page.locator('[data-slot="proxy-item"]:visible').first();
   await expect(firstProxy).toBeVisible({ timeout: 15_000 });
   await firstProxy.click();
 }
@@ -35,7 +37,7 @@ async function restartRelayOnly(): Promise<void> {
 async function restartProxyServeWithFixture(): Promise<void> {
   await execFileAsync(
     "pnpm",
-    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart"],
+    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart", "--env", proxyEnv],
     {
       cwd: repoRoot,
       timeout: 30_000,
@@ -59,9 +61,9 @@ async function createJsonSession(page: Page, cwd: string): Promise<string> {
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
   await page
-    .getByLabel("会话模式")
+    .getByLabel("交互方式")
     .getByRole("button", { name: /聊天模式/ })
-    .click();
+    .click({ timeout: 15_000 });
   await page
     .getByRole("dialog", { name: "新建会话" })
     .getByRole("button", { name: "创建" })

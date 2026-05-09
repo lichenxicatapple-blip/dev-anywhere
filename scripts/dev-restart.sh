@@ -16,6 +16,7 @@ export DEV_ANYWHERE_LOG_RETENTION
 
 RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
+DEV_ENV="${DEV_ANYWHERE_DEV_ENV:-local}"
 FONT_DIR="$HOME/.dev-anywhere/relay-data/fonts"
 PACKAGE_FONT_DIR="$ROOT/apps/proxy/assets/fonts"
 
@@ -133,13 +134,14 @@ wait_port "$WEB_PORT" "Web" "$WEB_LOG"
 
 echo ""
 echo "=== Restarting proxy serve daemon ==="
-INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env "$DEV_ENV"
 
 echo ""
 echo "=== All services restarted ==="
 echo "  Log run: $DEV_ANYWHERE_LOG_RUN_ID"
 echo "  Relay: http://localhost:$RELAY_PORT"
 echo "  Web:   http://localhost:$WEB_PORT"
+echo "  Proxy env: $DEV_ENV"
 echo ""
 echo "Check local chain health:"
 echo "  pnpm dev:health"

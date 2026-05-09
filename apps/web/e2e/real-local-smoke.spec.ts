@@ -5,7 +5,7 @@ const enabled = process.env.DEV_ANYWHERE_REAL_LOCAL_SMOKE === "1";
 const createRealSessions = process.env.DEV_ANYWHERE_REAL_CREATE_SESSION_SMOKE === "1";
 const baseUrl = process.env.WEB_BASE_URL ?? "http://127.0.0.1:5173";
 const localBaseUrl = /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(baseUrl);
-const smokeCwd = process.env.DEV_ANYWHERE_REAL_PROVIDER_CWD ?? "/Users/catli/MyApps/cc-anywhere";
+const smokeCwd = process.env.DEV_ANYWHERE_REAL_PROVIDER_CWD ?? process.cwd();
 const modelSmokeToken = "MOBILE_SMOKE_MODEL_OK";
 
 test.describe("real local smoke", () => {

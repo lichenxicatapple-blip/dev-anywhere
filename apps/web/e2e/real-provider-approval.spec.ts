@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -6,22 +7,26 @@ import { expect, test, type Page } from "@playwright/test";
 
 type Provider = "claude" | "codex";
 
-const smokeCwd = process.env.DEV_ANYWHERE_REAL_PROVIDER_CWD ?? "/Users/admin/test_go";
+const smokeCwd =
+  process.env.DEV_ANYWHERE_REAL_PROVIDER_CWD ?? "/tmp/dev-anywhere-chaos/provider-approval";
 const approvalTimeoutMs = Number(
-  process.env.DEV_ANYWHERE_REAL_PROVIDER_APPROVAL_TIMEOUT_MS ?? 180_000,
+  process.env.DEV_ANYWHERE_REAL_PROVIDER_APPROVAL_TIMEOUT_MS ?? 60_000,
 );
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 test.describe.configure({ mode: "serial" });
-test.setTimeout(approvalTimeoutMs + 90_000);
+test.setTimeout(approvalTimeoutMs + 60_000);
+test.beforeAll(() => {
+  mkdirSync(smokeCwd, { recursive: true });
+});
 
 async function selectFirstProxy(page: Page): Promise<void> {
   const switcher = page.locator('[data-slot="proxy-switcher-trigger"]').first();
   await expect(switcher).toBeVisible({ timeout: 15_000 });
   await switcher.click();
 
-  const firstProxy = page.locator('[data-slot="proxy-item"]').first();
+  const firstProxy = page.locator('[data-slot="proxy-item"]:visible').first();
   await expect(firstProxy).toBeVisible({ timeout: 15_000 });
   await firstProxy.click();
 }
@@ -36,13 +41,13 @@ async function createHostedPtySession(page: Page, provider: Provider): Promise<s
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
   await page
-    .getByLabel("会话模式")
+    .getByLabel("交互方式")
     .getByRole("button", { name: /终端模式/ })
-    .click();
+    .click({ timeout: 15_000 });
   await page
     .getByLabel("Agent CLI")
     .getByRole("button", { name: provider === "claude" ? /Claude Code/ : /Codex/ })
-    .click();
+    .click({ timeout: 15_000 });
   await page
     .getByRole("dialog", { name: "新建会话" })
     .getByRole("button", { name: "创建" })
@@ -60,15 +65,6 @@ async function terminalText(page: Page, sessionId: string): Promise<string> {
   return page.evaluate((id) => window.__ccTest?.pty.serialize(id) ?? "", sessionId);
 }
 
-async function waitForTerminalText(
-  page: Page,
-  sessionId: string,
-  pattern: RegExp,
-  timeout = 60_000,
-): Promise<void> {
-  await expect.poll(() => terminalText(page, sessionId), { timeout }).toMatch(pattern);
-}
-
 async function focusTerminalInput(page: Page): Promise<void> {
   const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
   await expect(input).toBeVisible({ timeout: 15_000 });
@@ -78,7 +74,7 @@ async function focusTerminalInput(page: Page): Promise<void> {
 async function maybeAcceptCodexTrustPrompt(page: Page, sessionId: string): Promise<void> {
   await expect
     .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
-    .toMatch(/Do you trust|Ready|Find and fix a bug/i);
+    .toMatch(/Do you trust|Ready|Find and fix a bug|OpenAI Codex|Run \/review/i);
 
   const text = await terminalText(page, sessionId);
   if (!/Do you trust/i.test(text)) return;
@@ -88,7 +84,23 @@ async function maybeAcceptCodexTrustPrompt(page: Page, sessionId: string): Promi
   await page.keyboard.press("Enter");
   await expect
     .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
-    .not.toMatch(/Do you trust/i);
+    .toMatch(/Ready|Find and fix a bug|OpenAI Codex|Run \/review/i);
+}
+
+async function maybeAcceptClaudeTrustPrompt(page: Page, sessionId: string): Promise<void> {
+  await expect
+    .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
+    .toMatch(/Quick safety check|Is this a project you trust|Try "write a test"|Welcome back/i);
+
+  const text = await terminalText(page, sessionId);
+  if (/Quick safety check|Is this a project you trust/i.test(text)) {
+    await focusTerminalInput(page);
+    await page.keyboard.press("Enter");
+  }
+
+  await expect
+    .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
+    .toMatch(/Try "write a test"|Welcome back|Claude Code v/i);
 }
 
 async function submitCodexPrompt(page: Page, sessionId: string): Promise<void> {
@@ -111,7 +123,7 @@ async function triggerToolApproval(
   provider: Provider,
 ): Promise<void> {
   if (provider === "claude") {
-    await waitForTerminalText(page, sessionId, /Claude Code/i, 60_000);
+    await maybeAcceptClaudeTrustPrompt(page, sessionId);
   } else {
     await maybeAcceptCodexTrustPrompt(page, sessionId);
   }

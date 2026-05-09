@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 本地真实链路健康检查：relay + web + proxy serve daemon + 最近日志。
-# 只读诊断，不启动/停止进程；需要重启时先运行 `pnpm dev:restart`。
+# Local dev loop health check: relay + web + proxy serve daemon + recent logs.
+# Read-only diagnostics. Run `pnpm dev:restart` first when services need a restart.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

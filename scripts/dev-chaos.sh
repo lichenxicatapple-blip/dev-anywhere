@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 本地真实环境 chaos runner：对 relay/proxy serve 注入进程级故障，并验证三件套恢复。
+# Local chaos runner: inject relay/proxy/web failures and verify reconnect recovery.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +12,7 @@ RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-5173}"
 WEB_BASE_URL="${WEB_BASE_URL:-http://localhost:$WEB_PORT}"
 LOG_DIR="${DEV_ANYWHERE_LOG_DIR:-$HOME/.dev-anywhere/logs}"
+DEV_ENV="${DEV_ANYWHERE_DEV_ENV:-local}"
 DEV_ANYWHERE_LOG_RUN_ID="${DEV_ANYWHERE_LOG_RUN_ID:-$(date +%Y%m%d-%H%M%S)-chaos-$$}"
 DEV_ANYWHERE_LOG_RETENTION="${DEV_ANYWHERE_LOG_RETENTION:-50}"
 export DEV_ANYWHERE_LOG_RUN_ID
@@ -20,12 +21,13 @@ mkdir -p "$LOG_DIR"
 SERVICE_LOG_CURSOR=0
 STARTED_PROXY_PID=""
 RELAY_CHAOS_TYPES="${DEV_ANYWHERE_RELAY_CHAOS_TYPES:-proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,permission_request_delivered,tool_approve,tool_deny,session_snapshot}"
+CHAOS_WORKDIR="${DEV_ANYWHERE_CHAOS_WORKDIR:-${TMPDIR:-/tmp}/dev-anywhere-chaos}"
 HOSTED_PTY_CHAOS_BIN=""
-HOSTED_PTY_CHAOS_CWD="${DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD:-/Users/admin/test_go}"
+HOSTED_PTY_CHAOS_CWD="${DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD:-$CHAOS_WORKDIR/hosted-pty}"
 LOCAL_PTY_CHAOS_BIN=""
-LOCAL_PTY_CHAOS_CWD="${DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD:-/Users/admin/test_go}"
+LOCAL_PTY_CHAOS_CWD="${DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD:-$CHAOS_WORKDIR/local-pty}"
 JSON_WORKER_CHAOS_BIN=""
-JSON_WORKER_CHAOS_CWD="${DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD:-/Users/admin/test_go}"
+JSON_WORKER_CHAOS_CWD="${DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD:-$CHAOS_WORKDIR/json-worker}"
 
 section() {
   echo ""
@@ -340,7 +342,10 @@ start_proxy_serve() {
   local code
   for attempt in 1 2 3; do
     set +e
-    output="$(env INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve start 2>&1)"
+    output="$(
+      env INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
+        serve start --env "$DEV_ENV" 2>&1
+    )"
     code=$?
     set -e
     printf '%s\n' "$output"
@@ -437,12 +442,13 @@ section "Chaos 7: client WebSocket reconnect state recovery"
 run_websocket_reconnect_chaos_smoke
 
 section "Chaos 8: real Claude/Codex hosted PTY approval"
+mkdir -p "$HOSTED_PTY_CHAOS_CWD"
 run_real_provider_approval_smoke
 
 section "Chaos 9: hosted Claude PTY provider exit while Web is attached"
 create_hosted_pty_chaos_provider
 mark_service_log
-run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env "$DEV_ENV"
 wait_until "proxy serve is running with hosted PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted PTY chaos provider swap" 30 proxy_relay_connected_observed
 run_hosted_pty_exit_chaos_smoke claude
@@ -450,7 +456,7 @@ run pnpm dev:health
 
 section "Chaos 10: hosted Codex PTY provider exit while Web is attached"
 mark_service_log
-run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env "$DEV_ENV"
 wait_until "proxy serve is running with hosted Codex PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted Codex PTY chaos provider swap" 30 proxy_relay_connected_observed
 run_hosted_pty_exit_chaos_smoke codex
@@ -465,7 +471,7 @@ run pnpm dev:health
 section "Chaos 12: real Claude JSON worker approval across relay restart"
 create_json_worker_chaos_provider
 mark_service_log
-run env CLAUDE_BIN="$JSON_WORKER_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart
+run env CLAUDE_BIN="$JSON_WORKER_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- serve restart --env "$DEV_ENV"
 wait_until "proxy serve is running with JSON worker chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after JSON worker provider swap" 30 proxy_relay_connected_observed
 run_json_worker_chaos_smoke

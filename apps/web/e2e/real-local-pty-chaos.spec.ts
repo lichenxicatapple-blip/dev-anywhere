@@ -11,7 +11,9 @@ const enabled = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS === "1";
 const provider: Provider =
   process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER === "codex" ? "codex" : "claude";
 const chaosBin = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN;
-const chaosRoot = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/Users/admin/test_go";
+const chaosRoot =
+  process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/local-pty";
+const proxyEnv = process.env.DEV_ANYWHERE_DEV_ENV ?? "local";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -22,7 +24,7 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await expect(switcher).toBeVisible({ timeout: 15_000 });
   await switcher.click();
 
-  const firstProxy = page.locator('[data-slot="proxy-item"]').first();
+  const firstProxy = page.locator('[data-slot="proxy-item"]:visible').first();
   await expect(firstProxy).toBeVisible({ timeout: 15_000 });
   await firstProxy.click();
 }
@@ -60,7 +62,7 @@ async function stopLocalRuntime(screenName: string): Promise<void> {
 async function restartServeOnly(): Promise<void> {
   await execFileAsync(
     "pnpm",
-    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart"],
+    ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "serve", "restart", "--env", proxyEnv],
     {
       cwd: repoRoot,
       timeout: 30_000,
