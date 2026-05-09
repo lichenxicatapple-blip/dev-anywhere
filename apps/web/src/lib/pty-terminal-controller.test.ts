@@ -49,6 +49,7 @@ describe("attachPtyTerminalController", () => {
     const h = createHarness();
     const onTerminalReady = vi.fn();
     const onReady = vi.fn();
+    const onSubscribeDelayed = vi.fn();
 
     attachPtyTerminalController({
       host: h.host,
@@ -60,6 +61,7 @@ describe("attachPtyTerminalController", () => {
       attachTransport: h.attachTransport,
       onTerminalReady,
       onReady,
+      onSubscribeDelayed,
     });
     await Promise.resolve();
 
@@ -75,6 +77,7 @@ describe("attachPtyTerminalController", () => {
         relay: h.relay,
         target: h.terminal,
         onReady,
+        onSubscribeDelayed,
       }),
     );
 

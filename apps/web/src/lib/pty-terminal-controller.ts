@@ -43,7 +43,7 @@ interface PtyTerminalControllerOptions {
   onRawInput?: (data: string) => void;
   onReady?: () => void;
   onSubscribeStarted?: () => void;
-  onSubscribeExhausted?: () => void;
+  onSubscribeDelayed?: () => void;
 }
 
 interface PtyTerminalController {
@@ -69,7 +69,7 @@ export function attachPtyTerminalController(
     onRawInput,
     onReady,
     onSubscribeStarted,
-    onSubscribeExhausted,
+    onSubscribeDelayed,
   } = options;
 
   let disposed = false;
@@ -106,7 +106,7 @@ export function attachPtyTerminalController(
       onFrameWritten,
       onReady,
       onSubscribeStarted,
-      onSubscribeExhausted,
+      onSubscribeDelayed,
     });
     transport.setOutputPaused(outputPaused);
   })();

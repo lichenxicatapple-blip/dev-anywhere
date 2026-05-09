@@ -157,39 +157,51 @@ describe("attachPtySessionTransport", () => {
     ]);
   });
 
-  it("retries snapshot requests and reports exhaustion", () => {
+  it("reports slow snapshot sync before retrying at a lower frequency", () => {
     const harness = createHarness();
     const target = createTarget();
-    const onSubscribeExhausted = vi.fn();
+    const onSubscribeDelayed = vi.fn();
     attachPtySessionTransport({
       sessionId: "s1",
       ws: harness.ws,
       relay: harness.relay,
       target,
-      retryDelayMs: 10,
-      maxRetries: 1,
-      onSubscribeExhausted,
+      onSubscribeDelayed,
     });
 
     expect(harness.sent).toHaveLength(1);
-    vi.advanceTimersByTime(10);
+    vi.advanceTimersByTime(9999);
+    expect(harness.sent).toHaveLength(1);
+    expect(onSubscribeDelayed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(harness.sent).toHaveLength(1);
+    expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(19_999);
+    expect(harness.sent).toHaveLength(1);
+
+    vi.advanceTimersByTime(1);
     expect(harness.sent).toHaveLength(2);
-    vi.advanceTimersByTime(10);
-    expect(onSubscribeExhausted).toHaveBeenCalledTimes(1);
+    expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(30_000);
+    expect(harness.sent).toHaveLength(3);
+    expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
   });
 
   it("cleans up subscriptions and pending retry timer", () => {
     const harness = createHarness();
     const target = createTarget();
-    const onSubscribeExhausted = vi.fn();
+    const onSubscribeDelayed = vi.fn();
     const transport = attachPtySessionTransport({
       sessionId: "s1",
       ws: harness.ws,
       relay: harness.relay,
       target,
       retryDelayMs: 10,
-      maxRetries: 0,
-      onSubscribeExhausted,
+      slowNoticeDelayMs: 10,
+      onSubscribeDelayed,
     });
 
     transport.dispose();
@@ -197,6 +209,6 @@ describe("attachPtySessionTransport", () => {
 
     expect(harness.unsubBinary).toHaveBeenCalledTimes(1);
     expect(harness.unsubRelay).toHaveBeenCalledTimes(1);
-    expect(onSubscribeExhausted).not.toHaveBeenCalled();
+    expect(onSubscribeDelayed).not.toHaveBeenCalled();
   });
 });

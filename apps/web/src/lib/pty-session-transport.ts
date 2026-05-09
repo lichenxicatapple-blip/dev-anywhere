@@ -21,14 +21,14 @@ interface PtySessionTransportOptions {
   relay: PtyRelayLike;
   target: PtyRenderTarget;
   retryDelayMs?: number;
-  maxRetries?: number;
+  slowNoticeDelayMs?: number;
   scheduleReady?: (callback: () => void) => void;
   scheduleFrameFlush?: (callback: FrameRequestCallback) => number;
   cancelFrameFlush?: (handle: number) => void;
   onFramePending?: () => void;
   onFrameWritten?: () => void;
   onReady?: () => void;
-  onSubscribeExhausted?: () => void;
+  onSubscribeDelayed?: () => void;
   onSubscribeStarted?: () => void;
 }
 
@@ -46,15 +46,15 @@ export function attachPtySessionTransport(
     ws,
     relay,
     target,
-    retryDelayMs = 3000,
-    maxRetries = 3,
+    retryDelayMs = 30_000,
+    slowNoticeDelayMs = 10_000,
     scheduleReady = (callback) => requestAnimationFrame(callback),
     scheduleFrameFlush,
     cancelFrameFlush,
     onFramePending,
     onFrameWritten,
     onReady,
-    onSubscribeExhausted,
+    onSubscribeDelayed,
     onSubscribeStarted,
   } = options;
 
@@ -67,12 +67,19 @@ export function attachPtySessionTransport(
   });
   let disposed = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let retryCount = 0;
+  let slowNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let subscribeDelayedReported = false;
 
   const clearRetry = (): void => {
     if (!retryTimer) return;
     clearTimeout(retryTimer);
     retryTimer = null;
+  };
+
+  const clearSlowNotice = (): void => {
+    if (!slowNoticeTimer) return;
+    clearTimeout(slowNoticeTimer);
+    slowNoticeTimer = null;
   };
 
   const requestSnapshot = (): void => {
@@ -81,26 +88,33 @@ export function attachPtySessionTransport(
   };
 
   const scheduleSnapshotRetry = (): void => {
-    requestSnapshot();
     retryTimer = setTimeout(() => {
       retryTimer = null;
       if (disposed || recovery.hasAppliedSnapshot()) return;
-      if (retryCount >= maxRetries) {
-        onSubscribeExhausted?.();
-        return;
-      }
-      retryCount += 1;
+      requestSnapshot();
       scheduleSnapshotRetry();
     }, retryDelayMs);
+  };
+
+  const scheduleSlowNotice = (): void => {
+    slowNoticeTimer = setTimeout(() => {
+      slowNoticeTimer = null;
+      if (disposed || recovery.hasAppliedSnapshot() || subscribeDelayedReported) return;
+      subscribeDelayedReported = true;
+      onSubscribeDelayed?.();
+    }, slowNoticeDelayMs);
   };
 
   const startSnapshotSubscribe = (): void => {
     if (disposed) return;
     clearRetry();
+    clearSlowNotice();
     frameWriter.clear();
-    retryCount = 0;
+    subscribeDelayedReported = false;
     onSubscribeStarted?.();
+    requestSnapshot();
     scheduleSnapshotRetry();
+    scheduleSlowNotice();
   };
 
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
@@ -129,6 +143,7 @@ export function attachPtySessionTransport(
     );
     if (!result.applied) return;
     clearRetry();
+    clearSlowNotice();
     scheduleReady(() => {
       if (!disposed) onReady?.();
     });
@@ -142,6 +157,7 @@ export function attachPtySessionTransport(
     dispose: () => {
       disposed = true;
       clearRetry();
+      clearSlowNotice();
       frameWriter.dispose();
       unsubBinary();
       unsubRelay();

@@ -3,8 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 export function usePtyConnectionState() {
   const [ready, setReady] = useState(false);
   const [connectingVisible, setConnectingVisible] = useState(false);
-  const [subscribeExhausted, setSubscribeExhausted] = useState(false);
-  const [retryNonce, setRetryNonce] = useState(0);
+  const [subscribeDelayed, setSubscribeDelayed] = useState(false);
 
   useEffect(() => {
     if (ready) {
@@ -17,44 +16,36 @@ export function usePtyConnectionState() {
 
   const markReady = useCallback(() => {
     setReady(true);
-    setSubscribeExhausted(false);
+    setSubscribeDelayed(false);
   }, []);
 
   const markSubscribeStarted = useCallback(() => {
-    setSubscribeExhausted(false);
+    setSubscribeDelayed(false);
   }, []);
 
-  const markSubscribeExhausted = useCallback(() => {
-    setSubscribeExhausted(true);
-  }, []);
-
-  const retry = useCallback(() => {
-    setReady(false);
-    setSubscribeExhausted(false);
-    setRetryNonce((n) => n + 1);
+  const markSubscribeDelayed = useCallback(() => {
+    setSubscribeDelayed(true);
   }, []);
 
   const overlay = useMemo(
     () => ({
       connecting: connectingVisible,
-      subscribeExhausted,
-      onRetry: retry,
+      subscribeDelayed,
     }),
-    [connectingVisible, retry, subscribeExhausted],
+    [connectingVisible, subscribeDelayed],
   );
 
   const transport = useMemo(
     () => ({
       onReady: markReady,
       onSubscribeStarted: markSubscribeStarted,
-      onSubscribeExhausted: markSubscribeExhausted,
+      onSubscribeDelayed: markSubscribeDelayed,
     }),
-    [markReady, markSubscribeExhausted, markSubscribeStarted],
+    [markReady, markSubscribeDelayed, markSubscribeStarted],
   );
 
   return {
     ready,
-    retryNonce,
     overlay,
     transport,
   };

@@ -262,7 +262,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     sessionId,
     connected,
     proxyOnline,
-    connection.retryNonce,
     connection.transport,
     clearNewFramesWhileAway,
     hasNewFramesWhileAwayRef,
