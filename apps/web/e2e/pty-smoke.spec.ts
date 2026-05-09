@@ -353,6 +353,14 @@ test.describe("PTY browser smoke", () => {
       el.dispatchEvent(new Event("scroll"));
     });
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
+    await expect
+      .poll(async () => {
+        const button = await page.locator('[data-slot="back-to-bottom"]').boundingBox();
+        const scrollbar = await page.locator('[data-slot="pty-scrollbar"]').boundingBox();
+        if (!button || !scrollbar) return -1;
+        return Math.round(scrollbar.x - (button.x + button.width));
+      })
+      .toBeGreaterThanOrEqual(16);
     const scrollTopBeforeNewFrame = await page
       .locator('[data-slot="pty-terminal"]')
       .evaluate((el) => {

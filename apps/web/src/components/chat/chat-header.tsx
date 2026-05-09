@@ -151,13 +151,13 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           </DropdownMenuLabel>
           <div className="px-2 pb-1.5" data-slot="chat-menu-font-control">
             <div
-              className="grid h-11 grid-cols-[2.75rem_minmax(3.25rem,1fr)_2.75rem] items-center overflow-hidden rounded-md border border-border bg-muted/20 md:h-9 md:grid-cols-[2.25rem_minmax(3rem,1fr)_2.25rem]"
+              className="flex h-11 items-center gap-1 rounded-lg bg-muted/35 md:h-9"
               data-slot="chat-menu-font-stepper"
             >
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="size-11 rounded-none md:size-9"
+                className="size-11 rounded-lg text-muted-foreground hover:bg-background/70 hover:text-foreground md:size-8"
                 disabled={fontSize <= minFontSize}
                 aria-label="字号变小"
                 data-slot="chat-menu-font-smaller"
@@ -169,7 +169,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 <Minus aria-hidden="true" />
               </Button>
               <span
-                className="flex h-full items-center justify-center border-x border-border text-sm tabular-nums"
+                className="flex h-9 min-w-[3.35rem] flex-1 items-center justify-center rounded-md bg-background/75 text-sm tabular-nums text-foreground shadow-xs md:h-8 md:min-w-[3rem]"
                 data-slot="chat-menu-font-size"
               >
                 {fontSize}px
@@ -177,7 +177,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="size-11 rounded-none md:size-9"
+                className="size-11 rounded-lg text-muted-foreground hover:bg-background/70 hover:text-foreground md:size-8"
                 disabled={fontSize >= MAX_CHAT_FONT_SIZE}
                 aria-label="字号变大"
                 data-slot="chat-menu-font-larger"

@@ -80,7 +80,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
   });
 
-  test("font controls are aligned as a compact stepper", async ({ page }) => {
+  test("font controls are aligned without overlap", async ({ page }) => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
 
     const stepper = page.locator('[data-slot="chat-menu-font-stepper"]');
@@ -110,11 +110,13 @@ test.describe("ChatHeader compact navigation controls", () => {
     }
 
     expect(Math.abs(smallerBox.width - largerBox.width)).toBeLessThanOrEqual(1);
-    expect(Math.abs(smallerBox.height - valueBox.height)).toBeLessThanOrEqual(1);
-    expect(Math.abs(largerBox.height - valueBox.height)).toBeLessThanOrEqual(1);
-    expect(Math.abs(valueBox.x - (smallerBox.x + smallerBox.width))).toBeLessThanOrEqual(1);
-    expect(Math.abs(largerBox.x - (valueBox.x + valueBox.width))).toBeLessThanOrEqual(1);
+    expect(valueBox.x - (smallerBox.x + smallerBox.width)).toBeGreaterThanOrEqual(0);
+    expect(largerBox.x - (valueBox.x + valueBox.width)).toBeGreaterThanOrEqual(0);
+    expect(
+      Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
+    ).toBeLessThanOrEqual(1);
     expect(Math.abs(stepperBox.x - (resetBox.x + 8))).toBeLessThanOrEqual(2);
+
   });
 
   test("PTY overflow menu exposes terminal shortcuts", async ({ page }) => {
