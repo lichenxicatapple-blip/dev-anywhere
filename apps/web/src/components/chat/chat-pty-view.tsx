@@ -11,7 +11,6 @@ import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
-import { isOnlyPtyMouseInput } from "@/lib/pty-mouse-input";
 import { formatPtyScrollTraceReport, isPtyScrollTraceEnabled } from "@/lib/pty-scroll-trace";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
@@ -261,11 +260,9 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       onFrameWritten: () => {
         relayoutSchedulerRef.current?.schedule();
       },
-      onRawInput: (data) => {
-        if (isOnlyPtyMouseInput(data)) return;
+      onRawInput: () => {
         rawInputFollowSchedulerRef.current?.schedule();
       },
-      shouldFocusOnPointerDown: () => !userHasVerticalScrollIntentRef.current,
       ...connection.transport,
     });
     terminalControllerRef.current = controller;

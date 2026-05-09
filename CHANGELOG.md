@@ -4,12 +4,6 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
-## [0.1.5] - 2026-05-09
-
-### Fixed
-
-- PTY mouse-reporting input no longer forces the terminal view back to the bottom while the user is reviewing history, including when opening image previews from historical terminal output.
-
 ## [0.1.4] - 2026-05-09
 
 ### Fixed
