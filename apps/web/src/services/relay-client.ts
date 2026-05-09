@@ -50,6 +50,15 @@ type ClipboardImageUploadRequest = Omit<
   Extract<RelayControlMessage, { type: "clipboard_image_upload" }>,
   "type" | "requestId" | "sessionId"
 >;
+type ImagePreviewResponse = Extract<RelayControlMessage, { type: "image_preview_response" }>;
+type ImagePreviewResult = {
+  sessionId: string;
+  success: boolean;
+  path: string;
+  mimeType?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  dataBase64?: string;
+  size?: number;
+} & RequestError;
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -219,6 +228,40 @@ export class RelayClient {
       sessionId: resp.sessionId,
       success: resp.success,
       path: resp.path,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestImagePreview(
+    sessionId: string,
+    path: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<ImagePreviewResult> {
+    const requestId = nextRequestId("image-preview");
+    return this.waitForMessage(
+      (msg): msg is ImagePreviewResponse =>
+        msg.type === "image_preview_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "image_preview_request",
+            requestId,
+            sessionId,
+            path,
+          }),
+        ),
+      "读取图片超时",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      success: resp.success,
+      path: resp.path,
+      mimeType: resp.mimeType,
+      dataBase64: resp.dataBase64,
+      size: resp.size,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

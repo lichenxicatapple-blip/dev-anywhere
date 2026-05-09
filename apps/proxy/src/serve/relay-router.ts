@@ -43,6 +43,7 @@ interface RelayRouterDeps {
   getProviderEnv: () => NodeJS.ProcessEnv;
   getAgentCliSuggestions: () => Partial<Record<ProviderHookContext["provider"], string[]>>;
   setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
+  getPreviewRoots?: () => string[];
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -66,6 +67,7 @@ export class RelayRouter {
       terminalSockets: deps.terminalSockets,
       hostedPtyRegistry: deps.hostedPtyRegistry,
       jsonObserver: deps.jsonObserver,
+      previewRoots: deps.getPreviewRoots?.(),
     });
     this.resourceHandlers = new RelayResourceHandlers({
       relaySend: deps.relaySend,
@@ -121,6 +123,7 @@ export class RelayRouter {
     user_input: (msg) => this.inputHandlers.onUserInput(msg),
     remote_input_raw: (msg) => this.inputHandlers.onRemoteInputRaw(msg),
     clipboard_image_upload: (msg) => this.inputHandlers.onClipboardImageUpload(msg),
+    image_preview_request: (msg) => this.inputHandlers.onImagePreviewRequest(msg),
     tool_approve: (msg) => this.permissionHandlers.onToolApprove(msg),
     tool_deny: (msg) => this.permissionHandlers.onToolDeny(msg),
     proxy_info_request: (msg) => this.resourceHandlers.onProxyInfoRequest(msg),

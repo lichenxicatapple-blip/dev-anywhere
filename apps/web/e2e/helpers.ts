@@ -26,6 +26,8 @@ declare global {
       } | null;
       holdConnections(): void;
       releaseConnections(): void;
+      setImagePreviewDelay(ms: number): void;
+      setImagePreviewDataBase64(value: string): void;
     };
   }
 }
@@ -39,6 +41,8 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const sessionStorageKey = "__dev_anywhere_e2e_sessions";
     const directoryStorageKey = "__dev_anywhere_e2e_dirs";
     const initializedKey = "__dev_anywhere_e2e_initialized";
+    let imagePreviewDataBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
     const initialized = sessionStorage.getItem(initializedKey) === "1";
     if (!initialized) {
       localStorage.clear();
@@ -99,6 +103,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     );
     const heldSockets = new Set<FakeRelayWebSocket>();
     let holdConnections = false;
+    let imagePreviewDelayMs = 0;
     const ptyBuffers = new Map<string, string>();
 
     function persistSessions(): void {
@@ -339,6 +344,20 @@ export async function installFakeRelay(page: Page): Promise<void> {
               success: true,
               path: `.dev-anywhere/clipboard/${String(msg.sessionId)}/pasted-e2e.png`,
             });
+            break;
+          case "image_preview_request":
+            setTimeout(() => {
+              this.emitJson({
+                type: "image_preview_response",
+                requestId: msg.requestId,
+                sessionId: String(msg.sessionId),
+                success: true,
+                path: String(msg.path),
+                mimeType: "image/png",
+                dataBase64: imagePreviewDataBase64,
+                size: 68,
+              });
+            }, imagePreviewDelayMs);
             break;
           case "session_resources_request":
             this.emitResources(String(msg.sessionId ?? ""), String(msg.requestId ?? ""));
@@ -609,6 +628,12 @@ export async function installFakeRelay(page: Page): Promise<void> {
         for (const socket of [...heldSockets]) {
           socket.open();
         }
+      },
+      setImagePreviewDelay(ms: number) {
+        imagePreviewDelayMs = Math.max(0, ms);
+      },
+      setImagePreviewDataBase64(value: string) {
+        imagePreviewDataBase64 = value;
       },
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;

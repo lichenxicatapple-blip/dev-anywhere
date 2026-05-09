@@ -187,6 +187,54 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("waits for matching image preview responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestImagePreview("s1", ".dev-anywhere/clipboard/s1/shot.png");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "image_preview_response",
+      requestId: "other-request",
+      sessionId: "s1",
+      success: true,
+      path: "wrong.png",
+    });
+    ws.emit({
+      type: "image_preview_response",
+      requestId,
+      sessionId: "other-session",
+      success: true,
+      path: "wrong-session.png",
+    });
+    ws.emit({
+      type: "image_preview_response",
+      requestId,
+      sessionId: "s1",
+      success: true,
+      path: ".dev-anywhere/clipboard/s1/shot.png",
+      mimeType: "image/png",
+      dataBase64: "AQID",
+      size: 3,
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "image_preview_request",
+      requestId,
+      sessionId: "s1",
+      path: ".dev-anywhere/clipboard/s1/shot.png",
+    });
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      success: true,
+      path: ".dev-anywhere/clipboard/s1/shot.png",
+      mimeType: "image/png",
+      dataBase64: "AQID",
+      size: 3,
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
   it("waits for matching proxy info responses", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestProxyInfo();

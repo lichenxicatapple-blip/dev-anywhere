@@ -7,6 +7,7 @@ import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatJsonView } from "@/components/chat/chat-json-view";
 import { ChatPtyView } from "@/components/chat/chat-pty-view";
 import { InputBar } from "@/components/chat/input-bar";
+import { ImagePreviewProvider } from "@/components/chat/image-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
 import { EmptyState } from "@/components/shell/empty-state";
@@ -87,44 +88,46 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   });
 
   return (
-    <div
-      className="flex flex-col h-full"
-      style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
-      data-keyboard-offset={kbOffset}
-    >
-      <ChatHeader sessionId={id} mode={mode} />
-      <StatusLine state={statusState} />
-      <div className="flex-1 min-h-0 relative">
-        {mode === "pty" && statusState === "waiting_approval" && (
-          <div
-            role="status"
-            aria-live="polite"
-            data-slot="pty-approval-hint"
-            className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-[var(--color-status-warning)]/10 text-[var(--color-status-warning)] border-b border-[var(--color-status-warning)]/30"
-          >
-            <span aria-hidden="true">⏸</span>
-            <span>等待审批</span>
-          </div>
-        )}
-        {routeSessionEnded ? (
-          <TerminatedSessionPanel mode={mode} />
-        ) : mode === "pty" ? (
-          <ChatPtyView sessionId={id} ptyOwner={session?.ptyOwner} />
-        ) : (
-          <ChatJsonView sessionId={id} />
+    <ImagePreviewProvider sessionId={id}>
+      <div
+        className="flex flex-col h-full"
+        style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
+        data-keyboard-offset={kbOffset}
+      >
+        <ChatHeader sessionId={id} mode={mode} />
+        <StatusLine state={statusState} />
+        <div className="flex-1 min-h-0 relative">
+          {mode === "pty" && statusState === "waiting_approval" && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-slot="pty-approval-hint"
+              className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-[var(--color-status-warning)]/10 text-[var(--color-status-warning)] border-b border-[var(--color-status-warning)]/30"
+            >
+              <span aria-hidden="true">⏸</span>
+              <span>等待审批</span>
+            </div>
+          )}
+          {routeSessionEnded ? (
+            <TerminatedSessionPanel mode={mode} />
+          ) : mode === "pty" ? (
+            <ChatPtyView sessionId={id} ptyOwner={session?.ptyOwner} />
+          ) : (
+            <ChatJsonView sessionId={id} />
+          )}
+        </div>
+        {mode === "json" && !routeSessionEnded && (
+          <>
+            <QuotePreviewBar sessionId={id} />
+            <div className="px-4 py-2" data-slot="input-bar-region">
+              <div className="dev-message-rail mx-auto w-full">
+                <InputBar sessionId={id} />
+              </div>
+            </div>
+          </>
         )}
       </div>
-      {mode === "json" && !routeSessionEnded && (
-        <>
-          <QuotePreviewBar sessionId={id} />
-          <div className="px-4 py-2" data-slot="input-bar-region">
-            <div className="dev-message-rail mx-auto w-full">
-              <InputBar sessionId={id} />
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+    </ImagePreviewProvider>
   );
 }
 

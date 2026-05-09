@@ -13,7 +13,7 @@ const DIST_FONT_ASSETS_DIR = resolve(MODULE_DIR, "../assets/fonts");
 const DEFAULT_FONT_FAMILY = "sarasa-fixed-sc";
 export const DEFAULT_PROXY_PROFILE = "default";
 
-export interface ProxyProfilePaths {
+interface ProxyProfilePaths {
   profileName: string;
   isDefaultProfile: boolean;
   appDir: string;
@@ -67,7 +67,7 @@ function readProxyProfileNameFromArgv(argv: readonly string[]): string | undefin
   return undefined;
 }
 
-export function resolveProxyProfileName(
+function resolveProxyProfileName(
   argv: readonly string[] = process.argv.slice(2),
   home: string = HOME,
 ): string {

@@ -16,3 +16,4 @@ artifacts/
 # PWA 图标必须入库 (generator 生成, 供 deploy.sh 同步到 nginx)
 !apps/web/public/*.png
 !docs/assets/*.png
+.dev-anywhere/

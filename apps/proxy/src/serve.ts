@@ -138,6 +138,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const getProviderEnv = (): NodeJS.ProcessEnv => buildProviderEnv(proxyConfig, process.env);
   const getAgentCliSuggestions = (): Partial<Record<ProviderId, string[]>> =>
     proxyConfig.agentCliSuggestions;
+  const getPreviewRoots = (): string[] => proxyConfig.previewRoots;
   const setAgentCliPath = (provider: ProviderId, path: string): void => {
     const field = provider === "claude" ? "claudeBin" : "codexBin";
     const existing = proxyConfig.agentCliSuggestions[provider] ?? [];
@@ -274,6 +275,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     getProviderEnv,
     getAgentCliSuggestions,
     setAgentCliPath,
+    getPreviewRoots,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));

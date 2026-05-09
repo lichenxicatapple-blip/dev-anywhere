@@ -96,7 +96,8 @@ Edit `~/.dev-anywhere/config.json`:
       "url": "wss://dev-anywhere.example.com",
       "proxyToken": "<RELAY_PROXY_TOKEN>"
     }
-  }
+  },
+  "previewRoots": []
 }
 ```
 
@@ -129,6 +130,18 @@ dev-anywhere codex
 ```
 
 Then open the web client, choose the connected machine, and create or resume a session.
+
+## Image Preview
+
+The web client can preview explicit image paths that appear in JSON messages or PTY terminal output. By default, the proxy allows images under the active session working directory and the developer machine's OS temp directory. To allow additional absolute folders, add them to `previewRoots`:
+
+```json
+{
+  "previewRoots": ["/Users/alice/Pictures/dev-screenshots", "/var/tmp"]
+}
+```
+
+Only direct image file paths are supported. The proxy does not expose directory listing, rejects non-image files, and limits previews to 10 MB.
 
 ## Operations
 

@@ -13,6 +13,7 @@ export interface ProxyConfig {
   hookPort?: number;
   claudeBin?: string;
   codexBin?: string;
+  previewRoots: string[];
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
     relayName: "cli" | "profile";
@@ -38,6 +39,7 @@ interface ProxyConfigFile {
   profiles: Record<string, ProxyProfileConfig | undefined>;
   relays: Record<string, RelayTargetConfig | undefined>;
   agentCli?: AgentCliConfig;
+  previewRoots?: string[];
 }
 
 interface AgentCliConfig {
@@ -153,6 +155,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
       defaultHookPortForProfile(PROFILE_NAME),
     claudeBin,
     codexBin,
+    previewRoots: uniqueAbsolutePaths(fromFile.previewRoots ?? []),
     agentCliSuggestions: {
       claude: uniqueAbsolutePaths([
         process.env.CLAUDE_BIN,

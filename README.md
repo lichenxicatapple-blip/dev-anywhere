@@ -37,6 +37,7 @@ Desktop / iPad / iPhone / Browser
 - Control local Claude Code and Codex sessions from a responsive web/PWA client.
 - Use PTY terminal mode for interactive CLI workflows and JSON mode for structured chat.
 - Resume sessions with history, reconnect recovery, mobile layouts, and tool approvals.
+- Paste screenshots into JSON or PTY sessions, and click local image paths in chat or terminal output to preview them on the web client.
 - Self-host the relay with token authentication and TLS in front.
 - Install the proxy and relay from npm, or publish the web/relay Docker images from the release workflow.
 
@@ -127,7 +128,8 @@ The npm relay package does not serve the production web client by itself. For a 
 2. Start sessions from the repository you want to work on with `dev-anywhere claude` or `dev-anywhere codex`.
 3. Open the web client on desktop, iPad, or iPhone.
 4. Select the machine, resume a session, approve tools, and follow terminal or JSON-mode output.
-5. Stop the local daemon with `dev-anywhere serve stop` when you no longer want the machine reachable through the relay.
+5. Click image paths such as `@.dev-anywhere/clipboard/<session>/shot.png` or `/tmp/shot.png` to preview screenshots from the developer machine.
+6. Stop the local daemon with `dev-anywhere serve stop` when you no longer want the machine reachable through the relay.
 
 ## Packages
 
@@ -143,6 +145,7 @@ The npm relay package does not serve the production web client by itself. For a 
 - CLI processes, shell state, local paths, and credentials stay on the developer machine.
 - Public relay deployments must set `RELAY_PROXY_TOKEN`, `RELAY_CLIENT_TOKEN`, and TLS.
 - Tool approvals are surfaced in the client before scoped local commands run.
+- Image preview only serves explicit image paths from the session working directory, the OS temp directory, or configured `previewRoots`; it does not browse directories.
 
 An unauthenticated relay is suitable only for local development. Anyone who can reach an unauthenticated relay can attempt to discover or bind to connected proxies.
 

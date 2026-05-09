@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { ControlErrorCode, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
@@ -322,6 +325,56 @@ describe("RelayRouter input routing", () => {
       expect(msg.success).toBe(false);
       expect(msg.path).toBe("");
       expect(msg.errorCode).toBe(ControlErrorCode.SESSION_NOT_FOUND);
+    }
+  });
+
+  it("returns image preview data for session cwd images", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "image-preview-router-"));
+    const relay = createRelayConnectionFake();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    writeFileSync(join(cwd, "shot.png"), png);
+    const handlers = new RelayInputHandlers({
+      sessionManager: {
+        getSession: (sessionId: string) =>
+          sessionId === "s1"
+            ? {
+                id: "s1",
+                mode: "json",
+                provider: "claude",
+                state: SessionState.IDLE,
+                cwd,
+                pid: 1,
+              }
+            : undefined,
+      } as never,
+      workerRegistry: createWorkerRegistryFake(),
+      terminalSockets: new Map(),
+      hostedPtyRegistry: {
+        write: vi.fn(() => false),
+      } as never,
+      jsonObserver: { onTurnStart: vi.fn() } as never,
+      relayConnection: relay.relayConnection,
+    });
+
+    try {
+      handlers.onImagePreviewRequest({
+        type: "image_preview_request",
+        requestId: "preview-1",
+        sessionId: "s1",
+        path: "shot.png",
+      });
+
+      expect(relay.raw).toHaveLength(1);
+      const msg = RelayControlSchema.parse(JSON.parse(relay.raw[0]!));
+      expect(msg.type).toBe("image_preview_response");
+      if (msg.type === "image_preview_response") {
+        expect(msg.requestId).toBe("preview-1");
+        expect(msg.success).toBe(true);
+        expect(msg.mimeType).toBe("image/png");
+        expect(msg.dataBase64).toBe(png.toString("base64"));
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
 });

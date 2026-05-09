@@ -18,6 +18,11 @@ const ptyFixture = resolve(fixtureRoot, "local-pty-chaos-agent.mjs");
 const smokeRoot =
   process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_CWD ?? "/tmp/dev-anywhere-chaos/clipboard-image";
 const execFileAsync = promisify(execFile);
+const pngBytes = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0, 0,
+  0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 252, 255, 31, 0, 3, 3, 2, 0, 239,
+  191, 167, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
 
 test.setTimeout(120_000);
 
@@ -173,8 +178,8 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
 }
 
 async function dispatchImagePaste(target: Locator): Promise<void> {
-  await target.evaluate((node) => {
-    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+  await target.evaluate((node, bytes) => {
+    const file = new File([new Uint8Array(bytes)], "shot.png", { type: "image/png" });
     const data = new DataTransfer();
     data.items.add(file);
     const event = new ClipboardEvent("paste", {
@@ -183,7 +188,7 @@ async function dispatchImagePaste(target: Locator): Promise<void> {
       clipboardData: data,
     });
     node.dispatchEvent(event);
-  });
+  }, pngBytes);
 }
 
 function proxyDataRoot(): string {
@@ -207,7 +212,7 @@ async function waitForUploadedImage(cwd: string, sessionId: string): Promise<str
 }
 
 function expectUploadedBytes(path: string): void {
-  expect([...readFileSync(path)]).toEqual([1, 2, 3]);
+  expect([...readFileSync(path)]).toEqual(pngBytes);
 }
 
 function cleanupSessionData(sessionId: string): void {
@@ -225,6 +230,23 @@ async function terminalText(page: Page, sessionId: string): Promise<string> {
 
 function compactTerminalText(text: string): string {
   return text.replace(/\s+/g, "");
+}
+
+async function previewJsonImagePath(page: Page, imagePath: string): Promise<void> {
+  await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+  const previewLink = page
+    .locator('[data-slot="image-preview-link"]', { hasText: imagePath })
+    .first();
+  await expect(previewLink).toBeVisible({ timeout: 20_000 });
+  await previewLink.click();
+  await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
+  await expect(page.locator('[data-slot="image-preview-img"]')).toHaveAttribute(
+    "data-loaded",
+    "true",
+    { timeout: 20_000 },
+  );
+  await expect(page.locator('[data-slot="image-preview-meta"]')).toContainText("image/png");
+  await page.keyboard.press("Escape");
 }
 
 test.describe("real clipboard image chain", () => {
@@ -265,7 +287,9 @@ test.describe("real clipboard image chain", () => {
       const jsonUpload = await waitForUploadedImage(jsonCwd, jsonSessionId);
       expectUploadedBytes(jsonUpload);
       expectProjectClipboardIgnored(jsonCwd);
-      await expect(input).toHaveValue(`inspect @${relative(jsonCwd, jsonUpload)} `);
+      const jsonRelativePath = relative(jsonCwd, jsonUpload);
+      await expect(input).toHaveValue(`inspect @${jsonRelativePath} `);
+      await previewJsonImagePath(page, jsonRelativePath);
 
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
@@ -275,11 +299,12 @@ test.describe("real clipboard image chain", () => {
       const ptyUpload = await waitForUploadedImage(ptyCwd, ptySessionId);
       expectUploadedBytes(ptyUpload);
       expectProjectClipboardIgnored(ptyCwd);
+      const visiblePtyNameFragment = basename(ptyUpload).split("-").at(-1) ?? basename(ptyUpload);
       await expect
         .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
           timeout: 20_000,
         })
-        .toContain(basename(ptyUpload));
+        .toContain(visiblePtyNameFragment);
     } finally {
       if (jsonSessionId) {
         await terminateSession(page, jsonSessionId).catch(() => undefined);

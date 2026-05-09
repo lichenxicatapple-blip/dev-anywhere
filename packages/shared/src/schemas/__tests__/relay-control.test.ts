@@ -73,6 +73,43 @@ describe("RelayControlSchema", () => {
     expect(isProxyToClientRelayControlType("clipboard_image_upload_response")).toBe(true);
   });
 
+  it("parses image preview request/response with requestId correlation", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "image_preview_request",
+        requestId: "preview-1",
+        sessionId: "sess-1",
+        path: ".dev-anywhere/clipboard/sess-1/shot.png",
+      }),
+    ).toEqual({
+      type: "image_preview_request",
+      requestId: "preview-1",
+      sessionId: "sess-1",
+      path: ".dev-anywhere/clipboard/sess-1/shot.png",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "image_preview_response",
+        requestId: "preview-1",
+        sessionId: "sess-1",
+        success: true,
+        path: ".dev-anywhere/clipboard/sess-1/shot.png",
+        mimeType: "image/png",
+        dataBase64: "AQID",
+        size: 3,
+      }),
+    ).toMatchObject({
+      type: "image_preview_response",
+      requestId: "preview-1",
+      sessionId: "sess-1",
+      success: true,
+      mimeType: "image/png",
+    });
+    expect(isClientToProxyRelayControlType("image_preview_request")).toBe(true);
+    expect(isProxyToClientRelayControlType("image_preview_response")).toBe(true);
+  });
+
   it("rejects proxy_select with empty proxyId", () => {
     expect(() => RelayControlSchema.parse({ type: "proxy_select", proxyId: "" })).toThrow();
   });

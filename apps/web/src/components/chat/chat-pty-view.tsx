@@ -13,6 +13,7 @@ import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { formatPtyScrollTraceReport, isPtyScrollTraceEnabled } from "@/lib/pty-scroll-trace";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
+import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
@@ -25,6 +26,7 @@ import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { toast } from "@/components/toast";
 import { BackToBottom } from "./back-to-bottom";
+import { useImagePreview } from "./image-preview";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 import { usePtyConnectionState } from "./use-pty-connection-state";
@@ -41,6 +43,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const imageLinkProviderDisposeRef = useRef<(() => void) | null>(null);
   const terminalControllerRef = useRef<{
     flushOutput: () => void;
     setOutputPaused: (value: boolean) => void;
@@ -93,6 +96,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   }, [keyboardOffset]);
   const softKeyboardOpenOrUnknown = !hasSeenSoftKeyboard || keyboardOffset > 0;
   const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+  const { openImagePreview } = useImagePreview();
 
   if (!relayoutSchedulerRef.current) {
     relayoutSchedulerRef.current = createRafScheduler(() => {
@@ -239,6 +243,11 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         }),
       onTerminalReady: (term) => {
         terminalRef.current = term as Terminal;
+        imageLinkProviderDisposeRef.current?.();
+        imageLinkProviderDisposeRef.current = registerImagePreviewLinkProvider(
+          term as Terminal,
+          openImagePreview,
+        ).dispose;
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
         registerPtyTerminal(sessionId, term as Terminal);
       },
@@ -260,6 +269,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
 
     return () => {
       controller.dispose();
+      imageLinkProviderDisposeRef.current?.();
+      imageLinkProviderDisposeRef.current = null;
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);
       terminalRef.current = null;
@@ -274,6 +285,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     hasNewFramesWhileAwayRef,
     setHasNewFramesWhileAway,
     ptyPlainEnterBehavior,
+    openImagePreview,
   ]);
 
   useEffect(() => {

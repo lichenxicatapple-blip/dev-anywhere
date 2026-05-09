@@ -92,7 +92,8 @@ Config file: `~/.dev-anywhere/config.json`
     "local": {
       "url": "ws://localhost:3100"
     }
-  }
+  },
+  "previewRoots": []
 }
 ```
 
@@ -102,6 +103,8 @@ cloud. If the relay also sets `RELAY_CLIENT_TOKEN`, open the web app once with
 `?relayToken=<RELAY_CLIENT_TOKEN>` so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
+
+Image preview is allowed for explicit image paths under the active session working directory and the OS temp directory. Add absolute paths to `previewRoots` if you want the web client to preview images from other folders. Directory listing is never exposed.
 
 Environment variables are reserved for temporary overrides:
 

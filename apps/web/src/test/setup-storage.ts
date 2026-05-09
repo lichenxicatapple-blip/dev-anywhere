@@ -43,3 +43,10 @@ function ensureStorage(name: "localStorage" | "sessionStorage"): void {
 
 ensureStorage("localStorage");
 ensureStorage("sessionStorage");
+
+if (typeof HTMLCanvasElement !== "undefined") {
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: () => null,
+  });
+}

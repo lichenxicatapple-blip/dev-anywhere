@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MessageBubble } from "./message-bubble";
+import { ImagePreviewProvider } from "./image-preview";
 import type { ChatMessage } from "@/stores/chat-store";
 
 // vitest 不自动 cleanup, 手工 afterEach 否则相邻 render 的 DOM 会累积
@@ -77,5 +78,21 @@ describe("MessageBubble", () => {
 
     const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
     expect(body?.style.fontSize).toBe("18px");
+  });
+
+  it("renders image preview links for local image paths", () => {
+    render(
+      <ImagePreviewProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a4",
+            role: "assistant",
+            text: "screenshot: @.dev-anywhere/clipboard/s1/shot.png",
+          })}
+        />
+      </ImagePreviewProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: /shot\.png/ })).toBeDefined();
   });
 });

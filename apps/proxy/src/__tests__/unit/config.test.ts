@@ -144,6 +144,18 @@ describe("proxy config relay selection", () => {
     expect(config.agentCliSuggestions.codex).toEqual(["/file/bin/codex"]);
   });
 
+  it("loads absolute image preview roots and ignores invalid entries", async () => {
+    writeConfig({
+      ...currentConfig,
+      previewRoots: ["/tmp/screenshots", "relative/path", "", "/Users/dev/Pictures"],
+    });
+
+    const { loadConfig } = await importConfig();
+    const config = loadConfig();
+
+    expect(config.previewRoots).toEqual(["/tmp/screenshots", "/Users/dev/Pictures"]);
+  });
+
   it("persists Agent CLI paths into top-level agentCli config", async () => {
     writeConfig(currentConfig);
 

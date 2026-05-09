@@ -2,6 +2,7 @@ import type { Socket } from "node:net";
 import { ControlErrorCode, MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { saveClipboardImageUpload } from "./clipboard-image-upload.js";
+import { loadImagePreview } from "./image-preview.js";
 import { serializeRawPtyInput } from "./pty-input.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -16,6 +17,7 @@ interface RelayInputHandlersDeps {
   terminalSockets: Map<string, Socket>;
   hostedPtyRegistry: HostedPtyRegistry;
   jsonObserver: JsonObserver;
+  previewRoots?: string[];
 }
 
 export class RelayInputHandlers {
@@ -140,5 +142,46 @@ export class RelayInputHandlers {
       }),
     );
     serviceLogger.info({ sessionId, success: result.success }, "Clipboard image upload handled");
+  }
+
+  onImagePreviewRequest(msg: Record<string, unknown>): void {
+    const sessionId = msg.sessionId as string | undefined;
+    const requestId = msg.requestId as string | undefined;
+    const path = msg.path as string | undefined;
+    if (!sessionId || !path) return;
+
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.deps.relayConnection.sendRaw(
+        JSON.stringify({
+          type: "image_preview_response",
+          requestId,
+          sessionId,
+          success: false,
+          path,
+          error: "会话不存在",
+          errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+        }),
+      );
+      serviceLogger.warn({ sessionId }, "Image preview rejected: session not found");
+      return;
+    }
+
+    const result = loadImagePreview(
+      { sessionId, path },
+      {
+        cwd: session.cwd,
+        previewRoots: this.deps.previewRoots,
+      },
+    );
+
+    this.deps.relayConnection.sendRaw(
+      JSON.stringify({
+        type: "image_preview_response",
+        requestId,
+        ...result,
+      }),
+    );
+    serviceLogger.info({ sessionId, success: result.success }, "Image preview handled");
   }
 }

@@ -73,7 +73,7 @@ export function useScreenWakeLockScope(scopeKey: string): ScreenWakeLockState {
       setActive(true);
     } catch (err) {
       if (scopeGenerationRef.current !== generation) return;
-      throw new Error(wakeLockErrorMessage(err));
+      throw new Error(wakeLockErrorMessage(err), { cause: err });
     } finally {
       if (scopeGenerationRef.current === generation) setPending(false);
     }

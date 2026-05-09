@@ -293,6 +293,29 @@ const relayControlDefinitions = [
     },
     "proxy_to_client",
   ),
+  control(
+    "image_preview_request",
+    {
+      ...RequestIdShape,
+      sessionId: z.string().min(1),
+      path: z.string().min(1),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "image_preview_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: z.string().min(1),
+      success: z.boolean(),
+      path: z.string(),
+      mimeType: ClipboardImageMimeTypeSchema.optional(),
+      dataBase64: z.string().optional(),
+      size: z.number().int().nonnegative().optional(),
+    },
+    "proxy_to_client",
+  ),
 
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览

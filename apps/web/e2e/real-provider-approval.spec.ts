@@ -15,6 +15,9 @@ const approvalTimeoutMs = Number(
 const relayPort = "3100";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const codexReadyPattern = /Do you trust|Ready|Find and fix a bug|OpenAI Codex|Run \/review/i;
+const codexUpdatePromptPattern =
+  /Update available|Skip until next version|Press enter to continue/i;
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(approvalTimeoutMs + 60_000);
@@ -73,9 +76,22 @@ async function focusTerminalInput(page: Page): Promise<void> {
 }
 
 async function maybeAcceptCodexTrustPrompt(page: Page, sessionId: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await expect
+      .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
+      .toMatch(new RegExp(`${codexReadyPattern.source}|${codexUpdatePromptPattern.source}`, "i"));
+
+    const text = await terminalText(page, sessionId);
+    if (!codexUpdatePromptPattern.test(text)) break;
+
+    await focusTerminalInput(page);
+    await page.keyboard.press("2");
+    await page.keyboard.press("Enter");
+  }
+
   await expect
     .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
-    .toMatch(/Do you trust|Ready|Find and fix a bug|OpenAI Codex|Run \/review/i);
+    .toMatch(codexReadyPattern);
 
   const text = await terminalText(page, sessionId);
   if (!/Do you trust/i.test(text)) return;
@@ -85,7 +101,7 @@ async function maybeAcceptCodexTrustPrompt(page: Page, sessionId: string): Promi
   await page.keyboard.press("Enter");
   await expect
     .poll(() => terminalText(page, sessionId), { timeout: 60_000 })
-    .toMatch(/Ready|Find and fix a bug|OpenAI Codex|Run \/review/i);
+    .toMatch(codexReadyPattern);
 }
 
 async function maybeAcceptClaudeTrustPrompt(page: Page, sessionId: string): Promise<void> {

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.3] - 2026-05-09
+
+### Added
+
+- Web clients can preview explicit local image paths from JSON messages and PTY terminal output. By default the proxy serves images from the session working directory and the OS temp directory; additional absolute roots can be configured with `previewRoots`.
+- Image preview requests are covered by shared protocol schemas, proxy unit tests, web unit tests, and Playwright smoke tests for JSON, PTY, loading, and mobile layouts.
+
+### Fixed
+
+- Image preview loading now uses a visible skeleton transition and waits for the browser image load before fading the preview in.
+- Image preview now reports browser decode failures instead of staying in a loading state indefinitely.
+- Image preview keeps the action bar focused on copying the local path and no longer exposes a redundant data-URL "open in new tab" action.
+- Mobile image preview opens as a true full-screen layer without the desktop dialog zoom shrinking the viewport.
+- The session overflow menu now groups screen wake lock under display controls, and the font-size stepper is visually aligned with other menu items.
+
+### Security
+
+- Image preview rejects missing sessions, paths outside allowed roots, directories, non-image payloads, unsupported formats, and files over 10 MB.
+
 ## [0.1.2] - 2026-05-09
 
 ### Added
