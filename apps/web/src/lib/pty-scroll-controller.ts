@@ -85,6 +85,7 @@ export function attachPtyScrollController(
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
   let userHasVerticalScrollIntent = initialUserHasVerticalScrollIntent;
+  let pendingProgrammaticScrollTop: number | null = null;
   let touchScrollActive = false;
   let touchStartY: number | null = null;
   let touchReviewNotified = false;
@@ -210,7 +211,9 @@ export function attachPtyScrollController(
     applySubpixel(0);
     const { cellH } = getDims();
     if (cellH !== 0) positionHostAt(maxYdisp, cellH);
-    container.scrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    container.scrollTop = nextScrollTop;
+    pendingProgrammaticScrollTop = nextScrollTop;
     notifyScroll();
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
   };
@@ -334,7 +337,18 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
-    if (!computeIsAtBottom()) {
+    const atBottom = computeIsAtBottom();
+    const isPendingProgrammaticScroll =
+      pendingProgrammaticScrollTop !== null &&
+      Math.abs(container.scrollTop - pendingProgrammaticScrollTop) <= 1 &&
+      !userHasVerticalScrollIntent;
+    if (!atBottom && isPendingProgrammaticScroll) {
+      pendingProgrammaticScrollTop = null;
+      scrollToBottom();
+      return;
+    }
+    pendingProgrammaticScrollTop = null;
+    if (!atBottom) {
       setUserHasVerticalScrollIntent(true);
     }
     syncContainerScroll();

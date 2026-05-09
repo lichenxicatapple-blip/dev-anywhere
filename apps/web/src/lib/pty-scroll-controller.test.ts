@@ -277,6 +277,38 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1800);
   });
 
+  it("keeps following when a delayed programmatic scroll event sees layout growth", () => {
+    const { container, spacer, host } = createDom();
+    const onAtBottomChange = vi.fn();
+    let scrollHeight = 2000;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    const { terminal } = createTerminal({ 99: "latest prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onAtBottomChange,
+    });
+
+    expect(container.scrollTop).toBe(1600);
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+
+    scrollHeight = 2024;
+    container.dispatchEvent(new Event("scroll"));
+    controller.relayout();
+
+    expect(container.scrollTop).toBe(1624);
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("follows to bottom on render when a real new frame arrives at bottom", () => {
     const { container, spacer, host } = createDom();
     const consumeNewFrame = vi.fn();
