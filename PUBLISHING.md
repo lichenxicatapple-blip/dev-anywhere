@@ -77,22 +77,27 @@ Production deploys must use published images. Do not deploy from local-only imag
 The installer defaults to Aliyun ACR:
 
 ```bash
-IMAGE_TAG=X.Y.Z ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.vita-tools.top dev-anywhere.vita-tools.top
+IMAGE_TAG=X.Y.Z ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 To deploy from GHCR explicitly, pass `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip`.
 
-The installer reuses `/opt/dev-anywhere/.env` when `RELAY_PROXY_TOKEN` already exists, pulls the requested image tag, restarts Docker Compose, and verifies:
+The installer reuses `/opt/dev-anywhere/.env` when relay tokens already exist, pulls the requested image tag, restarts Docker Compose, and verifies:
 
 ```bash
-curl -fsS https://dev-anywhere.vita-tools.top/health
+curl -fsS https://dev-anywhere.example.com/health
 ```
 
 Direct VPS mode is also supported:
 
 ```bash
-sudo ./scripts/install-relay.sh dev-anywhere.vita-tools.top
+sudo ./scripts/install-relay.sh dev-anywhere.example.com
 ```
+
+The installer prints two credentials:
+
+- `RELAY_PROXY_TOKEN`: put this in each developer machine's `~/.dev-anywhere/config.json` as `envs.cloud.relayToken`.
+- `RELAY_CLIENT_TOKEN`: open the web client once with `https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>`.
 
 ## Local proxy update
 

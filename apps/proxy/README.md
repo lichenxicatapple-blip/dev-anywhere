@@ -81,7 +81,7 @@ Config file: `~/.dev-anywhere/config.json`
       "relayUrl": "ws://localhost:3100"
     },
     "cloud": {
-      "relayUrl": "wss://dev-anywhere.vita-tools.top",
+      "relayUrl": "wss://dev-anywhere.example.com",
       "relayToken": ""
     }
   }
@@ -90,7 +90,8 @@ Config file: `~/.dev-anywhere/config.json`
 
 The hosted relay rejects proxy connections without the `RELAY_PROXY_TOKEN`. Fill
 `envs.cloud.relayToken` from the relay server's `.env` before switching to
-cloud.
+cloud. If the relay also sets `RELAY_CLIENT_TOKEN`, open the web app once with
+`?relayToken=<RELAY_CLIENT_TOKEN>` so the browser client can authenticate.
 
 `dev-anywhere serve start --env cloud` and `dev-anywhere serve restart --env cloud` use a named env without editing the file each time.
 
