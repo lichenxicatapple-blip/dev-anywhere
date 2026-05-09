@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "paths": {
+      "#src/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "scripts"],
+  "references": [{ "path": "../../packages/shared" }]
+}
