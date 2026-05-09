@@ -70,13 +70,16 @@ test.describe("image preview", () => {
       await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
     });
 
-    test("PTY mode links image paths from terminal output", async ({ page }) => {
-      const path = "/tmp/e2e-pty-preview.png";
+    test("PTY mode links image paths from terminal output after CJK text", async ({ page }) => {
+      const path = ".dev-anywhere/preview-demo.png";
       await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
       await expect(page.locator('[data-slot="pty-host"] .xterm-screen')).toBeVisible();
 
       await page.evaluate((imagePath) => {
-        window.__devAnywhereE2E?.socket?.emitPty("claude-pty", `screenshot ${imagePath}\r\n`);
+        window.__devAnywhereE2E?.socket?.emitPty(
+          "claude-pty",
+          `可测路径，应该能直接点击： @${imagePath}\r\n`,
+        );
       }, path);
       await expect
         .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
@@ -89,8 +92,9 @@ test.describe("image preview", () => {
         const rect = screen.getBoundingClientRect();
         const cellWidth = metrics.screenWidth / metrics.cols;
         const cellHeight = metrics.screenHeight / metrics.rows;
+        const linkColumn = 33;
         return {
-          x: rect.left + cellWidth * 16,
+          x: rect.left + cellWidth * (linkColumn - 0.5),
           y: rect.top + cellHeight * 1.5,
         };
       });

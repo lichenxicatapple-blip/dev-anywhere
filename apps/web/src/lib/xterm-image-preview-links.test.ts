@@ -15,6 +15,28 @@ describe("xterm image preview links", () => {
     ]);
   });
 
+  it("uses terminal display columns when wide CJK characters precede the path", () => {
+    expect(
+      findImagePreviewPathMatches("可测路径，应该能直接点击： .dev-anywhere/preview-demo.png。"),
+    ).toEqual([
+      {
+        path: ".dev-anywhere/preview-demo.png",
+        startColumn: 28,
+        endColumn: 57,
+      },
+    ]);
+  });
+
+  it("keeps a leading @ inside the terminal link range after CJK text", () => {
+    expect(findImagePreviewPathMatches("截图：@.dev-anywhere/clipboard/s1/shot.png")).toEqual([
+      {
+        path: ".dev-anywhere/clipboard/s1/shot.png",
+        startColumn: 7,
+        endColumn: 42,
+      },
+    ]);
+  });
+
   it("registers a link provider that activates image preview", () => {
     const onPreview = vi.fn();
     const providerRef: {

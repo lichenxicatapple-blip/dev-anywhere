@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.4] - 2026-05-09
+
+### Fixed
+
+- PTY image-preview links now align their hover and click range with terminal display columns when CJK or other wide characters appear before the image path.
+
 ## [0.1.3] - 2026-05-09
 
 ### Added
