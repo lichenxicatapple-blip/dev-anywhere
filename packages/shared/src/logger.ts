@@ -97,7 +97,7 @@ function pruneOldLogs(
   }
 }
 
-export function createLogger(options: CreateLoggerOptions): pino.Logger {
+function buildPinoLogger(options: CreateLoggerOptions): pino.Logger {
   const {
     name,
     level = "info",
@@ -124,4 +124,36 @@ export function createLogger(options: CreateLoggerOptions): pino.Logger {
   }
 
   return pino({ level }, pino.multistream(streams));
+}
+
+// 返回一个 lazy proxy：调用 createLogger 本身不触发 mkdirSync / pino.destination
+// 等任何文件 IO，只有第一次实际访问 logger 的方法/属性时才构造底层 pino Logger。
+// 这样 `dev-anywhere -v` / `dev-anywhere init` 等不需要写日志的命令路径不会
+// 落地空 log 文件，也避免异步 SonicBoom 在 process.exit 时未 ready 的 race。
+export function createLogger(options: CreateLoggerOptions): pino.Logger {
+  let real: pino.Logger | null = null;
+  const ensure = (): pino.Logger => {
+    if (!real) real = buildPinoLogger(options);
+    return real;
+  };
+
+  return new Proxy(Object.create(null) as pino.Logger, {
+    get(_target, prop) {
+      const target = ensure();
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set(_target, prop, value) {
+      return Reflect.set(ensure(), prop, value);
+    },
+    has(_target, prop) {
+      return Reflect.has(ensure(), prop);
+    },
+    ownKeys() {
+      return Reflect.ownKeys(ensure());
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      return Reflect.getOwnPropertyDescriptor(ensure(), prop);
+    },
+  });
 }

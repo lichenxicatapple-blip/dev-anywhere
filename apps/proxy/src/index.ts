@@ -228,7 +228,7 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
 
 const program = new Command("dev-anywhere")
   .description("Dev Anywhere - transparent local AI CLI proxy with remote control")
-  .version(pkg.version)
+  .version(pkg.version, "-v, --version")
   .option("--profile <name>", "Use an isolated local proxy profile")
   .allowUnknownOption()
   .allowExcessArguments()
@@ -237,9 +237,8 @@ const program = new Command("dev-anywhere")
       console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
       process.exit(1);
     }
-    // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
-    // tsup 基于 dynamic import 自动代码分裂，避免所有命令都为 terminal 付出 14KB 额外启动成本。
-    const { startTerminal } = await import("./terminal.js");
+    // 参数校验放在 dynamic import 之前：错误参数路径不应触发 terminal 模块加载，
+    // 避免无谓地拉起 PTY/xterm/logger 这些重资源（也避免 logger 文件 IO 副作用）。
     let invocation: ReturnType<typeof extractAgentInvocation>;
     try {
       invocation = extractAgentInvocation(cliArgsWithoutProfile);
@@ -247,6 +246,9 @@ const program = new Command("dev-anywhere")
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
+    // 延迟导入 terminal: CLI 的其他子命令（init/stop/status）不需要 PTY + xterm 相关依赖，
+    // tsup 基于 dynamic import 自动代码分裂，避免所有命令都为 terminal 付出 14KB 额外启动成本。
+    const { startTerminal } = await import("./terminal.js");
     const { provider, args } = invocation;
     await startTerminal(args, provider);
   });
