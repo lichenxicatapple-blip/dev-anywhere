@@ -21,7 +21,7 @@ describe("PtyRecoveryController", () => {
 
     const requestId = recovery.startSnapshotRequest();
     const frame = { data: new Uint8Array([65]), outputSeq: 11 };
-    expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: false });
+    expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: false, hasGap: false });
 
     const result = recovery.applySnapshot(
       { requestId, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
@@ -74,7 +74,7 @@ describe("PtyRecoveryController", () => {
     );
 
     const frame = { data: new Uint8Array([66]), outputSeq: 11 };
-    expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: true });
+    expect(recovery.handleBinaryFrame(frame, target)).toEqual({ written: true, hasGap: false });
     expect(target.calls.at(-1)).toEqual(["write", frame.data]);
   });
 
@@ -96,8 +96,10 @@ describe("PtyRecoveryController", () => {
 
     const frame12 = { data: new Uint8Array([12]), outputSeq: 12 };
     const frame11 = { data: new Uint8Array([11]), outputSeq: 11 };
-    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false });
-    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true });
+    // 12 先到：pendingFrames 有内容但 nextSeq=11 没到 → hasGap
+    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false, hasGap: true });
+    // 11 补上：flush 12+13 之类，pendingFrames 清空 → hasGap=false
+    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true, hasGap: false });
 
     expect(target.calls.slice(-2)).toEqual([
       ["write", frame11.data],
@@ -144,11 +146,11 @@ describe("PtyRecoveryController", () => {
     );
 
     const frame12 = { data: new Uint8Array([12]), outputSeq: 12 };
-    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false });
+    expect(recovery.handleBinaryFrame(frame12, target)).toEqual({ written: false, hasGap: true });
     expect(target.calls.at(-1)).toEqual(["write", "snapshot"]);
 
     const frame11 = { data: new Uint8Array([11]), outputSeq: 11 };
-    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true });
+    expect(recovery.handleBinaryFrame(frame11, target)).toEqual({ written: true, hasGap: false });
     expect(target.calls.slice(-2)).toEqual([
       ["write", frame11.data],
       ["write", frame12.data],

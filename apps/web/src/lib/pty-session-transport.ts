@@ -22,6 +22,9 @@ interface PtySessionTransportOptions {
   target: PtyRenderTarget;
   retryDelayMs?: number;
   slowNoticeDelayMs?: number;
+  // outputSeq gap 持续这么久仍未补齐就主动重订 snapshot。短于这个值能消化乱序，
+  // 长于这个值才认定服务端真丢帧（典型场景：proxy↔relay 闪断时的 sendBinary 丢弃）。
+  gapRecoveryDelayMs?: number;
   scheduleReady?: (callback: () => void) => void;
   scheduleFrameFlush?: (callback: FrameRequestCallback) => number;
   cancelFrameFlush?: (handle: number) => void;
@@ -30,6 +33,7 @@ interface PtySessionTransportOptions {
   onReady?: () => void;
   onSubscribeDelayed?: () => void;
   onSubscribeStarted?: () => void;
+  onGapRecovery?: () => void;
 }
 
 interface PtySessionTransport {
@@ -48,6 +52,7 @@ export function attachPtySessionTransport(
     target,
     retryDelayMs = 30_000,
     slowNoticeDelayMs = 10_000,
+    gapRecoveryDelayMs = 2_000,
     scheduleReady = (callback) => requestAnimationFrame(callback),
     scheduleFrameFlush,
     cancelFrameFlush,
@@ -56,6 +61,7 @@ export function attachPtySessionTransport(
     onReady,
     onSubscribeDelayed,
     onSubscribeStarted,
+    onGapRecovery,
   } = options;
 
   const recovery = new PtyRecoveryController();
@@ -68,6 +74,7 @@ export function attachPtySessionTransport(
   let disposed = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let slowNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let gapRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let subscribeDelayedReported = false;
 
   const clearRetry = (): void => {
@@ -80,6 +87,26 @@ export function attachPtySessionTransport(
     if (!slowNoticeTimer) return;
     clearTimeout(slowNoticeTimer);
     slowNoticeTimer = null;
+  };
+
+  const clearGapRecovery = (): void => {
+    if (!gapRecoveryTimer) return;
+    clearTimeout(gapRecoveryTimer);
+    gapRecoveryTimer = null;
+  };
+
+  // outputSeq gap 持续超过阈值即认为服务端确实丢帧（不是乱序），主动重订 snapshot。
+  // 不直接复用 startSnapshotSubscribe 调用方注释：这里要求保留 frameWriter 当前缓冲，
+  // startSnapshotSubscribe 会 frameWriter.clear()，相当于在等 snapshot 期间画面再清一次。
+  // 这里的语义是"流卡死了，从服务端拿权威状态重置"，clear 是必要副作用。
+  const armGapRecoveryTimer = (): void => {
+    if (gapRecoveryTimer) return;
+    gapRecoveryTimer = setTimeout(() => {
+      gapRecoveryTimer = null;
+      if (disposed || !recovery.hasPendingGap()) return;
+      onGapRecovery?.();
+      startSnapshotSubscribe();
+    }, gapRecoveryDelayMs);
   };
 
   const requestSnapshot = (): void => {
@@ -109,6 +136,7 @@ export function attachPtySessionTransport(
     if (disposed) return;
     clearRetry();
     clearSlowNotice();
+    clearGapRecovery();
     frameWriter.clear();
     subscribeDelayedReported = false;
     onSubscribeStarted?.();
@@ -119,7 +147,12 @@ export function attachPtySessionTransport(
 
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
     if (disposed) return;
-    recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
+    const result = recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
+    if (result.hasGap) {
+      armGapRecoveryTimer();
+    } else {
+      clearGapRecovery();
+    }
   });
 
   const unsubRelay = relay.onMessage((msg) => {
@@ -158,6 +191,7 @@ export function attachPtySessionTransport(
       disposed = true;
       clearRetry();
       clearSlowNotice();
+      clearGapRecovery();
       frameWriter.dispose();
       unsubBinary();
       unsubRelay();

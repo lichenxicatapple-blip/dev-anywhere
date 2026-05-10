@@ -190,6 +190,84 @@ describe("attachPtySessionTransport", () => {
     expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
   });
 
+  // proxy → relay 闪断时 sendBinary 直接丢帧，但 outputSeq 在 hosted-pty-registry
+  // 内仍递增。relay 重连后下一帧带跳过的 seq 到达 web。recovery.flushContiguousFrames
+  // 严格按 appliedOutputSeq+1 推进，永远等不到丢失帧 → 屏幕卡住。transport 必须探测
+  // 这个 gap 并主动重订 snapshot 让流恢复，否则用户必须手动 resize / reload 才能继续。
+  it("re-subscribes snapshot when binary frames have a persistent outputSeq gap", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+    const initialRequestId = lastRequestId(harness.sent);
+
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: initialRequestId,
+      cols: 80,
+      rows: 24,
+      data: "snapshot",
+      outputSeq: 10,
+    });
+    expect(harness.sent).toHaveLength(1);
+
+    // 模拟服务端闪断丢了 seq=11，后续帧从 seq=12 开始；seq=11 永远不会到达
+    harness.emitBinary(new Uint8Array([0x41]), 12);
+    harness.emitBinary(new Uint8Array([0x42]), 13);
+    harness.emitBinary(new Uint8Array([0x43]), 14);
+
+    // RAF 跑过：因为 seq 11 缺失，flushContiguousFrames 卡在 11，没有任何 binary frame 被写入
+    vi.advanceTimersByTime(16);
+    const binaryWritesBeforeRecovery = target.calls.filter(
+      ([type, data]) => type === "write" && data instanceof Uint8Array,
+    );
+    expect(binaryWritesBeforeRecovery).toEqual([]);
+
+    // gap 持续超过恢复阈值后，transport 应主动重订 snapshot 让流恢复
+    vi.advanceTimersByTime(2_000);
+
+    expect(harness.sent.length).toBeGreaterThan(1);
+    const recoveryRequestId = lastRequestId(harness.sent);
+    expect(recoveryRequestId).not.toBe(initialRequestId);
+  });
+
+  it("does not re-subscribe when the missing frame fills the gap before timeout", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+    const initialRequestId = lastRequestId(harness.sent);
+
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: initialRequestId,
+      cols: 80,
+      rows: 24,
+      data: "snapshot",
+      outputSeq: 10,
+    });
+
+    // 帧乱序到达：12 先到（产生临时 gap），紧接着 11 补齐 — 不该触发恢复重订。
+    harness.emitBinary(new Uint8Array([0x42]), 12);
+    vi.advanceTimersByTime(100);
+    harness.emitBinary(new Uint8Array([0x41]), 11);
+
+    vi.advanceTimersByTime(5_000);
+    expect(harness.sent).toHaveLength(1);
+  });
+
   it("cleans up subscriptions and pending retry timer", () => {
     const harness = createHarness();
     const target = createTarget();

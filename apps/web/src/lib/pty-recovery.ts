@@ -51,14 +51,23 @@ export class PtyRecoveryController {
   handleBinaryFrame(
     frame: { data: Uint8Array; outputSeq: number },
     target: PtyRenderTarget,
-  ): { written: boolean } {
+  ): { written: boolean; hasGap: boolean } {
     if (!this.snapshotApplied) {
       this.frameBuffer.push(frame);
-      return { written: false };
+      return { written: false, hasGap: false };
     }
-    if (frame.outputSeq <= this.appliedOutputSeq) return { written: false };
+    if (frame.outputSeq <= this.appliedOutputSeq) return { written: false, hasGap: false };
     this.pendingFrames.set(frame.outputSeq, frame.data);
-    return { written: this.flushContiguousFrames(target) > 0 };
+    const written = this.flushContiguousFrames(target) > 0;
+    // hasGap = flush 之后仍有 pendingFrames 没消费，说明 appliedOutputSeq+1 还没到。
+    // proxy↔relay 闪断会让 sendBinary 丢帧但 outputSeq 仍递增，恢复后下一帧 seq 就跳过了
+    // 中间若干个值，当前 frame 来填不到 nextSeq，整流就会卡死直到下次 ws 自然重连。
+    // 把 gap 信号外抛，由 transport 层做超时恢复（短期 gap 来自乱序，不该误触发）。
+    return { written, hasGap: this.pendingFrames.size > 0 };
+  }
+
+  hasPendingGap(): boolean {
+    return this.snapshotApplied && this.pendingFrames.size > 0;
   }
 
   applySnapshot(snapshot: PtySnapshotMessage, target: PtyRenderTarget): SnapshotResult {
