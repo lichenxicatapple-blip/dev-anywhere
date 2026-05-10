@@ -11,7 +11,12 @@ import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { loadFontCSS } from "@/lib/font-assets";
 import { checkRelayClientAuth } from "@/lib/relay-client-auth";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
-import { getRelayClientToken, toClientWsUrl } from "@/lib/relay-client-token";
+import {
+  clearRelayClientToken,
+  getRelayClientToken,
+  persistRelayClientToken,
+  toClientWsUrl,
+} from "@/lib/relay-client-token";
 
 // 模块级单例引用，供 pty-test 等页面直接访问 WebSocket 和 RelayClient 实例
 const RELAY_RUNTIME_KEY = "__devAnywhereRelayRuntime";
@@ -92,6 +97,9 @@ export function useRelaySetup(): void {
       }
       if (disposed) return;
       if (authIssue) {
+        // token 不对就把 storage 清空，避免 reload 去掉 ?relayToken= 后还卡在 invalid 状态。
+        // missing 时 storage 本来就空，clear 是 no-op。
+        if (authIssue === "invalid_client_token") clearRelayClientToken();
         const store = useAppStore.getState();
         store.setRelayClientAuthIssue(authIssue);
         store.setConnected(false);
@@ -101,6 +109,8 @@ export function useRelaySetup(): void {
         store.setPhase("proxy_selecting");
         return;
       }
+      // preflight 通过后再 persist：避免错 token "感染" 浏览器。
+      if (token) persistRelayClientToken(token);
       useAppStore.getState().setRelayClientAuthIssue(null);
       ws.connect(toClientWsUrl(relayUrl));
     }
