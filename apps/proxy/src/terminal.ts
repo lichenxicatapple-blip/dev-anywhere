@@ -13,10 +13,7 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "./common/osc-extractor.js";
-import {
-  shouldReleaseApprovalWait,
-  stateAfterApprovalRelease,
-} from "./common/pty-approval-state.js";
+import { decidePtySemanticTransition } from "./common/pty-semantic-machine.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import {
   SOCK_PATH,
@@ -323,34 +320,16 @@ class TerminalSession {
     if (signal?.title) {
       this.sendTerminalTitle(signal.title);
     }
-    if (signal?.state === "approval_wait") {
-      this.currentPtyState = "approval_wait";
-      this.sendPtyState("approval_wait", { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (
-      shouldReleaseApprovalWait({
-        currentState: this.currentPtyState,
-        signalState: signal?.state,
-      })
-    ) {
-      const nextState = stateAfterApprovalRelease(signal?.state);
-      this.currentPtyState = nextState;
-      this.sendPtyState(nextState, { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (this.currentPtyState === "approval_wait" && signal?.state !== "turn_complete") {
-      this.sendPtyState("approval_wait", { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (signal && signal.state !== "working") {
-      this.currentPtyState = signal.state;
-      this.sendPtyState(signal.state, { title: signal.title, tool: signal.tool });
-      return;
-    }
-    if (this.currentPtyState !== "working") {
-      this.currentPtyState = "working";
-      this.sendPtyState("working");
+
+    // 语义状态机决策（六条规则）抽到 common/pty-semantic-machine：terminal 进程仅 emit 事件，
+    // session FSM 副作用由 serve 端在收到 pty_state IPC 后驱动。
+    const decision = decidePtySemanticTransition({
+      currentState: this.currentPtyState,
+      signal: signal ?? null,
+    });
+    this.currentPtyState = decision.nextState;
+    if (decision.emit) {
+      this.sendPtyState(decision.nextState, decision.meta);
     }
   }
 

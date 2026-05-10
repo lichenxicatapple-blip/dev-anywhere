@@ -10,10 +10,7 @@ import {
   extractOscSignals,
   type PtySemanticState,
 } from "../common/osc-extractor.js";
-import {
-  shouldReleaseApprovalWait,
-  stateAfterApprovalRelease,
-} from "../common/pty-approval-state.js";
+import { decidePtySemanticTransition } from "../common/pty-semantic-machine.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -238,51 +235,34 @@ export class HostedPtyRegistry {
     if (signal?.title) {
       this.sendTerminalTitle(sessionId, signal.title);
     }
-    if (signal?.state === "approval_wait") {
-      hosted.currentState = "approval_wait";
-      this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
-      this.sendPtyState(sessionId, "approval_wait", { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (
-      shouldReleaseApprovalWait({
-        currentState: hosted.currentState,
-        signalState: signal?.state,
-      })
-    ) {
-      const nextState = stateAfterApprovalRelease(signal?.state);
-      hosted.currentState = nextState;
-      if (nextState === "turn_complete") {
-        this.deps.onTurnComplete(sessionId);
-        this.deps.changeSessionState(sessionId, SessionState.IDLE);
-      } else {
+
+    // 语义决策走统一 common/pty-semantic-machine；hosted 端在 emit 时多做两件事：
+    // 1. 把 PTY semantic state 翻译成 session JSON FSM 转换；2. turn_complete 时触发 onTurnComplete 回调。
+    const decision = decidePtySemanticTransition({
+      currentState: hosted.currentState,
+      signal: signal ?? null,
+      sessionStateIsWaitingApproval: session?.state === SessionState.WAITING_APPROVAL,
+    });
+    hosted.currentState = decision.nextState;
+    if (!decision.emit) return;
+
+    this.sendPtyState(sessionId, decision.nextState, decision.meta);
+    switch (decision.nextState) {
+      case "approval_wait":
+        // session 已在 WAITING_APPROVAL 时 changeSessionState 是 no-op，无副作用。
+        this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
+        break;
+      case "working":
         this.deps.changeSessionState(sessionId, SessionState.WORKING);
-      }
-      this.sendPtyState(sessionId, nextState, { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (
-      (session?.state === SessionState.WAITING_APPROVAL ||
-        hosted.currentState === "approval_wait") &&
-      signal?.state !== "turn_complete"
-    ) {
-      hosted.currentState = "approval_wait";
-      this.sendPtyState(sessionId, "approval_wait", { title: signal?.title, tool: signal?.tool });
-      return;
-    }
-    if (signal && signal.state !== "working") {
-      hosted.currentState = signal.state;
-      if (signal.state === "turn_complete") {
+        break;
+      case "turn_complete":
         this.deps.onTurnComplete(sessionId);
         this.deps.changeSessionState(sessionId, SessionState.IDLE);
-      }
-      this.sendPtyState(sessionId, signal.state, { title: signal.title, tool: signal.tool });
-      return;
-    }
-    if (hosted.currentState !== "working") {
-      hosted.currentState = "working";
-      this.deps.changeSessionState(sessionId, SessionState.WORKING);
-      this.sendPtyState(sessionId, "working");
+        break;
+      case "mid_pause":
+        // mid_pause 不驱动 session FSM：JSON FSM 的状态空间没有该枚举值，
+        // 等价于让 session 状态保持上一帧（通常是 WORKING）。
+        break;
     }
   }
 
