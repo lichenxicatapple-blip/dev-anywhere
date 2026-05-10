@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.8] - 2026-05-10
+
+### Added
+
+- `dev-anywhere relay token [--relay <name>]` prints the active client token of a configured relay, authenticated by the local proxy token. No more ssh into the VPS to read `.env`.
+- Web shortcut menu adds "发送 Shift+Tab" (CSI Z) for cycling Claude CLI permission modes from the browser.
+- `LOG_LEVEL` env var and `logLevel` config field control proxy log verbosity (precedence: env > config > per-logger default). The relay already respected `LOG_LEVEL`.
+- New docs: `docs/CONFIG.md` (operator-facing knob inventory) and `docs/DEV.md` (internal plumbing reference).
+- Diagnostic globals on the active PTY view: `window.__devAnywherePtyDebug()` returns a snapshot of container/spacer/xterm geometry; `window.__devAnywherePtyTerminal()` returns the live xterm Terminal for ad-hoc recovery commands like `term.clearTextureAtlas()`.
+
+### Fixed
+
+- Web PTY view now recovers from WebGL context loss by reloading the WebGL addon on `onContextLoss`. Previously, GPU context resumption (sleep/wake, backgrounded tabs) left the glyph atlas pointing at stale texture slots, which rendered as garbled characters even though the buffer was correct.
+- `dev-anywhere -v` and other invalid invocations no longer crash with `sonic-boom is not ready yet`. The proxy logger is now lazily initialized and arg validation runs before terminal module import.
+- The selected sidebar row's gradient now fades cleanly into the sidebar's right edge instead of cutting off abruptly partway across the row.
+- The web auth-failure copy is now shown as a full-screen `EmptyState` on desktop instead of a small subtitle under the BrandHero logo.
+- A wrong `?relayToken=...` URL no longer overwrites a previously valid token in localStorage; tokens are persisted only after the `/auth/client` preflight succeeds.
+
+### Changed
+
+- `~/.dev-anywhere/config.json` is now validated against a strict zod schema at load time; typos in top-level fields produce a clear field-level error instead of silent ignore.
+- Proxy and relay env reads are now centralized in `runtime-env.ts` modules with consistent parsing and validation.
+- Local dev scripts (`dev-restart`, `dev-health`, `dev-chaos`, `mobile-smoke`) auto-resolve which profile/relay to use by URL match against the local relay (`ws://localhost:<port>`), removing the implicit dependency on profiles being named `local`.
+
 ## [0.1.4] - 2026-05-09
 
 ### Fixed

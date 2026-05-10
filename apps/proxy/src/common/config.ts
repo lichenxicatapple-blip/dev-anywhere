@@ -87,7 +87,9 @@ function readConfigFile(): ProxyConfigFile {
   const parsed = ProxyConfigFileSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((issue) => `  ${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .map(
+        (issue) => `  ${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`,
+      )
       .join("\n");
     throw new Error(`Invalid config at ${CONFIG_PATH}:\n${issues}`);
   }

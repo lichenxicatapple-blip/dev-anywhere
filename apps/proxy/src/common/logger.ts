@@ -14,7 +14,9 @@ function readConfigLogLevel(): string | undefined {
   try {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as { logLevel?: unknown };
     if (typeof raw.logLevel !== "string") return undefined;
-    return (VALID_LOG_LEVELS as readonly string[]).includes(raw.logLevel) ? raw.logLevel : undefined;
+    return (VALID_LOG_LEVELS as readonly string[]).includes(raw.logLevel)
+      ? raw.logLevel
+      : undefined;
   } catch {
     return undefined;
   }
