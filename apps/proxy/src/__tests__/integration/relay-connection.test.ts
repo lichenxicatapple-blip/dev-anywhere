@@ -51,13 +51,11 @@ describe("RelayConnection", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const proxyId = conn.getProxyId();
-    expect(proxyId).toBeTruthy();
     expect(typeof proxyId).toBe("string");
     expect(proxyId.length).toBeGreaterThan(0);
 
     // 验证 proxy 已注册到 relay
-    const registered = relay.registry.getProxy(proxyId);
-    expect(registered).toBeTruthy();
+    expect(relay.registry.getProxy(proxyId)).toBeDefined();
   });
 
   it("sends MessageEnvelope to relay via sendEnvelope()", async () => {
@@ -137,7 +135,6 @@ describe("RelayConnection", () => {
     // 第一次创建时应该生成并持久化
     const conn1 = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     const id1 = conn1.getProxyId();
-    expect(id1).toBeTruthy();
     expect(id1.length).toBe(21); // nanoid 默认长度
     expect(existsSync(idPath)).toBe(true);
     expect(readFileSync(idPath, "utf-8").trim()).toBe(id1);
@@ -179,7 +176,7 @@ describe("RelayConnection", () => {
     await connected;
 
     await waitForRegistration();
-    expect(relay.registry.getProxy(conn.getProxyId())).toBeTruthy();
+    expect(relay.registry.getProxy(conn.getProxyId())).toBeDefined();
   });
 
   it("emits 'disconnected' event on unexpected close", async () => {
@@ -271,7 +268,7 @@ describe("RelayConnection", () => {
     await waitForRegistration();
 
     // 验证重连后 proxy 仍然使用同一个 proxyId 注册
-    expect(relay.registry.getProxy(proxyId)).toBeTruthy();
+    expect(relay.registry.getProxy(proxyId)).toBeDefined();
     expect(connectedCount).toBe(2);
   });
 
@@ -343,7 +340,6 @@ describe("RelayConnection", () => {
     await waitForRegistration();
 
     // 重连后的 proxy socket 应该收到了 flush 的消息
-    const newProxySocket = relay.registry.getProxy(proxyId);
-    expect(newProxySocket).toBeTruthy();
+    expect(relay.registry.getProxy(proxyId)).toBeDefined();
   });
 });
