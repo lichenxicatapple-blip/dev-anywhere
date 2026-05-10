@@ -1,8 +1,8 @@
 // PTY 模式保留 provider 原生 TUI，Web 只负责滚动和输入转发。
 // 浏览器滚动容器映射到 xterm viewportY；当真实 PTY 屏幕比 Web 可视区矮时，
 // scroll spacer 仍保证底部位置能映射到 xterm baseY，而不是伪造额外终端行。
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { FocusEvent, MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "lucide-react";
 import { createXtermTerminal } from "@/lib/create-xterm";
@@ -28,6 +28,7 @@ import {
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
+import { usePtyFocusState } from "./use-pty-focus-state";
 import { usePtyTouchGesture } from "./use-pty-touch-gesture";
 import { useTerminalPaste } from "./use-terminal-paste";
 import { toast } from "@/components/toast";
@@ -60,7 +61,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const scrollToXRatioRef = useRef<(ratio: number) => void>(() => {});
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
-  const suppressPtyFocusUntilRef = useRef(0);
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const connection = usePtyConnectionState();
   const follow = usePtyFollowState();
@@ -83,7 +83,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   // 用 ref flag 标记 "真的有新帧到达", subscribeBinary 收到数据时 set, onRender 消费后清零.
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
-  const [ptyInputFocused, setPtyInputFocused] = useState(false);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
@@ -96,7 +95,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
   }, [keyboardOffset]);
   const softKeyboardOpenOrUnknown = !hasSeenSoftKeyboard || keyboardOffset > 0;
-  const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
   const { openImagePreview } = useImagePreview();
 
   if (!relayoutSchedulerRef.current) {
@@ -111,24 +109,9 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     });
   }
 
-  const blurFocusedPtyInput = useCallback((): void => {
-    const container = containerEl;
-    const active = document.activeElement;
-    if (!container || !(active instanceof HTMLElement) || !container.contains(active)) return;
-    active.blur();
-  }, [containerEl]);
-
-  const syncPtyInputFocus = useCallback((): void => {
-    const host = xtermHostRef.current;
-    const active = document.activeElement;
-    setPtyInputFocused(Boolean(host && active instanceof HTMLElement && host.contains(active)));
-  }, []);
-
-  const suppressPtyFocus = useCallback((): void => {
-    suppressPtyFocusUntilRef.current = performance.now() + 900;
-    blurFocusedPtyInput();
-    setPtyInputFocused(false);
-  }, [blurFocusedPtyInput]);
+  const focusState = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
+  const { ptyInputFocused, suppressPtyFocus } = focusState;
+  const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
 
   function handleTerminalContainerMouseDown(event: MouseEvent<HTMLDivElement>): void {
     const target = event.target;
@@ -140,19 +123,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   }
 
   const touchGestureHandlers = usePtyTouchGesture({ terminalRef, suppressPtyFocus });
-
-  function handleTerminalFocusCapture(event: FocusEvent<HTMLDivElement>): void {
-    if (performance.now() <= suppressPtyFocusUntilRef.current) {
-      if (event.target instanceof HTMLElement) event.target.blur();
-      window.setTimeout(syncPtyInputFocus, 0);
-      return;
-    }
-    syncPtyInputFocus();
-  }
-
-  function handleTerminalBlurCapture(): void {
-    window.setTimeout(syncPtyInputFocus, 0);
-  }
 
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
@@ -358,8 +328,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         onPointerUpCapture={touchGestureHandlers.onPointerUpCapture}
         onPointerCancelCapture={touchGestureHandlers.onPointerCancelCapture}
         onPasteCapture={handleTerminalPasteCapture}
-        onFocusCapture={handleTerminalFocusCapture}
-        onBlurCapture={handleTerminalBlurCapture}
+        onFocusCapture={focusState.handleFocusCapture}
+        onBlurCapture={focusState.handleBlurCapture}
         data-slot="pty-terminal"
       >
         <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">
