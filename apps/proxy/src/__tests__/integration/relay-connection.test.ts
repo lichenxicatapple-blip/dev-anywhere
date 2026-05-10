@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createLogger } from "@dev-anywhere/shared";
 import { createRelayServer, type RelayServer } from "@dev-anywhere/relay/server";
 import { buildMessage } from "@dev-anywhere/shared";
-import { RelayConnection } from "#src/serve/relay-connection.js";
+import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
 
 const relayLogger = createLogger({ name: "test", silent: true });
 
@@ -148,7 +148,7 @@ describe("RelayConnection", () => {
     expect(id2).toBe(id1);
   });
 
-  it("handles connection failure gracefully without crashing", async () => {
+  it("transitions to WAITING_RECONNECT after a failed initial connect", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
 
@@ -158,11 +158,11 @@ describe("RelayConnection", () => {
     // connect() 不应抛异常
     expect(() => conn!.connect()).not.toThrow();
 
-    // 等待连接失败
+    // 等待 ws "error" → "close" 事件链路把状态推到 WAITING_RECONNECT
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // 进程仍在运行说明没有崩溃
-    expect(true).toBe(true);
+    // 必须落到 WAITING_RECONNECT；停留在 CONNECTING 表示状态机失败处理被吞掉了
+    expect(conn!.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
   });
 
   it("emits 'connected' event on successful connect", async () => {

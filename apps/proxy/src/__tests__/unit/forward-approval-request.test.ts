@@ -1,10 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { createServer, type Server, type Socket } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { MessageEnvelopeSchema } from "@dev-anywhere/shared";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
+import { serializeWorkerMsg } from "#src/ipc/ipc-protocol.js";
 import {
   createJsonObserverFake,
   createRelayConnectionFake,
@@ -33,7 +36,28 @@ function readFixtureControlRequest(): {
 }
 
 describe("forwardApprovalRequest (real CLI control_request data)", () => {
-  it("emits a MessageEnvelope-valid tool_use_request that preserves tool_name/request_id/input", () => {
+  let server: Server;
+  let acceptedSocket: Socket | null = null;
+  let tempDir: string;
+  let sockPath: string;
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "fwd-appr-"));
+    sockPath = join(tempDir, "worker.sock");
+    server = createServer((sock) => {
+      acceptedSocket = sock;
+    });
+    await new Promise<void>((resolve) => server.listen(sockPath, () => resolve()));
+  });
+
+  afterEach(async () => {
+    acceptedSocket?.destroy();
+    acceptedSocket = null;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("emits a MessageEnvelope-valid tool_use_request that preserves tool_name/request_id/input", async () => {
     const fixtureReq = readFixtureControlRequest();
     const relay = createRelayConnectionFake();
 
@@ -47,20 +71,20 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       nextSeq: () => 1,
     });
 
-    // 合成 worker → serve 的 IPC 消息，内容全部取自真实 fixture
+    // 通过真实的 worker → serve socket 路径喂入审批请求，避免穿透 private 方法直接调用
+    const sock = await registry.connect("session-real-data", sockPath);
+    expect(sock).not.toBeNull();
+
     const ipcMsg = {
       type: "worker_approval_request" as const,
       requestId: fixtureReq.request_id,
       toolName: fixtureReq.request.tool_name,
       input: fixtureReq.request.input,
     };
+    acceptedSocket?.write(serializeWorkerMsg(ipcMsg));
 
-    // forwardApprovalRequest 是 private，测试里直接穿透访问
-    (
-      registry as unknown as {
-        forwardApprovalRequest: (sid: string, msg: typeof ipcMsg) => void;
-      }
-    ).forwardApprovalRequest("session-real-data", ipcMsg);
+    // 等 IPC reader 解码 + dispatch 完成
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(relay.envelopes).toHaveLength(1);
 
