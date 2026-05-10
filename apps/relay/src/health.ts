@@ -68,6 +68,19 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
     res.json({ clientToken });
   });
 
+  // proxyToken 配置时需要 Bearer 校验，否则放行（dev 模式）。
+  // /api/status、/api/proxies、/api/clients 暴露拓扑/绑定信息，公网 relay 必须鉴权防遍历探测。
+  function requireProxyTokenIfConfigured(
+    req: import("express").Request,
+    res: import("express").Response,
+  ): boolean {
+    if (!proxyTokenRequired) return true;
+    const token = bearerToken(req.get("authorization"));
+    if (options.validateProxyToken?.(token)) return true;
+    res.status(401).json({ error: "invalid_proxy_token" });
+    return false;
+  }
+
   router.get("/status", (_req, res) => {
     res.json({
       version: RELAY_VERSION,
@@ -78,7 +91,8 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   });
 
   // 连接总览：proxy/client 计数、绑定关系
-  router.get("/api/status", (_req, res) => {
+  router.get("/api/status", (req, res) => {
+    if (!requireProxyTokenIfConfigured(req, res)) return;
     res.json({
       version: RELAY_VERSION,
       proxyCount: registry.listProxies().length,
@@ -89,7 +103,8 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   });
 
   // 逐 proxy 详情：id、名称、在线状态、会话列表、离线时间
-  router.get("/api/proxies", (_req, res) => {
+  router.get("/api/proxies", (req, res) => {
+    if (!requireProxyTokenIfConfigured(req, res)) return;
     const proxyIds = registry.listProxies();
     const details = proxyIds
       .map((id) => registry.getProxyDetail(id))
@@ -98,7 +113,8 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   });
 
   // 逐客户端详情：clientId、绑定的 proxyId、在线状态
-  router.get("/api/clients", (_req, res) => {
+  router.get("/api/clients", (req, res) => {
+    if (!requireProxyTokenIfConfigured(req, res)) return;
     res.json(registry.getClientDetails());
   });
 
