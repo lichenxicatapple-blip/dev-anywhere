@@ -283,6 +283,63 @@ describe("JsonSession", () => {
       expect(msg1.message.content).toBe("message-1");
       expect(msg2.message.content).toBe("message-2");
     });
+
+    it("recovers from write failure so subsequent writes still go through", async () => {
+      // 先抑制 console.error 噪音；失败路径会输出诊断
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const session = new JsonSession();
+      // start 之前 child 为 null，writeToStdin 会 reject
+      session.sendMessage("before-start");
+      await new Promise((r) => setTimeout(r, 30));
+
+      // start 之后正常的 sendMessage 必须能走通；如果 writeQueue 永久 rejected，这条会静默失败
+      session.start();
+      session.sendMessage("after-start");
+      await new Promise((r) => setTimeout(r, 50));
+
+      const written = mockChild.mockStdin.read();
+      expect(written).not.toBeNull();
+      const parsed = JSON.parse(written.toString().trim());
+      expect(parsed.message.content).toBe("after-start");
+
+      errSpy.mockRestore();
+    });
+  });
+
+  describe("approval strategy failure", () => {
+    it("falls back to deny response when approval strategy rejects", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const failingStrategy: ApprovalStrategy = async () => {
+        throw new Error("approval channel broken");
+      };
+      const session = new JsonSession({ approvalStrategy: failingStrategy });
+      session.start();
+
+      const controlRequest = {
+        type: "control_request",
+        request_id: "req-fail",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Write",
+          input: { file_path: "/tmp/x" },
+        },
+      };
+      mockChild.mockStdout.write(JSON.stringify(controlRequest) + "\n");
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      // approval 失败时必须仍向 claude 写一个 deny 响应，否则 claude 永远等待 control_response
+      const written = mockChild.mockStdin.read();
+      expect(written).not.toBeNull();
+      const response = JSON.parse(written.toString().trim());
+      expect(response.type).toBe("control_response");
+      expect(response.response.request_id).toBe("req-fail");
+      expect(response.response.response.behavior).toBe("deny");
+
+      errSpy.mockRestore();
+    });
   });
 
   describe("stderr collection", () => {

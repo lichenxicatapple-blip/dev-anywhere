@@ -236,51 +236,81 @@ export class JsonSession {
     const requestId = event.request_id;
     const request = event.request;
 
-    this.approvalStrategy(request.tool_name, request.input).then((decision) => {
-      const response =
-        decision.behavior === "deny"
-          ? {
-              type: "control_response",
-              response: {
-                subtype: "success",
-                request_id: requestId,
+    this.approvalStrategy(request.tool_name, request.input)
+      .then((decision) => {
+        const response =
+          decision.behavior === "deny"
+            ? {
+                type: "control_response",
                 response: {
-                  behavior: "deny",
-                  message: decision.message ?? "Tool use denied by default policy.",
+                  subtype: "success",
+                  request_id: requestId,
+                  response: {
+                    behavior: "deny",
+                    message: decision.message ?? "Tool use denied by default policy.",
+                  },
                 },
-              },
-            }
-          : {
-              type: "control_response",
-              response: {
-                subtype: "success",
-                request_id: requestId,
+              }
+            : {
+                type: "control_response",
                 response: {
-                  behavior: "allow",
-                  updatedInput: {},
+                  subtype: "success",
+                  request_id: requestId,
+                  response: {
+                    behavior: "allow",
+                    updatedInput: {},
+                  },
                 },
-              },
-            };
+              };
 
-      this.writeToStdin(JSON.stringify(response));
-    });
+        this.writeToStdin(JSON.stringify(response));
+      })
+      .catch((err) => {
+        // approvalStrategy 失败时若无应答，claude 会无限等待 control_response 卡死整个 turn。
+        // 兜底回 deny 让 turn 继续推进；具体失败原因记到 stderr 由调用方/日志收敛。
+        console.error(
+          "[json-session] approval strategy rejected, fallback to deny",
+          requestId,
+          err instanceof Error ? err.message : err,
+        );
+        this.writeToStdin(
+          JSON.stringify({
+            type: "control_response",
+            response: {
+              subtype: "success",
+              request_id: requestId,
+              response: {
+                behavior: "deny",
+                message: "Approval strategy failed; denied as fallback.",
+              },
+            },
+          }),
+        );
+      });
   }
 
   private writeToStdin(data: string): void {
-    this.writeQueue = this.writeQueue.then(() => {
-      return new Promise<void>((resolve, reject) => {
-        if (!this.child?.stdin?.writable) {
-          reject(new Error("stdin not writable"));
-          return;
-        }
-        this.child.stdin.write(data + "\n", (err) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        });
+    // writeQueue 只承诺单调推进：单次写入失败不能让 queue 永久 rejected，否则后续 sendMessage
+    // 与 control_response 全部走在 rejected promise 上立即失败，worker 表现为 stdin 静默死锁。
+    this.writeQueue = this.writeQueue
+      .then(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            if (!this.child?.stdin?.writable) {
+              reject(new Error("stdin not writable"));
+              return;
+            }
+            this.child.stdin.write(data + "\n", (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          }),
+      )
+      .catch((err) => {
+        console.error(
+          "[json-session] writeToStdin failed",
+          err instanceof Error ? err.message : err,
+        );
       });
-    });
   }
 }
