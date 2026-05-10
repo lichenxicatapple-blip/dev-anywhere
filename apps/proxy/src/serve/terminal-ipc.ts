@@ -13,8 +13,8 @@ import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { PermissionBroker } from "./permission-broker.js";
-import { shouldPromotePtyActivityToWorking } from "./pty-state-guard.js";
-import { resolvePtySemanticSessionTransitions } from "./pty-semantic-lifecycle.js";
+import { applyPtyStateToSession } from "./pty-session-bridge.js";
+import type { PtySessionBridgeDeps } from "./pty-session-bridge.js";
 import type { RelayConnection } from "./relay-connection.js";
 import {
   broadcastSessionList,
@@ -63,6 +63,15 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     cleanupSessionResources,
     config,
   } = deps;
+
+  const bridgeDeps: PtySessionBridgeDeps = {
+    changeSessionState: (sessionId, next) =>
+      changeSessionState(sessionManager, relayConnection, sessionId, next),
+    getSession: (sessionId) => sessionManager.getSession(sessionId),
+    getPendingApprovalCount: (sessionId) => permissionBroker.listSession(sessionId).length,
+    resolveInterruptedApprovals,
+    emitAgentStatus,
+  };
 
   createIpcReader(
     socket,
@@ -156,44 +165,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           } else {
             serviceLogger.debug(logPayload, "PTY semantic event received");
           }
-          if (msg.state === "approval_wait") {
-            changeSessionState(
-              sessionManager,
-              relayConnection,
-              msg.sessionId,
-              SessionState.WAITING_APPROVAL,
-            );
-          } else if (msg.state === "working" || msg.state === "mid_pause") {
-            const session = sessionManager.getSession(msg.sessionId);
-            const pendingApprovals = permissionBroker.listSession(msg.sessionId);
-            if (shouldPromotePtyActivityToWorking(session, pendingApprovals.length)) {
-              changeSessionState(
-                sessionManager,
-                relayConnection,
-                msg.sessionId,
-                SessionState.WORKING,
-              );
-            } else if (session?.state === SessionState.WAITING_APPROVAL) {
-              serviceLogger.debug(
-                {
-                  sessionId: msg.sessionId,
-                  ptyState: msg.state,
-                  pendingApprovals: pendingApprovals.length,
-                },
-                "PTY working signal ignored while permission approval is pending",
-              );
-            }
-          }
-
-          if (msg.state === "turn_complete") {
-            resolveInterruptedApprovals(msg.sessionId);
-            const session = sessionManager.getSession(msg.sessionId);
-            const transitions = resolvePtySemanticSessionTransitions(session?.state, msg.state);
-            for (const next of transitions) {
-              changeSessionState(sessionManager, relayConnection, msg.sessionId, next);
-            }
-            emitAgentStatus(msg.sessionId, "idle");
-          }
+          applyPtyStateToSession(bridgeDeps, msg.sessionId, msg.state);
           relayConnection.sendRaw(
             serializeControl({
               type: "pty_state",

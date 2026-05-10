@@ -4,11 +4,13 @@
 // eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
-export type PtySemanticState = "working" | "turn_complete" | "approval_wait" | "mid_pause";
+// PTY 局部语义状态。state 仅承载明确语义信号；只有 title/spinner 变化时帧的 PtyStateEvent.state
+// 取 null，让上层不参与 FSM 切换、只走 title 推送通道。
+export type PtySemanticState = "working" | "turn_complete" | "approval_wait";
 type PtySignalProvider = "claude" | "codex";
 
 interface PtyStateEvent {
-  state: PtySemanticState;
+  state: PtySemanticState | null;
   title?: string;
   tool?: string;
 }
@@ -43,6 +45,7 @@ function isCodexActionRequiredTitle(title: string): boolean {
 
 // 从 PTY 原始数据中提取 OSC 语义信号。
 // OSC 9 优先级高于 OSC 0，无匹配时返回 null。
+// 仅 OSC 0（spinner/标题）返回 { state: null, title }，让调用方推 title 但不动 FSM。
 export function extractOscSignals(
   rawData: string,
   provider?: PtySignalProvider,
@@ -73,9 +76,9 @@ export function extractOscSignals(
     return { state: "approval_wait", title: osc0.text };
   }
 
-  // 仅有 OSC 0（标题/spinner 变化）时视为 MID_PAUSE
+  // 仅 OSC 0：标题/spinner 更新，没有明确语义信号。state=null 让上层只推 title。
   if (osc0 && !osc9) {
-    return { state: "mid_pause", title: osc0.text };
+    return { state: null, title: osc0.text };
   }
 
   return null;

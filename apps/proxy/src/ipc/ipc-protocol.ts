@@ -151,7 +151,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pty_semantic_event"),
     sessionId: z.string(),
-    state: z.enum(["working", "turn_complete", "approval_wait", "mid_pause"]),
+    state: z.enum(["working", "turn_complete", "approval_wait"]),
     title: z.string().optional(),
     tool: z.string().optional(),
   }),

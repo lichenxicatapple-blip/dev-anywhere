@@ -25,6 +25,10 @@ import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
+import {
+  applyPtyStateToSession,
+  type PtySessionBridgeDeps,
+} from "./serve/pty-session-bridge.js";
 import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
 import { createEventBridge } from "./serve/event-bridge.js";
 import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
@@ -207,21 +211,26 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     touchSessionActivity: eventBridge.touchSessionActivity,
     getProviderEnv,
   });
-  const hostedPtyRegistry = new HostedPtyRegistry({
-    sessionManager,
-    relayConnection,
-    getProviderEnv,
+  const ptyBridgeDeps: PtySessionBridgeDeps = {
     changeSessionState: eventBridge.changeSessionState,
-    touchSessionActivity: eventBridge.touchSessionActivity,
-    onTurnComplete: (sessionId) => {
+    getSession: (sessionId) => sessionManager.getSession(sessionId),
+    getPendingApprovalCount: (sessionId) => permissionBroker.listSession(sessionId).length,
+    resolveInterruptedApprovals: (sessionId) =>
       resolveInterruptedApprovals(
         permissionBroker,
         hookRuntime.hookEventRouter,
         relayConnection,
         sessionId,
-      );
-      eventBridge.emitAgentStatus(sessionId, "idle");
-    },
+      ),
+    emitAgentStatus: eventBridge.emitAgentStatus,
+  };
+  const hostedPtyRegistry = new HostedPtyRegistry({
+    sessionManager,
+    relayConnection,
+    getProviderEnv,
+    touchSessionActivity: eventBridge.touchSessionActivity,
+    applyPtyStateToSession: (sessionId, ptyState) =>
+      applyPtyStateToSession(ptyBridgeDeps, sessionId, ptyState),
     onSessionClosed: eventBridge.cleanupSessionResources,
   });
 

@@ -38,9 +38,10 @@ interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
   getProviderEnv: () => NodeJS.ProcessEnv;
-  changeSessionState: (sessionId: string, next: SessionState) => boolean;
   touchSessionActivity: (sessionId: string) => boolean;
-  onTurnComplete: (sessionId: string) => void;
+  // PTY → Session FSM 的翻译副作用（changeSessionState、清理 interrupted approvals、推
+  // agent status 等）由 bridge 收口；hosted 与 terminal-ipc 共用同一实现。
+  applyPtyStateToSession: (sessionId: string, ptyState: PtySemanticState) => void;
   onSessionClosed: (sessionId: string) => void;
 }
 
@@ -247,23 +248,7 @@ export class HostedPtyRegistry {
     if (!decision.emit) return;
 
     this.sendPtyState(sessionId, decision.nextState, decision.meta);
-    switch (decision.nextState) {
-      case "approval_wait":
-        // session 已在 WAITING_APPROVAL 时 changeSessionState 是 no-op，无副作用。
-        this.deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
-        break;
-      case "working":
-        this.deps.changeSessionState(sessionId, SessionState.WORKING);
-        break;
-      case "turn_complete":
-        this.deps.onTurnComplete(sessionId);
-        this.deps.changeSessionState(sessionId, SessionState.IDLE);
-        break;
-      case "mid_pause":
-        // mid_pause 不驱动 session FSM：JSON FSM 的状态空间没有该枚举值，
-        // 等价于让 session 状态保持上一帧（通常是 WORKING）。
-        break;
-    }
+    this.deps.applyPtyStateToSession(sessionId, decision.nextState);
   }
 
   private checkIdle(sessionId: string): void {
@@ -275,9 +260,8 @@ export class HostedPtyRegistry {
     hosted.lastOutputTime = 0;
     if (hosted.currentState !== "working") return;
     hosted.currentState = "turn_complete";
-    this.deps.onTurnComplete(sessionId);
-    this.deps.changeSessionState(sessionId, SessionState.IDLE);
     this.sendPtyState(sessionId, "turn_complete");
+    this.deps.applyPtyStateToSession(sessionId, "turn_complete");
   }
 
   private sendPtyState(

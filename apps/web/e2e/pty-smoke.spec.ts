@@ -177,7 +177,7 @@ async function installFakeRelay(page: import("@playwright/test").Page): Promise<
         resize(cols: number, rows: number) {
           this.socket?.emitResize(cols, rows);
         },
-        setPtyState(state: "working" | "turn_complete" | "approval_wait" | "mid_pause") {
+        setPtyState(state: "working" | "turn_complete" | "approval_wait") {
           this.socket?.emitJson({ type: "pty_state", sessionId, payload: { state } });
           this.socket?.emitJson({
             type: "session_status",

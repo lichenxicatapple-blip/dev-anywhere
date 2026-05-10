@@ -24,8 +24,7 @@ export function resolveSessionDisplayState(options: {
     options.agentStatus?.phase === "thinking" ||
     options.agentStatus?.phase === "tool_use" ||
     options.agentStatus?.phase === "outputting" ||
-    options.ptyState?.state === "working" ||
-    options.ptyState?.state === "mid_pause"
+    options.ptyState?.state === "working"
   )
     return "working";
   return "idle";

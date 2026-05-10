@@ -18,7 +18,6 @@ describe("resolvePtySemanticSessionTransitions", () => {
   it("does not change idle sessions or non-terminal semantic states", () => {
     expect(resolvePtySemanticSessionTransitions(SessionState.IDLE, "turn_complete")).toEqual([]);
     expect(resolvePtySemanticSessionTransitions(SessionState.WORKING, "working")).toEqual([]);
-    expect(resolvePtySemanticSessionTransitions(SessionState.WORKING, "mid_pause")).toEqual([]);
     expect(resolvePtySemanticSessionTransitions(SessionState.WORKING, "approval_wait")).toEqual([]);
   });
 });

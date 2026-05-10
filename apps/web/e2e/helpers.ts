@@ -493,7 +493,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
             session.state = "waiting_approval";
             session.lastActive = Date.now();
           }
-          if (session && (ptyPayload?.state === "working" || ptyPayload?.state === "mid_pause")) {
+          if (session && ptyPayload?.state === "working") {
             session.state = "working";
             session.lastActive = Date.now();
           }

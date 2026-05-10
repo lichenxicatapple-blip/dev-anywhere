@@ -75,10 +75,10 @@ describe("session display state", () => {
       expected: "idle",
     },
     {
-      name: "session idle is authoritative over stale pty mid_pause",
+      name: "session idle is authoritative over stale pty working",
       input: {
         session: { ...ptySession, state: "idle" },
-        ptyState: { state: "mid_pause" } satisfies PtyStatePayload,
+        ptyState: { state: "working" } satisfies PtyStatePayload,
       },
       expected: "idle",
     },

@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { decidePtySemanticTransition } from "#src/common/pty-semantic-machine.js";
 
-// 状态机契约：六条规则的边界与组合
+// 状态机契约：七条规则的边界与组合
 // 规则 1: signal=approval_wait → approval_wait, emit=true
-// 规则 2: currentState=approval_wait + signal!=approval_wait → stateAfterApprovalRelease, emit=true
-// 规则 3: 审批上下文 + signal!=turn_complete → 维持 approval_wait, emit=true
-// 规则 4: signal!=working → signal.state, emit=true
-// 规则 5: currentState!=working + 无 signal → working, emit=true
-// 规则 6: currentState=working + 无信号 → 不变，emit=false
+// 规则 2: currentState=approval_wait + signal.state!=approval_wait → stateAfterApprovalRelease, emit=true
+//          signal.state===null（title-only）也走这条 → turn_complete（codex cancel 语义）
+// 规则 3: 审批上下文 + signal.state!=turn_complete → 维持 approval_wait, emit=true
+// 规则 4: title-only signal（非审批上下文）→ 维持 currentState, emit=false
+// 规则 5: signal.state ∈ {turn_complete} → signal.state, emit=true
+// 规则 6: currentState!=working + 无显式 working signal → 推到 working, emit=true
+// 规则 7: currentState=working + 无信号 → 不变，emit=false
 
 describe("decidePtySemanticTransition", () => {
   describe("规则 1: 进入审批", () => {
@@ -52,13 +54,16 @@ describe("decidePtySemanticTransition", () => {
       expect(r.emit).toBe(true);
     });
 
-    it("approval_wait + signal=mid_pause → mid_pause", () => {
+    // codex 取消审批后只发 OSC 0 标题变化（脱离 "Action Required"），osc-extractor 给 state=null
+    // 的 title-only signal。审批上下文下视为释放信号 → turn_complete（等用户下一轮输入）。
+    it("approval_wait + title-only signal (state=null) → turn_complete（codex cancel 语义）", () => {
       const r = decidePtySemanticTransition({
         currentState: "approval_wait",
-        signal: { state: "mid_pause" },
+        signal: { state: null, title: "codex-probe" },
       });
-      expect(r.nextState).toBe("mid_pause");
+      expect(r.nextState).toBe("turn_complete");
       expect(r.emit).toBe(true);
+      expect(r.meta?.title).toBe("codex-probe");
     });
   });
 
@@ -92,7 +97,25 @@ describe("decidePtySemanticTransition", () => {
     });
   });
 
-  describe("规则 4: 非 working 信号", () => {
+  describe("规则 4: title-only signal（非审批上下文）", () => {
+    it("working + title-only signal → 维持 working, emit=false", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "working",
+        signal: { state: null, title: "spinner update" },
+      });
+      expect(r).toEqual({ nextState: "working", emit: false });
+    });
+
+    it("turn_complete + title-only signal → 维持 turn_complete, emit=false", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "turn_complete",
+        signal: { state: null, title: "fresh title" },
+      });
+      expect(r).toEqual({ nextState: "turn_complete", emit: false });
+    });
+  });
+
+  describe("规则 5: 显式 turn_complete", () => {
     it("working + signal=turn_complete → turn_complete", () => {
       const r = decidePtySemanticTransition({
         currentState: "working",
@@ -101,18 +124,9 @@ describe("decidePtySemanticTransition", () => {
       expect(r.nextState).toBe("turn_complete");
       expect(r.emit).toBe(true);
     });
-
-    it("turn_complete + signal=mid_pause → mid_pause", () => {
-      const r = decidePtySemanticTransition({
-        currentState: "turn_complete",
-        signal: { state: "mid_pause" },
-      });
-      expect(r.nextState).toBe("mid_pause");
-      expect(r.emit).toBe(true);
-    });
   });
 
-  describe("规则 5: 隐式回到 working", () => {
+  describe("规则 6: 隐式回到 working", () => {
     it("turn_complete + 无 signal → working", () => {
       const r = decidePtySemanticTransition({
         currentState: "turn_complete",
@@ -121,18 +135,9 @@ describe("decidePtySemanticTransition", () => {
       expect(r.nextState).toBe("working");
       expect(r.emit).toBe(true);
     });
-
-    it("mid_pause + signal=working → working", () => {
-      const r = decidePtySemanticTransition({
-        currentState: "mid_pause",
-        signal: { state: "working" },
-      });
-      expect(r.nextState).toBe("working");
-      expect(r.emit).toBe(true);
-    });
   });
 
-  describe("规则 6: 稳态无变化", () => {
+  describe("规则 7: 稳态无变化", () => {
     it("working + 无 signal → 不 emit", () => {
       const r = decidePtySemanticTransition({
         currentState: "working",

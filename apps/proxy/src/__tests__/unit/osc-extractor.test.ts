@@ -36,10 +36,10 @@ describe("extractOscSignals", () => {
     expect(result).toEqual({ state: "approval_wait", tool: "Bash" });
   });
 
-  it("returns mid_pause with title for OSC 0 only", () => {
+  it("returns null state with title for OSC 0 only (title-only update)", () => {
     const data = "\x1b]0;claude - working...\x07";
     const result = extractOscSignals(data);
-    expect(result).toEqual({ state: "mid_pause", title: "claude - working..." });
+    expect(result).toEqual({ state: null, title: "claude - working..." });
   });
 
   it("returns approval_wait for Codex action-required OSC title", () => {

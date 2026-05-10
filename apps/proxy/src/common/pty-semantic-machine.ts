@@ -4,9 +4,13 @@ import { shouldReleaseApprovalWait, stateAfterApprovalRelease } from "./pty-appr
 // PTY 语义状态机的纯决策层。从一段 PTY 输出抽到的 OSC 信号 + 当前 PTY 局部状态出发，
 // 决定下一态以及是否要 emit 一次 pty_state 事件。
 // 副作用（changeSessionState、onTurnComplete、IPC 写）由调用方负责，本模块零 IO，便于单测。
+//
+// signal.state 三态：明确语义（working/turn_complete/approval_wait）、null（仅 OSC 0 title
+// 更新无语义）、signal 整体为 null（本帧无 OSC）。title-only signal 在 approval_wait 上下文
+// 下视为释放信号（codex 取消审批），其它上下文不参与 FSM 决策。
 
 interface PtySignal {
-  state: PtySemanticState;
+  state: PtySemanticState | null;
   title?: string;
   tool?: string;
 }
@@ -44,11 +48,16 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
     return { nextState: "approval_wait", emit: true, meta: withMeta(signal) };
   }
 
-  // 2. 已在 approval_wait 且收到非 approval_wait 信号：审批解除，落到 signal.state 上
-  //    （worker 继续干活 / 直接 turn_complete / mid_pause 等，由 stateAfterApprovalRelease 决定）。
-  if (shouldReleaseApprovalWait({ currentState, signalState: signal?.state })) {
+  // 2. 已在 approval_wait 且收到非 approval_wait 信号（含 title-only）：审批解除，
+  //    落到 stateAfterApprovalRelease 决定的状态上。
+  if (
+    shouldReleaseApprovalWait({
+      currentState,
+      signalState: signal === null ? undefined : signal.state,
+    })
+  ) {
     return {
-      nextState: stateAfterApprovalRelease(signal?.state),
+      nextState: stateAfterApprovalRelease(signal!.state),
       emit: true,
       meta: withMeta(signal),
     };
@@ -63,16 +72,22 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
     return { nextState: "approval_wait", emit: true, meta: withMeta(signal) };
   }
 
-  // 4. 任意非 working 信号（turn_complete / mid_pause）：直接落到 signal.state。
-  if (signal && signal.state !== "working") {
+  // 4. title-only signal（state=null，且不在审批上下文）：不参与 FSM 决策，title 由调用方
+  //    单独经 sendTerminalTitle 推。这里 emit=false 避免 spam pty_state。
+  if (signal !== null && signal.state === null) {
+    return { nextState: currentState, emit: false };
+  }
+
+  // 5. 任意非 working 显式信号（turn_complete）：直接落到 signal.state。
+  if (signal && signal.state !== null && signal.state !== "working") {
     return { nextState: signal.state, emit: true, meta: withMeta(signal) };
   }
 
-  // 5. 隐式 working：当前不在 working 且本帧没有显式信号或信号 state=working，则推到 working。
+  // 6. 隐式 working：当前不在 working 且本帧没有显式信号或信号 state=working，则推到 working。
   if (currentState !== "working") {
     return { nextState: "working", emit: true };
   }
 
-  // 6. 无变化：current==working 且没有有效信号。不产生事件。
+  // 7. 无变化：current==working 且没有有效信号。不产生事件。
   return { nextState: currentState, emit: false };
 }

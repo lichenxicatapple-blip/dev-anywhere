@@ -64,7 +64,7 @@ declare global {
       sendPty: (data: string) => void;
       sendPtyWithSeq: (data: string, outputSeq: number) => void;
       resize: (cols: number, rows: number) => void;
-      setPtyState: (state: "working" | "turn_complete" | "approval_wait" | "mid_pause") => void;
+      setPtyState: (state: "working" | "turn_complete" | "approval_wait") => void;
     };
     __devAnywherePtyScrollTrace?: DevAnywherePtyScrollTraceEntry[];
   }

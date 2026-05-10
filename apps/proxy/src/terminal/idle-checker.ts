@@ -14,7 +14,7 @@ interface IdleCheckerOptions {
   // 用于"重置最近输出时间到 0"，保证下次再触发前必须有真实新输出
   setLastOutputTime: (value: number) => void;
   // 读当前局部 PTY 状态
-  getCurrentState: () => "working" | "turn_complete" | "approval_wait" | "mid_pause";
+  getCurrentState: () => "working" | "turn_complete" | "approval_wait";
   // 仅在 currentState === "working" 时触发；onIdle 内部决定具体怎么落地（emit IPC / 改 state）
   onIdle: () => void;
 }
