@@ -137,7 +137,12 @@ describe("HookEventRouter", () => {
     expect(relay.envelopes).toHaveLength(0);
   });
 
-  it("emits agent_status when hook permission is resolved", () => {
+  // 审批解除路径按 outcome × mode 四档行为：
+  //   PTY + allow → WORKING（OSC 信号将驱动后续状态）
+  //   PTY + deny  → IDLE（FSM 直接接受）
+  //   JSON + allow → 不主动转换（FSM 拒绝 WAITING_APPROVAL → WORKING；交给 onTurnResult）
+  //   JSON + deny  → IDLE
+  it("PTY + allow hook permission resolution → WORKING", () => {
     const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
@@ -148,6 +153,7 @@ describe("HookEventRouter", () => {
         states.push([sessionId, state]);
         return true;
       },
+      getSessionMode: () => "pty",
       nextSeq: () => 9,
     });
 
@@ -165,18 +171,13 @@ describe("HookEventRouter", () => {
         provider: "codex",
         phase: "tool_use",
         seq: 9,
-        toolName: "Bash",
-        toolInput: { command: "pwd" },
-        permissionResolution: {
-          requestId: "req-1",
-          outcome: "allow",
-        },
+        permissionResolution: { requestId: "req-1", outcome: "allow" },
       });
     }
     expect(agentStatusRegistry.get("s1")?.phase).toBe("tool_use");
   });
 
-  it("returns to idle when hook permission is denied", () => {
+  it("PTY + deny hook permission resolution → IDLE without an intermediate WORKING", () => {
     const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
@@ -187,6 +188,7 @@ describe("HookEventRouter", () => {
         states.push([sessionId, state]);
         return true;
       },
+      getSessionMode: () => "pty",
       nextSeq: () => 10,
     });
 
@@ -195,22 +197,58 @@ describe("HookEventRouter", () => {
       toolInput: { command: "pwd" },
     });
 
-    expect(states).toEqual([
-      ["s1", SessionState.WORKING],
-      ["s1", SessionState.IDLE],
-    ]);
+    // deny 不需要中间的 WORKING，直接回 IDLE：避免向 FSM 发起冗余转换
+    expect(states).toEqual([["s1", SessionState.IDLE]]);
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
+  });
+
+  it("JSON + allow hook permission resolution does not transition (waits for onTurnResult)", () => {
+    // B1 回归保护：JSON FSM 中 WAITING_APPROVAL → WORKING 不是合法边，
+    // 老实现无差别先 → WORKING 会被 FSM 拒绝且不再转换，session 卡死在 WAITING_APPROVAL。
+    // 修复后 JSON+allow 路径不主动转换状态，由 onTurnResult 一次性 → IDLE。
+    const relay = createRelayConnectionFake();
+    const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
+    const router = new HookEventRouter({
+      relayConnection: relay.relayConnection,
+      agentStatusRegistry,
+      changeSessionState: (sessionId, state) => {
+        states.push([sessionId, state]);
+        return true;
+      },
+      getSessionMode: () => "json",
+      nextSeq: () => 11,
+    });
+
+    router.onPermissionResolved("s1", "claude", "req-1", "allow");
+
+    expect(states).toEqual([]);
+    // agent_status 仍要 emit，让 UI 反馈"工具被批准"
     const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
-    expect(status.type).toBe("agent_status");
     if (status.type === "agent_status") {
-      expect(status.payload).toMatchObject({
-        provider: "claude",
-        phase: "idle",
-        permissionResolution: {
-          requestId: "req-1",
-          outcome: "deny",
-        },
-      });
+      expect(status.payload.phase).toBe("tool_use");
+      expect(status.payload.permissionResolution).toEqual({ requestId: "req-1", outcome: "allow" });
     }
+  });
+
+  it("JSON + deny hook permission resolution → IDLE", () => {
+    const relay = createRelayConnectionFake();
+    const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
+    const router = new HookEventRouter({
+      relayConnection: relay.relayConnection,
+      agentStatusRegistry,
+      changeSessionState: (sessionId, state) => {
+        states.push([sessionId, state]);
+        return true;
+      },
+      getSessionMode: () => "json",
+      nextSeq: () => 12,
+    });
+
+    router.onPermissionResolved("s1", "claude", "req-1", "deny");
+
+    expect(states).toEqual([["s1", SessionState.IDLE]]);
     expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
   });
 });

@@ -38,6 +38,7 @@ export async function createProviderHookRuntime(
     relayConnection: options.relayConnection,
     agentStatusRegistry: options.agentStatusRegistry,
     changeSessionState: options.changeSessionState,
+    getSessionMode: (sessionId) => options.sessionManager.getSession(sessionId)?.mode,
   });
   const port = options.hookPort ?? 17654;
   const hookServer = new HookServer({
