@@ -4,6 +4,7 @@ import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
 import { resolveTerminalCwd } from "./terminal/cwd.js";
 import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
+import { createIdleChecker, type IdleChecker } from "./terminal/idle-checker.js";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -62,7 +63,7 @@ class TerminalSession {
   private hookContext: ProviderHookContext | null = null;
   private ptyManager: PtyManager | null = null;
   private lastOutputTime = 0;
-  private idleCheckTimer: NodeJS.Timeout | null = null;
+  private idleChecker: IdleChecker | null = null;
   private currentPtyState: PtySemanticState = "turn_complete";
   // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
@@ -91,7 +92,7 @@ class TerminalSession {
       fsm: this.fsm,
       getSocket: () => this.socket,
       getSessionId: () => this.sessionId,
-      getIdleCheckTimer: () => this.idleCheckTimer,
+      stopIdleChecker: () => this.idleChecker?.stop(),
     });
 
     this.setupSocketHandlers();
@@ -318,16 +319,21 @@ class TerminalSession {
 
   // 超过 IDLE_THRESHOLD_MS 无 PTY 输出则从 working 翻回 turn_complete
   private setupIdleCheck(): void {
-    if (this.idleCheckTimer) clearInterval(this.idleCheckTimer);
-    this.idleCheckTimer = setInterval(() => {
-      if (this.lastOutputTime > 0 && Date.now() - this.lastOutputTime > IDLE_THRESHOLD_MS) {
-        this.lastOutputTime = 0;
-        if (this.currentPtyState === "working") {
-          this.currentPtyState = "turn_complete";
-          this.sendPtyState("turn_complete");
-        }
-      }
-    }, IDLE_CHECK_INTERVAL_MS);
+    this.idleChecker?.stop();
+    this.idleChecker = createIdleChecker({
+      intervalMs: IDLE_CHECK_INTERVAL_MS,
+      thresholdMs: IDLE_THRESHOLD_MS,
+      getLastOutputTime: () => this.lastOutputTime,
+      setLastOutputTime: (value) => {
+        this.lastOutputTime = value;
+      },
+      getCurrentState: () => this.currentPtyState,
+      onIdle: () => {
+        this.currentPtyState = "turn_complete";
+        this.sendPtyState("turn_complete");
+      },
+    });
+    this.idleChecker.start();
   }
 
   private async reconnectToServe(): Promise<void> {

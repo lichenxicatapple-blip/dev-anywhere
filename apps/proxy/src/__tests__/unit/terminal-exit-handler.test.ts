@@ -15,23 +15,24 @@ function makeSocket(writable: boolean) {
 }
 
 describe("createExitHandler", () => {
-  it("首次调用：fsm 转 EXITED + clearInterval + socket.end(pty_deregister) + exit(code)", () => {
+  it("首次调用：fsm 转 EXITED + 停 idle checker + socket.end(pty_deregister) + exit(code)", () => {
     const fsm = makeFsm(TerminalState.RUNNING);
     const { socket, end } = makeSocket(true);
-    const timer = setInterval(() => {}, 1000);
+    const stopIdleChecker = vi.fn();
     const exit = vi.fn();
 
     const cleanup = createExitHandler({
       fsm,
       getSocket: () => socket,
       getSessionId: () => "sess-1",
-      getIdleCheckTimer: () => timer,
+      stopIdleChecker,
       exit,
     });
 
     cleanup(42);
 
     expect(fsm.current()).toBe(TerminalState.EXITED);
+    expect(stopIdleChecker).toHaveBeenCalledTimes(1);
     expect(end).toHaveBeenCalledTimes(1);
     const [msg] = end.mock.calls[0];
     expect(msg).toContain("pty_deregister");
@@ -48,7 +49,7 @@ describe("createExitHandler", () => {
       fsm,
       getSocket: () => socket,
       getSessionId: () => "sess-1",
-      getIdleCheckTimer: () => null,
+      stopIdleChecker: () => {},
       exit,
     });
 
@@ -70,7 +71,7 @@ describe("createExitHandler", () => {
       fsm,
       getSocket: () => socket,
       getSessionId: () => "sess-1",
-      getIdleCheckTimer: () => null,
+      stopIdleChecker: () => {},
       exit,
     });
 
@@ -90,7 +91,7 @@ describe("createExitHandler", () => {
       fsm,
       getSocket: () => socket,
       getSessionId: () => null,
-      getIdleCheckTimer: () => null,
+      stopIdleChecker: () => {},
       exit,
     });
 
@@ -111,7 +112,7 @@ describe("createExitHandler", () => {
       fsm,
       getSocket: () => socket,
       getSessionId: () => sessionId,
-      getIdleCheckTimer: () => null,
+      stopIdleChecker: () => {},
       exit,
     });
 

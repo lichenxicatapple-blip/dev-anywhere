@@ -24,14 +24,15 @@ export const TERMINAL_TRANSITIONS: Record<TerminalState, readonly TerminalState[
   exited: [],
 };
 
-// 下面三个依赖是 getter 而非值：因为它们在 terminal.ts 里是 let 变量，在 handler 创建之后还会变——
+// 下面几个依赖是 getter 而非值：因为它们在 terminal.ts 里是 let 变量，在 handler 创建之后还会变——
 // socket 在 reconnect 时被重新赋值为新实例，sessionId 在 session_create 成功后才有值，
-// idleCheckTimer 在 setupIdleCheck 跑完才赋值。直接传值只会记录 handler 构造那一刻的旧值。
+// idleChecker 在 setupIdleCheck 跑完才赋值。直接传值只会记录 handler 构造那一刻的旧值。
 interface ExitHandlerDeps {
   fsm: ReturnType<typeof createFSM<TerminalState>>;
   getSocket: () => Socket;
   getSessionId: () => string | null;
-  getIdleCheckTimer: () => NodeJS.Timeout | null;
+  // 退出时要停掉的 idle checker；handler 创建时尚未实例化，故传 getter
+  stopIdleChecker: () => void;
   // 测试注入点，production 默认 process.exit
   exit?: (code: number) => void;
 }
@@ -44,8 +45,7 @@ export function createExitHandler(deps: ExitHandlerDeps): (code: number) => void
   return (code: number) => {
     if (deps.fsm.is(TerminalState.EXITED)) return;
     deps.fsm.transitionTo(TerminalState.EXITED);
-    const timer = deps.getIdleCheckTimer();
-    if (timer) clearInterval(timer);
+    deps.stopIdleChecker();
     const socket = deps.getSocket();
     const sessionId = deps.getSessionId();
     if (socket.writable && sessionId) {
