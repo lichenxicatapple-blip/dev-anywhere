@@ -68,6 +68,32 @@ function handleClientRegister(
   logger.info({ clientId, proxyId, status: "restored" }, "Client registered");
 }
 
+function rejectNotBound(ws: ClientSocket): void {
+  ws.send(
+    JSON.stringify({
+      type: "relay_error",
+      code: RelayErrorCode.NOT_BOUND,
+      message: "Client is not bound to any proxy",
+    }),
+  );
+}
+
+function rejectProxySelect(
+  ws: ClientSocket,
+  requestId: string | undefined,
+  proxyId: string,
+): void {
+  ws.send(
+    JSON.stringify({
+      type: "proxy_select_response",
+      requestId,
+      success: false,
+      errorCode: ControlErrorCode.PROXY_OFFLINE,
+      error: `Proxy not online: ${proxyId}`,
+    }),
+  );
+}
+
 // 处理远程客户端 WebSocket 连接生命周期
 export function handleClientConnection(
   ws: WebSocket,
@@ -130,13 +156,7 @@ export function handleClientConnection(
         const targetProxyId =
           ("proxyId" in msg ? (msg.proxyId as string) : undefined) || clientWs.boundProxyId;
         if (!targetProxyId) {
-          clientWs.send(
-            JSON.stringify({
-              type: "relay_error",
-              code: RelayErrorCode.NOT_BOUND,
-              message: "Client is not bound to any proxy",
-            }),
-          );
+          rejectNotBound(clientWs);
           return;
         }
         const proxyWs = registry.getProxy(targetProxyId);
@@ -157,15 +177,7 @@ export function handleClientConnection(
 
       if (msg.type === "proxy_select") {
         if (!registry.isProxyOnline(msg.proxyId)) {
-          clientWs.send(
-            JSON.stringify({
-              type: "proxy_select_response",
-              requestId: msg.requestId,
-              success: false,
-              errorCode: ControlErrorCode.PROXY_OFFLINE,
-              error: `Proxy not online: ${msg.proxyId}`,
-            }),
-          );
+          rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
         }
         // 没有 clientId 时自动分配，统一通过 clientId 绑定
@@ -174,15 +186,7 @@ export function handleClientConnection(
         }
         const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         if (!bound) {
-          clientWs.send(
-            JSON.stringify({
-              type: "proxy_select_response",
-              requestId: msg.requestId,
-              success: false,
-              errorCode: ControlErrorCode.PROXY_OFFLINE,
-              error: `Proxy not online: ${msg.proxyId}`,
-            }),
-          );
+          rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
         }
         clientWs.boundProxyId = msg.proxyId;
@@ -216,13 +220,7 @@ export function handleClientConnection(
 
     if (result.kind === "envelope") {
       if (!clientWs.boundProxyId) {
-        clientWs.send(
-          JSON.stringify({
-            type: "relay_error",
-            code: RelayErrorCode.NOT_BOUND,
-            message: "Client is not bound to any proxy",
-          }),
-        );
+        rejectNotBound(clientWs);
         return;
       }
       routeClientMessage(raw, clientWs.boundProxyId, clientWs, registry, logger, chaos);

@@ -60,6 +60,16 @@ function broadcastProxyList(registry: RelayRegistry, chaos?: RelayChaos): void {
   }
 }
 
+function rejectNotRegistered(ws: ProxySocket): void {
+  ws.send(
+    JSON.stringify({
+      type: "relay_error",
+      code: RelayErrorCode.NOT_REGISTERED,
+      message: "Proxy must register before sending messages",
+    }),
+  );
+}
+
 // 处理代理端 WebSocket 连接生命周期
 export function handleProxyConnection(
   ws: WebSocket,
@@ -159,13 +169,7 @@ export function handleProxyConnection(
     if (result.kind === "control") {
       if (isProxyToClientRelayControlType(result.message.type)) {
         if (!proxyWs.proxyId) {
-          proxyWs.send(
-            JSON.stringify({
-              type: "relay_error",
-              code: RelayErrorCode.NOT_REGISTERED,
-              message: "Proxy must register before sending messages",
-            }),
-          );
+          rejectNotRegistered(proxyWs);
           return;
         }
         const clients = registry.getClientsForProxy(proxyWs.proxyId);
@@ -194,13 +198,7 @@ export function handleProxyConnection(
 
     if (result.kind === "envelope") {
       if (!proxyWs.proxyId) {
-        proxyWs.send(
-          JSON.stringify({
-            type: "relay_error",
-            code: RelayErrorCode.NOT_REGISTERED,
-            message: "Proxy must register before sending messages",
-          }),
-        );
+        rejectNotRegistered(proxyWs);
         return;
       }
       routeProxyMessage(raw, proxyWs.proxyId, registry, logger, chaos);
