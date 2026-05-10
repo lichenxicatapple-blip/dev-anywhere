@@ -162,7 +162,14 @@ function decodeHistoryCursor(cursor: string | undefined, fileSize: number): numb
   return Math.min(parsed, fileSize);
 }
 
+// claudeSessionId 由 claude 自身生成（UUID），但既然落盘后会被拼进文件路径，
+// 防御性正则确保任何来源的不规范值都不会越过 ~/.claude/projects/<dir>/ 边界。
+// 允许字母数字、下划线、短横线，足以覆盖 UUID 与历史 fixture，禁止 . / \ \0 等路径字符。
+const SAFE_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 async function findClaudeSessionFile(claudeSessionId: string): Promise<string | null> {
+  if (!SAFE_SESSION_ID_PATTERN.test(claudeSessionId)) return null;
+
   let projectDirs: string[];
   try {
     projectDirs = await readdir(claudeProjectsDir());
