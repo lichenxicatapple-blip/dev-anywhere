@@ -163,7 +163,7 @@ describe("CreateSessionDialog", () => {
     fireEvent.click(getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
-      expect(getByText("工作目录不存在")).toBeTruthy();
+      getByText("工作目录不存在");
     });
     expect(toastError).toHaveBeenCalledWith("找不到这个工作目录");
     expect(createDirectory).not.toHaveBeenCalled();
@@ -223,7 +223,7 @@ describe("CreateSessionDialog", () => {
     const { getByRole, getByText } = renderDialog();
 
     await waitFor(() => {
-      expect(getByText("未找到")).toBeTruthy();
+      getByText("未找到");
     });
     const claudeButton = getByRole("button", { name: "Claude Code" }) as HTMLButtonElement;
     expect(claudeButton.disabled).toBe(false);
@@ -254,7 +254,7 @@ describe("CreateSessionDialog", () => {
     const { getByLabelText, getByRole, getByText } = renderDialog();
 
     await waitFor(() => {
-      expect(getByText("未找到")).toBeTruthy();
+      getByText("未找到");
     });
     fireEvent.click(getByRole("button", { name: "Claude Code" }));
     fireEvent.click(getByRole("button", { name: "指定路径" }));
@@ -286,7 +286,7 @@ describe("CreateSessionDialog", () => {
     fireEvent.click(getByRole("button", { name: "指定路径" }));
 
     await waitFor(() => {
-      expect(getByLabelText("CLI 路径")).toBeTruthy();
+      getByLabelText("CLI 路径");
     });
     const options = Array.from(document.querySelectorAll("datalist option")).map((option) =>
       option.getAttribute("value"),

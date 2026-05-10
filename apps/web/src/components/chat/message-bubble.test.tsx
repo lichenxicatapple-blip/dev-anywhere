@@ -51,7 +51,7 @@ describe("MessageBubble", () => {
         })}
       />,
     );
-    expect(screen.getByLabelText("streaming")).toBeDefined();
+    screen.getByLabelText("streaming");
   });
 
   it("does not render cursor for user messages even if isPartial true", () => {
@@ -93,6 +93,6 @@ describe("MessageBubble", () => {
       </ImagePreviewProvider>,
     );
 
-    expect(screen.getByRole("button", { name: /shot\.png/ })).toBeDefined();
+    screen.getByRole("button", { name: /shot\.png/ });
   });
 });

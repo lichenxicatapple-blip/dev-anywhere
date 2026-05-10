@@ -8,14 +8,15 @@ describe("PtyConnectionOverlay", () => {
   it("renders delayed connecting state", () => {
     render(<PtyConnectionOverlay connecting={true} subscribeDelayed={false} />);
 
-    expect(screen.getByText("正在连接终端...")).toBeDefined();
+    // testing-library: getByText 找不到自抛 → 无需额外 expect 包装。
+    screen.getByText("正在连接终端...");
   });
 
   it("renders a neutral delayed sync state without retry chrome", () => {
     render(<PtyConnectionOverlay connecting={true} subscribeDelayed={true} />);
 
-    expect(screen.getByRole("status")).toBeDefined();
-    expect(screen.getByText("正在同步终端画面，低带宽网络可能需要更久")).toBeDefined();
+    screen.getByRole("status");
+    screen.getByText("正在同步终端画面，低带宽网络可能需要更久");
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
   });
 
