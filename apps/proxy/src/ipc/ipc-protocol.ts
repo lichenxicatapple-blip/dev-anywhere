@@ -1,28 +1,19 @@
 import { z } from "zod";
-import { SessionState } from "@dev-anywhere/shared";
+import { SessionState, encodeBinaryFrame, decodeBinaryFrame } from "@dev-anywhere/shared";
 import { LineBuffer } from "./line-buffer.js";
 
 // IPC binary 帧标记字节，0x00 不可能是 JSON 行的首字节（JSON 以 '{' 开头）
 export const IPC_BINARY_MARKER = 0x00;
 
-// 编码 binary PTY 数据帧用于 IPC 传输
-// 格式: [1B 0x00 marker][4B payload_len uint32LE][1B sessionId_len][sessionId UTF-8][4B outputSeq uint32LE][PTY data]
+// IPC binary 帧外层 = [1B marker][4B payload_len uint32LE] + 内层 PTY 帧（来自 shared/binary-frame）。
+// 内层格式（[1B sid_len][sid][4B seq][data]）由 encodeBinaryFrame 统一管理，
+// 避免与 hosted-pty-registry / terminal-ipc / web 各自手写偏移量分叉。
 export function encodeBinaryIpcFrame(sessionId: string, data: Buffer, outputSeq: number): Buffer {
-  const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-  const payloadLen = 1 + sessionIdBuf.length + 4 + data.length;
-  const frame = Buffer.alloc(1 + 4 + payloadLen);
-  let offset = 0;
-  frame[offset] = IPC_BINARY_MARKER;
-  offset += 1;
-  frame.writeUInt32LE(payloadLen, offset);
-  offset += 4;
-  frame[offset] = sessionIdBuf.length;
-  offset += 1;
-  sessionIdBuf.copy(frame, offset);
-  offset += sessionIdBuf.length;
-  frame.writeUInt32LE(outputSeq, offset);
-  offset += 4;
-  data.copy(frame, offset);
+  const inner = encodeBinaryFrame(sessionId, outputSeq, data);
+  const frame = Buffer.alloc(1 + 4 + inner.length);
+  frame[0] = IPC_BINARY_MARKER;
+  frame.writeUInt32LE(inner.length, 1);
+  frame.set(inner, 5);
   return frame;
 }
 
@@ -314,25 +305,19 @@ export function createIpcReader(
   function drain(): void {
     while (buf.length > 0) {
       if (buf[0] === IPC_BINARY_MARKER) {
-        // binary 帧: [1B marker][4B payload_len LE][payload]
-        // 需要至少 5 字节才能读取 header
+        // binary 帧: [1B marker][4B payload_len LE][payload]，需要至少 5 字节才能读取 header
         if (buf.length < 5) return;
         const payloadLen = buf.readUInt32LE(1);
         const totalFrameLen = 1 + 4 + payloadLen;
         if (buf.length < totalFrameLen) return;
 
-        // 解析 payload: [1B sessionId_len][sessionId][4B outputSeq][pty data]
-        const payloadStart = 5;
-        const sessionIdLen = buf[payloadStart];
-        const sessionId = buf
-          .subarray(payloadStart + 1, payloadStart + 1 + sessionIdLen)
-          .toString("utf-8");
-        const seqOffset = payloadStart + 1 + sessionIdLen;
-        const outputSeq = buf.readUInt32LE(seqOffset);
-        const ptyData = Buffer.from(buf.subarray(seqOffset + 4, totalFrameLen));
-
-        if (onBinaryFrame) {
-          onBinaryFrame(sessionId, ptyData, outputSeq);
+        // payload 内层就是 shared 端定义的 PTY frame（[sid_len][sid][seq][data]），
+        // 解码同样走 decodeBinaryFrame 保持单一权威。
+        const decoded = decodeBinaryFrame(buf.subarray(5, totalFrameLen));
+        if (decoded && onBinaryFrame) {
+          // ptyData copy 保留与旧代码一致的语义：调用方拿到的是独立 Buffer，
+          // 不会被后续 buf reslice 影响。
+          onBinaryFrame(decoded.sessionId, Buffer.from(decoded.data), decoded.outputSeq);
         }
 
         buf = buf.subarray(totalFrameLen);

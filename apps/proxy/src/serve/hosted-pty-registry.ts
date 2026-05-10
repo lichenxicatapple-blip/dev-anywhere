@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { SessionState } from "@dev-anywhere/shared";
+import { SessionState, encodeBinaryFrame } from "@dev-anywhere/shared";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -336,13 +336,7 @@ export class HostedPtyRegistry {
   }
 
   private sendBinary(sessionId: string, data: Buffer, outputSeq: number): void {
-    const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-    const frame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
-    frame[0] = sessionIdBuf.length;
-    sessionIdBuf.copy(frame, 1);
-    frame.writeUInt32LE(outputSeq, 1 + sessionIdBuf.length);
-    data.copy(frame, 1 + sessionIdBuf.length + 4);
-    this.deps.relayConnection.sendBinary(frame);
+    this.deps.relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
   }
 
   private close(sessionId: string, options: { kill: boolean; notify: boolean }): boolean {

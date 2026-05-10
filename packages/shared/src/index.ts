@@ -94,3 +94,11 @@ export type { ControlErrorCode as ControlErrorCodeType } from "./constants/contr
 // logger
 export { createLogger, flushLogger } from "./logger.js";
 export type { Logger, CreateLoggerOptions } from "./logger.js";
+
+// binary PTY frame codec
+export {
+  encodeBinaryFrame,
+  decodeBinaryFrame,
+  binaryFrameHeaderLength,
+} from "./binary-frame.js";
+export type { DecodedBinaryFrame } from "./binary-frame.js";

@@ -223,7 +223,9 @@ export class RelayConnection extends EventEmitter {
   }
 
   // 发送 binary PTY 帧到 relay，断线时直接丢弃不入队
-  sendBinary(data: Buffer): void {
+  // 接受 Uint8Array 而非强制 Buffer：encodeBinaryFrame 在 shared 包返回 Uint8Array，
+  // ws.send 在底层同样支持 Uint8Array，无需额外 Buffer.from 拷贝。
+  sendBinary(data: Uint8Array): void {
     if (
       this.fsm.current() === RelayConnectionState.SYNCED &&
       this.ws?.readyState === WebSocket.OPEN

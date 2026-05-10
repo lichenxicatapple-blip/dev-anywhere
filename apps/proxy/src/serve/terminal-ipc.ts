@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
+import { SessionState, encodeBinaryFrame, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { createIpcReader, serializeIpc, type IpcMessage } from "../ipc/ipc-protocol.js";
 import type { ProviderHookContext } from "../providers/index.js";
@@ -334,13 +334,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     (sessionId, data, outputSeq) => {
       if (!sessionManager.getSession(sessionId)) return;
       touchSessionActivity(sessionManager, relayConnection, sessionId);
-      const sessionIdBuf = Buffer.from(sessionId, "utf-8");
-      const wsFrame = Buffer.alloc(1 + sessionIdBuf.length + 4 + data.length);
-      wsFrame[0] = sessionIdBuf.length;
-      sessionIdBuf.copy(wsFrame, 1);
-      wsFrame.writeUInt32LE(outputSeq, 1 + sessionIdBuf.length);
-      data.copy(wsFrame, 1 + sessionIdBuf.length + 4);
-      relayConnection.sendBinary(wsFrame);
+      relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
     },
   );
 

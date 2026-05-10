@@ -1,5 +1,7 @@
 // WebSocket 连接管理器，使用原生 WebSocket，支持文本和二进制消息分发，指数退避重连
 
+import { decodeBinaryFrame } from "@dev-anywhere/shared";
+
 type SendOptions = {
   queueWhenDisconnected?: boolean;
 };
@@ -167,16 +169,11 @@ export class WebSocketManager {
   }
 
   private dispatchBinary(view: Uint8Array): void {
-    if (view.length < 2) return;
-    const sidLen = view[0];
-    if (view.length < 1 + sidLen + 4) return;
-    const sessionId = new TextDecoder().decode(view.subarray(1, 1 + sidLen));
-    const seqOffset = 1 + sidLen;
-    const outputSeq = new DataView(view.buffer, view.byteOffset + seqOffset, 4).getUint32(0, true);
-    const ptyData = view.subarray(seqOffset + 4);
-    const subscribers = this.binarySubscribers.get(sessionId);
+    const decoded = decodeBinaryFrame(view);
+    if (!decoded) return;
+    const subscribers = this.binarySubscribers.get(decoded.sessionId);
     if (subscribers) {
-      subscribers.forEach((h) => h(ptyData, outputSeq));
+      subscribers.forEach((h) => h(decoded.data, decoded.outputSeq));
     }
   }
 
