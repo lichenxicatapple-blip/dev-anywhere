@@ -113,4 +113,47 @@ describe("createPtyFrameWriteBuffer", () => {
     expect(onFramePending).toHaveBeenCalledTimes(1);
     expect(onFrameWritten).not.toHaveBeenCalled();
   });
+
+  // 模拟 transport.dispose 后 PtyRecoveryController.applySnapshot 的 deferred callback
+  // 触发的 race：xterm 异步调 snapshot write callback，callback 内部 flushContiguousFrames
+  // 调 frameWriter.target.write(Uint8Array)。此场景下不该泄漏到底层 target。
+  it("blocks Uint8Array writes after dispose, preserving the dispose-then-callback race", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const target = createTarget();
+    const writer = createPtyFrameWriteBuffer(target, {});
+
+    // 1. 同步写 snapshot 字符串（dispose 之前），底层 target 立即拿到
+    let capturedCallback: (() => void) = () => {};
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      // 模拟 xterm 把 snapshot callback 推迟，dispose 之后才回调
+      if (typeof data === "string") {
+        if (callback) capturedCallback = callback;
+      } else {
+        callback?.();
+      }
+    });
+    writer.target.write("snapshot", () => {});
+    expect(target.calls).toEqual([["write", "snapshot"]]);
+
+    // 2. 外部 transport 被 dispose
+    writer.dispose();
+
+    // 3. xterm 终于触发 snapshot 的 callback；模拟 PtyRecoveryController 在 callback 里
+    // flushContiguousFrames 调 target.write(Uint8Array)
+    capturedCallback();
+    writer.target.write(new Uint8Array([65, 66]));
+
+    // 关键断言：dispose 后只允许之前同步发出的 snapshot 字符串到达底层 target，
+    // dispose 之后任何 Uint8Array 都不该泄漏（避免 xterm dispose 后再写入）。
+    expect(target.calls).toEqual([["write", "snapshot"]]);
+  });
 });
