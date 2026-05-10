@@ -266,6 +266,10 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       onRawInput: () => {
         rawInputFollowSchedulerRef.current?.schedule();
       },
+      onError: (err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(`终端初始化失败：${message}`);
+      },
       ...connection.transport,
     });
     terminalControllerRef.current = controller;

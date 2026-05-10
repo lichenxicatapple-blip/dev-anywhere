@@ -44,6 +44,9 @@ interface PtyTerminalControllerOptions {
   onReady?: () => void;
   onSubscribeStarted?: () => void;
   onSubscribeDelayed?: () => void;
+  // createTerminal 等异步初始化失败时的回调；调用方可借此弹 toast / 切错误态。
+  // 不提供则错误仅记到 console.error，UI 静默无感知。
+  onError?: (err: unknown) => void;
 }
 
 interface PtyTerminalController {
@@ -70,6 +73,7 @@ export function attachPtyTerminalController(
     onReady,
     onSubscribeStarted,
     onSubscribeDelayed,
+    onError,
   } = options;
 
   let disposed = false;
@@ -80,35 +84,42 @@ export function attachPtyTerminalController(
   let outputPaused = false;
 
   void (async () => {
-    const result = await createTerminal(host);
-    if (disposed) {
-      result.dispose();
-      return;
+    try {
+      const result = await createTerminal(host);
+      if (disposed) {
+        result.dispose();
+        return;
+      }
+
+      disposeTerminal = result.dispose;
+      disposeRawInput = attachRawInput(result.terminal, sessionId, { onRawInput }).dispose;
+
+      const focusTerminal = (): void => result.terminal.focus();
+      host.addEventListener("pointerdown", focusTerminal, { passive: true });
+      removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
+      onTerminalReady?.(result.terminal);
+      requestAnimationFrame(() => {
+        if (!disposed) focusTerminal();
+      });
+
+      transport = attachTransport({
+        sessionId,
+        ws,
+        relay,
+        target: result.terminal,
+        onFramePending,
+        onFrameWritten,
+        onReady,
+        onSubscribeStarted,
+        onSubscribeDelayed,
+      });
+      transport.setOutputPaused(outputPaused);
+    } catch (err) {
+      // createTerminal / attachTransport 抛出会让用户看到空白终端无任何提示。
+      // 至少把错误抛给上层（toast / 错误态）+ 控制台，避免静默失败。
+      console.error("[pty-terminal-controller] initialization failed", err);
+      onError?.(err);
     }
-
-    disposeTerminal = result.dispose;
-    disposeRawInput = attachRawInput(result.terminal, sessionId, { onRawInput }).dispose;
-
-    const focusTerminal = (): void => result.terminal.focus();
-    host.addEventListener("pointerdown", focusTerminal, { passive: true });
-    removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
-    onTerminalReady?.(result.terminal);
-    requestAnimationFrame(() => {
-      if (!disposed) focusTerminal();
-    });
-
-    transport = attachTransport({
-      sessionId,
-      ws,
-      relay,
-      target: result.terminal,
-      onFramePending,
-      onFrameWritten,
-      onReady,
-      onSubscribeStarted,
-      onSubscribeDelayed,
-    });
-    transport.setOutputPaused(outputPaused);
   })();
 
   return {

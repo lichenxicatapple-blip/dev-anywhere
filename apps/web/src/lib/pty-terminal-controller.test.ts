@@ -189,6 +189,39 @@ describe("attachPtyTerminalController", () => {
     expect(h.setOutputPaused).toHaveBeenLastCalledWith(false);
   });
 
+  it("calls onError and avoids partial wiring when createTerminal rejects", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const h = createHarness();
+    const failure = new Error("WebGL context init failed");
+    const createTerminal = vi.fn(async () => {
+      throw failure;
+    });
+    const onError = vi.fn();
+    const onTerminalReady = vi.fn();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+      onTerminalReady,
+      onError,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onError).toHaveBeenCalledWith(failure);
+    // 失败后不应继续走后续 wiring
+    expect(h.attachRawInput).not.toHaveBeenCalled();
+    expect(h.attachTransport).not.toHaveBeenCalled();
+    expect(onTerminalReady).not.toHaveBeenCalled();
+
+    errSpy.mockRestore();
+  });
+
   it("disposes an async-created terminal when cancelled before creation completes", async () => {
     const h = createHarness();
     let resolveCreate: (value: {
