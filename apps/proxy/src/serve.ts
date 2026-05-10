@@ -181,6 +181,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     sessionManager,
     relayConnection,
     agentStatusRegistry,
+    controlHandlers,
   });
   const jsonObserver = new JsonObserver({
     changeSessionState: eventBridge.changeSessionState,
@@ -220,11 +221,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       );
       eventBridge.emitAgentStatus(sessionId, "idle");
     },
-    onSessionClosed: (sessionId) => {
-      controlHandlers.cleanup(sessionId);
-      agentStatusRegistry.delete(sessionId);
-      broadcastSessionList(relayConnection, sessionManager);
-    },
+    onSessionClosed: eventBridge.cleanupSessionResources,
   });
 
   relayConnection.connect();
@@ -294,6 +291,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       hookEventRouter: hookRuntime.hookEventRouter,
       createHookContext: hookRuntime.createHookContext,
       emitAgentStatus: eventBridge.emitAgentStatus,
+      cleanupSessionResources: eventBridge.cleanupSessionResources,
       config: statusConfig,
       resolveInterruptedApprovals: (sessionId) =>
         resolveInterruptedApprovals(

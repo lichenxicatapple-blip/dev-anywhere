@@ -5,9 +5,11 @@ import {
 } from "@dev-anywhere/shared";
 import { SeqCounter } from "../common/seq-counter.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
+import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
 import {
+  broadcastSessionList,
   changeSessionState,
   touchSessionActivity,
 } from "./session-broadcast.js";
@@ -16,6 +18,7 @@ interface EventBridgeDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
   agentStatusRegistry: AgentStatusRegistry;
+  controlHandlers: ControlMessageHandlers;
 }
 
 export interface EventBridge {
@@ -25,6 +28,9 @@ export interface EventBridge {
   touchSessionActivity: (sessionId: string) => boolean;
   // 把 agent_status 推到 relay 并写到 registry，用于 client 重连后查询。
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
+  // session 关闭时三件套清理：取消 control handlers 周期任务 / 删 agent_status / 广播会话列表。
+  // session 本身的 manager.delete 由调用方负责（不同路径删的时机不同）。
+  cleanupSessionResources: (sessionId: string) => void;
 }
 
 export function createEventBridge(deps: EventBridgeDeps): EventBridge {
@@ -50,9 +56,16 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
     deps.relayConnection.sendRaw(serializeControl({ type: "agent_status", sessionId, payload }));
   };
 
+  const cleanupSessionResources = (sessionId: string): void => {
+    deps.controlHandlers.cleanup(sessionId);
+    deps.agentStatusRegistry.delete(sessionId);
+    broadcastSessionList(deps.relayConnection, deps.sessionManager);
+  };
+
   return {
     changeSessionState: changeState,
     touchSessionActivity: touchActivity,
     emitAgentStatus,
+    cleanupSessionResources,
   };
 }

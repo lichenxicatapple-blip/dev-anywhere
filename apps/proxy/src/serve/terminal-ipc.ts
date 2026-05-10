@@ -43,6 +43,7 @@ interface TerminalConnectionDeps {
   ) => ProviderHookContext;
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   resolveInterruptedApprovals: (sessionId: string) => void;
+  cleanupSessionResources: (sessionId: string) => void;
   config: Extract<IpcMessage, { type: "service_status_response" }>["config"];
 }
 
@@ -59,6 +60,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     createHookContext,
     emitAgentStatus,
     resolveInterruptedApprovals,
+    cleanupSessionResources,
     config,
   } = deps;
 
@@ -280,10 +282,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           );
           sessionManager.terminateSession(msg.sessionId);
           terminalSockets.delete(msg.sessionId);
-
-          controlHandlers.cleanup(msg.sessionId);
-          agentStatusRegistry.delete(msg.sessionId);
-          broadcastSessionList(relayConnection, sessionManager);
+          cleanupSessionResources(msg.sessionId);
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
           break;
         }
@@ -367,9 +366,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           }),
         );
         sessionManager.terminateSession(sessionId);
-        controlHandlers.cleanup(sessionId);
-        agentStatusRegistry.delete(sessionId);
-        broadcastSessionList(relayConnection, sessionManager);
+        cleanupSessionResources(sessionId);
         serviceLogger.info(
           { sessionId },
           "PTY session cleaned up on socket close (crash fallback)",
