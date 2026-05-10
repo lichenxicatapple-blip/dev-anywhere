@@ -1,6 +1,6 @@
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
-import { ControlErrorCode } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
 import type { SessionManager } from "../session-manager.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
@@ -119,7 +119,7 @@ export function createControlMessageHandlers(
       try {
         const commands = await discoverCommands(workDir);
         send(
-          JSON.stringify({
+          serializeControl({
             type: "command_list_push",
             commands,
           }),
@@ -135,7 +135,7 @@ export function createControlMessageHandlers(
     async handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void> {
       if (!isPathSafe(msg.path)) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_list_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -151,7 +151,7 @@ export function createControlMessageHandlers(
       try {
         const entries = await scanDir(msg.path);
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_list_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -161,7 +161,7 @@ export function createControlMessageHandlers(
         serviceLogger.debug({ path: msg.path, count: entries.length }, "Dir list response sent");
       } catch (err) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_list_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -177,7 +177,7 @@ export function createControlMessageHandlers(
     async handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void> {
       if (!isPathSafe(msg.path)) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_create_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -193,7 +193,7 @@ export function createControlMessageHandlers(
       try {
         await mkdir(msg.path, { recursive: true });
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_create_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -203,7 +203,7 @@ export function createControlMessageHandlers(
         serviceLogger.info({ path: msg.path }, "Directory created");
       } catch (err) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "dir_create_response",
             requestId: msg.requestId,
             path: msg.path,
@@ -220,7 +220,7 @@ export function createControlMessageHandlers(
       try {
         const sessions = await scanSessionHistory();
         send(
-          JSON.stringify({
+          serializeControl({
             type: "session_history_response",
             requestId: msg.requestId,
             sessions,
@@ -229,7 +229,7 @@ export function createControlMessageHandlers(
         serviceLogger.debug({ count: sessions.length }, "Session history response sent");
       } catch (err) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "session_history_response",
             requestId: msg.requestId,
             sessions: [],
@@ -261,7 +261,7 @@ export function createControlMessageHandlers(
             : undefined;
 
       send(
-        JSON.stringify({
+        serializeControl({
           type: "session_resources_response",
           requestId: msg.requestId,
           sessionId: msg.sessionId,
@@ -285,7 +285,7 @@ export function createControlMessageHandlers(
       try {
         const commands = await discoverCommands(workDir);
         send(
-          JSON.stringify({
+          serializeControl({
             type: "command_list_push",
             commands,
           }),
@@ -306,7 +306,7 @@ export function createControlMessageHandlers(
       try {
         const groups = await getFileTree(workDir);
         send(
-          JSON.stringify({
+          serializeControl({
             type: "file_tree_push",
             groups,
           }),
@@ -327,7 +327,7 @@ export function createControlMessageHandlers(
       // 先同步 session 列表，relay 据此建立 proxy-session 关联
       if (activeSessions.length > 0) {
         send(
-          JSON.stringify({
+          serializeControl({
             type: "session_sync",
             sessions: activeSessions.map((s) => ({
               id: s.id,
@@ -348,14 +348,14 @@ export function createControlMessageHandlers(
           try {
             const commands = await discoverCommands(workDir);
             send(
-              JSON.stringify({
+              serializeControl({
                 type: "command_list_push",
                 commands,
               }),
             );
             const groups = await getFileTree(workDir);
             send(
-              JSON.stringify({
+              serializeControl({
                 type: "file_tree_push",
                 groups,
               }),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
+import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } from "./session.js";
 import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
@@ -482,7 +482,8 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
-  // proxy 重连后同步活跃 session 列表给 relay
+  // proxy 重连后同步活跃 session 列表给 relay。session_sync 由 relay 自消费（更新 proxy-session
+  // 关联）不转发给 client，因此**没有** direction 标注——RelayControlDirection 只描述转发流。
   control("session_sync", {
     sessions: z.array(
       z.object({
@@ -490,7 +491,7 @@ const relayControlDefinitions = [
         mode: z.enum(sessionModeValues),
         provider: z.enum(providerValues),
         ptyOwner: z.enum(ptyOwnerValues).optional(),
-        state: z.string(),
+        state: z.enum(sessionStateValues),
       }),
     ),
   }),

@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
 
-const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
+export const sessionStateValues = [
+  "idle",
+  "working",
+  "waiting_approval",
+  "error",
+  "terminated",
+] as const;
 const agentStatusPhaseValues = [
   "idle",
   "thinking",
