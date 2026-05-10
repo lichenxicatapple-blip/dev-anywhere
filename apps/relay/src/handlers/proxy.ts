@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
-import { isProxyToClientRelayControlType, RelayErrorCode, type Logger } from "@dev-anywhere/shared";
+import { isProxyToClientRelayControlType, RelayErrorCode } from "@dev-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";

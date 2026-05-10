@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import type { Logger } from "@dev-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared/logger";
 
 export type RelayChaosDirection = "client_to_proxy" | "proxy_to_client";
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared/logger";
 import { waitForOpen, waitForMessage, getPort } from "../helpers.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

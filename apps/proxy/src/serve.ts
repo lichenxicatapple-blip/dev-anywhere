@@ -1,6 +1,7 @@
 import { createServer, type Socket } from "node:net";
 import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import { serializeControl, flushLogger } from "@dev-anywhere/shared";
+import { serializeControl } from "@dev-anywhere/shared";
+import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";

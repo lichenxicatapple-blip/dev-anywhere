@@ -2,7 +2,7 @@ import { MessageEnvelopeSchema, RelayControlSchema, RelayErrorCode } from "@dev-
 import type { RelayControlMessage } from "@dev-anywhere/shared";
 import type { MessageEnvelope } from "@dev-anywhere/shared";
 import { WebSocket } from "ws";
-import type { Logger } from "@dev-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "./registry.js";
 import type { RelayChaos } from "./chaos.js";
 

@@ -1,4 +1,4 @@
-import { flushLogger } from "@dev-anywhere/shared";
+import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "../common/logger.js";
 import { HOOK_REGISTRY_PATH } from "../common/paths.js";
 import type { ProviderHookContext } from "../providers/index.js";

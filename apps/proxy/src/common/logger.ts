@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared/logger";
 import { CONFIG_PATH, LOG_DIR } from "./paths.js";
 import { loadProxyRuntimeEnv, VALID_LOG_LEVELS } from "./runtime-env.js";
 

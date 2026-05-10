@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import type { Logger } from "@dev-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared/logger";
 import { RelayRegistry } from "./registry.js";
 import { healthRouter } from "./health.js";
 import { handleProxyConnection } from "./handlers/proxy.js";

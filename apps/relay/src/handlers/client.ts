@@ -3,8 +3,8 @@ import {
   ControlErrorCode,
   isClientToProxyRelayControlType,
   RelayErrorCode,
-  type Logger,
 } from "@dev-anywhere/shared";
+import type { Logger } from "@dev-anywhere/shared/logger";
 import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";

@@ -1,4 +1,4 @@
-import { createLogger, flushLogger } from "@dev-anywhere/shared";
+import { createLogger, flushLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer } from "./server.js";
 import { loadRelayRuntimeEnv } from "./runtime-env.js";
 import { RELAY_VERSION } from "./version.js";

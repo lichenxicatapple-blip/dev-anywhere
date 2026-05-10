@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "@dev-anywhere/relay/server";
 import { buildMessage } from "@dev-anywhere/shared";
 import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared/logger";
 import {
   waitForOpen,
   waitForMessage,

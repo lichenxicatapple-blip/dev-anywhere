@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { connect, type Socket } from "node:net";
-import { flushLogger } from "@dev-anywhere/shared";
+import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "../common/logger.js";
 import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
 

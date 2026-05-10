@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger } from "@dev-anywhere/shared/logger";
 import { getPort } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
