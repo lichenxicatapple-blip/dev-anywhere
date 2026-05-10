@@ -8,17 +8,15 @@ import type { SessionInfo } from "#src/serve/session-manager.js";
 
 function makeSession(state: SessionState): SessionInfo {
   return {
-    sessionId: "test-session",
-    proxyId: "proxy-1",
-    clientId: "client-1",
-    provider: "claude",
+    id: "test-session",
     mode: "pty",
+    provider: "claude",
     state,
     cwd: "/tmp",
-    args: [],
     createdAt: 0,
-    lastActive: 0,
-  } as SessionInfo;
+    updatedAt: 0,
+    pid: 0,
+  };
 }
 
 function makeDeps(overrides?: Partial<PtySessionBridgeDeps>): PtySessionBridgeDeps & {

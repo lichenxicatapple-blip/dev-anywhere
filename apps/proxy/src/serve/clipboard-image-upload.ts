@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import { ControlErrorCode } from "@dev-anywhere/shared";
+import { serviceLogger } from "../common/logger.js";
 import { DATA_DIR } from "../common/paths.js";
 
 const MAX_CLIPBOARD_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -117,7 +118,11 @@ function trySaveProjectClipboardImage(options: {
     writeFileSync(path, options.buffer, { mode: 0o600 });
     ensureProjectClipboardIgnored(cwd);
     return { success: true, path: relative(cwd, path) };
-  } catch {
+  } catch (err) {
+    serviceLogger.warn(
+      { sessionId: options.sessionId, cwd: options.cwd, error: String(err) },
+      "Project clipboard image write failed; falling back to data dir",
+    );
     return null;
   }
 }
