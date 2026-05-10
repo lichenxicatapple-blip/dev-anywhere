@@ -202,6 +202,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               terminalSockets,
               hostedPtyRegistry,
               agentStatusRegistry,
+              broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
             },
             msg.sessionId,
           );

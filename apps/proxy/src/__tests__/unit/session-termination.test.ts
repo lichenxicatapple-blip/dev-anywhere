@@ -28,6 +28,7 @@ function createDeps(session: unknown, options?: { terminalWrite?: ReturnType<typ
     agentStatusRegistry: {
       delete: vi.fn(),
     },
+    broadcastSessionList: vi.fn(),
   };
 }
 
@@ -57,6 +58,7 @@ describe("terminateSessionByOwnership", () => {
       type: "pty_detach",
       sessionId: "s1",
     });
+    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
   });
 
   it("terminates hosted PTY through HostedPtyRegistry", () => {
@@ -73,6 +75,9 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.hostedPtyRegistry.terminate).toHaveBeenCalledWith("s1");
     expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
     expect(deps.workerRegistry.send).not.toHaveBeenCalled();
+    // hosted PTY 终止异步走 child.onExit → cleanupSessionResources 内部已广播，
+    // 同步路径不重复广播。
+    expect(deps.broadcastSessionList).not.toHaveBeenCalled();
   });
 
   it("terminates JSON workers through worker_stop", () => {
@@ -87,5 +92,6 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.workerRegistry.send).toHaveBeenCalledWith("s1", { type: "worker_stop" });
     expect(deps.workerRegistry.delete).toHaveBeenCalledWith("s1");
     expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
   });
 });

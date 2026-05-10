@@ -20,6 +20,11 @@ interface TerminateSessionDeps {
   terminalSockets: Map<string, Socket>;
   hostedPtyRegistry: HostedPtyRegistry;
   agentStatusRegistry: AgentStatusRegistry;
+  // 同步终止路径必须广播 session list，否则 web 看到幽灵 row。hosted PTY 终止异步走
+  // child.onExit → onSessionClosed → cleanupSessionResources 内部已广播，因此 hosted
+  // 路径不在此处调用。所有同步路径（detach_local_terminal / terminate_json_worker）
+  // 由本函数收口调用，调用方不必手动补。
+  broadcastSessionList: () => void;
 }
 
 export function terminateSessionByOwnership(
@@ -39,6 +44,7 @@ export function terminateSessionByOwnership(
     });
     deps.controlHandlers.cleanup(sessionId);
     deps.agentStatusRegistry.delete(sessionId);
+    deps.broadcastSessionList();
     serviceLogger.info(
       { sessionId, success: result.success },
       "Local terminal session detached from remote view",
@@ -58,6 +64,7 @@ export function terminateSessionByOwnership(
     const result = deps.sessionManager.terminateSession(sessionId);
     deps.controlHandlers.cleanup(sessionId);
     deps.agentStatusRegistry.delete(sessionId);
+    deps.broadcastSessionList();
     serviceLogger.info({ sessionId, success: result.success }, "JSON worker session terminated");
     return { success: result.success, action: "terminate_json_worker" };
   }

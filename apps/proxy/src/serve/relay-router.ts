@@ -247,7 +247,6 @@ export class RelayRouter {
       { sessionId: sid, success: result.success, action: result.action },
       "Session termination handled via relay",
     );
-    if (result.action !== "terminate_hosted_pty") this.deps.broadcastSessionList();
   }
 
   private onSessionWorkerAbort(msg: ControlMessage<"session_worker_abort">): void {
