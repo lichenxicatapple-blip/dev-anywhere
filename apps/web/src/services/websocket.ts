@@ -19,15 +19,19 @@ export class WebSocketManager {
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
 
+  private cancelReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
   connect(url: string): void {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnectTimer();
     this.connected = false;
     this.url = url;
     this.closed = false;
@@ -52,10 +56,7 @@ export class WebSocketManager {
     if (this.closed || this.connected) return;
     // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
     this.reconnectAttempt = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnectTimer();
     // 老 ws 可能处于 half-open（TCP 半死），显式 close 再立即重连
     if (this.ws) {
       try {
@@ -83,10 +84,7 @@ export class WebSocketManager {
 
   close(): void {
     this.closed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.cancelReconnectTimer();
     this.ws?.close();
     this.ws = null;
     this.connected = false;
