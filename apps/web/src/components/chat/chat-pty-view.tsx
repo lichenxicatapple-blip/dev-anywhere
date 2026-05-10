@@ -2,7 +2,7 @@
 // 浏览器滚动容器映射到 xterm viewportY；当真实 PTY 屏幕比 Web 可视区矮时，
 // scroll spacer 仍保证底部位置能映射到 xterm baseY，而不是伪造额外终端行。
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, FocusEvent, MouseEvent, PointerEvent } from "react";
+import type { ClipboardEvent, FocusEvent, MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "lucide-react";
 import { createXtermTerminal } from "@/lib/create-xterm";
@@ -30,6 +30,7 @@ import {
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
+import { usePtyTouchGesture } from "./use-pty-touch-gesture";
 import { toast } from "@/components/toast";
 import { BackToBottom } from "./back-to-bottom";
 import { useImagePreview } from "./image-preview";
@@ -60,12 +61,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const scrollToXRatioRef = useRef<(ratio: number) => void>(() => {});
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
-  const touchPointerRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    moved: boolean;
-  } | null>(null);
   const suppressPtyFocusUntilRef = useRef(0);
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const connection = usePtyConnectionState();
@@ -145,48 +140,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     terminalRef.current?.focus();
   }
 
-  function handleTerminalPointerDownCapture(event: PointerEvent<HTMLDivElement>): void {
-    if (event.pointerType !== "touch") return;
-    const target = event.target;
-    if (!(target instanceof Element) || !target.closest(".xterm")) return;
-    touchPointerRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      moved: false,
-    };
-    event.stopPropagation();
-  }
-
-  function handleTerminalPointerMoveCapture(event: PointerEvent<HTMLDivElement>): void {
-    const gesture = touchPointerRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    const dx = event.clientX - gesture.startX;
-    const dy = event.clientY - gesture.startY;
-    if (!gesture.moved && Math.hypot(dx, dy) >= 8) {
-      gesture.moved = true;
-      suppressPtyFocus();
-    }
-    if (gesture.moved) event.stopPropagation();
-  }
-
-  function handleTerminalPointerUpCapture(event: PointerEvent<HTMLDivElement>): void {
-    const gesture = touchPointerRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    touchPointerRef.current = null;
-    event.stopPropagation();
-    if (gesture.moved) {
-      suppressPtyFocus();
-      return;
-    }
-    terminalRef.current?.focus();
-  }
-
-  function handleTerminalPointerCancelCapture(event: PointerEvent<HTMLDivElement>): void {
-    if (touchPointerRef.current?.pointerId !== event.pointerId) return;
-    touchPointerRef.current = null;
-    suppressPtyFocus();
-  }
+  const touchGestureHandlers = usePtyTouchGesture({ terminalRef, suppressPtyFocus });
 
   function handleTerminalFocusCapture(event: FocusEvent<HTMLDivElement>): void {
     if (performance.now() <= suppressPtyFocusUntilRef.current) {
@@ -423,10 +377,10 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
           touchAction: "pan-x pan-y",
         }}
         onMouseDownCapture={handleTerminalContainerMouseDown}
-        onPointerDownCapture={handleTerminalPointerDownCapture}
-        onPointerMoveCapture={handleTerminalPointerMoveCapture}
-        onPointerUpCapture={handleTerminalPointerUpCapture}
-        onPointerCancelCapture={handleTerminalPointerCancelCapture}
+        onPointerDownCapture={touchGestureHandlers.onPointerDownCapture}
+        onPointerMoveCapture={touchGestureHandlers.onPointerMoveCapture}
+        onPointerUpCapture={touchGestureHandlers.onPointerUpCapture}
+        onPointerCancelCapture={touchGestureHandlers.onPointerCancelCapture}
         onPasteCapture={handleTerminalPasteCapture}
         onFocusCapture={handleTerminalFocusCapture}
         onBlurCapture={handleTerminalBlurCapture}
