@@ -50,3 +50,21 @@ declare global {
     __devAnywherePtyTerminal?: () => unknown;
   }
 }
+
+// 把两个调试入口的 window 写入/清理集中在一处，调用方拿到的 register/unregister 都是幂等的，
+// 自身不持状态，由 chat-pty-view 的 effect cleanup 配对调用。
+export function registerPtyTerminalWindowAccessor(getTerminal: () => unknown): void {
+  window.__devAnywherePtyTerminal = getTerminal;
+}
+
+export function unregisterPtyTerminalWindowAccessor(): void {
+  if (window.__devAnywherePtyTerminal) delete window.__devAnywherePtyTerminal;
+}
+
+export function registerPtyDebugSnapshotProvider(provider: PtyDebugSnapshotProvider): void {
+  window.__devAnywherePtyDebug = provider;
+}
+
+export function unregisterPtyDebugSnapshotProvider(): void {
+  if (window.__devAnywherePtyDebug) delete window.__devAnywherePtyDebug;
+}

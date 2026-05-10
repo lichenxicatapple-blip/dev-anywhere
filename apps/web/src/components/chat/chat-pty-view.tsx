@@ -23,6 +23,12 @@ import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
+import {
+  registerPtyDebugSnapshotProvider,
+  registerPtyTerminalWindowAccessor,
+  unregisterPtyDebugSnapshotProvider,
+  unregisterPtyTerminalWindowAccessor,
+} from "@/lib/pty-debug-snapshot";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { toast } from "@/components/toast";
 import { BackToBottom } from "./back-to-bottom";
@@ -251,7 +257,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         ).dispose;
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
         registerPtyTerminal(sessionId, term as Terminal);
-        window.__devAnywherePtyTerminal = () => terminalRef.current;
+        registerPtyTerminalWindowAccessor(() => terminalRef.current);
       },
       onFramePending: () => {
         pendingNewFrameRef.current = true;
@@ -282,7 +288,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       registerPtyTerminal(sessionId, null);
       terminalRef.current = null;
       terminalControllerRef.current = null;
-      if (window.__devAnywherePtyTerminal) delete window.__devAnywherePtyTerminal;
+      unregisterPtyTerminalWindowAccessor();
     };
   }, [
     sessionId,
@@ -351,20 +357,20 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     scrollToBottomRef.current = controller.scrollToBottom;
     scrollToRatioRef.current = controller.scrollToRatio;
     scrollToXRatioRef.current = controller.scrollToXRatio;
-    window.__devAnywherePtyDebug = () => ({
+    registerPtyDebugSnapshotProvider(() => ({
       ...controller.getDebugSnapshot(),
       frame: {
         lastWriteAt: lastFrameWriteAtRef.current,
         pendingNewFrame: pendingNewFrameRef.current,
       },
-    });
+    }));
     return () => {
       controller.dispose();
       relayoutPtyRef.current = () => {};
       scrollToBottomRef.current = () => {};
       scrollToRatioRef.current = () => {};
       scrollToXRatioRef.current = () => {};
-      if (window.__devAnywherePtyDebug) delete window.__devAnywherePtyDebug;
+      unregisterPtyDebugSnapshotProvider();
     };
   }, [
     connection.ready,
