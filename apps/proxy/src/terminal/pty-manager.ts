@@ -83,13 +83,7 @@ export class PtyManager {
 
     // 子进程退出，按 Unix 惯例处理信号退出码，通过回调通知调用方
     child.onExit(({ exitCode, signal }) => {
-      if (isInteractive) {
-        try {
-          this.stdin.setRawMode(false);
-        } catch {
-          // stdin 可能已关闭
-        }
-      }
+      if (isInteractive) this.disableRawModeQuiet();
       restoreHostTerminalModes(this.stdout);
       const code = signal ? 128 + signal : exitCode;
       this.onSessionExit?.(code);
@@ -120,14 +114,17 @@ export class PtyManager {
     this.child?.write(data);
   }
 
-  cleanup(exitCode: number): void {
-    if (this.stdin.isTTY) {
-      try {
-        this.stdin.setRawMode(false);
-      } catch {
-        // stdin 可能已关闭
-      }
+  // 关闭 raw mode 并吞掉 stdin 已关闭场景下的异常。退出 / cleanup 两条路径共用。
+  private disableRawModeQuiet(): void {
+    try {
+      this.stdin.setRawMode(false);
+    } catch {
+      // stdin 可能已关闭
     }
+  }
+
+  cleanup(exitCode: number): void {
+    if (this.stdin.isTTY) this.disableRawModeQuiet();
     restoreHostTerminalModes(this.stdout);
     if (this.child) {
       try {
