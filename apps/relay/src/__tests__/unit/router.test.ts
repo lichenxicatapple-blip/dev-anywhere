@@ -101,15 +101,22 @@ describe("routeProxyMessage", () => {
     routeProxyMessage("invalid json", "p1", registry, logger);
 
     expect(client1.send).not.toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalled();
+    // warn 必须带可定位的 proxyId + 解析错误，避免日志只剩 "warn 被调过"
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ proxyId: "p1", error: expect.any(String) }),
+      "Invalid message from proxy",
+    );
   });
 
-  it("does nothing when no clients are bound", () => {
+  it("no clients bound: silently drops without logging warn (not an error)", () => {
     const proxyWs = createMockWs();
     registry.registerProxy("p1", proxyWs);
 
     const raw = JSON.stringify(validEnvelope);
-    expect(() => routeProxyMessage(raw, "p1", registry, logger)).not.toThrow();
+    routeProxyMessage(raw, "p1", registry, logger);
+
+    // 没有 client 监听时直接丢弃是正常路径，不应触发 warn 日志
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("skips clients with non-OPEN readyState", () => {
@@ -170,7 +177,10 @@ describe("routeClientMessage", () => {
     const clientWs = createMockWs();
     routeClientMessage("bad data {{", "p1", clientWs, registry, logger);
 
-    expect(logger.warn).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.any(String) }),
+      "Invalid message from client",
+    );
     expect(clientWs.send).not.toHaveBeenCalled();
   });
 });
