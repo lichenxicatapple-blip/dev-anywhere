@@ -227,9 +227,11 @@ export class RelayRegistry {
   }
 
   countClients(): number {
+    // 计数依据：ws 还存活且处于 OPEN。仅 `if (binding.ws)` 不够：close handler 漏调
+    // unbindClientById 时 ws 对象残留，会让 /status 永久报告虚高 clientCount。
     let count = 0;
     for (const [, binding] of this.clientBindings) {
-      if (binding.ws) count++;
+      if (binding.ws && binding.ws.readyState === WebSocket.OPEN) count++;
     }
     return count;
   }

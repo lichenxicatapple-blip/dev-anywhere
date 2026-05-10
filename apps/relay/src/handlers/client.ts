@@ -241,6 +241,11 @@ export function handleClientConnection(
 
   clientWs.on("close", () => {
     registry.removeClientWs(clientWs);
+    // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
+    // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。
+    if (clientWs.clientId) {
+      registry.unbindClientById(clientWs.clientId);
+    }
     logger.info({ clientId: clientWs.clientId }, "Client disconnected");
   });
 

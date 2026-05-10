@@ -3,7 +3,7 @@ import { RelayRegistry } from "#src/registry.js";
 import { WebSocket } from "ws";
 
 // 创建模拟 WebSocket 对象用于测试
-function createMockWs(readyState = WebSocket.OPEN): WebSocket {
+function createMockWs(readyState: number = WebSocket.OPEN): WebSocket {
   return {
     readyState,
     close: vi.fn(),
@@ -207,6 +207,21 @@ describe("RelayRegistry", () => {
       registry.bindClientById("c1", "p1", createMockWs());
       registry.bindClientById("c2", "p1", createMockWs());
       expect(registry.countClients()).toBe(2);
+    });
+
+    it("excludes bindings whose ws has been unbound (clientId binding kept for reconnect)", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", createMockWs());
+      registry.bindClientById("c2", "p1", createMockWs());
+      registry.unbindClientById("c1");
+      expect(registry.countClients()).toBe(1);
+    });
+
+    it("excludes bindings whose ws is no longer OPEN", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", createMockWs(WebSocket.CLOSED));
+      registry.bindClientById("c2", "p1", createMockWs());
+      expect(registry.countClients()).toBe(1);
     });
   });
 
