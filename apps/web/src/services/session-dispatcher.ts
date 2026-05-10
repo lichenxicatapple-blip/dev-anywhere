@@ -4,11 +4,9 @@
 //   Control:  agent_status / pty_state / session_history_response
 // 未选 proxy 时短路, 避免跨 proxy 残留. 去重: chat-dispatcher 不消费这些类型, 无 race.
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
-import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
-
-type InboundMessage = MessageEnvelope | RelayControlMessage;
+import { registerDispatcher } from "./dispatcher-registry";
 
 function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" }>): void {
   if (!useAppStore.getState().selectedProxyId) return;
@@ -45,13 +43,7 @@ function handleSessionHistoryResponse(
 }
 
 export function registerSessionDispatcher(): () => void {
-  const relay = relayClientRef;
-  if (!relay) {
-    console.warn("registerSessionDispatcher called before relayClient bound; skipping");
-    return () => {};
-  }
-
-  return relay.onMessage((msg: InboundMessage) => {
+  return registerDispatcher("registerSessionDispatcher", () => (msg) => {
     switch (msg.type) {
       case "session_list":
         // Control 层的 session_list 是请求 (无 payload), 这里只处理 envelope 响应

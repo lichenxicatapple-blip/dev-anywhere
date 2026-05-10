@@ -14,7 +14,7 @@ import type { ControlErrorCodeType } from "@/lib/control-error-code";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
-type InboundMessage = MessageEnvelope | RelayControlMessage;
+export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
   proxyId: string;
   name?: string;

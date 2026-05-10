@@ -5,10 +5,10 @@
 //   Envelope 层: assistant_message / tool_use_request / tool_result / thinking / user_input
 //   Control 层: pending_approvals_push / session_history_messages / turn_result
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
-import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import type { RelayClient } from "@/services/relay-client";
+import { registerDispatcher } from "./dispatcher-registry";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ChatRelay = Pick<RelayClient, "sendControl">;
@@ -134,13 +134,7 @@ function handleTerminalTitle(msg: Extract<RelayControlMessage, { type: "terminal
 }
 
 export function registerChatDispatcher(): () => void {
-  const relay = relayClientRef;
-  if (!relay) {
-    console.warn("registerChatDispatcher called before relayClient bound; skipping");
-    return () => {};
-  }
-
-  return relay.onMessage(createChatMessageHandler(relay));
+  return registerDispatcher("registerChatDispatcher", (relay) => createChatMessageHandler(relay));
 }
 
 export function createChatMessageHandler(relay: ChatRelay | null): (msg: InboundMessage) => void {
