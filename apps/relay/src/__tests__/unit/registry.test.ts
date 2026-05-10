@@ -84,7 +84,7 @@ describe("RelayRegistry", () => {
 
     it("returns false when proxy is offline", () => {
       registry.registerProxy("p1", createMockWs());
-      registry.markProxyOffline("p1");
+      registry.transitionProxy("p1", "online", "offline");
       expect(registry.isProxyOnline("p1")).toBe(false);
     });
 
@@ -94,23 +94,15 @@ describe("RelayRegistry", () => {
   });
 
   describe("proxy offline and reconnect", () => {
-    it("markProxyOffline sets ws to null and preserves state", () => {
+    it("transition online->offline clears ws but preserves entry + sessions for reconnect", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
 
-      registry.markProxyOffline("p1");
+      registry.transitionProxy("p1", "online", "offline");
 
       expect(registry.getProxy("p1")).toBeUndefined();
       expect(registry.hasProxy("p1")).toBe(true);
-    });
-
-    it("state persists indefinitely after markProxyOffline", () => {
-      registry.registerProxy("p1", createMockWs());
-      registry.addSessionToProxy("p1", "s1");
-
-      registry.markProxyOffline("p1");
-
-      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.getSessionsForProxy("p1")).toContain("s1");
     });
 
     it("reconnect after offline restores state", () => {
@@ -118,7 +110,7 @@ describe("RelayRegistry", () => {
       registry.registerProxy("p1", ws1);
       registry.addSessionToProxy("p1", "s1");
 
-      registry.markProxyOffline("p1");
+      registry.transitionProxy("p1", "online", "offline");
       expect(registry.getProxy("p1")).toBeUndefined();
 
       const ws2 = createMockWs();
@@ -128,9 +120,6 @@ describe("RelayRegistry", () => {
       expect(registry.isProxyOnline("p1")).toBe(true);
     });
 
-    it("markProxyOffline does nothing for unknown proxy", () => {
-      expect(() => registry.markProxyOffline("unknown")).not.toThrow();
-    });
   });
 
   describe("session tracking", () => {
@@ -248,7 +237,7 @@ describe("RelayRegistry", () => {
 
     it("returns detail for offline proxy with disconnectedAt timestamp", () => {
       registry.registerProxy("p1", createMockWs());
-      registry.markProxyOffline("p1");
+      registry.transitionProxy("p1", "online", "offline");
 
       const detail = registry.getProxyDetail("p1");
       expect(detail).toBeDefined();
@@ -308,9 +297,9 @@ describe("RelayRegistry", () => {
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
 
-      it("getProxyConnectionState returns 'offline' after markProxyOffline", () => {
+      it("getProxyConnectionState returns 'offline' after transitionProxy to offline", () => {
         registry.registerProxy("p1", createMockWs());
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         expect(registry.getProxyConnectionState("p1")).toBe("offline");
       });
 
@@ -326,7 +315,7 @@ describe("RelayRegistry", () => {
 
       it("transitionProxy offline->online succeeds", () => {
         registry.registerProxy("p1", createMockWs());
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         expect(() => registry.transitionProxy("p1", "offline", "online")).not.toThrow();
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
@@ -338,7 +327,7 @@ describe("RelayRegistry", () => {
 
       it("transitionProxy offline->offline throws (same state)", () => {
         registry.registerProxy("p1", createMockWs());
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         expect(() => registry.transitionProxy("p1", "offline", "offline")).toThrow();
       });
 
@@ -360,7 +349,7 @@ describe("RelayRegistry", () => {
 
       it("reconnect sets connectionState back to online", () => {
         registry.registerProxy("p1", createMockWs());
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         const ws2 = createMockWs();
         registry.registerProxy("p1", ws2);
         expect(registry.getProxyConnectionState("p1")).toBe("online");
@@ -368,46 +357,14 @@ describe("RelayRegistry", () => {
     });
 
     describe("client connection state", () => {
-      it("getClientConnectionState returns 'registered' after client_register without binding", () => {
-        // bindClientById creates a binding, which is "bound" state
-        // For "registered" state, we need a client that registered but hasn't selected a proxy
-        // Actually, looking at the plan: client starts at binding time via bindClientById
-        // "registered" means bound to the registry but not yet proxy_select-ed
-        // Let's test the transition flow
+      it("getClientConnectionState returns 'bound' after bindClientById", () => {
         registry.registerProxy("p1", createMockWs());
         registry.bindClientById("c1", "p1", createMockWs());
-        // bindClientById creates with "bound" state
         expect(registry.getClientConnectionState("c1")).toBe("bound");
       });
 
       it("getClientConnectionState returns undefined for unknown client", () => {
         expect(registry.getClientConnectionState("unknown")).toBeUndefined();
-      });
-
-      it("transitionClient bound->registered succeeds (re-select / unbind)", () => {
-        registry.registerProxy("p1", createMockWs());
-        registry.bindClientById("c1", "p1", createMockWs());
-        expect(() => registry.transitionClient("c1", "bound", "registered")).not.toThrow();
-        expect(registry.getClientConnectionState("c1")).toBe("registered");
-      });
-
-      it("transitionClient registered->bound succeeds", () => {
-        registry.registerProxy("p1", createMockWs());
-        registry.bindClientById("c1", "p1", createMockWs());
-        registry.transitionClient("c1", "bound", "registered");
-        expect(() => registry.transitionClient("c1", "registered", "bound")).not.toThrow();
-        expect(registry.getClientConnectionState("c1")).toBe("bound");
-      });
-
-      it("transitionClient registered->registered throws (same state)", () => {
-        registry.registerProxy("p1", createMockWs());
-        registry.bindClientById("c1", "p1", createMockWs());
-        registry.transitionClient("c1", "bound", "registered");
-        expect(() => registry.transitionClient("c1", "registered", "registered")).toThrow();
-      });
-
-      it("transitionClient throws for unknown client", () => {
-        expect(() => registry.transitionClient("unknown", "registered", "bound")).toThrow();
       });
     });
 
@@ -417,7 +374,7 @@ describe("RelayRegistry", () => {
         const detail = registry.getProxyDetail("p1");
         expect(detail!.connectionState).toBe("online");
 
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         const detailOffline = registry.getProxyDetail("p1");
         expect(detailOffline!.connectionState).toBe("offline");
       });
@@ -435,7 +392,7 @@ describe("RelayRegistry", () => {
         let list = registry.listProxiesWithName();
         expect(list[0].online).toBe(true);
 
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         list = registry.listProxiesWithName();
         expect(list[0].online).toBe(false);
       });
@@ -444,7 +401,7 @@ describe("RelayRegistry", () => {
         registry.registerProxy("p1", createMockWs());
         expect(registry.isProxyOnline("p1")).toBe(true);
 
-        registry.markProxyOffline("p1");
+        registry.transitionProxy("p1", "online", "offline");
         expect(registry.isProxyOnline("p1")).toBe(false);
       });
     });

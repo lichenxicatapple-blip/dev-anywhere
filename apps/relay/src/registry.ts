@@ -52,17 +52,6 @@ export class RelayRegistry {
     return "new";
   }
 
-  // 标记 proxy 离线，保留所有状态等待重连，不设超时
-  // 清理只在 proxy 主动退出（proxy_disconnect）或 relay 启动清理废弃数据时发生
-  markProxyOffline(proxyId: string): void {
-    const state = this.proxyStates.get(proxyId);
-    if (!state) return;
-
-    state.ws = null;
-    state.connectionState = "offline";
-    state.disconnectedAt = Date.now();
-  }
-
   // 显式状态转换，校验 from 状态匹配后更新 connectionState
   transitionProxy(proxyId: string, from: ProxyConnectionState, to: ProxyConnectionState): void {
     if (from === to) {
@@ -82,23 +71,6 @@ export class RelayRegistry {
       state.ws = null;
       state.disconnectedAt = Date.now();
     }
-  }
-
-  // 显式客户端状态转换，校验 from 状态匹配后更新 connectionState
-  transitionClient(clientId: string, from: ClientConnectionState, to: ClientConnectionState): void {
-    if (from === to) {
-      throw new Error(`Invalid client transition: ${from} -> ${to} (same state)`);
-    }
-    const binding = this.clientBindings.get(clientId);
-    if (!binding) {
-      throw new Error(`Client not found: ${clientId}`);
-    }
-    if (binding.connectionState !== from) {
-      throw new Error(
-        `Client ${clientId} state mismatch: expected ${from}, actual ${binding.connectionState}`,
-      );
-    }
-    binding.connectionState = to;
   }
 
   getProxyConnectionState(proxyId: string): ProxyConnectionState | undefined {
