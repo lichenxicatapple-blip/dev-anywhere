@@ -12,6 +12,7 @@ const {
   updateAgentCliPath,
   toastError,
   toastSuccess,
+  navigateMock,
 } = vi.hoisted(() => ({
   sendControl: vi.fn(),
   onMessage: vi.fn(),
@@ -22,7 +23,16 @@ const {
   updateAgentCliPath: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  navigateMock: vi.fn(),
 }));
+
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<typeof import("react-router")>("react-router");
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
 
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {
@@ -85,6 +95,7 @@ describe("CreateSessionDialog", () => {
     updateAgentCliPath.mockReset();
     toastError.mockClear();
     toastSuccess.mockClear();
+    navigateMock.mockClear();
     useFileStore.setState({
       tree: new Map(),
       cwd: "",
@@ -292,5 +303,57 @@ describe("CreateSessionDialog", () => {
       option.getAttribute("value"),
     );
     expect(options).toEqual(["/usr/local/bin/claude", "/home/dev/.local/bin/claude"]);
+  });
+
+  // 用户在 createSession 还没回应前关闭弹窗（按 Esc / 切到其他界面）。dialog 受控关闭后
+  // submitSessionCreate 仍把 promise resolve 后的成功路径走完，最严重的副作用是 navigate
+  // 强行把 user 带去 /chat/<sessionId>——已经放弃创建却被路由劫持。
+  it("does not navigate to /chat/<id> when the dialog has been closed mid-flight", async () => {
+    type CreateResolve = (value: unknown) => void;
+    let resolveCreate: CreateResolve = () => {};
+    createSession.mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        resolveCreate = resolve as CreateResolve;
+      }),
+    );
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    function ControlledDialog({ open }: { open: boolean }) {
+      return (
+        <MemoryRouter>
+          <TooltipProvider>
+            <CreateSessionDialog open={open} onOpenChange={vi.fn()} />
+          </TooltipProvider>
+        </MemoryRouter>
+      );
+    }
+
+    const { rerender, getByRole } = render(<ControlledDialog open />);
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledTimes(1);
+    });
+
+    // 用户关掉 dialog（受控 prop 翻 false，等价于 Esc / 父级关闭）
+    rerender(<ControlledDialog open={false} />);
+
+    // 此时后端才回应创建成功
+    resolveCreate({
+      type: "session_create_response",
+      sessionId: "new-sess-1",
+      mode: "json",
+      provider: "claude",
+    });
+
+    // 给微任务跑完
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

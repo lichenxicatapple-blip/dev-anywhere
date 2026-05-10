@@ -106,6 +106,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [cliPathInput, setCliPathInput] = useState("");
   const [savingCliPath, setSavingCliPath] = useState(false);
   const cwdFieldRef = useRef<HTMLDivElement>(null);
+  // open=false 时把 latestOpen.current 同步翻 false，submitSessionCreate 在 await 后据此跳过
+  // 路由跳转——否则用户在创建中关掉弹窗会被强制带去 /chat/<id>，等同界面被劫持。
+  const latestOpen = useRef(open);
+  latestOpen.current = open;
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const agentCli = useFileStore((s) => s.agentCli);
@@ -247,6 +251,11 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         ptyOwner: ctrl.ptyOwner,
       };
       useSessionStore.getState().addSession(newSession);
+      // session 已建好就该入 store（其他地方刷新会看到），但若用户已关闭弹窗就别再
+      // 强行 navigate / 重置表单——他们已经放弃了这次创建，路由跳转是反预期的。
+      if (!latestOpen.current) {
+        return;
+      }
       onOpenChange(false);
       resetForm();
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? submittedMode}`);
