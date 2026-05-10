@@ -87,15 +87,15 @@ describe("proxy endpoint token auth", () => {
     });
 
     it("validates client tokens over HTTP for explicit browser errors", async () => {
-      const missing = await fetch(`http://127.0.0.1:${port}/auth/client`);
+      const missing = await fetch(`http://127.0.0.1:${port}/api/auth/client`);
       expect(missing.status).toBe(401);
 
-      const invalid = await fetch(`http://127.0.0.1:${port}/auth/client`, {
+      const invalid = await fetch(`http://127.0.0.1:${port}/api/auth/client`, {
         headers: { authorization: "Bearer wrong" },
       });
       expect(invalid.status).toBe(401);
 
-      const valid = await fetch(`http://127.0.0.1:${port}/auth/client`, {
+      const valid = await fetch(`http://127.0.0.1:${port}/api/auth/client`, {
         headers: { authorization: "Bearer client-secret" },
       });
       expect(valid.status).toBe(204);

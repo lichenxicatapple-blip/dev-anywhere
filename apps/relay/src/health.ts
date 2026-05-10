@@ -34,7 +34,7 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
     });
   });
 
-  router.get("/auth/client", (req, res) => {
+  router.get("/api/auth/client", (req, res) => {
     if (!clientTokenRequired) {
       res.status(204).end();
       return;
@@ -50,7 +50,7 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   // 已认证 proxy（凭 proxyToken）查询当前生效的 client token，避免运维者必须 ssh 上来读 .env。
   // 行为：proxy token 关闭时直接 401（防止开放 relay 公开 token）；proxy token 不匹配 401；
   // 校验通过且 client token 已配置返回 { clientToken }；client token 未配置返回 204。
-  router.get("/admin/client-token", (req, res) => {
+  router.get("/api/admin/client-token", (req, res) => {
     if (!proxyTokenRequired) {
       res.status(401).json({ error: "proxy_token_required" });
       return;

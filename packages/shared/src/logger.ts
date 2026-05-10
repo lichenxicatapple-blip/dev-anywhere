@@ -20,6 +20,9 @@ export interface CreateLoggerOptions {
   retention?: number;
   stdout?: boolean;
   silent?: boolean;
+  // 同步落盘：sonic-boom 默认异步 open + 异步 write，测试里需要在断言前看到文件，
+  // 或在 afterEach 删目录前确保后台 worker 已经退出，必须开同步。生产保留异步以避免热路径阻塞。
+  sync?: boolean;
 }
 
 const DEFAULT_LOG_DIR = `${homedir()}/.dev-anywhere/logs`;
@@ -105,6 +108,7 @@ function buildPinoLogger(options: CreateLoggerOptions): pino.Logger {
     retention,
     stdout = false,
     silent = false,
+    sync = false,
   } = options;
 
   if (silent) {
@@ -117,7 +121,9 @@ function buildPinoLogger(options: CreateLoggerOptions): pino.Logger {
   const filePath = join(logDir, `${name}-${runId}.log`);
   linkLatestLog(logDir, name, filePath, runId);
   pruneOldLogs(logDir, name, filePath, retention);
-  const streams: pino.StreamEntry[] = [{ stream: pino.destination(filePath) }];
+  const streams: pino.StreamEntry[] = [
+    { stream: pino.destination({ dest: filePath, sync }) },
+  ];
 
   if (stdout) {
     streams.unshift({ stream: process.stdout });

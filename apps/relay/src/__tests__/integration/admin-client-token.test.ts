@@ -5,7 +5,7 @@ import { getPort } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
 
-describe("/admin/client-token endpoint", () => {
+describe("/api/admin/client-token endpoint", () => {
   let relay: RelayServer;
   let port: number;
 
@@ -25,7 +25,7 @@ describe("/admin/client-token endpoint", () => {
   async function get(token?: string): Promise<Response> {
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
-    return await fetch(`http://127.0.0.1:${port}/admin/client-token`, { headers });
+    return await fetch(`http://127.0.0.1:${port}/api/admin/client-token`, { headers });
   }
 
   afterEach(async () => {

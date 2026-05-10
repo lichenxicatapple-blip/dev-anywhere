@@ -25,7 +25,7 @@ describe("createLogger", () => {
 
   it("creates logDir and writes a file on first .info call", () => {
     const logDir = join(tmp, "logs");
-    const logger = createLogger({ name: "active", logDir });
+    const logger = createLogger({ name: "active", logDir, sync: true });
 
     logger.info({ hello: "world" }, "first log");
 
@@ -46,7 +46,7 @@ describe("createLogger", () => {
   });
 
   it("supports child() and forwards level changes", () => {
-    const logger = createLogger({ name: "child-test", logDir: tmp, level: "debug" });
+    const logger = createLogger({ name: "child-test", logDir: tmp, level: "debug", sync: true });
     const child = logger.child({ scope: "unit" });
 
     expect(typeof child.info).toBe("function");

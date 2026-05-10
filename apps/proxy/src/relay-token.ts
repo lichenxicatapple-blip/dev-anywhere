@@ -34,7 +34,7 @@ export async function runRelayTokenCommand(options: { relayName?: string }): Pro
     process.exit(1);
   }
 
-  const adminUrl = `${toHttpUrl(relayUrl)}/admin/client-token`;
+  const adminUrl = `${toHttpUrl(relayUrl)}/api/admin/client-token`;
   let res: Response;
   try {
     res = await fetch(adminUrl, {

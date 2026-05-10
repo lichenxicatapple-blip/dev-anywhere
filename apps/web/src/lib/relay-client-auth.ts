@@ -27,7 +27,7 @@ export async function checkRelayClientAuth(
   if (!health.auth?.clientTokenRequired) return null;
   if (!token) return "missing_client_token";
 
-  const authRes = await fetch(endpointUrl(relayUrl, "/auth/client"), {
+  const authRes = await fetch(endpointUrl(relayUrl, "/api/auth/client"), {
     cache: "no-store",
     headers: { authorization: `Bearer ${token}` },
     signal,

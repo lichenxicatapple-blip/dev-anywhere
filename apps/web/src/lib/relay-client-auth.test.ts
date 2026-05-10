@@ -53,7 +53,7 @@ describe("relay client auth preflight", () => {
       checkRelayClientAuth("https://relay.example.com", "client-secret"),
     ).resolves.toBeNull();
     expect(fetchMock).toHaveBeenLastCalledWith(
-      "https://relay.example.com/auth/client",
+      "https://relay.example.com/api/auth/client",
       expect.objectContaining({
         headers: { authorization: "Bearer client-secret" },
       }),

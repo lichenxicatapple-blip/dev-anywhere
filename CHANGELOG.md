@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.1.9] - 2026-05-10
+
+### Fixed
+
+- Relay client-token preflight (`/auth/client`) and admin client-token retrieval (`/admin/client-token`) are now mounted under `/api/`. The previous paths fell outside the production nginx forward rule (`^/(fonts|health|status|api)`) and were served as the SPA HTML fallback, which broke the web auth-failure UI and `dev-anywhere relay token` against cloud relays.
+
+### Added
+
+- Web shortcut menu adds "发送 Ctrl+B" (`\x02`) and "发送 Ctrl+O" (`\x0f`) for sending these control codes from the browser.
+
 ## [0.1.8] - 2026-05-10
 
 ### Added
