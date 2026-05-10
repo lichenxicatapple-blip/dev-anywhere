@@ -29,14 +29,17 @@ function extractSessionIdFromHash(): string | null {
 
 function requestProxyState(relay: RelayClient): void {
   relay.sendControl({ type: "session_list" });
-  const proxyInfoRequest = relay.requestProxyInfo();
-  void proxyInfoRequest
+  void relay
+    .requestProxyInfo()
     .then((info) => {
       const fileStore = useFileStore.getState();
       fileStore.setHomePath(info.homePath);
       fileStore.setAgentCli(info.agentCli);
     })
-    .catch(() => undefined);
+    .catch((err: unknown) => {
+      console.error("[phase-machine] requestProxyInfo failed", err);
+      toast.error("无法获取开发机信息");
+    });
   void relay
     .requestAgentStatuses()
     .then((statuses) => {
@@ -45,7 +48,10 @@ function requestProxyState(relay: RelayClient): void {
         store.setAgentStatus(status.sessionId, status.payload);
       }
     })
-    .catch(() => undefined);
+    .catch((err: unknown) => {
+      // 后台辅助数据，失败仅日志，不打扰用户（避免每次重连飞 toast）
+      console.error("[phase-machine] requestAgentStatuses failed", err);
+    });
 }
 
 function requestSessionHistory(relay: RelayClient): void {
@@ -54,7 +60,10 @@ function requestSessionHistory(relay: RelayClient): void {
     .then((sessions) => {
       useSessionStore.getState().setHistorySessions(sessions);
     })
-    .catch(() => undefined);
+    .catch((err: unknown) => {
+      console.error("[phase-machine] requestSessionHistory failed", err);
+      toast.error("无法加载历史会话");
+    });
 }
 
 async function restoreSelectedProxyBinding(relay: RelayClient, proxy: ProxyInfo): Promise<boolean> {

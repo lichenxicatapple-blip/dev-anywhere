@@ -7,6 +7,15 @@ vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
 }));
 
+const toastError = vi.fn();
+vi.mock("@/components/toast", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    warning: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
 function resetAppStore(): void {
   useAppStore.setState({
     phase: "chatting",
@@ -97,5 +106,91 @@ describe("phase-machine reconnect timers", () => {
     expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list" });
     expect(useAppStore.getState().phase).toBe("chatting");
     expect(useAppStore.getState().proxyOnline).toBe(true);
+  });
+});
+
+describe("phase-machine request failure handling", () => {
+  beforeEach(() => {
+    resetAppStore();
+    toastError.mockClear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("surfaces requestProxyInfo failure via toast and does not crash subsequent flow", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let boundProxyId: string | null = "proxy-1";
+    const relay = {
+      clearBoundProxy: vi.fn((proxyId?: string) => {
+        if (!proxyId || proxyId === boundProxyId) boundProxyId = null;
+      }),
+      getBoundProxyId: vi.fn(() => boundProxyId),
+      listProxies: vi.fn(),
+      requestAgentStatuses: vi.fn().mockResolvedValue([]),
+      requestProxyInfo: vi.fn().mockRejectedValue(new Error("relay timeout")),
+      requestSessionHistory: vi.fn().mockResolvedValue([]),
+      selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
+        boundProxyId = proxyId;
+        return { success: true, proxyId };
+      }),
+      sendControl: vi.fn(),
+    } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    await handleRelayMessage({ type: "proxy_offline", proxyId: "proxy-1" }, timers, relay);
+    await handleRelayMessage(
+      {
+        type: "proxy_list_response",
+        proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
+      },
+      timers,
+      relay,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(toastError).toHaveBeenCalledWith("无法获取开发机信息");
+    // 失败不应阻断后续 phase 推进
+    expect(useAppStore.getState().phase).toBe("chatting");
+    errSpy.mockRestore();
+  });
+
+  it("surfaces requestSessionHistory failure via toast", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let boundProxyId: string | null = "proxy-1";
+    const relay = {
+      clearBoundProxy: vi.fn((proxyId?: string) => {
+        if (!proxyId || proxyId === boundProxyId) boundProxyId = null;
+      }),
+      getBoundProxyId: vi.fn(() => boundProxyId),
+      listProxies: vi.fn(),
+      requestAgentStatuses: vi.fn().mockResolvedValue([]),
+      requestProxyInfo: vi.fn().mockResolvedValue({
+        homePath: "/h",
+        agentCli: { claude: { available: true, command: "c" }, codex: { available: true, command: "c" } },
+      }),
+      requestSessionHistory: vi.fn().mockRejectedValue(new Error("relay down")),
+      selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
+        boundProxyId = proxyId;
+        return { success: true, proxyId };
+      }),
+      sendControl: vi.fn(),
+    } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    await handleRelayMessage({ type: "proxy_offline", proxyId: "proxy-1" }, timers, relay);
+    await handleRelayMessage(
+      {
+        type: "proxy_list_response",
+        proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
+      },
+      timers,
+      relay,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
+    errSpy.mockRestore();
   });
 });
