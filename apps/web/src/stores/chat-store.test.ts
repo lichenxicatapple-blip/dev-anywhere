@@ -10,8 +10,7 @@ describe("chat-store per-session", () => {
   it("appendAssistantText creates a slice for new session", () => {
     useChatStore.getState().appendAssistantText("s1", "hello");
     const slice = useChatStore.getState().bySessionId["s1"];
-    expect(slice).toBeDefined();
-    expect(slice.messages.length).toBe(1);
+    expect(slice.messages).toHaveLength(1);
     expect(slice.messages[0].text).toBe("hello");
     expect(useChatStore.getState().bySessionId["s2"]).toBeUndefined();
   });
@@ -88,7 +87,8 @@ describe("chat-store per-session", () => {
     useChatStore.getState().appendAssistantText("s2", "y");
     useChatStore.getState().clearSession("s1");
     expect(useChatStore.getState().bySessionId["s1"]).toBeUndefined();
-    expect(useChatStore.getState().bySessionId["s2"]).toBeDefined();
+    // s2 不只是"还存在"，内容必须保留
+    expect(useChatStore.getState().bySessionId["s2"].messages[0].text).toBe("y");
   });
 
   it("setInputDraft scoped by session", () => {
