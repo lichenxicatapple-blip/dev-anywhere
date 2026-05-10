@@ -272,14 +272,13 @@ code.hljs,
 }
 
 .dev-sidebar-active-row {
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--primary) 13%, transparent),
-      color-mix(in srgb, var(--color-status-success) 5%, transparent) 38%,
-      transparent 78%
-    ),
-    color-mix(in srgb, var(--foreground) 3%, transparent);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--primary) 14%, transparent),
+    color-mix(in srgb, var(--color-status-success) 6%, transparent) 38%,
+    color-mix(in srgb, var(--foreground) 2.5%, transparent) 72%,
+    transparent
+  );
 }
 
 .dev-sidebar-active-indicator {
