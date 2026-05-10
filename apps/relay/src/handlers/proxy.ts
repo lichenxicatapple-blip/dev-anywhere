@@ -221,21 +221,30 @@ export function handleProxyConnection(
   });
 
   proxyWs.on("close", () => {
-    if (proxyWs.proxyId) {
-      notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
-      // 通过状态转换标记离线，保留所有状态等待重连
-      // proxy_disconnect 已经清理过的情况下 transition 会抛异常，静默忽略
-      try {
-        registry.transitionProxy(proxyWs.proxyId, "online", "offline");
-      } catch {
-        // proxy 已被 proxy_disconnect 清理或已离线，跳过
-      }
+    if (!proxyWs.proxyId) return;
+    // 同 proxyId 重连场景：registerProxy 会 terminate 旧 ws、把 registry 指向新 ws，
+    // 旧 ws 的 close 异步触发到达这里时，registry.getProxy(proxyId) 已是新 ws 实例。
+    // 此时若仍执行 transitionProxy("online", "offline")，会把新连接的状态翻回离线并广播一次假离线。
+    // 仅当 registry 当前持有的 ws 仍是我们自己（或 entry 已被 proxy_disconnect 清掉）时才走离线流程。
+    const current = registry.getProxy(proxyWs.proxyId);
+    if (current && current !== proxyWs) {
       logger.info(
         { proxyId: proxyWs.proxyId },
-        "Proxy disconnected, state preserved for reconnect",
+        "Old proxy ws closed after being superseded by reconnect, skipping offline transition",
       );
-      broadcastProxyList(registry, chaos);
+      return;
     }
+    notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
+    try {
+      registry.transitionProxy(proxyWs.proxyId, "online", "offline");
+    } catch {
+      // proxy 已被 proxy_disconnect 清理或已离线，跳过
+    }
+    logger.info(
+      { proxyId: proxyWs.proxyId },
+      "Proxy disconnected, state preserved for reconnect",
+    );
+    broadcastProxyList(registry, chaos);
   });
 
   proxyWs.on("error", (err) => {

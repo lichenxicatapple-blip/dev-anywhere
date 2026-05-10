@@ -363,6 +363,61 @@ describe("proxy lifecycle", () => {
   );
 
   it(
+    "Proxy 重连 supersede → 旧 ws close 不应把新连接误标离线",
+    async () => {
+      const id = uid();
+
+      // 先建一个 client 订阅，便于观察是否收到伪造的 proxy_offline
+      const client = ws.client(port);
+      await waitForOpen(client);
+      client.send(JSON.stringify({ type: "client_register", clientId: `client-${id}` }));
+      await waitForMessage(client); // consume client_register_response
+
+      const proxy1 = ws.proxy(port);
+      await waitForOpen(proxy1);
+      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      await waitForMessage(proxy1);
+      await settle(50);
+
+      client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
+      await waitForMessage(client); // proxy_select_response
+
+      // 收集 client 收到的所有消息 200ms，期望看到 proxy_online，不期望 proxy_offline
+      const seen: string[] = [];
+      const handler = (data: Buffer): void => {
+        const msg = JSON.parse(data.toString()) as { type: string; proxyId?: string };
+        if (msg.proxyId === id) seen.push(msg.type);
+      };
+      client.on("message", handler);
+
+      // 第二个连接用同一 proxyId 注册（触发 supersede）
+      const proxy2 = ws.proxy(port);
+      await waitForOpen(proxy2);
+      const closeP = new Promise<void>((resolve) => {
+        proxy1.on("close", () => resolve());
+      });
+      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      await waitForMessage(proxy2);
+      await closeP;
+      // 给旧 ws 的 close handler 一段时间触发其异步逻辑
+      await settle(200);
+      client.off("message", handler);
+
+      // 旧 ws close 后，新连接必须仍然在线
+      const proxies = (await fetch(`http://127.0.0.1:${port}/api/proxies`).then((r) =>
+        r.json(),
+      )) as Array<{ proxyId: string; online: boolean }>;
+      const entry = proxies.find((p) => p.proxyId === id);
+      expect(entry?.online).toBe(true);
+
+      // client 应见到 proxy_online，不应见到由 supersede 导致的伪造 proxy_offline
+      expect(seen).toContain("proxy_online");
+      expect(seen).not.toContain("proxy_offline");
+    },
+    E2E_TIMEOUT,
+  );
+
+  it(
     "多个 client 绑定同一 proxy，proxy 断线 → 所有 client 收到 proxy_offline",
     async () => {
       const id = uid();
