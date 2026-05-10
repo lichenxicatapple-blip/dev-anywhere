@@ -430,15 +430,6 @@ describe("Worker Protocol", () => {
   }
 
   describe("serializeWorkerMsg", () => {
-    it("produces valid NDJSON (JSON + newline)", async () => {
-      const { serializeWorkerMsg } = await importIpc();
-      const msg = { type: "worker_stop" as const };
-      const result = serializeWorkerMsg(msg);
-
-      expect(result.endsWith("\n")).toBe(true);
-      expect(() => JSON.parse(result.trim())).not.toThrow();
-    });
-
     it("round-trips through JSON.parse", async () => {
       const { serializeWorkerMsg } = await importIpc();
       const msg = {

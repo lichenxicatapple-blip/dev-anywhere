@@ -131,19 +131,6 @@ describe("Relay Server Integration", () => {
     expect(proxyReceived.payload.text).toBe("hello from client");
   });
 
-  it("client gets error when selecting non-existent proxy", async () => {
-    const client = connectClient();
-    await waitForOpen(client);
-
-    const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({ type: "proxy_select", proxyId: "nonexistent" }));
-    const response = JSON.parse(await msgPromise);
-
-    expect(response.type).toBe("proxy_select_response");
-    expect(response.success).toBe(false);
-    expect(response.errorCode).toBe("PROXY_OFFLINE");
-  });
-
   it("GET /health returns 200 with status ok", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);

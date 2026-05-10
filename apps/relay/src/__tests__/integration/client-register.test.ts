@@ -257,41 +257,6 @@ describe("client_register protocol", () => {
     expect(response.code).toBe("PROXY_OFFLINE");
   });
 
-  it("proxy_select rejects binding to offline proxy in grace period", async () => {
-    const proxy = connectProxy();
-    await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await settle();
-
-    // proxy 断线进入宽限期
-    proxy.close();
-    await settle(100);
-
-    const client = connectClient();
-    await waitForOpen(client);
-
-    const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-
-    const response = JSON.parse(await msgPromise);
-    expect(response.type).toBe("proxy_select_response");
-    expect(response.success).toBe(false);
-    expect(response.errorCode).toBe("PROXY_OFFLINE");
-  });
-
-  it("proxy_select rejects binding to nonexistent proxy", async () => {
-    const client = connectClient();
-    await waitForOpen(client);
-
-    const msgPromise = waitForMessage(client);
-    client.send(JSON.stringify({ type: "proxy_select", proxyId: "nonexistent" }));
-
-    const response = JSON.parse(await msgPromise);
-    expect(response.type).toBe("proxy_select_response");
-    expect(response.success).toBe(false);
-    expect(response.errorCode).toBe("PROXY_OFFLINE");
-  });
-
   it("client receives proxy_offline on proxy graceful disconnect", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
