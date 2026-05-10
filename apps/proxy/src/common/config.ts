@@ -3,7 +3,10 @@ import { dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import { CONFIG_PATH, PROFILE_NAME, defaultHookPortForProfile } from "./paths.js";
 import { serviceLogger } from "./logger.js";
+import { VALID_LOG_LEVELS, loadProxyRuntimeEnv } from "./runtime-env.js";
 import type { ProviderId } from "../providers/types.js";
+
+export type { LogLevel } from "./runtime-env.js";
 
 export interface ProxyConfig {
   profileName: string;
@@ -26,8 +29,8 @@ export interface ProxyConfig {
   };
 }
 
-const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]);
-export type LogLevel = z.infer<typeof LogLevelSchema>;
+const LogLevelSchema = z.enum(VALID_LOG_LEVELS);
+// LogLevel 由 runtime-env.ts 定义并 re-export，schema 用同一组字面量保证两边对齐。
 
 const RelayTargetSchema = z
   .object({
@@ -68,15 +71,6 @@ type ProxyConfigFile = z.infer<typeof ProxyConfigFileSchema>;
 type RelayTargetConfig = z.infer<typeof RelayTargetSchema>;
 type AgentCliConfig = z.infer<typeof AgentCliSchema>;
 
-function parsePort(value: string | undefined, source: string): number | undefined {
-  if (!value) return undefined;
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid ${source}: expected TCP port 1-65535`);
-  }
-  return port;
-}
-
 function readConfigFile(): ProxyConfigFile {
   if (!existsSync(CONFIG_PATH)) {
     throw new Error(`Dev Anywhere config not found at ${CONFIG_PATH}. Run "dev-anywhere init".`);
@@ -87,6 +81,7 @@ function readConfigFile(): ProxyConfigFile {
   } catch (err) {
     throw new Error(
       `${CONFIG_PATH} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
   const parsed = ProxyConfigFileSchema.safeParse(raw);
@@ -163,45 +158,40 @@ function resolveRelayConfig(
 }
 
 export function loadConfig(options?: { relayName?: string }): ProxyConfig {
+  const env = loadProxyRuntimeEnv();
   const fromFile = readConfigFile();
   const agentCli = fromFile.agentCli ?? {};
   const resolved = resolveRelayConfig(fromFile, options?.relayName);
-  const claudeBin = process.env.CLAUDE_BIN ?? agentCli.claudeBin;
-  const codexBin = process.env.CODEX_BIN ?? agentCli.codexBin;
+  const claudeBin = env.claudeBin ?? agentCli.claudeBin;
+  const codexBin = env.codexBin ?? agentCli.codexBin;
   const config: ProxyConfig = {
     profileName: PROFILE_NAME,
     relayName: resolved.relayName,
-    relayUrl: process.env.RELAY_URL ?? resolved.relay.url,
-    relayToken: process.env.RELAY_PROXY_TOKEN ?? resolved.relay.proxyToken,
-    hookPort:
-      parsePort(process.env.DEV_ANYWHERE_HOOK_PORT, "DEV_ANYWHERE_HOOK_PORT") ??
-      defaultHookPortForProfile(PROFILE_NAME),
+    relayUrl: env.relayUrl ?? resolved.relay.url,
+    relayToken: env.relayProxyToken ?? resolved.relay.proxyToken,
+    hookPort: env.hookPort ?? defaultHookPortForProfile(PROFILE_NAME),
     claudeBin,
     codexBin,
     previewRoots: uniqueAbsolutePaths(fromFile.previewRoots ?? []),
     agentCliSuggestions: {
       claude: uniqueAbsolutePaths([
-        process.env.CLAUDE_BIN,
+        env.claudeBin,
         agentCli.claudeBin,
         ...(agentCli.claudeBinHistory ?? []),
       ]),
       codex: uniqueAbsolutePaths([
-        process.env.CODEX_BIN,
+        env.codexBin,
         agentCli.codexBin,
         ...(agentCli.codexBinHistory ?? []),
       ]),
     },
     sources: {
       relayName: resolved.relayNameSource,
-      relayUrl: process.env.RELAY_URL ? "env" : resolved.relay.url ? "file" : "none",
-      relayToken: process.env.RELAY_PROXY_TOKEN
-        ? "env"
-        : resolved.relay.proxyToken
-          ? "file"
-          : "none",
-      hookPort: process.env.DEV_ANYWHERE_HOOK_PORT ? "env" : "default",
-      claudeBin: process.env.CLAUDE_BIN ? "env" : agentCli.claudeBin ? "file" : "none",
-      codexBin: process.env.CODEX_BIN ? "env" : agentCli.codexBin ? "file" : "none",
+      relayUrl: env.relayUrl ? "env" : resolved.relay.url ? "file" : "none",
+      relayToken: env.relayProxyToken ? "env" : resolved.relay.proxyToken ? "file" : "none",
+      hookPort: env.hookPort !== undefined ? "env" : "default",
+      claudeBin: env.claudeBin ? "env" : agentCli.claudeBin ? "file" : "none",
+      codexBin: env.codexBin ? "env" : agentCli.codexBin ? "file" : "none",
     },
   };
 
