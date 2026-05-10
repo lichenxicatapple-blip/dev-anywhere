@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
+import { z } from "zod";
 import { CONFIG_PATH, PROFILE_NAME, defaultHookPortForProfile } from "./paths.js";
 import { serviceLogger } from "./logger.js";
 import type { ProviderId } from "../providers/types.js";
@@ -25,29 +26,47 @@ export interface ProxyConfig {
   };
 }
 
-interface ProxyProfileConfig {
-  relay?: string;
-}
+const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]);
+export type LogLevel = z.infer<typeof LogLevelSchema>;
 
-interface RelayTargetConfig {
-  url?: string;
-  proxyToken?: string;
-}
+const RelayTargetSchema = z
+  .object({
+    url: z.string().optional(),
+    proxyToken: z.string().optional(),
+  })
+  .strict();
 
-interface ProxyConfigFile {
-  defaultProfile?: string;
-  profiles: Record<string, ProxyProfileConfig | undefined>;
-  relays: Record<string, RelayTargetConfig | undefined>;
-  agentCli?: AgentCliConfig;
-  previewRoots?: string[];
-}
+const ProxyProfileSchema = z
+  .object({
+    relay: z.string().optional(),
+  })
+  .strict();
 
-interface AgentCliConfig {
-  claudeBin?: string;
-  codexBin?: string;
-  claudeBinHistory?: string[];
-  codexBinHistory?: string[];
-}
+const AgentCliSchema = z
+  .object({
+    claudeBin: z.string().optional(),
+    codexBin: z.string().optional(),
+    claudeBinHistory: z.array(z.string()).optional(),
+    codexBinHistory: z.array(z.string()).optional(),
+  })
+  .strict();
+
+// .strict() 在顶层捕获拼错的字段（"relayss" / "profile"），但 profiles/relays 内部
+// 是 record（用户定义键），不限制键名。
+const ProxyConfigFileSchema = z
+  .object({
+    defaultProfile: z.string().optional(),
+    profiles: z.record(z.string(), ProxyProfileSchema),
+    relays: z.record(z.string(), RelayTargetSchema),
+    agentCli: AgentCliSchema.optional(),
+    previewRoots: z.array(z.string()).optional(),
+    logLevel: LogLevelSchema.optional(),
+  })
+  .strict();
+
+type ProxyConfigFile = z.infer<typeof ProxyConfigFileSchema>;
+type RelayTargetConfig = z.infer<typeof RelayTargetSchema>;
+type AgentCliConfig = z.infer<typeof AgentCliSchema>;
 
 function parsePort(value: string | undefined, source: string): number | undefined {
   if (!value) return undefined;
@@ -58,22 +77,26 @@ function parsePort(value: string | undefined, source: string): number | undefine
   return port;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateConfigShape(value: unknown): ProxyConfigFile {
-  if (!isRecord(value) || !isRecord(value.profiles) || !isRecord(value.relays)) {
-    throw new Error(`Invalid config shape in ${CONFIG_PATH}: expected "profiles" and "relays".`);
-  }
-  return value as unknown as ProxyConfigFile;
-}
-
 function readConfigFile(): ProxyConfigFile {
   if (!existsSync(CONFIG_PATH)) {
     throw new Error(`Dev Anywhere config not found at ${CONFIG_PATH}. Run "dev-anywhere init".`);
   }
-  return validateConfigShape(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+  } catch (err) {
+    throw new Error(
+      `${CONFIG_PATH} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const parsed = ProxyConfigFileSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `  ${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .join("\n");
+    throw new Error(`Invalid config at ${CONFIG_PATH}:\n${issues}`);
+  }
+  return parsed.data;
 }
 
 function agentCliField(provider: ProviderId): "claudeBin" | "codexBin" {

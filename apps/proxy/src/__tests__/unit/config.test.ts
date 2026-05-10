@@ -199,7 +199,20 @@ describe("proxy config relay selection", () => {
 
     const { loadConfig } = await importConfig();
 
-    expect(() => loadConfig()).toThrow(/expected "profiles" and "relays"/);
+    // 新版 zod 校验在错误里同时给出多个 issue：缺 profiles/relays + 未识别的 defaultEnv/envs。
+    expect(() => loadConfig()).toThrow(/profiles:.*expected record/);
+    expect(() => loadConfig()).toThrow(/Unrecognized keys.*defaultEnv.*envs/);
+  });
+
+  it("rejects logLevel with an invalid value", async () => {
+    writeConfig({
+      ...currentConfig,
+      logLevel: "verbose",
+    });
+
+    const { loadConfig } = await importConfig();
+
+    expect(() => loadConfig()).toThrow(/logLevel:/);
   });
 
   it("throws a clear error for unknown relay names", async () => {
