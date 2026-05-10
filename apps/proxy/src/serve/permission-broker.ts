@@ -21,18 +21,33 @@ interface PendingPermission extends PermissionRequest {
   deliveredAt?: number;
 }
 
+export type PendingPermissionView = Omit<PendingPermission, "resolve">;
+
+const DUPLICATE_DECISION: PermissionDecision = {
+  behavior: "deny",
+  message: "Duplicate permission request id.",
+};
+
+function snapshot(pending: PendingPermission): PendingPermissionView {
+  return {
+    requestId: pending.requestId,
+    sessionId: pending.sessionId,
+    provider: pending.provider,
+    source: pending.source,
+    toolName: pending.toolName,
+    input: pending.input,
+    createdAt: pending.createdAt,
+    ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
+  };
+}
+
 export class PermissionBroker {
   private readonly pending = new Map<string, PendingPermission>();
 
   request(request: PermissionRequest): Promise<PermissionDecision> {
-    const existing = this.pending.get(request.requestId);
-    if (existing) {
-      return Promise.resolve({
-        behavior: "deny",
-        message: "Duplicate permission request id.",
-      });
+    if (this.pending.has(request.requestId)) {
+      return Promise.resolve(DUPLICATE_DECISION);
     }
-
     return new Promise((resolve) => {
       this.pending.set(request.requestId, {
         ...request,
@@ -47,15 +62,10 @@ export class PermissionBroker {
     request: PermissionRequest,
     onDecision: (decision: PermissionDecision) => void,
   ): boolean {
-    const existing = this.pending.get(request.requestId);
-    if (existing) {
-      onDecision({
-        behavior: "deny",
-        message: "Duplicate permission request id.",
-      });
+    if (this.pending.has(request.requestId)) {
+      onDecision(DUPLICATE_DECISION);
       return false;
     }
-
     this.pending.set(request.requestId, {
       ...request,
       source: "worker",
@@ -80,28 +90,9 @@ export class PermissionBroker {
     return true;
   }
 
-  get(requestId: string): {
-    requestId: string;
-    sessionId: string;
-    provider: HookProviderId;
-    source: "hook" | "worker";
-    toolName: string;
-    input: Record<string, unknown>;
-    createdAt: number;
-    deliveredAt?: number;
-  } | null {
+  get(requestId: string): PendingPermissionView | null {
     const pending = this.pending.get(requestId);
-    if (!pending) return null;
-    return {
-      requestId: pending.requestId,
-      sessionId: pending.sessionId,
-      provider: pending.provider,
-      source: pending.source,
-      toolName: pending.toolName,
-      input: pending.input,
-      createdAt: pending.createdAt,
-      ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
-    };
+    return pending ? snapshot(pending) : null;
   }
 
   cleanupSession(sessionId: string, reason: string): void {
@@ -113,20 +104,11 @@ export class PermissionBroker {
     }
   }
 
-  listSession(sessionId: string): Array<Omit<PendingPermission, "resolve">> {
-    const out: Array<Omit<PendingPermission, "resolve">> = [];
+  listSession(sessionId: string): PendingPermissionView[] {
+    const out: PendingPermissionView[] = [];
     for (const pending of this.pending.values()) {
       if (pending.sessionId !== sessionId) continue;
-      out.push({
-        requestId: pending.requestId,
-        sessionId: pending.sessionId,
-        provider: pending.provider,
-        source: pending.source,
-        toolName: pending.toolName,
-        input: pending.input,
-        createdAt: pending.createdAt,
-        ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
-      });
+      out.push(snapshot(pending));
     }
     return out;
   }
