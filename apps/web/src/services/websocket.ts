@@ -6,6 +6,10 @@ type SendOptions = {
   queueWhenDisconnected?: boolean;
 };
 
+// 离线 pending 队列上限。proxy 端 MemoryMessageQueue 用同一数值。超过后丢弃最旧条目，
+// 避免在长时间离线 + 连续 send 的场景下无限增长把 tab 内存吃光。
+const MAX_PENDING_QUEUE_SIZE = 10000;
+
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private url = "";
@@ -75,7 +79,16 @@ export class WebSocketManager {
       return false;
     }
     if (!this.connected) {
-      if (options.queueWhenDisconnected) this.pendingQueue.push(data);
+      if (options.queueWhenDisconnected) {
+        if (this.pendingQueue.length >= MAX_PENDING_QUEUE_SIZE) {
+          const dropped = this.pendingQueue.shift();
+          console.warn(
+            "WebSocket queue overflow: dropping oldest pending message",
+            dropped?.slice(0, 200),
+          );
+        }
+        this.pendingQueue.push(data);
+      }
       return false;
     }
     this.doSend(data);
