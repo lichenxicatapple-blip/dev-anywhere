@@ -271,7 +271,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
   relayConnection.on("connected", () => {
-    controlHandlers.reinitializeOnReconnect();
+    // fire-and-forget 但显式吞掉 rejection，否则 reinitializeOnReconnect 内部任意 IO 异常
+    // 或 schema 校验错误会变 unhandledRejection，Node 默认终止整个 serve 进程。
+    void controlHandlers.reinitializeOnReconnect().catch((err: unknown) => {
+      serviceLogger.warn(
+        { error: err instanceof Error ? err.message : String(err) },
+        "reinitializeOnReconnect failed",
+      );
+    });
     broadcastBridgeStatus(true);
   });
   relayConnection.on("disconnected", () => {
