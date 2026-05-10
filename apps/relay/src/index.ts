@@ -1,7 +1,6 @@
-import { homedir } from "node:os";
 import { createLogger } from "@dev-anywhere/shared";
 import { createRelayServer } from "./server.js";
-import { parseRelayChaosFromEnv } from "./chaos.js";
+import { loadRelayRuntimeEnv } from "./runtime-env.js";
 import { RELAY_VERSION } from "./version.js";
 
 function printHelp(): void {
@@ -34,33 +33,27 @@ if (args.includes("--version") || args.includes("-v")) {
   process.exit(0);
 }
 
-const PORT = parseInt(process.env.PORT ?? "3100", 10);
-const DEFAULT_DATA_DIR = `${homedir()}/.dev-anywhere/relay-data`;
-// DATA_DIR="" 表示显式禁用默认数据目录。
-const DATA_DIR = (process.env.DATA_DIR ?? DEFAULT_DATA_DIR) || undefined;
-const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL ?? "30000", 10);
-const PROXY_TOKEN = process.env.RELAY_PROXY_TOKEN;
-const CLIENT_TOKEN = process.env.RELAY_CLIENT_TOKEN;
+const env = loadRelayRuntimeEnv();
 
 const logger = createLogger({
   name: "relay",
-  level: process.env.LOG_LEVEL ?? "info",
+  level: env.logLevel,
   stdout: true,
 });
 
 const relay = createRelayServer({
-  port: PORT,
+  port: env.port,
   logger,
-  dataDir: DATA_DIR,
-  heartbeatInterval: HEARTBEAT_INTERVAL,
-  proxyToken: PROXY_TOKEN,
-  clientToken: CLIENT_TOKEN,
-  chaos: parseRelayChaosFromEnv(process.env),
+  dataDir: env.dataDir,
+  heartbeatInterval: env.heartbeatInterval,
+  proxyToken: env.proxyToken,
+  clientToken: env.clientToken,
+  chaos: env.chaos,
 });
 
-relay.httpServer.listen(PORT, () => {
+relay.httpServer.listen(env.port, () => {
   const addr = relay.httpServer.address();
-  const actualPort = typeof addr === "object" && addr ? addr.port : PORT;
+  const actualPort = typeof addr === "object" && addr ? addr.port : env.port;
   logger.info({ port: actualPort }, "Relay server started");
 });
 
