@@ -1,6 +1,11 @@
 import { createServer, type Socket } from "node:net";
 import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import { SessionState, type AgentStatusPayload, flushLogger } from "@dev-anywhere/shared";
+import {
+  SessionState,
+  serializeControl,
+  type AgentStatusPayload,
+  flushLogger,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
@@ -56,7 +61,7 @@ function resolveInterruptedApprovals(
       { toolName: approval.toolName, toolInput: approval.input },
     );
     relay.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "permission_decision_result",
         sessionId: approval.sessionId,
         requestId: approval.requestId,
@@ -197,7 +202,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       updatedAt: Date.now(),
     };
     agentStatusRegistry.set(sessionId, payload);
-    relayConnection.sendRaw(JSON.stringify({ type: "agent_status", sessionId, payload }));
+    relayConnection.sendRaw(serializeControl({ type: "agent_status", sessionId, payload }));
   };
   const jsonObserver = new JsonObserver({
     changeSessionState: observerChangeState,

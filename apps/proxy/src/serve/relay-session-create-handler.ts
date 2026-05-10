@@ -1,7 +1,7 @@
 import { rmSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
-import { ControlErrorCode } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
@@ -68,7 +68,7 @@ export class RelaySessionCreateHandler {
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_create_response",
           requestId,
           sessionId: "",
@@ -91,7 +91,7 @@ export class RelaySessionCreateHandler {
 
     if (provider !== "claude") {
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_create_response",
           requestId,
           sessionId: "",
@@ -138,7 +138,11 @@ export class RelaySessionCreateHandler {
             this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
           }
           this.deps.relaySend(
-            JSON.stringify({ type: "session_create_response", requestId, sessionId: session.id }),
+            serializeControl({
+              type: "session_create_response",
+              requestId,
+              sessionId: session.id,
+            }),
           );
           if (resumeSessionId) {
             this.pushHistoryMessages(session.id, resumeSessionId);
@@ -155,7 +159,7 @@ export class RelaySessionCreateHandler {
         } else {
           this.cleanupPendingJsonSession(pendingId);
           this.deps.relaySend(
-            JSON.stringify({
+            serializeControl({
               type: "session_create_response",
               requestId,
               sessionId: pendingId,
@@ -191,7 +195,7 @@ export class RelaySessionCreateHandler {
   ): void {
     if (provider !== "claude" && provider !== "codex") {
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: "",
@@ -228,7 +232,7 @@ export class RelaySessionCreateHandler {
         this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
       }
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: session.id,
@@ -245,7 +249,7 @@ export class RelaySessionCreateHandler {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_create_response",
           requestId: msg.requestId as string | undefined,
           sessionId: "",
@@ -273,7 +277,7 @@ export class RelaySessionCreateHandler {
       .then((page) => {
         if (page.messages.length === 0) return;
         this.deps.relaySend(
-          JSON.stringify({
+          serializeControl({
             type: "session_history_messages",
             sessionId,
             messages: page.messages,

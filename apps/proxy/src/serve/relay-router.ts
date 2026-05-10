@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
+import { SessionState, serializeControl, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
@@ -157,7 +157,9 @@ export class RelayRouter {
         status && this.deps.sessionManager.getSession(sid)
           ? [{ sessionId: sid, payload: status }]
           : [];
-      this.deps.relaySend(JSON.stringify({ type: "agent_status_response", requestId, statuses }));
+      this.deps.relaySend(
+        serializeControl({ type: "agent_status_response", requestId, statuses }),
+      );
       serviceLogger.info({ sessionId: sid, count: statuses.length }, "Agent status snapshot sent");
       return;
     }
@@ -167,7 +169,9 @@ export class RelayRouter {
       if (!this.deps.sessionManager.getSession(sessionId)) continue;
       statuses.push({ sessionId, payload: status });
     }
-    this.deps.relaySend(JSON.stringify({ type: "agent_status_response", requestId, statuses }));
+    this.deps.relaySend(
+      serializeControl({ type: "agent_status_response", requestId, statuses }),
+    );
     serviceLogger.info({ count: statuses.length }, "Agent status snapshot sent");
   }
 

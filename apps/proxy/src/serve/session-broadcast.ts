@@ -1,4 +1,4 @@
-import { buildMessage, SessionState } from "@dev-anywhere/shared";
+import { buildMessage, serializeControl, SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
@@ -39,22 +39,22 @@ function pushSessionStatus(
 }
 
 export function broadcastSessionList(relay: RelayConnection, sessionManager: SessionManager): void {
-  relay.sendRaw(
-    JSON.stringify({
-      type: "session_list",
-      sessionId: "",
-      seq: 0,
-      timestamp: Date.now(),
-      source: "proxy",
-      version: "1",
-      payload: { sessions: sessionManager.listSessions().map(toSessionListPayload) },
-    }),
+  // session_list 是 envelope（payload 携带 sessions 数组），走 buildMessage 才能保证
+  // version / timestamp / source 字段与其它 envelope 一致；旧代码手写 version: "1" 与
+  // buildMessage 默认的 "1.0" 不符，会让任何对 envelope schema 严格校验的地方报错。
+  const envelope = buildMessage(
+    "session_list",
+    "",
+    0,
+    { sessions: sessionManager.listSessions().map(toSessionListPayload) },
+    "proxy",
   );
+  relay.sendEnvelope(envelope);
 }
 
 export function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): void {
   relay.sendRaw(
-    JSON.stringify({
+    serializeControl({
       type: "session_sync",
       sessions: [
         {

@@ -1,7 +1,7 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
-import { buildMessage } from "@dev-anywhere/shared";
+import { buildMessage, serializeControl } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   ContentBlockDeltaSchema,
@@ -393,7 +393,7 @@ export class WorkerRegistry {
     if (ev.type === "result") {
       const resultText = typeof ev.result === "string" ? ev.result : undefined;
       relay.sendRaw(
-        JSON.stringify({
+        serializeControl({
           type: "turn_result",
           sessionId,
           success: ev.subtype === "success",

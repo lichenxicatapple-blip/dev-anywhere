@@ -56,7 +56,7 @@ export type {
 export * from "./types/index.js";
 
 // builders
-export { buildMessage } from "./builders/index.js";
+export { buildMessage, serializeControl } from "./builders/index.js";
 
 // relay control
 export {

@@ -1,3 +1,4 @@
+import { serializeControl } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
@@ -81,7 +82,7 @@ export class RelayHistoryHandlers {
       input: approval.input,
     }));
     this.deps.relaySend(
-      JSON.stringify({ type: "pending_approvals_push", sessionId: sid, approvals }),
+      serializeControl({ type: "pending_approvals_push", sessionId: sid, approvals }),
     );
     serviceLogger.info({ sessionId: sid, count: approvals.length }, "Pending approvals pushed");
   }

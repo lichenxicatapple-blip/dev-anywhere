@@ -29,20 +29,19 @@ describe("session broadcast state source", () => {
     manager = makeSessionManager();
     const session = manager.createSession("pty", "/tmp/project", process.pid);
     manager.updateState(session.id, SessionState.WAITING_APPROVAL);
-    const rawMessages: string[] = [];
+    const envelopes: Array<{
+      type: string;
+      payload: { sessions: Array<{ sessionId: string; state: string }> };
+    }> = [];
     const relay = {
-      sendRaw: (raw: string) => rawMessages.push(raw),
+      sendEnvelope: (envelope: (typeof envelopes)[number]) => envelopes.push(envelope),
     } as unknown as RelayConnection;
 
     broadcastSessionList(relay, manager);
 
-    expect(rawMessages).toHaveLength(1);
-    const message = JSON.parse(rawMessages[0]) as {
-      type: string;
-      payload: { sessions: Array<{ sessionId: string; state: string }> };
-    };
-    expect(message.type).toBe("session_list");
-    expect(message.payload.sessions).toContainEqual(
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].type).toBe("session_list");
+    expect(envelopes[0].payload.sessions).toContainEqual(
       expect.objectContaining({
         sessionId: session.id,
         state: "waiting_approval",

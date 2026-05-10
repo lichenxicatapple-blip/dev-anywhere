@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import type { MessageEnvelope } from "@dev-anywhere/shared";
+import { serializeControl, type MessageEnvelope } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { createFSM } from "../common/state-machine.js";
 import { MemoryMessageQueue } from "./message-queue.js";
@@ -270,7 +270,7 @@ export class RelayConnection extends EventEmitter {
     }
     if (this.ws) {
       if (this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: "proxy_disconnect", proxyId: this.proxyId }));
+        this.ws.send(serializeControl({ type: "proxy_disconnect", proxyId: this.proxyId }));
       }
       this.ws.close();
       this.ws = null;

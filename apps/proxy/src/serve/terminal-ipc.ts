@@ -1,5 +1,10 @@
 import type { Socket } from "node:net";
-import { SessionState, encodeBinaryFrame, type AgentStatusPayload } from "@dev-anywhere/shared";
+import {
+  SessionState,
+  encodeBinaryFrame,
+  serializeControl,
+  type AgentStatusPayload,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { createIpcReader, serializeIpc, type IpcMessage } from "../ipc/ipc-protocol.js";
 import type { ProviderHookContext } from "../providers/index.js";
@@ -127,7 +132,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
         case "pty_title_change": {
           if (!sessionManager.getSession(msg.sessionId)) break;
           relayConnection.sendRaw(
-            JSON.stringify({
+            serializeControl({
               type: "terminal_title",
               sessionId: msg.sessionId,
               title: msg.title,
@@ -188,7 +193,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
             emitAgentStatus(msg.sessionId, "idle");
           }
           relayConnection.sendRaw(
-            JSON.stringify({
+            serializeControl({
               type: "pty_state",
               sessionId: msg.sessionId,
               payload: {
@@ -204,7 +209,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
         case "pty_resize": {
           if (!sessionManager.getSession(msg.sessionId)) break;
           relayConnection.sendRaw(
-            JSON.stringify({
+            serializeControl({
               type: "terminal_resize",
               sessionId: msg.sessionId,
               cols: msg.cols,
@@ -267,7 +272,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
 
         case "pty_deregister": {
           relayConnection.sendRaw(
-            JSON.stringify({
+            serializeControl({
               type: "pty_state",
               sessionId: msg.sessionId,
               payload: { state: "turn_complete" },
@@ -309,14 +314,14 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
         case "pty_snapshot": {
           if (!sessionManager.getSession(msg.sessionId)) break;
           relayConnection.sendRaw(
-            JSON.stringify({
+            serializeControl({
               type: "session_snapshot",
               sessionId: msg.sessionId,
               cols: msg.cols,
               rows: msg.rows,
               data: msg.data,
               outputSeq: msg.outputSeq,
-              requestId: msg.requestId,
+              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
             }),
           );
           serviceLogger.info(
@@ -355,7 +360,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           continue;
         }
         relayConnection.sendRaw(
-          JSON.stringify({
+          serializeControl({
             type: "pty_state",
             sessionId,
             payload: { state: "turn_complete" },

@@ -1,4 +1,9 @@
-import { buildMessage, SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
+import {
+  buildMessage,
+  serializeControl,
+  SessionState,
+  type AgentStatusPayload,
+} from "@dev-anywhere/shared";
 import { SeqCounter } from "../common/seq-counter.js";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
@@ -164,7 +169,7 @@ export class HookEventRouter {
     };
     this.deps.agentStatusRegistry.set(event.sessionId, payload);
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "agent_status",
         sessionId: event.sessionId,
         payload,

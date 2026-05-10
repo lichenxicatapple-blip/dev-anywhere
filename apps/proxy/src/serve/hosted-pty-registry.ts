@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { SessionState, encodeBinaryFrame } from "@dev-anywhere/shared";
+import { SessionState, encodeBinaryFrame, serializeControl } from "@dev-anywhere/shared";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -175,7 +175,7 @@ export class HostedPtyRegistry {
     hosted.child.resize(cols, rows);
     hosted.terminal.resize(cols, rows);
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({ type: "terminal_resize", sessionId, cols, rows }),
+      serializeControl({ type: "terminal_resize", sessionId, cols, rows }),
     );
     serviceLogger.info({ sessionId, cols, rows }, "Hosted PTY resized");
     return true;
@@ -186,14 +186,14 @@ export class HostedPtyRegistry {
     if (!hosted) return false;
     const data = hosted.serializeAddon.serialize();
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "session_snapshot",
         sessionId,
         cols: hosted.terminal.cols,
         rows: hosted.terminal.rows,
         data,
         outputSeq: hosted.outputSeq,
-        requestId,
+        ...(requestId !== undefined ? { requestId } : {}),
       }),
     );
     serviceLogger.info(
@@ -311,7 +311,7 @@ export class HostedPtyRegistry {
       ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
     };
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "pty_state",
         sessionId,
         payload,
@@ -327,7 +327,7 @@ export class HostedPtyRegistry {
 
   private sendTerminalTitle(sessionId: string, title: string): void {
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "terminal_title",
         sessionId,
         title,

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { accessSync, constants, statSync } from "node:fs";
-import { ControlErrorCode } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
@@ -36,7 +36,7 @@ export class RelayResourceHandlers {
 
   onProxyInfoRequest(msg: Record<string, unknown>): void {
     this.deps.relaySend(
-      JSON.stringify({
+      serializeControl({
         type: "proxy_info",
         requestId: msg.requestId as string | undefined,
         homePath: homedir() || "/",
@@ -54,7 +54,7 @@ export class RelayResourceHandlers {
 
     if (provider !== "claude" && provider !== "codex") {
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "agent_cli_config_update_response",
           requestId,
           provider: "claude",
@@ -73,7 +73,7 @@ export class RelayResourceHandlers {
         suggestions: this.deps.getAgentCliSuggestions(),
       });
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "agent_cli_config_update_response",
           requestId,
           provider,
@@ -84,7 +84,7 @@ export class RelayResourceHandlers {
     } catch (err) {
       const error = errorMessage(err);
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "agent_cli_config_update_response",
           requestId,
           provider,
@@ -118,7 +118,7 @@ export class RelayResourceHandlers {
     if (!session?.cwd) {
       serviceLogger.warn({ sessionId: sid }, "Session resources request: no cwd available");
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_resources_response",
           requestId: msg.requestId as string | undefined,
           sessionId: sid,
