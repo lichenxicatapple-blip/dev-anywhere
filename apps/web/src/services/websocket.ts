@@ -22,6 +22,12 @@ export class WebSocketManager {
   private statusHandlers = new Set<(connected: boolean) => void>();
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
+  // 命名引用让 close() 能 removeEventListener；匿名 lambda 注册到 document/window 上
+  // 后无法摘除，instance 不会被 GC，长寿 tab 上 close → reconnect 反复后能堆积大量回调。
+  private readonly visibilityListener = (): void => {
+    if (document.visibilityState === "visible") this.wakeReconnect();
+  };
+  private readonly wakeListener = (): void => this.wakeReconnect();
 
   private cancelReconnectTimer(): void {
     if (this.reconnectTimer) {
@@ -48,12 +54,17 @@ export class WebSocketManager {
   private attachWakeListeners(): void {
     if (this.wakeListenersAttached || typeof window === "undefined") return;
     this.wakeListenersAttached = true;
-    const wake = (): void => this.wakeReconnect();
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") wake();
-    });
-    window.addEventListener("online", wake);
-    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", this.visibilityListener);
+    window.addEventListener("online", this.wakeListener);
+    window.addEventListener("focus", this.wakeListener);
+  }
+
+  private detachWakeListeners(): void {
+    if (!this.wakeListenersAttached || typeof window === "undefined") return;
+    this.wakeListenersAttached = false;
+    document.removeEventListener("visibilitychange", this.visibilityListener);
+    window.removeEventListener("online", this.wakeListener);
+    window.removeEventListener("focus", this.wakeListener);
   }
 
   private wakeReconnect(): void {
@@ -101,6 +112,7 @@ export class WebSocketManager {
     this.ws?.close();
     this.ws = null;
     this.connected = false;
+    this.detachWakeListeners();
   }
 
   onMessage(handler: (data: string) => void): () => void {

@@ -57,4 +57,48 @@ describe("WebSocketManager", () => {
     expect(sockets[0]?.sent).toEqual(["client-register", "queued-user-input"]);
     manager.close();
   });
+
+  it("removes wake listeners on close so document/window do not retain the manager", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+    const docAdds: string[] = [];
+    const docRemoves: string[] = [];
+    const winAdds: string[] = [];
+    const winRemoves: string[] = [];
+    const docAdd = vi.spyOn(document, "addEventListener");
+    const docRemove = vi.spyOn(document, "removeEventListener");
+    const winAdd = vi.spyOn(window, "addEventListener");
+    const winRemove = vi.spyOn(window, "removeEventListener");
+
+    docAdd.mockImplementation((type: string) => {
+      docAdds.push(type);
+    });
+    docRemove.mockImplementation((type: string) => {
+      docRemoves.push(type);
+    });
+    winAdd.mockImplementation((type: string) => {
+      winAdds.push(type);
+    });
+    winRemove.mockImplementation((type: string) => {
+      winRemoves.push(type);
+    });
+
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+
+    expect(docAdds).toContain("visibilitychange");
+    expect(winAdds).toEqual(expect.arrayContaining(["online", "focus"]));
+
+    manager.close();
+
+    // 每个被注册的 wake listener 在 close 时都该有一次匹配的 removeEventListener，
+    // 否则 document/window 上残留匿名 lambda 引用，instance 永远拿不到 GC。
+    expect(docRemoves).toContain("visibilitychange");
+    expect(winRemoves).toEqual(expect.arrayContaining(["online", "focus"]));
+
+    docAdd.mockRestore();
+    docRemove.mockRestore();
+    winAdd.mockRestore();
+    winRemove.mockRestore();
+  });
 });
