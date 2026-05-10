@@ -2,7 +2,7 @@
 // 浏览器滚动容器映射到 xterm viewportY；当真实 PTY 屏幕比 Web 可视区矮时，
 // scroll spacer 仍保证底部位置能映射到 xterm baseY，而不是伪造额外终端行。
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, FocusEvent, MouseEvent } from "react";
+import type { FocusEvent, MouseEvent } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "lucide-react";
 import { createXtermTerminal } from "@/lib/create-xterm";
@@ -21,8 +21,6 @@ import { useAppStore } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
-import { getClipboardImageFile } from "@/lib/clipboard-image";
-import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
 import {
   registerPtyDebugSnapshotProvider,
   registerPtyTerminalWindowAccessor,
@@ -31,6 +29,7 @@ import {
 } from "@/lib/pty-debug-snapshot";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { usePtyTouchGesture } from "./use-pty-touch-gesture";
+import { useTerminalPaste } from "./use-terminal-paste";
 import { toast } from "@/components/toast";
 import { BackToBottom } from "./back-to-bottom";
 import { useImagePreview } from "./image-preview";
@@ -155,34 +154,11 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     window.setTimeout(syncPtyInputFocus, 0);
   }
 
-  const handleTerminalPasteCapture = useCallback(
-    async (event: ClipboardEvent<HTMLDivElement>): Promise<void> => {
-      if (!getClipboardImageFile(event.clipboardData)) return;
-      event.preventDefault();
-      event.stopPropagation();
-
-      const relay = relayClientRef;
-      if (!relay) {
-        toast.error("请先连接开发机");
-        return;
-      }
-
-      try {
-        const result = await uploadClipboardImageFromPaste({
-          clipboardData: event.clipboardData,
-          relay,
-          sessionId,
-        });
-        if (!result) return;
-        sendRemoteInputRaw(sessionId, result.token);
-        rawInputFollowSchedulerRef.current?.schedule();
-        terminalRef.current?.focus();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [sessionId],
-  );
+  const handleTerminalPasteCapture = useTerminalPaste({
+    sessionId,
+    terminalRef,
+    onAfterPaste: () => rawInputFollowSchedulerRef.current?.schedule(),
+  });
 
   useEffect(() => {
     if (!connected || !proxyOnline) return;
