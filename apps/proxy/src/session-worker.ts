@@ -9,6 +9,7 @@ import {
 } from "./worker/json-session.js";
 import { SeqCounter } from "./common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
+import { takeoverServeSocket } from "./worker/serve-socket-takeover.js";
 import type { ProviderHookContext } from "./providers/index.js";
 
 // 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
@@ -120,16 +121,7 @@ const session = new JsonSession({
 });
 
 function handleServeConnection(socket: Socket): void {
-  // serve 进程快速 stop+start 时，旧 socket 的 close 事件可能还没触发，新连接已经到达。
-  // 显式 destroy 旧 socket 避免两条 socket 同时活跃产生双 reader 与状态不一致窗口。
-  if (serveSocket && serveSocket !== socket) {
-    try {
-      serveSocket.destroy();
-    } catch {
-      // 旧 socket 可能已半关闭
-    }
-  }
-  serveSocket = socket;
+  serveSocket = takeoverServeSocket(serveSocket, socket);
 
   for (const [requestId, pending] of pendingApprovals) {
     sendToServe({
