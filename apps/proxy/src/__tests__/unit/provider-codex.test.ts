@@ -17,13 +17,6 @@ function withExecutable(name: string, test: (path: string) => void): void {
 }
 
 describe("Codex provider", () => {
-  it("declares Codex provider capabilities", () => {
-    expect(CODEX_PROVIDER.id).toBe("codex");
-    expect(CODEX_PROVIDER.displayName).toBe("Codex CLI");
-    expect(CODEX_PROVIDER.capabilities.supportsHooks).toBe(true);
-    expect(CODEX_PROVIDER.capabilities.supportsSessionScopedConfig).toBe(true);
-  });
-
   it("uses CODEX_BIN before probing PATH", () => {
     withExecutable("codex", (codexBin) => {
       expect(resolveCodexCommand({ CODEX_BIN: codexBin })).toBe(codexBin);

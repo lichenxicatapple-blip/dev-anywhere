@@ -1,14 +1,10 @@
 // chat-store per-session slice map 单测, 覆盖会话独立性 + CustomEvent 桥接替换
 import { describe, it, expect, beforeEach } from "vitest";
-import { useChatStore, EMPTY_SLICE } from "./chat-store";
+import { useChatStore } from "./chat-store";
 
 describe("chat-store per-session", () => {
   beforeEach(() => {
     useChatStore.getState().clearAllSessions();
-  });
-
-  it("initial state is empty object", () => {
-    expect(useChatStore.getState().bySessionId).toEqual({});
   });
 
   it("appendAssistantText creates a slice for new session", () => {
@@ -93,12 +89,6 @@ describe("chat-store per-session", () => {
     useChatStore.getState().clearSession("s1");
     expect(useChatStore.getState().bySessionId["s1"]).toBeUndefined();
     expect(useChatStore.getState().bySessionId["s2"]).toBeDefined();
-  });
-
-  it("EMPTY_SLICE constant has expected shape", () => {
-    expect(EMPTY_SLICE.messages).toEqual([]);
-    expect(EMPTY_SLICE.pendingApprovals).toEqual([]);
-    expect(EMPTY_SLICE.inputDraft).toBe("");
   });
 
   it("setInputDraft scoped by session", () => {

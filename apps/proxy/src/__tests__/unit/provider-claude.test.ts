@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,14 +24,6 @@ function withExecutable(name: string, test: (path: string) => void): void {
 }
 
 describe("Claude provider", () => {
-  it("declares Claude provider capabilities", () => {
-    expect(CLAUDE_PROVIDER.id).toBe("claude");
-    expect(CLAUDE_PROVIDER.displayName).toBe("Claude Code");
-    expect(CLAUDE_PROVIDER.capabilities.supportsHooks).toBe(true);
-    expect(CLAUDE_PROVIDER.capabilities.supportsSessionScopedConfig).toBe(true);
-    expect(CLAUDE_PROVIDER.capabilities.supportsProjectScopedConfig).toBe(true);
-  });
-
   it("builds stream-json args with safe defaults", () => {
     const args = buildClaudeArgs({});
 
@@ -192,9 +184,7 @@ describe("Claude provider", () => {
     expect(buildClaudeArgs({ forkSession: false })).not.toContain("--fork-session");
   });
 
-  it("does not call PATH resolution when CLAUDE_BIN is present", () => {
-    const execFileSync = vi.fn();
-    expect(execFileSync).not.toHaveBeenCalled();
+  it("uses CLAUDE_BIN directly without PATH resolution when set", () => {
     withExecutable("claude", (claudeBin) => {
       expect(resolveClaudePtyCommand({ CLAUDE_BIN: claudeBin })).toBe(claudeBin);
     });

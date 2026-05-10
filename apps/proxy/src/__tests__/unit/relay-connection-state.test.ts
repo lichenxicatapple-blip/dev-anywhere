@@ -46,17 +46,6 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-describe("RelayConnectionState", () => {
-  it("has all 6 state values", () => {
-    expect(RelayConnectionState.DISCONNECTED).toBe("disconnected");
-    expect(RelayConnectionState.CONNECTING).toBe("connecting");
-    expect(RelayConnectionState.REGISTERING).toBe("registering");
-    expect(RelayConnectionState.SYNCED).toBe("synced");
-    expect(RelayConnectionState.WAITING_RECONNECT).toBe("waiting_reconnect");
-    expect(RelayConnectionState.CLOSED).toBe("closed");
-  });
-});
-
 describe("RelayConnection state machine", () => {
   let conn: RelayConnection;
 

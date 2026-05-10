@@ -37,6 +37,10 @@ describe("AssistantMessagePayloadSchema", () => {
 });
 
 describe("ThinkingPayloadSchema", () => {
+  it("accepts text-only thinking payload", () => {
+    expect(ThinkingPayloadSchema.parse({ text: "reasoning" })).toEqual({ text: "reasoning" });
+  });
+
   it("rejects missing text", () => {
     expect(() => ThinkingPayloadSchema.parse({})).toThrow();
   });

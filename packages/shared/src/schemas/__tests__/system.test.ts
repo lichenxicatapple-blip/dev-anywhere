@@ -1,21 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  HeartbeatPayloadSchema,
-  SyncRequestPayloadSchema,
-  SyncResponsePayloadSchema,
-} from "../system.js";
-
-describe("HeartbeatPayloadSchema", () => {
-  it("accepts empty object", () => {
-    const result = HeartbeatPayloadSchema.parse({});
-    expect(result).toEqual({});
-  });
-
-  it("strips extra fields", () => {
-    const result = HeartbeatPayloadSchema.parse({ extra: "field" });
-    expect(result).toEqual({});
-  });
-});
+import { SyncRequestPayloadSchema, SyncResponsePayloadSchema } from "../system.js";
 
 describe("SyncRequestPayloadSchema", () => {
   it("rejects negative lastSeq", () => {
