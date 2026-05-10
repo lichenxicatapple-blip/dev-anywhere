@@ -17,6 +17,7 @@ interface PtyManagerOptions {
 
 export class PtyManager {
   private child: IPty | null = null;
+  private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly provider: ProviderAdapter;
   private readonly providerArgs: string[];
   private readonly cwd: string;
@@ -70,13 +71,15 @@ export class PtyManager {
     // PTY -> stdout + tap
     child.onData((data: string) => this.handleData(data));
 
-    // resize 防抖，50ms 窗口合并快速连续的尺寸变化
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    // resize 防抖，50ms 窗口合并快速连续的尺寸变化。timer 持有在实例字段上，cleanup 时
+    // clearTimeout 防止 PTY 退出后 callback 还在等待，导致 child.resize 调用已 kill 的子进程。
     this.stdout.on("resize", () => {
-      if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
+      if (this.resizeTimer) clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => {
+        this.resizeTimer = null;
+        if (!this.child) return;
         const { cols: newCols, rows: newRows } = readTtySize(this.stdout);
-        child.resize(newCols, newRows);
+        this.child.resize(newCols, newRows);
         this.onResize?.(newCols, newRows);
       }, 50);
     });
@@ -124,6 +127,10 @@ export class PtyManager {
   }
 
   cleanup(exitCode: number): void {
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = null;
+    }
     if (this.stdin.isTTY) this.disableRawModeQuiet();
     restoreHostTerminalModes(this.stdout);
     if (this.child) {
@@ -132,6 +139,7 @@ export class PtyManager {
       } catch {
         // 子进程可能已退出
       }
+      this.child = null;
     }
     this.onSessionExit?.(exitCode);
   }
