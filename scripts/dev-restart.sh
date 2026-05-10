@@ -11,8 +11,10 @@ LOG_DIR="$HOME/.dev-anywhere/logs"
 LOG_RETENTION="50"
 RELAY_PORT="3100"
 WEB_PORT="5173"
-DEV_RELAY="local"
-DEV_PROFILE="local"
+# 默认空：未显式指定 --profile/--relay 时由 resolve-dev-profile.mjs 按 URL 在
+# ~/.dev-anywhere/config.json 里解析，避免和具体名字（"local"/"dev"/...）耦合。
+DEV_RELAY=""
+DEV_PROFILE=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -20,8 +22,8 @@ usage:
   scripts/dev-restart.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>]
 
 Defaults:
-  --profile local
-  --relay local
+  --profile  auto-resolved from config (whichever profile points at the local relay URL)
+  --relay    auto-resolved from config (whichever relay url == ws://localhost:<relay-port>)
   --relay-port 3100
   --web-port 5173
 EOF
@@ -104,6 +106,14 @@ for port in "$RELAY_PORT" "$WEB_PORT"; do
     exit 2
   fi
 done
+
+if [[ -z "$DEV_PROFILE" || -z "$DEV_RELAY" ]]; then
+  resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
+  eval "$resolved"
+  : "${DEV_PROFILE:=$RESOLVED_PROFILE}"
+  : "${DEV_RELAY:=$RESOLVED_RELAY}"
+  unset RESOLVED_PROFILE RESOLVED_RELAY
+fi
 
 mkdir -p "$LOG_DIR"
 LOG_RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
@@ -224,7 +234,7 @@ start_detached "$ROOT/apps/web" "$WEB_LOG" env DEV_ANYWHERE_WEB_RELAY_TARGET="ht
 wait_port "$WEB_PORT" "Web" "$WEB_LOG"
 
 echo ""
-echo "=== Restarting proxy serve daemon ==="
+echo "=== Restarting proxy serve daemon (profile=$DEV_PROFILE, relay=$DEV_RELAY) ==="
 INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
   --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
 

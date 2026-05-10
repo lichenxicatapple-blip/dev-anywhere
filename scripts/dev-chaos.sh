@@ -13,8 +13,10 @@ WEB_PORT="5173"
 WEB_BASE_URL=""
 LOG_DIR="$HOME/.dev-anywhere/logs"
 LOG_RETENTION="50"
-DEV_PROFILE="local"
-DEV_RELAY="local"
+# 默认空：未显式指定时由 resolve-dev-profile.mjs 按 ws://localhost:<relay-port> 在
+# config.json 里反查 profile/relay 名。和 dev-restart.sh 同口径。
+DEV_PROFILE=""
+DEV_RELAY=""
 LOG_RUN_ID="$(date +%Y%m%d-%H%M%S)-chaos-$$"
 RELAY_CHAOS_TYPES="proxy_list_response,proxy_select_response,dir_list_response,proxy_info,session_list,agent_status,agent_status_response,session_history_messages,session_resources_response,pty_state,pending_approvals_push,permission_request_delivered,tool_approve,tool_deny,session_snapshot"
 RELAY_CHAOS_DELAY_MS="20"
@@ -33,8 +35,8 @@ usage:
                        [--relay-chaos-reorder 0|1] [--relay-chaos-reorder-delay-ms <ms>]
 
 Defaults:
-  --profile local
-  --relay local
+  --profile  auto-resolved from config (whichever profile points at the local relay URL)
+  --relay    auto-resolved from config (whichever relay url == ws://localhost:<relay-port>)
   --relay-port 3100
   --web-port 5173
 EOF
@@ -195,6 +197,15 @@ for bool_value in "$RELAY_CHAOS_DUPLICATE" "$RELAY_CHAOS_REORDER"; do
     exit 2
   fi
 done
+
+if [[ -z "$DEV_PROFILE" || -z "$DEV_RELAY" ]]; then
+  resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
+  eval "$resolved"
+  : "${DEV_PROFILE:=$RESOLVED_PROFILE}"
+  : "${DEV_RELAY:=$RESOLVED_RELAY}"
+  unset RESOLVED_PROFILE RESOLVED_RELAY
+fi
+
 WEB_BASE_URL="${WEB_BASE_URL:-http://localhost:$WEB_PORT}"
 mkdir -p "$LOG_DIR"
 SERVICE_LOG_CURSOR=0

@@ -5,8 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT_DIR="${ROOT}/artifacts/mobile-smoke"
 BASE_URL="http://127.0.0.1:5173"
 RELAY_PORT="3100"
-PROFILE="local"
-RELAY="local"
+# 默认空：未显式指定时由 resolve-dev-profile.mjs 按 ws://localhost:<relay-port> 解析。
+PROFILE=""
+RELAY=""
 RUN_REAL=1
 CREATE_REAL_SESSIONS=0
 RUN_SIMULATOR=0
@@ -90,6 +91,14 @@ done
 
 mkdir -p "$ARTIFACT_DIR"
 cd "$ROOT"
+
+if [[ -z "$PROFILE" || -z "$RELAY" ]]; then
+  resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
+  eval "$resolved"
+  : "${PROFILE:=$RESOLVED_PROFILE}"
+  : "${RELAY:=$RESOLVED_RELAY}"
+  unset RESOLVED_PROFILE RESOLVED_RELAY
+fi
 
 smoke_use_stable_node
 smoke_require_local_base_url "$BASE_URL" "mobile smoke"

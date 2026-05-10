@@ -8,7 +8,9 @@ cd "$ROOT"
 
 RELAY_PORT="3100"
 WEB_PORT="5173"
-DEV_PROFILE="local"
+# 默认空：未显式指定时由 resolve-dev-profile.mjs 按 ws://localhost:<relay-port> 在
+# config.json 里反查 profile 名。和 dev-restart.sh 保持同一解析口径。
+DEV_PROFILE=""
 DEV_SERVER_LOG_DIR="$HOME/.dev-anywhere/logs"
 PROXY_LOG_DIR=""
 
@@ -18,7 +20,7 @@ usage:
   scripts/dev-health.sh [--profile <name>] [--relay-port <port>] [--web-port <port>]
 
 Defaults:
-  --profile local
+  --profile  auto-resolved from config (whichever profile points at the local relay URL)
   --relay-port 3100
   --web-port 5173
 EOF
@@ -92,6 +94,13 @@ for port in "$RELAY_PORT" "$WEB_PORT"; do
     exit 2
   fi
 done
+
+if [[ -z "$DEV_PROFILE" ]]; then
+  resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
+  eval "$resolved"
+  DEV_PROFILE="$RESOLVED_PROFILE"
+  unset RESOLVED_PROFILE RESOLVED_RELAY
+fi
 
 if [ "$DEV_PROFILE" = "default" ]; then
   DEFAULT_PROXY_LOG_DIR="$HOME/.dev-anywhere/logs"
