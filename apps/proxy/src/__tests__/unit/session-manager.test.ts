@@ -122,8 +122,7 @@ describe("SessionManager", () => {
     it("returns SessionInfo for existing session", () => {
       const created = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       const found = manager.getSession(created.id);
-      expect(found).toBeDefined();
-      expect(found!.id).toBe(created.id);
+      expect(found?.id).toBe(created.id);
     });
 
     it("returns undefined for non-existent session", () => {
@@ -323,28 +322,26 @@ describe("SessionManager", () => {
     it("loads sessions from existing file on construction", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "persisted");
       const manager2 = new SessionManager({ persistPath });
-      const found = manager2.getSession(s.id);
-      expect(found).toBeDefined();
-      expect(found!.name).toBe("persisted");
+      expect(manager2.getSession(s.id)?.name).toBe("persisted");
       manager2.stopReaper();
     });
 
     it("terminated sessions do not reappear on load", () => {
       const s1 = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID, "kept");
       manager.terminateSession(s1.id);
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(s1.id)).toBeUndefined();
-      expect(manager2.getSession(s2.id)).toBeDefined();
+      expect(manager2.getSession(s2.id)?.name).toBe("kept");
       manager2.stopReaper();
     });
 
     it("skips PTY sessions on restore when terminal process is dead", () => {
       const pty = manager.createSession("pty", "/tmp/test", DEAD_PID);
-      const json = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const json = manager.createSession("json", "/tmp/test", ALIVE_PID, "alive");
       const manager2 = new SessionManager({ persistPath });
       expect(manager2.getSession(pty.id)).toBeUndefined();
-      expect(manager2.getSession(json.id)).toBeDefined();
+      expect(manager2.getSession(json.id)?.name).toBe("alive");
       manager2.stopReaper();
     });
 
@@ -374,9 +371,8 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({ persistPath });
       const restored = manager2.getSession(s.id);
-      expect(restored).toBeDefined();
-      expect(restored!.state).toBe(SessionState.IDLE);
-      expect(restored!.provider).toBe("claude");
+      expect(restored?.state).toBe(SessionState.IDLE);
+      expect(restored?.provider).toBe("claude");
       manager2.stopReaper();
     });
 
@@ -473,9 +469,8 @@ describe("SessionManager", () => {
         onSessionRemoved: (id) => removedIds.push(id),
       });
       const restored = manager2.getSession(json.id);
-      expect(restored).toBeDefined();
-      expect(restored!.name).toBe("alive");
-      expect(restored!.mode).toBe("json");
+      expect(restored?.name).toBe("alive");
+      expect(restored?.mode).toBe("json");
       expect(removedIds).not.toContain(json.id);
       manager2.stopReaper();
     });
