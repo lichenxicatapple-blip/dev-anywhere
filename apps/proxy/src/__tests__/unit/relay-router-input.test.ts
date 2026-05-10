@@ -227,8 +227,8 @@ describe("RelayRouter input routing", () => {
     await vi.runAllTimersAsync();
 
     const lastRaw = relaySend.mock.calls.at(-1)?.[0];
-    expect(lastRaw).toBeTruthy();
-    const msg = RelayControlSchema.parse(JSON.parse(lastRaw!));
+    if (typeof lastRaw !== "string") throw new Error("expected last relay send to be a string");
+    const msg = RelayControlSchema.parse(JSON.parse(lastRaw));
     expect(msg.type).toBe("session_create_response");
     if (msg.type === "session_create_response") {
       expect(msg.error).toBe("Worker failed to start");

@@ -44,10 +44,9 @@ Details here.
       homeDir: join(TEST_DIR, ".claude-home"),
     });
     const skill = commands.find((c) => c.name === "/my-skill");
-    expect(skill).toBeDefined();
-    expect(skill!.source).toBe("user-skill");
-    expect(skill!.description).toBe("A custom skill");
-    expect(skill!.argumentHint).toBe("some hint");
+    expect(skill?.source).toBe("user-skill");
+    expect(skill?.description).toBe("A custom skill");
+    expect(skill?.argumentHint).toBe("some hint");
   });
 
   it("scans project-level skills from {workDir}/.claude/skills/*/SKILL.md", async () => {
@@ -65,9 +64,8 @@ description: Project skill
 
     const commands = await discoverCommands(TEST_DIR);
     const skill = commands.find((c) => c.name === "/proj-skill");
-    expect(skill).toBeDefined();
-    expect(skill!.source).toBe("project-skill");
-    expect(skill!.description).toBe("Project skill");
+    expect(skill?.source).toBe("project-skill");
+    expect(skill?.description).toBe("Project skill");
   });
 
   it("scans user-level commands from ~/.claude/commands/*.md", async () => {
@@ -85,9 +83,8 @@ More details here.
       homeDir: join(TEST_DIR, ".claude-home"),
     });
     const cmd = commands.find((c) => c.name === "/deploy");
-    expect(cmd).toBeDefined();
-    expect(cmd!.source).toBe("user-command");
-    expect(cmd!.description).toBe("Deploy the application to production.");
+    expect(cmd?.source).toBe("user-command");
+    expect(cmd?.description).toBe("Deploy the application to production.");
   });
 
   it("scans project-level commands from {workDir}/.claude/commands/*.md", async () => {
@@ -101,9 +98,8 @@ More details here.
 
     const commands = await discoverCommands(TEST_DIR);
     const cmd = commands.find((c) => c.name === "/test-all");
-    expect(cmd).toBeDefined();
-    expect(cmd!.source).toBe("project-command");
-    expect(cmd!.description).toBe("Run all project tests.");
+    expect(cmd?.source).toBe("project-command");
+    expect(cmd?.description).toBe("Run all project tests.");
   });
 
   it("filters blacklisted commands", async () => {

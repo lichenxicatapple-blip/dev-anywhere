@@ -164,10 +164,13 @@ describe("Claude provider", () => {
         { CLAUDE_BIN: claudeBin },
       );
       const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
-        hooks: Record<string, unknown>;
+        hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
       };
 
-      expect(settings.hooks.PreToolUse).toBeDefined();
+      // PreToolUse 必须真的有可执行 hook（不是空数组），否则 native TUI 审批前的拦截不会触发
+      expect(Array.isArray(settings.hooks.PreToolUse)).toBe(true);
+      expect(settings.hooks.PreToolUse.length).toBeGreaterThan(0);
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("DEV_ANYWHERE_HOOK_EVENT");
       expect(settings.hooks.PermissionRequest).toBeUndefined();
     });
   });

@@ -29,7 +29,8 @@ describe("SessionManager", () => {
   describe("createSession", () => {
     it("creates a PTY session with unique id and idle state", () => {
       const info = manager.createSession("pty", "/tmp/test", ALIVE_PID);
-      expect(info.id).toBeTruthy();
+      expect(typeof info.id).toBe("string");
+      expect(info.id.length).toBeGreaterThan(0);
       expect(info.mode).toBe("pty");
       expect(info.provider).toBe("claude");
       expect(info.state).toBe(SessionState.IDLE);
@@ -39,7 +40,8 @@ describe("SessionManager", () => {
 
     it("creates a JSON session with unique id and idle state", () => {
       const info = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      expect(info.id).toBeTruthy();
+      expect(typeof info.id).toBe("string");
+      expect(info.id.length).toBeGreaterThan(0);
       expect(info.mode).toBe("json");
       expect(info.state).toBe(SessionState.IDLE);
       expect(info.pid).toBe(ALIVE_PID);

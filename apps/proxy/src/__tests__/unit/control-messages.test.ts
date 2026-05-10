@@ -214,8 +214,7 @@ describe("control-messages: file tree push", () => {
     expect(rootNames).not.toContain("src/index.ts");
 
     const srcGroup = groups.find((g) => g.path === join(tmpDir, "src"));
-    expect(srcGroup).toBeDefined();
-    expect(srcGroup!.entries.map((e) => e.name)).toContain("index.ts");
+    expect(srcGroup?.entries.map((e) => e.name)).toContain("index.ts");
 
     await rm(tmpDir, { recursive: true, force: true });
   });

@@ -174,7 +174,7 @@ describe("RelayRegistry", () => {
       registry.bindClientById("c1", "p1", ws1);
 
       registry.updateClientSocket("c1", ws2);
-      expect(registry.getClientBinding("c1")!.ws).toBe(ws2);
+      expect(registry.getClientBinding("c1")?.ws).toBe(ws2);
     });
 
     it("getClientsForProxy includes clientId-bound clients", () => {
