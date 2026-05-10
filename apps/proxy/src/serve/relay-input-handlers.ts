@@ -42,7 +42,8 @@ export class RelayInputHandlers {
     const text = msg.payload.text;
 
     if (session.mode === "json") {
-      this.deps.jsonObserver.onTurnStart(sessionId);
+      // 必须先 send 成功再 onTurnStart：onTurnStart 把 session 推到 WORKING，但 send 失败时
+      // 没有 onTurnResult / onChannelBroken 回到 IDLE，session 会卡 WORKING 直到 60s reaper。
       const sent = this.deps.workerRegistry.send(sessionId, {
         type: "worker_input",
         content: text,
@@ -51,6 +52,7 @@ export class RelayInputHandlers {
         serviceLogger.warn({ sessionId }, "Remote input dropped: JSON worker socket not available");
         return;
       }
+      this.deps.jsonObserver.onTurnStart(sessionId);
       const messageId =
         msg.payload.messageId && msg.payload.messageId.length > 0
           ? msg.payload.messageId
