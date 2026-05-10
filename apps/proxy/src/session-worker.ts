@@ -155,10 +155,23 @@ function handleServeConnection(socket: Socket): void {
 
   socket.on("close", () => {
     serveSocket = null;
+    rejectAllPendingApprovals("Serve connection closed");
   });
   socket.on("error", () => {
     serveSocket = null;
+    rejectAllPendingApprovals("Serve connection error");
   });
+}
+
+// serve socket 断开时：所有未决 approval 立即按 deny 落盘。deny 是安全默认值（不执行操作），
+// 防止 worker 在 approvalStrategy 里永久 await 一个永不 resolve 的 Promise，从而把 claude
+// 进程拖入死锁状态直到 60s reaper。
+function rejectAllPendingApprovals(reason: string): void {
+  if (pendingApprovals.size === 0) return;
+  for (const [, pending] of pendingApprovals) {
+    pending.resolve({ behavior: "deny", message: reason });
+  }
+  pendingApprovals.clear();
 }
 
 const sockDir = sockPath.substring(0, sockPath.lastIndexOf("/"));
