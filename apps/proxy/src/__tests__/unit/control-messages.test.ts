@@ -72,7 +72,9 @@ describe("control-messages: path traversal defense", () => {
     const response = JSON.parse(sent[0]);
     expect(response.entries).toEqual([]);
     expect(response.errorCode).toBe("PATH_NOT_FOUND");
-    expect(response.error).toBeDefined();
+    // 任何具体描述都行，但不允许空串/缺失：errorCode 已是机器可读的，error 是给用户看的人话
+    expect(typeof response.error).toBe("string");
+    expect(response.error.length).toBeGreaterThan(0);
   });
 
   it("hides dotfiles in listing", async () => {
@@ -164,7 +166,8 @@ describe("control-messages: dir_create", () => {
 
     const response = JSON.parse(sent[0]);
     expect(response.success).toBe(false);
-    expect(response.error).toBeDefined();
+    expect(typeof response.error).toBe("string");
+    expect(response.error.length).toBeGreaterThan(0);
   });
 });
 

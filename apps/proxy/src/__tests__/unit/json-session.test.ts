@@ -59,8 +59,8 @@ describe("JsonSession", () => {
       const env = spawnCall[2]?.env as Record<string, string>;
       expect(env.CLAUDECODE_SECRET).toBeUndefined();
       expect(env.CLAUDECODE_TOKEN).toBeUndefined();
-      // 非 CLAUDECODE 开头的变量保留
-      expect(env.PATH).toBeDefined();
+      // 非 CLAUDECODE 开头的变量原样透传（取自父进程 PATH）
+      expect(env.PATH).toBe(originalEnv.PATH);
 
       process.env = originalEnv;
     });

@@ -99,13 +99,25 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
       },
       () => {},
     );
-    expect(() => relay.emit("envelope_dropped", "not json {{{")).not.toThrow();
+    relay.emit("envelope_dropped", "not json {{{");
+    // 非法输入下的实质性不变量：pending 不被错误清理
     expect(permissionBroker.listSession("s3")).toHaveLength(1);
   });
 
   it("is a no-op when toolId has no matching pending entry", () => {
-    expect(() =>
-      relay.emit("envelope_dropped", buildToolUseRequestRaw("s4", "unknown-req")),
-    ).not.toThrow();
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "req-other",
+        sessionId: "s4",
+        provider: "claude",
+        toolName: "Bash",
+        input: {},
+      },
+      () => {},
+    );
+    relay.emit("envelope_dropped", buildToolUseRequestRaw("s4", "unknown-req"));
+    // 实质性不变量：未命中的 toolId 不应误删其它 pending 条目
+    expect(permissionBroker.listSession("s4")).toHaveLength(1);
+    expect(permissionBroker.get("req-other")).not.toBeNull();
   });
 });
