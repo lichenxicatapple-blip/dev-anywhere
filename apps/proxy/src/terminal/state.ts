@@ -33,6 +33,10 @@ interface ExitHandlerDeps {
   getSessionId: () => string | null;
   // 退出时要停掉的 idle checker；handler 创建时尚未实例化，故传 getter
   stopIdleChecker: () => void;
+  // 释放 xterm headless 渲染资源（HeadlessTerminal、SerializeAddon、UnicodeGraphemesAddon
+  // 等）。process 退出后 OS 会回收文件描述符等系统资源，但 wasm 模块状态、addon listener
+  // 留到 process 末期会让多次 spawn-exit 循环（如测试场景）累积内存。
+  disposeRenderResources?: () => void;
   // 测试注入点，production 默认 process.exit
   exit?: (code: number) => void;
 }
@@ -46,6 +50,7 @@ export function createExitHandler(deps: ExitHandlerDeps): (code: number) => void
     if (deps.fsm.is(TerminalState.EXITED)) return;
     deps.fsm.transitionTo(TerminalState.EXITED);
     deps.stopIdleChecker();
+    deps.disposeRenderResources?.();
     const socket = deps.getSocket();
     const sessionId = deps.getSessionId();
     if (socket.writable && sessionId) {

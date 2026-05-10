@@ -93,6 +93,11 @@ class TerminalSession {
       getSocket: () => this.socket,
       getSessionId: () => this.sessionId,
       stopIdleChecker: () => this.idleChecker?.stop(),
+      disposeRenderResources: () => {
+        this.headlessTerminal?.dispose();
+        this.headlessTerminal = null;
+        this.serializeAddon = null;
+      },
     });
 
     this.setupSocketHandlers();
@@ -361,6 +366,10 @@ class TerminalSession {
         if (degraded) notifyUser("serve daemon reachable, reconnected");
         consecutiveSpawnFailures = 0;
 
+        // setupSocketHandlers 在每次重连时挂新 listener；旧 socket 上的 close/error/data
+        // listener 在 socket close 后不会再被触发，但仍占引用，且 createIpcReader 内部
+        // pipe 的 LineBuffer 会泄漏。重连成功后立即解绑旧 socket 全部 listener。
+        this.socket.removeAllListeners();
         this.socket = newSocket;
         log.info({ attempt: i + 1, sessionId: this.sessionId }, "Reconnected to serve");
 
