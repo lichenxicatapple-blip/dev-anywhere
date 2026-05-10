@@ -149,9 +149,8 @@ describe("RelayRegistry", () => {
       expect(bound).toBe(true);
 
       const binding = registry.getClientBinding("c1");
-      expect(binding).toBeDefined();
-      expect(binding!.proxyId).toBe("p1");
-      expect(binding!.ws).toBe(ws);
+      expect(binding?.proxyId).toBe("p1");
+      expect(binding?.ws).toBe(ws);
     });
 
     it("bindClientById returns false for unknown proxy", () => {
@@ -164,9 +163,8 @@ describe("RelayRegistry", () => {
       registry.bindClientById("c1", "p1", createMockWs());
       registry.unbindClientById("c1");
       const binding = registry.getClientBinding("c1");
-      expect(binding).toBeDefined();
-      expect(binding!.proxyId).toBe("p1");
-      expect(binding!.ws).toBeNull();
+      expect(binding?.proxyId).toBe("p1");
+      expect(binding?.ws).toBeNull();
     });
 
     it("updateClientSocket updates ws for existing binding", () => {
@@ -226,13 +224,12 @@ describe("RelayRegistry", () => {
       registry.addSessionToProxy("p1", "s2");
 
       const detail = registry.getProxyDetail("p1");
-      expect(detail).toBeDefined();
-      expect(detail!.proxyId).toBe("p1");
-      expect(detail!.name).toBe("MacBook");
-      expect(detail!.online).toBe(true);
-      expect(detail!.sessions).toContain("s1");
-      expect(detail!.sessions).toContain("s2");
-      expect(detail!.disconnectedAt).toBeNull();
+      expect(detail?.proxyId).toBe("p1");
+      expect(detail?.name).toBe("MacBook");
+      expect(detail?.online).toBe(true);
+      expect(detail?.sessions).toContain("s1");
+      expect(detail?.sessions).toContain("s2");
+      expect(detail?.disconnectedAt).toBeNull();
     });
 
     it("returns detail for offline proxy with disconnectedAt timestamp", () => {
@@ -240,16 +237,15 @@ describe("RelayRegistry", () => {
       registry.transitionProxy("p1", "online", "offline");
 
       const detail = registry.getProxyDetail("p1");
-      expect(detail).toBeDefined();
-      expect(detail!.online).toBe(false);
-      expect(detail!.disconnectedAt).toBeTypeOf("number");
+      expect(detail?.online).toBe(false);
+      // disconnectedAt 必须是接近 Date.now() 的合理时间戳（不是 0 / 远古值 / NaN）
+      expect(detail?.disconnectedAt).toBeGreaterThan(Date.now() - 5_000);
     });
 
     it("omits name field when proxy has no name", () => {
       registry.registerProxy("p1", createMockWs());
       const detail = registry.getProxyDetail("p1");
-      expect(detail).toBeDefined();
-      expect("name" in detail!).toBe(false);
+      expect(detail && "name" in detail).toBe(false);
     });
   });
 
@@ -309,14 +305,14 @@ describe("RelayRegistry", () => {
 
       it("transitionProxy online->offline succeeds", () => {
         registry.registerProxy("p1", createMockWs());
-        expect(() => registry.transitionProxy("p1", "online", "offline")).not.toThrow();
+        registry.transitionProxy("p1", "online", "offline");
         expect(registry.getProxyConnectionState("p1")).toBe("offline");
       });
 
       it("transitionProxy offline->online succeeds", () => {
         registry.registerProxy("p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
-        expect(() => registry.transitionProxy("p1", "offline", "online")).not.toThrow();
+        registry.transitionProxy("p1", "offline", "online");
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
 
