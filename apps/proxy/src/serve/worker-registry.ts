@@ -262,6 +262,14 @@ export class WorkerRegistry {
   private onDisconnect(sessionId: string): void {
     this.sockets.delete(sessionId);
     this.deps.permissionBroker.cleanupSession(sessionId, "Worker disconnected");
+    // worker_exit 消息走 handleWorkerMessage，那条路径已经 terminateSession 把 session 从 manager
+    // 中删掉——onDisconnect 紧随其后到达时 getSession 返回 undefined，不触发 ERROR 转换。
+    // 只有"未经 worker_exit 即断连"（进程崩溃 / 内核 OOM kill / IPC socket 损坏）才会进入这里：
+    // session 仍然在 manager 中，必须立即把状态推到 ERROR，否则 UI 看到的状态会停留在
+    // WORKING / WAITING_APPROVAL 直到 reaper 60s 周期触发，期间用户既无法手动中止也无法重启。
+    if (this.deps.sessionManager.getSession(sessionId)) {
+      this.deps.jsonObserver.onChannelBroken(sessionId);
+    }
   }
 
   // 对齐 Claude CLI stream-json 输出，按 type 分发：
