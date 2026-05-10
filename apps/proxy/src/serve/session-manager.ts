@@ -177,8 +177,8 @@ export class SessionManager {
     if (oldState === newState) return false;
     const fsm = fsmForMode(session.mode);
     if (!fsm.canTransition(oldState, newState)) {
-      // 吸收态（传递闭包推导：TERMINATED + 所有出边都指向吸收态的状态）之后的残余转换请求
-      // 是进程竞态，日志降噪到 debug；其他非法转换是协议违反或 bug，warn 以便盯盘能看到
+      // 吸收态之后的残余转换来自进程竞态，降噪到 debug；
+      // 其他非法转换属于协议违反或 bug，保持 warn 可观测
       const level = fsm.isAbsorbing(oldState) ? "debug" : "warn";
       serviceLogger[level](
         { sessionId: id, from: oldState, to: newState, mode: session.mode },
@@ -368,7 +368,7 @@ export class SessionManager {
       }
       // JSON 会话：检查 worker 进程是否存活，无 PID 或进程已死则清理
       if (info.pid && this.isProcessAlive(info.pid)) {
-        // 加载回内存时 state 固定回观察零点 IDLE，等观察器下一轮信号推到位
+        // 加载回内存时 state 重置为 IDLE，等后续观察通道信号刷新
         this.sessions.set(info.id, { ...info, state: SessionState.IDLE });
       } else {
         this.onSessionRemoved?.(info.id);

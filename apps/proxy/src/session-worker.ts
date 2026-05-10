@@ -70,7 +70,7 @@ function sendToServe(msg: WorkerMessage): void {
   }
 }
 
-// 转发审批请求到 serve 进程，由 serve 进程通过 relay 转发到小程序
+// 转发审批请求到 serve 进程，由 serve 进程通过 relay 转发到 web 客户端
 const forwardToRelay = async (
   toolName: string,
   input: Record<string, unknown>,

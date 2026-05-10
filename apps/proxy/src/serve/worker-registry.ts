@@ -162,9 +162,8 @@ export class WorkerRegistry {
       const sock = await this.connect(sessionId, paths.workerSock);
       if (sock) {
         if (!this.deps.sessionManager.getSession(sessionId)) {
-          // 两边数据源不一致：DATA_DIR 下的 worker.sock 能连通说明 worker 进程还在跑，
-          // 但 SessionManager 的内存 Map（持久化已在 load 时清过）里没这条 session。
-          // 成因：sessions.json 被删 / 写盘失败 / 记录丢失而 worker 没跟着退。这类孤儿 worker 清掉。
+          // worker.sock 可连通但 SessionManager 无该 session 记录
+          // （sessions.json 写盘失败或文件丢失，但 worker 仍存活），属于孤儿 worker，直接终止。
           serviceLogger.warn(
             { sessionId },
             "Orphaned worker found without session data, terminating",

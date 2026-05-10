@@ -184,7 +184,8 @@ class TerminalSession {
   private serializeAddon: SerializeAddon | null = null;
   private outputSeq = 0;
   private remoteDetached = false;
-  // 记录上次 bridge 状态避免重连抖动导致 banner 连刷；初值 null 让首次状态（无论真假）都打，启动时提示 remote viewing 是否就绪
+  // 记录上次 bridge 连接状态，避免重连抖动重复打印 banner；
+  // 初值 null 确保首次状态变更（无论 true/false）都触发一次输出
   private lastBridgeConnected: boolean | null = null;
   // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
   private cleanupAndExit!: (code: number) => void;

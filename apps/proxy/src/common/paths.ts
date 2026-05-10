@@ -146,11 +146,8 @@ export const RUN_DIR = PROFILE_PATHS.runDir;
 export const SOCK_PATH = PROFILE_PATHS.sockPath;
 export const PID_PATH = PROFILE_PATHS.pidPath;
 // 停机标记文件。用户执行 `dev-anywhere stop` 时创建，其它时候不存在。文件内容无意义。
-// 作用：告诉 terminal 不要在此期间自动重启 daemon。
-//
-// 背景：terminal 在与 serve 的连接断开时，默认会 spawn 新 daemon 把连接修复。
-// 这与用户执行 stop 的诉求冲突——stop 刚结束 daemon，terminal 会立即把它重新拉起。
-// 解决办法是 stop 落下此标记，terminal 重连逻辑先检查标记：存在则仅 tryConnect，不 spawn。
+// 作用：terminal 重连逻辑检查此标记，存在则仅 tryConnect 不主动 spawn daemon，
+// 防止 stop 结束 daemon 后 terminal 立即将其重新拉起。
 export const STOPPED_PATH = PROFILE_PATHS.stoppedPath;
 export const DESIRED_RELAY_PATH = PROFILE_PATHS.desiredRelayPath;
 
