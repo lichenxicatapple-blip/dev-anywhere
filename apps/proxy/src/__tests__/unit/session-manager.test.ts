@@ -378,23 +378,44 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("rejects persisted sessions with state field", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      const invalid = [
-        {
-          id: s.id,
-          mode: "json",
-          provider: "claude",
-          cwd: "/tmp/test",
-          pid: ALIVE_PID,
-          state: SessionState.WORKING,
-          createdAt: s.createdAt,
-          updatedAt: s.updatedAt,
-        },
-      ];
-      writeFileSync(persistPath, JSON.stringify(invalid), "utf-8");
+    it("skips persisted sessions with state field, keeping the rest loadable", () => {
+      const goodId = "good-session";
+      const badId = "bad-session";
+      const removedIds: string[] = [];
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: badId,
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            state: SessionState.WORKING,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          {
+            id: goodId,
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
 
-      expect(() => new SessionManager({ persistPath })).toThrow("invalid persisted state");
+      const manager2 = new SessionManager({
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.getSession(goodId)?.state).toBe(SessionState.IDLE);
+      expect(manager2.getSession(badId)).toBeUndefined();
+      expect(removedIds).toContain(badId);
+      manager2.stopReaper();
     });
 
     it("cleans persisted sessions without provider", () => {

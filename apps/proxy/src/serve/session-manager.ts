@@ -332,12 +332,16 @@ export class SessionManager {
       );
     }
     for (const item of parsed) {
+      // state 字段不该落盘（见 save 注释）。遇到说明 schema 不匹配（旧版本数据 / 手改文件 / save bug）；
+      // 跳过该条而不是 throw，否则一条坏数据让所有 session 都加载不了，serve 起不来。
       if (item && typeof item === "object" && "state" in item) {
-        throw new Error(
-          `Session persistence file has invalid persisted state for session ${String(
-            (item as { id?: unknown }).id,
-          )}`,
+        const sessionId = String((item as { id?: unknown }).id);
+        serviceLogger.warn(
+          { sessionId },
+          "Session persistence record has unexpected state field, skipping",
         );
+        this.onSessionRemoved?.(sessionId);
+        continue;
       }
       const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
       if (!isProviderId(info.provider)) {
