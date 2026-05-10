@@ -52,15 +52,34 @@ export async function createXtermTerminal(
   terminal.open(container);
 
   // WebGL 必须在 terminal.open() 之后加载, 否则拿不到 canvas context
-  try {
-    terminal.loadAddon(new WebglAddon());
-  } catch (err) {
-    console.warn("WebGL addon failed, fallback to DOM renderer", err);
+  // onContextLoss: GPU context 被回收时（标签页休眠 / 系统休眠 / GPU 进程崩溃等），
+  // 旧 atlas 的 texture handle 全部失效但 xterm 内部状态没刷新；不重载会持续画错 glyph。
+  let webglAddon: WebglAddon | null = null;
+  let webglDisposed = false;
+  function loadWebgl(): void {
+    if (webglDisposed) return;
+    try {
+      const addon = new WebglAddon();
+      addon.onContextLoss(() => {
+        addon.dispose();
+        webglAddon = null;
+        loadWebgl();
+      });
+      terminal.loadAddon(addon);
+      webglAddon = addon;
+    } catch (err) {
+      console.warn("WebGL addon failed, fallback to DOM renderer", err);
+    }
   }
+  loadWebgl();
 
   return {
     terminal,
     serializeAddon,
-    dispose: () => terminal.dispose(),
+    dispose: () => {
+      webglDisposed = true;
+      webglAddon?.dispose();
+      terminal.dispose();
+    },
   };
 }

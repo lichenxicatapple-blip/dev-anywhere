@@ -44,5 +44,9 @@ export type PtyDebugSnapshotProvider = () => PtyDebugSnapshot | null;
 declare global {
   interface Window {
     __devAnywherePtyDebug?: PtyDebugSnapshotProvider;
+    // 取出当前活动 PTY 的 xterm Terminal 实例，便于线上排错时让用户在 console 调用
+    // term.refresh(0, term.rows - 1) / term.clearTextureAtlas() 等恢复操作。
+    // 类型故意松到 unknown，避免给 web 添加 @xterm/xterm 类型依赖给 globals。
+    __devAnywherePtyTerminal?: () => unknown;
   }
 }

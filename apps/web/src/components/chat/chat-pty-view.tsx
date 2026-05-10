@@ -251,6 +251,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         ).dispose;
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
         registerPtyTerminal(sessionId, term as Terminal);
+        window.__devAnywherePtyTerminal = () => terminalRef.current;
       },
       onFramePending: () => {
         pendingNewFrameRef.current = true;
@@ -277,6 +278,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       registerPtyTerminal(sessionId, null);
       terminalRef.current = null;
       terminalControllerRef.current = null;
+      if (window.__devAnywherePtyTerminal) delete window.__devAnywherePtyTerminal;
     };
   }, [
     sessionId,
