@@ -1,5 +1,13 @@
 import type { Socket } from "node:net";
-import { SessionState, serializeControl, type AgentStatusPayload } from "@dev-anywhere/shared";
+import {
+  MessageEnvelopeSchema,
+  RelayControlSchema,
+  SessionState,
+  serializeControl,
+  type AgentStatusPayload,
+  type ControlMessage,
+  type RelayControlMessage,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
@@ -99,58 +107,113 @@ export class RelayRouter {
     });
   }
 
-  handle(parsed: Record<string, unknown>): void {
-    const type = parsed.type as string | undefined;
-    if (!type) {
-      serviceLogger.warn("Relay message without type discriminator");
+  // 入站消息统一入口：proxy 收两类消息——relay control 与 envelope（user_input 这一种）。
+  // 先按 envelope 试解析（discriminated union），失败再按 control 解析；各 handler 拿到
+  // 强类型窄化后的消息，不再需要 `as string | undefined` / `as { ... }` 裸 cast。
+  handle(rawMsg: Record<string, unknown>): void {
+    const asEnvelope = MessageEnvelopeSchema.safeParse(rawMsg);
+    if (asEnvelope.success && asEnvelope.data.type === "user_input") {
+      try {
+        this.inputHandlers.onUserInput(asEnvelope.data);
+      } catch (err) {
+        serviceLogger.warn({ type: "user_input", error: String(err) }, "Relay handler threw");
+      }
       return;
     }
 
-    const handler = this.handlers[type];
-    if (!handler) {
-      serviceLogger.warn({ type }, "Unhandled relay message type");
+    const asControl = RelayControlSchema.safeParse(rawMsg);
+    if (!asControl.success) {
+      serviceLogger.warn(
+        {
+          type: typeof rawMsg.type === "string" ? rawMsg.type : "<missing>",
+          controlIssues: asControl.error.issues.slice(0, 3),
+        },
+        "Relay message rejected by both envelope and control schemas",
+      );
       return;
     }
-
+    const msg = asControl.data;
     try {
-      handler.call(this, parsed);
+      this.dispatch(msg);
     } catch (err) {
-      serviceLogger.warn({ type, error: String(err) }, "Relay handler threw");
+      serviceLogger.warn({ type: msg.type, error: String(err) }, "Relay handler threw");
     }
   }
 
-  private readonly handlers: Record<string, (msg: Record<string, unknown>) => void> = {
-    user_input: (msg) => this.inputHandlers.onUserInput(msg),
-    remote_input_raw: (msg) => this.inputHandlers.onRemoteInputRaw(msg),
-    clipboard_image_upload: (msg) => this.inputHandlers.onClipboardImageUpload(msg),
-    image_preview_request: (msg) => this.inputHandlers.onImagePreviewRequest(msg),
-    tool_approve: (msg) => this.permissionHandlers.onToolApprove(msg),
-    tool_deny: (msg) => this.permissionHandlers.onToolDeny(msg),
-    proxy_info_request: (msg) => this.resourceHandlers.onProxyInfoRequest(msg),
-    agent_cli_config_update: (msg) => this.resourceHandlers.onAgentCliConfigUpdate(msg),
-    dir_list_request: (msg) => this.resourceHandlers.onDirListRequest(msg),
-    dir_create_request: (msg) => this.resourceHandlers.onDirCreateRequest(msg),
-    session_create: (msg) => this.sessionCreateHandler.onSessionCreate(msg),
-    session_messages_request: (msg) => this.historyHandlers.onSessionMessagesRequest(msg),
-    session_resources_request: (msg) => this.resourceHandlers.onSessionResourcesRequest(msg),
-    agent_status_request: (msg) => this.onAgentStatusRequest(msg),
-    permission_request_delivered: (msg) =>
-      this.permissionHandlers.onPermissionRequestDelivered(msg),
-    session_terminate: (msg) => this.onSessionTerminate(msg),
-    session_worker_abort: (msg) => this.onSessionWorkerAbort(msg),
-    session_history_request: (msg) =>
-      this.deps.controlHandlers.handleSessionHistoryRequest({
-        requestId: msg.requestId as string | undefined,
-      }),
-    session_list: () => this.onSessionList(),
-    permission_mode_change: (msg) => this.onPermissionModeChange(msg),
-    session_subscribe: (msg) => this.onSessionSubscribe(msg),
-    terminal_resize_request: (msg) => this.onTerminalResizeRequest(msg),
-  };
+  private dispatch(msg: RelayControlMessage): void {
+    switch (msg.type) {
+      case "remote_input_raw":
+        this.inputHandlers.onRemoteInputRaw(msg);
+        return;
+      case "clipboard_image_upload":
+        this.inputHandlers.onClipboardImageUpload(msg);
+        return;
+      case "image_preview_request":
+        this.inputHandlers.onImagePreviewRequest(msg);
+        return;
+      case "tool_approve":
+        this.permissionHandlers.onToolApprove(msg);
+        return;
+      case "tool_deny":
+        this.permissionHandlers.onToolDeny(msg);
+        return;
+      case "proxy_info_request":
+        this.resourceHandlers.onProxyInfoRequest(msg);
+        return;
+      case "agent_cli_config_update":
+        this.resourceHandlers.onAgentCliConfigUpdate(msg);
+        return;
+      case "dir_list_request":
+        this.resourceHandlers.onDirListRequest(msg);
+        return;
+      case "dir_create_request":
+        this.resourceHandlers.onDirCreateRequest(msg);
+        return;
+      case "session_create":
+        this.sessionCreateHandler.onSessionCreate(msg);
+        return;
+      case "session_messages_request":
+        this.historyHandlers.onSessionMessagesRequest(msg);
+        return;
+      case "session_resources_request":
+        this.resourceHandlers.onSessionResourcesRequest(msg);
+        return;
+      case "agent_status_request":
+        this.onAgentStatusRequest(msg);
+        return;
+      case "permission_request_delivered":
+        this.permissionHandlers.onPermissionRequestDelivered(msg);
+        return;
+      case "session_terminate":
+        this.onSessionTerminate(msg);
+        return;
+      case "session_worker_abort":
+        this.onSessionWorkerAbort(msg);
+        return;
+      case "session_history_request":
+        this.deps.controlHandlers.handleSessionHistoryRequest({ requestId: msg.requestId });
+        return;
+      case "session_list":
+        this.onSessionList();
+        return;
+      case "permission_mode_change":
+        this.onPermissionModeChange(msg);
+        return;
+      case "session_subscribe":
+        this.onSessionSubscribe(msg);
+        return;
+      case "terminal_resize_request":
+        this.onTerminalResizeRequest(msg);
+        return;
+      default:
+        // proxy_to_client 方向的 control 消息由 client/relay 处理，这里直接忽略。
+        return;
+    }
+  }
 
-  private onAgentStatusRequest(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
-    const requestId = msg.requestId as string | undefined;
+  private onAgentStatusRequest(msg: ControlMessage<"agent_status_request">): void {
+    const sid = msg.sessionId;
+    const requestId = msg.requestId;
     if (sid) {
       const status = this.deps.agentStatusRegistry.get(sid);
       const statuses =
@@ -175,8 +238,8 @@ export class RelayRouter {
     serviceLogger.info({ count: statuses.length }, "Agent status snapshot sent");
   }
 
-  private onSessionTerminate(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
+  private onSessionTerminate(msg: ControlMessage<"session_terminate">): void {
+    const sid = msg.sessionId;
     if (!sid) return;
 
     const result = terminateSessionByOwnership(this.deps, sid);
@@ -187,8 +250,8 @@ export class RelayRouter {
     if (result.action !== "terminate_hosted_pty") this.deps.broadcastSessionList();
   }
 
-  private onSessionWorkerAbort(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
+  private onSessionWorkerAbort(msg: ControlMessage<"session_worker_abort">): void {
+    const sid = msg.sessionId;
     if (!sid) return;
 
     const session = this.deps.sessionManager.getSession(sid);
@@ -237,8 +300,8 @@ export class RelayRouter {
     serviceLogger.info("Session list sent via relay");
   }
 
-  private onPermissionModeChange(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
+  private onPermissionModeChange(msg: ControlMessage<"permission_mode_change">): void {
+    const sid = msg.sessionId;
     const mode = msg.mode;
     if (!sid) {
       serviceLogger.info(
@@ -276,9 +339,9 @@ export class RelayRouter {
     }
   }
 
-  private onSessionSubscribe(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
-    const requestId = msg.requestId as string | undefined;
+  private onSessionSubscribe(msg: ControlMessage<"session_subscribe">): void {
+    const sid = msg.sessionId;
+    const requestId = msg.requestId;
     if (!sid) return;
 
     const ts = this.deps.terminalSockets.get(sid);
@@ -292,10 +355,10 @@ export class RelayRouter {
     }
   }
 
-  private onTerminalResizeRequest(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
-    const cols = msg.cols as number | undefined;
-    const rows = msg.rows as number | undefined;
+  private onTerminalResizeRequest(msg: ControlMessage<"terminal_resize_request">): void {
+    const sid = msg.sessionId;
+    const cols = msg.cols;
+    const rows = msg.rows;
     if (!sid || !cols || !rows) return;
     if (!this.deps.hostedPtyRegistry.resize(sid, cols, rows)) {
       serviceLogger.debug({ sessionId: sid, cols, rows }, "Resize request ignored: not hosted PTY");

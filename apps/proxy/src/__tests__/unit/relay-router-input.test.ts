@@ -162,6 +162,10 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "user_input",
       sessionId: "s1",
+      seq: 1,
+      timestamp: 1700000000000,
+      source: "client",
+      version: "1.0",
       payload: { text: "hello" },
     });
 

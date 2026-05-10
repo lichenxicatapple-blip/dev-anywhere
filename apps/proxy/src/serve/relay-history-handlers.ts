@@ -1,4 +1,4 @@
-import { serializeControl } from "@dev-anywhere/shared";
+import { serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
@@ -14,19 +14,16 @@ interface RelayHistoryHandlersDeps {
 export class RelayHistoryHandlers {
   constructor(private readonly deps: RelayHistoryHandlersDeps) {}
 
-  onSessionMessagesRequest(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
+  onSessionMessagesRequest(msg: ControlMessage<"session_messages_request">): void {
+    const { sessionId: sid, requestId, before, limit } = msg;
     if (!sid) return;
-    const requestId = msg.requestId as string | undefined;
-    const before = msg.before as string | undefined;
-    const limit = msg.limit as number | undefined;
 
     const session = this.deps.sessionManager.getSession(sid);
     if (session?.claudeSessionId) {
       readSessionMessagesPage(session.claudeSessionId, { before, limit })
         .then((page) => {
           this.deps.relaySend(
-            JSON.stringify({
+            serializeControl({
               type: "session_history_messages",
               requestId,
               sessionId: sid,
@@ -53,7 +50,7 @@ export class RelayHistoryHandlers {
             "Failed to read session history page on request",
           );
           this.deps.relaySend(
-            JSON.stringify({
+            serializeControl({
               type: "session_history_messages",
               requestId,
               sessionId: sid,
@@ -65,7 +62,7 @@ export class RelayHistoryHandlers {
         });
     } else {
       this.deps.relaySend(
-        JSON.stringify({
+        serializeControl({
           type: "session_history_messages",
           requestId,
           sessionId: sid,

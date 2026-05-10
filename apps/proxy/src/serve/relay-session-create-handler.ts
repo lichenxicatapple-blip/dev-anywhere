@@ -1,7 +1,7 @@
 import { rmSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
-import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
@@ -62,9 +62,8 @@ function validateSessionCwd(cwd: unknown): SessionCwdValidationError | null {
 export class RelaySessionCreateHandler {
   constructor(private readonly deps: RelaySessionCreateHandlerDeps) {}
 
-  onSessionCreate(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    const cwd = msg.cwd as string | undefined;
+  onSessionCreate(msg: ControlMessage<"session_create">): void {
+    const { requestId, cwd } = msg;
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
@@ -81,9 +80,9 @@ export class RelaySessionCreateHandler {
     }
     const sessionCwd = typeof cwd === "string" ? cwd.trim() : "";
 
-    const provider = msg.provider as ProviderId | undefined;
-    const mode = (msg.mode as "json" | "pty" | undefined) ?? "json";
-    const permissionMode = msg.permissionMode as string | undefined;
+    const provider = msg.provider;
+    const mode = msg.mode ?? "json";
+    const permissionMode = msg.permissionMode;
     if (mode === "pty") {
       this.createHostedPtySession(msg, sessionCwd, provider ?? "claude", permissionMode);
       return;
@@ -106,8 +105,10 @@ export class RelaySessionCreateHandler {
       return;
     }
 
-    const resumeSessionId = msg.resumeSessionId as string | undefined;
-    const streamDelta = msg.streamDelta === true;
+    const resumeSessionId = msg.resumeSessionId;
+    // streamDelta 不在 session_create 协议字段里：当前没有客户端发起 delta 模式，
+    // 默认关闭即可。后续若要恢复增量推送，需先在 RelayControlSchema 加字段。
+    const streamDelta = false;
     const name = tildify(sessionCwd);
     const pendingId = nanoid();
     const hook = this.deps.createHookContext(pendingId, provider);
@@ -188,7 +189,7 @@ export class RelaySessionCreateHandler {
   }
 
   private createHostedPtySession(
-    msg: Record<string, unknown>,
+    msg: ControlMessage<"session_create">,
     cwd: string,
     provider: ProviderId,
     permissionMode?: string,
@@ -197,7 +198,7 @@ export class RelaySessionCreateHandler {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
-          requestId: msg.requestId as string | undefined,
+          requestId: msg.requestId,
           sessionId: "",
           errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error: "Unsupported provider for PTY session.",
@@ -206,7 +207,7 @@ export class RelaySessionCreateHandler {
       return;
     }
 
-    const resumeSessionId = msg.resumeSessionId as string | undefined;
+    const resumeSessionId = msg.resumeSessionId;
     const pendingId = nanoid();
     const name = tildify(cwd);
     const hook = this.deps.createHookContext(pendingId, provider);
@@ -234,7 +235,7 @@ export class RelaySessionCreateHandler {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
-          requestId: msg.requestId as string | undefined,
+          requestId: msg.requestId,
           sessionId: session.id,
           mode: "pty",
           provider,
@@ -251,7 +252,7 @@ export class RelaySessionCreateHandler {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
-          requestId: msg.requestId as string | undefined,
+          requestId: msg.requestId,
           sessionId: "",
           errorCode: ControlErrorCode.PROCESS_START_FAILED,
           error,

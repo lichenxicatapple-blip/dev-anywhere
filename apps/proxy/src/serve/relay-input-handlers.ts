@@ -1,5 +1,11 @@
 import type { Socket } from "node:net";
-import { ControlErrorCode, MessageEnvelopeSchema } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  MessageEnvelopeSchema,
+  serializeControl,
+  type ControlMessage,
+  type Envelope,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { saveClipboardImageUpload } from "./clipboard-image-upload.js";
 import { loadImagePreview } from "./image-preview.js";
@@ -23,8 +29,8 @@ interface RelayInputHandlersDeps {
 export class RelayInputHandlers {
   constructor(private readonly deps: RelayInputHandlersDeps) {}
 
-  onUserInput(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
+  onUserInput(msg: Envelope<"user_input">): void {
+    const { sessionId } = msg;
     if (!sessionId) return;
 
     const session = this.deps.sessionManager.getSession(sessionId);
@@ -33,8 +39,7 @@ export class RelayInputHandlers {
       return;
     }
 
-    const payload = msg.payload as { text?: string; messageId?: string } | undefined;
-    const text = payload?.text ?? "";
+    const text = msg.payload.text;
 
     if (session.mode === "json") {
       this.deps.jsonObserver.onTurnStart(sessionId);
@@ -46,25 +51,18 @@ export class RelayInputHandlers {
         serviceLogger.warn({ sessionId }, "Remote input dropped: JSON worker socket not available");
         return;
       }
-      const timestamp =
-        typeof msg.timestamp === "number" && Number.isFinite(msg.timestamp)
-          ? msg.timestamp
-          : Date.now();
-      const seq =
-        typeof msg.seq === "number" && Number.isInteger(msg.seq) && msg.seq >= 0 ? msg.seq : 0;
-      const version = typeof msg.version === "string" ? msg.version : "1";
       const messageId =
-        typeof payload?.messageId === "string" && payload.messageId.length > 0
-          ? payload.messageId
-          : `${sessionId}-user-${timestamp}`;
+        msg.payload.messageId && msg.payload.messageId.length > 0
+          ? msg.payload.messageId
+          : `${sessionId}-user-${msg.timestamp}`;
       this.deps.relayConnection.sendEnvelope(
         MessageEnvelopeSchema.parse({
           type: "user_input",
           sessionId,
-          seq,
-          timestamp,
+          seq: msg.seq,
+          timestamp: msg.timestamp,
           source: "proxy",
-          version,
+          version: msg.version,
           payload: { text, messageId },
         }),
       );
@@ -78,9 +76,8 @@ export class RelayInputHandlers {
     );
   }
 
-  onRemoteInputRaw(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
-    const data = msg.data as string | undefined;
+  onRemoteInputRaw(msg: ControlMessage<"remote_input_raw">): void {
+    const { sessionId, data } = msg;
     if (!sessionId || data === undefined) return;
 
     const ts = this.deps.terminalSockets.get(sessionId);
@@ -99,15 +96,14 @@ export class RelayInputHandlers {
     serviceLogger.info({ sessionId, bytes: data.length }, "Raw PTY input forwarded");
   }
 
-  onClipboardImageUpload(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
-    const requestId = msg.requestId as string | undefined;
+  onClipboardImageUpload(msg: ControlMessage<"clipboard_image_upload">): void {
+    const { sessionId, requestId } = msg;
     if (!sessionId) return;
 
     const session = this.deps.sessionManager.getSession(sessionId);
     if (!session) {
       this.deps.relayConnection.sendRaw(
-        JSON.stringify({
+        serializeControl({
           type: "clipboard_image_upload_response",
           requestId,
           sessionId,
@@ -124,9 +120,9 @@ export class RelayInputHandlers {
     const result = saveClipboardImageUpload(
       {
         sessionId,
-        mimeType: typeof msg.mimeType === "string" ? msg.mimeType : "",
-        dataBase64: typeof msg.dataBase64 === "string" ? msg.dataBase64 : "",
-        fileName: typeof msg.fileName === "string" ? msg.fileName : undefined,
+        mimeType: msg.mimeType,
+        dataBase64: msg.dataBase64,
+        fileName: msg.fileName,
       },
       {
         cwd: session.cwd,
@@ -134,7 +130,7 @@ export class RelayInputHandlers {
     );
 
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "clipboard_image_upload_response",
         requestId,
         sessionId,
@@ -144,16 +140,14 @@ export class RelayInputHandlers {
     serviceLogger.info({ sessionId, success: result.success }, "Clipboard image upload handled");
   }
 
-  onImagePreviewRequest(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
-    const requestId = msg.requestId as string | undefined;
-    const path = msg.path as string | undefined;
+  onImagePreviewRequest(msg: ControlMessage<"image_preview_request">): void {
+    const { sessionId, requestId, path } = msg;
     if (!sessionId || !path) return;
 
     const session = this.deps.sessionManager.getSession(sessionId);
     if (!session) {
       this.deps.relayConnection.sendRaw(
-        JSON.stringify({
+        serializeControl({
           type: "image_preview_response",
           requestId,
           sessionId,
@@ -176,7 +170,7 @@ export class RelayInputHandlers {
     );
 
     this.deps.relayConnection.sendRaw(
-      JSON.stringify({
+      serializeControl({
         type: "image_preview_response",
         requestId,
         ...result,

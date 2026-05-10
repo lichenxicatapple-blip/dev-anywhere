@@ -1,3 +1,4 @@
+import { serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { PermissionBroker } from "./permission-broker.js";
@@ -14,9 +15,8 @@ interface RelayPermissionHandlersDeps {
 export class RelayPermissionHandlers {
   constructor(private readonly deps: RelayPermissionHandlersDeps) {}
 
-  onToolApprove(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
-    const payload = msg.payload as { toolId?: string; whitelistTool?: boolean } | undefined;
+  onToolApprove(msg: ControlMessage<"tool_approve">): void {
+    const { sessionId, payload } = msg;
     if (!sessionId || !payload?.toolId) return;
 
     const pending = this.deps.permissionBroker.get(payload.toolId);
@@ -70,9 +70,8 @@ export class RelayPermissionHandlers {
     );
   }
 
-  onToolDeny(msg: Record<string, unknown>): void {
-    const sessionId = msg.sessionId as string | undefined;
-    const payload = msg.payload as { toolId?: string; reason?: string } | undefined;
+  onToolDeny(msg: ControlMessage<"tool_deny">): void {
+    const { sessionId, payload } = msg;
     if (!sessionId || !payload?.toolId) return;
 
     const reason = payload.reason ?? "Denied by remote user";
@@ -113,9 +112,8 @@ export class RelayPermissionHandlers {
     serviceLogger.info({ sessionId, toolId: payload.toolId }, "Tool denied via relay");
   }
 
-  onPermissionRequestDelivered(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
-    const requestId = msg.requestId as string | undefined;
+  onPermissionRequestDelivered(msg: ControlMessage<"permission_request_delivered">): void {
+    const { sessionId: sid, requestId } = msg;
     if (!sid || !requestId) return;
     const marked = this.deps.permissionBroker.markDelivered(requestId);
     serviceLogger.info({ sessionId: sid, requestId, marked }, "Permission request delivered");
@@ -129,7 +127,7 @@ export class RelayPermissionHandlers {
     message?: string,
   ): void {
     this.deps.relaySend(
-      JSON.stringify({
+      serializeControl({
         type: "permission_decision_result",
         sessionId,
         requestId,

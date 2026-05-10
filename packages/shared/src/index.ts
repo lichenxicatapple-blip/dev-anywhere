@@ -84,6 +84,15 @@ export type {
   RelayControlMessage,
   RelayControlType,
 } from "./schemas/relay-control.js";
+// 类型别名，便于在 handler 签名里写 ControlMessage<"tool_approve"> / Envelope<"user_input">
+// 而不是冗长的 Extract<RelayControlMessage, ...>。
+import type { RelayControlMessage as _RelayControlMessage } from "./schemas/relay-control.js";
+import type { MessageEnvelope as _MessageEnvelope } from "./schemas/envelope.js";
+export type ControlMessage<T extends _RelayControlMessage["type"]> = Extract<
+  _RelayControlMessage,
+  { type: T }
+>;
+export type Envelope<T extends _MessageEnvelope["type"]> = Extract<_MessageEnvelope, { type: T }>;
 
 // constants
 export { SessionState } from "./constants/session.js";

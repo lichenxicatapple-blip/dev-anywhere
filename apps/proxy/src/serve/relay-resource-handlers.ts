@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { accessSync, constants, statSync } from "node:fs";
-import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
@@ -34,11 +34,11 @@ function validateExecutablePath(path: string): string {
 export class RelayResourceHandlers {
   constructor(private readonly deps: RelayResourceHandlersDeps) {}
 
-  onProxyInfoRequest(msg: Record<string, unknown>): void {
+  onProxyInfoRequest(msg: ControlMessage<"proxy_info_request">): void {
     this.deps.relaySend(
       serializeControl({
         type: "proxy_info",
-        requestId: msg.requestId as string | undefined,
+        requestId: msg.requestId,
         homePath: homedir() || "/",
         agentCli: detectAgentCliStatus(this.deps.getProviderEnv(), {
           suggestions: this.deps.getAgentCliSuggestions(),
@@ -47,10 +47,9 @@ export class RelayResourceHandlers {
     );
   }
 
-  onAgentCliConfigUpdate(msg: Record<string, unknown>): void {
-    const requestId = msg.requestId as string | undefined;
-    const provider = msg.provider as ProviderId | undefined;
-    const rawPath = msg.path as string | undefined;
+  onAgentCliConfigUpdate(msg: ControlMessage<"agent_cli_config_update">): void {
+    const { requestId, provider } = msg;
+    const rawPath = msg.path;
 
     if (provider !== "claude" && provider !== "codex") {
       this.deps.relaySend(
@@ -96,22 +95,22 @@ export class RelayResourceHandlers {
     }
   }
 
-  onDirListRequest(msg: Record<string, unknown>): void {
+  onDirListRequest(msg: ControlMessage<"dir_list_request">): void {
     this.deps.controlHandlers.handleDirListRequest({
-      path: (msg.path as string) ?? "",
-      requestId: msg.requestId as string | undefined,
+      path: msg.path ?? "",
+      requestId: msg.requestId,
     });
   }
 
-  onDirCreateRequest(msg: Record<string, unknown>): void {
+  onDirCreateRequest(msg: ControlMessage<"dir_create_request">): void {
     this.deps.controlHandlers.handleDirCreateRequest({
-      path: (msg.path as string) ?? "",
-      requestId: msg.requestId as string | undefined,
+      path: msg.path ?? "",
+      requestId: msg.requestId,
     });
   }
 
-  onSessionResourcesRequest(msg: Record<string, unknown>): void {
-    const sid = msg.sessionId as string | undefined;
+  onSessionResourcesRequest(msg: ControlMessage<"session_resources_request">): void {
+    const sid = msg.sessionId;
     if (!sid) return;
 
     const session = this.deps.sessionManager.getSession(sid);
@@ -120,7 +119,7 @@ export class RelayResourceHandlers {
       this.deps.relaySend(
         serializeControl({
           type: "session_resources_response",
-          requestId: msg.requestId as string | undefined,
+          requestId: msg.requestId,
           sessionId: sid,
           commands: [],
           groups: [],
@@ -132,7 +131,7 @@ export class RelayResourceHandlers {
     }
     this.deps.controlHandlers.handleSessionResourcesRequest({
       sessionId: sid,
-      requestId: msg.requestId as string | undefined,
+      requestId: msg.requestId,
       workDir: session.cwd,
     });
     serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources requested");
