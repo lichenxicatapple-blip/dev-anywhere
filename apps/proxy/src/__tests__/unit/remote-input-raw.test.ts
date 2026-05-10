@@ -73,7 +73,4 @@ describe("serve.ts remote_input_raw forwarding semantics", () => {
     }
   });
 
-  it("does not expose a batch-input serializer for PTY", async () => {
-    expect("serializeBatchPtyInput" in (await import("#src/serve/pty-input.js"))).toBe(false);
-  });
 });

@@ -144,7 +144,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
   });
 
-  it("register_response after close() gets swallowed by over-broad try/catch and leaks as message (race B)", async () => {
+  it("ignores register_response received after close() (CLOSED state)", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     fakeWs.emit("open"); // 先 open 进 REGISTERING
     conn.close(); // 然后外部 close
