@@ -1,6 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 import { computePtyHostLayout, computeScrollTarget, ydispToScrollTop } from "./pty-scroll";
 import { appendPtyScrollTrace, isPtyScrollTraceEnabled } from "./pty-scroll-trace";
+import type { PtyDebugSnapshot } from "./pty-debug-snapshot";
 
 interface PtyScrollControllerOptions {
   container: HTMLDivElement;
@@ -25,6 +26,7 @@ interface PtyScrollController {
   scrollToBottom: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
+  getDebugSnapshot: () => Omit<PtyDebugSnapshot, "frame">;
 }
 
 export interface PtyScrollState {
@@ -89,6 +91,7 @@ export function attachPtyScrollController(
   let touchScrollActive = false;
   let touchStartY: number | null = null;
   let touchReviewNotified = false;
+  let lastSpacerUpdateAt: number | null = null;
 
   const setUserHasVerticalScrollIntent = (value: boolean): void => {
     if (userHasVerticalScrollIntent === value) return;
@@ -283,6 +286,7 @@ export function attachPtyScrollController(
     host.style.width = `${layout.hostWidth}px`;
     host.style.height = `${layout.hostHeight}px`;
     host.style.paddingTop = `${layout.hostPaddingTop}px`;
+    lastSpacerUpdateAt = now();
     positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
   };
 
@@ -470,6 +474,85 @@ export function attachPtyScrollController(
   ro.observe(container);
   ro.observe(host);
 
+  const getDebugSnapshot = (): Omit<PtyDebugSnapshot, "frame"> => {
+    const { cellH, cellW } = getDims();
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const buffer = term.buffer.active;
+
+    // 重新跑一遍 layout 计算（不写 DOM），用 expected 值和现有 spacer.height 比对漂移。
+    let expectedSpacerHeight = 0;
+    if (cellH > 0 && cellW > 0) {
+      let canvasLastY = -1;
+      for (let ry = term.rows - 1; ry >= 0; ry--) {
+        const absY = buffer.viewportY + ry;
+        if (absY < 0 || absY >= buffer.length) continue;
+        const line = buffer.getLine(absY);
+        if (line && line.translateToString(true).trimEnd().length > 0) {
+          canvasLastY = ry;
+          break;
+        }
+      }
+      const layout = computePtyHostLayout(
+        {
+          bufferLength: buffer.length,
+          rows: term.rows,
+          cols: term.cols,
+          viewportY: buffer.viewportY,
+          cellH,
+          cellW,
+          visibleContentHeight,
+        },
+        canvasLastY,
+      );
+      expectedSpacerHeight = layout?.spacerHeight ?? 0;
+    }
+    const currentSpacerHeight = parseFloat(spacer.style.height) || 0;
+    const currentHostTop = parseFloat(host.style.top) || 0;
+    const currentHostHeight = parseFloat(host.style.height) || 0;
+    const currentHostWidth = parseFloat(host.style.width) || 0;
+    const currentHostPaddingTop = parseFloat(host.style.paddingTop) || 0;
+    const currentSpacerWidth = parseFloat(spacer.style.width) || 0;
+
+    return {
+      ts: now(),
+      container: {
+        scrollTop: container.scrollTop,
+        scrollLeft: container.scrollLeft,
+        scrollHeight: container.scrollHeight,
+        scrollWidth: container.scrollWidth,
+        clientHeight: container.clientHeight,
+        clientWidth: container.clientWidth,
+        paddingTop,
+        paddingBottom,
+      },
+      spacer: { height: currentSpacerHeight, width: currentSpacerWidth },
+      host: {
+        top: currentHostTop,
+        height: currentHostHeight,
+        width: currentHostWidth,
+        paddingTop: currentHostPaddingTop,
+      },
+      term: {
+        rows: term.rows,
+        cols: term.cols,
+        bufferLength: buffer.length,
+        viewportY: buffer.viewportY,
+        baseY: buffer.baseY,
+        cursorX: buffer.cursorX,
+        cursorY: buffer.cursorY,
+      },
+      cell: { h: cellH, w: cellW },
+      visibleContentHeight,
+      pinned: !userHasVerticalScrollIntent,
+      pendingProgrammaticScrollTop,
+      touchScrollActive,
+      expectedSpacerHeight,
+      spacerDrift: currentSpacerHeight - expectedSpacerHeight,
+      lastSpacerUpdateAt,
+    };
+  };
+
   return {
     dispose: () => {
       container.removeEventListener("scroll", onContainerScroll);
@@ -486,5 +569,6 @@ export function attachPtyScrollController(
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,
+    getDebugSnapshot,
   };
 }

@@ -61,6 +61,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     moved: boolean;
   } | null>(null);
   const suppressPtyFocusUntilRef = useRef(0);
+  const lastFrameWriteAtRef = useRef<number | null>(null);
   const connection = usePtyConnectionState();
   const follow = usePtyFollowState();
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
@@ -258,6 +259,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         }
       },
       onFrameWritten: () => {
+        lastFrameWriteAtRef.current = performance.now();
         relayoutSchedulerRef.current?.schedule();
       },
       onRawInput: () => {
@@ -343,12 +345,20 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     scrollToBottomRef.current = controller.scrollToBottom;
     scrollToRatioRef.current = controller.scrollToRatio;
     scrollToXRatioRef.current = controller.scrollToXRatio;
+    window.__devAnywherePtyDebug = () => ({
+      ...controller.getDebugSnapshot(),
+      frame: {
+        lastWriteAt: lastFrameWriteAtRef.current,
+        pendingNewFrame: pendingNewFrameRef.current,
+      },
+    });
     return () => {
       controller.dispose();
       relayoutPtyRef.current = () => {};
       scrollToBottomRef.current = () => {};
       scrollToRatioRef.current = () => {};
       scrollToXRatioRef.current = () => {};
+      if (window.__devAnywherePtyDebug) delete window.__devAnywherePtyDebug;
     };
   }, [
     connection.ready,
