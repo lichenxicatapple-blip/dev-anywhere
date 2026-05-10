@@ -313,6 +313,13 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
       touchSessionActivity(sessionManager, relayConnection, sessionId);
       relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
     },
+    (err, line) => {
+      // 单条 IPC 行 schema 失败时 warn-skip，不让它升级为 socket error 触发整个 terminal 断开。
+      serviceLogger.warn(
+        { err: err.message, lineLen: line.length },
+        "Terminal IPC message dropped (parse/schema error)",
+      );
+    },
   );
 
   socket.on("close", () => {

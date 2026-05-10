@@ -257,9 +257,14 @@ export function serializeWorkerMsg(msg: WorkerMessage): string {
   return JSON.stringify(msg) + "\n";
 }
 
+// onProtocolError：单条 NDJSON 行 parse 失败 / schema 校验失败时回调（不会终止 reader）。
+// 历史上这里用 stream.emit("error") 把传输层炸掉，触发 socket close 与 onDisconnect，等于让一条
+// 协议层的不兼容消息把整个 session 推进 ERROR 态——这是 Claude/Codex CLI 增加新事件类型时的真实风险。
+// 现在改为 callback：调用方自行决定 log + skip 还是断开，传输层保持开放。
 export function createWorkerReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: WorkerMessage) => void,
+  onProtocolError?: (err: Error, line: string) => void,
 ): void {
   const lineBuffer = new LineBuffer();
   lineBuffer.on("data", (line: Buffer | string) => {
@@ -271,13 +276,13 @@ export function createWorkerReader(
       if (result.success) {
         onMessage(result.data);
       } else {
-        stream.emit(
-          "error",
+        onProtocolError?.(
           new Error(`Worker message validation failed: ${result.error.message}`),
+          str,
         );
       }
     } catch (err) {
-      stream.emit("error", new Error("Worker message parse error", { cause: err }));
+      onProtocolError?.(new Error("Worker message parse error", { cause: err }), str);
     }
   });
   (stream as NodeJS.ReadableStream).pipe(lineBuffer);
@@ -293,10 +298,13 @@ export function serializeIpc(msg: IpcMessage): string {
 // 混合协议 IPC 读取器，支持 NDJSON 控制消息和 binary PTY 帧。
 // binary 帧以 0x00 开头，NDJSON 行以 '{' 开头，通过首字节区分。
 // 返回 dispose 函数用于摘掉 'data' 监听，长连接可以忽略，一次性等待（如 waitForMessage）必须调用避免累积 listener 重复解析每条消息。
+// 同 createWorkerReader：onProtocolError 让协议层 parse / schema 错误不再走 stream.emit("error")，
+// 由调用方决定如何处理（warn-skip / disconnect）。默认 silent drop 是为了向后兼容尚未挂回调的调用点。
 export function createIpcReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: IpcMessage) => void,
   onBinaryFrame?: (sessionId: string, data: Buffer, outputSeq: number) => void,
+  onProtocolError?: (err: Error, line: string) => void,
 ): () => void {
   let buf = Buffer.alloc(0);
   let disposed = false;
@@ -337,13 +345,13 @@ export function createIpcReader(
           if (result.success) {
             onMessage(result.data);
           } else {
-            stream.emit(
-              "error",
+            onProtocolError?.(
               new Error(`IPC message validation failed: ${result.error.message}`),
+              line,
             );
           }
         } catch (err) {
-          stream.emit("error", new Error("IPC message parse error", { cause: err }));
+          onProtocolError?.(new Error("IPC message parse error", { cause: err }), line);
         }
       }
     }

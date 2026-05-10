@@ -269,40 +269,53 @@ class TerminalSession {
   }
 
   private setupSocketHandlers(): void {
-    createIpcReader(this.socket, (msg: IpcMessage) => {
-      if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
-        log.debug({ sessionId: this.sessionId, bytes: msg.data.length }, "Remote input received");
-        this.ptyManager?.write(msg.data);
-      } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
-        this.detachRemoteView();
-      } else if (msg.type === "bridge_status") {
-        this.handleBridgeStatus(msg.connected);
-      } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
-        if (this.serializeAddon && this.headlessTerminal) {
-          const data = this.serializeAddon.serialize();
-          this.socket.write(
-            serializeIpc({
-              type: "pty_snapshot",
-              sessionId: msg.sessionId,
-              cols: this.headlessTerminal.cols,
-              rows: this.headlessTerminal.rows,
-              data,
-              outputSeq: this.outputSeq,
-              requestId: msg.requestId,
-            }),
+    createIpcReader(
+      this.socket,
+      (msg: IpcMessage) => {
+        if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
+          log.debug(
+            { sessionId: this.sessionId, bytes: msg.data.length },
+            "Remote input received",
           );
-          log.info(
-            {
-              sessionId: this.sessionId,
-              cols: this.headlessTerminal.cols,
-              rows: this.headlessTerminal.rows,
-              bytes: data.length,
-            },
-            "Snapshot sent via IPC",
-          );
+          this.ptyManager?.write(msg.data);
+        } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
+          this.detachRemoteView();
+        } else if (msg.type === "bridge_status") {
+          this.handleBridgeStatus(msg.connected);
+        } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
+          if (this.serializeAddon && this.headlessTerminal) {
+            const data = this.serializeAddon.serialize();
+            this.socket.write(
+              serializeIpc({
+                type: "pty_snapshot",
+                sessionId: msg.sessionId,
+                cols: this.headlessTerminal.cols,
+                rows: this.headlessTerminal.rows,
+                data,
+                outputSeq: this.outputSeq,
+                requestId: msg.requestId,
+              }),
+            );
+            log.info(
+              {
+                sessionId: this.sessionId,
+                cols: this.headlessTerminal.cols,
+                rows: this.headlessTerminal.rows,
+                bytes: data.length,
+              },
+              "Snapshot sent via IPC",
+            );
+          }
         }
-      }
-    });
+      },
+      undefined,
+      (err, line) => {
+        log.warn(
+          { err: err.message, lineLen: line.length },
+          "Serve IPC message dropped (parse/schema error)",
+        );
+      },
+    );
 
     this.socket.on("close", () => {
       log.info("Serve socket closed");

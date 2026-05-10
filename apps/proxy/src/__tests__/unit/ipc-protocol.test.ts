@@ -214,14 +214,20 @@ describe("IPC Protocol", () => {
       expect(messages).toHaveLength(2);
     });
 
-    it("emits error on stream for invalid JSON, continues processing valid messages", async () => {
+    it("calls onProtocolError for invalid JSON, continues processing valid messages, does NOT emit stream error", async () => {
       const { createIpcReader } = await importIpc();
       const stream = new PassThrough();
       const messages: unknown[] = [];
-      const errors: Error[] = [];
-      stream.on("error", (err) => errors.push(err));
+      const protocolErrors: Array<{ msg: string; line: string }> = [];
+      const streamErrors: Error[] = [];
+      stream.on("error", (err) => streamErrors.push(err));
 
-      createIpcReader(stream, (msg) => messages.push(msg));
+      createIpcReader(
+        stream,
+        (msg) => messages.push(msg),
+        undefined,
+        (err, line) => protocolErrors.push({ msg: err.message, line }),
+      );
 
       stream.write("not-valid-json\n");
       stream.write(
@@ -231,9 +237,41 @@ describe("IPC Protocol", () => {
 
       await new Promise((r) => setTimeout(r, 50));
 
+      // 单条坏行不应升级为传输层错误（避免 socket.on("error") → onDisconnect 把整个 session 推 ERROR）。
       expect(messages).toHaveLength(1);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]!.message).toMatch(/IPC message parse error/);
+      expect(streamErrors).toHaveLength(0);
+      expect(protocolErrors).toHaveLength(1);
+      expect(protocolErrors[0]!.msg).toMatch(/IPC message parse error/);
+      expect(protocolErrors[0]!.line).toBe("not-valid-json");
+    });
+
+    it("calls onProtocolError for schema-invalid messages without breaking the reader", async () => {
+      const { createIpcReader } = await importIpc();
+      const stream = new PassThrough();
+      const messages: unknown[] = [];
+      const protocolErrors: Error[] = [];
+      const streamErrors: Error[] = [];
+      stream.on("error", (err) => streamErrors.push(err));
+
+      createIpcReader(
+        stream,
+        (msg) => messages.push(msg),
+        undefined,
+        (err) => protocolErrors.push(err),
+      );
+
+      stream.write(JSON.stringify({ type: "totally_unknown_future_message" }) + "\n");
+      stream.write(
+        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+      );
+      stream.end();
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(messages).toHaveLength(1);
+      expect(streamErrors).toHaveLength(0);
+      expect(protocolErrors).toHaveLength(1);
+      expect(protocolErrors[0]!.message).toMatch(/IPC message validation failed/);
     });
   });
 
@@ -507,14 +545,19 @@ describe("Worker Protocol", () => {
       expect(messages[0]).toEqual({ type: "worker_stop" });
     });
 
-    it("emits error on stream for invalid JSON, continues processing valid messages", async () => {
+    it("calls onProtocolError for invalid JSON, continues processing valid messages, does NOT emit stream error", async () => {
       const { createWorkerReader, serializeWorkerMsg } = await importIpc();
       const stream = new PassThrough();
       const messages: unknown[] = [];
-      const errors: Error[] = [];
-      stream.on("error", (err) => errors.push(err));
+      const protocolErrors: Array<{ msg: string; line: string }> = [];
+      const streamErrors: Error[] = [];
+      stream.on("error", (err) => streamErrors.push(err));
 
-      createWorkerReader(stream, (msg) => messages.push(msg));
+      createWorkerReader(
+        stream,
+        (msg) => messages.push(msg),
+        (err, line) => protocolErrors.push({ msg: err.message, line }),
+      );
 
       stream.write("garbage-not-json\n");
       stream.write(serializeWorkerMsg({ type: "worker_stop" }));
@@ -524,8 +567,37 @@ describe("Worker Protocol", () => {
 
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({ type: "worker_stop" });
-      expect(errors).toHaveLength(1);
-      expect(errors[0]!.message).toMatch(/Worker message parse error/);
+      expect(streamErrors).toHaveLength(0);
+      expect(protocolErrors).toHaveLength(1);
+      expect(protocolErrors[0]!.msg).toMatch(/Worker message parse error/);
+    });
+
+    it("calls onProtocolError for schema-invalid worker messages without breaking the reader", async () => {
+      const { createWorkerReader, serializeWorkerMsg } = await importIpc();
+      const stream = new PassThrough();
+      const messages: unknown[] = [];
+      const protocolErrors: Error[] = [];
+      const streamErrors: Error[] = [];
+      stream.on("error", (err) => streamErrors.push(err));
+
+      createWorkerReader(
+        stream,
+        (msg) => messages.push(msg),
+        (err) => protocolErrors.push(err),
+      );
+
+      // 模拟未来 Claude/Codex CLI 加新事件类型，旧版 dev-anywhere 不识别
+      stream.write(JSON.stringify({ type: "worker_telemetry_v2" }) + "\n");
+      stream.write(serializeWorkerMsg({ type: "worker_stop" }));
+      stream.end();
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toEqual({ type: "worker_stop" });
+      expect(streamErrors).toHaveLength(0);
+      expect(protocolErrors).toHaveLength(1);
+      expect(protocolErrors[0]!.message).toMatch(/Worker message validation failed/);
     });
   });
 

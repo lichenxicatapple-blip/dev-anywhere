@@ -139,7 +139,18 @@ export class WorkerRegistry {
       const sock = connect(sockPath);
       sock.on("connect", () => {
         this.sockets.set(sessionId, sock);
-        createWorkerReader(sock, (msg) => this.handleWorkerMessage(sessionId, msg));
+        createWorkerReader(
+          sock,
+          (msg) => this.handleWorkerMessage(sessionId, msg),
+          (err, line) => {
+            // 单条 worker NDJSON 行 schema 校验失败：warn 而非断连。Claude/Codex CLI 增量
+            // 加新事件类型时不该把整个 session 推进 ERROR；连接保持开放，下一条仍继续解析。
+            serviceLogger.warn(
+              { sessionId, err: err.message, lineLen: line.length },
+              "Worker IPC message dropped (parse/schema error)",
+            );
+          },
+        );
         sock.on("close", () => this.onDisconnect(sessionId));
         sock.on("error", () => this.onDisconnect(sessionId));
         resolve(sock);

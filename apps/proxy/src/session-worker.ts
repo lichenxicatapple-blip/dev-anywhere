@@ -120,6 +120,15 @@ const session = new JsonSession({
 });
 
 function handleServeConnection(socket: Socket): void {
+  // serve 进程快速 stop+start 时，旧 socket 的 close 事件可能还没触发，新连接已经到达。
+  // 显式 destroy 旧 socket 避免两条 socket 同时活跃产生双 reader 与状态不一致窗口。
+  if (serveSocket && serveSocket !== socket) {
+    try {
+      serveSocket.destroy();
+    } catch {
+      // 旧 socket 可能已半关闭
+    }
+  }
   serveSocket = socket;
 
   for (const [requestId, pending] of pendingApprovals) {
@@ -131,27 +140,35 @@ function handleServeConnection(socket: Socket): void {
     });
   }
 
-  createWorkerReader(socket, (msg: WorkerMessage) => {
-    switch (msg.type) {
-      case "worker_input":
-        session.sendMessage(msg.content);
-        break;
-      case "worker_stop":
-        session.stop();
-        break;
-      case "worker_approval_response": {
-        const pending = pendingApprovals.get(msg.requestId);
-        if (pending) {
-          pending.resolve({ behavior: msg.behavior, message: msg.message });
-          pendingApprovals.delete(msg.requestId);
+  createWorkerReader(
+    socket,
+    (msg: WorkerMessage) => {
+      switch (msg.type) {
+        case "worker_input":
+          session.sendMessage(msg.content);
+          break;
+        case "worker_stop":
+          session.stop();
+          break;
+        case "worker_approval_response": {
+          const pending = pendingApprovals.get(msg.requestId);
+          if (pending) {
+            pending.resolve({ behavior: msg.behavior, message: msg.message });
+            pendingApprovals.delete(msg.requestId);
+          }
+          break;
         }
-        break;
+        case "worker_whitelist_add":
+          whitelist.add(msg.toolName);
+          break;
       }
-      case "worker_whitelist_add":
-        whitelist.add(msg.toolName);
-        break;
-    }
-  });
+    },
+    (err) => {
+      // worker 进程没有 pino logger，console.error 经 ipc-protocol 捕获到 stderr。
+      // 同样不让单条 schema 错误升级成 socket close。
+      console.error(`[worker] serve IPC message dropped: ${err.message}`);
+    },
+  );
 
   socket.on("close", () => {
     serveSocket = null;
