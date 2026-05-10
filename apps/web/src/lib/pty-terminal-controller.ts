@@ -1,4 +1,8 @@
-import { attachPtySessionTransport } from "./pty-session-transport";
+import {
+  attachPtySessionTransport,
+  type PtyRelayLike,
+  type PtyWebSocketLike,
+} from "./pty-session-transport";
 import type { PtyRenderTarget } from "./pty-recovery";
 
 type Disposable = { dispose: () => void };
@@ -13,17 +17,24 @@ interface PtyControlledTerminal extends PtyRenderTarget {
   onData: (handler: (data: string) => void) => Disposable;
 }
 
-interface PtyWebSocketLike {
-  send: (data: string) => boolean;
-  subscribeBinary: (
-    sessionId: string,
-    handler: (data: Uint8Array, outputSeq: number) => void,
-  ) => () => void;
-}
-
-interface PtyRelayLike {
-  onMessage: (handler: (msg: Record<string, unknown>) => void) => () => void;
-}
+// 故意收窄到 controller 真正会用到的字段，避免把 PtySessionTransportOptions
+// 的全部 13 个字段（retryDelayMs / scheduleFrameFlush / 各种 telemetry 钩子）
+// 都泄露到 controller 接口表面。测试 mock 只需要满足这个最小契约。
+type PtyTransportAttacher = (opts: {
+  sessionId: string;
+  ws: PtyWebSocketLike;
+  relay: PtyRelayLike;
+  target: PtyRenderTarget;
+  onFramePending?: () => void;
+  onFrameWritten?: () => void;
+  onReady?: () => void;
+  onSubscribeStarted?: () => void;
+  onSubscribeDelayed?: () => void;
+}) => {
+  dispose: () => void;
+  flushOutput: () => void;
+  setOutputPaused: (value: boolean) => void;
+};
 
 interface PtyTerminalControllerOptions {
   host: HTMLDivElement;
@@ -36,7 +47,10 @@ interface PtyTerminalControllerOptions {
     sessionId: string,
     options?: { onRawInput?: (data: string) => void },
   ) => Disposable;
-  attachTransport?: typeof attachPtySessionTransport;
+  attachTransport?: PtyTransportAttacher;
+  // 默认 requestAnimationFrame——首屏挂载完后下一帧 focus，让 xterm helper textarea 有时间附上。
+  // 测试可注入同步调用避免依赖 fake timers。
+  scheduleAutoFocus?: (callback: () => void) => void;
   onTerminalReady?: (term: PtyControlledTerminal) => void;
   onFramePending?: () => void;
   onFrameWritten?: () => void;
@@ -66,6 +80,7 @@ export function attachPtyTerminalController(
     createTerminal,
     attachRawInput,
     attachTransport = attachPtySessionTransport,
+    scheduleAutoFocus = (callback) => requestAnimationFrame(callback),
     onTerminalReady,
     onFramePending,
     onFrameWritten,
@@ -98,7 +113,7 @@ export function attachPtyTerminalController(
       host.addEventListener("pointerdown", focusTerminal, { passive: true });
       removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
       onTerminalReady?.(result.terminal);
-      requestAnimationFrame(() => {
+      scheduleAutoFocus(() => {
         if (!disposed) focusTerminal();
       });
 

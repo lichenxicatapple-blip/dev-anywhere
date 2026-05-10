@@ -1,9 +1,9 @@
 import { createPtyFrameWriteBuffer } from "./pty-frame-write-buffer";
-import { PtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
+import { createPtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
 
 type RelayMessage = Record<string, unknown>;
 
-interface PtyWebSocketLike {
+export interface PtyWebSocketLike {
   send: (data: string) => boolean;
   subscribeBinary: (
     sessionId: string,
@@ -11,7 +11,7 @@ interface PtyWebSocketLike {
   ) => () => void;
 }
 
-interface PtyRelayLike {
+export interface PtyRelayLike {
   onMessage: (handler: (msg: RelayMessage) => void) => () => void;
 }
 
@@ -64,7 +64,7 @@ export function attachPtySessionTransport(
     onGapRecovery,
   } = options;
 
-  const recovery = new PtyRecoveryController();
+  const recovery = createPtyRecoveryController();
   const frameWriter = createPtyFrameWriteBuffer(target, {
     onFramePending,
     onFrameWritten,

@@ -206,10 +206,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
       const scrollHeight = node?.scrollHeight ?? 0;
       const visualViewport = window.visualViewport;
       appendJsonScrollTrace({
-        t:
-          typeof performance !== "undefined" && typeof performance.now === "function"
-            ? performance.now()
-            : Date.now(),
+        t: performance.now(),
         event,
         scrollTop,
         scrollHeight,

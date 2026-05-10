@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
+import { createPtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
 
 function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
   const calls: Array<[string, unknown]> = [];
@@ -16,7 +16,7 @@ function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
 
 describe("PtyRecoveryController", () => {
   it("buffers binary frames until the matching snapshot is applied", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     const requestId = recovery.startSnapshotRequest();
@@ -38,7 +38,7 @@ describe("PtyRecoveryController", () => {
   });
 
   it("drops buffered frames already included by the matching snapshot watermark", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     const requestId = recovery.startSnapshotRequest();
@@ -58,7 +58,7 @@ describe("PtyRecoveryController", () => {
   });
 
   it("writes binary frames directly after a snapshot is applied", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     recovery.startSnapshotRequest();
@@ -79,7 +79,7 @@ describe("PtyRecoveryController", () => {
   });
 
   it("buffers out-of-order binary frames and flushes them by outputSeq", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     recovery.startSnapshotRequest();
@@ -108,7 +108,7 @@ describe("PtyRecoveryController", () => {
   });
 
   it("replays buffered pre-snapshot frames in outputSeq order", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     const requestId = recovery.startSnapshotRequest();
@@ -130,7 +130,7 @@ describe("PtyRecoveryController", () => {
   });
 
   it("keeps later frames buffered until the missing outputSeq arrives", () => {
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
 
     recovery.startSnapshotRequest();
@@ -159,7 +159,7 @@ describe("PtyRecoveryController", () => {
 
   it("ignores stale snapshots from older resize or reconnect requests", () => {
     const requestIds = ["req-old", "req-new"];
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
     const target = createTarget();
 
     recovery.startSnapshotRequest();
@@ -188,7 +188,7 @@ describe("PtyRecoveryController", () => {
 
   it("starts a new buffer window for each snapshot request", () => {
     const requestIds = ["req-1", "req-2"];
-    const recovery = new PtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
     const target = createTarget();
 
     const first = recovery.startSnapshotRequest();

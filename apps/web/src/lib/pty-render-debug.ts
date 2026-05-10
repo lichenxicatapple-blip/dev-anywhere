@@ -1,4 +1,4 @@
-// PTY 渲染层调试入口。挂在 window.__ptyDebug 上，开发者控制台直接调用。
+// PTY 渲染层调试入口。挂在 window.__devAnywherePtyRenderDebug 上，开发者控制台直接调用。
 //
 // 主要面向两类问题：
 //   1. CJK / 高频颜色场景下 xterm WebGL atlas 出现 cell 叠字（鼠标选中后正常） →
@@ -150,14 +150,14 @@ const debugApi: PtyDebugApi = {
 
 declare global {
   // eslint-disable-next-line no-var
-  var __ptyDebug: PtyDebugApi | undefined;
+  var __devAnywherePtyRenderDebug: PtyDebugApi | undefined;
 }
 
 export function installPtyRenderDebug(): PtyDebugApi {
-  if (typeof window !== "undefined" && !window.__ptyDebug) {
-    window.__ptyDebug = debugApi;
+  if (typeof window !== "undefined" && !window.__devAnywherePtyRenderDebug) {
+    window.__devAnywherePtyRenderDebug = debugApi;
     console.info(
-      "[ptyDebug] installed. Try __ptyDebug.setRenderer('dom') / __ptyDebug.forceRedraw() / __ptyDebug.dumpState()",
+      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.setRenderer('dom') / __devAnywherePtyRenderDebug.forceRedraw() / __devAnywherePtyRenderDebug.dumpState()",
     );
   }
   return debugApi;

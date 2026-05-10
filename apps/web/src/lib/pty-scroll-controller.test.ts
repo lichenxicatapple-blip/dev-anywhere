@@ -95,12 +95,18 @@ function createTerminal(lineTextByIndex: Record<number, string> = {}) {
 
 describe("attachPtyScrollController", () => {
   let resizeDisconnect: ReturnType<typeof vi.fn>;
+  let resizeObserveCalls: Element[];
 
   beforeEach(() => {
     resizeDisconnect = vi.fn();
+    resizeObserveCalls = [];
+    const observeCalls = resizeObserveCalls;
     globalThis.ResizeObserver = class {
-      observe = vi.fn();
+      observe(target: Element): void {
+        observeCalls.push(target);
+      }
       disconnect = resizeDisconnect;
+      unobserve = vi.fn();
     } as unknown as typeof ResizeObserver;
   });
 
@@ -131,8 +137,8 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1600);
   });
 
-  it("maps container scroll to xterm ydisp while browser owns subpixel motion", () => {
-    const { container, spacer, host, xterm } = createDom();
+  it("maps container scroll to a row-aligned xterm ydisp", () => {
+    const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
       container,
@@ -150,7 +156,6 @@ describe("attachPtyScrollController", () => {
 
     expect(terminal.scrollToLine).toHaveBeenCalledWith(2);
     expect(host.style.top).toBe("40px");
-    expect(xterm.style.transform).toBe("");
   });
 
   it("syncs native touch scroll to the matching terminal row immediately", () => {
@@ -163,7 +168,7 @@ describe("attachPtyScrollController", () => {
       }),
     );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
-    const { container, spacer, host, xterm } = createDom();
+    const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
       container,
@@ -188,11 +193,10 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledTimes(2);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(7);
     expect(host.style.top).toBe("140px");
-    expect(xterm.style.transform).toBe("");
   });
 
   it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
-    const { container, spacer, host, xterm } = createDom();
+    const { container, spacer, host } = createDom();
     const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
       container,
@@ -205,7 +209,6 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    xterm.style.transform = "translate3d(0,-5px,0)";
     container.scrollTop = 100;
     markUserVerticalScrollIntent(container);
     terminal.buffer.active.viewportY = 7;
@@ -214,11 +217,10 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(100);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
     expect(host.style.top).toBe("100px");
-    expect(xterm.style.transform).toBe("");
   });
 
   it("keeps the xterm viewport on the reviewed history when new output scrolls the terminal", () => {
-    const { container, spacer, host, xterm } = createDom();
+    const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
     const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
     let hasNewFrame = true;
@@ -236,7 +238,6 @@ describe("attachPtyScrollController", () => {
     });
 
     terminal.scrollToLine.mockClear();
-    xterm.style.transform = "translate3d(0,-5px,0)";
     container.scrollTop = 100;
     markUserVerticalScrollIntent(container);
     terminal.buffer.active.viewportY = 80;
@@ -245,7 +246,6 @@ describe("attachPtyScrollController", () => {
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
     expect(host.style.top).toBe("100px");
-    expect(xterm.style.transform).toBe("");
   });
 
   it("keeps the browser scroll pinned when xterm scrolls after content growth at bottom", () => {
@@ -685,7 +685,7 @@ describe("attachPtyScrollController", () => {
   });
 
   it("relayout keeps bottom pinned after terminal metrics change", () => {
-    const { container, spacer, host, xterm } = createDom();
+    const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     const controller = attachPtyScrollController({
       container,
@@ -707,11 +707,10 @@ describe("attachPtyScrollController", () => {
     expect(host.style.height).toBe("600px");
     expect(container.scrollTop).toBe(1600);
     expect(host.style.top).toBe("2400px");
-    expect(xterm.style.transform).toBe("");
   });
 
   it("relayout preserves xterm viewport when user is away from bottom", () => {
-    const { container, spacer, host, xterm } = createDom();
+    const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     const controller = attachPtyScrollController({
       container,
@@ -729,14 +728,72 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 100;
     markUserVerticalScrollIntent(container);
     terminal.buffer.active.viewportY = 7;
-    xterm.style.transform = "translate3d(0,-5px,0)";
     defineSize(screen, { clientHeight: 600, clientWidth: 800 });
     controller.relayout();
 
     expect(spacer.style.height).toBe("3000px");
     expect(container.scrollTop).toBe(210);
     expect(host.style.top).toBe("210px");
-    expect(xterm.style.transform).toBe("");
+  });
+
+  it("only observes the scroll container (not host) to avoid feedback loop", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // host 的尺寸由 updateSpacer 主动写——再 observe 它就会"写→ 触发→ 重算→ 又写"。
+    expect(resizeObserveCalls).toContain(container);
+    expect(resizeObserveCalls).not.toContain(host);
+  });
+
+  it("does not rewrite host/spacer style when layout values are unchanged", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    const writeCounts: Record<string, number> = {};
+    const trackStyle = (el: HTMLElement, label: string, props: string[]): void => {
+      for (const prop of props) {
+        let stored = "";
+        Object.defineProperty(el.style, prop, {
+          configurable: true,
+          get: () => stored,
+          set: (next: string) => {
+            stored = next;
+            const key = `${label}.${prop}`;
+            writeCounts[key] = (writeCounts[key] ?? 0) + 1;
+          },
+        });
+      }
+    };
+    trackStyle(host, "host", ["position", "left", "top", "width", "height", "paddingTop"]);
+    trackStyle(spacer, "spacer", ["height", "width"]);
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    // 让构造期的初始化 + scrollToBottom 把 cache 喂到稳定状态。
+    controller.relayout();
+    const settled = { ...writeCounts };
+
+    controller.relayout();
+
+    expect(writeCounts).toEqual(settled);
   });
 
   it("cleans up DOM, xterm, and resize observers", () => {

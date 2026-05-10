@@ -1,4 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
+import { parsePx } from "./pty-style-utils";
+import { measureXtermCellSize } from "./pty-xterm-metrics";
 
 interface PtyResizeControllerOptions {
   container: HTMLDivElement;
@@ -34,23 +36,15 @@ function getAvailableContainerSize(container: HTMLDivElement): {
   height: number;
 } {
   const style = getComputedStyle(container);
-  const px = (value: string): number => {
-    const parsed = parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
   return {
-    width: Math.max(0, container.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
-    height: Math.max(0, container.clientHeight - px(style.paddingTop) - px(style.paddingBottom)),
-  };
-}
-
-function measureCellSize(term: Terminal): { width: number; height: number } | null {
-  const root = term.element;
-  const screen = root?.querySelector<HTMLElement>(".xterm-screen");
-  if (!screen || term.cols <= 0 || term.rows <= 0) return null;
-  return {
-    width: screen.clientWidth / term.cols,
-    height: screen.clientHeight / term.rows,
+    width: Math.max(
+      0,
+      container.clientWidth - parsePx(style.paddingLeft) - parsePx(style.paddingRight),
+    ),
+    height: Math.max(
+      0,
+      container.clientHeight - parsePx(style.paddingTop) - parsePx(style.paddingBottom),
+    ),
   };
 }
 
@@ -65,9 +59,11 @@ export function attachPtyResizeController(
     frame = null;
     if (disposed) return;
     const available = getAvailableContainerSize(container);
-    const cell = measureCellSize(term);
+    const root = term.element;
+    if (!root) return;
+    const cell = measureXtermCellSize(root, term);
     if (!cell) return;
-    const next = computePtyGeometry(available.width, available.height, cell.width, cell.height, {
+    const next = computePtyGeometry(available.width, available.height, cell.cellW, cell.cellH, {
       minCols,
       minRows,
     });

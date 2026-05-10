@@ -26,6 +26,7 @@ import {
   unregisterPtyDebugSnapshotProvider,
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
+import { buildPtyScrollDebugSnapshot } from "@/lib/pty-scroll-debug-snapshot";
 import { getPtyDebug } from "@/lib/pty-render-debug";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { PtyMobileControls } from "./pty-mobile-controls";
@@ -260,7 +261,12 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
     scrollToRatioRef.current = controller.scrollToRatio;
     scrollToXRatioRef.current = controller.scrollToXRatio;
     registerPtyDebugSnapshotProvider(() => ({
-      ...controller.getDebugSnapshot(),
+      ...buildPtyScrollDebugSnapshot(controller.getDebugProbe, {
+        container,
+        spacer,
+        host,
+        term,
+      }),
       frame: {
         lastWriteAt: lastFrameWriteAtRef.current,
         pendingNewFrame: pendingNewFrameRef.current,

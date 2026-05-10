@@ -18,7 +18,6 @@ interface PtyHostLayout {
 
 interface PtyScrollTarget {
   ydisp: number;
-  subpixel: number;
 }
 
 export function computePtyHostLayout(
@@ -44,18 +43,15 @@ export function computePtyHostLayout(
 
 export function computeScrollTarget(scrollTop: number, metrics: PtyScrollMetrics): PtyScrollTarget {
   if (metrics.cellH <= 0) {
-    return { ydisp: metrics.viewportY, subpixel: 0 };
+    return { ydisp: metrics.viewportY };
   }
   const maxYdisp = Math.max(0, metrics.bufferLength - metrics.rows);
   const pinnedMaxScrollTop = maxYdisp * metrics.cellH;
   if (scrollTop >= pinnedMaxScrollTop) {
-    return { ydisp: maxYdisp, subpixel: 0 };
+    return { ydisp: maxYdisp };
   }
   const ydisp = Math.max(0, Math.floor(scrollTop / metrics.cellH));
-  return {
-    ydisp: Math.min(ydisp, maxYdisp),
-    subpixel: scrollTop - ydisp * metrics.cellH,
-  };
+  return { ydisp: Math.min(ydisp, maxYdisp) };
 }
 
 export function ydispToScrollTop(ydisp: number, cellH: number): number {

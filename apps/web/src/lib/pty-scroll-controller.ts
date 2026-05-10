@@ -1,7 +1,10 @@
 import type { Terminal } from "@xterm/xterm";
 import { computePtyHostLayout, computeScrollTarget, ydispToScrollTop } from "./pty-scroll";
 import { appendPtyScrollTrace, isPtyScrollTraceEnabled } from "./pty-scroll-trace";
-import type { PtyDebugSnapshot } from "./pty-debug-snapshot";
+import type { PtyScrollDebugProbe } from "./pty-scroll-debug-snapshot";
+import { parsePx } from "./pty-style-utils";
+import { createPtyStyleWriter } from "./pty-style-writer";
+import { findCanvasLastNonEmptyRow, measureXtermCellSize } from "./pty-xterm-metrics";
 
 interface PtyScrollControllerOptions {
   container: HTMLDivElement;
@@ -26,7 +29,8 @@ interface PtyScrollController {
   scrollToBottom: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
-  getDebugSnapshot: () => Omit<PtyDebugSnapshot, "frame">;
+  // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
+  getDebugProbe: () => PtyScrollDebugProbe;
 }
 
 export interface PtyScrollState {
@@ -62,25 +66,20 @@ export function attachPtyScrollController(
     atBottomThreshold = 8,
   } = options;
 
-  const getDims = (): { cellH: number; cellW: number } => {
-    const screen = host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen || term.rows === 0 || term.cols === 0) return { cellH: 0, cellW: 0 };
-    return {
-      cellH: screen.clientHeight / term.rows,
-      cellW: screen.clientWidth / term.cols,
-    };
-  };
+  const getDims = (): { cellH: number; cellW: number } =>
+    measureXtermCellSize(host, term) ?? { cellH: 0, cellW: 0 };
 
   const getVerticalInsets = (): { paddingTop: number; paddingBottom: number } => {
     const style = getComputedStyle(container);
-    const parsePx = (value: string): number => {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) ? parsed : 0;
-    };
     return {
       paddingTop: parsePx(style.paddingTop),
       paddingBottom: parsePx(style.paddingBottom),
     };
+  };
+
+  const styleWriter = createPtyStyleWriter();
+  const setStyle = (el: HTMLElement, prop: string, value: string): void => {
+    styleWriter.set(el, prop, value);
   };
 
   const syncing = { external: false, internal: false };
@@ -144,24 +143,13 @@ export function attachPtyScrollController(
     notifyScrollState();
   };
 
-  const applySubpixel = (px: number): void => {
-    const xtermRoot = host.querySelector<HTMLElement>(".xterm");
-    if (!xtermRoot) return;
-    xtermRoot.style.transform = px !== 0 ? `translate3d(0,${-px}px,0)` : "";
-  };
-
-  const now = (): number =>
-    typeof performance !== "undefined" && typeof performance.now === "function"
-      ? performance.now()
-      : Date.now();
-
   const trace = (event: string, extra: { ydisp?: number } = {}): void => {
     if (!isPtyScrollTraceEnabled()) return;
     const containerRect = container.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
     const visualViewport = window.visualViewport;
     appendPtyScrollTrace({
-      t: now(),
+      t: performance.now(),
       event,
       scrollTop: container.scrollTop,
       scrollHeight: container.scrollHeight,
@@ -194,10 +182,9 @@ export function attachPtyScrollController(
       visibleContentHeight !== undefined && hostHeight < visibleContentHeight
         ? visibleContentHeight - hostHeight
         : 0;
-    host.style.position = "absolute";
-    host.style.left = "0px";
-    host.style.top = `${Math.max(0, ydisp * cellH + verticalOffset)}px`;
-    applySubpixel(0);
+    setStyle(host, "position", "absolute");
+    setStyle(host, "left", "0px");
+    setStyle(host, "top", `${Math.max(0, ydisp * cellH + verticalOffset)}px`);
     trace("host-position", { ydisp });
   };
 
@@ -211,7 +198,6 @@ export function attachPtyScrollController(
     } finally {
       syncing.internal = false;
     }
-    applySubpixel(0);
     const { cellH } = getDims();
     if (cellH !== 0) positionHostAt(maxYdisp, cellH);
     const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
@@ -252,22 +238,31 @@ export function attachPtyScrollController(
     notifyScroll();
   };
 
+  // canvasLastY 扫描会跑到 term.rows 行，每帧 onRender 都跑一次浪费。
+  // 用 buffer revision 当 cache key：xterm.onWriteParsed 写完就 ++，加上 viewportY/rows
+  // 一起作 key——viewport 滚动或 resize 都会改 cache。
+  let bufferRevision = 0;
+  const dispWriteParsed = term.onWriteParsed?.(() => {
+    bufferRevision += 1;
+  });
+  let cachedCanvasLastYKey: string | null = null;
+  let cachedCanvasLastY = -1;
+  const getCachedCanvasLastY = (): number => {
+    const buffer = term.buffer.active;
+    const key = `${bufferRevision}:${buffer.viewportY}:${buffer.length}:${term.rows}`;
+    if (key === cachedCanvasLastYKey) return cachedCanvasLastY;
+    cachedCanvasLastY = findCanvasLastNonEmptyRow(buffer, term.rows);
+    cachedCanvasLastYKey = key;
+    return cachedCanvasLastY;
+  };
+
   const updateSpacer = (): void => {
     const { cellH, cellW } = getDims();
     if (cellH === 0 || cellW === 0) return;
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const buffer = term.buffer.active;
-    let canvasLastY = -1;
-    for (let ry = term.rows - 1; ry >= 0; ry--) {
-      const absY = buffer.viewportY + ry;
-      if (absY < 0 || absY >= buffer.length) continue;
-      const line = buffer.getLine(absY);
-      if (line && line.translateToString(true).trimEnd().length > 0) {
-        canvasLastY = ry;
-        break;
-      }
-    }
+    const canvasLastY = getCachedCanvasLastY();
     const layout = computePtyHostLayout(
       {
         bufferLength: buffer.length,
@@ -281,12 +276,12 @@ export function attachPtyScrollController(
       canvasLastY,
     );
     if (!layout) return;
-    spacer.style.height = `${layout.spacerHeight}px`;
-    spacer.style.width = `${layout.spacerWidth}px`;
-    host.style.width = `${layout.hostWidth}px`;
-    host.style.height = `${layout.hostHeight}px`;
-    host.style.paddingTop = `${layout.hostPaddingTop}px`;
-    lastSpacerUpdateAt = now();
+    setStyle(spacer, "height", `${layout.spacerHeight}px`);
+    setStyle(spacer, "width", `${layout.spacerWidth}px`);
+    setStyle(host, "width", `${layout.hostWidth}px`);
+    setStyle(host, "height", `${layout.hostHeight}px`);
+    setStyle(host, "paddingTop", `${layout.hostPaddingTop}px`);
+    lastSpacerUpdateAt = performance.now();
     positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
   };
 
@@ -470,85 +465,24 @@ export function attachPtyScrollController(
   container.addEventListener("scroll", onContainerScroll, { passive: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
+  // host 自身的尺寸由 updateSpacer 主动写，再 observe 它会形成"写→ ResizeObserver
+  // → relayout → 又写"的反馈环。container 的尺寸（窗口/侧边栏变化）才需要 observe。
+  // xterm 内部 cols/rows 变化通过 onScroll/onRender 已能捕获。
   const ro = new ResizeObserver(relayout);
   ro.observe(container);
-  ro.observe(host);
 
-  const getDebugSnapshot = (): Omit<PtyDebugSnapshot, "frame"> => {
+  const getDebugProbe = (): PtyScrollDebugProbe => {
     const { cellH, cellW } = getDims();
     const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const buffer = term.buffer.active;
-
-    // 重新跑一遍 layout 计算（不写 DOM），用 expected 值和现有 spacer.height 比对漂移。
-    let expectedSpacerHeight = 0;
-    if (cellH > 0 && cellW > 0) {
-      let canvasLastY = -1;
-      for (let ry = term.rows - 1; ry >= 0; ry--) {
-        const absY = buffer.viewportY + ry;
-        if (absY < 0 || absY >= buffer.length) continue;
-        const line = buffer.getLine(absY);
-        if (line && line.translateToString(true).trimEnd().length > 0) {
-          canvasLastY = ry;
-          break;
-        }
-      }
-      const layout = computePtyHostLayout(
-        {
-          bufferLength: buffer.length,
-          rows: term.rows,
-          cols: term.cols,
-          viewportY: buffer.viewportY,
-          cellH,
-          cellW,
-          visibleContentHeight,
-        },
-        canvasLastY,
-      );
-      expectedSpacerHeight = layout?.spacerHeight ?? 0;
-    }
-    const currentSpacerHeight = parseFloat(spacer.style.height) || 0;
-    const currentHostTop = parseFloat(host.style.top) || 0;
-    const currentHostHeight = parseFloat(host.style.height) || 0;
-    const currentHostWidth = parseFloat(host.style.width) || 0;
-    const currentHostPaddingTop = parseFloat(host.style.paddingTop) || 0;
-    const currentSpacerWidth = parseFloat(spacer.style.width) || 0;
-
     return {
-      ts: now(),
-      container: {
-        scrollTop: container.scrollTop,
-        scrollLeft: container.scrollLeft,
-        scrollHeight: container.scrollHeight,
-        scrollWidth: container.scrollWidth,
-        clientHeight: container.clientHeight,
-        clientWidth: container.clientWidth,
-        paddingTop,
-        paddingBottom,
-      },
-      spacer: { height: currentSpacerHeight, width: currentSpacerWidth },
-      host: {
-        top: currentHostTop,
-        height: currentHostHeight,
-        width: currentHostWidth,
-        paddingTop: currentHostPaddingTop,
-      },
-      term: {
-        rows: term.rows,
-        cols: term.cols,
-        bufferLength: buffer.length,
-        viewportY: buffer.viewportY,
-        baseY: buffer.baseY,
-        cursorX: buffer.cursorX,
-        cursorY: buffer.cursorY,
-      },
-      cell: { h: cellH, w: cellW },
-      visibleContentHeight,
-      pinned: !userHasVerticalScrollIntent,
+      cellH,
+      cellW,
+      paddingTop,
+      paddingBottom,
+      canvasLastY: cellH > 0 && cellW > 0 ? getCachedCanvasLastY() : -1,
+      userHasVerticalScrollIntent,
       pendingProgrammaticScrollTop,
       touchScrollActive,
-      expectedSpacerHeight,
-      spacerDrift: currentSpacerHeight - expectedSpacerHeight,
       lastSpacerUpdateAt,
     };
   };
@@ -563,12 +497,13 @@ export function attachPtyScrollController(
       container.removeEventListener("touchcancel", onTouchEnd);
       dispScroll.dispose();
       dispRender.dispose();
+      dispWriteParsed?.dispose();
       ro.disconnect();
     },
     relayout,
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,
-    getDebugSnapshot,
+    getDebugProbe,
   };
 }

@@ -53,7 +53,7 @@ export async function createXtermTerminal(
   container.replaceChildren();
   terminal.open(container);
 
-  // 渲染器选择：默认 webgl（按 cell 坐标稳定对齐 CJK），但 __ptyDebug.setRenderer("dom")
+  // 渲染器选择：默认 webgl（按 cell 坐标稳定对齐 CJK），但 __devAnywherePtyRenderDebug.setRenderer("dom")
   // 可以在不重新发布的情况下切回 DOM renderer——用来在出现 cell 叠字 / atlas 残留这类
   // 难定位的渲染问题时做对比验证（DOM renderer 不依赖 GPU atlas）。
   const requested = getPtyDebug().getRenderer();

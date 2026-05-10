@@ -69,7 +69,7 @@ describe("PTY scroll geometry", () => {
     ).toBe(460);
   });
 
-  it("maps scrollTop to ydisp plus subpixel while pinned", () => {
+  it("maps scrollTop to a row-aligned ydisp", () => {
     expect(
       computeScrollTarget(45, {
         bufferLength: 100,
@@ -79,10 +79,10 @@ describe("PTY scroll geometry", () => {
         cellH: 20,
         cellW: 10,
       }),
-    ).toEqual({ ydisp: 2, subpixel: 5 });
+    ).toEqual({ ydisp: 2 });
   });
 
-  it("clamps to max ydisp and disables subpixel in sticky-release range", () => {
+  it("clamps to max ydisp in the sticky-release range", () => {
     expect(
       computeScrollTarget(2000, {
         bufferLength: 100,
@@ -92,7 +92,7 @@ describe("PTY scroll geometry", () => {
         cellH: 20,
         cellW: 10,
       }),
-    ).toEqual({ ydisp: 80, subpixel: 0 });
+    ).toEqual({ ydisp: 80 });
   });
 
   it("converts xterm ydisp back to container scrollTop", () => {

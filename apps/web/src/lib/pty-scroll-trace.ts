@@ -1,3 +1,12 @@
+import {
+  countDirectionFlips,
+  createScrollTraceStore,
+  range,
+  round,
+  uniqueNumbers,
+} from "./scroll-trace-store";
+import { parsePx } from "./pty-style-utils";
+
 interface PtyScrollTraceEntry {
   t: number;
   event: string;
@@ -27,41 +36,17 @@ declare global {
   }
 }
 
-export function isPtyScrollTraceEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  const hashQueryStart = window.location.hash.indexOf("?");
-  const routeParams =
-    hashQueryStart >= 0
-      ? new URLSearchParams(window.location.hash.slice(hashQueryStart + 1))
-      : null;
-  const pageParams = new URLSearchParams(window.location.search);
-  return (
-    pageParams.get("ptyScrollTrace") === "1" ||
-    routeParams?.get("ptyScrollTrace") === "1" ||
-    getLocalStorageFlag("dev_anywhere_pty_scroll_trace") === "1"
-  );
-}
+const store = createScrollTraceStore<PtyScrollTraceEntry>({
+  windowKey: "__devAnywherePtyScrollTrace",
+  urlParam: "ptyScrollTrace",
+  storageKey: "dev_anywhere_pty_scroll_trace",
+});
 
-function getLocalStorageFlag(key: string): string | null {
-  try {
-    const storage = window.localStorage;
-    if (!storage || typeof storage.getItem !== "function") return null;
-    return storage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-export function appendPtyScrollTrace(entry: PtyScrollTraceEntry): void {
-  if (typeof window === "undefined") return;
-  const trace = window.__devAnywherePtyScrollTrace ?? [];
-  trace.push(entry);
-  if (trace.length > 500) trace.splice(0, trace.length - 500);
-  window.__devAnywherePtyScrollTrace = trace;
-}
+export const isPtyScrollTraceEnabled = store.isEnabled;
+export const appendPtyScrollTrace = store.append;
 
 export function formatPtyScrollTraceReport(): string {
-  const trace = window.__devAnywherePtyScrollTrace ?? [];
+  const trace = store.getAll();
   const rows = trace.slice(-160);
   const scrollValues = rows.map((entry) => entry.scrollTop);
   const viewportValues = rows.map((entry) => entry.viewportY);
@@ -96,35 +81,4 @@ export function formatPtyScrollTraceReport(): string {
     "t\tevent\tscrollTop\tviewportY\thostTop\tscrollMinusHost\tclientHeight\tvvHeight\tvvTop\tatBottom\ttouch\tintent\tfocus",
     ...lines,
   ].join("\n");
-}
-
-function parsePx(value: string): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function round(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function range(values: number[]): string {
-  if (values.length === 0) return "";
-  return `${round(Math.min(...values))}..${round(Math.max(...values))}`;
-}
-
-function uniqueNumbers(values: Array<number | undefined>): number[] {
-  return [...new Set(values.filter((value): value is number => value !== undefined).map(round))];
-}
-
-function countDirectionFlips(values: number[]): number {
-  let previousDirection = 0;
-  let flips = 0;
-  for (let i = 1; i < values.length; i += 1) {
-    const delta = values[i] - values[i - 1];
-    if (Math.abs(delta) < 1) continue;
-    const direction = Math.sign(delta);
-    if (previousDirection !== 0 && direction !== previousDirection) flips += 1;
-    previousDirection = direction;
-  }
-  return flips;
 }

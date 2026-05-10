@@ -1,3 +1,11 @@
+import {
+  countDirectionFlips,
+  createScrollTraceStore,
+  range,
+  round,
+  uniqueNumbers,
+} from "./scroll-trace-store";
+
 interface JsonScrollTraceEntry {
   t: number;
   event: string;
@@ -28,41 +36,17 @@ declare global {
   }
 }
 
-export function isJsonScrollTraceEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  const hashQueryStart = window.location.hash.indexOf("?");
-  const routeParams =
-    hashQueryStart >= 0
-      ? new URLSearchParams(window.location.hash.slice(hashQueryStart + 1))
-      : null;
-  const pageParams = new URLSearchParams(window.location.search);
-  return (
-    pageParams.get("jsonScrollTrace") === "1" ||
-    routeParams?.get("jsonScrollTrace") === "1" ||
-    getLocalStorageFlag("dev_anywhere_json_scroll_trace") === "1"
-  );
-}
+const store = createScrollTraceStore<JsonScrollTraceEntry>({
+  windowKey: "__devAnywhereJsonScrollTrace",
+  urlParam: "jsonScrollTrace",
+  storageKey: "dev_anywhere_json_scroll_trace",
+});
 
-function getLocalStorageFlag(key: string): string | null {
-  try {
-    const storage = window.localStorage;
-    if (!storage || typeof storage.getItem !== "function") return null;
-    return storage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-export function appendJsonScrollTrace(entry: JsonScrollTraceEntry): void {
-  if (typeof window === "undefined") return;
-  const trace = window.__devAnywhereJsonScrollTrace ?? [];
-  trace.push(entry);
-  if (trace.length > 500) trace.splice(0, trace.length - 500);
-  window.__devAnywhereJsonScrollTrace = trace;
-}
+export const isJsonScrollTraceEnabled = store.isEnabled;
+export const appendJsonScrollTrace = store.append;
 
 export function formatJsonScrollTraceReport(): string {
-  const trace = window.__devAnywhereJsonScrollTrace ?? [];
+  const trace = store.getAll();
   const rows = trace.slice(-180);
   const scrollValues = rows.map((entry) => entry.scrollTop);
   const totalSizeValues = rows.map((entry) => entry.totalSize);
@@ -113,30 +97,4 @@ function historyFlag(entry: JsonScrollTraceEntry): string {
 function indexRange(first?: number, last?: number): string {
   if (first === undefined || last === undefined) return "";
   return `${first}..${last}`;
-}
-
-function round(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function range(values: number[]): string {
-  if (values.length === 0) return "";
-  return `${round(Math.min(...values))}..${round(Math.max(...values))}`;
-}
-
-function uniqueNumbers(values: Array<number | undefined>): number[] {
-  return [...new Set(values.filter((value): value is number => value !== undefined).map(round))];
-}
-
-function countDirectionFlips(values: number[]): number {
-  let previousDirection = 0;
-  let flips = 0;
-  for (let i = 1; i < values.length; i += 1) {
-    const delta = values[i] - values[i - 1];
-    if (Math.abs(delta) < 1) continue;
-    const direction = Math.sign(delta);
-    if (previousDirection !== 0 && direction !== previousDirection) flips += 1;
-    previousDirection = direction;
-  }
-  return flips;
 }

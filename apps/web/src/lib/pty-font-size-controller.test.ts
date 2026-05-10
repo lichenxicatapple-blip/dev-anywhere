@@ -32,7 +32,7 @@ describe("pty font size controller", () => {
     raf.mockRestore();
   });
 
-  it("applies a manual font size, refreshes xterm, and requests relayout", () => {
+  it("applies a manual font size and requests relayout without forcing a refresh", () => {
     const term = createTerminal(14);
     const onRelayout = vi.fn();
 
@@ -40,11 +40,13 @@ describe("pty font size controller", () => {
 
     expect(term.options.fontSize).toBe(16);
     expect(term.resize).toHaveBeenCalledWith(80, 20);
-    expect(term.refresh).toHaveBeenCalledWith(0, 19);
+    // xterm 自身在 fontSize 变化后会触发 render，显式 refresh 在 WebGL renderer 下
+    // 触发 atlas 全量重建，是字号调整时的卡顿来源。
+    expect(term.refresh).not.toHaveBeenCalled();
     expect(onRelayout).toHaveBeenCalledTimes(1);
   });
 
-  it("does not refresh when the manual font size is unchanged", () => {
+  it("does not touch the terminal when the manual font size is unchanged", () => {
     const term = createTerminal(14);
     const onRelayout = vi.fn();
 
