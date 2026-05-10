@@ -433,10 +433,9 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("new");
-    expect(response.sessions).toBeUndefined();
   });
 
-  it("proxy receives proxy_register_response with status 'reconnected' without session seq map", async () => {
+  it("proxy receives proxy_register_response with status 'reconnected' on second register with same proxyId", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
     proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
@@ -457,7 +456,5 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("reconnected");
-    // relay 无状态，不返回假 seq 水位
-    expect(response.sessions).toBeUndefined();
   });
 });

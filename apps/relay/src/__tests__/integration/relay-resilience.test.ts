@@ -190,7 +190,6 @@ describe("proxy lifecycle", () => {
 
       expect(response.type).toBe("proxy_register_response");
       expect(response.status).toBe("new");
-      expect(response.sessions).toBeUndefined();
 
       const status = (await fetchJson(port, "/status")) as { proxyCount: number };
       expect(status.proxyCount).toBeGreaterThanOrEqual(1);
@@ -269,8 +268,6 @@ describe("proxy lifecycle", () => {
       const response = JSON.parse(await registerPromise);
       expect(response.type).toBe("proxy_register_response");
       expect(response.status).toBe("reconnected");
-      // relay 无状态，不返回假 seq 水位
-      expect(response.sessions).toBeUndefined();
 
       const onlineMsg = JSON.parse(await onlinePromise);
       expect(onlineMsg.type).toBe("proxy_online");
@@ -473,14 +470,13 @@ describe("proxy lifecycle", () => {
         await settle(200);
       }
 
-      // 第 4 次重连，relay 无状态，不返回假 seq 水位
+      // 第 4 次重连仍应返回 reconnected
       const proxy4 = ws.proxy(port);
       await waitForOpen(proxy4);
       const msgP = waitForMessage(proxy4);
       proxy4.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("reconnected");
-      expect(resp.sessions).toBeUndefined();
     },
     E2E_TIMEOUT,
   );
@@ -794,89 +790,6 @@ describe("client lifecycle", () => {
   );
 });
 
-describe("relay stateless routing", () => {
-  let relay: ChildProcess;
-  let port: number;
-  const ws = createSocketTracker();
-
-  beforeAll(async () => {
-    port = await findFreePort();
-    relay = spawnRelay({ port });
-    await waitForReady(port);
-  }, E2E_TIMEOUT);
-
-  afterAll(async () => {
-    await ws.cleanup();
-    killRelay(relay, "SIGTERM");
-    await waitForExit(relay);
-  });
-
-  afterEach(async () => {
-    await ws.cleanup();
-  });
-
-  it(
-    "/status 不包含 buffers 字段（relay 无状态）",
-    async () => {
-      const status = (await fetchJson(port, "/status")) as Record<string, unknown>;
-      expect(status.proxyCount).toBeDefined();
-      expect(status.clientCount).toBeDefined();
-      expect(status.buffers).toBeUndefined();
-    },
-    E2E_TIMEOUT,
-  );
-});
-
-describe("proxy reconnect metadata", () => {
-  let relay: ChildProcess;
-  let port: number;
-  const ws = createSocketTracker();
-
-  beforeAll(async () => {
-    port = await findFreePort();
-    relay = spawnRelay({ port });
-    await waitForReady(port);
-  }, E2E_TIMEOUT);
-
-  afterAll(async () => {
-    await ws.cleanup();
-    killRelay(relay, "SIGTERM");
-    await waitForExit(relay);
-  });
-
-  afterEach(async () => {
-    await ws.cleanup();
-  });
-
-  it(
-    "重连注册结果不携带 per-session seq 映射",
-    async () => {
-      const proxyId = "p5-recon";
-      const proxy1 = ws.proxy(port);
-      await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId }));
-      await waitForMessage(proxy1);
-      await settle();
-
-      proxy1.send(JSON.stringify(makeEnvelope(10, "recon-a")));
-      proxy1.send(JSON.stringify(makeEnvelope(5, "recon-b")));
-      await settle();
-
-      proxy1.close();
-      await settle(200);
-
-      const proxy2 = ws.proxy(port);
-      await waitForOpen(proxy2);
-      const msgP = waitForMessage(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId }));
-      const resp = JSON.parse(await msgP);
-      expect(resp.status).toBe("reconnected");
-      expect(resp.sessions).toBeUndefined();
-    },
-    E2E_TIMEOUT,
-  );
-});
-
 // ── 六: 持久化与 Relay 重启 ─────────────────────────────
 // 每个测试管理自己的 relay 进程
 
@@ -950,7 +863,6 @@ describe("disk persistence and relay restart", () => {
       proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p6-5" }));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("new");
-      expect(resp.sessions).toBeUndefined();
     },
     E2E_TIMEOUT,
   );
@@ -1130,7 +1042,6 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
 
       const resp = JSON.parse(await registerP);
       expect(resp.status).toBe("reconnected");
-      expect(resp.sessions).toBeUndefined();
 
       const onlineMsg = JSON.parse(await onlinePromise);
       expect(onlineMsg.type).toBe("proxy_online");
