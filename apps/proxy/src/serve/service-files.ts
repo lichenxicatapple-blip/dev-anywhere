@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { connect, type Socket } from "node:net";
+import { flushLogger } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
 
@@ -30,6 +31,7 @@ export async function cleanupStaleResources(): Promise<void> {
       const msg = `Another service is already running on ${SOCK_PATH}`;
       serviceLogger.error(msg);
       console.error(msg);
+      await flushLogger(serviceLogger);
       process.exit(1);
     }
     unlinkSync(SOCK_PATH);
@@ -43,6 +45,7 @@ export async function cleanupStaleResources(): Promise<void> {
       const msg = `Another service is already running with PID ${pid}`;
       serviceLogger.error(msg);
       console.error(msg);
+      await flushLogger(serviceLogger);
       process.exit(1);
     }
     unlinkSync(PID_PATH);

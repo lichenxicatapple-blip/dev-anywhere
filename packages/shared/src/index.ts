@@ -92,5 +92,5 @@ export { ControlErrorCode } from "./constants/control-errors.js";
 export type { ControlErrorCode as ControlErrorCodeType } from "./constants/control-errors.js";
 
 // logger
-export { createLogger } from "./logger.js";
+export { createLogger, flushLogger } from "./logger.js";
 export type { Logger, CreateLoggerOptions } from "./logger.js";

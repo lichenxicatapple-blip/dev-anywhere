@@ -1,3 +1,4 @@
+import { flushLogger } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { HOOK_REGISTRY_PATH } from "../common/paths.js";
 import type { ProviderHookContext } from "../providers/index.js";
@@ -64,6 +65,7 @@ export async function createProviderHookRuntime(
     const msg = `Failed to start hook server on 127.0.0.1:${port}: ${String(err)}`;
     serviceLogger.error(msg);
     console.error(msg);
+    await flushLogger(serviceLogger);
     process.exit(1);
   }
 

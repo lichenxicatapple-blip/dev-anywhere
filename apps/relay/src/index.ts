@@ -1,4 +1,4 @@
-import { createLogger } from "@dev-anywhere/shared";
+import { createLogger, flushLogger } from "@dev-anywhere/shared";
 import { createRelayServer } from "./server.js";
 import { loadRelayRuntimeEnv } from "./runtime-env.js";
 import { RELAY_VERSION } from "./version.js";
@@ -60,6 +60,7 @@ relay.httpServer.listen(env.port, () => {
 async function shutdown(): Promise<void> {
   logger.info("Shutting down relay server");
   await relay.close();
+  await flushLogger(logger);
   process.exit(0);
 }
 

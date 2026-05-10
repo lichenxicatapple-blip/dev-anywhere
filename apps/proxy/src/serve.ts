@@ -1,6 +1,6 @@
 import { createServer, type Socket } from "node:net";
 import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import { SessionState, type AgentStatusPayload } from "@dev-anywhere/shared";
+import { SessionState, type AgentStatusPayload, flushLogger } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
@@ -171,6 +171,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     const msg = `Relay URL is required. Set relays.${proxyConfig.relayName}.url in ~/.dev-anywhere/config.json or pass --relay <name>.`;
     serviceLogger.error(msg);
     console.error(msg);
+    await flushLogger(serviceLogger);
     process.exit(1);
   }
   const relayConnection = new RelayConnection(relayUrl, {
@@ -345,6 +346,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     } catch {
       // 关闭时 PID 文件可能已被删除
     }
+    await flushLogger(serviceLogger);
     process.exit(0);
   }
 
@@ -360,10 +362,11 @@ const isMainModule =
   process.argv[1] && (process.argv[1].endsWith("serve.js") || process.argv[1].endsWith("serve.ts"));
 
 if (isMainModule) {
-  startService(parseServiceOptions(process.argv.slice(2))).catch((err) => {
+  startService(parseServiceOptions(process.argv.slice(2))).catch(async (err) => {
     const message = err instanceof Error ? err.message : String(err);
     serviceLogger.error({ err: message }, "Service failed to start");
     console.error(message);
+    await flushLogger(serviceLogger);
     process.exit(1);
   });
 }

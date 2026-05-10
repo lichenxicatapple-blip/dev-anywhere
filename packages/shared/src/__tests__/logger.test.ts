@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "../logger.js";
+import { createLogger, flushLogger } from "../logger.js";
 
 describe("createLogger", () => {
   let tmp: string;
@@ -52,5 +52,43 @@ describe("createLogger", () => {
     expect(typeof child.info).toBe("function");
     logger.level = "warn";
     expect(logger.level).toBe("warn");
+  });
+
+  it("flushLogger is a no-op on a logger that was never used (does not materialize)", async () => {
+    const logDir = join(tmp, "untouched");
+    const logger = createLogger({ name: "untouched", logDir });
+
+    await flushLogger(logger);
+
+    // 关键：flushLogger 不应触发懒构造，否则空命令路径会留下空 log 文件。
+    expect(existsSync(logDir)).toBe(false);
+  });
+
+  it("flushLogger is a no-op on a silent logger", async () => {
+    const logDir = join(tmp, "silent-flush");
+    const logger = createLogger({ name: "silent-flush", logDir, silent: true });
+    logger.info("ignored");
+
+    await flushLogger(logger);
+
+    expect(existsSync(logDir)).toBe(false);
+  });
+
+  it("flushLogger drains pending async writes to disk before returning", async () => {
+    const logDir = join(tmp, "async-flush");
+    // 不传 sync，模拟生产 async destination —— sonic-boom 的 fs.open 是异步的，
+    // 写入后立刻读文件可能为空。flushLogger 必须等 ready 事件再 flushSync。
+    const logger = createLogger({ name: "async-flush", logDir });
+
+    logger.info({ k: 1 }, "line-a");
+    logger.info({ k: 2 }, "line-b");
+
+    await flushLogger(logger, 1000);
+
+    const files = readdirSync(logDir).filter((f) => f.startsWith("async-flush-") && f.endsWith(".log"));
+    expect(files.length).toBe(1);
+    const content = readFileSync(join(logDir, files[0]), "utf-8");
+    expect(content).toContain("line-a");
+    expect(content).toContain("line-b");
   });
 });
