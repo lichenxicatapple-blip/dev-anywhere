@@ -44,7 +44,8 @@ type ClipboardImageUploadResponse = Extract<
 type ClipboardImageUploadResult = {
   sessionId: string;
   success: boolean;
-  path: string;
+  // success=false 时 proxy 不返回 path（schema 已收紧为 optional）；调用方必须先看 success
+  path?: string;
 } & RequestError;
 type ClipboardImageUploadRequest = Omit<
   Extract<RelayControlMessage, { type: "clipboard_image_upload" }>,
@@ -54,7 +55,7 @@ type ImagePreviewResponse = Extract<RelayControlMessage, { type: "image_preview_
 type ImagePreviewResult = {
   sessionId: string;
   success: boolean;
-  path: string;
+  path?: string;
   mimeType?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
   dataBase64?: string;
   size?: number;

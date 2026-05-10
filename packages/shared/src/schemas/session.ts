@@ -1,8 +1,7 @@
 import { z } from "zod";
+import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
 
 const sessionStateValues = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
-const providerValues = ["claude", "codex"] as const;
-const ptyOwnerValues = ["local-terminal", "proxy-hosted"] as const;
 const agentStatusPhaseValues = [
   "idle",
   "thinking",
@@ -18,7 +17,7 @@ export const SessionInfoSchema = z.object({
   sessionId: z.string(),
   name: z.string().optional(),
   state: z.enum(sessionStateValues),
-  mode: z.enum(["pty", "json"]).optional(),
+  mode: z.enum(sessionModeValues).optional(),
   provider: z.enum(providerValues),
   // PTY 尺寸所有权:
   // - local-terminal: 本地 terminal 进程持有真实 PTY，Web 只按原始 cols/rows 展示

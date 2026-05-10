@@ -3,6 +3,11 @@ import { AgentStatusPayloadSchema, PtyStatePayloadSchema } from "./session.js";
 import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
+import {
+  providerValues,
+  ptyOwnerValues,
+  sessionModeValues,
+} from "../constants/enums.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -49,7 +54,7 @@ export const HistorySessionSchema = z.object({
   title: z.string(),
   projectDir: z.string(),
   updatedAt: z.number(),
-  provider: z.enum(["claude", "codex"]).optional(),
+  provider: z.enum(providerValues).optional(),
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
@@ -289,7 +294,8 @@ const relayControlDefinitions = [
       ...RequestErrorShape,
       sessionId: z.string().min(1),
       success: z.boolean(),
-      path: z.string(),
+      // success=false 时 proxy 没有有效 path 可填；保持 optional 以避免占位空字符串通过校验。
+      path: z.string().optional(),
     },
     "proxy_to_client",
   ),
@@ -309,7 +315,8 @@ const relayControlDefinitions = [
       ...RequestErrorShape,
       sessionId: z.string().min(1),
       success: z.boolean(),
-      path: z.string(),
+      // 同 clipboard_image_upload_response：失败时 proxy 不一定有路径。
+      path: z.string().optional(),
       mimeType: ClipboardImageMimeTypeSchema.optional(),
       dataBase64: z.string().optional(),
       size: z.number().int().nonnegative().optional(),
@@ -327,14 +334,14 @@ const relayControlDefinitions = [
   ),
   control(
     "agent_cli_config_update",
-    { ...RequestIdShape, provider: z.enum(["claude", "codex"]), path: z.string().min(1) },
+    { ...RequestIdShape, provider: z.enum(providerValues), path: z.string().min(1) },
     "client_to_proxy",
   ),
   control(
     "agent_cli_config_update_response",
     {
       ...RequestIdShape,
-      provider: z.enum(["claude", "codex"]),
+      provider: z.enum(providerValues),
       agentCli: AgentCliStatusSchema.optional(),
       ...RequestErrorShape,
     },
@@ -347,8 +354,8 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       cwd: z.string(),
-      provider: z.enum(["claude", "codex"]),
-      mode: z.enum(["json", "pty"]).optional(),
+      provider: z.enum(providerValues),
+      mode: z.enum(sessionModeValues).optional(),
       resumeSessionId: z.string().optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
       permissionMode: z
@@ -362,9 +369,9 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       sessionId: z.string(),
-      mode: z.enum(["json", "pty"]).optional(),
-      provider: z.enum(["claude", "codex"]).optional(),
-      ptyOwner: z.enum(["local-terminal", "proxy-hosted"]).optional(),
+      mode: z.enum(sessionModeValues).optional(),
+      provider: z.enum(providerValues).optional(),
+      ptyOwner: z.enum(ptyOwnerValues).optional(),
       ...RequestErrorShape,
     },
     "proxy_to_client",
@@ -480,9 +487,9 @@ const relayControlDefinitions = [
     sessions: z.array(
       z.object({
         id: z.string(),
-        mode: z.enum(["pty", "json"]),
-        provider: z.enum(["claude", "codex"]),
-        ptyOwner: z.enum(["local-terminal", "proxy-hosted"]).optional(),
+        mode: z.enum(sessionModeValues),
+        provider: z.enum(providerValues),
+        ptyOwner: z.enum(ptyOwnerValues).optional(),
         state: z.string(),
       }),
     ),

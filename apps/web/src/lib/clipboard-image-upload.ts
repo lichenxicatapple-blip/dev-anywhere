@@ -9,7 +9,7 @@ type ClipboardImageRelay = {
   uploadClipboardImage: (
     sessionId: string,
     payload: ClipboardImagePayload,
-  ) => Promise<{ success: boolean; path: string; error?: string }>;
+  ) => Promise<{ success: boolean; path?: string; error?: string }>;
 };
 
 type ClipboardImageUploadResult = {
