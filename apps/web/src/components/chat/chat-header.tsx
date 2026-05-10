@@ -153,6 +153,12 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               >
                 发送 Ctrl+C
               </DropdownMenuItem>
+              <DropdownMenuItem
+                data-slot="chat-menu-send-shift-tab"
+                onClick={() => sendRemoteInputRaw(sessionId, "\x1b[Z")}
+              >
+                发送 Shift+Tab
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           ) : null}

@@ -142,6 +142,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
   });
 
   test("font controls are aligned without overlap", async ({ page }) => {
@@ -193,6 +194,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toBeVisible();
     await expect(menu.getByText("显示")).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
