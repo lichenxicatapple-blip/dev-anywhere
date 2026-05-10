@@ -1,11 +1,6 @@
 import { createServer, type Socket } from "node:net";
 import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
-import {
-  SessionState,
-  serializeControl,
-  type AgentStatusPayload,
-  flushLogger,
-} from "@dev-anywhere/shared";
+import { serializeControl, flushLogger } from "@dev-anywhere/shared";
 import { serviceLogger } from "./common/logger.js";
 import { SessionManager } from "./serve/session-manager.js";
 import { RelayConnection } from "./serve/relay-connection.js";
@@ -29,13 +24,8 @@ import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
-import { SeqCounter } from "./common/seq-counter.js";
-import {
-  broadcastSessionList,
-  broadcastSessionSync,
-  changeSessionState,
-  touchSessionActivity,
-} from "./serve/session-broadcast.js";
+import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
+import { createEventBridge } from "./serve/event-bridge.js";
 import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
 import { handleTerminalConnection } from "./serve/terminal-ipc.js";
 import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
@@ -187,26 +177,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
-  // 两个观察通道共用同一个底层 changeSessionState 原语；由 FSM 按 session.mode 路由到对应转换表
-  const observerChangeState = (sessionId: string, next: SessionState): boolean =>
-    changeSessionState(sessionManager, relayConnection, sessionId, next);
-  const observerTouchActivity = (sessionId: string): boolean =>
-    touchSessionActivity(sessionManager, relayConnection, sessionId);
-  const emitAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
-    const session = sessionManager.getSession(sessionId);
-    if (!session) return;
-    const payload: AgentStatusPayload = {
-      provider: session.provider,
-      phase,
-      seq: new SeqCounter(sessionId).next(),
-      updatedAt: Date.now(),
-    };
-    agentStatusRegistry.set(sessionId, payload);
-    relayConnection.sendRaw(serializeControl({ type: "agent_status", sessionId, payload }));
-  };
+  const eventBridge = createEventBridge({
+    sessionManager,
+    relayConnection,
+    agentStatusRegistry,
+  });
   const jsonObserver = new JsonObserver({
-    changeSessionState: observerChangeState,
-    emitAgentStatus,
+    changeSessionState: eventBridge.changeSessionState,
+    emitAgentStatus: eventBridge.emitAgentStatus,
   });
   const hookRuntime = await createProviderHookRuntime({
     hookPort: proxyConfig.hookPort,
@@ -214,7 +192,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     sessionManager,
     relayConnection,
     agentStatusRegistry,
-    changeSessionState: observerChangeState,
+    changeSessionState: eventBridge.changeSessionState,
   });
   unregisterHookSession = (sessionId) => hookRuntime.hookRegistry.unregisterSession(sessionId);
 
@@ -224,15 +202,15 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     permissionBroker,
     relayConnection,
     jsonObserver,
-    touchSessionActivity: observerTouchActivity,
+    touchSessionActivity: eventBridge.touchSessionActivity,
     getProviderEnv,
   });
   const hostedPtyRegistry = new HostedPtyRegistry({
     sessionManager,
     relayConnection,
     getProviderEnv,
-    changeSessionState: observerChangeState,
-    touchSessionActivity: observerTouchActivity,
+    changeSessionState: eventBridge.changeSessionState,
+    touchSessionActivity: eventBridge.touchSessionActivity,
     onTurnComplete: (sessionId) => {
       resolveInterruptedApprovals(
         permissionBroker,
@@ -240,7 +218,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         relayConnection,
         sessionId,
       );
-      emitAgentStatus(sessionId, "idle");
+      eventBridge.emitAgentStatus(sessionId, "idle");
     },
     onSessionClosed: (sessionId) => {
       controlHandlers.cleanup(sessionId);
@@ -315,7 +293,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       permissionBroker,
       hookEventRouter: hookRuntime.hookEventRouter,
       createHookContext: hookRuntime.createHookContext,
-      emitAgentStatus,
+      emitAgentStatus: eventBridge.emitAgentStatus,
       config: statusConfig,
       resolveInterruptedApprovals: (sessionId) =>
         resolveInterruptedApprovals(
