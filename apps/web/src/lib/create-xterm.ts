@@ -9,10 +9,12 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { DEFAULT_TERMINAL_FONT_SIZE } from "@/lib/chat-font-size";
 import { xtermTheme } from "@/lib/xterm-theme";
+import { getPtyDebug, type PtyRendererKind } from "@/lib/pty-render-debug";
 
 interface CreateXtermResult {
   terminal: Terminal;
   serializeAddon: SerializeAddon;
+  renderer: PtyRendererKind;
   dispose: () => void;
 }
 
@@ -51,15 +53,20 @@ export async function createXtermTerminal(
   container.replaceChildren();
   terminal.open(container);
 
-  // WebGL 必须在 terminal.open() 之后加载, 否则拿不到 canvas context
-  // onContextLoss: GPU context 被回收时（标签页休眠 / 系统休眠 / GPU 进程崩溃等），
-  // 旧 atlas 的 texture handle 全部失效但 xterm 内部状态没刷新；不重载会持续画错 glyph。
+  // 渲染器选择：默认 webgl（按 cell 坐标稳定对齐 CJK），但 __ptyDebug.setRenderer("dom")
+  // 可以在不重新发布的情况下切回 DOM renderer——用来在出现 cell 叠字 / atlas 残留这类
+  // 难定位的渲染问题时做对比验证（DOM renderer 不依赖 GPU atlas）。
+  const requested = getPtyDebug().getRenderer();
   let webglAddon: WebglAddon | null = null;
   let webglDisposed = false;
+  let activeRenderer: PtyRendererKind = "dom";
+
   function loadWebgl(): void {
     if (webglDisposed) return;
     try {
       const addon = new WebglAddon();
+      // GPU context 被回收时（标签页休眠 / 系统休眠 / GPU 进程崩溃），旧 atlas 的 texture
+      // handle 全部失效但 xterm 内部状态没刷新；不重载会持续画错 glyph。
       addon.onContextLoss(() => {
         addon.dispose();
         webglAddon = null;
@@ -67,15 +74,24 @@ export async function createXtermTerminal(
       });
       terminal.loadAddon(addon);
       webglAddon = addon;
+      activeRenderer = "webgl";
     } catch (err) {
       console.warn("WebGL addon failed, fallback to DOM renderer", err);
+      activeRenderer = "dom";
     }
   }
-  loadWebgl();
+
+  if (requested === "webgl") {
+    loadWebgl();
+  } else {
+    // 不加 webgl addon = xterm 走内置 DOM renderer
+    activeRenderer = "dom";
+  }
 
   return {
     terminal,
     serializeAddon,
+    renderer: activeRenderer,
     dispose: () => {
       webglDisposed = true;
       webglAddon?.dispose();

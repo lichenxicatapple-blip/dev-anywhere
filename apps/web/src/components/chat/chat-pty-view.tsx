@@ -26,6 +26,7 @@ import {
   unregisterPtyDebugSnapshotProvider,
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
+import { getPtyDebug } from "@/lib/pty-render-debug";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { PtyMobileControls } from "./pty-mobile-controls";
 import { usePtyFocusState } from "./use-pty-focus-state";
@@ -52,6 +53,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const xtermHostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const imageLinkProviderDisposeRef = useRef<(() => void) | null>(null);
+  const ptyDebugDeregisterRef = useRef<(() => void) | null>(null);
   const terminalControllerRef = useRef<{
     flushOutput: () => void;
     setOutputPaused: (value: boolean) => void;
@@ -159,6 +161,16 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(term as Terminal));
         registerPtyTerminal(sessionId, term as Terminal);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
+        ptyDebugDeregisterRef.current = getPtyDebug().registerTerminal(sessionId, {
+          // 强制整屏重绘绕过 atlas 缓存——给"鼠标选中后正常显示"这种 cell 残留 bug 用。
+          refresh: () => (term as Terminal).refresh(0, (term as Terminal).rows - 1),
+          serialize: () => serializeTerminalBuffer(term as Terminal),
+          describe: () => ({
+            sessionId,
+            cols: (term as Terminal).cols,
+            rows: (term as Terminal).rows,
+          }),
+        });
       },
       onFramePending: () => {
         pendingNewFrameRef.current = true;
@@ -185,6 +197,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       controller.dispose();
       imageLinkProviderDisposeRef.current?.();
       imageLinkProviderDisposeRef.current = null;
+      ptyDebugDeregisterRef.current?.();
+      ptyDebugDeregisterRef.current = null;
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);
       terminalRef.current = null;
