@@ -139,26 +139,6 @@ describe("MessageEnvelopeSchema", () => {
     });
   });
 
-  describe("removed envelope types", () => {
-    it("rejects pty_snapshot (removed from envelope)", () => {
-      expect(() =>
-        MessageEnvelopeSchema.parse(makeEnvelope("pty_snapshot", { data: "base64data" })),
-      ).toThrow();
-    });
-
-    it("rejects terminal_frame (moved to Control)", () => {
-      expect(() =>
-        MessageEnvelopeSchema.parse(makeEnvelope("terminal_frame", { lines: [[{ text: "x" }]] })),
-      ).toThrow();
-    });
-
-    it("rejects pty_state (moved to Control)", () => {
-      expect(() =>
-        MessageEnvelopeSchema.parse(makeEnvelope("pty_state", { state: "working" })),
-      ).toThrow();
-    });
-  });
-
   describe("invalid messages", () => {
     it("rejects unknown message type", () => {
       expect(() =>

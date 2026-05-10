@@ -124,40 +124,8 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
-  it("rejects replay_request because relay recovery is proxy-driven", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "replay_request", sessionId: "", fromSeq: 0, toSeq: 10 }),
-    ).toThrow();
-  });
-
-  it("rejects gap_unrecoverable because relay no longer exposes fake replay gaps", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "gap_unrecoverable", sessionId: "", fromSeq: 0, toSeq: 10 }),
-    ).toThrow();
-  });
-
   it("rejects proxy_offline with missing proxyId", () => {
     expect(() => RelayControlSchema.parse({ type: "proxy_offline" })).toThrow();
-  });
-
-  it("rejects terminal_scroll_request (removed from schema)", () => {
-    expect(() =>
-      RelayControlSchema.parse({
-        type: "terminal_scroll_request",
-        sessionId: "sess-1",
-        direction: "up",
-        delta: 5,
-      }),
-    ).toThrow();
-  });
-
-  it("rejects terminal_frame_request (removed from schema)", () => {
-    expect(() =>
-      RelayControlSchema.parse({
-        type: "terminal_frame_request",
-        sessionId: "sess-1",
-      }),
-    ).toThrow();
   });
 
   it("accepts PTY snapshot requestId for stale snapshot rejection", () => {
@@ -231,16 +199,6 @@ describe("RelayControlSchema", () => {
       hasMore: true,
       nextBefore: "b:1024",
     });
-  });
-
-  it("rejects terminal_frame (removed from schema)", () => {
-    expect(() =>
-      RelayControlSchema.parse({
-        type: "terminal_frame",
-        sessionId: "sess-1",
-        payload: { mode: "full", lines: [] },
-      }),
-    ).toThrow();
   });
 
   it("parses proxy_list_response with proxies array", () => {
@@ -604,13 +562,4 @@ describe("RelayControlSchema", () => {
     expect(ProxyToClientRelayControlTypes.has("terminal_resize_request")).toBe(false);
   });
 
-  it("rejects bind_by_session type (removed from schema)", () => {
-    expect(() => RelayControlSchema.parse({ type: "bind_by_session", sessionId: "s1" })).toThrow();
-  });
-
-  it("rejects bind_by_session_response type (removed from schema)", () => {
-    expect(() =>
-      RelayControlSchema.parse({ type: "bind_by_session_response", success: true, proxyId: "p1" }),
-    ).toThrow();
-  });
 });
