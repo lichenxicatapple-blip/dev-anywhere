@@ -21,23 +21,10 @@ interface HookEventRouterDeps {
   nextSeq?: (sessionId: string) => number;
 }
 
-function hookPayloadRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function toolNameFromPayload(payload: Record<string, unknown>): string {
-  return typeof payload.toolName === "string"
-    ? payload.toolName
-    : typeof payload.tool_name === "string"
-      ? payload.tool_name
-      : "unknown";
-}
-
-function toolInputFromPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  return hookPayloadRecord(payload.input ?? payload.tool_input);
-}
+import {
+  toolInputFromPayload,
+  toolNameFromPayload,
+} from "./hook-payload-helpers.js";
 
 export class HookEventRouter {
   constructor(private readonly deps: HookEventRouterDeps) {}

@@ -99,6 +99,8 @@ export { SessionState } from "./constants/session.js";
 export { RelayErrorCode } from "./constants/relay-errors.js";
 export { ControlErrorCode } from "./constants/control-errors.js";
 export type { ControlErrorCode as ControlErrorCodeType } from "./constants/control-errors.js";
+export { providerValues, ptyOwnerValues, sessionModeValues } from "./constants/enums.js";
+export type { ProviderId, PtyOwner, SessionMode } from "./constants/enums.js";
 
 // logger
 export { createLogger, flushLogger } from "./logger.js";

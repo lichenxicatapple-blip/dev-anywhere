@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { serviceLogger } from "../common/logger.js";
 import { HookRegistry, type HookProviderId } from "./hook-registry.js";
 import { PermissionBroker } from "./permission-broker.js";
+import { asProvider, asRecord, toolNameFromPayload } from "./hook-payload-helpers.js";
 
 interface HookServerOptions {
   port: number;
@@ -35,16 +36,6 @@ function getBearerToken(req: IncomingMessage): string | null {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return null;
   return header.slice("Bearer ".length).trim() || null;
-}
-
-function asProvider(value: unknown): HookProviderId | null {
-  return value === "claude" || value === "codex" ? value : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 export class HookServer {
@@ -173,12 +164,7 @@ export class HookServer {
       event.requestId ??
       (typeof event.payload.tool_use_id === "string" ? event.payload.tool_use_id : undefined) ??
       `${event.sessionId}:${Date.now()}`;
-    const toolName =
-      typeof event.payload.toolName === "string"
-        ? event.payload.toolName
-        : typeof event.payload.tool_name === "string"
-          ? event.payload.tool_name
-          : "unknown";
+    const toolName = toolNameFromPayload(event.payload);
     const input = asRecord(event.payload.input ?? event.payload.tool_input);
 
     this.options.onEvent?.({ ...event, requestId });
