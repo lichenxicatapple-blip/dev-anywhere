@@ -325,6 +325,23 @@ serve
 
 program.addCommand(serve);
 
+const relay = new Command("relay").description("Inspect and manage relay configuration");
+
+relay
+  .command("token")
+  .description("Print the relay's current client token (auth: proxy token)")
+  .option("--relay <name>", "Use a named relay from config")
+  .action(async (opts) => {
+    if (!isInitialized()) {
+      console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
+      process.exit(1);
+    }
+    const { runRelayTokenCommand } = await import("./relay-token.js");
+    await runRelayTokenCommand({ relayName: opts.relay });
+  });
+
+program.addCommand(relay);
+
 program
   .command("init")
   .description("Initialize dev-anywhere workspace (~/.dev-anywhere)")

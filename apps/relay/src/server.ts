@@ -95,6 +95,8 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       proxyTokenRequired,
       clientTokenRequired,
       validateClientToken: (token) => token === clientToken,
+      validateProxyToken: (token) => token === proxyToken,
+      getClientToken: () => clientToken ?? null,
     }),
   );
 
