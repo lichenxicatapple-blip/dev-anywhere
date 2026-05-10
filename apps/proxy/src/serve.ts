@@ -326,9 +326,19 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     serviceLogger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
   });
 
+  let shuttingDown = false;
   async function shutdown(): Promise<void> {
+    // 守卫：双重 SIGTERM / SIGTERM+SIGINT 并发触发时，第二次直接返回，避免两路并发关闭。
+    // 真实场景：systemd TimeoutStopSec 到期会再发一次 SIGTERM；用户连按两次 Ctrl+C 同样如此。
+    // 没有守卫时，第二路的 process.exit(0) 可能在第一路 await flushLogger 完成前先返回，截断日志。
+    if (shuttingDown) return;
+    shuttingDown = true;
     serviceLogger.info("Shutting down service");
     sessionManager.stopReaper();
+    // 先 destroy router：清掉 pending session-create retry timer，并 cleanupPendingJsonSession
+    // 把已 spawn 但还未 connect 的 worker 子进程收掉，否则进入 destroyAll 时这批子进程
+    // 会在 timer 命中后失去 parent 引用变孤儿（只有 sock destroy，没人发 SIGTERM 给 worker）。
+    relayRouter.destroy();
     await hookRuntime.hookServer.close();
     relayConnection.close();
     workerRegistry.destroyAll();
@@ -349,10 +359,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   }
 
   process.on("SIGTERM", () => {
-    shutdown();
+    void shutdown();
   });
   process.on("SIGINT", () => {
-    shutdown();
+    void shutdown();
   });
 }
 
