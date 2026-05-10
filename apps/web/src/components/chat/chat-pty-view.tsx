@@ -10,7 +10,7 @@ import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController } from "@/lib/pty-scroll-controller";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
-import { formatPtyScrollTraceReport, isPtyScrollTraceEnabled } from "@/lib/pty-scroll-trace";
+import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { createRafScheduler } from "@/lib/raf-scheduler";
@@ -29,6 +29,7 @@ import {
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { PtyMobileControls } from "./pty-mobile-controls";
 import { usePtyFocusState } from "./use-pty-focus-state";
+import { usePtyScrollTraceEnabled } from "./use-pty-scroll-trace-enabled";
 import { usePtyTouchGesture } from "./use-pty-touch-gesture";
 import { useTerminalPaste } from "./use-terminal-paste";
 import { toast } from "@/components/toast";
@@ -67,7 +68,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
   const hasNewFramesWhileAwayRef = follow.hasNewFramesWhileAwayRef;
   const setHasNewFramesWhileAway = follow.setHasNewFramesWhileAway;
-  const [traceEnabled, setTraceEnabled] = useState(() => isPtyScrollTraceEnabled());
+  const traceEnabled = usePtyScrollTraceEnabled();
   const [scrollState, setScrollState] = useState<PtyScrollState>({
     scrollTop: 0,
     scrollLeft: 0,
@@ -208,19 +209,6 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       rawInputFollowSchedulerRef.current?.dispose();
       relayoutSchedulerRef.current = null;
       rawInputFollowSchedulerRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const updateTraceEnabled = (): void => {
-      setTraceEnabled(isPtyScrollTraceEnabled());
-    };
-    updateTraceEnabled();
-    window.addEventListener("hashchange", updateTraceEnabled);
-    window.addEventListener("popstate", updateTraceEnabled);
-    return () => {
-      window.removeEventListener("hashchange", updateTraceEnabled);
-      window.removeEventListener("popstate", updateTraceEnabled);
     };
   }, []);
 
