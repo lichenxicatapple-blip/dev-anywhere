@@ -52,11 +52,15 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
           store.setAgentStatus(status.sessionId, status.payload);
         }
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error("[proxy-switcher] post-bind data fetch failed", err);
+      });
     void relay
       .requestSessionHistory()
       .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error("[proxy-switcher] post-bind data fetch failed", err);
+      });
     setDropdownOpen(false);
     if (layout === "page") {
       navigate("/sessions");

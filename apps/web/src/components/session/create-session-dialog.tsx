@@ -129,7 +129,9 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         store.setHomePath(info.homePath);
         store.setAgentCli(info.agentCli);
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error("[create-session-dialog] requestProxyInfo failed", err);
+      });
   }, [open, homePath, agentCli]);
 
   useEffect(() => {

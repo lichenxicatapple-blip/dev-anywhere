@@ -63,7 +63,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           fileStore.setDirEntries(group.path, group.entries);
         }
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error("[chat] requestSessionResources failed", { sessionId: id }, err);
+      });
     void relay
       .requestAgentStatuses(id)
       .then((statuses) => {
@@ -72,7 +74,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           sessionStore.setAgentStatus(status.sessionId, status.payload);
         }
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        console.error("[chat] requestAgentStatuses failed", { sessionId: id }, err);
+      });
   }, [id, connected, proxyOnline, routeSessionEnded]);
 
   // 生命周期由 session.state / 活跃列表负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。
