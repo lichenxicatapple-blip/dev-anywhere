@@ -107,6 +107,12 @@ export class RelayRouter {
     });
   }
 
+  // shutdown 链路上提供单一 destroy 入口：把 sessionCreateHandler 内部 pending retry timer 清掉
+  // 并 cleanup 已 spawn 但未 connect 的 worker 子进程，避免在 SIGTERM 之后变成孤儿。
+  destroy(): void {
+    this.sessionCreateHandler.destroy();
+  }
+
   // 入站消息统一入口：proxy 收两类消息——relay control 与 envelope（user_input 这一种）。
   // 先按 envelope 试解析（discriminated union），失败再按 control 解析；各 handler 拿到
   // 强类型窄化后的消息，不再需要 `as string | undefined` / `as { ... }` 裸 cast。

@@ -60,7 +60,20 @@ function validateSessionCwd(cwd: unknown): SessionCwdValidationError | null {
 }
 
 export class RelaySessionCreateHandler {
+  // 跟踪每个 pendingId 当前挂起的 retry timer。SIGTERM 抵达时 destroy() 会 clear
+  // 这些 timer 并执行 cleanupPendingJsonSession，否则 worker 子进程在窗口期内可能成为孤儿
+  // （setTimeout 回调命中时 workerRegistry 已经 destroyAll，但 worker 进程并未被 kill）。
+  private readonly pendingTimers = new Map<string, NodeJS.Timeout>();
+
   constructor(private readonly deps: RelaySessionCreateHandlerDeps) {}
+
+  destroy(): void {
+    for (const [pendingId, timer] of this.pendingTimers) {
+      clearTimeout(timer);
+      this.cleanupPendingJsonSession(pendingId);
+    }
+    this.pendingTimers.clear();
+  }
 
   onSessionCreate(msg: ControlMessage<"session_create">): void {
     const { requestId, cwd } = msg;
@@ -123,7 +136,12 @@ export class RelaySessionCreateHandler {
     const paths = sessionPaths(pendingId);
     let attempt = 0;
     const maxRetries = 20;
+    const scheduleAttempt = (delayMs: number): void => {
+      const timer = setTimeout(tryConnect, delayMs);
+      this.pendingTimers.set(pendingId, timer);
+    };
     const tryConnect = () => {
+      this.pendingTimers.delete(pendingId);
       attempt++;
       this.deps.workerRegistry.connect(pendingId, paths.workerSock).then((sock) => {
         if (sock) {
@@ -156,7 +174,7 @@ export class RelaySessionCreateHandler {
           this.deps.broadcastSessionSync(session);
           this.deps.broadcastSessionList();
         } else if (attempt < maxRetries) {
-          setTimeout(tryConnect, Math.min(100 * attempt, 2000));
+          scheduleAttempt(Math.min(100 * attempt, 2000));
         } else {
           this.cleanupPendingJsonSession(pendingId);
           this.deps.relaySend(
@@ -172,7 +190,7 @@ export class RelaySessionCreateHandler {
         }
       });
     };
-    setTimeout(tryConnect, 100);
+    scheduleAttempt(100);
   }
 
   private cleanupPendingJsonSession(sessionId: string): void {
