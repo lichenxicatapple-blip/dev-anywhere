@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 
@@ -97,6 +97,31 @@ describe("PtyScrollbar", () => {
     const thumb = container.querySelector<HTMLElement>('[data-slot="pty-scrollbar-thumb"]');
     expect(thumb?.style.height).toBe("20%");
     expect(thumb?.style.top).toBe("40%");
+  });
+
+  // 平时隐藏, 滚动时短暂出现, 静止 ~1s 后再隐藏 (item 13)。
+  it("hides on initial render even when scrollable, and reveals after scrollTop changes", () => {
+    vi.useFakeTimers();
+    const { container, rerender } = render(
+      <PtyScrollbar
+        state={makeScrollState({ scrollTop: 0, scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={vi.fn()}
+      />,
+    );
+    const track = container.querySelector('[data-slot="pty-scrollbar"]');
+    expect(track?.className).toContain("opacity-0");
+
+    rerender(
+      <PtyScrollbar
+        state={makeScrollState({ scrollTop: 200, scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={vi.fn()}
+      />,
+    );
+    expect(track?.className).toContain("opacity-100");
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(track?.className).toContain("opacity-0");
+    vi.useRealTimers();
   });
 
   it("maps pointer drag to scroll ratios", () => {
