@@ -32,7 +32,7 @@ interface PtyDebugApi {
   setTrace(enabled: boolean): void;
   registerTerminal(id: string, handle: ActiveTerminalHandle): () => void;
   forceRedraw(): number;
-  dumpState(): void;
+  dumpState(): string;
   listTerminals(): string[];
 }
 
@@ -126,22 +126,31 @@ const debugApi: PtyDebugApi = {
         });
       }
     }
-    console.groupCollapsed(`[ptyDebug] dump ${dumps.length} terminal(s)`);
+    const json = JSON.stringify(dumps, null, 2);
+    console.group(`[ptyDebug] dump ${dumps.length} terminal(s)`);
     for (const dump of dumps) {
-      console.groupCollapsed(`terminal ${dump.id}`);
+      console.group(`terminal ${dump.id}`);
       console.log(dump.meta);
       console.log(dump.serialized);
       console.groupEnd();
     }
     console.groupEnd();
+    // clipboard.writeText 在 DevTools focused / page unfocused 时会抛 NotAllowedError。
+    // 兜底: 把 JSON 作为返回值返回, DevTools 可直接 copy(__devAnywherePtyRenderDebug.dumpState())。
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard
-        .writeText(JSON.stringify(dumps, null, 2))
+        .writeText(json)
         .then(() => console.info("[ptyDebug] dump copied to clipboard"))
         .catch((err: unknown) => {
-          console.warn("[ptyDebug] clipboard write failed", err);
+          console.warn(
+            "[ptyDebug] clipboard write failed; use copy(__devAnywherePtyRenderDebug.dumpState()) in DevTools",
+            err,
+          );
         });
+    } else {
+      console.info("[ptyDebug] use copy(__devAnywherePtyRenderDebug.dumpState()) to copy");
     }
+    return json;
   },
   listTerminals() {
     return Array.from(activeTerminals.keys());
