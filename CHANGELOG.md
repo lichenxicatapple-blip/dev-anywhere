@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.2.2] - 2026-05-11
+
+### Added
+
+- File download from the dev machine to the user's browser. PTY supports cmd/ctrl+click on a file path; image preview gains a download button; chat messages render any non-image file path as a download link. Triggers a normal browser download via blob URL, no protocol handler required.
+- Drag-and-drop file upload on the PTY container and JSON input bar; "上传文件" entry in the PTY overflow menu. JSON input bar also gains an attach-file picker.
+- Mobile keyboard bar adds a dedicated Ctrl+C button and lets arrow keys auto-repeat on hold.
+- Image preview supports toggling between fit-to-window and actual size, so screenshots wider than the viewport can be panned.
+- Loading toast shows during clipboard image paste, so users see the upload is in flight on slow links.
+- PTY view auto-scrolls horizontally to keep the cursor in view, and auto-scrolls during mouse drag-select past container edges.
+- WebGL render-model diagnostic and `clearRenderModel` action surface GPU-state information when the canvas garbles after sleep/wake.
+
+### Fixed
+
+- Local-terminal claude/codex sessions: ctrl+c×2 exit no longer leaves the session in the web list with subsequent uploads timing out. Each cleanup step (control handlers, agent registry, seq counter, permission broker) now runs under its own try/catch so a thrown callback cannot eat the trailing `broadcastSessionList`.
+- `disposeSeqCounter` no longer writes a sequence file to the just-removed session directory on every PTY exit. The `ENOENT` was silent before c82caff6's per-step isolation surfaced it as a warn.
+- Chinese IME mixed text-and-punctuation input no longer renders the punctuation as a stray prefix (e.g. typing `hello-` showed as `-hello-`); the punctuation probe now skips during IME composition.
+- "正在终止会话" toast no longer lingers past the optimistic session removal.
+- iOS PWA wake-from-sleep no longer bounces to the session-select screen; the last chat route is restored on cold-start.
+- PTY image preview no longer opens on plain click — cmd/ctrl+click is required, matching the file-download link behavior. Also clears the last-route on session end so reopening the app starts fresh after an explicit terminate.
+- PTY mouse drag-select extension across the row now dispatches a synthetic mousemove on `.xterm-screen`, so selection actually grows past the initial click cell.
+- PTY cursor no longer keeps blinking while the terminal is unfocused.
+- File-path link detection covers bare relative paths (`README.md`, `package.json`, `docs/foo.md`) and double/triple extensions (`.tar.gz`, `.d.ts`, `fixture.test.snapshot.json`) without false-positives on version numbers (`5.0`, `Mozilla/5.0`).
+
+### Changed
+
+- Control-message error codes (`PATH_NOT_FOUND`, `PATH_ACCESS_DENIED`, `SESSION_NOT_FOUND`, `TOO_LARGE`, `UNSUPPORTED_FORMAT`, `NOT_A_FILE`, `RATE_LIMITED`) are translated to Chinese before reaching the UI; raw fs error strings (`ENOENT`, `EACCES`) no longer leak to user-facing toasts.
+- `relay_error` envelopes carry the originating `requestId` so client `waitForMessage` rejects immediately on routing failure instead of hanging to its 30s timeout.
+- Upload + toast lifecycle is now centralized: clipboard paste, drag-drop, attach picker, and PTY overflow upload all share `uploadFileAndShowToast`, removing toast-state drift across call sites.
+- PTY vertical scrollbar hides when idle and re-appears on scroll/hover/drag, matching native macOS behavior.
+
+### Observability
+
+- `terminal-ipc` IPC parse-error log now includes `err.cause` and a 200-character `linePreview`, so the next reproduction surfaces what `JSON.parse` rejected instead of an opaque error string.
+- File-download trigger logs ok/failed events via `console.debug` with `sessionId`, `path`, `size`, `errorCode`, `durationMs`.
+- `__devAnywherePtyRenderDebug.dumpState` returns JSON instead of writing to console, so DevTools focus loss can no longer block extraction.
+
+### Tooling
+
+- `pnpm release` script: validates `CHANGELOG.md` has the target version, runs `release:check` + `release:smoke`, bumps the four package versions, commits `release: vX.Y.Z`, tags, and asks before pushing. CI (`.github/workflows/release.yml`) takes over on tag push.
+- `playwright.config.ts` aborts with a clear error under Node 25+ instead of letting the worker fork hang silently — Playwright 1.52 + Node 25 was the root of multiple "no output, no exit" e2e debugging detours.
+
 ## [0.2.1] - 2026-05-11
 
 ### Fixed
