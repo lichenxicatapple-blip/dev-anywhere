@@ -21,6 +21,7 @@ function makeRefs(opts: {
   hostHeight: string;
   viewportY: number;
   bufferLength: number;
+  rows?: number;
 }) {
   const container = document.createElement("div") as HTMLDivElement;
   const spacer = document.createElement("div") as HTMLDivElement;
@@ -38,7 +39,7 @@ function makeRefs(opts: {
   host.style.paddingTop = "0px";
 
   const term = {
-    rows: 20,
+    rows: opts.rows ?? 20,
     cols: 80,
     buffer: {
       active: {
@@ -126,9 +127,11 @@ describe("buildPtyScrollDebugSnapshot", () => {
   });
 
   it("matches positionHostAt's verticalOffset for small-buffer hosts", () => {
-    // hostHeight=200 < visibleContentHeight=400 → verticalOffset=200.
-    // positionHostAt 实际写: top = max(0, viewportY*cellH + 200)。expectedTop 必须跟着。
-    // viewportY=3, cellH=20 → 3*20+200=260, drift 应当为 0 (host 实际就在 260px)。
+    // 构造小 buffer: rows=10, cellH=20 → hostHeight=200; visibleContentHeight=400 (clientHeight)。
+    // positionHostAt 在这种情况下 verticalOffset = 400-200 = 200, 实际写: top = max(0, viewportY*20 + 200)。
+    // viewportY=3 → expectedTop = 3*20 + 200 = 260, host 实际在 260, drift=0。
+    // expectedHostHeight 必须用 term.rows*cellH (=10*20=200) 算, 不能读 host.style.height
+    // ——init 早期 style 还没写时这俩会发散。
     const refs = makeRefs({
       scrollTop: 0,
       clientHeight: 400,
@@ -136,10 +139,33 @@ describe("buildPtyScrollDebugSnapshot", () => {
       hostHeight: "200px",
       viewportY: 3,
       bufferLength: 10,
+      rows: 10,
     });
 
     const snap = buildPtyScrollDebugSnapshot(() => probe(), refs);
 
+    expect(snap.host.expectedTop).toBe(260);
+    expect(snap.host.topDrift).toBe(0);
+  });
+
+  it("computes expectedTop from term.rows*cellH even when host.style.height is empty (init race)", () => {
+    // 早期 init: updateSpacer 还没写 style.height → currentHostHeight=0。但 positionHostAt
+    // 已经被 syncContainerScroll 调过, host.style.top 已经是 viewportY*cellH+offset。
+    // expectedHostHeight 必须用 term.rows*cellH (=200) 而不是 currentHostHeight (=0),
+    // 否则会把"还没写 height 的小 buffer host"误判成 hostHeight=0、offset=0、drift!=0 假阴性。
+    const refs = makeRefs({
+      scrollTop: 0,
+      clientHeight: 400,
+      hostTop: "260px",
+      hostHeight: "", // style.height 还没写
+      viewportY: 3,
+      bufferLength: 10,
+      rows: 10,
+    });
+
+    const snap = buildPtyScrollDebugSnapshot(() => probe(), refs);
+
+    // 即便 host.style.height 是空的, expectedTop 仍然应当算出 260 (跟 positionHostAt 一致)
     expect(snap.host.expectedTop).toBe(260);
     expect(snap.host.topDrift).toBe(0);
   });

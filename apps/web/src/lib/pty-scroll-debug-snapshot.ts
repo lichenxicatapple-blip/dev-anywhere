@@ -61,13 +61,16 @@ export function buildPtyScrollDebugSnapshot(
   const currentSpacerWidth = parsePx(spacer.style.width);
 
   // 复刻 positionHostAt 的写入公式: top = max(0, viewportY*cellH + verticalOffset),
-  // verticalOffset 在 hostHeight < visibleContentHeight 时非零 (小 buffer)。expectedTop
-  // 必须跟着这条公式走,否则小 buffer 场景会产出虚假的 topDrift,误导线上诊断。
+  // 其中 hostHeight = term.rows * cellH (positionHostAt 自己也是这么算的, 不读 style)。
+  // 不能用 currentHostHeight (=parsePx(host.style.height)) 替代 ——init 早期 updateSpacer
+  // 还没写 host.style.height 时 currentHostHeight=0, 但 positionHostAt 算出来 hostHeight>0,
+  // 此时若 hostHeight<visibleContentHeight 应有非零 offset, 用 currentHostHeight 会假阴性。
   let expectedHostTop = 0;
   if (cellH > 0) {
+    const expectedHostHeight = term.rows * cellH;
     const expectedVerticalOffset =
-      currentHostHeight > 0 && currentHostHeight < visibleContentHeight
-        ? visibleContentHeight - currentHostHeight
+      expectedHostHeight > 0 && expectedHostHeight < visibleContentHeight
+        ? visibleContentHeight - expectedHostHeight
         : 0;
     expectedHostTop = Math.max(0, buffer.viewportY * cellH + expectedVerticalOffset);
   }

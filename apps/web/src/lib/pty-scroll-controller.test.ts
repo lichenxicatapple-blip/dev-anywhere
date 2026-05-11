@@ -953,10 +953,39 @@ describe("attachPtyScrollController", () => {
     expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(false);
   });
 
-  // syncing.{internal,external} 泄漏审查记录: scrollToYdisp / scrollToBottom / onTermScroll
-  // 三处置位都被 try/finally 包住, 内部路径的 throw 都会复位 flag。模拟 throw 的回归测试
-  // 在 jsdom 下被作为 unhandled error 上报,污染下一个 test。这条 invariant 改由静态保留 +
-  // 上面的 cellH 恢复测试一起兜——前者保证 syncing 不卡, 后者保证 host 不卡。
+  it("scrollToBottom keeps flag clear even when cellH=0 during the synthetic scroll event", () => {
+    // 边界场景: scrollToBottom 末尾的 container.scrollTop=nextScrollTop 写入会同步触发
+    // onContainerScroll → syncContainerScroll, 这时如果 cellH 还是 0, syncContainerScroll
+    // 会再次把 flag 置 true。clear 必须在所有同步副作用之后, 否则 scrollToBottom 的语义"清干净
+    // stale state"不真。
+    const { container, spacer, host } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // cellH=0 整段都保持: scrollToBottom 期间 + 同步副作用 onContainerScroll 期间都 measure 不到。
+    defineSize(screen, { clientHeight: 0, clientWidth: 0 });
+    ctrl.scrollToBottom();
+    expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(false);
+  });
+
+  // syncing.{internal,external} 泄漏审查记录:
+  //   - syncing.internal: 仅在 scrollToYdisp / scrollToBottom 里围着 term.scrollToLine 那一行 set/restore,
+  //     try/finally 保证 scrollToLine 抛错也会复位。其它语句 (positionHostAt / scrollTop 写入 / notifyScroll)
+  //     运行时 syncing.internal 已经是 false, 抛错也不污染 flag。
+  //   - syncing.external: 仅在 onTermScroll 整段 try/finally 围住, finally 里 restore。
+  // 模拟 scrollToLine throw 的回归测试在 jsdom 下被作为 unhandled error 上报,污染下一个 test。
+  // 这条 invariant 改由静态审查 + cellH 恢复测试一起兜——前者保证 syncing 不卡, 后者保证 host 不卡。
 
   it("only observes the scroll container (not host) to avoid feedback loop", () => {
     const { container, spacer, host } = createDom();

@@ -201,9 +201,6 @@ export function attachPtyScrollController(
   const scrollToBottom = (): void => {
     trace("scroll-to-bottom:start");
     setUserHasVerticalScrollIntent(false);
-    // scrollToBottom 重写 scrollTop 到底,任何"上一次 user scroll 没 sync 上"的语义就此失效——
-    // 否则 retry flag 会留在 true,下一次 relayout 还会按当前 scrollTop 再 sync 一遍 (无害但语义不真)。
-    pendingContainerSyncRetry = false;
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
     syncing.internal = true;
     try {
@@ -217,6 +214,10 @@ export function attachPtyScrollController(
     container.scrollTop = nextScrollTop;
     pendingProgrammaticScrollTop = nextScrollTop;
     notifyScroll();
+    // 清零必须放在最末尾: container.scrollTop = nextScrollTop 会同步触发 onContainerScroll →
+    // syncContainerScroll, 此时若 cellH=0 会重新置位 retry flag。开头清零的话这里又会被覆盖,
+    // 让 scrollToBottom 的"重置 stale state"语义不真。在所有同步副作用后再清,确保边界干净。
+    pendingContainerSyncRetry = false;
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
   };
 
