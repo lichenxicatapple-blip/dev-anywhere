@@ -186,6 +186,47 @@ describe("PtyRecoveryController", () => {
     ]);
   });
 
+  it("does not flush stale replay frames when a new snapshot request supersedes the in-flight write", () => {
+    // 复现 race: applySnapshot 把 replay frames 排进 target.write 的异步 callback;
+    // callback 触发前 startSnapshotRequest 又被调用 (resize / 重连), 旧 replay 不应再写到 target。
+    const requestIds = ["req-1", "req-2"];
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
+
+    const calls: Array<[string, unknown]> = [];
+    const pendingWriteCallback: { fn: (() => void) | null } = { fn: null };
+    const target: PtyRenderTarget = {
+      reset: vi.fn(() => calls.push(["reset", null])),
+      resize: vi.fn((cols: number, rows: number) => calls.push(["resize", { cols, rows }])),
+      write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
+        calls.push(["write", data]);
+        if (callback) {
+          // 模拟 xterm 异步写入: 不立即触发 callback, 留给测试控制时机
+          pendingWriteCallback.fn = callback;
+        }
+      }),
+    };
+
+    const first = recovery.startSnapshotRequest();
+    const staleFrame = { data: new Uint8Array([0xaa]), outputSeq: 11 };
+    recovery.handleBinaryFrame(staleFrame, target);
+
+    recovery.applySnapshot(
+      { requestId: first, cols: 80, rows: 24, data: "old-snapshot", outputSeq: 10 },
+      target,
+    );
+
+    // callback 还没 fire, 此时新 snapshot request 进来 (resize / 重连触发)
+    recovery.startSnapshotRequest();
+
+    // 现在旧 callback 异步触发——它持有的 replayFrames 是属于 req-1 周期的
+    expect(pendingWriteCallback.fn).toBeTruthy();
+    pendingWriteCallback.fn?.();
+
+    // 旧 replay frame 不应再写到 target——req-2 在等新 snapshot, 此时把旧帧写出来会污染。
+    const writes = calls.filter(([op]) => op === "write").map(([, data]) => data);
+    expect(writes).not.toContainEqual(staleFrame.data);
+  });
+
   it("starts a new buffer window for each snapshot request", () => {
     const requestIds = ["req-1", "req-2"];
     const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
