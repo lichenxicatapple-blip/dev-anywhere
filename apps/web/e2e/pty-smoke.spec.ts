@@ -697,4 +697,65 @@ test.describe("PTY browser smoke", () => {
 
     await expect.poll(() => readRawPtyInput(page)).toBe("，.");
   });
+
+  // 用户复现路径: PTY 容器横向有 overflow 时, 鼠标拖拽到边缘选区不再延伸。
+  // 单测覆盖 autoscroll 模块本身 (pty-drag-select-autoscroll.test.ts), 这里走真鼠标
+  // 验证集成链路: pointerdown 落到容器、Playwright 派发的 pointermove 被监听、raf
+  // 真转动 scrollLeft。直接撑大 spacer 避免依赖 xterm 200-col 渲染恰好溢出。
+  test("auto-scrolls horizontally during mouse drag-select past container edges", async ({
+    page,
+  }) => {
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+    await resetLocalState(page);
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
+    await expectTerminalMounted(page);
+
+    // 直接把 spacer 撑到 2000px, 容器 (~1030px) 必然 horizontal overflow。
+    // 不走 xterm resize 链路, 避免被 ptyOwner / scroll-controller relayout 顺序拖累。
+    await page.evaluate(() => {
+      const spacer = document.querySelector<HTMLElement>('[data-slot="pty-spacer"]');
+      if (!spacer) throw new Error("pty-spacer not mounted");
+      spacer.style.width = "2000px";
+      spacer.style.minWidth = "2000px";
+    });
+
+    const terminal = page.locator('[data-slot="pty-terminal"]');
+    await expect
+      .poll(() =>
+        terminal.evaluate(
+          (el) => (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    const initialScrollLeft = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    expect(initialScrollLeft).toBe(0);
+
+    const box = await terminal.boundingBox();
+    if (!box) throw new Error("pty terminal has no bounding box");
+
+    // 按住左键拖到右边缘, 在边缘悬停几百 ms 让 raf 多帧 auto-scroll
+    await page.mouse.move(box.x + 60, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 5, box.y + box.height / 2, { steps: 8 });
+    await page.waitForTimeout(400);
+
+    const scrolledRight = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    expect(scrolledRight).toBeGreaterThan(initialScrollLeft);
+
+    // 拖回左边缘, scrollLeft 回退 (用户的真实复现路径: \r 把光标拉回行首)
+    await page.mouse.move(box.x + 5, box.y + box.height / 2, { steps: 8 });
+    await page.waitForTimeout(400);
+    const scrolledBack = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    expect(scrolledBack).toBeLessThan(scrolledRight);
+
+    // pointerup 后 raf 循环停, scrollLeft 不再变化
+    await page.mouse.up();
+    const afterUp = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    await page.waitForTimeout(200);
+    const stillSame = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    expect(stillSame).toBe(afterUp);
+  });
 });

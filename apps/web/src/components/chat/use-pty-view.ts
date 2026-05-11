@@ -15,6 +15,7 @@ import type {
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
+import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import {
@@ -270,6 +271,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let ptyDebugDeregister: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
     let resizeDispose: (() => void) | null = null;
+    let dragSelectDispose: (() => void) | null = null;
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
@@ -383,6 +385,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           },
         }));
 
+        const dragSelect = attachPtyDragSelectAutoscroll({ container, host });
+        dragSelectDispose = dragSelect.dispose;
+
         if (webOwnsPtyGeometry) {
           const resizeCtrl = attachPtyResizeController({
             container,
@@ -408,6 +413,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     return () => {
       resizeDispose?.();
+      dragSelectDispose?.();
       scrollDispose?.();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
