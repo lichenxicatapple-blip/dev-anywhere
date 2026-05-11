@@ -14,6 +14,7 @@
     "typecheck": "tsc -b",
     "knip": "knip",
     "quality:check": "bash scripts/quality-check.sh",
+    "release": "bash scripts/release.sh",
     "release:check": "bash scripts/release-check.sh",
     "release:smoke": "bash scripts/release-smoke.sh",
     "dev:web": "bash scripts/dev-web.sh",
