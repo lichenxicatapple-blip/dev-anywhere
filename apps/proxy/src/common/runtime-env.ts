@@ -17,7 +17,7 @@ export const VALID_LOG_LEVELS = [
 ] as const;
 export type LogLevel = (typeof VALID_LOG_LEVELS)[number];
 
-export interface ProxyRuntimeEnv {
+interface ProxyRuntimeEnv {
   // RELAY_URL —— 覆盖 config.relays[name].url；用于一次性指向另一个 relay。
   relayUrl: string | undefined;
   // RELAY_PROXY_TOKEN —— 覆盖 config.relays[name].proxyToken。

@@ -1,6 +1,5 @@
 import type { Socket } from "node:net";
 import {
-  SessionState,
   encodeBinaryFrame,
   serializeControl,
   type AgentStatusPayload,

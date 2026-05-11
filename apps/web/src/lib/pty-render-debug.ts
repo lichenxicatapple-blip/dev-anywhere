@@ -25,7 +25,7 @@ interface ActiveTerminalHandle {
   describe: () => Record<string, unknown>;
 }
 
-export interface PtyDebugApi {
+interface PtyDebugApi {
   getRenderer(): PtyRendererKind;
   setRenderer(kind: PtyRendererKind): void;
   isTraceEnabled(): boolean;
@@ -149,7 +149,6 @@ const debugApi: PtyDebugApi = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __devAnywherePtyRenderDebug: PtyDebugApi | undefined;
 }
 

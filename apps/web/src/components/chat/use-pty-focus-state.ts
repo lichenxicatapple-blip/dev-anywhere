@@ -13,7 +13,7 @@ interface UsePtyFocusStateOptions {
   terminalRef: RefObject<Terminal | null>;
 }
 
-export interface PtyFocusState {
+interface PtyFocusState {
   ptyInputFocused: boolean;
   // 进入抑制窗口：blur 当前焦点元素并屏蔽该时间窗内的所有 focus 重入。
   suppressPtyFocus: () => void;

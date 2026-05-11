@@ -19,7 +19,7 @@ export interface PtyScrollDebugProbe {
   pendingContainerSyncRetry: boolean;
 }
 
-export interface PtyScrollDebugRefs {
+interface PtyScrollDebugRefs {
   container: HTMLElement;
   spacer: HTMLElement;
   host: HTMLElement;

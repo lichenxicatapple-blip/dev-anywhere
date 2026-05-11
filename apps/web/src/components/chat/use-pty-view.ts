@@ -65,7 +65,7 @@ interface FocusHandlers {
   onBlurCapture: (event: React.FocusEvent<HTMLDivElement>) => void;
 }
 
-export interface UsePtyViewResult {
+interface UsePtyViewResult {
   scrollState: PtyScrollState;
   isAtBottom: boolean;
   hasNewFramesWhileAway: boolean;
@@ -333,6 +333,18 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       scrollControllerRef.current = null;
       terminalControllerRef.current = null;
     };
+    // 故意只列 follow.handleAtBottomChange / .hasNewFramesWhileAwayRef /
+    // .setHasNewFramesWhileAway 三个子字段而不是整个 follow 对象。
+    //
+    // usePtyFollowState 每次都返回一个新对象字面量, follow 的 === 引用每次父级
+    // re-render 都不相等; 真把 follow 列进 deps 会让本 effect 每次父 render 都
+    // tear down + rebuild xterm Terminal / scroll-controller / resize-controller,
+    // 极贵且闪屏。
+    //
+    // 子字段反过来是 useCallback / RefObject / useState setter, React 保证引用
+    // 稳定, 列子字段才是真正的"effect 何时该重跑"。lint 规则机械化, 不识别这种
+    // sub-field stability 模式, 因此 disable。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sessionId,
     connected,

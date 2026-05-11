@@ -15,7 +15,7 @@ interface TouchGestureState {
 
 const TAP_MOVE_THRESHOLD_PX = 8;
 
-export interface PtyTouchGestureHandlers {
+interface PtyTouchGestureHandlers {
   onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void;
   onPointerMoveCapture: (event: PointerEvent<HTMLDivElement>) => void;
   onPointerUpCapture: (event: PointerEvent<HTMLDivElement>) => void;

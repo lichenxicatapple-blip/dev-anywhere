@@ -15,7 +15,7 @@ interface PtySignal {
   tool?: string;
 }
 
-export interface PtyTransitionInput {
+interface PtyTransitionInput {
   currentState: PtySemanticState;
   signal: PtySignal | null;
   // hosted-pty 在 JSON FSM 维度也维护 session.state；当外部 hook 已先把 session 推到
@@ -24,7 +24,7 @@ export interface PtyTransitionInput {
   sessionStateIsWaitingApproval?: boolean;
 }
 
-export interface PtyTransitionResult {
+interface PtyTransitionResult {
   // 决策后应当采用的 currentState 值；与 input.currentState 相同表示局部状态不变。
   nextState: PtySemanticState;
   // 是否要把这次决策作为一次 pty_state 事件外发（含 hosted 端的 sessionFsm 副作用）。

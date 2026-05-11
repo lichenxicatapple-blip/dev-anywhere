@@ -1,6 +1,6 @@
 // 写 inline style 之前对比上次值，相同则跳过——避免无意义的 DOM 写引起额外
 // reflow / paint。每个 writer 实例自带 cache，dispose 不显式清，跟随闭包 GC。
-export interface PtyStyleWriter {
+interface PtyStyleWriter {
   set: (el: HTMLElement, prop: string, value: string) => void;
 }
 

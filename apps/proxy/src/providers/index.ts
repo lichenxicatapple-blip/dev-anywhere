@@ -1,5 +1,4 @@
 export { CLAUDE_PROVIDER } from "./claude.js";
-export { buildClaudeArgs, filterClaudeEnvVars } from "./claude.js";
 export { CODEX_PROVIDER } from "./codex.js";
 export { detectAgentCliStatus } from "./availability.js";
 export type { ClaudePermissionMode } from "./claude.js";

@@ -2,14 +2,14 @@
 // PTY 和 JSON 视图各有独立的 trace 列与 entry shape，但 enable / append /
 // 缓冲淘汰 / 报表数值小工具是相同的；这里集中实现一份避免漂移。
 
-export interface ScrollTraceStoreOptions {
+interface ScrollTraceStoreOptions {
   windowKey: string;
   urlParam: string;
   storageKey: string;
   maxEntries?: number;
 }
 
-export interface ScrollTraceStore<T> {
+interface ScrollTraceStore<T> {
   isEnabled: () => boolean;
   append: (entry: T) => void;
   getAll: () => T[];

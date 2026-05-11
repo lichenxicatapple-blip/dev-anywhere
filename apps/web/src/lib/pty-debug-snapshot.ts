@@ -55,7 +55,7 @@ export interface PtyDebugSnapshot {
   };
 }
 
-export type PtyDebugSnapshotProvider = () => PtyDebugSnapshot | null;
+type PtyDebugSnapshotProvider = () => PtyDebugSnapshot | null;
 
 declare global {
   interface Window {
