@@ -91,6 +91,12 @@ export function attachPtyScrollController(
   let touchStartY: number | null = null;
   let touchReviewNotified = false;
   let lastSpacerUpdateAt: number | null = null;
+  // cellH=0 时 syncContainerScroll 早返回不能动 host/viewportY,但用户的 scrollTop 已经
+  // 改了。这一帧不补,host 会停在旧 ydisp 上,直到下一次显式 user scroll 才会再次走到
+  // syncContainerScroll。production blank-render 候选成因之一就是 WebGL canvas 那一帧
+  // measure 不到尺寸 → 这条路径漏掉一次 sync。用这个标志让 relayout / onRender 在 cellH
+  // 恢复后立刻补一次 sync,不依赖用户再滚一下。
+  let pendingContainerSyncRetry = false;
 
   const setUserHasVerticalScrollIntent = (value: boolean): void => {
     if (userHasVerticalScrollIntent === value) return;
@@ -316,7 +322,12 @@ export function attachPtyScrollController(
   const syncContainerScroll = (): void => {
     trace("container-sync:start");
     const { cellH } = getDims();
-    if (cellH === 0) return;
+    if (cellH === 0) {
+      // canvas 还没 measure 到 / WebGL context 暂失效。先记下,等 onRender / relayout 补。
+      pendingContainerSyncRetry = true;
+      return;
+    }
+    pendingContainerSyncRetry = false;
     const buffer = term.buffer.active;
     const { ydisp } = computeScrollTarget(container.scrollTop, {
       bufferLength: buffer.length,
@@ -411,8 +422,15 @@ export function attachPtyScrollController(
 
     const { cellH } = getDims();
     if (cellH !== 0) {
-      container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
-      positionHostAt(term.buffer.active.viewportY, cellH);
+      // 上一次 syncContainerScroll 因 cellH=0 漏掉了 user scroll 时,先按用户当前 scrollTop
+      // 把 viewportY 和 host 补齐——再走"按 viewportY 强制对齐 scrollTop"那条路,否则会把
+      // 用户的 scrollTop yank 回旧 viewportY 对应位置。
+      if (pendingContainerSyncRetry) {
+        syncContainerScroll();
+      } else {
+        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
+        positionHostAt(term.buffer.active.viewportY, cellH);
+      }
     }
     notifyScroll();
     trace("relayout:end");
@@ -421,6 +439,7 @@ export function attachPtyScrollController(
   const onRender = (): void => {
     trace("render");
     updateSpacer();
+    if (pendingContainerSyncRetry) syncContainerScroll();
     handlePendingNewFrame();
     notifyScroll();
   };
@@ -492,6 +511,7 @@ export function attachPtyScrollController(
       pendingProgrammaticScrollTop,
       touchScrollActive,
       lastSpacerUpdateAt,
+      pendingContainerSyncRetry,
     };
   };
 

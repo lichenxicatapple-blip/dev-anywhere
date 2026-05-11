@@ -834,6 +834,54 @@ describe("attachPtyScrollController", () => {
     expect(onIntentChange).not.toHaveBeenCalledWith(false);
   });
 
+  it("recovers host position after a transient cellH=0 measurement window", () => {
+    // 移动端 production blank-render 候选成因之一: WebGL canvas 在某帧 measure 不到尺寸
+    // (xterm-screen 暂时 0 高 / 还没 attach), getDims 返回 cellH=0。这帧用户若发生滚动,
+    // syncContainerScroll 早返回不动 host, host.style.top 卡在上一次有效值上, viewportY
+    // 也没跟着 scrollTop 走。下一次 cellH 恢复到正常 (onRender / relayout 收到通知) 时
+    // 必须把这次 stale 的 scroll 补上,否则 host 永远停在旧位置——视觉上就是上半截全黑。
+    const { container, spacer, host, xterm } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // 初始 cellH=400/20=20, scrollTop=200 → ydisp=10, host.top=200
+    container.scrollTop = 200;
+    container.dispatchEvent(new Event("scroll"));
+    expect(host.style.top).toBe("200px");
+
+    // 模拟"canvas 不可测"的瞬间: xterm-screen clientHeight 跌成 0 → cellH=0
+    defineSize(screen, { clientHeight: 0, clientWidth: 0 });
+    container.scrollTop = 600;
+    container.dispatchEvent(new Event("scroll"));
+    // 此时 syncContainerScroll 早返回, host.top 滞留在 stale 值 (=200px) ——这是 bug 的种子。
+    expect(host.style.top).toBe("200px");
+
+    // 测量恢复到正常 (canvas 完成首次绘制 / WebGL context 恢复)。
+    // onRender / relayout 触发时, controller 必须自检"用户 scrollTop 与 host 是否对得上",
+    // 不一致就补一遍 syncContainerScroll, 让 host 跳到 600 对应的 ydisp=30, host.top=600。
+    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
+    ctrl.relayout();
+
+    expect(host.style.top).toBe("600px");
+    void xterm;
+  });
+
+  // syncing.{internal,external} 泄漏审查记录: scrollToYdisp / scrollToBottom / onTermScroll
+  // 三处置位都被 try/finally 包住, 内部路径的 throw 都会复位 flag。模拟 throw 的回归测试
+  // 在 jsdom 下被作为 unhandled error 上报,污染下一个 test。这条 invariant 改由静态保留 +
+  // 上面的 cellH 恢复测试一起兜——前者保证 syncing 不卡, 后者保证 host 不卡。
+
   it("only observes the scroll container (not host) to avoid feedback loop", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
