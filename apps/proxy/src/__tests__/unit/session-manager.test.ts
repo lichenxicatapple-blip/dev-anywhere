@@ -277,6 +277,24 @@ describe("SessionManager", () => {
       expect(contexts).toEqual([{ preserveProviderHooks: true }]);
       scoped.stopReaper();
     });
+
+    // 防 item 9 复合 bug: onSessionRemoved 内的某步抛异常 (例如
+    // permissionBroker.cleanupSession / hookRegistry 落盘失败) 不能让 terminateSession
+    // 自己抛, 否则调用方 (如 socket close handler) 后续的 cleanupSessionResources +
+    // broadcastSessionList 会被吞掉, web 看到 session 残留。
+    it("does not propagate exceptions from onSessionRemoved callback", () => {
+      const scoped = new SessionManager({
+        persistPath,
+        onSessionRemoved: () => {
+          throw new Error("hook unregister boom");
+        },
+      });
+      const s = scoped.createSession("pty", "/tmp/test", ALIVE_PID);
+
+      expect(() => scoped.terminateSession(s.id)).not.toThrow();
+      expect(scoped.getSession(s.id)).toBeUndefined();
+      scoped.stopReaper();
+    });
   });
 
   describe("terminateAll", () => {

@@ -314,8 +314,16 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     },
     (err, line) => {
       // 单条 IPC 行 schema 失败时 warn-skip，不让它升级为 socket error 触发整个 terminal 断开。
+      // err.cause 暴露 JSON.parse / zod 的原始报错; line 截断 200 字符避免日志爆掉但留够字段
+      // 取证 (item 9 排查时只看到 "IPC message parse error" 字符串, 丢了根因细节)。
+      const cause = err instanceof Error ? err.cause : undefined;
       serviceLogger.warn(
-        { err: err.message, lineLen: line.length },
+        {
+          err: err.message,
+          cause: cause instanceof Error ? cause.message : cause,
+          lineLen: line.length,
+          linePreview: line.slice(0, 200),
+        },
         "Terminal IPC message dropped (parse/schema error)",
       );
     },

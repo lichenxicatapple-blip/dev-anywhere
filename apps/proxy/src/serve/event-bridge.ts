@@ -3,6 +3,7 @@ import {
   type AgentStatusPayload,
   type SessionState,
 } from "@dev-anywhere/shared";
+import { serviceLogger } from "../common/logger.js";
 import { disposeSeqCounter, getSeqCounterFor } from "../common/seq-counter.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
@@ -58,14 +59,38 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
   };
 
   const cleanupSessionResources = (sessionId: string): void => {
-    deps.controlHandlers.cleanup(sessionId);
-    deps.agentStatusRegistry.delete(sessionId);
-    disposeSeqCounter(sessionId);
+    // 每步独立 try/catch: 任意中间步骤抛异常都不能阻断最后的 broadcastSessionList。
+    // 一旦广播丢失, web 不知道 session 已删, 列表残留 + 后续给该 session 的请求全
+    // hang 到超时 (item 9 实测根因)。
+    const safe = (fn: () => void, step: string): void => {
+      try {
+        fn();
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        serviceLogger.warn(
+          {
+            sessionId,
+            step,
+            err: { message: error.message, stack: error.stack, cause: error.cause },
+          },
+          "Session cleanup step failed; continuing",
+        );
+      }
+    };
+    safe(() => deps.controlHandlers.cleanup(sessionId), "controlHandlers.cleanup");
+    safe(() => deps.agentStatusRegistry.delete(sessionId), "agentStatusRegistry.delete");
+    safe(() => disposeSeqCounter(sessionId), "disposeSeqCounter");
     // hosted PTY 走的是 onSessionClosed = cleanupSessionResources, 不经过 worker socket
     // close → onDisconnect → permissionBroker.cleanupSession 那条链, 否则 hosted 模式下
     // 待审批工具会在 child 退出后留在 broker 永不释放, 客户端的 approval card 永远卡住。
-    deps.permissionBroker.cleanupSession(sessionId, "Session closed");
-    broadcastSessionList(deps.relayConnection, deps.sessionManager);
+    safe(
+      () => deps.permissionBroker.cleanupSession(sessionId, "Session closed"),
+      "permissionBroker.cleanupSession",
+    );
+    safe(
+      () => broadcastSessionList(deps.relayConnection, deps.sessionManager),
+      "broadcastSessionList",
+    );
   };
 
   return {
