@@ -18,6 +18,8 @@ import {
 } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
+import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
+import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
@@ -209,6 +211,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     if (!host || !ws || !relay || !container || !spacer) return;
 
     let imageLinkDispose: (() => void) | null = null;
+    let fileDownloadLinkDispose: (() => void) | null = null;
     let ptyDebugDeregister: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
     let resizeDispose: (() => void) | null = null;
@@ -248,6 +251,16 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const xterm = term as Terminal;
         terminalRef.current = xterm;
         imageLinkDispose = registerImagePreviewLinkProvider(xterm, openImagePreview).dispose;
+        fileDownloadLinkDispose = registerFileDownloadLinkProvider(xterm, async (path) => {
+          const toastId = toast.loading(`下载 ${path} ...`);
+          try {
+            const result = await triggerFileDownload({ relay, sessionId, path });
+            if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
+            else toast.error(result.error, { id: toastId });
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+          }
+        }).dispose;
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
@@ -323,6 +336,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       scrollDispose?.();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
+      fileDownloadLinkDispose?.();
       ptyDebugDeregister?.();
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);

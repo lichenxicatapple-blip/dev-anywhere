@@ -324,6 +324,55 @@ const relayControlDefinitions = [
     },
     "proxy_to_client",
   ),
+  // 任意文件下载: 与 image_preview 形状对称, 只是 mimeType 不限定为图片;
+  // 单租户场景下 path 任意 (不受 previewRoots 限制), 由 proxy 端 size cap 兜底。
+  control(
+    "file_download_request",
+    {
+      ...RequestIdShape,
+      sessionId: IdSchema,
+      path: z.string().min(1),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "file_download_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: IdSchema,
+      success: z.boolean(),
+      path: z.string().optional(),
+      mimeType: z.string().optional(),
+      dataBase64: z.string().optional(),
+      size: z.number().int().nonnegative().optional(),
+    },
+    "proxy_to_client",
+  ),
+  // 任意文件上传: 复用 clipboard_image_upload 的形状, mimeType 放开 + fileName 必填,
+  // 由 proxy 端写入 session cwd 的 .dev-anywhere/uploads/ 子目录, 返回相对路径供 web 拼成 @path。
+  control(
+    "file_upload_request",
+    {
+      ...RequestIdShape,
+      sessionId: IdSchema,
+      mimeType: z.string().min(1),
+      dataBase64: z.string().min(1),
+      fileName: z.string().min(1),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "file_upload_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: IdSchema,
+      success: z.boolean(),
+      path: z.string().optional(),
+    },
+    "proxy_to_client",
+  ),
 
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览

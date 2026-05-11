@@ -60,6 +60,25 @@ type ImagePreviewResult = {
   dataBase64?: string;
   size?: number;
 } & RequestError;
+type FileDownloadResponse = Extract<RelayControlMessage, { type: "file_download_response" }>;
+type FileDownloadResult = {
+  sessionId: string;
+  success: boolean;
+  path?: string;
+  mimeType?: string;
+  dataBase64?: string;
+  size?: number;
+} & RequestError;
+type FileUploadResponse = Extract<RelayControlMessage, { type: "file_upload_response" }>;
+type FileUploadResult = {
+  sessionId: string;
+  success: boolean;
+  path?: string;
+} & RequestError;
+type FileUploadRequest = Omit<
+  Extract<RelayControlMessage, { type: "file_upload_request" }>,
+  "type" | "requestId" | "sessionId"
+>;
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -263,6 +282,71 @@ export class RelayClient {
       mimeType: resp.mimeType,
       dataBase64: resp.dataBase64,
       size: resp.size,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestFileDownload(
+    sessionId: string,
+    path: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<FileDownloadResult> {
+    const requestId = nextRequestId("file-download");
+    return this.waitForMessage(
+      (msg): msg is FileDownloadResponse =>
+        msg.type === "file_download_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "file_download_request",
+            requestId,
+            sessionId,
+            path,
+          }),
+        ),
+      "下载文件超时",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      success: resp.success,
+      path: resp.path,
+      mimeType: resp.mimeType,
+      dataBase64: resp.dataBase64,
+      size: resp.size,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  uploadFile(
+    sessionId: string,
+    file: FileUploadRequest,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<FileUploadResult> {
+    const requestId = nextRequestId("file-upload");
+    return this.waitForMessage(
+      (msg): msg is FileUploadResponse =>
+        msg.type === "file_upload_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "file_upload_request",
+            requestId,
+            sessionId,
+            ...file,
+          }),
+        ),
+      "上传文件超时",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      success: resp.success,
+      path: resp.path,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

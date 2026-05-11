@@ -8,6 +8,8 @@ import {
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { saveClipboardImageUpload } from "./clipboard-image-upload.js";
+import { loadFileDownload } from "./file-download.js";
+import { saveFileUpload } from "./file-upload.js";
 import { loadImagePreview } from "./image-preview.js";
 import { serializeRawPtyInput } from "./pty-input.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
@@ -179,5 +181,80 @@ export class RelayInputHandlers {
       }),
     );
     serviceLogger.info({ sessionId, success: result.success }, "Image preview handled");
+  }
+
+  onFileDownloadRequest(msg: ControlMessage<"file_download_request">): void {
+    const { sessionId, requestId, path } = msg;
+    if (!sessionId || !path) return;
+
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.deps.relayConnection.sendRaw(
+        serializeControl({
+          type: "file_download_response",
+          requestId,
+          sessionId,
+          success: false,
+          path,
+          error: "会话不存在",
+          errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+        }),
+      );
+      serviceLogger.warn({ sessionId }, "File download rejected: session not found");
+      return;
+    }
+
+    const result = loadFileDownload({ sessionId, path }, { cwd: session.cwd });
+
+    this.deps.relayConnection.sendRaw(
+      serializeControl({
+        type: "file_download_response",
+        requestId,
+        ...result,
+      }),
+    );
+    serviceLogger.info(
+      { sessionId, success: result.success, size: result.size },
+      "File download handled",
+    );
+  }
+
+  async onFileUploadRequest(msg: ControlMessage<"file_upload_request">): Promise<void> {
+    const { sessionId, requestId, mimeType, dataBase64, fileName } = msg;
+    if (!sessionId) return;
+
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.deps.relayConnection.sendRaw(
+        serializeControl({
+          type: "file_upload_response",
+          requestId,
+          sessionId,
+          success: false,
+          error: "会话不存在",
+          errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+        }),
+      );
+      serviceLogger.warn({ sessionId }, "File upload rejected: session not found");
+      return;
+    }
+
+    const result = await saveFileUpload(
+      { sessionId, mimeType, dataBase64, fileName },
+      { cwd: session.cwd },
+    );
+
+    this.deps.relayConnection.sendRaw(
+      serializeControl({
+        type: "file_upload_response",
+        requestId,
+        sessionId,
+        ...result,
+      }),
+    );
+    serviceLogger.info(
+      { sessionId, success: result.success, fileName },
+      "File upload handled",
+    );
   }
 }

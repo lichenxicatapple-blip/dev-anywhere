@@ -157,6 +157,12 @@ export class RelayRouter {
       case "image_preview_request":
         this.inputHandlers.onImagePreviewRequest(msg);
         return;
+      case "file_download_request":
+        this.inputHandlers.onFileDownloadRequest(msg);
+        return;
+      case "file_upload_request":
+        void this.inputHandlers.onFileUploadRequest(msg);
+        return;
       case "tool_approve":
         this.permissionHandlers.onToolApprove(msg);
         return;
