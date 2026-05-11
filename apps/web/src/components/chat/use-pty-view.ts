@@ -29,7 +29,7 @@ import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
-import { fileToUploadPayload } from "@/lib/file-upload-payload";
+import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
@@ -226,19 +226,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         toast.error("请先连接开发机");
         return;
       }
-      const toastId = toast.loading(`上传 ${file.name} ...`);
-      try {
-        const payload = await fileToUploadPayload(file);
-        const result = await relay.uploadFile(sessionId, payload);
-        if (!result.success || !result.path) {
-          toast.error(result.error ?? "上传失败", { id: toastId });
-          return;
-        }
-        sendRemoteInputRaw(sessionId, `@${result.path} `);
-        toast.success(`已上传 ${result.path}`, { id: toastId });
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
-      }
+      const path = await uploadFileAndShowToast({ relay, sessionId, file });
+      if (path) sendRemoteInputRaw(sessionId, `@${path} `);
     },
     [sessionId],
   );

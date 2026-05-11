@@ -16,7 +16,7 @@ import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { fileToUploadPayload } from "@/lib/file-upload-payload";
+import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { useAppStore } from "@/stores/app-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -207,30 +207,33 @@ export function InputBar({ sessionId }: InputBarProps) {
 
       const pasteSessionId = sessionId;
       setClipboardImageUploading(true);
-      const uploadToastId = toast.loading(
-        hasImage ? "图片上传中..." : `上传 ${otherFile?.name ?? "文件"} ...`,
-      );
       try {
         // pathMention: 上传成功后插入到输入框的 "@<path> " 文本片段
         let pathMention: string | null = null;
         if (hasImage) {
-          const result = await uploadClipboardImageFromPaste({
-            clipboardData: data,
-            relay,
-            sessionId: pasteSessionId,
-          });
-          toast.dismiss(uploadToastId);
-          if (!result) return;
-          pathMention = result.pathMention;
-        } else if (otherFile) {
-          const payload = await fileToUploadPayload(otherFile);
-          const result = await relay.uploadFile(pasteSessionId, payload);
-          if (!result.success || !result.path) {
-            toast.error(result.error ?? "上传失败", { id: uploadToastId });
+          const uploadToastId = toast.loading("图片上传中...");
+          try {
+            const result = await uploadClipboardImageFromPaste({
+              clipboardData: data,
+              relay,
+              sessionId: pasteSessionId,
+            });
+            toast.dismiss(uploadToastId);
+            if (!result) return;
+            pathMention = result.pathMention;
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
             return;
           }
-          pathMention = `@${result.path} `;
-          toast.dismiss(uploadToastId);
+        } else if (otherFile) {
+          const path = await uploadFileAndShowToast({
+            relay,
+            sessionId: pasteSessionId,
+            file: otherFile,
+            successLabel: null,
+          });
+          if (!path) return;
+          pathMention = `@${path} `;
         }
         if (!pathMention) return;
 
@@ -253,8 +256,6 @@ export function InputBar({ sessionId }: InputBarProps) {
         } else {
           setInputDraft(pasteSessionId, next.value);
         }
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
       } finally {
         setClipboardImageUploading(false);
       }
@@ -277,15 +278,16 @@ export function InputBar({ sessionId }: InputBarProps) {
       }
       const uploadSessionId = sessionId;
       setClipboardImageUploading(true);
-      const toastId = toast.loading(`上传 ${file.name} ...`);
       try {
-        const payload = await fileToUploadPayload(file);
-        const result = await relay.uploadFile(uploadSessionId, payload);
-        if (!result.success || !result.path) {
-          toast.error(result.error ?? "上传失败", { id: toastId });
-          return;
-        }
-        const pathMention = `@${result.path} `;
+        const path = await uploadFileAndShowToast({
+          relay,
+          sessionId: uploadSessionId,
+          file,
+          // 路径会作为 @<path> 出现在输入框, 不再额外弹成功 toast 打扰
+          successLabel: null,
+        });
+        if (!path) return;
+        const pathMention = `@${path} `;
         const activeTextarea =
           currentSessionIdRef.current === uploadSessionId ? textareaRef.current : null;
         const currentValue =
@@ -305,9 +307,6 @@ export function InputBar({ sessionId }: InputBarProps) {
         } else {
           setInputDraft(uploadSessionId, next.value);
         }
-        toast.dismiss(toastId);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
       } finally {
         setClipboardImageUploading(false);
       }

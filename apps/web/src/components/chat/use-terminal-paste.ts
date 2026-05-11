@@ -4,7 +4,7 @@ import type { Terminal } from "@xterm/xterm";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
-import { fileToUploadPayload } from "@/lib/file-upload-payload";
+import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 
@@ -48,11 +48,9 @@ export function useTerminalPaste({
         return;
       }
 
-      const uploadToastId = toast.loading(
-        hasImage ? "图片上传中..." : `上传 ${otherFile?.name ?? "文件"} ...`,
-      );
-      try {
-        if (hasImage) {
+      if (hasImage) {
+        const uploadToastId = toast.loading("图片上传中...");
+        try {
           const result = await uploadClipboardImageFromPaste({
             clipboardData: data,
             relay,
@@ -61,21 +59,17 @@ export function useTerminalPaste({
           toast.dismiss(uploadToastId);
           if (!result) return;
           sendRemoteInputRaw(sessionId, result.pathMention);
-        } else if (otherFile) {
-          const payload = await fileToUploadPayload(otherFile);
-          const result = await relay.uploadFile(sessionId, payload);
-          if (!result.success || !result.path) {
-            toast.error(result.error ?? "上传失败", { id: uploadToastId });
-            return;
-          }
-          sendRemoteInputRaw(sessionId, `@${result.path} `);
-          toast.success(`已上传 ${result.path}`, { id: uploadToastId });
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
+          return;
         }
-        onAfterPaste?.();
-        terminalRef.current?.focus();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
+      } else if (otherFile) {
+        const path = await uploadFileAndShowToast({ relay, sessionId, file: otherFile });
+        if (!path) return;
+        sendRemoteInputRaw(sessionId, `@${path} `);
       }
+      onAfterPaste?.();
+      terminalRef.current?.focus();
     },
     [sessionId, terminalRef, onAfterPaste],
   );

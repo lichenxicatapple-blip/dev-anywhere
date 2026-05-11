@@ -55,6 +55,9 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
   let dragging = false;
   let pointerX = 0;
   let pointerY = 0;
+  // 这里手写 raf loop 而不是用 lib/raf-scheduler.ts: scheduler 是 debounce-once 语义
+  // (多次 schedule 同一帧合并成一次), 这里需要的是连续帧 (tick 自己重排下一帧, 直到
+  // pointerup 才停)。两种语义混到一个 API 里只会让 scheduler 更复杂。
   let frame: number | null = null;
   let dispatchCount = 0;
   let dispatchTargetTag: DragSelectDebugSnapshot["dispatchTargetTag"] = "unknown";

@@ -24,7 +24,7 @@ import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
-import { fileToUploadPayload } from "@/lib/file-upload-payload";
+import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 
 interface ChatHeaderProps {
@@ -113,19 +113,8 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
       toast.error("请先连接开发机");
       return;
     }
-    const toastId = toast.loading(`上传 ${file.name} ...`);
-    try {
-      const payload = await fileToUploadPayload(file);
-      const result = await relay.uploadFile(sessionId, payload);
-      if (!result.success || !result.path) {
-        toast.error(result.error ?? "上传失败", { id: toastId });
-        return;
-      }
-      sendRemoteInputRaw(sessionId, `@${result.path} `);
-      toast.success(`已上传 ${result.path}`, { id: toastId });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
-    }
+    const path = await uploadFileAndShowToast({ relay, sessionId, file });
+    if (path) sendRemoteInputRaw(sessionId, `@${path} `);
   }
 
   return (

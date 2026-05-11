@@ -914,11 +914,11 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       initialUserHasVerticalScrollIntent: true,
     });
-    // attach 后 spacer.height = 400（一屏）。模拟 snapshot 重放让 buffer 长到 120 行：
-    // xterm 内部触发 onScroll，但此时 spacer.height 还是 attach 时的旧值 400px。
-    // 旧实现的 onTermScroll 在 updateSpacer 之前算 wasAtBottom=true（旧 scrollHeight 仍小），
-    // 然后 updateSpacer 把 spacer 长到 2400，但 wasAtBottom 已 stale，触发 scrollToBottom 把
-    // 用户拉回底部。
+    // attach 后 spacer.height=400(一屏)。模拟 snapshot 重放让 buffer 长到 120 行,
+    // xterm 内部触发 onScroll, 此时 spacer.height 仍是 attach 时的 400px, scrollHeight
+    // 还没反映新 buffer 长度。invariant: onTermScroll 必须先 updateSpacer 再算
+    // wasAtBottom, 否则用 stale scrollHeight 算出 atBottom=true 会触发 scrollToBottom
+    // 把用户拉回底部, 抹掉用户已存在的 vertical scroll intent。
     terminal.buffer.active.length = 120;
     container.scrollTop = 0;
     const scrollTopBefore = container.scrollTop;
@@ -928,10 +928,10 @@ describe("attachPtyScrollController", () => {
   });
 
   it("preserves intent across reconnect when an empty terminal triggers relayout", () => {
-    // 复现 websocket-chaos:184 的根因：reconnect 时 scroll-controller 被重建，
-    // 新 buffer 短暂为空 → 几何 atBottom=true，但用户 intent 应当跨周期保留。
-    // ResizeObserver 触发首次 relayout 时 pendingFrame=none，旧实现因 wasAtBottom=true
-    // 触发 scrollToBottom 清掉了 intent。修复后该分支只看 !intent 不再看 wasAtBottom。
+    // 复现 websocket-chaos:184 的根因: reconnect 时 scroll-controller 被重建,
+    // 新 buffer 短暂为空 → 几何 atBottom=true, 但用户 intent 必须跨周期保留。
+    // invariant: empty-buffer + relayout 路径 (pendingFrame=none) 不能调 scrollToBottom
+    // 抹掉 intent — 该分支只看 !intent, 不看 wasAtBottom。
     const { container, spacer, host } = createDom();
     Object.defineProperty(container, "scrollHeight", {
       configurable: true,
