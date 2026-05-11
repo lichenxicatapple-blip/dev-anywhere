@@ -12,6 +12,10 @@ import type { RelayChaos } from "../chaos.js";
 // binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
 const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
 
+// JSON 控制消息最大允许长度（1MB）。控制消息典型 < 64KB（含 session_history_response 等
+// 大消息），1MB 给协议演进留余量, 同时挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
+const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
+
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
   isAlive: boolean;
@@ -119,6 +123,14 @@ export function handleProxyConnection(
       return;
     }
 
+    if (data.length > MAX_JSON_MESSAGE_SIZE) {
+      logger.warn(
+        { size: data.length, proxyId: proxyWs.proxyId },
+        "JSON message rejected: exceeds max size",
+      );
+      return;
+    }
+
     const raw = data.toString();
     const result = parseMessage(raw);
 
@@ -221,8 +233,9 @@ export function handleProxyConnection(
     }
   });
 
-  proxyWs.on("close", () => {
+  proxyWs.on("close", (code: number, reason: Buffer) => {
     if (!proxyWs.proxyId) return;
+    const closeMeta = { code, reason: reason.toString() || undefined };
     // 同 proxyId 重连场景：registerProxy 会 terminate 旧 ws、把 registry 指向新 ws，
     // 旧 ws 的 close 异步触发到达这里时，registry.getProxy(proxyId) 已是新 ws 实例。
     // 此时若仍执行 transitionProxy("online", "offline")，会把新连接的状态翻回离线并广播一次假离线。
@@ -230,7 +243,7 @@ export function handleProxyConnection(
     const current = registry.getProxy(proxyWs.proxyId);
     if (current && current !== proxyWs) {
       logger.info(
-        { proxyId: proxyWs.proxyId },
+        { proxyId: proxyWs.proxyId, ...closeMeta },
         "Old proxy ws closed after being superseded by reconnect, skipping offline transition",
       );
       return;
@@ -238,11 +251,16 @@ export function handleProxyConnection(
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");
-    } catch {
-      // proxy 已被 proxy_disconnect 清理或已离线，跳过
+    } catch (err) {
+      // 期望路径: proxy_disconnect 已清理 entry, 或 entry 已 offline——transitionProxy 抛
+      // "Proxy not found" / state mismatch。debug 级别记录 err 以便真有 FSM bug 时能定位。
+      logger.debug(
+        { proxyId: proxyWs.proxyId, err: String(err) },
+        "transitionProxy on close skipped",
+      );
     }
     logger.info(
-      { proxyId: proxyWs.proxyId },
+      { proxyId: proxyWs.proxyId, ...closeMeta },
       "Proxy disconnected, state preserved for reconnect",
     );
     broadcastProxyList(registry, chaos);

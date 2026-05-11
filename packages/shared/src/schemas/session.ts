@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
 import { ptySemanticStateValues } from "../constants/pty.js";
+import { IdSchema } from "./id.js";
 
 export const sessionStateValues = [
   "idle",
@@ -21,7 +22,7 @@ const agentStatusPhaseValues = [
 // 会话信息，用于会话列表展示
 // lastActive: 最近一次状态变更或运行时活动时间戳 (ms), 用于列表"最近活动 N 分钟前"显示, 可选
 export const SessionInfoSchema = z.object({
-  sessionId: z.string(),
+  sessionId: IdSchema,
   name: z.string().optional(),
   state: z.enum(sessionStateValues),
   mode: z.enum(sessionModeValues).optional(),
@@ -53,14 +54,14 @@ export type SessionListPayload = z.infer<typeof SessionListPayloadSchema>;
 
 // 切换会话
 export const SessionSwitchPayloadSchema = z.object({
-  sessionId: z.string(),
+  sessionId: IdSchema,
 });
 
 export type SessionSwitchPayload = z.infer<typeof SessionSwitchPayloadSchema>;
 
 // 终止会话
 export const SessionTerminatePayloadSchema = z.object({
-  sessionId: z.string(),
+  sessionId: IdSchema,
 });
 
 export type SessionTerminatePayload = z.infer<typeof SessionTerminatePayloadSchema>;
@@ -68,7 +69,7 @@ export type SessionTerminatePayload = z.infer<typeof SessionTerminatePayloadSche
 // 会话状态变更
 // lastActive: 触发本次状态迁移或活动刷新的时间戳 (ms)，用于列表相对时间显示。
 export const SessionStatusPayloadSchema = z.object({
-  sessionId: z.string(),
+  sessionId: IdSchema,
   state: z.enum(sessionStateValues),
   lastActive: z.number(),
 });
@@ -92,14 +93,14 @@ export const AgentStatusPayloadSchema = z.object({
   toolInput: z.record(z.string(), z.unknown()).optional(),
   permissionRequest: z
     .object({
-      requestId: z.string(),
+      requestId: IdSchema,
       toolName: z.string(),
       input: z.record(z.string(), z.unknown()),
     })
     .optional(),
   permissionResolution: z
     .object({
-      requestId: z.string(),
+      requestId: IdSchema,
       outcome: z.enum(["allow", "deny"]),
     })
     .optional(),

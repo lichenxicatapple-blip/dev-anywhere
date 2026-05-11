@@ -83,7 +83,6 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId,
-          sessionId: "",
           error: cwdError.message,
           errorCode: cwdError.code,
         }),
@@ -106,7 +105,6 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId,
-          sessionId: "",
           errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error:
             provider === "codex"
@@ -217,7 +215,6 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId: msg.requestId,
-          sessionId: "",
           errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
           error: "Unsupported provider for PTY session.",
         }),
@@ -271,7 +268,6 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId: msg.requestId,
-          sessionId: "",
           errorCode: ControlErrorCode.PROCESS_START_FAILED,
           error,
         }),

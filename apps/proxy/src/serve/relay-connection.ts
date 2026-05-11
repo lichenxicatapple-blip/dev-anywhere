@@ -1,12 +1,12 @@
 import WebSocket from "ws";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import { serializeControl, type MessageEnvelope } from "@dev-anywhere/shared";
+import { createFSM, serializeControl, type MessageEnvelope } from "@dev-anywhere/shared";
+import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
-import { createFSM } from "../common/state-machine.js";
 import { MemoryMessageQueue } from "./message-queue.js";
 
 // 默认 proxyId 存储路径
@@ -18,6 +18,9 @@ const MAX_BACKOFF_MS = 30000;
 const BASE_BACKOFF_MS = 1000;
 // 消息队列上限
 const MAX_QUEUE_SIZE = 10000;
+// 来自 relay 的 JSON 控制消息最大长度（1MB）。挡住恶意/被攻陷的 relay 推超长 JSON 在
+// JSON.parse 前就 OOM proxy daemon。
+const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
 
 export const RelayConnectionState = {
   DISCONNECTED: "disconnected",
@@ -110,11 +113,7 @@ export class RelayConnection extends EventEmitter {
     }
 
     const id = nanoid(21);
-    const dir = dirname(idPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(idPath, id, "utf-8");
+    atomicWriteFileSync(idPath, id, { ensureDir: true });
     return id;
   }
 
@@ -148,7 +147,15 @@ export class RelayConnection extends EventEmitter {
       });
 
       this.ws.on("message", (data) => {
-        const raw = data.toString();
+        const buf = data as Buffer;
+        if (buf.length > MAX_JSON_MESSAGE_SIZE) {
+          serviceLogger.warn(
+            { size: buf.length },
+            "JSON message from relay rejected: exceeds max size",
+          );
+          return;
+        }
+        const raw = buf.toString();
         let msg: Record<string, unknown>;
         try {
           msg = JSON.parse(raw) as Record<string, unknown>;
@@ -167,15 +174,16 @@ export class RelayConnection extends EventEmitter {
         this.emit("message", msg);
       });
 
-      this.ws.on("close", () => {
+      this.ws.on("close", (code: number, reason: Buffer) => {
         this.ws = null;
+        const closeMeta = { code, reason: reason.toString() || undefined };
         if (this.fsm.current() !== RelayConnectionState.CLOSED) {
           this.fsm.tryTransitionTo(RelayConnectionState.WAITING_RECONNECT);
-          serviceLogger.info("Relay connection closed unexpectedly");
+          serviceLogger.info(closeMeta, "Relay connection closed unexpectedly");
           this.emit("disconnected");
           this.scheduleReconnect();
         } else {
-          serviceLogger.info("Relay connection closed");
+          serviceLogger.info(closeMeta, "Relay connection closed");
         }
       });
 

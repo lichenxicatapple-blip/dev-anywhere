@@ -43,6 +43,9 @@ vi.mock("node:fs", async (importOriginal) => {
     readFileSync: original.readFileSync,
     writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    // atomicWriteFileSync 写 tmp 后 rename, 测试里 writeFileSync 已 stub 成 no-op,
+    // rename 找不到源文件会抛 ENOENT, 这里也 stub 成 no-op。
+    renameSync: vi.fn(),
   };
 });
 

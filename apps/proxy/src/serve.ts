@@ -188,6 +188,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     agentStatusRegistry,
     controlHandlers,
+    permissionBroker,
   });
   const jsonObserver = new JsonObserver({
     changeSessionState: eventBridge.changeSessionState,
@@ -274,10 +275,12 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   relayConnection.on("connected", () => {
     // fire-and-forget 但显式吞掉 rejection，否则 reinitializeOnReconnect 内部任意 IO 异常
     // 或 schema 校验错误会变 unhandledRejection，Node 默认终止整个 serve 进程。
+    // 失败影响面: agent-cli-status / proxy_register_response 后的状态推送丢失, client 在
+    // reconnect 后看到陈旧状态。属于服务降级而非健康降级, 用 error 级别让 ops 能接到告警。
     void controlHandlers.reinitializeOnReconnect().catch((err: unknown) => {
-      serviceLogger.warn(
-        { error: err instanceof Error ? err.message : String(err) },
-        "reinitializeOnReconnect failed",
+      serviceLogger.error(
+        { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined },
+        "reinitializeOnReconnect failed: client may see stale state until next manual sync",
       );
     });
     broadcastBridgeStatus(true);

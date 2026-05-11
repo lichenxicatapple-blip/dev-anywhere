@@ -11,7 +11,7 @@ import {
 } from "../common/stream-json-schema.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
-import { SeqCounter } from "../common/seq-counter.js";
+import { getSeqCounterFor } from "../common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
@@ -426,7 +426,7 @@ export class WorkerRegistry {
     );
     this.deps.jsonObserver.onApprovalRequested(sessionId);
     try {
-      const approvalSeq = this.deps.nextSeq?.(sessionId) ?? new SeqCounter(sessionId).next();
+      const approvalSeq = this.deps.nextSeq?.(sessionId) ?? getSeqCounterFor(sessionId).next();
       const envelope = buildMessage(
         "tool_use_request",
         sessionId,

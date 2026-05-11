@@ -113,3 +113,6 @@ export {
   binaryFrameHeaderLength,
 } from "./binary-frame.js";
 export type { DecodedBinaryFrame } from "./binary-frame.js";
+
+// FSM helper (createFSM / defineFSM)
+export { createFSM, defineFSM } from "./state-machine.js";

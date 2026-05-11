@@ -7,7 +7,7 @@ const DEFAULT_DATA_DIR = `${homedir()}/.dev-anywhere/relay-data`;
 const DEFAULT_PORT = 3100;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 
-export interface RelayRuntimeEnv {
+interface RelayRuntimeEnv {
   port: number;
   // DATA_DIR 显式置 "" 表示关闭持久化目录；未设置时回落到 ~/.dev-anywhere/relay-data。
   dataDir: string | undefined;
@@ -15,6 +15,10 @@ export interface RelayRuntimeEnv {
   // 任一 token 未设置（或空串）→ 对应端点关闭鉴权（仅 dev 可用）。
   proxyToken: string | undefined;
   clientToken: string | undefined;
+  // ALLOWED_ORIGINS=https://app.example.com,https://www.example.com — 逗号分隔。
+  // 空 / 未设置 = 不校验 (向后兼容; 本地 dev / Capacitor / file:// 等场景需要)。
+  // 公网部署务必设置, 防 CSWSH。
+  allowedOrigins: string[];
   logLevel: string;
   chaos: RelayChaosOptions;
 }
@@ -53,6 +57,10 @@ export function loadRelayRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Relay
     ),
     proxyToken: nonEmpty(env.RELAY_PROXY_TOKEN),
     clientToken: nonEmpty(env.RELAY_CLIENT_TOKEN),
+    allowedOrigins: (env.ALLOWED_ORIGINS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
     logLevel: env.LOG_LEVEL ?? "info",
     chaos: parseRelayChaosFromEnv(env),
   };

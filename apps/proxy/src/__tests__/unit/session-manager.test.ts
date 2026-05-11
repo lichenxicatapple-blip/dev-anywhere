@@ -354,9 +354,14 @@ describe("SessionManager", () => {
       fresh.stopReaper();
     });
 
-    it("throws on corrupt persistence file", () => {
+    it("fails soft on corrupt persistence file (warn + empty state, daemon still boots)", () => {
+      // 抛错路径会让 proxy daemon 起不来, 用户必须手删文件才能恢复——不友好。
+      // fail-soft: 警告 + 退化为空 session 列表, 还活着的 worker 通过 reconnectAll 走
+      // worker.sock 探活补回, 仅丢失元数据 (name / cwd 等)。
       writeFileSync(persistPath, "not-valid-json{{{", "utf-8");
-      expect(() => new SessionManager({ persistPath })).toThrow();
+      const mgr = new SessionManager({ persistPath });
+      expect(mgr.listSessions()).toEqual([]);
+      mgr.stopReaper();
     });
 
     it("uses atomic write (temp + rename)", () => {

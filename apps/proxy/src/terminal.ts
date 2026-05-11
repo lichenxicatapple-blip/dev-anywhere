@@ -11,7 +11,7 @@ const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { extractOscSequences, extractOscSignals } from "./common/osc-extractor.js";
-import type { PtySemanticState } from "@dev-anywhere/shared";
+import { createFSM, type PtySemanticState } from "@dev-anywhere/shared";
 import { decidePtySemanticTransition } from "./common/pty-semantic-machine.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
@@ -23,7 +23,6 @@ import {
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
-import { createFSM } from "./common/state-machine.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,

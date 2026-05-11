@@ -21,7 +21,7 @@ interface PendingPermission extends PermissionRequest {
   deliveredAt?: number;
 }
 
-export type PendingPermissionView = Omit<PendingPermission, "resolve">;
+type PendingPermissionView = Omit<PendingPermission, "resolve">;
 
 const DUPLICATE_DECISION: PermissionDecision = {
   behavior: "deny",

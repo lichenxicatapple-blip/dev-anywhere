@@ -4,16 +4,18 @@ import type { RelayControlMessage } from "../schemas/relay-control.js";
 
 // 构建经过 schema 验证的消息信封
 // seq 由调用方提供，必须与 EventStore per-session seq 一致，保证 proxy 和 relay 对账可靠
+// sessionId 仅 session-scoped envelope 携带; 全局广播 (session_list / heartbeat / auth /
+// sync_*) 传 null 或省略, 否则要求合法 ID。
 export function buildMessage<T extends MessageEnvelope["type"]>(
   type: T,
-  sessionId: string,
+  sessionId: string | null,
   seq: number,
   payload: Extract<MessageEnvelope, { type: T }>["payload"],
   source: "proxy" | "client",
 ): Extract<MessageEnvelope, { type: T }> {
   const envelope = {
     seq,
-    sessionId,
+    ...(sessionId !== null ? { sessionId } : {}),
     type,
     payload,
     timestamp: Date.now(),

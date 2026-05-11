@@ -48,6 +48,7 @@ const relay = createRelayServer({
   heartbeatInterval: env.heartbeatInterval,
   proxyToken: env.proxyToken,
   clientToken: env.clientToken,
+  allowedOrigins: env.allowedOrigins,
   chaos: env.chaos,
 });
 

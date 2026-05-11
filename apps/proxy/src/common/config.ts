@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import { CONFIG_PATH, PROFILE_NAME, defaultHookPortForProfile } from "./paths.js";
@@ -247,5 +248,6 @@ export function saveAgentCliPath(provider: ProviderId, path: string): void {
   const fromFile = readConfigFile();
   fromFile.agentCli = updateAgentCliConfig(fromFile.agentCli ?? {}, provider, normalized);
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(fromFile, null, 2)}\n`, "utf-8");
+  // mode 0o600: config 文件含 relays[].proxyToken 等敏感字段, 不能让其他用户读到
+  atomicWriteFileSync(CONFIG_PATH, `${JSON.stringify(fromFile, null, 2)}\n`, { mode: 0o600 });
 }

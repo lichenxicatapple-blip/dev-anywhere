@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createFSM, defineFSM } from "../../common/state-machine.js";
+import { createFSM, defineFSM } from "@dev-anywhere/shared";
 
 // 测试用的小状态集：start → middle → end
 const TRANSITIONS = {

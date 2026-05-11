@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { createFSM } from "../common/state-machine.js";
+import { createFSM } from "@dev-anywhere/shared";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 
 // terminal 进程生命周期状态

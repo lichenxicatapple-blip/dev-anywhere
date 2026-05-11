@@ -84,10 +84,14 @@ describe("SeqCounter integration smoke test", () => {
     expect(counter.current()).toBe(0);
     expect(counter.next()).toBe(1);
     expect(counter.next()).toBe(2);
+    counter.flush();
 
+    // 重启续号: reservation batch 让 restart 后 seq 跳到上次预留的高水位 (>= 上次最高 next 值)。
+    // 不再保证 contiguous——已用未持久化的区间会作废, 防 wire collision。
     const counter2 = new SeqCounter("test-session", tmpDir);
-    expect(counter2.current()).toBe(2);
-    expect(counter2.next()).toBe(3);
+    expect(counter2.current()).toBeGreaterThanOrEqual(2);
+    const before = counter2.current();
+    expect(counter2.next()).toBe(before + 1);
 
     rmSync(tmpDir, { recursive: true, force: true });
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createFSM } from "../../common/state-machine.js";
+import { createFSM } from "@dev-anywhere/shared";
 import { createExitHandler, TerminalState, TERMINAL_TRANSITIONS } from "../../terminal/state.js";
 import { createSocketFake } from "./test-fakes.js";
 

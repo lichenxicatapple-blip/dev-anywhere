@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdSchema } from "./id.js";
 import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } from "./session.js";
 import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
@@ -11,7 +12,7 @@ import {
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
-  proxyId: z.string(),
+  proxyId: IdSchema,
   name: z.string().optional(),
   online: z.boolean(),
   sessions: z.array(z.string()).optional(),
@@ -67,7 +68,7 @@ const SessionHistoryMessageSchema = z.object({
 
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
-const RequestIdShape = { requestId: z.string().min(1).optional() };
+const RequestIdShape = { requestId: IdSchema.optional() };
 const ControlErrorCodeSchema = z.enum(
   Object.values(ControlErrorCode) as [ControlErrorCode, ...ControlErrorCode[]],
 );
@@ -112,7 +113,7 @@ function control<T extends string, S extends z.ZodRawShape>(
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 const relayControlDefinitions = [
   control("proxy_register", {
-    proxyId: z.string().min(1),
+    proxyId: IdSchema,
     name: z.string().optional(),
   }),
   control("proxy_register_response", {
@@ -123,11 +124,11 @@ const relayControlDefinitions = [
     ...RequestIdShape,
     proxies: z.array(ProxyInfoSchema),
   }),
-  control("proxy_select", { ...RequestIdShape, proxyId: z.string().min(1) }),
+  control("proxy_select", { ...RequestIdShape, proxyId: IdSchema }),
   control("proxy_select_response", {
     ...RequestIdShape,
     success: z.boolean(),
-    proxyId: z.string().optional(),
+    proxyId: IdSchema.optional(),
     ...RequestErrorShape,
   }),
   control("relay_error", {
@@ -137,33 +138,33 @@ const relayControlDefinitions = [
 
   // 客户端注册协议
   control("client_register", {
-    clientId: z.string().min(1),
+    clientId: IdSchema,
   }),
   control("client_register_response", {
     status: z.enum(["restored", "proxy_offline", "new"]),
-    proxyId: z.string().optional(),
+    proxyId: IdSchema.optional(),
   }),
 
   // Proxy 离线通知
   control("proxy_offline", {
-    proxyId: z.string(),
+    proxyId: IdSchema,
   }),
 
   // Proxy 主动断开，relay 立即清理资源
   control("proxy_disconnect", {
-    proxyId: z.string().min(1),
+    proxyId: IdSchema,
   }),
 
   // Proxy 重连后通知 client 恢复
   control("proxy_online", {
-    proxyId: z.string().min(1),
+    proxyId: IdSchema,
   }),
 
   // 目录列表请求与响应
   control(
     "dir_list_request",
     {
-      proxyId: z.string().min(1).optional(),
+      proxyId: IdSchema.optional(),
       ...RequestIdShape,
       path: z.string(),
     },
@@ -208,7 +209,7 @@ const relayControlDefinitions = [
     {
       mode: z.enum(["default", "auto_accept", "plan"]),
       // sessionId 可选：传入时 proxy 按该会话的 mode 分叉（PTY 发 Tab ANSI），未传走全局日志行为
-      sessionId: z.string().optional(),
+      sessionId: IdSchema.optional(),
     },
     "client_to_proxy",
   ),
@@ -224,43 +225,43 @@ const relayControlDefinitions = [
   // PTY 语义状态，从 Envelope 迁移到 Control 层
   control(
     "pty_state",
-    { sessionId: z.string(), payload: PtyStatePayloadSchema },
+    { sessionId: IdSchema, payload: PtyStatePayloadSchema },
     "proxy_to_client",
   ),
 
   // Provider 语义状态，来自 Claude/Codex hook 等结构化事件，不从 PTY 字节推断
   control(
     "agent_status",
-    { sessionId: z.string(), payload: AgentStatusPayloadSchema },
+    { sessionId: IdSchema, payload: AgentStatusPayloadSchema },
     "proxy_to_client",
   ),
 
   // 终端标题变化，proxy -> client
-  control("terminal_title", { sessionId: z.string(), title: z.string() }, "proxy_to_client"),
+  control("terminal_title", { sessionId: IdSchema, title: z.string() }, "proxy_to_client"),
 
   // 终端尺寸变化，proxy -> client
   control(
     "terminal_resize",
-    { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
+    { sessionId: IdSchema, cols: z.number().int().positive(), rows: z.number().int().positive() },
     "proxy_to_client",
   ),
   control(
     "terminal_resize_request",
-    { sessionId: z.string(), cols: z.number().int().positive(), rows: z.number().int().positive() },
+    { sessionId: IdSchema, cols: z.number().int().positive(), rows: z.number().int().positive() },
     "client_to_proxy",
   ),
 
   // 远程终止 JSON 会话，client -> proxy
-  control("session_terminate", { sessionId: z.string() }, "client_to_proxy"),
+  control("session_terminate", { sessionId: IdSchema }, "client_to_proxy"),
 
   // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
-  control("session_worker_abort", { sessionId: z.string() }, "client_to_proxy"),
+  control("session_worker_abort", { sessionId: IdSchema }, "client_to_proxy"),
 
   // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件
   control(
     "turn_result",
     {
-      sessionId: z.string(),
+      sessionId: IdSchema,
       success: z.boolean(),
       isError: z.boolean(),
       // stream-json result.result 是本轮最终文本。assistant_message 流丢失或 CLI 未发增量时，
@@ -273,14 +274,14 @@ const relayControlDefinitions = [
   // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
   control(
     "remote_input_raw",
-    { sessionId: z.string().min(1), data: z.string() },
+    { sessionId: IdSchema, data: z.string() },
     "client_to_proxy",
   ),
   control(
     "clipboard_image_upload",
     {
       ...RequestIdShape,
-      sessionId: z.string().min(1),
+      sessionId: IdSchema,
       mimeType: ClipboardImageMimeTypeSchema,
       dataBase64: z.string().min(1),
       fileName: z.string().optional(),
@@ -292,7 +293,7 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       ...RequestErrorShape,
-      sessionId: z.string().min(1),
+      sessionId: IdSchema,
       success: z.boolean(),
       // success=false 时 proxy 没有有效 path 可填；保持 optional 以避免占位空字符串通过校验。
       path: z.string().optional(),
@@ -303,7 +304,7 @@ const relayControlDefinitions = [
     "image_preview_request",
     {
       ...RequestIdShape,
-      sessionId: z.string().min(1),
+      sessionId: IdSchema,
       path: z.string().min(1),
     },
     "client_to_proxy",
@@ -313,7 +314,7 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       ...RequestErrorShape,
-      sessionId: z.string().min(1),
+      sessionId: IdSchema,
       success: z.boolean(),
       // 同 clipboard_image_upload_response：失败时 proxy 不一定有路径。
       path: z.string().optional(),
@@ -368,7 +369,8 @@ const relayControlDefinitions = [
     "session_create_response",
     {
       ...RequestIdShape,
-      sessionId: z.string(),
+      // 失败路径只送 errorCode/error, sessionId 此时无语义。成功路径才有 id。
+      sessionId: IdSchema.optional(),
       mode: z.enum(sessionModeValues).optional(),
       provider: z.enum(providerValues).optional(),
       ptyOwner: z.enum(ptyOwnerValues).optional(),
@@ -382,7 +384,7 @@ const relayControlDefinitions = [
     "session_messages_request",
     {
       ...RequestIdShape,
-      sessionId: z.string(),
+      sessionId: IdSchema,
       limit: z.number().int().min(1).max(200).optional(),
       before: z.string().optional(),
     },
@@ -392,7 +394,7 @@ const relayControlDefinitions = [
   // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
   control(
     "session_resources_request",
-    { ...RequestIdShape, sessionId: z.string() },
+    { ...RequestIdShape, sessionId: IdSchema },
     "client_to_proxy",
   ),
   control(
@@ -400,7 +402,7 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       ...RequestErrorShape,
-      sessionId: z.string(),
+      sessionId: IdSchema,
       commands: z.array(CommandEntrySchema),
       groups: z.array(FileTreeGroupSchema),
     },
@@ -410,14 +412,14 @@ const relayControlDefinitions = [
   // 客户端请求当前 provider 语义状态；不经 relay 缓存，由 proxy 返回当前值
   control(
     "agent_status_request",
-    { ...RequestIdShape, sessionId: z.string().optional() },
+    { ...RequestIdShape, sessionId: IdSchema.optional() },
     "client_to_proxy",
   ),
   control(
     "agent_status_response",
     {
       ...RequestIdShape,
-      statuses: z.array(z.object({ sessionId: z.string(), payload: AgentStatusPayloadSchema })),
+      statuses: z.array(z.object({ sessionId: IdSchema, payload: AgentStatusPayloadSchema })),
     },
     "proxy_to_client",
   ),
@@ -425,17 +427,17 @@ const relayControlDefinitions = [
   // 客户端确认已收到审批请求；proxy 只记录送达状态，不把它当成用户决策
   control(
     "permission_request_delivered",
-    { sessionId: z.string(), requestId: z.string() },
+    { sessionId: IdSchema, requestId: IdSchema },
     "client_to_proxy",
   ),
   control(
     "tool_approve",
-    { sessionId: z.string(), payload: ToolApprovePayloadSchema },
+    { sessionId: IdSchema, payload: ToolApprovePayloadSchema },
     "client_to_proxy",
   ),
   control(
     "tool_deny",
-    { sessionId: z.string(), payload: ToolDenyPayloadSchema },
+    { sessionId: IdSchema, payload: ToolDenyPayloadSchema },
     "client_to_proxy",
   ),
 
@@ -443,8 +445,8 @@ const relayControlDefinitions = [
   control(
     "permission_decision_result",
     {
-      sessionId: z.string(),
-      requestId: z.string(),
+      sessionId: IdSchema,
+      requestId: IdSchema,
       outcome: z.enum(["allow", "deny"]),
       delivered: z.boolean(),
       message: z.string().optional(),
@@ -456,10 +458,10 @@ const relayControlDefinitions = [
   control(
     "pending_approvals_push",
     {
-      sessionId: z.string(),
+      sessionId: IdSchema,
       approvals: z.array(
         z.object({
-          requestId: z.string(),
+          requestId: IdSchema,
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
         }),
@@ -473,7 +475,7 @@ const relayControlDefinitions = [
     "session_history_messages",
     {
       ...RequestIdShape,
-      sessionId: z.string(),
+      sessionId: IdSchema,
       before: z.string().optional(),
       messages: z.array(SessionHistoryMessageSchema),
       hasMore: z.boolean().optional(),
@@ -499,7 +501,7 @@ const relayControlDefinitions = [
   // PTY 会话订阅，client -> proxy，触发 terminal serialize() 返回当前状态
   control(
     "session_subscribe",
-    { sessionId: z.string(), requestId: z.string().optional() },
+    { sessionId: IdSchema, requestId: IdSchema.optional() },
     "client_to_proxy",
   ),
 
@@ -507,12 +509,12 @@ const relayControlDefinitions = [
   control(
     "session_snapshot",
     {
-      sessionId: z.string(),
+      sessionId: IdSchema,
       cols: z.number().int().positive(),
       rows: z.number().int().positive(),
       data: z.string(),
       outputSeq: z.number().int().nonnegative(),
-      requestId: z.string().optional(),
+      requestId: IdSchema.optional(),
     },
     "proxy_to_client",
   ),

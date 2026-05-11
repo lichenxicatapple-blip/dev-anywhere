@@ -1,9 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 import { nanoid } from "nanoid";
-import { SessionState } from "@dev-anywhere/shared";
+import { defineFSM, SessionState } from "@dev-anywhere/shared";
+import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
-import { defineFSM } from "../common/state-machine.js";
 import type { ProviderId } from "../providers/index.js";
 
 export interface SessionInfo {
@@ -293,8 +292,6 @@ export class SessionManager {
   }
 
   private save(): void {
-    const dir = dirname(this.persistPath);
-    mkdirSync(dir, { recursive: true });
     // state 是对 claude 的观察值，进程死后无意义，不落盘。磁盘上只留 identity（id/mode/cwd/pid/...）。
     const persisted = Array.from(this.sessions.values()).map((s) => ({
       id: s.id,
@@ -308,9 +305,7 @@ export class SessionManager {
       ...(s.claudeSessionId !== undefined ? { claudeSessionId: s.claudeSessionId } : {}),
     }));
     const data = JSON.stringify(persisted, null, 2);
-    const tmpPath = this.persistPath + ".tmp";
-    writeFileSync(tmpPath, data, "utf-8");
-    renameSync(tmpPath, this.persistPath);
+    atomicWriteFileSync(this.persistPath, data, { ensureDir: true });
   }
 
   private load(): void {
@@ -322,14 +317,21 @@ export class SessionManager {
     try {
       parsed = JSON.parse(raw);
     } catch (err) {
-      throw new Error(`Failed to parse session persistence file at ${this.persistPath}`, {
-        cause: err,
-      });
+      // 文件被截断 / 部分写入 / 手改成非法 JSON: 抛错会让 daemon 起不来, 用户没法 self-serve。
+      // fail-soft 到空状态——已运行的 session 通过 reconnectAll 走 worker.sock 探活恢复, 还活着的
+      // worker 仍能被 attach。失败仅意味着 session 名字 / cwd 等元数据丢失, 不至于阻塞启动。
+      serviceLogger.warn(
+        { path: this.persistPath, error: String(err) },
+        "Session persistence file unparseable, starting with empty state",
+      );
+      return;
     }
     if (!Array.isArray(parsed)) {
-      throw new Error(
-        `Session persistence file has invalid format at ${this.persistPath}: expected array`,
+      serviceLogger.warn(
+        { path: this.persistPath },
+        "Session persistence file has unexpected format (not array), starting with empty state",
       );
+      return;
     }
     for (const item of parsed) {
       // state 字段不该落盘（见 save 注释）。遇到说明 schema 不匹配（旧版本数据 / 手改文件 / save bug）；

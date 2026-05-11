@@ -198,7 +198,7 @@ describe("RelayRouter input routing", () => {
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg.type).toBe("session_create_response");
     if (msg.type === "session_create_response") {
-      expect(msg.sessionId).toBe("");
+      expect(msg.sessionId).toBeUndefined();
       expect(msg.error).toContain("工作目录不存在或不可访问");
     }
   });

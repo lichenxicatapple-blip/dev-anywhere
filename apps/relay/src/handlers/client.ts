@@ -10,6 +10,9 @@ import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
 
+// JSON 控制消息最大允许长度（1MB）。挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
+const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
+
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
@@ -115,6 +118,14 @@ export function handleClientConnection(
       return;
     }
 
+    if (data.length > MAX_JSON_MESSAGE_SIZE) {
+      logger.warn(
+        { size: data.length, clientId: clientWs.clientId },
+        "JSON message rejected: exceeds max size",
+      );
+      return;
+    }
+
     const raw = data.toString();
     const result = parseMessage(raw);
 
@@ -151,10 +162,11 @@ export function handleClientConnection(
         return;
       }
 
-      // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy
+      // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy。
+      // 路由 key 永远是 clientWs.boundProxyId, 不能被消息字段里 client 自填的 proxyId 覆盖
+      // (那条路径让绑到 p1 的 client 通过 dir_list_request{proxyId:"p2"} 读到别的 proxy 的目录)。
       if (isClientToProxyRelayControlType(msg.type)) {
-        const targetProxyId =
-          ("proxyId" in msg ? (msg.proxyId as string) : undefined) || clientWs.boundProxyId;
+        const targetProxyId = clientWs.boundProxyId;
         if (!targetProxyId) {
           rejectNotBound(clientWs);
           return;

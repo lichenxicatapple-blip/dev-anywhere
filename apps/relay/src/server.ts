@@ -22,6 +22,10 @@ export interface RelayServerOptions {
   proxyToken?: string;
   // client 连接预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
   clientToken?: string;
+  // ws upgrade 时校验的 Origin 列表 (匹配 request.headers.origin)。空数组 / undefined 不
+  // 校验, 向后兼容现有部署 (本地 dev 跨端口 / Capacitor 等)。设置后只放白名单, 阻挡
+  // CSWSH——攻击者站点诱导用户浏览器直接发 ws upgrade 到 relay 时, 没有合法 Origin。
+  allowedOrigins?: readonly string[];
   chaos?: RelayChaosOptions;
   fontAssetDir?: string;
 }
@@ -40,6 +44,14 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const { heartbeatInterval = 30000, logger, dataDir, proxyToken, clientToken, chaos } = options;
   const proxyTokenRequired = typeof proxyToken === "string" && proxyToken.length > 0;
   const clientTokenRequired = typeof clientToken === "string" && clientToken.length > 0;
+  const allowedOriginsSet =
+    options.allowedOrigins && options.allowedOrigins.length > 0
+      ? new Set(options.allowedOrigins)
+      : null;
+  const checkOrigin = (origin: string | undefined): boolean => {
+    if (!allowedOriginsSet) return true;
+    return typeof origin === "string" && allowedOriginsSet.has(origin);
+  };
   if (!proxyTokenRequired) {
     logger.warn(
       "proxy auth token not set, /proxy endpoint is open — ok for dev, not for public relay",
@@ -109,6 +121,17 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   httpServer.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     const { pathname } = url;
+    const origin = request.headers.origin;
+
+    if (!checkOrigin(origin)) {
+      logger.warn(
+        { ip: request.socket.remoteAddress, origin: origin ?? "(missing)", pathname },
+        "rejected upgrade: origin not in allowedOrigins",
+      );
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+      return;
+    }
 
     if (pathname === "/proxy") {
       if (proxyTokenRequired) {

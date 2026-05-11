@@ -56,10 +56,12 @@ export function routeProxyMessage(
   }
 
   const { message } = result;
-  const { sessionId } = message;
 
-  // 跟踪该 proxy 拥有的 session
-  registry.addSessionToProxy(proxyId, sessionId);
+  // session-scoped envelope 在 proxy 与 sessionId 间建立关联; 全局广播 (session_list /
+  // heartbeat / auth / sync_*) 没有 sessionId, 直接广播给所有 client。
+  if ("sessionId" in message) {
+    registry.addSessionToProxy(proxyId, message.sessionId);
+  }
 
   // 转发给所有绑定的客户端
   const clients = registry.getClientsForProxy(proxyId);

@@ -28,10 +28,22 @@ describe("MessageEnvelopeSchema", () => {
       expect(() => MessageEnvelopeSchema.parse(env)).toThrow();
     });
 
-    it("rejects missing sessionId", () => {
-      const env = makeEnvelope("heartbeat", {});
+    it("rejects missing sessionId on session-scoped envelope", () => {
+      // session_status 是 session-scoped, 必须带 sessionId; heartbeat / session_list 等
+      // 全局广播则允许省略——schema 按 type 区分。
+      const env = makeEnvelope("session_status", {
+        sessionId: "s1",
+        state: "idle",
+        lastActive: 0,
+      });
       delete (env as Record<string, unknown>).sessionId;
       expect(() => MessageEnvelopeSchema.parse(env)).toThrow();
+    });
+
+    it("allows missing sessionId on global broadcast envelope", () => {
+      const env = makeEnvelope("heartbeat", {});
+      delete (env as Record<string, unknown>).sessionId;
+      expect(() => MessageEnvelopeSchema.parse(env)).not.toThrow();
     });
 
     it("rejects missing timestamp", () => {

@@ -4,7 +4,7 @@ import {
   SessionState,
   type AgentStatusPayload,
 } from "@dev-anywhere/shared";
-import { SeqCounter } from "../common/seq-counter.js";
+import { getSeqCounterFor } from "../common/seq-counter.js";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { AuthenticatedHookEvent } from "./hook-server.js";
@@ -118,7 +118,7 @@ export class HookEventRouter {
       },
     });
 
-    const seq = this.deps.nextSeq?.(event.sessionId) ?? new SeqCounter(event.sessionId).next();
+    const seq = this.deps.nextSeq?.(event.sessionId) ?? getSeqCounterFor(event.sessionId).next();
     const envelope = buildMessage(
       "tool_use_request",
       event.sessionId,
@@ -165,6 +165,6 @@ export class HookEventRouter {
   }
 
   private nextSeq(sessionId: string): number {
-    return this.deps.nextSeq?.(sessionId) ?? new SeqCounter(sessionId).next();
+    return this.deps.nextSeq?.(sessionId) ?? getSeqCounterFor(sessionId).next();
   }
 }

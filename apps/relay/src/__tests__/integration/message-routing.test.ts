@@ -104,6 +104,54 @@ describe("Message routing integration", () => {
     expect(received.payload.whitelistTool).toBe(true);
   });
 
+  // 跨租户隔离: 客户端 control msg 携带 proxyId 字段时, relay 必须忽略它, 只用 boundProxyId 路由。
+  // dir_list_request 的 schema 显式带 proxyId (历史上设计为可指定 proxy), 是这个漏洞的载体——
+  // 绑到 p1 的客户端通过 dir_list_request{proxyId:"p2"} 即可读取 p2 的本地目录。
+  it("ignores client-supplied proxyId override; routes only to boundProxyId", async () => {
+    // 起两个 proxy: p1 (client 绑这个) + p2 (client 不应能联到)
+    const proxy1 = connectProxy();
+    await waitForOpen(proxy1);
+    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "m1" }));
+    await settle();
+
+    const proxy2 = connectProxy();
+    await waitForOpen(proxy2);
+    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p2", name: "m2" }));
+    await settle();
+
+    // 同时订阅两个 proxy 看 dir_list_request 落到哪里
+    let p1ReceivedDirList = false;
+    let p2ReceivedDirList = false;
+    proxy1.on("message", (data: Buffer) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === "dir_list_request") p1ReceivedDirList = true;
+    });
+    proxy2.on("message", (data: Buffer) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === "dir_list_request") p2ReceivedDirList = true;
+    });
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessage(client); // consume proxy_select_response
+
+    // 客户端尝试绕过: dir_list_request 字段里带 proxyId: "p2"
+    client.send(
+      JSON.stringify({
+        type: "dir_list_request",
+        requestId: "r1",
+        path: "/etc",
+        proxyId: "p2",
+      }),
+    );
+
+    await settle();
+    // 期望: 按 boundProxyId(=p1) 路由——p1 收到, p2 不收到
+    expect(p1ReceivedDirList).toBe(true);
+    expect(p2ReceivedDirList).toBe(false);
+  });
+
   // ==========================================================
   // 2. Control 消息端到端（proxy -> relay -> client）
   // ==========================================================

@@ -44,7 +44,7 @@ export function broadcastSessionList(relay: RelayConnection, sessionManager: Ses
   // buildMessage 默认的 "1.0" 不符，会让任何对 envelope schema 严格校验的地方报错。
   const envelope = buildMessage(
     "session_list",
-    "",
+    null,
     0,
     { sessions: sessionManager.listSessions().map(toSessionListPayload) },
     "proxy",

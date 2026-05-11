@@ -1,10 +1,19 @@
 import { WebSocket } from "ws";
+import { defineFSM } from "@dev-anywhere/shared";
 
 // 显式代理连接状态，取代 ws null 检查
 type ProxyConnectionState = "online" | "offline";
 
 // 显式客户端连接状态，跟踪注册和绑定
 type ClientConnectionState = "registered" | "bound";
+
+// proxy 连接 FSM: 仅 online <-> offline 双向流转。registerProxy 走 reconnect 路径直接写
+// online (相当于 offline -> online), transitionProxy 走 close 路径走 online -> offline。
+// 同状态停留 (online -> online / offline -> offline) 视为非法, 由 canTransition 拦下。
+const proxyConnectionFSM = defineFSM<ProxyConnectionState>({
+  online: ["offline"],
+  offline: ["online"],
+});
 
 // 代理连接状态，跟踪 ws、会话集合、离线时间、显示名称
 interface ProxyState {
@@ -54,8 +63,8 @@ export class RelayRegistry {
 
   // 显式状态转换，校验 from 状态匹配后更新 connectionState
   transitionProxy(proxyId: string, from: ProxyConnectionState, to: ProxyConnectionState): void {
-    if (from === to) {
-      throw new Error(`Invalid proxy transition: ${from} -> ${to} (same state)`);
+    if (!proxyConnectionFSM.canTransition(from, to)) {
+      throw new Error(`Invalid proxy transition: ${from} -> ${to}`);
     }
     const state = this.proxyStates.get(proxyId);
     if (!state) {
