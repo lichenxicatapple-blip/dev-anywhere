@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RelayClient } from "@/services/relay-client";
 import { handleRelayMessage, handleWsStatusChange, type Timers } from "./phase-machine";
 import { useAppStore } from "@/stores/app-store";
+import { useSessionStore } from "@/stores/session-store";
 
 vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
@@ -192,5 +193,53 @@ describe("phase-machine request failure handling", () => {
 
     expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
     errSpy.mockRestore();
+  });
+});
+
+// proxy_offline 不能重置 sessionListLoaded 或清空 sessions[]——chat.tsx 通过
+// isRouteSessionEnded(session, sessionListLoaded) = "已加载且找不到 session" 来决定
+// 是否清掉冷启动恢复的 lastChatRoute (route-restore.ts:39-47)。
+//
+// 如果 proxy_offline 改成清 sessions / 翻 sessionListLoaded=false, offline 那一瞬间
+// 仍在该会话页的用户会触发 clearLastChatRoute, 之后 PWA 冷启动就再也不会恢复到原会话——
+// 退化到 v0.2.1 之前的"息屏唤醒被甩回 session 选择页"体验。这个测试把这个隐式不变
+// 量显式钉住, 改 phase-machine 的人会被红测试拦下来重新评估。
+describe("phase-machine proxy_offline preserves session list for cold-start route restore", () => {
+  beforeEach(() => {
+    resetAppStore();
+    useSessionStore.setState({
+      sessions: [
+        { sessionId: "s1", mode: "json", provider: "claude", state: "idle" },
+      ],
+      sessionListLoaded: true,
+    });
+  });
+
+  afterEach(() => {
+    useSessionStore.setState({ sessions: [], sessionListLoaded: false });
+  });
+
+  it("does not clear sessions or flip sessionListLoaded when current proxy goes offline", async () => {
+    const relay = { listProxies: vi.fn(), clearBoundProxy: vi.fn() } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    await handleRelayMessage({ type: "proxy_offline", proxyId: "proxy-1" }, timers, relay);
+
+    const session = useSessionStore.getState();
+    expect(session.sessions).toHaveLength(1);
+    expect(session.sessions[0].sessionId).toBe("s1");
+    expect(session.sessionListLoaded).toBe(true);
+    expect(useAppStore.getState().proxyOnline).toBe(false);
+  });
+
+  it("does not clear sessions when an unrelated proxy goes offline", async () => {
+    const relay = { listProxies: vi.fn() } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    await handleRelayMessage({ type: "proxy_offline", proxyId: "proxy-2" }, timers, relay);
+
+    const session = useSessionStore.getState();
+    expect(session.sessions).toHaveLength(1);
+    expect(session.sessionListLoaded).toBe(true);
   });
 });
