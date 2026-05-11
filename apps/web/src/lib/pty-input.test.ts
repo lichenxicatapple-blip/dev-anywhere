@@ -260,6 +260,28 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
   });
 
+  // 防 item 7 复合 bug: 中文 IME 下用户快速输入 "hello-",IME 把 "-" 吃进 composition;
+  // 此时 keydown(-) 仍然 fire 但 event.isComposing=true。如果把它当成普通 ASCII 启动
+  // punctuation 探针 16ms 等 native echo,IME 同时把 "-" 吞了不发 textarea input,探针
+  // 超时 fallback 发了一个孤立的 "-",紧接着 IME commit "hello-" 经 onData 又来一次,
+  // 终端就渲染成 "-hello-"。
+  it("does not start a punctuation probe when keydown fires during IME composition", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1");
+    const composingDash = new KeyboardEvent("keydown", { key: "-", isComposing: true });
+    const shouldContinue = emitKey(composingDash);
+    // composition 未结束, 不模拟 textarea input;直接走 IME commit 路径 → xterm.onData
+    emitData("hello-");
+    vi.runAllTimers();
+
+    // 关键: composing 时 punctuation 不应被探针拦截, 必须让 xterm 自己接管 (返回 true)
+    expect(shouldContinue).toBe(true);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "hello-");
+  });
+
   it("can map plain Enter to LF for mobile soft-keyboard newline", () => {
     const { terminal, emitKey } = createTerminal();
     const onRawInput = vi.fn();

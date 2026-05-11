@@ -47,6 +47,11 @@ function isPrintableAsciiPunctuation(data: string): boolean {
 function shouldRouteKeyThroughNativeInput(event: KeyboardEvent): boolean {
   if (event.type !== "keydown") return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  // IME composition 期间 keydown 仍然 fire,但字符已被输入法吞进候选;这时启动 punctuation
+  // 探针会让 16ms 超时 fallback 发出一个孤立字符,叠加 IME 提交时的完整字符串,渲染成
+  // "-hello-" 这样的前缀重复 (item 7 现场)。让 xterm 走默认路径,IME commit 的文本最终
+  // 经 textarea input → xterm.onData 一次性递给我们。
+  if (event.isComposing) return false;
   return isPrintableAsciiPunctuation(event.key);
 }
 
