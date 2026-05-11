@@ -1,5 +1,8 @@
 name: Release
 
+# 带 tag 名进 run title, 列表里直接显示 "Release v0.2.2" 而不是 "Release #26"。
+run-name: Release ${{ github.ref_name }}
+
 on:
   push:
     tags:
