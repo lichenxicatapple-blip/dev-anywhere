@@ -1,7 +1,8 @@
 // InputBar: JSON 消息输入栏, 1-8 行自撑, 斜杠/@/iOS 键盘适配
 // PTY 模式由 xterm 逐键输入承载，不再复用聊天式 InputBar。
 // draft 为 per-session, 通过 chat-store 跨组件共享
-// 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理
+// 命令 (/cmd) / @<路径> 这类原子片段整体删除: insertedMentions 记录所有选过的片段,
+// onChange 拦 backspace 跨片段清理
 import {
   useCallback,
   useEffect,
@@ -20,7 +21,7 @@ import { useAppStore } from "@/stores/app-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { cleanupDeletedToken, computeSendDisabled, detectPickerMode } from "./input-bar-utils";
+import { cleanupDeletedMention, computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
 import { InputMenu } from "./input-menu";
@@ -65,8 +66,8 @@ export function InputBar({ sessionId }: InputBarProps) {
   const sendDisabled = computeSendDisabled(isWorking, pendingApprovals);
   const canSend = !sendDisabled && value.trim() !== "";
 
-  // 已插入 token (slash 命令 or @路径) 列表, 用于 backspace 整体删除
-  const [insertedTokens, setInsertedTokens] = useState<string[]>([]);
+  // 已插入的原子片段 (slash 命令 / @<路径>), 用于 backspace 整体删除
+  const [insertedMentions, setInsertedMentions] = useState<string[]>([]);
   const [clipboardImageUploading, setClipboardImageUploading] = useState(false);
   // 选中 slash 命令后的参数提示 (argumentHint), 显示在输入栏上方
   const [argumentHint, setArgumentHint] = useState("");
@@ -75,9 +76,9 @@ export function InputBar({ sessionId }: InputBarProps) {
   const currentSessionIdRef = useRef(sessionId);
   currentSessionIdRef.current = sessionId;
 
-  // 会话切换时重置 token 跟踪 (argumentHint 随之失效, insertedTokens 作废)
+  // 会话切换时重置 mention 跟踪 (argumentHint 随之失效, insertedMentions 作废)
   useEffect(() => {
-    setInsertedTokens([]);
+    setInsertedMentions([]);
     setArgumentHint("");
   }, [sessionId]);
 
@@ -88,7 +89,7 @@ export function InputBar({ sessionId }: InputBarProps) {
   }, [value]);
 
   const clearTrackingState = useCallback(() => {
-    setInsertedTokens([]);
+    setInsertedMentions([]);
     setArgumentHint("");
   }, []);
 
@@ -142,14 +143,14 @@ export function InputBar({ sessionId }: InputBarProps) {
     clearTrackingState,
   ]);
 
-  // onChange 拦截: backspace 删到 token 片段时整体清除, 维护 insertedTokens
+  // onChange 拦截: backspace 删到原子片段时整体清除, 维护 insertedMentions
   const handleValueChange = (nextVal: string) => {
     const prev = prevTextRef.current;
-    const { cleaned, removedToken } = cleanupDeletedToken(nextVal, prev, insertedTokens);
-    if (removedToken) {
-      setInsertedTokens((tokens) => tokens.filter((t) => t !== removedToken));
+    const { cleaned, removedMention } = cleanupDeletedMention(nextVal, prev, insertedMentions);
+    if (removedMention) {
+      setInsertedMentions((mentions) => mentions.filter((m) => m !== removedMention));
       // 删掉的是 slash 命令 (以 "/" 开头), 参数提示也同步清空
-      if (removedToken.startsWith("/")) setArgumentHint("");
+      if (removedMention.startsWith("/")) setArgumentHint("");
       applyInputDraft(cleaned);
       return;
     }
@@ -184,7 +185,18 @@ export function InputBar({ sessionId }: InputBarProps) {
 
   const handlePaste = useCallback(
     async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (!getClipboardImageFile(event.clipboardData)) return;
+      const data = event.clipboardData;
+      const hasImage = Boolean(getClipboardImageFile(data));
+      const otherFile = hasImage
+        ? null
+        : (() => {
+            if (!data.files || data.files.length === 0) return null;
+            for (const f of data.files) {
+              if (!f.type.startsWith("image/")) return f;
+            }
+            return null;
+          })();
+      if (!hasImage && !otherFile) return;
       event.preventDefault();
 
       const relay = relayClientRef;
@@ -195,17 +207,32 @@ export function InputBar({ sessionId }: InputBarProps) {
 
       const pasteSessionId = sessionId;
       setClipboardImageUploading(true);
-      // 上传 loading toast: 大图传输有 1-数秒等待, 没反馈用户会怀疑是否触发;
-      // 成功直接 dismiss, 失败时把同一 id 替换成 error toast。
-      const uploadToastId = toast.loading("图片上传中...");
+      const uploadToastId = toast.loading(
+        hasImage ? "图片上传中..." : `上传 ${otherFile?.name ?? "文件"} ...`,
+      );
       try {
-        const result = await uploadClipboardImageFromPaste({
-          clipboardData: event.clipboardData,
-          relay,
-          sessionId: pasteSessionId,
-        });
-        toast.dismiss(uploadToastId);
-        if (!result) return;
+        // pathMention: 上传成功后插入到输入框的 "@<path> " 文本片段
+        let pathMention: string | null = null;
+        if (hasImage) {
+          const result = await uploadClipboardImageFromPaste({
+            clipboardData: data,
+            relay,
+            sessionId: pasteSessionId,
+          });
+          toast.dismiss(uploadToastId);
+          if (!result) return;
+          pathMention = result.pathMention;
+        } else if (otherFile) {
+          const payload = await fileToUploadPayload(otherFile);
+          const result = await relay.uploadFile(pasteSessionId, payload);
+          if (!result.success || !result.path) {
+            toast.error(result.error ?? "上传失败", { id: uploadToastId });
+            return;
+          }
+          pathMention = `@${result.path} `;
+          toast.dismiss(uploadToastId);
+        }
+        if (!pathMention) return;
 
         const activeTextarea =
           currentSessionIdRef.current === pasteSessionId ? textareaRef.current : null;
@@ -215,15 +242,10 @@ export function InputBar({ sessionId }: InputBarProps) {
           "";
         const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
         const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
-        const next = insertTextAtSelection(
-          currentValue,
-          result.token,
-          selectionStart,
-          selectionEnd,
-        );
+        const next = insertTextAtSelection(currentValue, pathMention, selectionStart, selectionEnd);
         if (activeTextarea) {
           applyInputDraft(next.value);
-          setInsertedTokens((tokens) => [...tokens, result.token.trim()]);
+          setInsertedMentions((mentions) => [...mentions, pathMention.trim()]);
           requestAnimationFrame(() => {
             textareaRef.current?.focus();
             textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
@@ -242,7 +264,7 @@ export function InputBar({ sessionId }: InputBarProps) {
 
   // 任意文件上传: picker (Paperclip 按钮) 和 drag-drop 共用同一上传逻辑。
   // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
-  // image paste 的 insertTextAtSelection / insertedTokens 跟踪逻辑。
+  // image paste 的 insertTextAtSelection / insertedMentions 跟踪逻辑。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -263,7 +285,7 @@ export function InputBar({ sessionId }: InputBarProps) {
           toast.error(result.error ?? "上传失败", { id: toastId });
           return;
         }
-        const token = `@${result.path} `;
+        const pathMention = `@${result.path} `;
         const activeTextarea =
           currentSessionIdRef.current === uploadSessionId ? textareaRef.current : null;
         const currentValue =
@@ -272,10 +294,10 @@ export function InputBar({ sessionId }: InputBarProps) {
           "";
         const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
         const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
-        const next = insertTextAtSelection(currentValue, token, selectionStart, selectionEnd);
+        const next = insertTextAtSelection(currentValue, pathMention, selectionStart, selectionEnd);
         if (activeTextarea) {
           applyInputDraft(next.value);
-          setInsertedTokens((tokens) => [...tokens, token.trim()]);
+          setInsertedMentions((mentions) => [...mentions, pathMention.trim()]);
           requestAnimationFrame(() => {
             textareaRef.current?.focus();
             textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
@@ -325,10 +347,10 @@ export function InputBar({ sessionId }: InputBarProps) {
           filter={value.slice(value.lastIndexOf("/"))}
           onSelect={(cmd: CommandEntry) => {
             // cmd.name 已含前导 "/", 别再拼 `/${name}` 否则出现 //clear
-            const token = cmd.name;
-            const newVal = value.replace(/\/[^\s]*$/, `${token} `);
+            const slashCommand = cmd.name;
+            const newVal = value.replace(/\/[^\s]*$/, `${slashCommand} `);
             applyInputDraft(newVal);
-            setInsertedTokens((prev) => [...prev, token]);
+            setInsertedMentions((prev) => [...prev, slashCommand]);
             setArgumentHint(cmd.argumentHint ?? "");
             textareaRef.current?.focus();
           }}
@@ -341,12 +363,12 @@ export function InputBar({ sessionId }: InputBarProps) {
           filter={value.slice(value.lastIndexOf("@"))}
           onSelect={(path) => {
             // 目录以 "/" 结尾: 不加空格, 让 picker 保持打开继续挑下一级
-            // 文件: 加空格关闭 picker, 并把最终 token 记入 insertedTokens 用于整 token 退格
+            // 文件: 加空格关闭 picker, 并把最终 mention 记入 insertedMentions 用于整片段退格
             const isDir = path.endsWith("/");
-            const token = `@${path}`;
-            const newVal = value.replace(/@[^\s]*$/, isDir ? token : `${token} `);
+            const pathMention = `@${path}`;
+            const newVal = value.replace(/@[^\s]*$/, isDir ? pathMention : `${pathMention} `);
             applyInputDraft(newVal);
-            if (!isDir) setInsertedTokens((prev) => [...prev, token]);
+            if (!isDir) setInsertedMentions((prev) => [...prev, pathMention]);
             textareaRef.current?.focus();
           }}
         />

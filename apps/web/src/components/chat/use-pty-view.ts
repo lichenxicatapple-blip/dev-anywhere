@@ -191,7 +191,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onAfterPaste: () => rawInputFollowSchedulerRef.current?.schedule(),
   });
 
-  // 拖拽任意文件到终端容器: 上传后把 @<path> token 写到 PTY stdin, 与 chat-header
+  // 拖拽任意文件到终端容器: 上传后把 "@<path> " 写到 PTY stdin, 与 chat-header
   // upload menu 同样形状。dragover 必须 preventDefault 否则浏览器拒绝触发 drop。
   const [isPtyDragOver, setIsPtyDragOver] = useState(false);
   const handlePtyDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {

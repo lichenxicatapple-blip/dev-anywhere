@@ -83,7 +83,7 @@ export async function fileToClipboardImagePayload(file: File): Promise<Clipboard
   };
 }
 
-export function clipboardImagePathToken(path: string): string {
+export function clipboardImagePathMention(path: string): string {
   return `${path.startsWith("@") ? path : `@${path}`} `;
 }
 

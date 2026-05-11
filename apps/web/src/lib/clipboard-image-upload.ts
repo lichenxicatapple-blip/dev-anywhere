@@ -1,5 +1,5 @@
 import {
-  clipboardImagePathToken,
+  clipboardImagePathMention,
   fileToClipboardImagePayload,
   getClipboardImageFile,
   type ClipboardImagePayload,
@@ -14,7 +14,8 @@ type ClipboardImageRelay = {
 
 type ClipboardImageUploadResult = {
   path: string;
-  token: string;
+  // 已格式化的 "@<path> " 提及文本, 可直接插入 PTY stdin 或 JSON textarea。
+  pathMention: string;
 };
 
 export async function uploadClipboardImageFromPaste(options: {
@@ -34,6 +35,6 @@ export async function uploadClipboardImageFromPaste(options: {
 
   return {
     path: response.path,
-    token: clipboardImagePathToken(response.path),
+    pathMention: clipboardImagePathMention(response.path),
   };
 }

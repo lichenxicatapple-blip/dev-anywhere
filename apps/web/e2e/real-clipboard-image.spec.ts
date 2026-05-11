@@ -329,7 +329,7 @@ test.describe("real clipboard image chain", () => {
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
 
       // setInputFiles 直接打到 hidden input,绕过 Radix Portal 在 e2e 下的 pointer 不稳定。
-      // 真实链路: input.change → fileToUploadPayload → relay.uploadFile → proxy 落盘 → token sendRaw。
+      // 真实链路: input.change → fileToUploadPayload → relay.uploadFile → proxy 落盘 → "@<path> " sendRaw。
       const fileBytes = Buffer.from("hello dev-anywhere\n", "utf-8");
       const fileName = `notes-${Date.now()}.txt`;
       await page
@@ -344,7 +344,7 @@ test.describe("real clipboard image chain", () => {
       expect(readFileSync(uploadedAbs)).toEqual(fileBytes);
       expectProjectClipboardIgnored(ptyCwd);
 
-      // token 写入终端: 等到 xterm 回放出 @<path>
+      // 等到 xterm 回放出 @<path>, 证明终端 stdin 收到了 mention 文本
       await expect
         .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
           timeout: 20_000,

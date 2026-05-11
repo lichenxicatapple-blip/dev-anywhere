@@ -79,7 +79,7 @@ describe("ChatHeader PTY upload menu", () => {
 
   // Radix DropdownMenu 用 Portal + pointer events, jsdom 下交互复杂。这里跳过菜单 UI,
    // 直接触发 hidden input 的 change—— input 仍由 ChatHeader 渲染出来 (PTY 模式), 测的是
-   // 菜单选完文件后的核心 handler: uploadFile 调用 + token 写终端。
+   // 菜单选完文件后的核心 handler: uploadFile 调用 + "@<path> " 写终端。
   function getUploadInput(container: HTMLElement): HTMLInputElement {
     const input = container.querySelector(
       'input[data-slot="chat-menu-upload-file-input"]',

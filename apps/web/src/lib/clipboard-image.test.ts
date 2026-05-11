@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  clipboardImagePathToken,
+  clipboardImagePathMention,
   fileToClipboardImagePayload,
   getClipboardImageFile,
   insertTextAtSelection,
@@ -66,10 +66,10 @@ describe("clipboard image helpers", () => {
   });
 
   it("formats uploaded paths as agent file tokens", () => {
-    expect(clipboardImagePathToken("/tmp/dev-anywhere/shot.png")).toBe(
+    expect(clipboardImagePathMention("/tmp/dev-anywhere/shot.png")).toBe(
       "@/tmp/dev-anywhere/shot.png ",
     );
-    expect(clipboardImagePathToken("@/tmp/already-tokenized.png")).toBe(
+    expect(clipboardImagePathMention("@/tmp/already-tokenized.png")).toBe(
       "@/tmp/already-tokenized.png ",
     );
   });

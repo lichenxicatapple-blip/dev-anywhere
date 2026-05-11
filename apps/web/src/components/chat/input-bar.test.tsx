@@ -263,4 +263,34 @@ describe("InputBar attach file picker", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe("see ");
   });
+
+  // Finder 等来源 cmd+C 复制文件 → 输入框 cmd+V, 走 file_upload 链路插入 @<path>
+  it("uploads non-image pasted file via clipboardData.files and inserts @<path>", async () => {
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+    const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    const file = new File([new Uint8Array([0x41, 0x42, 0x43])], "log.txt", {
+      type: "text/plain",
+    });
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        items: [{ kind: "file", type: file.type, getAsFile: () => file }],
+        files: [file],
+      },
+    });
+    fireEvent(textarea, event);
+
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
+    expect(uploadFile).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ fileName: "log.txt", mimeType: "text/plain" }),
+    );
+    await waitFor(() =>
+      expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
+        "see @.dev-anywhere/uploads/s1/notes.txt ",
+      ),
+    );
+  });
 });

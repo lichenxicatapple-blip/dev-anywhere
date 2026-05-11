@@ -101,7 +101,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   }
 
   // PTY 模式上传文件: 触发隐藏 input → 读字节 → relay.uploadFile → 把返回路径作为
-  // @path token 写到终端 stdin, 用户接着回车 / 自己拼到命令里。复用图片粘贴的 token 形状。
+  // "@<path> " 文本写到终端 stdin, 用户接着回车或自己拼到命令里 (与图片粘贴同形状)。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function handleFilePicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {

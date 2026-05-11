@@ -27,28 +27,28 @@ export function detectPickerMode(val: string): PickerMode {
   return "none";
 }
 
-// 退格删除已插入 token 时清理残留片段, 返回清理后文本
-export function cleanupDeletedToken(
+// 退格删除已插入的原子片段 (slash / @<路径>) 时清理残留, 返回清理后文本
+export function cleanupDeletedMention(
   val: string,
   prev: string,
-  insertedTokens: string[],
-): { cleaned: string; removedToken: string | null } {
-  if (val.length >= prev.length || insertedTokens.length === 0) {
-    return { cleaned: val, removedToken: null };
+  insertedMentions: string[],
+): { cleaned: string; removedMention: string | null } {
+  if (val.length >= prev.length || insertedMentions.length === 0) {
+    return { cleaned: val, removedMention: null };
   }
-  for (const token of insertedTokens) {
-    if (prev.includes(token) && !val.includes(token)) {
+  for (const mention of insertedMentions) {
+    if (prev.includes(mention) && !val.includes(mention)) {
       let cleaned = val;
-      for (let len = token.length - 1; len > 0; len--) {
-        const fragment = token.slice(0, len);
+      for (let len = mention.length - 1; len > 0; len--) {
+        const fragment = mention.slice(0, len);
         if (cleaned.endsWith(fragment)) {
           cleaned = cleaned.slice(0, -fragment.length);
           if (cleaned.endsWith(" ")) cleaned = cleaned.slice(0, -1);
           break;
         }
       }
-      return { cleaned, removedToken: token };
+      return { cleaned, removedMention: mention };
     }
   }
-  return { cleaned: val, removedToken: null };
+  return { cleaned: val, removedMention: null };
 }

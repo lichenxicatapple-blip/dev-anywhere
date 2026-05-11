@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { uploadClipboardImageFromPaste } from "./clipboard-image-upload";
 
 describe("clipboard image upload flow", () => {
-  it("uploads clipboard images and returns an agent file token", async () => {
+  it("uploads clipboard images and returns an @<path> mention", async () => {
     const imageFile = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
     const relay = {
       uploadClipboardImage: vi.fn().mockResolvedValue({
@@ -21,7 +21,7 @@ describe("clipboard image upload flow", () => {
       }),
     ).resolves.toEqual({
       path: ".dev-anywhere/clipboard/s1/shot.png",
-      token: "@.dev-anywhere/clipboard/s1/shot.png ",
+      pathMention: "@.dev-anywhere/clipboard/s1/shot.png ",
     });
     expect(relay.uploadClipboardImage).toHaveBeenCalledWith("s1", {
       mimeType: "image/png",
