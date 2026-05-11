@@ -1,5 +1,6 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
-import { ArrowLeft, Minus, MoreVertical, Plus } from "lucide-react";
+import { ArrowLeft, Minus, MoreVertical, Plus, Upload } from "lucide-react";
+import { useRef, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,8 @@ import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
+import { fileToUploadPayload } from "@/lib/file-upload-payload";
+import { relayClientRef } from "@/hooks/use-relay-setup";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -95,6 +98,34 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
     void screenWakeLock.toggle().catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : String(err));
     });
+  }
+
+  // PTY 模式上传文件: 触发隐藏 input → 读字节 → relay.uploadFile → 把返回路径作为
+  // @path token 写到终端 stdin, 用户接着回车 / 自己拼到命令里。复用图片粘贴的 token 形状。
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function handleFilePicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const relay = relayClientRef;
+    if (!relay) {
+      toast.error("请先连接开发机");
+      return;
+    }
+    const toastId = toast.loading(`上传 ${file.name} ...`);
+    try {
+      const payload = await fileToUploadPayload(file);
+      const result = await relay.uploadFile(sessionId, payload);
+      if (!result.success || !result.path) {
+        toast.error(result.error ?? "上传失败", { id: toastId });
+        return;
+      }
+      sendRemoteInputRaw(sessionId, `@${result.path} `);
+      toast.success(`已上传 ${result.path}`, { id: toastId });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+    }
   }
 
   return (
@@ -172,6 +203,15 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 发送 Ctrl+O
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-muted-foreground">文件</DropdownMenuLabel>
+              <DropdownMenuItem
+                data-slot="chat-menu-upload-file"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload aria-hidden="true" />
+                上传文件
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
             </>
           ) : null}
           <DropdownMenuLabel className="text-muted-foreground">显示</DropdownMenuLabel>
@@ -234,6 +274,17 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {isPty ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          data-slot="chat-menu-upload-file-input"
+          onChange={(event) => {
+            void handleFilePicked(event);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
