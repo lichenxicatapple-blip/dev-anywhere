@@ -69,6 +69,27 @@ describe("PTY scroll geometry", () => {
     ).toBe(460);
   });
 
+  // 长会话光标在屏幕中段时, 光标下方的空行属于"光标余空"而非"冷启动留白"——
+  // 此时 bufferLength 已远超 rows, viewport 上方都是有效 buffer 内容, 不应再加
+  // hostPaddingTop。早期实现仅看 canvasLastY 不看 bufferLength, 会把光标余空误判
+  // 为留白把 host 内容向下推, 在视窗顶部产生黑带 (blank-render 现场)。
+  it("does not pad when buffer has scrolled past one screen, even if cursor is mid-screen", () => {
+    expect(
+      computePtyHostLayout(
+        {
+          bufferLength: 538,
+          rows: 52,
+          cols: 270,
+          viewportY: 486,
+          cellH: 18,
+          cellW: 8,
+          visibleContentHeight: 871,
+        },
+        26,
+      )?.hostPaddingTop,
+    ).toBe(0);
+  });
+
   it("maps scrollTop to a row-aligned ydisp", () => {
     expect(
       computeScrollTarget(45, {
