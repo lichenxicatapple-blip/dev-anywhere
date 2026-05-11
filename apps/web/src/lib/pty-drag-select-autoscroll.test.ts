@@ -182,7 +182,36 @@ describe("pty drag-select autoscroll", () => {
     expect(h.pendingFrame).toBeNull();
   });
 
-  it("dispatches a synthetic mousemove on the host when scroll happens so xterm extends selection", () => {
+  // host 派发会冒泡到父级, 但永远到不了子元素 .xterm-screen (xterm SelectionService
+  // 真正的 listener 位置)。本测试钉死: 派发目标是 .xterm-screen 而不是 host。
+  it("dispatches synthetic mousemove on .xterm-screen so xterm SelectionService receives it", () => {
+    h = createHarness({});
+    const xtermWrapper = document.createElement("div");
+    xtermWrapper.className = "xterm";
+    const xtermScreen = document.createElement("div");
+    xtermScreen.className = "xterm-screen";
+    xtermWrapper.appendChild(xtermScreen);
+    h.host.appendChild(xtermWrapper);
+
+    const screenEvents: MouseEvent[] = [];
+    const hostEvents: MouseEvent[] = [];
+    xtermScreen.addEventListener("mousemove", (e) => screenEvents.push(e as MouseEvent));
+    h.host.addEventListener("mousemove", (e) => hostEvents.push(e as MouseEvent), {
+      capture: false,
+    });
+    pointerDown(h.container, { x: 100, y: 200 });
+    pointerMove({ x: 795, y: 200 });
+    h.flushFrame();
+
+    expect(screenEvents).toHaveLength(1);
+    expect(screenEvents[0].clientX).toBe(795);
+    expect(screenEvents[0].clientY).toBe(200);
+    // 同时应该 bubble 到 host (因为 bubbles: true)。这条在事件不冒泡时也会失败,
+    // 间接 lock dispatchEvent 用了 bubble=true 而不是 capture-only。
+    expect(hostEvents).toHaveLength(1);
+  });
+
+  it("falls back to host dispatch when no .xterm-screen child exists yet", () => {
     h = createHarness({});
     const events: MouseEvent[] = [];
     h.host.addEventListener("mousemove", (e) => events.push(e as MouseEvent));
@@ -190,8 +219,6 @@ describe("pty drag-select autoscroll", () => {
     pointerMove({ x: 795, y: 200 });
     h.flushFrame();
     expect(events).toHaveLength(1);
-    expect(events[0].clientX).toBe(795);
-    expect(events[0].clientY).toBe(200);
   });
 
   it("does not dispatch synthetic mousemove on idle frames (pointer not at edge)", () => {

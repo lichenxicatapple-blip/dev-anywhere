@@ -41,6 +41,16 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
   let pointerX = 0;
   let pointerY = 0;
   let frame: number | null = null;
+  // xterm SelectionService 把 mousemove listener 挂在 .xterm-screen 上, 那是 host
+  // 的后代节点。dispatchEvent 只走 capture 向下 + bubble 向上, 在 host 派发的事件
+  // 永远到不了 .xterm-screen, 选区不会扩。必须在 .xterm-screen 上派发。lazy 解析
+  // 一次, attach 时 xterm 可能还没把 screen 渲出来。
+  let cachedDispatchTarget: HTMLElement | null = null;
+  const getDispatchTarget = (): HTMLElement => {
+    if (cachedDispatchTarget && cachedDispatchTarget.isConnected) return cachedDispatchTarget;
+    cachedDispatchTarget = host.querySelector<HTMLElement>(".xterm-screen") ?? host;
+    return cachedDispatchTarget;
+  };
 
   const stop = (): void => {
     dragging = false;
@@ -88,8 +98,9 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
 
     if (dx !== 0 || dy !== 0) {
       // pointer 没动但 cell 下面的内容因为 scroll 改变了; 派发合成 mousemove
-      // 让 xterm SelectionService 重算 cell-under-pointer 并扩选区。
-      host.dispatchEvent(
+      // 让 xterm SelectionService 重算 cell-under-pointer 并扩选区。必须派发在
+      // .xterm-screen 上 (xterm SelectionService listener 在该元素), 而不是父级 host。
+      getDispatchTarget().dispatchEvent(
         new MouseEvent("mousemove", {
           clientX: pointerX,
           clientY: pointerY,
