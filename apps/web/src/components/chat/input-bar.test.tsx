@@ -1,18 +1,26 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadClipboardImage, sendEnvelope, toastError, toastLoading, toastDismiss } =
-  vi.hoisted(() => ({
-    uploadClipboardImage: vi.fn(),
-    sendEnvelope: vi.fn(),
-    toastError: vi.fn(),
-    toastLoading: vi.fn(() => "loading-id"),
-    toastDismiss: vi.fn(),
-  }));
+const {
+  uploadClipboardImage,
+  uploadFile,
+  sendEnvelope,
+  toastError,
+  toastLoading,
+  toastDismiss,
+} = vi.hoisted(() => ({
+  uploadClipboardImage: vi.fn(),
+  uploadFile: vi.fn(),
+  sendEnvelope: vi.fn(),
+  toastError: vi.fn(),
+  toastLoading: vi.fn(() => "loading-id"),
+  toastDismiss: vi.fn(),
+}));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {
     uploadClipboardImage,
+    uploadFile,
     sendEnvelope,
     sendControl: vi.fn(),
   },
@@ -71,6 +79,12 @@ describe("InputBar clipboard image paste", () => {
     toastLoading.mockReset();
     toastLoading.mockReturnValue("loading-id");
     toastDismiss.mockReset();
+    uploadFile.mockReset();
+    uploadFile.mockResolvedValue({
+      sessionId: "s1",
+      success: true,
+      path: ".dev-anywhere/uploads/s1/notes.txt",
+    });
     useChatStore.setState({
       bySessionId: {
         s1: { ...EMPTY_SLICE, inputDraft: "inspect " },
@@ -185,5 +199,68 @@ describe("InputBar clipboard image paste", () => {
     });
     expect(useChatStore.getState().bySessionId.s2?.inputDraft).toBe("new session ");
     expect(switchedTextarea.value).toBe("new session ");
+  });
+});
+
+describe("InputBar attach file picker", () => {
+  afterEach(() => cleanup());
+
+  beforeEach(() => {
+    uploadFile.mockReset();
+    uploadFile.mockResolvedValue({
+      sessionId: "s1",
+      success: true,
+      path: ".dev-anywhere/uploads/s1/notes.txt",
+    });
+    toastError.mockReset();
+    toastLoading.mockReset();
+    toastLoading.mockReturnValue("loading-id");
+    toastDismiss.mockReset();
+    useChatStore.setState({
+      bySessionId: { s1: { ...EMPTY_SLICE, inputDraft: "see " } },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+  });
+
+  it("uploads picked file and inserts the @<path> token at the cursor", async () => {
+    const { container, getByLabelText } = render(<InputBar sessionId="s1" />);
+    const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    const input = container.querySelector(
+      'input[data-slot="input-attach-file-input"]',
+    ) as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" });
+    Object.defineProperty(input, "files", { value: [file] });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
+    expect(uploadFile).toHaveBeenCalledWith(
+      "s1",
+      expect.objectContaining({ fileName: "notes.txt", mimeType: "text/plain" }),
+    );
+    await waitFor(() =>
+      expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
+        "see @.dev-anywhere/uploads/s1/notes.txt ",
+      ),
+    );
+    expect(toastDismiss).toHaveBeenCalledWith("loading-id");
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("shows error toast when upload fails", async () => {
+    uploadFile.mockResolvedValueOnce({ sessionId: "s1", success: false, error: "磁盘满" });
+    const { container } = render(<InputBar sessionId="s1" />);
+    const input = container.querySelector(
+      'input[data-slot="input-attach-file-input"]',
+    ) as HTMLInputElement;
+    const file = new File([new Uint8Array([1])], "x.bin", { type: "application/octet-stream" });
+    Object.defineProperty(input, "files", { value: [file] });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe("see ");
   });
 });

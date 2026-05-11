@@ -2,10 +2,13 @@
 // PTY 模式由 xterm 逐键输入承载，不再复用聊天式 InputBar。
 // draft 为 per-session, 通过 chat-store 跨组件共享
 // 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Paperclip } from "lucide-react";
 import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { fileToUploadPayload } from "@/lib/file-upload-payload";
 import { useAppStore } from "@/stores/app-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -230,6 +233,61 @@ export function InputBar({ sessionId }: InputBarProps) {
     [applyInputDraft, sessionId, setInputDraft],
   );
 
+  // 任意文件上传 attach 按钮 (JSON 模式 picker 入口, 与 PTY chat-header 上传项对称)。
+  // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
+  // image paste 的 insertTextAtSelection / insertedTokens 跟踪逻辑。
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFilePicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      const relay = relayClientRef;
+      if (!relay) {
+        toast.error("请先连接开发机");
+        return;
+      }
+      const uploadSessionId = sessionId;
+      setClipboardImageUploading(true);
+      const toastId = toast.loading(`上传 ${file.name} ...`);
+      try {
+        const payload = await fileToUploadPayload(file);
+        const result = await relay.uploadFile(uploadSessionId, payload);
+        if (!result.success || !result.path) {
+          toast.error(result.error ?? "上传失败", { id: toastId });
+          return;
+        }
+        const token = `@${result.path} `;
+        const activeTextarea =
+          currentSessionIdRef.current === uploadSessionId ? textareaRef.current : null;
+        const currentValue =
+          activeTextarea?.value ??
+          useChatStore.getState().bySessionId[uploadSessionId]?.inputDraft ??
+          "";
+        const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
+        const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
+        const next = insertTextAtSelection(currentValue, token, selectionStart, selectionEnd);
+        if (activeTextarea) {
+          applyInputDraft(next.value);
+          setInsertedTokens((tokens) => [...tokens, token.trim()]);
+          requestAnimationFrame(() => {
+            textareaRef.current?.focus();
+            textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
+          });
+        } else {
+          setInputDraft(uploadSessionId, next.value);
+        }
+        toast.dismiss(toastId);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+      } finally {
+        setClipboardImageUploading(false);
+      }
+    },
+    [applyInputDraft, sessionId, setInputDraft],
+  );
+
   const placeholder = submitOnPlainEnter
     ? "输入消息... (Enter 发送，Shift+Enter 换行)"
     : "输入消息...";
@@ -300,6 +358,17 @@ export function InputBar({ sessionId }: InputBarProps) {
             aria-busy={clipboardImageUploading}
           />
           <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-11 md:size-9"
+              aria-label="上传文件"
+              data-slot="input-attach-button"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip aria-hidden="true" />
+            </Button>
             <InputMenu />
             <SendButton
               sessionId={sessionId}
@@ -310,6 +379,15 @@ export function InputBar({ sessionId }: InputBarProps) {
           </div>
         </div>
       </form>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        data-slot="input-attach-file-input"
+        onChange={(event) => {
+          void handleFilePicked(event);
+        }}
+      />
     </div>
   );
 }
