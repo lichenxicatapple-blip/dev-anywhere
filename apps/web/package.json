@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "build:icons": "node scripts/build-icons.mjs",
     "test": "vitest run",
     "test:e2e": "bash ../../scripts/web-e2e.sh",
     "test:e2e:desktop": "bash ../../scripts/web-e2e.sh e2e/shell.spec.ts e2e/proxy-switcher.spec.ts e2e/session-list.spec.ts e2e/input-bar.spec.ts e2e/functional-walkthrough.spec.ts e2e/chat-chrome.spec.ts --project=desktop",
@@ -42,6 +43,7 @@
   "devDependencies": {
     "@dev-anywhere/shared": "workspace:*",
     "@playwright/test": "^1.52.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.1.8",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.15.30",
