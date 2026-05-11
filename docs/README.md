@@ -13,3 +13,11 @@ This directory contains public documentation for operating and releasing DEV Any
 | [`../PUBLISHING.md`](../PUBLISHING.md)     | Versioning, npm, Docker, and VPS release process.       |
 | [`SCRIPTS.md`](SCRIPTS.md)                 | Development, deployment, and verification script guide. |
 | [`assets/`](assets/)                       | Public README images and logo assets.                   |
+
+## Known Issues
+
+记录已知但根因未定的问题 + 下次复现时的取数 playbook, 见 [`known-issues/`](known-issues/):
+
+| Document                                                            | Status                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`pty-blank-render.md`](known-issues/pty-blank-render.md)           | 移动端 PTY viewport 偶发空白带, 已修若干候选成因, 待真机数据回归。 |
