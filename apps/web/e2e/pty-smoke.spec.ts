@@ -698,13 +698,20 @@ test.describe("PTY browser smoke", () => {
     await expect.poll(() => readRawPtyInput(page)).toBe("，.");
   });
 
-  // 用户复现路径: PTY 容器横向有 overflow 时, 鼠标拖拽到边缘选区不再延伸。
-  // 单测覆盖 autoscroll 模块本身 (pty-drag-select-autoscroll.test.ts), 这里走真鼠标
-  // 验证集成链路: pointerdown 落到容器、Playwright 派发的 pointermove 被监听、raf
-  // 真转动 scrollLeft。直接撑大 spacer 避免依赖 xterm 200-col 渲染恰好溢出。
-  test("auto-scrolls horizontally during mouse drag-select past container edges", async ({
-    page,
-  }) => {
+  // PTY 容器横向有 overflow 时, 鼠标拖拽到边缘应该自动横向滚屏。
+  //
+  // 这条 e2e 钉死容器层的可观测行为 (scrollLeft 真的动了, autoscroll 模块在真 DOM 真
+  // Playwright pointer event 下生效)。**没有**断 xterm SelectionService 的选区扩展,
+  // 因为:
+  //   (1) xterm WebGL 模式 .xterm-screen 上面叠了 .xterm-link-layer canvas, 完全盖住
+  //       click 落点, Playwright 真 mousedown 都到不了 .xterm-screen 上的 listener
+  //       (probe 实测 mousedownTrusted=0)。
+  //   (2) 自己用 dispatchEvent 派 untrusted mousedown 倒是能上 .xterm-screen, 但
+  //       xterm SelectionService 对 untrusted MouseEvent 不响应, 选区不启动。
+  // 选区扩展那一段的覆盖在两个层面: 单测 (pty-drag-select-autoscroll.test.ts 钉死合成
+  // mousemove 派发目标 = .xterm-screen, 这是 ca44767b 修的 critical bug 的核心)
+  // + 用户真实环境手动验证。
+  test("auto-scrolls horizontally during mouse drag past container edges", async ({ page }) => {
     await installFakeRelay(page);
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
     await resetLocalState(page);
@@ -712,8 +719,7 @@ test.describe("PTY browser smoke", () => {
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
     await expectTerminalMounted(page);
 
-    // 直接把 spacer 撑到 2000px, 容器 (~1030px) 必然 horizontal overflow。
-    // 不走 xterm resize 链路, 避免被 ptyOwner / scroll-controller relayout 顺序拖累。
+    // 直接撑 spacer 让容器横向溢出, 不依赖 xterm cols × cellW 那条易碎的链路
     await page.evaluate(() => {
       const spacer = document.querySelector<HTMLElement>('[data-slot="pty-spacer"]');
       if (!spacer) throw new Error("pty-spacer not mounted");
@@ -736,7 +742,7 @@ test.describe("PTY browser smoke", () => {
     const box = await terminal.boundingBox();
     if (!box) throw new Error("pty terminal has no bounding box");
 
-    // 按住左键拖到右边缘, 在边缘悬停几百 ms 让 raf 多帧 auto-scroll
+    // 拖到右边缘 (距右沿 5px), 进入 EDGE_PX (28) 区域, autoscroll 多帧推 scrollLeft
     await page.mouse.move(box.x + 60, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width - 5, box.y + box.height / 2, { steps: 8 });
@@ -751,7 +757,7 @@ test.describe("PTY browser smoke", () => {
     const scrolledBack = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
     expect(scrolledBack).toBeLessThan(scrolledRight);
 
-    // pointerup 后 raf 循环停, scrollLeft 不再变化
+    // pointerup 后停 raf, scrollLeft 不再变化
     await page.mouse.up();
     const afterUp = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
     await page.waitForTimeout(200);

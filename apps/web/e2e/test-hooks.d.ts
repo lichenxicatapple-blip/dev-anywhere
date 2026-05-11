@@ -31,6 +31,7 @@ interface CCTestHooks {
       screenWidth: number;
       screenHeight: number;
     } | null;
+    getSelection: (sessionId: string) => string;
   };
   toast: (message: string) => void;
 }

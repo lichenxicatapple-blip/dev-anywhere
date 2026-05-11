@@ -28,6 +28,7 @@ interface CCTestHooks {
       screenWidth: number;
       screenHeight: number;
     } | null;
+    getSelection: (sessionId: string) => string;
   };
   toast: (message: string) => void;
 }
@@ -66,6 +67,9 @@ export function installTestHooks(): void {
           screenHeight: screen.clientHeight,
         };
       },
+      // drag-select autoscroll e2e 用: 取 xterm 当前选区文字, 验证选区是否真延伸
+      // 到屏外内容上(光 scrollLeft 动了不够, 那只能证明容器滚了)。
+      getSelection: (sid) => ptyTerminals.get(sid)?.getSelection() ?? "",
     },
     toast: (msg) => {
       toast(msg);
