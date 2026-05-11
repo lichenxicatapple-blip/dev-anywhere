@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.2.3] - 2026-05-11
+
+### Changed
+
+- Brand icon redesigned around GitHub Octicon's "agent" glyph (cloud + chevron prompt + underscore cursor) over the existing dark-gradient palette. The previous editor-frame wrapping is dropped — the new glyph carries both the agent and prompt semantics on its own.
+
+### Tooling
+
+- `pnpm build:icons` regenerates `apple-touch-icon-180x180.png`, `maskable-icon-512x512.png`, and `favicon.ico` (16/32/48 inline PNG) from `brand-icon.svg` using `@resvg/resvg-js`. No system dependency — replaces ad-hoc rsvg-convert / Playwright invocations.
+- `pnpm release vX.Y.Z` (added in v0.2.2) auto-pushes commit + tag once gates pass; the `y/N` confirmation was removed since `release:check` and `release:smoke` already validate everything before reaching the push step. `RELEASE_SKIP_PUSH=1` stays for dry runs.
+- `dev-health` manual-smoke prompt is English-only now, matching the rest of the operational output.
+- `.github/workflows/release.yml` exposes the tag in `run-name`, so the Actions list shows `Release v0.2.3` instead of `Release #N`.
+
+### Notes
+
+- The v0.2.2 release pushed npm packages successfully but the docker image push to Aliyun ACR was hit by a transient `connection reset by peer`. v0.2.3 ships fresh docker tags. If ACR flakes again, retry by re-running the failed Actions job.
+
 ## [0.2.2] - 2026-05-11
 
 ### Added
