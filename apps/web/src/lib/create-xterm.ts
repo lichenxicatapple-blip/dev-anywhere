@@ -36,7 +36,10 @@ export async function createXtermTerminal(
     fontSize: options.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
     cursorBlink: true,
     cursorStyle: "block",
-    cursorInactiveStyle: "outline",
+    // 失焦时不渲染光标: "outline" 模式下 xterm 计算的 inactive 光标位置在长会话里会
+    // 偏离当前 prompt, 视觉上是个孤立的空心方框落在错误格子上 (item 12 现场截图)。
+    // 失焦本就不接受输入, 不显示更安全。
+    cursorInactiveStyle: "none",
     disableStdin: false,
     theme: xtermTheme,
     allowProposedApi: true,
