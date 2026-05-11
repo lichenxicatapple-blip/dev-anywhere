@@ -36,6 +36,16 @@ export function writeLastChatRoute(route: string): void {
   }
 }
 
+// 清除上次记录: session 终止 / 自然消失时调用, 否则下次冷启动会跳到一个已经死掉的
+// 会话再被 ChatPage 翻译为 TerminatedSessionPanel, 等于让用户多走一步。
+export function clearLastChatRoute(): void {
+  try {
+    globalThis.localStorage?.removeItem(LAST_CHAT_ROUTE_KEY);
+  } catch {
+    // 同上
+  }
+}
+
 export function hasRestoredThisSession(): boolean {
   try {
     return globalThis.sessionStorage?.getItem(RESTORED_FLAG_KEY) === "1";

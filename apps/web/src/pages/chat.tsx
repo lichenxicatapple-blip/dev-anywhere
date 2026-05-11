@@ -3,6 +3,7 @@
 // PTY 模式由 xterm 自己承载逐键输入，不再保留下方聊天式命令输入框。
 import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router";
+import { clearLastChatRoute } from "@/lib/route-restore";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatJsonView } from "@/components/chat/chat-json-view";
 import { ChatPtyView } from "@/components/chat/chat-pty-view";
@@ -78,6 +79,12 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         console.error("[chat] requestAgentStatuses failed", { sessionId: id }, err);
       });
   }, [id, connected, proxyOnline, routeSessionEnded]);
+
+  // session 通过任何路径被终止 (用户主动终止 / 子进程退出广播) 后清掉上次 chat 路由记录,
+  // 否则下次冷启动还会自动跳到一个已经不存在的 sessionId, 体验上多走一步。
+  useEffect(() => {
+    if (routeSessionEnded) clearLastChatRoute();
+  }, [routeSessionEnded]);
 
   // 生命周期由 session.state / 活跃列表负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。
   // 当前路由 session 从活跃列表消失时，本页进入 terminated，避免残留审批/working 状态压过退出态。

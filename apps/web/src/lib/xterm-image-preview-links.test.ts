@@ -37,8 +37,10 @@ describe("xterm image preview links", () => {
     ]);
   });
 
-  it("registers a link provider that activates image preview", () => {
-    const onPreview = vi.fn();
+  function provideAndActivate(
+    onPreview: (path: string) => void,
+    event: { metaKey?: boolean; ctrlKey?: boolean } & Partial<Pick<MouseEvent, "type">> = {},
+  ): { text?: string } {
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
     } = {};
@@ -55,15 +57,37 @@ describe("xterm image preview links", () => {
         return { dispose: vi.fn() };
       }),
     };
-
     registerImagePreviewLinkProvider(term as never, onPreview);
 
+    const captured: { text?: string } = {};
     providerRef.current?.provideLinks(1, (links) => {
-      const [link] = links as Array<{ text: string; activate: () => void }>;
-      expect(link.text).toBe("/tmp/shot.png");
-      link.activate();
+      const [link] = links as Array<{
+        text: string;
+        activate: (event: MouseEvent, text: string) => void;
+      }>;
+      captured.text = link.text;
+      link.activate(event as MouseEvent, link.text);
     });
+    return captured;
+  }
 
+  // 单击太容易误触, 用户期望 cmd/ctrl+click 才触发预览 (item 10)。
+  it("only triggers image preview when the user holds cmd or ctrl on click", () => {
+    const onPreview = vi.fn();
+    const captured = provideAndActivate(onPreview, { metaKey: true });
+    expect(captured.text).toBe("/tmp/shot.png");
     expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
+  });
+
+  it("also triggers on ctrl+click for non-mac users", () => {
+    const onPreview = vi.fn();
+    provideAndActivate(onPreview, { ctrlKey: true });
+    expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
+  });
+
+  it("ignores plain clicks without a modifier (anti-misclick)", () => {
+    const onPreview = vi.fn();
+    provideAndActivate(onPreview, {});
+    expect(onPreview).not.toHaveBeenCalled();
   });
 });
