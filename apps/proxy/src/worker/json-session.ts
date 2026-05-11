@@ -2,15 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { z } from "zod";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { ControlRequestEventSchema } from "../common/stream-json-schema.js";
-import {
-  CLAUDE_PROVIDER,
-  buildClaudeArgs,
-  filterClaudeEnvVars,
-  type ClaudePermissionMode,
-} from "../providers/index.js";
+import { CLAUDE_PROVIDER, type ClaudePermissionMode } from "../providers/index.js";
 import type { ProviderHookContext } from "../providers/index.js";
 
-export { buildClaudeArgs, filterClaudeEnvVars };
 export type { ClaudePermissionMode };
 
 // stream-json event types observed from provider output.
@@ -227,8 +221,32 @@ export class JsonSession {
 
   private setupExitHandler(): void {
     if (!this.child) return;
+    // child 'exit' 触发时, stdout pipe 里可能还堆着最后几行 stream-json (含 'result'
+    // event → turn_complete 信号)。直接 fire onExit → caller process.exit(0) 会切断
+    // pipe, 这些行永远不解析, session 永卡 WORKING。等 stdout 'end' (所有 chunk 流过
+    // LineBuffer) + child 'exit' 都到, 才 fire onExit。
+    let stdoutEnded = false;
+    let exitCode: number | null = null;
+    let exited = false;
+    let fired = false;
+    const fireOnce = (): void => {
+      if (fired || !exited || !stdoutEnded) return;
+      fired = true;
+      this.onExitCb?.(exitCode ?? 1);
+    };
+    this.child.stdout?.on("end", () => {
+      stdoutEnded = true;
+      fireOnce();
+    });
     this.child.on("exit", (code: number | null) => {
-      this.onExitCb?.(code ?? 1);
+      exitCode = code;
+      exited = true;
+      // 兜底: child 异常退出且 stdout 卡住时 'end' 永不到, 1s 后强制 fire 防 session 永挂
+      setTimeout(() => {
+        stdoutEnded = true;
+        fireOnce();
+      }, 1000).unref();
+      fireOnce();
     });
   }
 

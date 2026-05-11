@@ -356,14 +356,17 @@ describe("JsonSession", () => {
   });
 
   describe("exit handling", () => {
-    it("calls onExit callback with exit code", async () => {
+    it("calls onExit callback with exit code after stdout end", async () => {
       const exitCodes: number[] = [];
       const session = new JsonSession({
         onExit: (code) => exitCodes.push(code),
       });
       session.start();
 
+      // 真实 child 退出前/后 stdout pipe 自然 'end'。setupExitHandler 等 stdout 'end'
+      // 后才 fire onExit, 否则 buffer 里最后几行 stream-json 会丢。
       mockChild.emit("exit", 0, null);
+      mockChild.stdout!.emit("end");
 
       await new Promise((r) => setTimeout(r, 50));
       expect(exitCodes).toEqual([0]);
@@ -377,9 +380,29 @@ describe("JsonSession", () => {
       session.start();
 
       mockChild.emit("exit", null, null);
+      mockChild.stdout!.emit("end");
 
       await new Promise((r) => setTimeout(r, 50));
       expect(exitCodes).toEqual([1]);
+    });
+
+    // 兜底: child 异常退出且 stdout 卡住, 'end' 永不到时, 1s 后强制 fire onExit 防 session 永挂。
+    it("fires onExit after 1s fallback if stdout never ends", async () => {
+      vi.useFakeTimers();
+      try {
+        const exitCodes: number[] = [];
+        const session = new JsonSession({
+          onExit: (code) => exitCodes.push(code),
+        });
+        session.start();
+        mockChild.emit("exit", 0, null);
+        // 不 emit stdout 'end'
+
+        await vi.advanceTimersByTimeAsync(1100);
+        expect(exitCodes).toEqual([0]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
