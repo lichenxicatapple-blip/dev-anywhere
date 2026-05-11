@@ -1,4 +1,4 @@
-import type { PtySemanticState } from "./osc-extractor.js";
+import type { PtySemanticState } from "@dev-anywhere/shared";
 
 // signalState 三态：undefined 表示本帧没有任何 signal；null 表示有 signal 但只承载 title（OSC 0
 // only，无明确语义）；其它值是明确语义状态。title-only signal 也视为对 approval_wait 的释放

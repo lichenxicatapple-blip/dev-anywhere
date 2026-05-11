@@ -1,12 +1,11 @@
+import type { PtySemanticState } from "@dev-anywhere/shared";
+
 // OSC 0: 窗口标题 -- ESC ] 0 ; <title> BEL/ST
 // OSC 9: 通知 -- ESC ] 9 ; <text> BEL/ST
 // 每次调用创建新的 regex 实例避免 g flag 导致的 lastIndex 状态泄漏
 // eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
-// PTY 局部语义状态。state 仅承载明确语义信号；只有 title/spinner 变化时帧的 PtyStateEvent.state
-// 取 null，让上层不参与 FSM 切换、只走 title 推送通道。
-export type PtySemanticState = "working" | "turn_complete" | "approval_wait";
 type PtySignalProvider = "claude" | "codex";
 
 interface PtyStateEvent {

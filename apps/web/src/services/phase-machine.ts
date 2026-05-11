@@ -1,9 +1,8 @@
 // 状态机事件处理，直接访问 zustand store 和 router，不再通过 PhaseNav 间接注入
-import type { ProxyInfo } from "@dev-anywhere/shared";
+import { ControlErrorCode, type ProxyInfo } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
 import { router } from "@/lib/router";
-import { ControlErrorCode } from "@/lib/control-error-code";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";

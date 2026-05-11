@@ -4,13 +4,13 @@ import type {
   AgentStatusPayload,
   AgentCliStatus,
   CommandEntry,
+  ControlErrorCodeType,
   DirEntry,
   FileTreeGroup,
   HistorySession,
   MessageEnvelope,
   RelayControlMessage,
 } from "@dev-anywhere/shared";
-import type { ControlErrorCodeType } from "@/lib/control-error-code";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 

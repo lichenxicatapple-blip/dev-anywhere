@@ -1,4 +1,4 @@
-import type { PtySemanticState } from "./osc-extractor.js";
+import type { PtySemanticState } from "@dev-anywhere/shared";
 import { shouldReleaseApprovalWait, stateAfterApprovalRelease } from "./pty-approval-state.js";
 
 // PTY 语义状态机的纯决策层。从一段 PTY 输出抽到的 OSC 信号 + 当前 PTY 局部状态出发，

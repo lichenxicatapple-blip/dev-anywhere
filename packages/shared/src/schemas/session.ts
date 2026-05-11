@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
+import { ptySemanticStateValues } from "../constants/pty.js";
 
 export const sessionStateValues = [
   "idle",
@@ -76,7 +77,7 @@ export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({
-  state: z.enum(["working", "turn_complete", "approval_wait"]),
+  state: z.enum(ptySemanticStateValues),
   title: z.string().optional(),
   tool: z.string().optional(),
 });

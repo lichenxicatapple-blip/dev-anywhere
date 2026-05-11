@@ -1,5 +1,4 @@
-import { SessionState } from "@dev-anywhere/shared";
-import type { PtySemanticState } from "../common/osc-extractor.js";
+import { SessionState, type PtySemanticState } from "@dev-anywhere/shared";
 import { shouldPromotePtyActivityToWorking } from "./pty-state-guard.js";
 import { resolvePtySemanticSessionTransitions } from "./pty-semantic-lifecycle.js";
 import type { SessionInfo } from "./session-manager.js";

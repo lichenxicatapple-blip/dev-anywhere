@@ -1,5 +1,4 @@
-import { SessionState } from "@dev-anywhere/shared";
-import type { PtySemanticState } from "../common/osc-extractor.js";
+import { SessionState, type PtySemanticState } from "@dev-anywhere/shared";
 
 export function resolvePtySemanticSessionTransitions(
   currentState: SessionState | undefined,

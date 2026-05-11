@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { SessionState, encodeBinaryFrame, decodeBinaryFrame } from "@dev-anywhere/shared";
+import {
+  SessionState,
+  encodeBinaryFrame,
+  decodeBinaryFrame,
+  ptySemanticStateValues,
+} from "@dev-anywhere/shared";
 import { LineBuffer } from "./line-buffer.js";
 
 // IPC binary 帧标记字节，0x00 不可能是 JSON 行的首字节（JSON 以 '{' 开头）
@@ -147,11 +152,10 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   }),
 
   // terminal → serve：local runtime 观察到的 PTY 语义事件。
-  // 下面 state 枚举必须与 src/common/osc-extractor.ts 的 PtySemanticState 保持一致。
   z.object({
     type: z.literal("pty_semantic_event"),
     sessionId: z.string(),
-    state: z.enum(["working", "turn_complete", "approval_wait"]),
+    state: z.enum(ptySemanticStateValues),
     title: z.string().optional(),
     tool: z.string().optional(),
   }),

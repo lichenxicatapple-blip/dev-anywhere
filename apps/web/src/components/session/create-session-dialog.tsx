@@ -8,7 +8,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
 import { toast } from "@/components/toast";
-import { ControlErrorCode } from "@/lib/control-error-code";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import { cn } from "@/lib/utils";
 import {
   Dialog,

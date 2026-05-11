@@ -1,15 +1,16 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { SessionState, encodeBinaryFrame, serializeControl } from "@dev-anywhere/shared";
+import {
+  SessionState,
+  encodeBinaryFrame,
+  serializeControl,
+  type PtySemanticState,
+} from "@dev-anywhere/shared";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
-import {
-  extractOscSequences,
-  extractOscSignals,
-  type PtySemanticState,
-} from "../common/osc-extractor.js";
+import { extractOscSequences, extractOscSignals } from "../common/osc-extractor.js";
 import { decidePtySemanticTransition } from "../common/pty-semantic-machine.js";
 import {
   CLAUDE_PROVIDER,

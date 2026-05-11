@@ -10,11 +10,8 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import {
-  extractOscSequences,
-  extractOscSignals,
-  type PtySemanticState,
-} from "./common/osc-extractor.js";
+import { extractOscSequences, extractOscSignals } from "./common/osc-extractor.js";
+import type { PtySemanticState } from "@dev-anywhere/shared";
 import { decidePtySemanticTransition } from "./common/pty-semantic-machine.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";

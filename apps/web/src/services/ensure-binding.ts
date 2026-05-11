@@ -1,4 +1,4 @@
-import { ControlErrorCode, type ControlErrorCodeType } from "@/lib/control-error-code";
+import { ControlErrorCode, type ControlErrorCodeType } from "@dev-anywhere/shared";
 import type { RelayClient } from "./relay-client";
 
 interface BindingContext {
