@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { Monitor, Settings } from "lucide-react";
 import { Sidebar } from "./sidebar";
@@ -11,6 +11,13 @@ import { useSessionStore } from "@/stores/session-store";
 import { getTopLevelSubtitle } from "@/lib/top-level-copy";
 import { cn } from "@/lib/utils";
 import { useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
+import {
+  hasRestoredThisSession,
+  markRestoredThisSession,
+  pickRouteToRestore,
+  readLastChatRoute,
+  writeLastChatRoute,
+} from "@/lib/route-restore";
 
 export function AppShell() {
   useVisualViewportHeightVar();
@@ -66,6 +73,28 @@ export function AppShell() {
     fns[pendingToast.kind](pendingToast.message);
     setPendingToast(null);
   }, [pendingToast, setPendingToast]);
+
+  // 冷启动恢复上次 chat 路由 (item 5): 仅首次挂载评估一次, 之后用户主动回到 "/" 不再打扰。
+  const restoreEvaluatedRef = useRef(false);
+  useEffect(() => {
+    if (restoreEvaluatedRef.current) return;
+    restoreEvaluatedRef.current = true;
+    const target = pickRouteToRestore({
+      pathname: location.pathname,
+      alreadyRestored: hasRestoredThisSession(),
+      lastRoute: readLastChatRoute(),
+    });
+    markRestoredThisSession();
+    if (target) navigate(target, { replace: true });
+    // 只在首挂载跑, 不依赖 location/navigate 变化重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 持续追踪当前 chat 路由, 落盘最后一次, 供下次冷启动恢复
+  useEffect(() => {
+    if (!isChatRoute) return;
+    writeLastChatRoute(`${location.pathname}${location.search}`);
+  }, [isChatRoute, location.pathname, location.search]);
 
   return (
     <div
