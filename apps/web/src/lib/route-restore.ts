@@ -1,8 +1,8 @@
 // 移动端浏览器 / PWA 在息屏后被系统回收, 唤醒会冷启动到 manifest start_url ("/"),
-// 丢失原本停在 /chat/<id> 的位置 → 用户被甩回 session 选择页 (item 5)。
+// 丢失停在 /chat/<id> 的位置, 用户被甩回 session 选择页。
 // 把最近一次进入的 chat 路由持久化到 localStorage; 冷启动落地 "/" 时若有记录就 replace
-// 过去, 让用户的"接着上次继续"成立。sessionStorage 标记防止 SPA 内重复 restore (用户
-// 主动点回首页时不应被自动跳走)。
+// 过去, 让用户的"接着上次继续"成立。sessionStorage 标记防止 SPA 内重复 restore: 用户
+// 主动点回首页时不应被自动跳走。
 
 const LAST_CHAT_ROUTE_KEY = "dev-anywhere:last-chat-route";
 const RESTORED_FLAG_KEY = "dev-anywhere:route-restored";

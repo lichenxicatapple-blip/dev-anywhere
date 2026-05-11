@@ -214,7 +214,7 @@ export class SessionManager {
     serviceLogger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
     // 隔离 callback 异常: hook unregister / permission broker / 文件系统操作任意一步抛
     // 都不能让 terminateSession 把异常抛回调用方, 否则 socket close handler 上的后续
-    // cleanupSessionResources + broadcastSessionList 会被吞掉, web 看到 session 残留 (item 9)。
+    // cleanupSessionResources + broadcastSessionList 会被吞掉, web 看到 session 残留。
     try {
       this.onSessionRemoved?.(id, context);
     } catch (err) {

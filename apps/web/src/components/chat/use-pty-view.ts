@@ -3,9 +3,8 @@
 // 集中到这里，让 chat-pty-view.tsx 退化为纯 JSX shell。
 //
 // 关键设计：单一 effect 在 attachPtyTerminalController 的 onTerminalReady 回调里
-// 就近挂 scroll/resize/debug——typed handshake（term 直接作为入参传入）替代之前依赖
-// React state 重渲染的跨 effect 隐式 ref 协议。font-size effect 因为依赖 store
-// 状态独立 trigger 单独保留。
+// 就近挂 scroll/resize/debug——typed handshake（term 直接作为入参传入），跨 effect
+// 没有隐式 ref 协议。font-size effect 因为依赖 store 状态独立 trigger 单独保留。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";

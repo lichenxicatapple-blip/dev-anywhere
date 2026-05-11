@@ -74,7 +74,7 @@ export function AppShell() {
     setPendingToast(null);
   }, [pendingToast, setPendingToast]);
 
-  // 冷启动恢复上次 chat 路由 (item 5): 仅首次挂载评估一次, 之后用户主动回到 "/" 不再打扰。
+  // 冷启动恢复上次 chat 路由: 仅首次挂载评估一次, 后续 SPA 内回到 "/" 不再打扰。
   const restoreEvaluatedRef = useRef(false);
   useEffect(() => {
     if (restoreEvaluatedRef.current) return;

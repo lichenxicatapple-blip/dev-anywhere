@@ -61,7 +61,7 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
   const cleanupSessionResources = (sessionId: string): void => {
     // 每步独立 try/catch: 任意中间步骤抛异常都不能阻断最后的 broadcastSessionList。
     // 一旦广播丢失, web 不知道 session 已删, 列表残留 + 后续给该 session 的请求全
-    // hang 到超时 (item 9 实测根因)。
+    // hang 到超时。
     const safe = (fn: () => void, step: string): void => {
       try {
         fn();

@@ -95,8 +95,7 @@ export function registerImagePreviewLinkProvider(
           underline: true,
           pointerCursor: true,
         },
-        // 防误触: 仅在 cmd / ctrl 修饰下才打开预览 (item 10)。普通点击会经过
-        // 代码 / 路径文本是日常操作, 老的"裸点"行为太容易把用户拽进预览。
+        // 防误触: 仅在 cmd / ctrl 修饰下才打开预览。普通阅读路径文本不应触发任何动作。
         activate: (event) => {
           if (!event.metaKey && !event.ctrlKey) return;
           onPreview(match.path);

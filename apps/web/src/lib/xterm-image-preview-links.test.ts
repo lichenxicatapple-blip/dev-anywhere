@@ -71,7 +71,7 @@ describe("xterm image preview links", () => {
     return captured;
   }
 
-  // 单击太容易误触, 用户期望 cmd/ctrl+click 才触发预览 (item 10)。
+  // 单击太容易误触, cmd/ctrl+click 才触发预览。
   it("only triggers image preview when the user holds cmd or ctrl on click", () => {
     const onPreview = vi.fn();
     const captured = provideAndActivate(onPreview, { metaKey: true });

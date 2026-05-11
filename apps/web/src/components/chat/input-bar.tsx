@@ -186,7 +186,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       const pasteSessionId = sessionId;
       setClipboardImageUploading(true);
       // 上传 loading toast: 大图传输有 1-数秒等待, 没反馈用户会怀疑是否触发;
-      // 成功直接 dismiss, 失败时把同一 id 替换成 error toast
+      // 成功直接 dismiss, 失败时把同一 id 替换成 error toast。
       const uploadToastId = toast.loading("图片上传中...");
       try {
         const result = await uploadClipboardImageFromPaste({

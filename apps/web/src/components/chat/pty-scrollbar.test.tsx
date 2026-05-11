@@ -99,7 +99,7 @@ describe("PtyScrollbar", () => {
     expect(thumb?.style.top).toBe("40%");
   });
 
-  // 平时隐藏, 滚动时短暂出现, 静止 ~1s 后再隐藏 (item 13)。
+  // 平时隐藏, 滚动时短暂出现, 静止 ~1s 后再隐藏。
   it("hides on initial render even when scrollable, and reveals after scrollTop changes", () => {
     vi.useFakeTimers();
     const { container, rerender } = render(

@@ -663,7 +663,7 @@ describe("attachPtyScrollController", () => {
   });
 
   // 长行(终端宽度 cols=80, 内容延伸到 cols * 2 等), 光标随输入移到屏外右侧时,
-  // 水平滚动条应该自动把光标拉回视窗中部 (item 8: 不能只贴着光标显示, 要留左右上下文)。
+  // 水平滚动条应该自动把光标拉回视窗中部, 留出左右上下文而不是贴着光标。
   it("auto-scrolls horizontally to center the cursor when it leaves the viewport", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);

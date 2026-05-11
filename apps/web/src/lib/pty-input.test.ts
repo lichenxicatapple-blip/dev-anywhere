@@ -260,7 +260,7 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
   });
 
-  // 防 item 7 复合 bug: 中文 IME 下用户快速输入 "hello-",IME 把 "-" 吃进 composition;
+  // 中文 IME 下用户快速输入 "hello-",IME 把 "-" 吃进 composition;
   // 此时 keydown(-) 仍然 fire 但 event.isComposing=true。如果把它当成普通 ASCII 启动
   // punctuation 探针 16ms 等 native echo,IME 同时把 "-" 吞了不发 textarea input,探针
   // 超时 fallback 发了一个孤立的 "-",紧接着 IME commit "hello-" 经 onData 又来一次,

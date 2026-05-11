@@ -103,7 +103,7 @@ describe("InputBar clipboard image paste", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  // 上传 loading toast 在传输期间给用户存在反馈, 成功后立即消失避免持续打扰 (item 4)。
+  // 上传 loading toast 在传输期间给用户存在反馈, 成功后立即消失避免持续打扰。
   it("shows a loading toast during paste upload and dismisses it on success", async () => {
     const upload = deferred<{ success: boolean; path: string }>();
     uploadClipboardImage.mockReturnValueOnce(upload.promise);
