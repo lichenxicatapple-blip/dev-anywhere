@@ -444,6 +444,21 @@ export function attachPtyScrollController(
     trace("relayout:end");
   };
 
+  // 长行场景下光标跟着输入向右移到屏外, 把 scrollLeft 调到能让光标位于视窗中部 (留出
+  // 左右上下文)。仅在光标真正出视窗时触发, 用户主动横向滚动到不同区域时不打扰。
+  const followCursorX = (): void => {
+    if (container.scrollWidth <= container.clientWidth) return;
+    const { cellW } = getDims();
+    if (cellW <= 0) return;
+    const cursorPxX = term.buffer.active.cursorX * cellW;
+    const viewportLeft = container.scrollLeft;
+    const viewportRight = viewportLeft + container.clientWidth;
+    if (cursorPxX >= viewportLeft && cursorPxX <= viewportRight) return;
+    const target = Math.max(0, cursorPxX - container.clientWidth / 2);
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    container.scrollLeft = Math.min(maxScrollLeft, target);
+  };
+
   const onRender = (): void => {
     trace("render");
     updateSpacer();
@@ -453,6 +468,7 @@ export function attachPtyScrollController(
     // 用户原本想停留的位置。先 sync 让 user-intent 落地,再 handle pending frame。
     if (pendingContainerSyncRetry) syncContainerScroll();
     handlePendingNewFrame();
+    followCursorX();
     notifyScroll();
   };
 
