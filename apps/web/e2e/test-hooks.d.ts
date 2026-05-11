@@ -43,7 +43,10 @@ interface DevAnywherePtyDebugSnapshot {
   spacerDrift: number;
   expectedSpacerHeight: number;
   spacer: { height: number };
-  host: { top: number };
+  host: { top: number; height: number; expectedTop: number; topDrift: number };
+  container: { scrollTop: number; clientHeight: number };
+  viewportHostCoverage: number;
+  pendingContainerSyncRetry: boolean;
 }
 
 interface DevAnywherePtyRenderDebugApi {

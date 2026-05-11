@@ -16,6 +16,7 @@ export interface PtyScrollDebugProbe {
   pendingProgrammaticScrollTop: number | null;
   touchScrollActive: boolean;
   lastSpacerUpdateAt: number | null;
+  pendingContainerSyncRetry: boolean;
 }
 
 export interface PtyScrollDebugRefs {
@@ -59,6 +60,22 @@ export function buildPtyScrollDebugSnapshot(
   const currentHostPaddingTop = parsePx(host.style.paddingTop);
   const currentSpacerWidth = parsePx(spacer.style.width);
 
+  // 不考虑 verticalOffset 的简单期望值——足够诊断 stale ydisp 的常见走样,verticalOffset
+  // 只在 hostHeight < visibleContentHeight 时非零,是另一类小 buffer 的特例。
+  const expectedHostTop = cellH > 0 ? buffer.viewportY * cellH : 0;
+  const hostTopDrift = currentHostTop - expectedHostTop;
+
+  // viewport ∩ host 重叠比例。线上排查 blank-render 时优先看这个值——< 1 就是可见区有空白带。
+  const viewportTop = container.scrollTop;
+  const viewportBottom = viewportTop + container.clientHeight;
+  const hostBottom = currentHostTop + currentHostHeight;
+  const overlap = Math.max(
+    0,
+    Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
+  );
+  const viewportHostCoverage =
+    container.clientHeight > 0 ? overlap / container.clientHeight : 0;
+
   return {
     ts: performance.now(),
     container: {
@@ -77,6 +94,8 @@ export function buildPtyScrollDebugSnapshot(
       height: currentHostHeight,
       width: currentHostWidth,
       paddingTop: currentHostPaddingTop,
+      expectedTop: expectedHostTop,
+      topDrift: hostTopDrift,
     },
     term: {
       rows: term.rows,
@@ -95,5 +114,7 @@ export function buildPtyScrollDebugSnapshot(
     expectedSpacerHeight,
     spacerDrift: currentSpacerHeight - expectedSpacerHeight,
     lastSpacerUpdateAt: probe.lastSpacerUpdateAt,
+    viewportHostCoverage,
+    pendingContainerSyncRetry: probe.pendingContainerSyncRetry,
   };
 }

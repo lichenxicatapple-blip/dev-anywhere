@@ -68,6 +68,15 @@ test.describe("Real PTY long-context smoke", () => {
     const drift = await readSpacerDrift(page);
     expect(drift, "spacerDrift 偏离 0 超过 1px——几何不自洽").not.toBeNull();
     expect(Math.abs(drift ?? 0)).toBeLessThanOrEqual(1);
+
+    // viewport ∩ host 重叠比例。<1 即"可见视口里有空白带"——blank-render bug 的最直接特征。
+    // 阈值 0.99 容忍亚像素级别的 round-off,实质要求"基本完全覆盖"。
+    const coverage = await readViewportHostCoverage(page);
+    expect(coverage, "viewportHostCoverage 不可读 / null").not.toBeNull();
+    expect(
+      coverage ?? 0,
+      `viewport-host 覆盖率 ${coverage} < 0.99,可见区出现空白带 (host 卡 stale 或 spacer 几何错位)`,
+    ).toBeGreaterThanOrEqual(0.99);
   });
 
   test("scrolling to top reveals history then scrolling back re-engages follow", async ({
@@ -260,6 +269,15 @@ async function readSpacerDrift(page: Page): Promise<number | null> {
     if (!provider) return null;
     const snap = provider();
     return snap?.spacerDrift ?? null;
+  });
+}
+
+async function readViewportHostCoverage(page: Page): Promise<number | null> {
+  return page.evaluate(() => {
+    const provider = window.__devAnywherePtyDebug;
+    if (!provider) return null;
+    const snap = provider();
+    return snap?.viewportHostCoverage ?? null;
   });
 }
 

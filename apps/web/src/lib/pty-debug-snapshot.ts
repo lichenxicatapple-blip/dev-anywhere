@@ -13,7 +13,16 @@ export interface PtyDebugSnapshot {
     paddingBottom: number;
   };
   spacer: { height: number; width: number };
-  host: { top: number; height: number; width: number; paddingTop: number };
+  host: {
+    top: number;
+    height: number;
+    width: number;
+    paddingTop: number;
+    // 期望 host.top = viewportY * cellH(忽略 verticalOffset 这个 small-buffer 矫正)。
+    // expectedTop 与实际 top 的差是诊断"host 卡死在 stale ydisp 上"的直接信号。
+    expectedTop: number;
+    topDrift: number;
+  };
   term: {
     rows: number;
     cols: number;
@@ -33,6 +42,13 @@ export interface PtyDebugSnapshot {
   expectedSpacerHeight: number;
   spacerDrift: number;
   lastSpacerUpdateAt: number | null;
+  // viewport [scrollTop, scrollTop+clientHeight] 与 host [host.top, host.top+host.height]
+  // 的重叠比例。<1 就意味着可见区有空白带——blank-render bug 的最直接特征。
+  viewportHostCoverage: number;
+  // syncContainerScroll 上一次因 cellH=0 漏掉用户 scroll 的标志位。线上 snapshot 里非 false
+  // 即代表"测量瞬间没拿到 cell 尺寸,host/ydisp 没跟上 scrollTop"——下一次 onRender / relayout
+  // 才会补刷。
+  pendingContainerSyncRetry: boolean;
   frame: {
     lastWriteAt: number | null;
     pendingNewFrame: boolean;
