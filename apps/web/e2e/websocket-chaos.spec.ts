@@ -233,6 +233,17 @@ test.describe("WebSocket reconnect chaos", () => {
   });
 
   test("does not queue request-response session creation while disconnected", async ({ page }) => {
+    // 移动 UX 单栏路由下 proxy 断线会把"新建会话"对话框整体卸载回退到 proxy-selection,
+    // 这条 invariant 在 mobile 路径上以另一种 UX 表达(整个对话被卸载),不是相同测试形态。
+    // 限定到桌面视口 + 非触屏环境验证 relay 不入队的契约。
+    const isDesktopUX = await page.evaluate(
+      () =>
+        window.matchMedia("(min-width: 768px)").matches &&
+        !window.matchMedia("(pointer: coarse), (hover: none)").matches,
+    );
+    if (!isDesktopUX) {
+      test.skip(true, "mobile/touch UX: 断线时新建会话弹窗不保留,relay 不入队的契约由 desktop 验证");
+    }
     await selectFakeProxy(page);
     await page.getByRole("button", { name: "新建会话" }).first().click();
     await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();

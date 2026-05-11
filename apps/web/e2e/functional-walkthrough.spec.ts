@@ -131,7 +131,19 @@ test.describe("functional browser walkthrough", () => {
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="insert"]')).toBeVisible();
     await page.keyboard.press("Escape");
     await textbox.fill("run a smoke check");
-    await page.keyboard.press("Enter");
+    // 触屏设备 (pointer:coarse / hover:none) 上 InputBar 把 plain Enter 让给软键盘换行,
+    // 必须走"发送"按钮——见 input-bar.tsx 的 submitOnPlainEnter = isDesktop && !touchEditingSurface。
+    // 桌面无触控时直接按 Enter 提交。
+    const submitsOnEnter = await page.evaluate(
+      () =>
+        window.matchMedia("(min-width: 768px)").matches &&
+        !window.matchMedia("(pointer: coarse), (hover: none)").matches,
+    );
+    if (submitsOnEnter) {
+      await page.keyboard.press("Enter");
+    } else {
+      await page.getByRole("button", { name: "发送" }).click();
+    }
     await expect(page.getByText("run a smoke check")).toBeVisible();
     await expect(page.getByText("收到。")).toBeVisible();
 

@@ -10,7 +10,7 @@ test.describe("Master-detail — 桌面端即时会话切换", () => {
 
   test("侧栏挂载 session-list slot", async ({ page }) => {
     await page.goto(BASE_URL);
-    const sidebar = page.locator("nav[aria-label='Sidebar navigation']");
+    const sidebar = page.locator("nav[aria-label='侧边栏']");
     await expect(sidebar).toBeVisible();
     // 即便 session 列表为空，slot 容器也必须存在，避免桌面布局跳变。
     const middle = sidebar.locator('[data-slot="sidebar-session-list"]');

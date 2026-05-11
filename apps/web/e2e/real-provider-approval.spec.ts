@@ -21,6 +21,16 @@ const codexUpdatePromptPattern =
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(approvalTimeoutMs + 60_000);
+
+// 需要本机已登录的 Claude/Codex CLI 才能验证 hosted PTY approval 路径——不是 hermetic 环境
+// 能保证的契约。CI / 普通本地跑 e2e 时缺省跳过,显式 opt-in 才走:
+//   DEV_ANYWHERE_REAL_PROVIDER_APPROVAL=1 bash scripts/web-e2e.sh e2e/real-provider-approval.spec.ts --project=desktop
+const realProviderEnabled = process.env.DEV_ANYWHERE_REAL_PROVIDER_APPROVAL === "1";
+test.skip(
+  !realProviderEnabled,
+  "set DEV_ANYWHERE_REAL_PROVIDER_APPROVAL=1 to run against locally authed CLI",
+);
+
 test.beforeAll(() => {
   mkdirSync(smokeCwd, { recursive: true });
 });
