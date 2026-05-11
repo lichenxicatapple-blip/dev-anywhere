@@ -28,12 +28,18 @@ export function applyPtyStateToSession(
   sessionId: string,
   ptyState: PtySemanticState,
 ): void {
+  // 单点拒绝非法源 state: session 不在 map 里 (已 terminate 删除) 或 state===TERMINATED 时,
+  // 跳过所有 bridge 副作用——changeSessionState 会被 FSM 各自拒绝, 但 resolveInterruptedApprovals /
+  // emitAgentStatus 等下游回调没有自己的 guard, 否则会对 zombie session 触发空跑或冗余事件。
+  // 这一层把 "session 处于非法源状态" 的判定收口到此, 不依赖每个回调自己重新检查。
+  const session = deps.getSession(sessionId);
+  if (!session || session.state === SessionState.TERMINATED) return;
+
   switch (ptyState) {
     case "approval_wait":
       deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
       break;
     case "working": {
-      const session = deps.getSession(sessionId);
       const pending = deps.getPendingApprovalCount(sessionId);
       if (shouldPromotePtyActivityToWorking(session, pending)) {
         deps.changeSessionState(sessionId, SessionState.WORKING);
@@ -42,8 +48,7 @@ export function applyPtyStateToSession(
     }
     case "turn_complete": {
       deps.resolveInterruptedApprovals(sessionId);
-      const session = deps.getSession(sessionId);
-      const transitions = resolvePtySemanticSessionTransitions(session?.state, ptyState);
+      const transitions = resolvePtySemanticSessionTransitions(session.state, ptyState);
       for (const next of transitions) {
         deps.changeSessionState(sessionId, next);
       }

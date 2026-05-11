@@ -37,7 +37,9 @@ function makeDeps(overrides?: Partial<PtySessionBridgeDeps>): PtySessionBridgeDe
 describe("applyPtyStateToSession", () => {
   describe("approval_wait", () => {
     it("推 SessionState.WAITING_APPROVAL", () => {
-      const deps = makeDeps();
+      const deps = makeDeps({
+        getSession: vi.fn().mockReturnValue(makeSession(SessionState.IDLE)),
+      });
       applyPtyStateToSession(deps, "s1", "approval_wait");
       expect(deps.changeSessionState).toHaveBeenCalledWith("s1", SessionState.WAITING_APPROVAL);
       expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
@@ -127,12 +129,54 @@ describe("applyPtyStateToSession", () => {
       expect(deps.emitAgentStatus).toHaveBeenCalledWith("s1", "idle");
     });
 
-    it("TERMINATED session → 不推 IDLE，但仍清理 + emit idle", () => {
+    it("TERMINATED session → 全部跳过 (zombie 防护)", () => {
       const deps = makeDeps({
         getSession: vi.fn().mockReturnValue(makeSession(SessionState.TERMINATED)),
       });
       applyPtyStateToSession(deps, "s1", "turn_complete");
       expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
+      expect(deps.emitAgentStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("zombie / missing session guard", () => {
+    // session 已被 terminate 从 manager map 删除时, PTY 仍可能再吐一帧 turn_complete (节流抖动 /
+    // proxy 收尾窗口)。bridge 必须吃掉这条事件, 不能向已经不存在的 session 派发任何副作用。
+    it("missing session + approval_wait → 全部跳过", () => {
+      const deps = makeDeps({ getSession: vi.fn().mockReturnValue(undefined) });
+      applyPtyStateToSession(deps, "s1", "approval_wait");
+      expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
+      expect(deps.emitAgentStatus).not.toHaveBeenCalled();
+    });
+
+    it("missing session + turn_complete → 全部跳过", () => {
+      const deps = makeDeps({ getSession: vi.fn().mockReturnValue(undefined) });
+      applyPtyStateToSession(deps, "s1", "turn_complete");
+      expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
+      expect(deps.emitAgentStatus).not.toHaveBeenCalled();
+    });
+
+    it("TERMINATED session + approval_wait → 全部跳过", () => {
+      const deps = makeDeps({
+        getSession: vi.fn().mockReturnValue(makeSession(SessionState.TERMINATED)),
+      });
+      applyPtyStateToSession(deps, "s1", "approval_wait");
+      expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
+      expect(deps.emitAgentStatus).not.toHaveBeenCalled();
+    });
+
+    it("TERMINATED session + working → 全部跳过", () => {
+      const deps = makeDeps({
+        getSession: vi.fn().mockReturnValue(makeSession(SessionState.TERMINATED)),
+      });
+      applyPtyStateToSession(deps, "s1", "working");
+      expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(deps.resolveInterruptedApprovals).not.toHaveBeenCalled();
+      expect(deps.emitAgentStatus).not.toHaveBeenCalled();
     });
   });
 });

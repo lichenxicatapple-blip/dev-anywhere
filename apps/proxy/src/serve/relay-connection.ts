@@ -139,7 +139,7 @@ export class RelayConnection extends EventEmitter {
           "Connected to relay server",
         );
         this.ws!.send(
-          JSON.stringify({
+          serializeControl({
             type: "proxy_register",
             proxyId: this.proxyId,
             ...(this.name ? { name: this.name } : {}),

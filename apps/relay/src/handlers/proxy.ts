@@ -1,5 +1,9 @@
 import { WebSocket } from "ws";
-import { isProxyToClientRelayControlType, RelayErrorCode } from "@dev-anywhere/shared";
+import {
+  isProxyToClientRelayControlType,
+  RelayErrorCode,
+  serializeControl,
+} from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
@@ -125,7 +129,7 @@ export function handleProxyConnection(
       logger.info({ proxyId, status }, "Proxy registered");
 
       proxyWs.send(
-        JSON.stringify({
+        serializeControl({
           type: "proxy_register_response",
           status,
         }),
