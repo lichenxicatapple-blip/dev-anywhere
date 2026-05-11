@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.2.1] - 2026-05-11
+
+### Fixed
+
+- PTY blank-render bug (intermittent upper-half-black viewport on long sessions): `computePtyHostLayout` was applying its cold-start "fill from bottom" padding whenever the cursor was mid-screen with empty rows below, even when the buffer had scrollback and those rows above the cursor were valid content. The padding pushed host content down by `blankRows * cellH` while `host.top` still expected content at host top, leaving the gap as a black band at the viewport top. Padding is now gated on `bufferLength <= rows` (true cold-start only).
+
 ## [0.2.0] - 2026-05-11
 
 ### Fixed
