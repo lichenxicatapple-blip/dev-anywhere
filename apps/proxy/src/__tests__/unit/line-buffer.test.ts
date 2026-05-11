@@ -109,4 +109,39 @@ describe("LineBuffer", () => {
 
     expect(await output).toEqual([]);
   });
+
+  // claude/codex CLI 的 stream-json 含 CJK / emoji。Buffer.toString() 直接对单 chunk
+  // 调用, 多字节字符 (UTF-8 4 字节 emoji / 3 字节 CJK) 跨 chunk 边界时, 单 chunk 解码会
+  // 把不完整字节序列变成 U+FFFD 替换字符。需用 StringDecoder 跨 chunk 缓存不完整字节。
+  it("preserves multi-byte UTF-8 character split across two chunks (emoji)", async () => {
+    const LineBuffer = await importLineBuffer();
+    const lb = new LineBuffer();
+    const output = collectOutput(lb);
+
+    // 🎉 = U+1F389 = F0 9F 8E 89 (4 bytes)
+    const emoji = Buffer.from("🎉", "utf-8");
+    expect(emoji.length).toBe(4);
+    // 把 emoji 的字节切到两个 chunk: 第一段 [F0], 第二段 [9F 8E 89]
+    lb.write(Buffer.concat([Buffer.from("a"), emoji.slice(0, 1)]));
+    lb.write(Buffer.concat([emoji.slice(1), Buffer.from("\n")]));
+    lb.end();
+
+    const lines = await output;
+    expect(lines).toEqual(["a🎉"]);
+  });
+
+  it("preserves CJK character split across chunks", async () => {
+    const LineBuffer = await importLineBuffer();
+    const lb = new LineBuffer();
+    const output = collectOutput(lb);
+
+    // 中 = U+4E2D = E4 B8 AD (3 bytes)
+    const cjk = Buffer.from("中", "utf-8");
+    expect(cjk.length).toBe(3);
+    lb.write(cjk.slice(0, 2));
+    lb.write(Buffer.concat([cjk.slice(2), Buffer.from("\n")]));
+    lb.end();
+
+    expect(await output).toEqual(["中"]);
+  });
 });
