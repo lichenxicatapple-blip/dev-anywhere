@@ -15,6 +15,9 @@ interface CreateXtermResult {
   terminal: Terminal;
   serializeAddon: SerializeAddon;
   renderer: PtyRendererKind;
+  // webgl 模式下返回当前活动的 addon ref;DOM renderer 时为 null。
+  // 暴露给 pty-render-state-probe 走形状探测拿 _renderer._model.cells 做 diff。
+  getWebglAddon: () => WebglAddon | null;
   dispose: () => void;
 }
 
@@ -95,6 +98,7 @@ export async function createXtermTerminal(
     terminal,
     serializeAddon,
     renderer: activeRenderer,
+    getWebglAddon: () => webglAddon,
     dispose: () => {
       webglDisposed = true;
       webglAddon?.dispose();

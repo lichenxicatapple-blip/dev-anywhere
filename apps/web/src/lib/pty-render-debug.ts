@@ -1,13 +1,16 @@
-// PTY 渲染层调试入口。挂在 window.__devAnywherePtyRenderDebug 上，开发者控制台直接调用。
+// PTY 渲染层调试入口。挂在 window.__devAnywherePtyRenderDebug 上,开发者控制台直接调用。
 //
-// 主要面向两类问题：
-//   1. CJK / 高频颜色场景下 xterm WebGL atlas 出现 cell 叠字（鼠标选中后正常） →
-//      用 setRenderer("dom") 切回 DOM renderer 验证，是的话锁定 atlas 是嫌疑。
-//   2. 渲染管线里 frame 顺序 / 重放 / dispose 之类不易复现的 bug →
-//      setTrace(true) 打开 verbose log，bug 复现后 dumpState() 一键存证据。
+// 当前嫌疑:webgl renderer 的 diff-only model 与 buffer 状态脱钩——某些 cell
+// "以为没变"被跳过,留着上一帧的渲染。两步分流:
+//   1. dumpRenderDiff() 复现时按一下,逐 cell 比 model.cells vs buffer.active。
+//      mismatch 非 0 -> model desync 假设确认。
+//   2. mismatch 为 0 但仍肉眼错位 -> setRenderer("dom") + reload 看 bug 是否消失,
+//      区分 "WebGL 推送/着色阶段" 还是 "xterm 上游"。
 //
-// 故意不做成 React state：任何挂上 React 状态的开关都会污染 fast-refresh 与
-// production build。这里只用 localStorage + 全局对象，刷新后保持选择。
+// 故意不做成 React state:任何挂上 React 状态的开关都会污染 fast-refresh 与
+// production build。这里只用 localStorage + 全局对象,刷新后保持选择。
+
+import type { RenderDiffReport } from "./pty-render-state-probe";
 
 const RENDERER_STORAGE_KEY = "dev_anywhere_pty_renderer";
 const TRACE_STORAGE_KEY = "dev_anywhere_pty_trace";
@@ -17,12 +20,13 @@ export type PtyRendererKind = "webgl" | "dom";
 const VALID_RENDERERS: readonly PtyRendererKind[] = ["webgl", "dom"];
 
 interface ActiveTerminalHandle {
-  // 调用 xterm 的 refresh(0, rows-1) 强制重绘整屏，绕过 atlas 缓存。
-  refresh: () => void;
-  // 取当前 xterm 屏幕完整 serialize 内容（含 ANSI），用来粘到 issue 里。
-  serialize: () => string;
-  // session/terminal 元信息，dump 时一并打印
-  describe: () => Record<string, unknown>;
+  // 读 webgl renderer 内部 model.cells 与 buffer.active 真实状态做逐 cell diff。
+  // 见 pty-render-state-probe.ts。webgl addon 不可用 / probe 失败时返回 null。
+  dumpRenderDiff?: () => RenderDiffReport | null;
+  // 强清 webgl renderer 内部 model + 触发 refresh,把所有 cell 当成 dirty 全量重画。
+  // 诊断工具:出现错位时按一下,屏幕修复 -> 坐实 diff-only model desync 假设。
+  // 返回 true 表示成功执行,false 表示 webgl addon / probe 失败。
+  clearRenderModel?: () => boolean;
 }
 
 interface PtyDebugApi {
@@ -31,8 +35,13 @@ interface PtyDebugApi {
   isTraceEnabled(): boolean;
   setTrace(enabled: boolean): void;
   registerTerminal(id: string, handle: ActiveTerminalHandle): () => void;
-  forceRedraw(): number;
-  dumpState(): string;
+  // 触发所有已注册终端做 model vs buffer diff,把 mismatch 列表打到 console + 返回。
+  // 用于复现错位时按一下,定位是 model desync 还是 GPU 推送层异常。
+  dumpRenderDiff(): RenderDiffReport[];
+  // 强清所有已注册终端的 webgl renderer model + refresh。
+  // 诊断流程:复现 -> dumpRenderDiff() 看 mismatch -> clearRenderModel() 看是否
+  // 修复 -> dumpRenderDiff() 再看一次确认 mismatch 归零。
+  clearRenderModel(): number;
   listTerminals(): string[];
 }
 
@@ -44,7 +53,7 @@ function readRenderer(): PtyRendererKind {
       return raw as PtyRendererKind;
     }
   } catch {
-    // localStorage 不可用（隐身模式 / 异常 origin），按默认走
+    // localStorage 不可用(隐身模式 / 异常 origin),按默认走
   }
   return "webgl";
 }
@@ -70,7 +79,7 @@ const debugApi: PtyDebugApi = {
     try {
       window.localStorage.setItem(RENDERER_STORAGE_KEY, kind);
     } catch {
-      // 写入失败也继续——下次刷新会回到默认，但当前 console 操作仍可见
+      // 写入失败也继续——下次刷新会回到默认,但当前 console 操作仍可见
     }
     console.info(
       `[ptyDebug] renderer => ${kind}. Reload the page (or recreate the PTY view) for it to take effect.`,
@@ -96,61 +105,50 @@ const debugApi: PtyDebugApi = {
       if (current === handle) activeTerminals.delete(id);
     };
   },
-  forceRedraw() {
-    let count = 0;
-    for (const handle of activeTerminals.values()) {
-      try {
-        handle.refresh();
-        count++;
-      } catch (err) {
-        console.warn("[ptyDebug] refresh failed", err);
-      }
-    }
-    console.info(`[ptyDebug] forced redraw on ${count} terminal(s)`);
-    return count;
-  },
-  dumpState() {
-    const dumps: Array<{ id: string; meta: Record<string, unknown>; serialized: string }> = [];
+  dumpRenderDiff() {
+    const reports: RenderDiffReport[] = [];
     for (const [id, handle] of activeTerminals) {
+      if (!handle.dumpRenderDiff) {
+        console.info(`[ptyDebug] terminal ${id} has no render diff probe (DOM renderer?)`);
+        continue;
+      }
       try {
-        dumps.push({
-          id,
-          meta: handle.describe(),
-          serialized: handle.serialize(),
-        });
+        const report = handle.dumpRenderDiff();
+        if (!report) {
+          console.warn(`[ptyDebug] terminal ${id} render diff probe failed`);
+          continue;
+        }
+        reports.push(report);
+        console.group(
+          `[ptyDebug] render diff ${id}: ${report.mismatchCount}/${report.totalCells} mismatches` +
+            (report.truncated ? " (truncated)" : ""),
+        );
+        console.log(`viewportY=${report.viewportY} cols=${report.cols} rows=${report.rows}`);
+        if (report.mismatches.length > 0) {
+          console.table(report.mismatches.slice(0, 50));
+        }
+        console.groupEnd();
       } catch (err) {
-        dumps.push({
-          id,
-          meta: { error: err instanceof Error ? err.message : String(err) },
-          serialized: "",
-        });
+        console.warn(`[ptyDebug] render diff ${id} threw`, err);
       }
     }
-    const json = JSON.stringify(dumps, null, 2);
-    console.group(`[ptyDebug] dump ${dumps.length} terminal(s)`);
-    for (const dump of dumps) {
-      console.group(`terminal ${dump.id}`);
-      console.log(dump.meta);
-      console.log(dump.serialized);
-      console.groupEnd();
+    return reports;
+  },
+  clearRenderModel() {
+    let count = 0;
+    for (const [id, handle] of activeTerminals) {
+      if (!handle.clearRenderModel) {
+        console.info(`[ptyDebug] terminal ${id} has no clear-model probe (DOM renderer?)`);
+        continue;
+      }
+      try {
+        if (handle.clearRenderModel()) count++;
+      } catch (err) {
+        console.warn(`[ptyDebug] clearRenderModel ${id} threw`, err);
+      }
     }
-    console.groupEnd();
-    // clipboard.writeText 在 DevTools focused / page unfocused 时会抛 NotAllowedError。
-    // 兜底: 把 JSON 作为返回值返回, DevTools 可直接 copy(__devAnywherePtyRenderDebug.dumpState())。
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard
-        .writeText(json)
-        .then(() => console.info("[ptyDebug] dump copied to clipboard"))
-        .catch((err: unknown) => {
-          console.warn(
-            "[ptyDebug] clipboard write failed; use copy(__devAnywherePtyRenderDebug.dumpState()) in DevTools",
-            err,
-          );
-        });
-    } else {
-      console.info("[ptyDebug] use copy(__devAnywherePtyRenderDebug.dumpState()) to copy");
-    }
-    return json;
+    console.info(`[ptyDebug] cleared model on ${count} terminal(s)`);
+    return count;
   },
   listTerminals() {
     return Array.from(activeTerminals.keys());
@@ -165,7 +163,7 @@ export function installPtyRenderDebug(): PtyDebugApi {
   if (typeof window !== "undefined" && !window.__devAnywherePtyRenderDebug) {
     window.__devAnywherePtyRenderDebug = debugApi;
     console.info(
-      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.setRenderer('dom') / __devAnywherePtyRenderDebug.forceRedraw() / __devAnywherePtyRenderDebug.dumpState()",
+      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.dumpRenderDiff() / .clearRenderModel() / .setRenderer('dom')",
     );
   }
   return debugApi;

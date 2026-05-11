@@ -41,6 +41,11 @@ import {
 } from "@/lib/pty-debug-snapshot";
 import { buildPtyScrollDebugSnapshot } from "@/lib/pty-scroll-debug-snapshot";
 import { getPtyDebug } from "@/lib/pty-render-debug";
+import {
+  clearRenderModel,
+  diffModelAgainstBuffer,
+  probeWebglRenderModel,
+} from "@/lib/pty-render-state-probe";
 import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { toast } from "@/components/toast";
@@ -285,13 +290,21 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       rawInputFollowSchedulerRef.current?.schedule();
     };
 
+    let getWebglAddon: (() => Parameters<typeof probeWebglRenderModel>[0] | null) | null = null;
+
     const termCtrl = attachPtyTerminalController({
       host,
       sessionId,
       ws,
       relay,
-      createTerminal: (terminalHost) =>
-        createXtermTerminal(terminalHost, { fontSize: useAppStore.getState().ptyFontSize }),
+      createTerminal: async (terminalHost) => {
+        const result = await createXtermTerminal(terminalHost, {
+          fontSize: useAppStore.getState().ptyFontSize,
+        });
+        // 暴露给后续 onTerminalReady 注册 dumpRenderDiff——靠形状探测拿 model.cells。
+        getWebglAddon = () => result.getWebglAddon();
+        return result;
+      },
       attachRawInput: (term, rawSessionId, rawOptions) =>
         attachXtermRawInput(term, rawSessionId, {
           ...rawOptions,
@@ -315,10 +328,22 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
         ptyDebugDeregister = getPtyDebug().registerTerminal(sessionId, {
-          // 强制整屏重绘绕过 atlas 缓存——给"鼠标选中后正常显示"这种 cell 残留 bug 用。
-          refresh: () => xterm.refresh(0, xterm.rows - 1),
-          serialize: () => serializeTerminalBuffer(xterm),
-          describe: () => ({ sessionId, cols: xterm.cols, rows: xterm.rows }),
+          dumpRenderDiff: () => {
+            const addon = getWebglAddon?.();
+            if (!addon) return null;
+            const probed = probeWebglRenderModel(addon, xterm.cols, xterm.rows);
+            if (!probed) return null;
+            return diffModelAgainstBuffer(xterm, probed);
+          },
+          clearRenderModel: () => {
+            const addon = getWebglAddon?.();
+            if (!addon) return false;
+            const probed = probeWebglRenderModel(addon, xterm.cols, xterm.rows);
+            if (!probed) return false;
+            clearRenderModel(probed);
+            xterm.refresh(0, xterm.rows - 1);
+            return true;
+          },
         });
 
         const scrollCtrl = attachPtyScrollController({
