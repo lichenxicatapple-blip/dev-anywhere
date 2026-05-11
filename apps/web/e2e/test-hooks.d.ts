@@ -39,6 +39,23 @@ interface DevAnywherePtyScrollTraceEntry {
   event?: string;
 }
 
+interface DevAnywherePtyDebugSnapshot {
+  spacerDrift: number;
+  expectedSpacerHeight: number;
+  spacer: { height: number };
+  host: { top: number };
+}
+
+interface DevAnywherePtyRenderDebugApi {
+  forceRedraw: () => number;
+  setRenderer: (kind: "webgl" | "dom") => void;
+  getRenderer: () => "webgl" | "dom";
+  isTraceEnabled: () => boolean;
+  setTrace: (enabled: boolean) => void;
+  dumpState: () => void;
+  listTerminals: () => string[];
+}
+
 declare global {
   interface Window {
     __ccTest?: CCTestHooks;
@@ -53,6 +70,8 @@ declare global {
         };
       }
     >;
+    __devAnywherePtyDebug?: () => DevAnywherePtyDebugSnapshot | null;
+    __devAnywherePtyRenderDebug?: DevAnywherePtyRenderDebugApi;
     __ptySmoke: {
       sent: string[];
       socket: {
