@@ -120,7 +120,7 @@ const debugApi: PtyDebugApi = {
         }
         reports.push(report);
         console.group(
-          `[ptyDebug] render diff ${id}: ${report.mismatchCount}/${report.totalCells} mismatches` +
+          `[ptyDebug] render diff ${id}: ${report.mismatchCount}/${report.totalCells} mismatches, ${report.skippedCombined} combined skipped` +
             (report.truncated ? " (truncated)" : ""),
         );
         console.log(`viewportY=${report.viewportY} cols=${report.cols} rows=${report.rows}`);

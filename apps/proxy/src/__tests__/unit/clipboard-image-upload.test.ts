@@ -33,8 +33,8 @@ describe("clipboard image upload storage", () => {
       success: true,
       path: join(root, "s1", "clipboard", "pasted-20231114-221320-abc123.png"),
     });
-    expect(existsSync(result.path)).toBe(true);
-    expect(readFileSync(result.path)).toEqual(Buffer.from([1, 2, 3]));
+    expect(existsSync(result.path!)).toBe(true);
+    expect(readFileSync(result.path!)).toEqual(Buffer.from([1, 2, 3]));
   });
 
   it("prefers the session cwd and returns a project-relative agent path", () => {
@@ -153,7 +153,7 @@ describe("clipboard image upload storage", () => {
       success: true,
       path: join(root, "s1", "clipboard", "pasted-20231114-221320-abc123.png"),
     });
-    expect(readFileSync(result.path)).toEqual(Buffer.from([1, 2, 3]));
+    expect(readFileSync(result.path!)).toEqual(Buffer.from([1, 2, 3]));
   });
 
   it("rejects unsupported clipboard image MIME types", () => {

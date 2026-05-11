@@ -112,7 +112,6 @@ export class RelayInputHandlers {
           requestId,
           sessionId,
           success: false,
-          path: "",
           error: "会话不存在",
           errorCode: ControlErrorCode.SESSION_NOT_FOUND,
         }),

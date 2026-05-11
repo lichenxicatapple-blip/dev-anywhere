@@ -327,7 +327,7 @@ describe("RelayRouter input routing", () => {
       expect(msg.requestId).toBe("clip-1");
       expect(msg.sessionId).toBe("missing");
       expect(msg.success).toBe(false);
-      expect(msg.path).toBe("");
+      expect(msg.path).toBeUndefined();
       expect(msg.errorCode).toBe(ControlErrorCode.SESSION_NOT_FOUND);
     }
   });

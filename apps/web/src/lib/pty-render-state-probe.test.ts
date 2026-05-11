@@ -164,6 +164,27 @@ describe("diffModelAgainstBuffer", () => {
     expect(report.viewportY).toBe(5);
   });
 
+  it("does not treat combined-char cells as mismatches when buffer codepoint differs", () => {
+    // model 对 combined char 存 (COMBINED_CHAR_BIT | index), 不是 codepoint。
+    // 直接和 buffer.getCode() 比会假阳性——这里验证 skippedCombined 路径。
+    const cols = 2;
+    const rows = 1;
+    const COMBINED_BIT = 0x80000000;
+    const term = fakeTerminal({
+      cols,
+      rows,
+      viewportY: 0,
+      codes: [[0x4e2d, 0x6587]], // 中, 文
+    });
+    const cells = new Uint32Array(cols * rows * 4);
+    cells[0] = (COMBINED_BIT | 0x12) >>> 0; // combined idx 0x12, NOT codepoint 0x4e2d
+    cells[4] = (COMBINED_BIT | 0x34) >>> 0;
+    const report = diffModelAgainstBuffer(term, { cells, cols, rows, indicesPerCell: 4 });
+    expect(report.mismatchCount).toBe(0);
+    expect(report.matchCount).toBe(0);
+    expect(report.skippedCombined).toBe(2);
+  });
+
   it("clearRenderModel zeroes cells and lineLengths so next diff sees full mismatch", () => {
     const cols = 2;
     const rows = 1;

@@ -34,7 +34,7 @@ describe("file upload saving", () => {
     );
 
     expect(result.success).toBe(true);
-    const writtenAbs = join(cwd, result.path);
+    const writtenAbs = join(cwd, result.path!);
     expect(readFileSync(writtenAbs)).toEqual(data);
   });
 
@@ -53,7 +53,7 @@ describe("file upload saving", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.path.startsWith(dataDir)).toBe(true);
+    expect(result.path!.startsWith(dataDir)).toBe(true);
   });
 
   it("rejects payloads that exceed the 100MB cap", async () => {
@@ -98,8 +98,8 @@ describe("file upload saving", () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.path).not.toContain("..");
-    expect(result.path).toMatch(/passwd\.txt$/);
+    expect(result.path!).not.toContain("..");
+    expect(result.path!).toMatch(/passwd\.txt$/);
   });
 
   it("falls back to upload-<stamp>-<suffix><ext> when filename has unsafe characters", async () => {
@@ -113,7 +113,7 @@ describe("file upload saving", () => {
       { cwd, dataDir, randomSuffix: () => "rand9", now: () => 1000 },
     );
     expect(result.success).toBe(true);
-    expect(result.path).toMatch(/upload-\d{14}-rand9\.md$/);
+    expect(result.path!).toMatch(/upload-\d{14}-rand9\.md$/);
   });
 
   it("appends .dev-anywhere/ to .gitignore when the project has one", async () => {

@@ -19,7 +19,8 @@ export type FileUploadRequest = {
 
 export type FileUploadResult = {
   success: boolean;
-  path: string;
+  // 失败时不填,避免空字符串通过 schema 的 z.string().optional() 校验。
+  path?: string;
   error?: string;
   errorCode?: ControlErrorCode;
 };
@@ -147,7 +148,6 @@ export async function saveFileUpload(
   } catch (err) {
     return {
       success: false,
-      path: "",
       error: err instanceof Error ? err.message : String(err),
       errorCode: ControlErrorCode.UNKNOWN,
     };

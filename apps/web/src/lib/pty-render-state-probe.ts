@@ -88,6 +88,8 @@ export interface RenderDiffReport {
   totalCells: number;
   matchCount: number;
   mismatchCount: number;
+  // combined char cells (CJK/emoji 等) 探测器无法解析 codepoint, 单独计数
+  skippedCombined: number;
   mismatches: RenderDiffMismatch[];
   truncated: boolean;
 }
@@ -125,6 +127,7 @@ export function diffModelAgainstBuffer(
   const mismatches: RenderDiffMismatch[] = [];
   let matchCount = 0;
   let mismatchCount = 0;
+  let skippedCombined = 0;
   for (let row = 0; row < rows; row++) {
     const line = buffer.getLine(row + viewportY);
     for (let col = 0; col < cols; col++) {
@@ -135,11 +138,16 @@ export function diffModelAgainstBuffer(
       const modelCellRaw1 = cells[offset + 1] ?? 0;
       const modelCellRaw2 = cells[offset + 2] ?? 0;
       const modelCellRaw3 = cells[offset + 3] ?? 0;
-      const modelCodePlain =
-        (modelCellRaw0 & COMBINED_CHAR_BIT) !== 0 ? modelCellRaw0 : modelCellRaw0;
-      // 平凡 match: 都是空 cell, 或 codepoint 一致
-      const codeMatches =
-        bufferCode === modelCodePlain || (bufferCode === 0 && modelCodePlain === 0);
+      // model 对 combined char 存的是 (COMBINED_CHAR_BIT | combinedIndex), 不是 codepoint;
+      // 真实 codepoint 在 addon 的 combinedData 表里, 探测器拿不到。直接和 buffer.getCode()
+      // 比一定 mismatch — CJK / emoji 会话会全屏假阳性, 让 desync 诊断变废。降级处理:
+      // 设了 COMBINED_CHAR_BIT 就跳过该 cell, 不计入 mismatch (也不计入 match, 单独计数)。
+      const isCombined = (modelCellRaw0 & COMBINED_CHAR_BIT) !== 0;
+      if (isCombined) {
+        skippedCombined++;
+        continue;
+      }
+      const codeMatches = bufferCode === modelCellRaw0;
       if (codeMatches) {
         matchCount++;
         continue;
@@ -151,8 +159,8 @@ export function diffModelAgainstBuffer(
           col,
           bufferCode,
           bufferChar: decodeChar(bufferCode),
-          modelCode: modelCodePlain,
-          modelChar: decodeChar(modelCodePlain),
+          modelCode: modelCellRaw0,
+          modelChar: decodeChar(modelCellRaw0),
           modelCellRaw: [modelCellRaw0, modelCellRaw1, modelCellRaw2, modelCellRaw3]
             .map((n) => `0x${(n >>> 0).toString(16).padStart(8, "0")}`)
             .join(","),
@@ -167,6 +175,7 @@ export function diffModelAgainstBuffer(
     totalCells: cols * rows,
     matchCount,
     mismatchCount,
+    skippedCombined,
     mismatches,
     truncated: mismatchCount > mismatches.length,
   };
