@@ -185,12 +185,16 @@ export function InputBar({ sessionId }: InputBarProps) {
 
       const pasteSessionId = sessionId;
       setClipboardImageUploading(true);
+      // 上传 loading toast: 大图传输有 1-数秒等待, 没反馈用户会怀疑是否触发;
+      // 成功直接 dismiss, 失败时把同一 id 替换成 error toast
+      const uploadToastId = toast.loading("图片上传中...");
       try {
         const result = await uploadClipboardImageFromPaste({
           clipboardData: event.clipboardData,
           relay,
           sessionId: pasteSessionId,
         });
+        toast.dismiss(uploadToastId);
         if (!result) return;
 
         const activeTextarea =
@@ -218,7 +222,7 @@ export function InputBar({ sessionId }: InputBarProps) {
           setInputDraft(pasteSessionId, next.value);
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
+        toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
       } finally {
         setClipboardImageUploading(false);
       }

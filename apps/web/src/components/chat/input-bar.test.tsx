@@ -1,11 +1,14 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadClipboardImage, sendEnvelope, toastError } = vi.hoisted(() => ({
-  uploadClipboardImage: vi.fn(),
-  sendEnvelope: vi.fn(),
-  toastError: vi.fn(),
-}));
+const { uploadClipboardImage, sendEnvelope, toastError, toastLoading, toastDismiss } =
+  vi.hoisted(() => ({
+    uploadClipboardImage: vi.fn(),
+    sendEnvelope: vi.fn(),
+    toastError: vi.fn(),
+    toastLoading: vi.fn(() => "loading-id"),
+    toastDismiss: vi.fn(),
+  }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {
@@ -17,7 +20,7 @@ vi.mock("@/hooks/use-relay-setup", () => ({
 }));
 
 vi.mock("@/components/toast", () => ({
-  toast: { error: toastError },
+  toast: { error: toastError, loading: toastLoading, dismiss: toastDismiss },
 }));
 
 vi.mock("./input-menu", () => ({
@@ -65,6 +68,9 @@ describe("InputBar clipboard image paste", () => {
     });
     sendEnvelope.mockReset();
     toastError.mockReset();
+    toastLoading.mockReset();
+    toastLoading.mockReturnValue("loading-id");
+    toastDismiss.mockReset();
     useChatStore.setState({
       bySessionId: {
         s1: { ...EMPTY_SLICE, inputDraft: "inspect " },
@@ -95,6 +101,37 @@ describe("InputBar clipboard image paste", () => {
       expect(textarea.value).toBe("inspect @.dev-anywhere/clipboard/s1/shot.png ");
     });
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  // 上传 loading toast 在传输期间给用户存在反馈, 成功后立即消失避免持续打扰 (item 4)。
+  it("shows a loading toast during paste upload and dismisses it on success", async () => {
+    const upload = deferred<{ success: boolean; path: string }>();
+    uploadClipboardImage.mockReturnValueOnce(upload.promise);
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+    const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+
+    dispatchImagePaste(textarea, file);
+    await waitFor(() => expect(toastLoading).toHaveBeenCalledTimes(1));
+    expect(toastDismiss).not.toHaveBeenCalled();
+
+    upload.resolve({ success: true, path: ".dev-anywhere/clipboard/s1/shot.png" });
+    await waitFor(() => expect(toastDismiss).toHaveBeenCalledWith("loading-id"));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("replaces the loading toast with an error message when upload fails", async () => {
+    uploadClipboardImage.mockRejectedValueOnce(new Error("network broken"));
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+    const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+
+    dispatchImagePaste(textarea, file);
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("network broken", { id: "loading-id" }),
+    );
+    expect(toastDismiss).not.toHaveBeenCalled();
   });
 
   it("inserts uploaded image tokens into the latest draft after slow uploads", async () => {

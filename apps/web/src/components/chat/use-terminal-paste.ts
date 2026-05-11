@@ -34,18 +34,22 @@ export function useTerminalPaste({
         return;
       }
 
+      // 上传 loading toast: 移动端粘贴大图常见 1-数秒延迟, 没反馈用户重复触发更糟;
+      // 成功立刻 dismiss, 失败替换为 error toast
+      const uploadToastId = toast.loading("图片上传中...");
       try {
         const result = await uploadClipboardImageFromPaste({
           clipboardData: event.clipboardData,
           relay,
           sessionId,
         });
+        toast.dismiss(uploadToastId);
         if (!result) return;
         sendRemoteInputRaw(sessionId, result.token);
         onAfterPaste?.();
         terminalRef.current?.focus();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
+        toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
       }
     },
     [sessionId, terminalRef, onAfterPaste],
