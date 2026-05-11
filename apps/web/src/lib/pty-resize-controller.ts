@@ -83,12 +83,21 @@ export function attachPtyResizeController(
   scheduleFit();
   const ro = new ResizeObserver(scheduleFit);
   ro.observe(container);
+  // iOS 地址栏折叠 / Android 软键盘弹出会改 visualViewport / window 尺寸, 但 flex 容器
+  // 的 clientHeight 在 layout 安顿前可能滞后, ResizeObserver 不一定立即触发。订阅 window
+  // resize + visualViewport resize 作兜底, scheduleFit 自身 idempotent (RAF 合并)。
+  const onWindowResize = scheduleFit;
+  window.addEventListener("resize", onWindowResize);
+  const visualViewport = window.visualViewport;
+  visualViewport?.addEventListener("resize", onWindowResize);
 
   return {
     dispose: () => {
       disposed = true;
       if (frame !== null) cancelAnimationFrame(frame);
       ro.disconnect();
+      window.removeEventListener("resize", onWindowResize);
+      visualViewport?.removeEventListener("resize", onWindowResize);
     },
   };
 }
