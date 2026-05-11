@@ -125,6 +125,25 @@ describe("buildPtyScrollDebugSnapshot", () => {
     expect(snap.pendingContainerSyncRetry).toBe(true);
   });
 
+  it("matches positionHostAt's verticalOffset for small-buffer hosts", () => {
+    // hostHeight=200 < visibleContentHeight=400 → verticalOffset=200.
+    // positionHostAt 实际写: top = max(0, viewportY*cellH + 200)。expectedTop 必须跟着。
+    // viewportY=3, cellH=20 → 3*20+200=260, drift 应当为 0 (host 实际就在 260px)。
+    const refs = makeRefs({
+      scrollTop: 0,
+      clientHeight: 400,
+      hostTop: "260px",
+      hostHeight: "200px",
+      viewportY: 3,
+      bufferLength: 10,
+    });
+
+    const snap = buildPtyScrollDebugSnapshot(() => probe(), refs);
+
+    expect(snap.host.expectedTop).toBe(260);
+    expect(snap.host.topDrift).toBe(0);
+  });
+
   it("returns coverage=0 and expectedTop=0 when cellH=0 (probe pre-measurement)", () => {
     const refs = makeRefs({
       scrollTop: 100,

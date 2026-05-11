@@ -60,9 +60,17 @@ export function buildPtyScrollDebugSnapshot(
   const currentHostPaddingTop = parsePx(host.style.paddingTop);
   const currentSpacerWidth = parsePx(spacer.style.width);
 
-  // 不考虑 verticalOffset 的简单期望值——足够诊断 stale ydisp 的常见走样,verticalOffset
-  // 只在 hostHeight < visibleContentHeight 时非零,是另一类小 buffer 的特例。
-  const expectedHostTop = cellH > 0 ? buffer.viewportY * cellH : 0;
+  // 复刻 positionHostAt 的写入公式: top = max(0, viewportY*cellH + verticalOffset),
+  // verticalOffset 在 hostHeight < visibleContentHeight 时非零 (小 buffer)。expectedTop
+  // 必须跟着这条公式走,否则小 buffer 场景会产出虚假的 topDrift,误导线上诊断。
+  let expectedHostTop = 0;
+  if (cellH > 0) {
+    const expectedVerticalOffset =
+      currentHostHeight > 0 && currentHostHeight < visibleContentHeight
+        ? visibleContentHeight - currentHostHeight
+        : 0;
+    expectedHostTop = Math.max(0, buffer.viewportY * cellH + expectedVerticalOffset);
+  }
   const hostTopDrift = currentHostTop - expectedHostTop;
 
   // viewport ∩ host 重叠比例。线上排查 blank-render 时优先看这个值——< 1 就是可见区有空白带。

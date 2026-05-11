@@ -877,6 +877,82 @@ describe("attachPtyScrollController", () => {
     void xterm;
   });
 
+  it("treats missing .xterm-screen as cellH=0 and queues retry", () => {
+    // measureXtermCellSize 三条 null 路径之一: .xterm-screen 节点不存在
+    // (xterm 还没 open / 已经 dispose 了 inner DOM)。fix 不依赖具体触发器,只看 cellH——
+    // 但测试要把这条路径也覆盖到,免得未来重构改 measure 实现时这条 invariant 失守。
+    const { container, spacer, host } = createDom();
+    host.querySelector(".xterm-screen")?.remove();
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    container.scrollTop = 600;
+    container.dispatchEvent(new Event("scroll"));
+    expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(true);
+  });
+
+  it("treats term.cols=0 as cellH=0 and queues retry", () => {
+    // measureXtermCellSize 另一条 null 路径: term.cols<=0 || term.rows<=0。
+    // 移动端键盘 show/hide 时 container 短暂被压扁, xterm 内部 reflow 可能让 cols 临时为 0。
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    // 先正常 attach (init 期间 cols=80 拿到正常 cellH), 再把 cols 砍掉
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    (terminal as unknown as { cols: number }).cols = 0;
+    container.scrollTop = 600;
+    container.dispatchEvent(new Event("scroll"));
+    expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(true);
+  });
+
+  it("clears pendingContainerSyncRetry when scrollToBottom takes over the scroll position", () => {
+    // scrollToBottom 重写 scrollTop 到底, 上一次 cellH=0 漏掉的"按 user scroll 重对齐"语义就此失效。
+    // flag 留 true 不破坏正确性 (再 sync 一遍是 no-op), 但语义不真——审计中应当显式 reset。
+    const { container, spacer, host } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // 触发 cellH=0 → 用户 scroll → flag 置 true
+    defineSize(screen, { clientHeight: 0, clientWidth: 0 });
+    container.scrollTop = 600;
+    container.dispatchEvent(new Event("scroll"));
+    expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(true);
+
+    // scrollToBottom (无论是用户点 BackToBottom, 还是自动 follow 路径) 必须清掉 flag
+    ctrl.scrollToBottom();
+    expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(false);
+  });
+
   // syncing.{internal,external} 泄漏审查记录: scrollToYdisp / scrollToBottom / onTermScroll
   // 三处置位都被 try/finally 包住, 内部路径的 throw 都会复位 flag。模拟 throw 的回归测试
   // 在 jsdom 下被作为 unhandled error 上报,污染下一个 test。这条 invariant 改由静态保留 +

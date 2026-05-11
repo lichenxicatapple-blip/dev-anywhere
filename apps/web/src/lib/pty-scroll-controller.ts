@@ -201,6 +201,9 @@ export function attachPtyScrollController(
   const scrollToBottom = (): void => {
     trace("scroll-to-bottom:start");
     setUserHasVerticalScrollIntent(false);
+    // scrollToBottom 重写 scrollTop 到底,任何"上一次 user scroll 没 sync 上"的语义就此失效——
+    // 否则 retry flag 会留在 true,下一次 relayout 还会按当前 scrollTop 再 sync 一遍 (无害但语义不真)。
+    pendingContainerSyncRetry = false;
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
     syncing.internal = true;
     try {
@@ -432,6 +435,10 @@ export function attachPtyScrollController(
         positionHostAt(term.buffer.active.viewportY, cellH);
       }
     }
+    // 注: pendingContainerSyncRetry 分支里 syncContainerScroll 自己已经 notifyScroll 一次,
+    // 这里再 notifyScroll 一次是冗余但无害的——notifyAtBottom / notifyScrollState 都有
+    // idempotent guard (lastAtBottom / lastScrollStateKey),重复调用直接早返回。保持收尾
+    // 一行 notifyScroll 让 relayout 主路径读起来线性,不为了这一次冗余加分支。
     notifyScroll();
     trace("relayout:end");
   };
@@ -439,6 +446,10 @@ export function attachPtyScrollController(
   const onRender = (): void => {
     trace("render");
     updateSpacer();
+    // 顺序很关键: retry 必须在 handlePendingNewFrame 之前。如果反过来,
+    // handlePendingNewFrame 在 follow 路径里会调 scrollToBottom 改写 scrollTop,
+    // 后跑的 syncContainerScroll 就会按"被改写后的 scrollTop"重新对齐,等于无视
+    // 用户原本想停留的位置。先 sync 让 user-intent 落地,再 handle pending frame。
     if (pendingContainerSyncRetry) syncContainerScroll();
     handlePendingNewFrame();
     notifyScroll();
