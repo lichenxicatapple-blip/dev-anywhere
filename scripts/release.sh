@@ -143,25 +143,22 @@ echo "  Commit: ${RELEASE_SHA} ($(git log -1 --pretty=%s))"
 echo "  Tag:    ${TAG} -> ${RELEASE_SHA}"
 echo ""
 echo "Pushing the tag triggers .github/workflows/release.yml to publish docker + npm."
-echo ""
 
 if [[ "${RELEASE_SKIP_PUSH:-}" == "1" ]]; then
-  echo "RELEASE_SKIP_PUSH=1 set; stopping before push. Run manually:"
+  echo ""
+  echo "RELEASE_SKIP_PUSH=1 set; stopping before push. To push later:"
   echo "  git push origin $(git rev-parse --abbrev-ref HEAD)"
   echo "  git push origin ${TAG}"
   exit 0
 fi
 
-read -r -p "Push commit + tag now? [y/N] " ANSWER
-if [[ "${ANSWER}" != "y" && "${ANSWER}" != "Y" ]]; then
-  echo "Aborted before push. To push later:"
-  echo "  git push origin $(git rev-parse --abbrev-ref HEAD)"
-  echo "  git push origin ${TAG}"
-  exit 0
-fi
-
+# 所有门禁过了 (release:check / release:smoke / tag不存在 / dirty 限定),
+# 直接推; 想跳过推的话用 RELEASE_SKIP_PUSH=1。
+echo ""
+echo "=== Pushing commit and tag ==="
 git push origin "$(git rev-parse --abbrev-ref HEAD)"
 git push origin "${TAG}"
 
+REMOTE_PATH="$(git remote get-url origin | sed -E 's|.*github.com[:/]||; s|\.git$||')"
 echo ""
-echo "Pushed. Watch CI: https://github.com/$(git remote get-url origin | sed -E 's|.*github.com[:/]||; s|\.git$||')/actions"
+echo "Pushed. CI: https://github.com/${REMOTE_PATH}/actions"
