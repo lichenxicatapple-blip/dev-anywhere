@@ -32,6 +32,12 @@ interface CCTestHooks {
       screenHeight: number;
     } | null;
     getSelection: (sessionId: string) => string;
+    activateLink: (
+      sessionId: string,
+      kind: "image-preview" | "file-download",
+      needle: string,
+      modifier: "meta" | "ctrl" | "none",
+    ) => { triggered: boolean; text?: string; lineNumber?: number };
   };
   toast: (message: string) => void;
 }

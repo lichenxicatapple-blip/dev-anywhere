@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { describeControlError } from "@/lib/control-error-message";
 import { extractImagePreviewPaths } from "@/lib/image-preview-path";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
@@ -75,7 +76,11 @@ export function ImagePreviewProvider({
             setState({
               status: "error",
               path,
-              error: result.error ?? "图片预览失败",
+              error: describeControlError({
+                errorCode: result.errorCode,
+                rawError: result.error,
+                fallback: "图片预览失败",
+              }),
             });
             return;
           }

@@ -4,15 +4,17 @@
 export function ThinkingIndicator() {
   return (
     <div
-      className="flex justify-start px-4 py-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
+      className="px-4 py-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
       data-slot="thinking-indicator"
       role="status"
       aria-label="Claude 正在思考"
     >
-      <div className="flex w-fit items-center gap-1.5 rounded-[8px_24px_24px_24px] bg-foreground/8 px-5 py-3">
-        <span className="dev-thinking-dot" />
-        <span className="dev-thinking-dot" />
-        <span className="dev-thinking-dot" />
+      <div className="dev-message-rail mx-auto flex w-full justify-start">
+        <div className="flex w-fit items-center gap-1.5 rounded-[8px_24px_24px_24px] bg-foreground/8 px-5 py-3">
+          <span className="dev-thinking-dot" />
+          <span className="dev-thinking-dot" />
+          <span className="dev-thinking-dot" />
+        </div>
       </div>
     </div>
   );

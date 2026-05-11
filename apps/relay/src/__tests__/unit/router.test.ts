@@ -173,7 +173,7 @@ describe("routeClientMessage", () => {
     expect(sentData.code).toBe("PROXY_OFFLINE");
   });
 
-  it("logs warning for invalid data", () => {
+  it("logs warning for invalid data and sends relay_error back to client", () => {
     const clientWs = createMockWs();
     routeClientMessage("bad data {{", "p1", clientWs, registry, logger);
 
@@ -181,6 +181,33 @@ describe("routeClientMessage", () => {
       expect.objectContaining({ error: expect.any(String) }),
       "Invalid message from client",
     );
-    expect(clientWs.send).not.toHaveBeenCalled();
+    // 之前是静默丢弃, client 只能等到 timeout 才知道。现在 relay 回 relay_error,
+    // client waitForMessage 立即拒掉 pending Promise。
+    expect(clientWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse((clientWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    expect(sent.type).toBe("relay_error");
+    expect(sent.code).toBe("INVALID_MESSAGE");
+    expect(typeof sent.message).toBe("string");
+  });
+
+  it("propagates requestId from invalid payload back via relay_error", () => {
+    const clientWs = createMockWs();
+    // schema 不认的 type, 但 raw 上有 requestId 字段, 应被透传回 client
+    const raw = JSON.stringify({ type: "no_such_type", requestId: "req-xyz-1" });
+    routeClientMessage(raw, "p1", clientWs, registry, logger);
+
+    expect(clientWs.send).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse((clientWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    expect(sent.type).toBe("relay_error");
+    expect(sent.requestId).toBe("req-xyz-1");
+  });
+
+  it("omits requestId when invalid payload has no requestId field", () => {
+    const clientWs = createMockWs();
+    routeClientMessage("not json", "p1", clientWs, registry, logger);
+
+    const sent = JSON.parse((clientWs.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    expect(sent.type).toBe("relay_error");
+    expect(sent).not.toHaveProperty("requestId");
   });
 });

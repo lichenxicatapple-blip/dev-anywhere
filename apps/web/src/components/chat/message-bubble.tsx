@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
+import { FileDownloadLinks } from "./file-download-link";
 import { ImagePreviewLinks } from "./image-preview";
 import { MarkdownView } from "./markdown-view";
 
@@ -25,6 +26,7 @@ export const MessageBubble = memo(function MessageBubble({
           >
             <MarkdownView text={message.text} tone="on-primary" />
             <ImagePreviewLinks text={message.text} tone="on-primary" />
+            <FileDownloadLinks text={message.text} tone="on-primary" />
           </div>
         </div>
       </article>
@@ -40,6 +42,7 @@ export const MessageBubble = memo(function MessageBubble({
         >
           <MarkdownView text={message.text} />
           <ImagePreviewLinks text={message.text} />
+          <FileDownloadLinks text={message.text} />
           {message.isPartial && (
             <span
               className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"

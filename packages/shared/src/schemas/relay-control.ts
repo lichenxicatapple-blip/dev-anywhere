@@ -134,6 +134,9 @@ const relayControlDefinitions = [
   control("relay_error", {
     code: z.enum(Object.values(RelayErrorCode) as [RelayErrorCode, ...RelayErrorCode[]]),
     message: z.string(),
+    // 可选 requestId: relay 把 client 发来 raw 的 requestId 字段透传回来,
+    // client 侧 waitForMessage 据此把对应 pending request 立即拒掉而不必等到 timeout。
+    requestId: IdSchema.optional(),
   }),
 
   // 客户端注册协议

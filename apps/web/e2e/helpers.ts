@@ -345,6 +345,20 @@ export async function installFakeRelay(page: Page): Promise<void> {
               path: `.dev-anywhere/clipboard/${String(msg.sessionId)}/pasted-e2e.png`,
             });
             break;
+          case "file_download_request": {
+            const sid = String(msg.sessionId);
+            this.emitJson({
+              type: "file_download_response",
+              requestId: msg.requestId,
+              sessionId: sid,
+              success: true,
+              path: String(msg.path),
+              mimeType: "text/plain",
+              dataBase64: "QUJD",
+              size: 3,
+            });
+            break;
+          }
           case "image_preview_request":
             setTimeout(() => {
               this.emitJson({

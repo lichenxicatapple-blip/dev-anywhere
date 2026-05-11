@@ -39,4 +39,45 @@ describe("file-download-path extraction", () => {
   it("dedupes repeated paths", () => {
     expect(extractFileDownloadPaths("/a.log /a.log /a.log")).toEqual(["/a.log"]);
   });
+
+  it("matches double-extension archives and TS/JS source files", () => {
+    expect(extractFileDownloadPaths("Created ./build/out.tar.gz")).toEqual([
+      "./build/out.tar.gz",
+    ]);
+    expect(extractFileDownloadPaths("see ../dist/bundle.min.js end")).toEqual([
+      "../dist/bundle.min.js",
+    ]);
+    expect(extractFileDownloadPaths("declared in /pkg/types/index.d.ts.")).toEqual([
+      "/pkg/types/index.d.ts",
+    ]);
+    expect(extractFileDownloadPaths(".dev-anywhere/uploads/s1/dump.tar.bz2")).toEqual([
+      ".dev-anywhere/uploads/s1/dump.tar.bz2",
+    ]);
+    // 三段及以上扩展: 主干 greedy 延伸到下一空白前, 扩展子表达式回溯到最末段。
+    expect(extractFileDownloadPaths("see ./a/fixture.test.snapshot.json end")).toEqual([
+      "./a/fixture.test.snapshot.json",
+    ]);
+  });
+
+  it("recognizes bare relative paths and top-level filenames without explicit prefix", () => {
+    expect(extractFileDownloadPaths("see README.md")).toEqual(["README.md"]);
+    expect(extractFileDownloadPaths("edit package.json next")).toEqual(["package.json"]);
+    expect(extractFileDownloadPaths("docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([
+      "docs/superpowers/specs/2026-05-10-spec.md",
+    ]);
+  });
+
+  it("rejects version-number-shaped tokens that incidentally match path syntax", () => {
+    expect(isFileDownloadPath("5.0")).toBe(false);
+    expect(isFileDownloadPath("1.2.3")).toBe(false);
+    expect(extractFileDownloadPaths("User-Agent: Mozilla/5.0 (Macintosh)")).toEqual([]);
+    expect(extractFileDownloadPaths("Node 22.4.0 release notes")).toEqual([]);
+  });
+
+  it("isFileDownloadPath accepts each explicit prefix directly", () => {
+    expect(isFileDownloadPath("/a.log")).toBe(true);
+    expect(isFileDownloadPath("./a.log")).toBe(true);
+    expect(isFileDownloadPath("../a.log")).toBe(true);
+    expect(isFileDownloadPath(".dev-anywhere/x.log")).toBe(true);
+  });
 });

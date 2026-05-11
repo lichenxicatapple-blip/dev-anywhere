@@ -179,7 +179,14 @@ export class RelayInputHandlers {
         ...result,
       }),
     );
-    serviceLogger.info({ sessionId, success: result.success }, "Image preview handled");
+    if (result.success) {
+      serviceLogger.info({ sessionId, path, size: result.size }, "Image preview handled");
+    } else {
+      serviceLogger.warn(
+        { sessionId, path, errorCode: result.errorCode, error: result.error },
+        "Image preview failed",
+      );
+    }
   }
 
   onFileDownloadRequest(msg: ControlMessage<"file_download_request">): void {
@@ -212,10 +219,18 @@ export class RelayInputHandlers {
         ...result,
       }),
     );
-    serviceLogger.info(
-      { sessionId, success: result.success, size: result.size },
-      "File download handled",
-    );
+    if (result.success) {
+      serviceLogger.info(
+        { sessionId, path, size: result.size },
+        "File download handled",
+      );
+    } else {
+      // 失败必带 errorCode + error, 否则只看 success=false 不知道是 ENOENT / EACCES / 超大 / 不是文件。
+      serviceLogger.warn(
+        { sessionId, path, errorCode: result.errorCode, error: result.error },
+        "File download failed",
+      );
+    }
   }
 
   async onFileUploadRequest(msg: ControlMessage<"file_upload_request">): Promise<void> {
@@ -251,9 +266,13 @@ export class RelayInputHandlers {
         ...result,
       }),
     );
-    serviceLogger.info(
-      { sessionId, success: result.success, fileName },
-      "File upload handled",
-    );
+    if (result.success) {
+      serviceLogger.info({ sessionId, fileName, path: result.path }, "File upload handled");
+    } else {
+      serviceLogger.warn(
+        { sessionId, fileName, errorCode: result.errorCode, error: result.error },
+        "File upload failed",
+      );
+    }
   }
 }

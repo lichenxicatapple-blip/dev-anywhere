@@ -34,6 +34,20 @@ export function parseMessage(data: string): ParseResult {
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };
 }
 
+// 从 raw JSON 抓 requestId, 用来给 invalid message 拼回 relay_error 时填充——这样
+// client waitForMessage 能用 requestId 立即拒对应的 pending Promise, 不必等 timeout。
+function extractRequestIdFromRaw(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.requestId === "string") {
+      return parsed.requestId;
+    }
+  } catch {
+    // raw 不是合法 JSON, 直接没 requestId
+  }
+  return undefined;
+}
+
 // 将 proxy 发来的 MessageEnvelope 转发给绑定的 client
 // relay 无状态，不缓冲消息，直接透传
 export function routeProxyMessage(
@@ -87,6 +101,18 @@ export function routeClientMessage(
 
   if (result.kind === "invalid") {
     logger.warn({ error: result.error }, "Invalid message from client");
+    // 把拒绝原因带 requestId 发回 client, 让 waitForMessage 立刻拒 pending Promise。
+    // 不发回的话, 调用方只看到 "上传超时" / "请求超时" 这种泛用 timeout, 不知道
+    // 实际是 schema 不认。常见触发场景: 客户端有新协议, relay 在旧 build 上还没认。
+    const requestId = extractRequestIdFromRaw(raw);
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_error",
+        code: RelayErrorCode.INVALID_MESSAGE,
+        message: result.error,
+        ...(requestId ? { requestId } : {}),
+      }),
+    );
     return;
   }
 

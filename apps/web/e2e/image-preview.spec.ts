@@ -100,7 +100,11 @@ test.describe("image preview", () => {
       });
       expect(point).not.toBeNull();
       await page.mouse.move(point!.x, point!.y);
+      // link provider 的 activate gate 要求 cmd/ctrl 修饰: 普通 click 不触发预览,
+      // 通过 keyboard.down("Meta") 在 click 期间持有修饰键。
+      await page.keyboard.down("Meta");
       await page.mouse.click(point!.x, point!.y);
+      await page.keyboard.up("Meta");
 
       await expectPreviewReady(page, path);
     });

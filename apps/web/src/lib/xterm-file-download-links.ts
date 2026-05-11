@@ -77,7 +77,7 @@ function isFullWidthCodePoint(codePoint: number): boolean {
 export function registerFileDownloadLinkProvider(
   terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
   onDownload: (path: string) => void,
-): { dispose: () => void } {
+): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
       const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true);
@@ -104,5 +104,6 @@ export function registerFileDownloadLinkProvider(
       callback(links.length > 0 ? links : undefined);
     },
   };
-  return terminal.registerLinkProvider(provider);
+  const disposable = terminal.registerLinkProvider(provider);
+  return { dispose: () => disposable.dispose(), provider };
 }

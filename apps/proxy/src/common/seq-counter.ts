@@ -80,11 +80,10 @@ export function getSeqCounterFor(sessionId: string, baseDir?: string): SeqCounte
   return counter;
 }
 
-// session 终止时调用, 把 counter 从缓存里摘掉并 flush 当前值到盘。
+// session 终止时调用, 把 counter 从缓存里摘掉。不再 flush:
+// terminateSession 的 onSessionRemoved 已经 rmSync session 目录, 紧接着 cleanupSessionResources
+// 调本函数, flush 会写到一个不存在的路径报 ENOENT。flush 的语义是"优雅退出 process 时让重启
+// 续号尽量贴近真实进度", 而 sessionId 是 nanoid 不复用, terminate 后的续号没意义。
 export function disposeSeqCounter(sessionId: string): void {
-  const counter = seqCounterCache.get(sessionId);
-  if (counter) {
-    counter.flush();
-    seqCounterCache.delete(sessionId);
-  }
+  seqCounterCache.delete(sessionId);
 }

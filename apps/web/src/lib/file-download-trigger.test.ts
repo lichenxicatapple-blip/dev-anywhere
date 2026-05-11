@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ControlErrorCode } from "@dev-anywhere/shared";
+import type { ControlErrorCode as ControlErrorCodeType } from "@dev-anywhere/shared";
 import { triggerFileDownload } from "./file-download-trigger";
 import type { RelayClient } from "@/services/relay-client";
 
@@ -10,6 +12,7 @@ function makeRelayWithResponse(
     dataBase64: string;
     size: number;
     error: string;
+    errorCode: ControlErrorCodeType;
   }>,
 ): RelayClient {
   return {
@@ -21,6 +24,7 @@ function makeRelayWithResponse(
       dataBase64: resp.dataBase64,
       size: resp.size,
       error: resp.error,
+      errorCode: resp.errorCode,
     }),
   } as unknown as RelayClient;
 }
@@ -71,6 +75,21 @@ describe("triggerFileDownload", () => {
     });
 
     const result = await triggerFileDownload({ relay, sessionId: "s1", path: "/missing.log" });
+
+    expect(result).toEqual({ ok: false, error: "文件不存在" });
+    expect(clickSpy).not.toHaveBeenCalled();
+  });
+
+  it("translates errorCode into Chinese, ignoring raw fs error string", async () => {
+    const relay = makeRelayWithResponse({
+      success: false,
+      error: "ENOENT: no such file or directory, lstat '/abs/missing'",
+      errorCode: ControlErrorCode.PATH_NOT_FOUND,
+      dataBase64: undefined,
+      mimeType: undefined,
+    });
+
+    const result = await triggerFileDownload({ relay, sessionId: "s1", path: "/abs/missing" });
 
     expect(result).toEqual({ ok: false, error: "文件不存在" });
     expect(clickSpy).not.toHaveBeenCalled();

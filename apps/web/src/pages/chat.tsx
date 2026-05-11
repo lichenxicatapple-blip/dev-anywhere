@@ -8,6 +8,7 @@ import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatJsonView } from "@/components/chat/chat-json-view";
 import { ChatPtyView } from "@/components/chat/chat-pty-view";
 import { InputBar } from "@/components/chat/input-bar";
+import { FileDownloadProvider } from "@/components/chat/file-download-link";
 import { ImagePreviewProvider } from "@/components/chat/image-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
@@ -100,6 +101,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
 
   return (
     <ImagePreviewProvider sessionId={id}>
+      <FileDownloadProvider sessionId={id}>
       <div
         className="flex flex-col h-full"
         style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
@@ -138,6 +140,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           </>
         )}
       </div>
+      </FileDownloadProvider>
     </ImagePreviewProvider>
   );
 }

@@ -156,6 +156,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "proxy_list_request", requestId })),
       "请求开发机列表超时",
       timeoutMs,
+      requestId,
     ).then((msg) => msg.proxies as ProxyInfoResult);
   }
 
@@ -171,6 +172,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "proxy_select", requestId, proxyId })),
       "连接开发机超时",
       timeoutMs,
+      requestId,
     ).then((resp) => {
       if (resp.success) {
         this.boundProxyId = proxyId;
@@ -195,6 +197,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "dir_create_request", requestId, path })),
       "创建目录超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       success: resp.success,
       path: resp.path,
@@ -214,6 +217,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "dir_list_request", requestId, path })),
       "读取目录超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       path: resp.path,
       entries: resp.entries,
@@ -244,6 +248,7 @@ export class RelayClient {
         ),
       "上传剪贴板图片超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       success: resp.success,
@@ -275,6 +280,7 @@ export class RelayClient {
         ),
       "读取图片超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       success: resp.success,
@@ -309,6 +315,7 @@ export class RelayClient {
         ),
       "下载文件超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       success: resp.success,
@@ -343,6 +350,7 @@ export class RelayClient {
         ),
       "上传文件超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       success: resp.success,
@@ -362,6 +370,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "proxy_info_request", requestId })),
       "读取开发机信息超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({ homePath: resp.homePath, agentCli: resp.agentCli }));
   }
 
@@ -385,6 +394,7 @@ export class RelayClient {
         ),
       "保存 Agent CLI 路径超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       provider: resp.provider,
       agentCli: resp.agentCli,
@@ -401,6 +411,7 @@ export class RelayClient {
       () => this.ws.send(JSON.stringify({ type: "session_history_request", requestId })),
       "读取历史会话超时",
       timeoutMs,
+      requestId,
     ).then((resp) => resp.sessions);
   }
 
@@ -434,6 +445,7 @@ export class RelayClient {
         ),
       "读取会话消息超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       messages: resp.messages,
       hasMore: resp.hasMore ?? false,
@@ -460,6 +472,7 @@ export class RelayClient {
         ),
       "读取 Agent 状态超时",
       timeoutMs,
+      requestId,
     ).then((resp) => resp.statuses);
   }
 
@@ -483,6 +496,7 @@ export class RelayClient {
         ),
       "读取会话资源超时",
       timeoutMs,
+      requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       commands: resp.commands,
@@ -528,6 +542,9 @@ export class RelayClient {
     send: () => boolean | void,
     timeoutMessage: string,
     timeoutMs: number,
+    // 传入则同时监听 relay_error 上的同 requestId, 命中即按 relay 给的原因 reject。
+    // 这条让 schema 不认 / proxy_offline 这类失败立刻报错而不是等 timeout 兜底。
+    requestId?: string,
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -549,8 +566,18 @@ export class RelayClient {
       };
 
       unsubscribeMessage = this.onMessage((msg) => {
-        if (!predicate(msg)) return;
-        settle(() => resolve(msg));
+        if (predicate(msg)) {
+          settle(() => resolve(msg));
+          return;
+        }
+        if (
+          requestId &&
+          msg.type === "relay_error" &&
+          (msg as { requestId?: string }).requestId === requestId
+        ) {
+          const message = (msg as { message?: string }).message ?? "relay error";
+          settle(() => reject(new Error(`relay 拒绝请求: ${message}`)));
+        }
       });
       unsubscribeStatus = this.ws.onStatusChange((connected) => {
         if (connected) return;

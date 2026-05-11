@@ -51,7 +51,7 @@ import {
   probeWebglRenderModel,
 } from "@/lib/pty-render-state-probe";
 import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
-import { registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
+import { registerPtyLinkProvider, registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { toast } from "@/components/toast";
 import { useImagePreview } from "./image-preview";
 import { usePtyConnectionState } from "./use-pty-connection-state";
@@ -310,17 +310,24 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       onTerminalReady: (term) => {
         const xterm = term as Terminal;
         terminalRef.current = xterm;
-        imageLinkDispose = registerImagePreviewLinkProvider(xterm, openImagePreview).dispose;
-        fileDownloadLinkDispose = registerFileDownloadLinkProvider(xterm, async (path) => {
-          const toastId = toast.loading(`下载 ${path} ...`);
-          try {
-            const result = await triggerFileDownload({ relay, sessionId, path });
-            if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
-            else toast.error(result.error, { id: toastId });
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
-          }
-        }).dispose;
+        const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openImagePreview);
+        imageLinkDispose = imageLinkRegistration.dispose;
+        registerPtyLinkProvider(sessionId, "image-preview", imageLinkRegistration.provider);
+        const fileDownloadLinkRegistration = registerFileDownloadLinkProvider(
+          xterm,
+          async (path) => {
+            const toastId = toast.loading(`下载 ${path} ...`);
+            try {
+              const result = await triggerFileDownload({ relay, sessionId, path });
+              if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
+              else toast.error(result.error, { id: toastId });
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+            }
+          },
+        );
+        fileDownloadLinkDispose = fileDownloadLinkRegistration.dispose;
+        registerPtyLinkProvider(sessionId, "file-download", fileDownloadLinkRegistration.provider);
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
@@ -416,6 +423,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
       fileDownloadLinkDispose?.();
+      registerPtyLinkProvider(sessionId, "image-preview", null);
+      registerPtyLinkProvider(sessionId, "file-download", null);
       ptyDebugDeregister?.();
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);

@@ -4,7 +4,11 @@
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { toast } from "@/components/toast";
-import type { Terminal } from "@xterm/xterm";
+import type { ILinkProvider, Terminal } from "@xterm/xterm";
+
+// PTY xterm link provider 在真实浏览器里需要鼠标精确落到字符 cell 才会激活,
+// e2e 通过此 hook 直接调 provideLinks → activate, 绕过坐标投影。
+export type PtyLinkKind = "image-preview" | "file-download";
 
 interface CCTestHooks {
   chat: {
@@ -29,6 +33,12 @@ interface CCTestHooks {
       screenHeight: number;
     } | null;
     getSelection: (sessionId: string) => string;
+    activateLink: (
+      sessionId: string,
+      kind: PtyLinkKind,
+      needle: string,
+      modifier: "meta" | "ctrl" | "none",
+    ) => { triggered: boolean; text?: string; lineNumber?: number };
   };
   toast: (message: string) => void;
 }
@@ -43,6 +53,8 @@ export function installTestHooks(): void {
   if (!import.meta.env.DEV) return;
   const ptySerializers = new Map<string, () => string>();
   const ptyTerminals = new Map<string, Terminal>();
+  const ptyLinkProviders = new Map<string, ILinkProvider>();
+  const linkKey = (sid: string, kind: PtyLinkKind): string => `${sid}/${kind}`;
   window.__ccTest = {
     chat: {
       addUserMessage: (sid, msg) => useChatStore.getState().addUserMessage(sid, msg),
@@ -70,6 +82,34 @@ export function installTestHooks(): void {
       // drag-select autoscroll e2e 用: 取 xterm 当前选区文字, 验证选区是否真延伸
       // 到屏外内容上(光 scrollLeft 动了不够, 那只能证明容器滚了)。
       getSelection: (sid) => ptyTerminals.get(sid)?.getSelection() ?? "",
+      activateLink: (sid, kind, needle, modifier) => {
+        const provider = ptyLinkProviders.get(linkKey(sid, kind));
+        const term = ptyTerminals.get(sid);
+        if (!provider || !term) return { triggered: false };
+        const buffer = term.buffer.active;
+        for (let i = 0; i < buffer.length; i += 1) {
+          const line = buffer.getLine(i)?.translateToString(true) ?? "";
+          if (!line.includes(needle)) continue;
+          let triggered = false;
+          let text: string | undefined;
+          // bufferLineNumber 是 1-based, getLine(i) 是 0-based, 因此传 i+1。
+          provider.provideLinks(i + 1, (links) => {
+            const link = links?.[0];
+            if (!link) return;
+            text = link.text;
+            // 构造仅含修饰键的合成 MouseEvent: link provider 内部只读 metaKey / ctrlKey,
+            // 其它字段 (clientX/Y / button) 与命中判定无关, 因此用 partial cast 即可。
+            const event = {
+              metaKey: modifier === "meta",
+              ctrlKey: modifier === "ctrl",
+            } as unknown as MouseEvent;
+            link.activate(event, link.text);
+            triggered = true;
+          });
+          return { triggered, text, lineNumber: i + 1 };
+        }
+        return { triggered: false };
+      },
     },
     toast: (msg) => {
       toast(msg);
@@ -77,12 +117,14 @@ export function installTestHooks(): void {
   };
   window.__ccTestPtySerializers = ptySerializers;
   window.__ccTestPtyTerminals = ptyTerminals;
+  window.__ccTestPtyLinkProviders = ptyLinkProviders;
 }
 
 declare global {
   interface Window {
     __ccTestPtySerializers?: Map<string, () => string>;
     __ccTestPtyTerminals?: Map<string, Terminal>;
+    __ccTestPtyLinkProviders?: Map<string, ILinkProvider>;
   }
 }
 
@@ -100,4 +142,17 @@ export function registerPtyTerminal(sessionId: string, terminal: Terminal | null
   if (!terminals) return;
   if (terminal) terminals.set(sessionId, terminal);
   else terminals.delete(sessionId);
+}
+
+export function registerPtyLinkProvider(
+  sessionId: string,
+  kind: PtyLinkKind,
+  provider: ILinkProvider | null,
+): void {
+  if (!import.meta.env.DEV) return;
+  const providers = window.__ccTestPtyLinkProviders;
+  if (!providers) return;
+  const key = `${sessionId}/${kind}`;
+  if (provider) providers.set(key, provider);
+  else providers.delete(key);
 }

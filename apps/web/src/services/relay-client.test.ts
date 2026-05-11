@@ -422,6 +422,46 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("rejects pending request immediately when relay_error carries the same requestId", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestProxyList(60_000);
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+      message: "Message matches neither RelayControl nor MessageEnvelope",
+      requestId,
+    });
+
+    // 不等 timeout, 立刻拒掉, 错误信息带上 relay 给的原因
+    await expect(promise).rejects.toThrow(
+      /relay 拒绝请求.*Message matches neither RelayControl nor MessageEnvelope/,
+    );
+  });
+
+  it("ignores relay_error whose requestId does not match the pending request", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay, ws } = createClient();
+      const promise = relay.requestProxyList(100);
+      sentRequestId(ws);
+
+      ws.emit({
+        type: "relay_error",
+        code: "INVALID_MESSAGE",
+        message: "for someone else",
+        requestId: "unrelated-request",
+      });
+
+      const assertion = expect(promise).rejects.toThrow("请求开发机列表超时");
+      await vi.advanceTimersByTimeAsync(100);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("correlates concurrent session create responses by requestId", async () => {
     const { relay, ws } = createClient();
     const first = relay.createSession({ cwd: "/one", provider: "claude", mode: "pty" });
