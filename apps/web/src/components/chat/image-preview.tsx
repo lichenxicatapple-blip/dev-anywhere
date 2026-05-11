@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Copy, Image as ImageIcon, Maximize2, Minimize2 } from "lucide-react";
+import { Copy, Download, Image as ImageIcon, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -188,6 +188,18 @@ function ImagePreviewDialog({
     }
   }
 
+  function downloadImage(): void {
+    if (!src) return;
+    const fileName = state.path.split(/[\\/]/).pop() || "image";
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = fileName;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -273,6 +285,16 @@ function ImagePreviewDialog({
                   适应窗口
                 </>
               )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={downloadImage}
+              disabled={!src || showDecodeError}
+              data-slot="image-preview-download"
+            >
+              <Download aria-hidden="true" />
+              下载
             </Button>
             <Button variant="outline" size="sm" onClick={copyPath} disabled={!state.path}>
               <Copy aria-hidden="true" />
