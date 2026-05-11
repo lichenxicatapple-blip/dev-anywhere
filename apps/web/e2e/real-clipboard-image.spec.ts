@@ -318,4 +318,44 @@ test.describe("real clipboard image chain", () => {
       rmSync(ptyCwd, { recursive: true, force: true });
     }
   });
+
+  test("PTY chat menu uploads picked file and inserts the @<path> token", async ({ page }) => {
+    const ptyCwd = join(smokeRoot, `pty-file-${Date.now()}`);
+    mkdirSync(ptyCwd, { recursive: true });
+    writeFileSync(join(ptyCwd, ".gitignore"), "node_modules/\n");
+    let ptySessionId: string | undefined;
+    try {
+      ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
+      await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
+
+      // setInputFiles 直接打到 hidden input,绕过 Radix Portal 在 e2e 下的 pointer 不稳定。
+      // 真实链路: input.change → fileToUploadPayload → relay.uploadFile → proxy 落盘 → token sendRaw。
+      const fileBytes = Buffer.from("hello dev-anywhere\n", "utf-8");
+      const fileName = `notes-${Date.now()}.txt`;
+      await page
+        .locator('input[data-slot="chat-menu-upload-file-input"]')
+        .setInputFiles({ name: fileName, mimeType: "text/plain", buffer: fileBytes });
+
+      const uploadedRelative = `.dev-anywhere/uploads/${ptySessionId}/${fileName}`;
+      const uploadedAbs = join(ptyCwd, uploadedRelative);
+      await expect
+        .poll(() => existsSync(uploadedAbs), { timeout: 15_000 })
+        .toBe(true);
+      expect(readFileSync(uploadedAbs)).toEqual(fileBytes);
+      expectProjectClipboardIgnored(ptyCwd);
+
+      // token 写入终端: 等到 xterm 回放出 @<path>
+      await expect
+        .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
+          timeout: 20_000,
+        })
+        .toContain(`@${uploadedRelative}`.replace(/\s+/g, ""));
+    } finally {
+      if (ptySessionId) {
+        await terminateSession(page, ptySessionId).catch(() => undefined);
+        cleanupSessionData(ptySessionId);
+      }
+      rmSync(ptyCwd, { recursive: true, force: true });
+    }
+  });
 });

@@ -37,7 +37,7 @@ describe("triggerFileDownload", () => {
     URL.revokeObjectURL = vi.fn();
     clickSpy = vi.fn();
     // 拦截 anchor click 防 jsdom 真去导航
-    HTMLAnchorElement.prototype.click = clickSpy;
+    HTMLAnchorElement.prototype.click = clickSpy as unknown as () => void;
   });
 
   afterEach(() => {
