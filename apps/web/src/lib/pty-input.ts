@@ -176,7 +176,12 @@ export function attachXtermRawInput(
       return false;
     }
     if (event.type !== "keydown" || event.key !== "Enter") return true;
-    if (event.shiftKey || options.plainEnterBehavior === "linefeed") {
+    // Shift 与默认 Enter 行为互为反操作：submit 模式下 Enter→\r、Shift+Enter→\n；
+    // linefeed 模式（移动键盘软回车）反过来——Enter→\n、Shift+Enter→\r。这样在两种模式
+    // 下都能稳定地走出"提交"和"换行"两个语义，而不是让 Shift 在 linefeed 模式下变成 no-op。
+    const wantLinefeedDefault = options.plainEnterBehavior === "linefeed";
+    const sendLinefeed = wantLinefeedDefault !== event.shiftKey;
+    if (sendLinefeed) {
       sendRawInput("\n");
       event.preventDefault();
       return false;

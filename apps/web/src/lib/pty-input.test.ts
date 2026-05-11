@@ -277,4 +277,25 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "\n");
     expect(onRawInput).toHaveBeenCalledWith("\n");
   });
+
+  it("inverts Shift+Enter under linefeed mode so users can still submit (CR)", () => {
+    // 移动端 plainEnterBehavior=linefeed：plain Enter 走 \n，Shift+Enter 必须翻转回 submit
+    // 语义（落到 xterm 默认 \r）。否则 Shift 在该模式下退化成 no-op，用户没有办法显式提交。
+    const { terminal, emitKey } = createTerminal();
+    const onRawInput = vi.fn();
+    const event = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", {
+      onRawInput,
+      plainEnterBehavior: "linefeed",
+    });
+    const shouldContinue = emitKey(event);
+
+    // shouldContinue=true 让 xterm 走默认 Enter 处理（\r）。本层不发 LF、不 preventDefault。
+    expect(shouldContinue).toBe(true);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalledWith("sess-1", "\n");
+    expect(onRawInput).not.toHaveBeenCalled();
+  });
 });
