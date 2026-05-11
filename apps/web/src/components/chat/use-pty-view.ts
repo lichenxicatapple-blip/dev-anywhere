@@ -6,7 +6,12 @@
 // 就近挂 scroll/resize/debug——typed handshake（term 直接作为入参传入），跨 effect
 // 没有隐式 ref 协议。font-size effect 因为依赖 store 状态独立 trigger 单独保留。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, MouseEvent as ReactMouseEvent, RefObject } from "react";
+import type {
+  ClipboardEvent,
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+  RefObject,
+} from "react";
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
@@ -20,6 +25,7 @@ import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
+import { fileToUploadPayload } from "@/lib/file-upload-payload";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
@@ -85,6 +91,10 @@ interface UsePtyViewResult {
   handlePasteCapture: (event: ClipboardEvent<HTMLDivElement>) => void;
   pointerHandlers: PointerHandlers;
   focusHandlers: FocusHandlers;
+  isPtyDragOver: boolean;
+  handlePtyDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
+  handlePtyDragLeave: (event: ReactDragEvent<HTMLDivElement>) => void;
+  handlePtyDrop: (event: ReactDragEvent<HTMLDivElement>) => void;
 }
 
 interface ScrollControllerHandle {
@@ -180,6 +190,46 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalRef,
     onAfterPaste: () => rawInputFollowSchedulerRef.current?.schedule(),
   });
+
+  // 拖拽任意文件到终端容器: 上传后把 @<path> token 写到 PTY stdin, 与 chat-header
+  // upload menu 同样形状。dragover 必须 preventDefault 否则浏览器拒绝触发 drop。
+  const [isPtyDragOver, setIsPtyDragOver] = useState(false);
+  const handlePtyDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    setIsPtyDragOver((current) => (current ? current : true));
+  }, []);
+  const handlePtyDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>): void => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setIsPtyDragOver(false);
+  }, []);
+  const handlePtyDrop = useCallback(
+    async (event: ReactDragEvent<HTMLDivElement>): Promise<void> => {
+      const file = event.dataTransfer.files?.[0];
+      if (!file) return;
+      event.preventDefault();
+      setIsPtyDragOver(false);
+      const relay = relayClientRef;
+      if (!relay) {
+        toast.error("请先连接开发机");
+        return;
+      }
+      const toastId = toast.loading(`上传 ${file.name} ...`);
+      try {
+        const payload = await fileToUploadPayload(file);
+        const result = await relay.uploadFile(sessionId, payload);
+        if (!result.success || !result.path) {
+          toast.error(result.error ?? "上传失败", { id: toastId });
+          return;
+        }
+        sendRemoteInputRaw(sessionId, `@${result.path} `);
+        toast.success(`已上传 ${result.path}`, { id: toastId });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+      }
+    },
+    [sessionId],
+  );
 
   const handleTerminalContainerMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>): void => {
@@ -436,5 +486,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     handlePasteCapture,
     pointerHandlers: touchGestureHandlers,
     focusHandlers,
+    isPtyDragOver,
+    handlePtyDragOver,
+    handlePtyDragLeave,
+    handlePtyDrop,
   };
 }

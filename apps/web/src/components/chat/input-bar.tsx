@@ -2,7 +2,14 @@
 // PTY 模式由 xterm 逐键输入承载，不再复用聊天式 InputBar。
 // draft 为 per-session, 通过 chat-store 跨组件共享
 // 命令/文件 token 整体删除: insertedTokens 记录选过的 token, onChange 拦 backspace 跨片段清理
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent as ReactDragEvent,
+} from "react";
 import { Paperclip } from "lucide-react";
 import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
@@ -233,16 +240,14 @@ export function InputBar({ sessionId }: InputBarProps) {
     [applyInputDraft, sessionId, setInputDraft],
   );
 
-  // 任意文件上传 attach 按钮 (JSON 模式 picker 入口, 与 PTY chat-header 上传项对称)。
+  // 任意文件上传: picker (Paperclip 按钮) 和 drag-drop 共用同一上传逻辑。
   // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
   // image paste 的 insertTextAtSelection / insertedTokens 跟踪逻辑。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  const handleFilePicked = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
-      if (!file) return;
+  const uploadAndInsertFile = useCallback(
+    async (file: File): Promise<void> => {
       const relay = relayClientRef;
       if (!relay) {
         toast.error("请先连接开发机");
@@ -288,6 +293,26 @@ export function InputBar({ sessionId }: InputBarProps) {
     [applyInputDraft, sessionId, setInputDraft],
   );
 
+  const handleFilePicked = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) await uploadAndInsertFile(file);
+    },
+    [uploadAndInsertFile],
+  );
+
+  const handleDrop = useCallback(
+    async (event: ReactDragEvent<HTMLFormElement>): Promise<void> => {
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      event.preventDefault();
+      setIsDragOver(false);
+      await uploadAndInsertFile(file);
+    },
+    [uploadAndInsertFile],
+  );
+
   const placeholder = submitOnPlainEnter
     ? "输入消息... (Enter 发送，Shift+Enter 换行)"
     : "输入消息...";
@@ -331,8 +356,22 @@ export function InputBar({ sessionId }: InputBarProps) {
           e.preventDefault();
           send();
         }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          if (!isDragOver) setIsDragOver(true);
+        }}
+        onDragLeave={(event) => {
+          // 只在真正离开 form (不是子元素冒泡) 才清; relatedTarget 在 form 之外才算离开
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setIsDragOver(false);
+        }}
+        onDrop={(event) => {
+          void handleDrop(event);
+        }}
         data-slot="input-card"
-        className="flex flex-col w-full rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30"
+        data-drag-over={isDragOver ? "true" : undefined}
+        className="flex flex-col w-full rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 data-[drag-over=true]:border-primary data-[drag-over=true]:ring-[3px] data-[drag-over=true]:ring-primary/50 dark:bg-input/30"
       >
         {argumentHint && (
           <div

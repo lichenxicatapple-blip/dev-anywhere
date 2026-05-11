@@ -40,9 +40,13 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         onPointerUpCapture={view.pointerHandlers.onPointerUpCapture}
         onPointerCancelCapture={view.pointerHandlers.onPointerCancelCapture}
         onPasteCapture={view.handlePasteCapture}
+        onDragOver={view.handlePtyDragOver}
+        onDragLeave={view.handlePtyDragLeave}
+        onDrop={view.handlePtyDrop}
         onFocusCapture={view.focusHandlers.onFocusCapture}
         onBlurCapture={view.focusHandlers.onBlurCapture}
         data-slot="pty-terminal"
+        data-drag-over={view.isPtyDragOver ? "true" : undefined}
       >
         <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">
           <div
