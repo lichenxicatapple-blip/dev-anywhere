@@ -710,6 +710,77 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollLeft).toBe(200);
   });
 
+  // 用户手动滚到右侧后, terminal 把光标拉回行首 (\r 或 Ctrl+A) — 光标在视窗左外侧,
+  // 应自动回滚让其居中, 否则用户看不到自己刚到的输入位置。
+  it("auto-scrolls horizontally back when the cursor falls left of the viewport", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    container.scrollLeft = 800; // 用户手动滚到右半边
+
+    terminal.buffer.active.cursorX = 5; // cursorPxX = 50, 落在 viewport [800, 1600) 左外侧
+    emitRender();
+
+    // 中心目标: 50 - 400 = -350, clamp 到 0
+    expect(container.scrollLeft).toBe(0);
+  });
+
+  // 光标贴最右端时, target 会超过 maxScrollLeft, 必须 clamp 否则 scrollLeft 越界。
+  it("clamps horizontal auto-scroll to the rightmost reachable scroll position", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // cursorX=160 → cursorPxX=1600 (行尾), target=1200 但 maxScrollLeft=800 (1600-800)
+    terminal.buffer.active.cursorX = 160;
+    emitRender();
+
+    expect(container.scrollLeft).toBe(800);
+  });
+
+  // 内容没溢出时不能动 scrollLeft, 否则在小终端上无故抖屏。
+  it("leaves horizontal scroll alone when the terminal content fits the viewport", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 800); // == clientWidth, 不溢出
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    container.scrollLeft = 0;
+
+    terminal.buffer.active.cursorX = 200; // 即使 cursor 数值"出框"也不该动
+    emitRender();
+
+    expect(container.scrollLeft).toBe(0);
+  });
+
   it("exposes ratio scrolling for a custom horizontal terminal scrollbar", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);

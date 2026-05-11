@@ -1,7 +1,7 @@
 // xterm 工厂: WebGL renderer
 // WebGL 按 cell 坐标直接绘制, 不依赖 DOM letter-spacing 补偿, CJK/box-drawing 对齐稳定.
 // Sarasa Fixed SC 随产品分发, 不依赖用户系统字体
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITerminalOptions } from "@xterm/xterm";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -25,14 +25,10 @@ interface CreateXtermOptions {
   fontSize?: number;
 }
 
-// 创建 xterm 实例并挂载到 container
-export async function createXtermTerminal(
-  container: HTMLDivElement,
-  options: CreateXtermOptions = {},
-): Promise<CreateXtermResult> {
-  await document.fonts.ready;
-
-  const terminal = new Terminal({
+// 提到独立纯函数让单测可以直接断言关键 option 不被无意改回——尤其是
+// cursorInactiveStyle: "none" (失焦时不画 ghost 光标)。
+export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITerminalOptions {
+  return {
     scrollback: 5000,
     fontFamily:
       '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
@@ -46,7 +42,17 @@ export async function createXtermTerminal(
     disableStdin: false,
     theme: xtermTheme,
     allowProposedApi: true,
-  });
+  };
+}
+
+// 创建 xterm 实例并挂载到 container
+export async function createXtermTerminal(
+  container: HTMLDivElement,
+  options: CreateXtermOptions = {},
+): Promise<CreateXtermResult> {
+  await document.fonts.ready;
+
+  const terminal = new Terminal(buildXtermTerminalOptions(options));
 
   const serializeAddon = new SerializeAddon();
   const webLinksAddon = new WebLinksAddon();
