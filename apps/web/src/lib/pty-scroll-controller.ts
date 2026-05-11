@@ -132,7 +132,11 @@ export function attachPtyScrollController(
 
   const notifyAtBottom = (): void => {
     const next = computeIsAtBottom();
-    if (next && !touchScrollActive) setUserHasVerticalScrollIntent(false);
+    // 只在 false → true 真实过渡时清 intent。初次 attach 时 lastAtBottom === null，
+    // 即使容器恰好在底部，也要保留 caller 传入的 initialUserHasVerticalScrollIntent。
+    if (next && lastAtBottom === false && !touchScrollActive) {
+      setUserHasVerticalScrollIntent(false);
+    }
     if (lastAtBottom === next) return;
     lastAtBottom = next;
     onAtBottomChange?.(next);
@@ -356,7 +360,6 @@ export function attachPtyScrollController(
   const onTermScroll = (): void => {
     trace("term-scroll");
     if (syncing.internal) return;
-    const wasAtBottom = computeIsAtBottom();
     syncing.external = true;
     try {
       updateSpacer();
@@ -364,7 +367,10 @@ export function attachPtyScrollController(
       if (pendingFrame === "followed") {
         return;
       }
-      if (pendingFrame === "none" && (wasAtBottom || !userHasVerticalScrollIntent)) {
+      // intent=true 表示用户在主动回看，即便几何上 atBottom=true 也不可强行回底——
+      // reconnect 时新 buffer 短暂为空，空容器 + 跨周期保留的 intent 会被 wasAtBottom
+      // 误清掉。只在 !intent（"未明示意图"）时按 atBottom 跟底。
+      if (pendingFrame === "none" && !userHasVerticalScrollIntent) {
         scrollToBottom();
         return;
       }
@@ -392,11 +398,13 @@ export function attachPtyScrollController(
 
   const relayout = (): void => {
     trace("relayout:start");
-    const wasAtBottom = computeIsAtBottom();
     updateSpacer();
     const pendingFrame = handlePendingNewFrame();
     if (pendingFrame === "followed") return;
-    if (pendingFrame === "none" && (wasAtBottom || !userHasVerticalScrollIntent)) {
+    // 与 onTermScroll 同：intent=true 时不允许"几何 atBottom"反过来盖掉用户回看意图。
+    // wasAtBottom 已经包含在 notifyAtBottom 的 false→true 过渡里负责清 intent，
+    // 这里只需对"无意图"时跟底，避免 reconnect 空容器误清 intent。
+    if (pendingFrame === "none" && !userHasVerticalScrollIntent) {
       scrollToBottom();
       return;
     }

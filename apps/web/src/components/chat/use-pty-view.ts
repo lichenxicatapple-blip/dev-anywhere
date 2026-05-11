@@ -3,8 +3,9 @@
 // 集中到这里，让 chat-pty-view.tsx 退化为纯 JSX shell。
 //
 // 关键设计：单一 effect 在 attachPtyTerminalController 的 onTerminalReady 回调里
-// 就近挂 scroll/resize/debug——typed handshake 替代之前依赖 React state 重渲染的
-// 跨 effect 隐式 ref 协议。
+// 就近挂 scroll/resize/debug——typed handshake（term 直接作为入参传入）替代之前依赖
+// React state 重渲染的跨 effect 隐式 ref 协议。font-size effect 因为依赖 store
+// 状态独立 trigger 单独保留。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, MouseEvent as ReactMouseEvent, RefObject } from "react";
 import type { Terminal } from "@xterm/xterm";
@@ -191,21 +192,27 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
-  // === 终端层 effect：xterm 实例 / image link / debug 注册 ===
-  // 在 onTerminalReady 里完成所有 terminal 衍生 wiring；用 connection.ready 派发给
-  // 下游的 scroll/resize effect 走分离生命周期——reconnect 时 socket 重建 ws、xterm
-  // 重建，但 scroll-controller 仍旧（持有旧 term 引用，DOM 容器复用）。这样可以
-  // 避免 scroll-controller 在 reconnect 瞬间因 spacer 还没长大就 wasAtBottom=true，
-  // 触发 scrollToBottom 把用户回看的 intent 清掉的回归。
+  // === controller graph：单 effect 编排 terminal / scroll / resize ===
+  // attachPtyTerminalController 的 onTerminalReady 是 typed handshake：term 在 callback
+  // 入参里直接给到，不再依赖 React 重渲染让下游 effect 通过 ref 读到。所有 terminal
+  // 衍生 wiring（image link / debug 注册 / scroll-controller / resize-controller）
+  // 都在这个 callback 内一并挂载。reconnect 时 termCtrl/scrollCtrl 一起重建——靠
+  // userHasVerticalScrollIntentRef 跨周期保留用户回看意图，且 scroll-controller 内部
+  // 对 wasAtBottom 的判定已修正（updateSpacer 之后再读 scrollHeight），不会因 spacer
+  // 几何 stale 误判 atBottom 而清掉 intent。
   useEffect(() => {
     if (!connected || !proxyOnline) return;
     const host = xtermHostRef.current;
     const ws = wsManagerRef;
     const relay = relayClientRef;
-    if (!host || !ws || !relay) return;
+    const container = containerEl;
+    const spacer = spacerRef.current;
+    if (!host || !ws || !relay || !container || !spacer) return;
 
     let imageLinkDispose: (() => void) | null = null;
     let ptyDebugDeregister: (() => void) | null = null;
+    let scrollDispose: (() => void) | null = null;
+    let resizeDispose: (() => void) | null = null;
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
@@ -231,8 +238,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       sessionId,
       ws,
       relay,
-      createTerminal: (container) =>
-        createXtermTerminal(container, { fontSize: useAppStore.getState().ptyFontSize }),
+      createTerminal: (terminalHost) =>
+        createXtermTerminal(terminalHost, { fontSize: useAppStore.getState().ptyFontSize }),
       attachRawInput: (term, rawSessionId, rawOptions) =>
         attachXtermRawInput(term, rawSessionId, {
           ...rawOptions,
@@ -251,6 +258,55 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           serialize: () => serializeTerminalBuffer(xterm),
           describe: () => ({ sessionId, cols: xterm.cols, rows: xterm.rows }),
         });
+
+        const scrollCtrl = attachPtyScrollController({
+          container,
+          spacer,
+          host,
+          term: xterm,
+          hasNewFrame: () => pendingNewFrameRef.current,
+          consumeNewFrame: () => {
+            pendingNewFrameRef.current = false;
+          },
+          hasNewFramesWhileAway: () => follow.hasNewFramesWhileAwayRef.current,
+          setNewFramesWhileAway: follow.setHasNewFramesWhileAway,
+          onAtBottomChange: follow.handleAtBottomChange,
+          onScrollStateChange: setScrollState,
+          initialUserHasVerticalScrollIntent: userHasVerticalScrollIntentRef.current,
+          onUserVerticalScrollIntentChange: (value) => {
+            userHasVerticalScrollIntentRef.current = value;
+            terminalControllerRef.current?.setOutputPaused(value);
+            if (!value) terminalControllerRef.current?.flushOutput();
+          },
+          onTouchReviewStart: suppressPtyFocus,
+        });
+        scrollControllerRef.current = scrollCtrl;
+        scrollDispose = scrollCtrl.dispose;
+
+        registerPtyDebugSnapshotProvider(() => ({
+          ...buildPtyScrollDebugSnapshot(scrollCtrl.getDebugProbe, {
+            container,
+            spacer,
+            host,
+            term: xterm,
+          }),
+          frame: {
+            lastWriteAt: lastFrameWriteAtRef.current,
+            pendingNewFrame: pendingNewFrameRef.current,
+          },
+        }));
+
+        if (webOwnsPtyGeometry) {
+          const resizeCtrl = attachPtyResizeController({
+            container,
+            term: xterm,
+            onResize: (cols, rows) => {
+              relay.sendControl({ type: "terminal_resize_request", sessionId, cols, rows });
+            },
+            onRelayout: () => scrollControllerRef.current?.relayout(),
+          });
+          resizeDispose = resizeCtrl.dispose;
+        }
       },
       onFramePending,
       onFrameWritten,
@@ -264,6 +320,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalControllerRef.current = termCtrl;
 
     return () => {
+      resizeDispose?.();
+      scrollDispose?.();
+      unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
       ptyDebugDeregister?.();
       registerPtySerializer(sessionId, null);
@@ -271,101 +330,24 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       unregisterPtyTerminalWindowAccessor();
       termCtrl.dispose();
       terminalRef.current = null;
+      scrollControllerRef.current = null;
       terminalControllerRef.current = null;
     };
   }, [
     sessionId,
     connected,
     proxyOnline,
+    containerEl,
+    spacerRef,
     xtermHostRef,
     connection.transport,
+    follow.handleAtBottomChange,
     follow.hasNewFramesWhileAwayRef,
     follow.setHasNewFramesWhileAway,
     ptyPlainEnterBehavior,
     openImagePreview,
-  ]);
-
-  // === scroll / resize effect：仅 connection.ready 第一次为 true 时挂载 ===
-  // connection.ready 一旦为 true 就不再变 false（usePtyConnectionState 不重置），
-  // 所以 reconnect 不会重跑这个 effect——scroll controller 持有的 xterm 引用变 stale，
-  // 但容器 DOM 不变；接下来用户的 scrollTop / scrollIntent 状态完整保留。
-  useEffect(() => {
-    if (!connection.ready) return;
-    const container = containerEl;
-    const spacer = spacerRef.current;
-    const host = xtermHostRef.current;
-    const term = terminalRef.current;
-    if (!container || !spacer || !host || !term) return;
-
-    const scrollCtrl = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term,
-      hasNewFrame: () => pendingNewFrameRef.current,
-      consumeNewFrame: () => {
-        pendingNewFrameRef.current = false;
-      },
-      hasNewFramesWhileAway: () => follow.hasNewFramesWhileAwayRef.current,
-      setNewFramesWhileAway: follow.setHasNewFramesWhileAway,
-      onAtBottomChange: follow.handleAtBottomChange,
-      onScrollStateChange: setScrollState,
-      initialUserHasVerticalScrollIntent: userHasVerticalScrollIntentRef.current,
-      onUserVerticalScrollIntentChange: (value) => {
-        userHasVerticalScrollIntentRef.current = value;
-        terminalControllerRef.current?.setOutputPaused(value);
-        if (!value) terminalControllerRef.current?.flushOutput();
-      },
-      onTouchReviewStart: suppressPtyFocus,
-    });
-    scrollControllerRef.current = scrollCtrl;
-
-    registerPtyDebugSnapshotProvider(() => ({
-      ...buildPtyScrollDebugSnapshot(scrollCtrl.getDebugProbe, {
-        container,
-        spacer,
-        host,
-        term,
-      }),
-      frame: {
-        lastWriteAt: lastFrameWriteAtRef.current,
-        pendingNewFrame: pendingNewFrameRef.current,
-      },
-    }));
-
-    let resizeDispose: (() => void) | null = null;
-    if (webOwnsPtyGeometry) {
-      const relay = relayClientRef;
-      if (relay) {
-        const resizeCtrl = attachPtyResizeController({
-          container,
-          term,
-          onResize: (cols, rows) => {
-            relay.sendControl({ type: "terminal_resize_request", sessionId, cols, rows });
-          },
-          onRelayout: () => scrollControllerRef.current?.relayout(),
-        });
-        resizeDispose = resizeCtrl.dispose;
-      }
-    }
-
-    return () => {
-      scrollCtrl.dispose();
-      resizeDispose?.();
-      unregisterPtyDebugSnapshotProvider();
-      scrollControllerRef.current = null;
-    };
-  }, [
-    connection.ready,
-    containerEl,
-    spacerRef,
-    xtermHostRef,
-    follow.handleAtBottomChange,
-    follow.hasNewFramesWhileAwayRef,
-    follow.setHasNewFramesWhileAway,
     suppressPtyFocus,
     webOwnsPtyGeometry,
-    sessionId,
   ]);
 
   // === font-size effect：依赖 ptyFontSize 单独触发 ===

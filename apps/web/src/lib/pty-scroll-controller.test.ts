@@ -736,6 +736,104 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("210px");
   });
 
+  it("preserves user scroll intent on initial attach even when atBottom evaluates true", () => {
+    const { container, spacer, host } = createDom();
+    // 让 scrollHeight 跟随 spacer.style.height —— 模拟生产 DOM 的真实层级。
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => parseFloat(spacer.style.height || "0") || 0,
+    });
+    const onIntentChange = vi.fn<(value: boolean) => void>();
+    // 一屏大小的 buffer：updateSpacer 写完后 spacer.height = clientHeight，
+    // notifyAtBottom 评为 atBottom=true，旧逻辑会清掉用户传的 intent。
+    const { terminal } = createTerminal({});
+    terminal.buffer.active.length = 20;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+      onUserVerticalScrollIntentChange: onIntentChange,
+    });
+
+    // 用户 attach 时已声明 intent=true（正在回看），不应被 init 反查 atBottom 误清。
+    expect(onIntentChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("does not pin to bottom when buffer growth races onTermScroll before updateSpacer", () => {
+    const { container, spacer, host } = createDom();
+    // scrollHeight 跟 spacer.style.height 走，模拟真实 DOM
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => parseFloat(spacer.style.height || "0") || 0,
+    });
+    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    terminal.buffer.active.length = 20;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+    });
+    // attach 后 spacer.height = 400（一屏）。模拟 snapshot 重放让 buffer 长到 120 行：
+    // xterm 内部触发 onScroll，但此时 spacer.height 还是 attach 时的旧值 400px。
+    // 旧实现的 onTermScroll 在 updateSpacer 之前算 wasAtBottom=true（旧 scrollHeight 仍小），
+    // 然后 updateSpacer 把 spacer 长到 2400，但 wasAtBottom 已 stale，触发 scrollToBottom 把
+    // 用户拉回底部。
+    terminal.buffer.active.length = 120;
+    container.scrollTop = 0;
+    const scrollTopBefore = container.scrollTop;
+    emitScroll();
+
+    expect(container.scrollTop).toBe(scrollTopBefore);
+  });
+
+  it("preserves intent across reconnect when an empty terminal triggers relayout", () => {
+    // 复现 websocket-chaos:184 的根因：reconnect 时 scroll-controller 被重建，
+    // 新 buffer 短暂为空 → 几何 atBottom=true，但用户 intent 应当跨周期保留。
+    // ResizeObserver 触发首次 relayout 时 pendingFrame=none，旧实现因 wasAtBottom=true
+    // 触发 scrollToBottom 清掉了 intent。修复后该分支只看 !intent 不再看 wasAtBottom。
+    const { container, spacer, host } = createDom();
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => parseFloat(spacer.style.height || "0") || 0,
+    });
+    const onIntentChange = vi.fn<(value: boolean) => void>();
+    const { terminal } = createTerminal({});
+    terminal.buffer.active.length = 0;
+
+    const ctrl = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+      onUserVerticalScrollIntentChange: onIntentChange,
+    });
+
+    onIntentChange.mockClear();
+    // ResizeObserver 在 attach 后异步触发的首次 relayout 等价于直接调用 relayout()。
+    ctrl.relayout();
+
+    expect(onIntentChange).not.toHaveBeenCalledWith(false);
+  });
+
   it("only observes the scroll container (not host) to avoid feedback loop", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
