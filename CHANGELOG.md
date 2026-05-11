@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 This project follows Semantic Versioning before `1.0.0`: minor versions may include breaking changes, and patch versions are reserved for compatible fixes.
 
+## [0.2.0] - 2026-05-11
+
+### Fixed
+
+- CJK and emoji characters in claude/codex stream-json output no longer corrupt to `?` when the multi-byte sequence straddles a stdout chunk boundary; the affected line was previously dropped by schema validation and the message would disappear entirely.
+- JSON sessions no longer get stuck in `WORKING` after the model finishes — the proxy now waits for stdout to drain (with a 1s fallback for hung pipes) before signaling exit, so the final `result` always reaches the web client.
+- iOS Safari address-bar collapse no longer leaves the PTY at stale row/column geometry.
+- Reconnect snapshot replay no longer leaks frames from a previous recovery window into a fresh one.
+- Control-message routing always uses the relay's bound proxy ID; a client-supplied `proxyId` field can no longer redirect a request at someone else's proxy.
+- When a hosted-PTY child exits, any tool-approval requests still pending for that session are now denied, instead of being orphaned.
+- The proxy daemon no longer aborts startup on a corrupt session-persistence file; it falls back to empty state with a warning and live workers are still recovered.
+- `~/.dev-anywhere/config.json`, the proxy-id file, and per-session sequence files are now written atomically (tmp + rename), so a crash mid-write cannot corrupt them. `config.json` is also written with `0o600` since it stores relay tokens.
+- Per-message sequence-counter persistence no longer issues a sync write on every relay envelope; reduces fsync load under high-throughput sessions.
+- PTY recovery buffers are now bounded under sustained out-of-order delivery; oldest entries are dropped at the cap instead of growing without limit.
+- Events are no longer fired against a session that has just terminated.
+
+### Added
+
+- `MAX_JSON_MESSAGE_SIZE` (1 MB) limit on relay `/proxy` and `/client` upgrade endpoints and on the proxy's relay-incoming path. Oversized JSON is rejected with a warning before parse.
+- `ALLOWED_ORIGINS` env var on the relay (comma-separated origin allowlist) — opt-in CSWSH defense for public-tunnel deployments. Default behavior is unchanged.
+- WebSocket close handlers in proxy and relay now log close `code` / `reason`, making it easier to distinguish ECONNREFUSED / ETIMEDOUT / graceful drops.
+- `docs/known-issues/pty-blank-render.md` and `docs/known-issues/pty-garbling.md` — diagnostic playbooks with field-capture instructions for the two intermittent mobile rendering issues that remain open.
+
+### Known Limitations
+
+- On viewports under 360 px the mobile soft keyboard can cover the PTY scrollbar thumb; use the mobile control bar to scroll for now.
+
 ## [0.1.9] - 2026-05-10
 
 ### Fixed
@@ -22,20 +49,19 @@ This project follows Semantic Versioning before `1.0.0`: minor versions may incl
 - Web shortcut menu adds "发送 Shift+Tab" (CSI Z) for cycling Claude CLI permission modes from the browser.
 - `LOG_LEVEL` env var and `logLevel` config field control proxy log verbosity (precedence: env > config > per-logger default). The relay already respected `LOG_LEVEL`.
 - New docs: `docs/CONFIG.md` (operator-facing knob inventory) and `docs/DEV.md` (internal plumbing reference).
-- Diagnostic globals on the active PTY view: `window.__devAnywherePtyDebug()` returns a snapshot of container/spacer/xterm geometry; `window.__devAnywherePtyTerminal()` returns the live xterm Terminal for ad-hoc recovery commands like `term.clearTextureAtlas()`.
+- Diagnostic globals on the active PTY view: `window.__devAnywherePtyDebug()` returns a geometry snapshot, and `window.__devAnywherePtyTerminal()` exposes the live terminal for ad-hoc recovery commands from devtools.
 
 ### Fixed
 
 - Web PTY view now recovers from WebGL context loss by reloading the WebGL addon on `onContextLoss`. Previously, GPU context resumption (sleep/wake, backgrounded tabs) left the glyph atlas pointing at stale texture slots, which rendered as garbled characters even though the buffer was correct.
 - `dev-anywhere -v` and other invalid invocations no longer crash with `sonic-boom is not ready yet`. The proxy logger is now lazily initialized and arg validation runs before terminal module import.
 - The selected sidebar row's gradient now fades cleanly into the sidebar's right edge instead of cutting off abruptly partway across the row.
-- The web auth-failure copy is now shown as a full-screen `EmptyState` on desktop instead of a small subtitle under the BrandHero logo.
+- The web auth-failure copy is now shown as a full-screen empty state on desktop instead of a small subtitle under the brand logo.
 - A wrong `?relayToken=...` URL no longer overwrites a previously valid token in localStorage; tokens are persisted only after the `/auth/client` preflight succeeds.
 
 ### Changed
 
-- `~/.dev-anywhere/config.json` is now validated against a strict zod schema at load time; typos in top-level fields produce a clear field-level error instead of silent ignore.
-- Proxy and relay env reads are now centralized in `runtime-env.ts` modules with consistent parsing and validation.
+- `~/.dev-anywhere/config.json` is now validated at load time; typos in top-level fields produce a clear field-level error instead of being silently ignored.
 - Local dev scripts (`dev-restart`, `dev-health`, `dev-chaos`, `mobile-smoke`) auto-resolve which profile/relay to use by URL match against the local relay (`ws://localhost:<port>`), removing the implicit dependency on profiles being named `local`.
 
 ## [0.1.4] - 2026-05-09

@@ -21,3 +21,4 @@ This directory contains public documentation for operating and releasing DEV Any
 | Document                                                            | Status                                                        |
 | ------------------------------------------------------------------- | ------------------------------------------------------------- |
 | [`pty-blank-render.md`](known-issues/pty-blank-render.md)           | 移动端 PTY viewport 偶发空白带, 已修若干候选成因, 待真机数据回归。 |
+| [`pty-garbling.md`](known-issues/pty-garbling.md)                   | PTY 渲染偶发乱码 / 叠字 / U+FFFD, 已修若干 atlas 成因, 待真机数据回归。 |
