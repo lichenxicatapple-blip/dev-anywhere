@@ -67,11 +67,14 @@ export function SessionList({ layout }: SessionListProps) {
     relay.sendControl({ type: "session_terminate", sessionId });
     useSessionStore.getState().removeSession(sessionId);
     if (sessionId === activeSessionId) navigate("/sessions");
-    toast.info(
-      session?.mode === "pty" && session.ptyOwner === "local-terminal"
-        ? "已断开页面连接，本地终端仍在运行"
-        : "正在终止会话",
-    );
+    if (session?.mode === "pty" && session.ptyOwner === "local-terminal") {
+      // local-terminal "页面断开" 是行为说明, 给用户读完整句的时间
+      toast.info("已断开页面连接，本地终端仍在运行");
+    } else {
+      // 其它路径已经做了 optimistic 移除, sidebar 立刻更新, toast 只是动作回执;
+      // 默认 4s 太长, 缩到 1.5s 即扫即过
+      toast.info("正在终止会话", { duration: 1500 });
+    }
   }
 
   function toggleActiveProvider(provider: SessionProvider) {
