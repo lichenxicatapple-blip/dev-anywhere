@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachPtyDragSelectAutoscroll } from "./pty-drag-select-autoscroll";
+import {
+  attachPtyDragSelectAutoscroll,
+  type DragSelectDebugSnapshot,
+} from "./pty-drag-select-autoscroll";
 
 interface Harness {
   container: HTMLDivElement;
@@ -11,6 +14,7 @@ interface Harness {
   rect: DOMRect;
   pendingFrame: (() => void) | null;
   flushFrame: () => void;
+  getSnapshot: () => DragSelectDebugSnapshot;
   dispose: () => void;
 }
 
@@ -77,6 +81,7 @@ function createHarness(opts: {
       pendingFrame = null;
       fn?.();
     },
+    getSnapshot: handle.getDebugSnapshot,
     dispose() {
       handle.dispose();
       container.remove();
@@ -229,6 +234,46 @@ describe("pty drag-select autoscroll", () => {
     pointerMove({ x: 400, y: 200 });
     h.flushFrame();
     expect(events).toHaveLength(0);
+  });
+
+  it("debug snapshot reports xterm-screen target tag and dispatch count when scroll happens", () => {
+    h = createHarness({});
+    const xtermWrapper = document.createElement("div");
+    xtermWrapper.className = "xterm";
+    const xtermScreen = document.createElement("div");
+    xtermScreen.className = "xterm-screen";
+    xtermWrapper.appendChild(xtermScreen);
+    h.host.appendChild(xtermWrapper);
+    pointerDown(h.container, { x: 100, y: 200 });
+    pointerMove({ x: 795, y: 200 });
+    h.flushFrame();
+    const snap = h.getSnapshot();
+    expect(snap.dragging).toBe(true);
+    expect(snap.dispatchCount).toBe(1);
+    expect(snap.dispatchTargetTag).toBe("xterm-screen");
+    expect(snap.lastScrollDelta).not.toBeNull();
+    expect(snap.lastScrollDelta!.dx).toBeGreaterThan(0);
+  });
+
+  it("debug snapshot tags target as host when no .xterm-screen exists", () => {
+    h = createHarness({});
+    pointerDown(h.container, { x: 100, y: 200 });
+    pointerMove({ x: 795, y: 200 });
+    h.flushFrame();
+    const snap = h.getSnapshot();
+    expect(snap.dispatchTargetTag).toBe("host");
+    expect(snap.dispatchCount).toBe(1);
+  });
+
+  it("debug snapshot dispatchCount stays 0 when pointer never enters edge zone", () => {
+    h = createHarness({});
+    pointerDown(h.container, { x: 400, y: 200 });
+    pointerMove({ x: 400, y: 200 });
+    h.flushFrame();
+    const snap = h.getSnapshot();
+    expect(snap.dragging).toBe(true);
+    expect(snap.dispatchCount).toBe(0);
+    expect(snap.dispatchTargetTag).toBe("unknown");
   });
 
   it("scrolls vertically when pointer hits top/bottom edge", () => {

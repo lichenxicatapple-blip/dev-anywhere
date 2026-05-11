@@ -15,7 +15,10 @@ import type {
 import type { Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
-import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
+import {
+  attachPtyDragSelectAutoscroll,
+  type DragSelectDebugSnapshot,
+} from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import {
@@ -133,6 +136,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
+  // attachPtyDragSelectAutoscroll 在 onTerminalReady 内部 attach 而 registerTerminal
+  // 在它之前发生, 用 ref 把 snapshot 取数函数传给 debug API。
+  const dragSelectSnapshotRef = useRef<(() => DragSelectDebugSnapshot) | null>(null);
 
   // === 视图层状态 ===
   const [scrollState, setScrollState] = useState<PtyScrollState>({
@@ -346,6 +352,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             xterm.refresh(0, xterm.rows - 1);
             return true;
           },
+          getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
         });
 
         const scrollCtrl = attachPtyScrollController({
@@ -387,6 +394,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
         const dragSelect = attachPtyDragSelectAutoscroll({ container, host });
         dragSelectDispose = dragSelect.dispose;
+        dragSelectSnapshotRef.current = dragSelect.getDebugSnapshot;
 
         if (webOwnsPtyGeometry) {
           const resizeCtrl = attachPtyResizeController({
@@ -414,6 +422,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return () => {
       resizeDispose?.();
       dragSelectDispose?.();
+      dragSelectSnapshotRef.current = null;
       scrollDispose?.();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();

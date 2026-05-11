@@ -10,6 +10,7 @@
 // 故意不做成 React state:任何挂上 React 状态的开关都会污染 fast-refresh 与
 // production build。这里只用 localStorage + 全局对象,刷新后保持选择。
 
+import type { DragSelectDebugSnapshot } from "./pty-drag-select-autoscroll";
 import type { RenderDiffReport } from "./pty-render-state-probe";
 
 const RENDERER_STORAGE_KEY = "dev_anywhere_pty_renderer";
@@ -27,6 +28,9 @@ interface ActiveTerminalHandle {
   // 诊断工具:出现错位时按一下,屏幕修复 -> 坐实 diff-only model desync 假设。
   // 返回 true 表示成功执行,false 表示 webgl addon / probe 失败。
   clearRenderModel?: () => boolean;
+  // 取 drag-select autoscroll 模块当前状态。返回 null 表示该 session 没有 attach
+  // (DOM renderer / pre-mount 等)。
+  getDragSelectSnapshot?: () => DragSelectDebugSnapshot | null;
 }
 
 interface PtyDebugApi {
@@ -42,6 +46,11 @@ interface PtyDebugApi {
   // 诊断流程:复现 -> dumpRenderDiff() 看 mismatch -> clearRenderModel() 看是否
   // 修复 -> dumpRenderDiff() 再看一次确认 mismatch 归零。
   clearRenderModel(): number;
+  // 拖右边缘时容器滚了但选区没扩 → 拿这个分流:
+  //   dispatchCount=0 → autoscroll 模块没派发, 排查 pointer / dragging 状态
+  //   dispatchCount>0 + tag=host → .xterm-screen 没找到, 派发不到 SelectionService
+  //   dispatchCount>0 + tag=xterm-screen → 派发到位, xterm SelectionService 没扩
+  dumpDragSelectState(): Array<{ id: string; snapshot: DragSelectDebugSnapshot }>;
   listTerminals(): string[];
 }
 
@@ -150,6 +159,20 @@ const debugApi: PtyDebugApi = {
     console.info(`[ptyDebug] cleared model on ${count} terminal(s)`);
     return count;
   },
+  dumpDragSelectState() {
+    const out: Array<{ id: string; snapshot: DragSelectDebugSnapshot }> = [];
+    for (const [id, handle] of activeTerminals) {
+      const snapshot = handle.getDragSelectSnapshot?.();
+      if (!snapshot) continue;
+      out.push({ id, snapshot });
+    }
+    console.group(`[ptyDebug] drag-select snapshots (${out.length})`);
+    for (const { id, snapshot } of out) {
+      console.log(id, snapshot);
+    }
+    console.groupEnd();
+    return out;
+  },
   listTerminals() {
     return Array.from(activeTerminals.keys());
   },
@@ -163,7 +186,7 @@ export function installPtyRenderDebug(): PtyDebugApi {
   if (typeof window !== "undefined" && !window.__devAnywherePtyRenderDebug) {
     window.__devAnywherePtyRenderDebug = debugApi;
     console.info(
-      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.dumpRenderDiff() / .clearRenderModel() / .setRenderer('dom')",
+      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.dumpRenderDiff() / .clearRenderModel() / .dumpDragSelectState() / .setRenderer('dom')",
     );
   }
   return debugApi;

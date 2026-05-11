@@ -10,9 +10,6 @@
 //      pointer 没动 + 不滚就不派发, 避免无害但密集的事件。
 //   4. pointerup / pointercancel / 切到 touch 即停。
 
-interface Disposable {
-  dispose: () => void;
-}
 
 interface DragSelectOptions {
   container: HTMLElement;
@@ -24,10 +21,28 @@ interface DragSelectOptions {
   cancelFrame?: (id: number) => void;
 }
 
+// 暴露给 pty-render-debug.dumpDragSelectState 的诊断快照。
+// dispatchTargetTag 区分: "xterm-screen" = 派发到 SelectionService 监听的元素;
+// "host" = 没找到 .xterm-screen 走 fallback, 此时事件不冒泡到 SelectionService。
+export interface DragSelectDebugSnapshot {
+  dragging: boolean;
+  pointerX: number;
+  pointerY: number;
+  dispatchCount: number;
+  dispatchTargetTag: "xterm-screen" | "host" | "unknown";
+  lastScrollDelta: { dx: number; dy: number } | null;
+  lastDispatchedAt: number | null;
+}
+
+export interface DragSelectAutoscroll {
+  dispose: () => void;
+  getDebugSnapshot: () => DragSelectDebugSnapshot;
+}
+
 const DEFAULT_EDGE_PX = 28;
 const DEFAULT_MAX_SPEED_PX = 14;
 
-export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposable {
+export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSelectAutoscroll {
   const {
     container,
     host,
@@ -41,6 +56,11 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
   let pointerX = 0;
   let pointerY = 0;
   let frame: number | null = null;
+  let dispatchCount = 0;
+  let dispatchTargetTag: DragSelectDebugSnapshot["dispatchTargetTag"] = "unknown";
+  let lastScrollDelta: DragSelectDebugSnapshot["lastScrollDelta"] = null;
+  let lastDispatchedAt: number | null = null;
+
   // xterm SelectionService 把 mousemove listener 挂在 .xterm-screen 上, 那是 host
   // 的后代节点。dispatchEvent 只走 capture 向下 + bubble 向上, 在 host 派发的事件
   // 永远到不了 .xterm-screen, 选区不会扩。必须在 .xterm-screen 上派发。lazy 解析
@@ -48,7 +68,9 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
   let cachedDispatchTarget: HTMLElement | null = null;
   const getDispatchTarget = (): HTMLElement => {
     if (cachedDispatchTarget && cachedDispatchTarget.isConnected) return cachedDispatchTarget;
-    cachedDispatchTarget = host.querySelector<HTMLElement>(".xterm-screen") ?? host;
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    cachedDispatchTarget = screen ?? host;
+    dispatchTargetTag = screen ? "xterm-screen" : "host";
     return cachedDispatchTarget;
   };
 
@@ -108,6 +130,9 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
           cancelable: true,
         }),
       );
+      dispatchCount += 1;
+      lastScrollDelta = { dx, dy };
+      lastDispatchedAt = Date.now();
     }
 
     frame = requestFrame(tick);
@@ -146,6 +171,17 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): Disposab
       globalThis.removeEventListener?.("pointerup", stop);
       globalThis.removeEventListener?.("pointercancel", stop);
       globalThis.removeEventListener?.("blur", stop);
+    },
+    getDebugSnapshot(): DragSelectDebugSnapshot {
+      return {
+        dragging,
+        pointerX,
+        pointerY,
+        dispatchCount,
+        dispatchTargetTag,
+        lastScrollDelta,
+        lastDispatchedAt,
+      };
     },
   };
 }
