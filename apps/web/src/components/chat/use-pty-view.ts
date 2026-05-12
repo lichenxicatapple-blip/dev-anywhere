@@ -489,8 +489,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [sessionId],
   );
 
+  // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
+  // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
   const containerPaddingBottom = showMobilePtyControls
-    ? 64
+    ? 112
     : scrollState.horizontalScrollable
       ? 32
       : 8;

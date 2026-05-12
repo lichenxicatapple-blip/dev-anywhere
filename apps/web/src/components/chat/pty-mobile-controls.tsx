@@ -10,45 +10,80 @@ interface PtyMobileControlsProps {
 const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 
-// 移动端浮层按键：方向键支持长按连发, 控制类按键 (清空 / Ctrl+C / 回车) 单击触发。
-// onPointerDown preventDefault 防止把焦点抢走 xterm。
+// 移动端浮层按键 (2 行):
+//   Row1: [Tab ][⇧Tab][^T  ][  .  ][ ↑ ][  .  ]
+//   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
+//   Enter 在最右, 跨 2 行高亮
+// 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
+// onPointerDown preventDefault 防把焦点抢走 xterm。
 export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 py-1.5 shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
+      className="absolute inset-x-0 bottom-0 z-20 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 py-1.5 shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
       data-slot="pty-mobile-controls"
       aria-label="终端移动端控制"
     >
-      <div className="grid min-w-0 flex-1 grid-cols-6 gap-1" role="group" aria-label="辅助按键">
+      <div
+        className="grid min-w-0 flex-1 grid-cols-6 grid-rows-2 gap-1"
+        role="group"
+        aria-label="辅助按键"
+      >
+        <SinglePressKey
+          label="发送 Tab"
+          slot="pty-mobile-key-tab"
+          onPress={() => onInput("\t")}
+        >
+          Tab
+        </SinglePressKey>
+        <SinglePressKey
+          label="发送 Shift+Tab"
+          slot="pty-mobile-key-shift-tab"
+          onPress={() => onInput("\x1b[Z")}
+        >
+          ⇧Tab
+        </SinglePressKey>
+        <SinglePressKey
+          label="发送 Ctrl+T"
+          slot="pty-mobile-key-ctrl-t"
+          onPress={() => onInput("\x14")}
+        >
+          ^T
+        </SinglePressKey>
+        <ArrowSpacer />
+        <RepeatableKey
+          label="光标上移"
+          slot="pty-mobile-key-up"
+          icon={ArrowUp}
+          onPress={() => onInput("\x1b[A")}
+        />
+        <ArrowSpacer />
+
         <SinglePressKey
           label="清空当前输入"
           slot="pty-mobile-key-clear"
           onPress={() => onInput("\x15")}
         >
-          <span className="inline-flex h-9 min-w-0 items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] px-1.5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            清空
-          </span>
+          清空
         </SinglePressKey>
         <SinglePressKey
           label="发送 Ctrl+C 中断"
           slot="pty-mobile-key-ctrl-c"
           onPress={() => onInput("\x03")}
         >
-          <span className="inline-flex h-9 min-w-0 items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] px-1.5 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-            ^C
-          </span>
+          ^C
+        </SinglePressKey>
+        <SinglePressKey
+          label="发送 Ctrl+B"
+          slot="pty-mobile-key-ctrl-b"
+          onPress={() => onInput("\x02")}
+        >
+          ^B
         </SinglePressKey>
         <RepeatableKey
           label="光标左移"
           slot="pty-mobile-key-left"
           icon={ArrowLeft}
           onPress={() => onInput("\x1b[D")}
-        />
-        <RepeatableKey
-          label="光标上移"
-          slot="pty-mobile-key-up"
-          icon={ArrowUp}
-          onPress={() => onInput("\x1b[A")}
         />
         <RepeatableKey
           label="光标下移"
@@ -65,13 +100,15 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
       </div>
       <button
         type="button"
-        className="inline-flex h-11 w-[4.375rem] shrink-0 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
+        className="inline-flex w-[4.375rem] shrink-0 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
         aria-label="回车"
         data-slot="pty-mobile-key-enter"
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => onInput("\r")}
       >
-        <span className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[6px] border border-[#7A6046] bg-[#5A452E] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        {/* h-[5.25rem] = 2 × h-9 + gap-1 + 4px×2 边距, 跟左侧 h-11 外壳里 h-9 pill
+            的 4px 上下留白对齐 (y=4-88), 不再上下各多 4px。 */}
+        <span className="inline-flex h-[5.25rem] w-full items-center justify-center gap-1.5 rounded-[6px] border border-[#7A6046] bg-[#5A452E] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
           <CornerDownLeft aria-hidden="true" className="size-4" />
           <span>回车</span>
         </span>
@@ -79,6 +116,17 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
     </div>
   );
 }
+
+// 占位格保持 grid 对齐, 用于 ↑ 上方左右两侧的 cross 形状。
+function ArrowSpacer() {
+  return <div aria-hidden="true" className="h-9" />;
+}
+
+const KEY_BUTTON_OUTER_CLASS =
+  "inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white";
+
+const KEY_PILL_CLASS =
+  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] px-1 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 
 interface SinglePressKeyProps {
   label: string;
@@ -91,13 +139,13 @@ function SinglePressKey({ label, slot, onPress, children }: SinglePressKeyProps)
   return (
     <button
       type="button"
-      className="inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white"
+      className={KEY_BUTTON_OUTER_CLASS}
       aria-label={label}
       data-slot={slot}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onPress}
     >
-      {children}
+      <span className={KEY_PILL_CLASS}>{children}</span>
     </button>
   );
 }
@@ -142,7 +190,7 @@ function RepeatableKey({ label, slot, icon: Icon, onPress }: RepeatableKeyProps)
   return (
     <button
       type="button"
-      className="inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white"
+      className={KEY_BUTTON_OUTER_CLASS}
       aria-label={label}
       data-slot={slot}
       onPointerDown={(event) => {
@@ -161,7 +209,7 @@ function RepeatableKey({ label, slot, icon: Icon, onPress }: RepeatableKeyProps)
         onPress();
       }}
     >
-      <span className="inline-flex size-9 items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <span className={KEY_PILL_CLASS}>
         <Icon aria-hidden="true" className="size-4" />
       </span>
     </button>

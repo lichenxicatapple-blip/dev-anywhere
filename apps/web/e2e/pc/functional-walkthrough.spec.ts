@@ -92,11 +92,9 @@ test.describe("functional browser walkthrough", () => {
       page.locator('[data-slot="chat-overflow-menu"]').getByText("快捷键"),
     ).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
-    await page.getByRole("menuitem", { name: "发送 Ctrl+T" }).click();
+    // 头部菜单只留 Ctrl+O (其余热键挪到移动端控制条)。这里覆盖 dropdown → raw input 这条路径。
+    await page.getByRole("menuitem", { name: "发送 Ctrl+O" }).click();
     await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toBeVisible();
-    await page.locator('[data-slot="chat-menu-send-ctrl-c"]').click();
     const rawInput = (await sentFakeRelayMessages(page))
       .filter((msg) => msg.type === "remote_input_raw")
       .map((msg) => String(msg.data ?? ""))
@@ -104,8 +102,7 @@ test.describe("functional browser walkthrough", () => {
     expect(rawInput).toContain("hello");
     expect(rawInput).toContain("\n");
     expect(rawInput).toContain("\r");
-    expect(rawInput).toContain("\x14");
-    expect(rawInput).toContain("\x03");
+    expect(rawInput).toContain("\x0f");
 
     await page.goto(`${page.url().split("#")[0]}#/chat/json-sess?mode=json`);
     await expect(page.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible();

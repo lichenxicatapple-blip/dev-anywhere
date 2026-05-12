@@ -164,31 +164,9 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         >
           {isPty ? (
             <>
+              {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留
+                  低频且不适合常驻浮层的 Ctrl+O。 */}
               <DropdownMenuLabel className="text-muted-foreground">快捷键</DropdownMenuLabel>
-              <DropdownMenuItem
-                data-slot="chat-menu-send-ctrl-t"
-                onClick={() => sendRemoteInputRaw(sessionId, "\x14")}
-              >
-                发送 Ctrl+T
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-slot="chat-menu-send-ctrl-c"
-                onClick={() => sendRemoteInputRaw(sessionId, "\x03")}
-              >
-                发送 Ctrl+C
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-slot="chat-menu-send-shift-tab"
-                onClick={() => sendRemoteInputRaw(sessionId, "\x1b[Z")}
-              >
-                发送 Shift+Tab
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-slot="chat-menu-send-ctrl-b"
-                onClick={() => sendRemoteInputRaw(sessionId, "\x02")}
-              >
-                发送 Ctrl+B
-              </DropdownMenuItem>
               <DropdownMenuItem
                 data-slot="chat-menu-send-ctrl-o"
                 onClick={() => sendRemoteInputRaw(sessionId, "\x0f")}

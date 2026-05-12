@@ -192,9 +192,13 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(menu.getByText("快捷键")).toBeVisible();
     await expect(menu.getByText("切换权限模式")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toBeVisible();
+    // Tab / ⇧Tab / ^T / ^C / ^B 已挪到移动端控制条 (PtyMobileControls), header dropdown 这里
+    // 仅留低频的 Ctrl+O。PC 桌面物理键盘可以直接发这些组合键, 不再依赖菜单按钮。
+    await expect(page.locator('[data-slot="chat-menu-send-ctrl-o"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="chat-menu-send-ctrl-b"]')).toHaveCount(0);
     await expect(menu.getByText("显示")).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
@@ -203,7 +207,7 @@ test.describe("ChatHeader compact navigation controls", () => {
       .locator('[data-slot="chat-menu-screen-wake-lock-item"]')
       .evaluate((node) => getComputedStyle(node).paddingLeft);
     const shortcutPaddingLeft = await page
-      .locator('[data-slot="chat-menu-send-ctrl-t"]')
+      .locator('[data-slot="chat-menu-send-ctrl-o"]')
       .evaluate((node) => getComputedStyle(node).paddingLeft);
     expect(wakePaddingLeft).toBe(shortcutPaddingLeft);
   });

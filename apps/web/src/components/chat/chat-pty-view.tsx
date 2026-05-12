@@ -67,7 +67,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
         hasNewMessages={view.hasNewFramesWhileAway}
         className={
           view.showMobilePtyControls
-            ? "right-6 bottom-[calc(env(safe-area-inset-bottom)+4rem)]"
+            ? "right-6 bottom-[calc(env(safe-area-inset-bottom)+7rem)]"
             : view.touchEditingSurface
               ? "right-6"
               : "right-12"
