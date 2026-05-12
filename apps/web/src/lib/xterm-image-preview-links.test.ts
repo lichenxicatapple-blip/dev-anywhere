@@ -90,4 +90,45 @@ describe("xterm image preview links", () => {
     provideAndActivate(onPreview, {});
     expect(onPreview).not.toHaveBeenCalled();
   });
+
+  // 触屏设备 (pointer: coarse) 没修饰键, plain tap 即触发. 平板接外置键盘走修饰键
+  // 路径也照样 work (两条路径并存).
+  describe("touch surface (mobile / tablet without keyboard)", () => {
+    function withTouchSurface<T>(fn: () => T): T {
+      const spy = vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes("pointer: coarse") || query.includes("hover: none"),
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          }) as unknown as MediaQueryList,
+      );
+      try {
+        return fn();
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    it("triggers preview on plain tap (no modifier needed)", () => {
+      withTouchSurface(() => {
+        const onPreview = vi.fn();
+        provideAndActivate(onPreview, {});
+        expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
+      });
+    });
+
+    it("still triggers on cmd+click when tablet has keyboard attached", () => {
+      withTouchSurface(() => {
+        const onPreview = vi.fn();
+        provideAndActivate(onPreview, { metaKey: true });
+        expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
+      });
+    });
+  });
 });

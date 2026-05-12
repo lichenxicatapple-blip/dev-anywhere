@@ -85,4 +85,45 @@ describe("xterm file download links", () => {
     expect(captured.text).toBeUndefined();
     expect(onDownload).not.toHaveBeenCalled();
   });
+
+  // 触屏设备 (pointer: coarse) 没修饰键, plain tap 即触发. PC anti-misclick gate
+  // 不应阻止移动端用户点链接打开下载.
+  describe("touch surface (mobile / tablet without keyboard)", () => {
+    function withTouchSurface<T>(fn: () => T): T {
+      const spy = vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes("pointer: coarse") || query.includes("hover: none"),
+            media: query,
+            onchange: null,
+            addListener: () => {},
+            removeListener: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          }) as unknown as MediaQueryList,
+      );
+      try {
+        return fn();
+      } finally {
+        spy.mockRestore();
+      }
+    }
+
+    it("triggers download on plain tap (no modifier needed)", () => {
+      withTouchSurface(() => {
+        const onDownload = vi.fn();
+        provideAndActivate(onDownload, {});
+        expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
+      });
+    });
+
+    it("still triggers on cmd+click when tablet has keyboard attached", () => {
+      withTouchSurface(() => {
+        const onDownload = vi.fn();
+        provideAndActivate(onDownload, { metaKey: true });
+        expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
+      });
+    });
+  });
 });

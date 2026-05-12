@@ -50,3 +50,23 @@ if (typeof HTMLCanvasElement !== "undefined") {
     value: () => null,
   });
 }
+
+// jsdom 不实现 matchMedia, 给 window / globalThis 装一个最小 mock. 默认全部 query
+// 不匹配 (等价桌面 + hover 设备); 需要测 touch surface 的用例自己 vi.spyOn 覆盖.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  });
+}
