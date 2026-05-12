@@ -164,7 +164,7 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
   // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。
   // start 命令必须等 daemon socket 可连接后再退出；否则用户会看到“启动成功”，实际服务还没就绪。
   const serveArgs = ["--profile", PROFILE_NAME, ...daemonRelayArgs(options?.relayName)];
-  const child = spawnScript(new URL("./serve", import.meta.url), serveArgs, {
+  const child = spawnScript("serve", serveArgs, {
     env: { ...process.env },
     stdio: ["ignore", "ignore", "pipe"],
     unref: false,

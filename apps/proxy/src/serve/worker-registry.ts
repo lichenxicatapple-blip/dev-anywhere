@@ -119,7 +119,7 @@ export class WorkerRegistry {
     args.push("--");
 
     const providerEnv = this.deps.getProviderEnv();
-    const child = spawnScript(new URL("../session-worker", import.meta.url), args, {
+    const child = spawnScript("session-worker", args, {
       logger: serviceLogger,
       env: options?.hook
         ? { ...providerEnv, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }

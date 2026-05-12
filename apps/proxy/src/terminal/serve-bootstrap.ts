@@ -38,14 +38,10 @@ export async function ensureService(autoStart = true): Promise<Socket> {
   if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
 
   log.info("Auto-starting serve daemon");
-  const child = spawnScript(
-    new URL("../serve", import.meta.url),
-    ["--profile", PROFILE_NAME, ...daemonRelayArgs()],
-    {
-      env: { ...process.env },
-      logger: log,
-    },
-  );
+  const child = spawnScript("serve", ["--profile", PROFILE_NAME, ...daemonRelayArgs()], {
+    env: { ...process.env },
+    logger: log,
+  });
 
   // 监听 daemon 失败信号，让下面的 tryConnect 轮询能在 daemon 启动时就崩的场景下立刻抛诊断。
   // - 'exit'：进程启动成功后又退出（配置错误、端口占用、内部崩溃），带 code/signal。

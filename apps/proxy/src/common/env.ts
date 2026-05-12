@@ -18,23 +18,40 @@ interface SpawnScriptOptions extends Omit<SpawnOptions, "detached"> {
 }
 
 /**
+ * 顶层 entry（serve / session-worker）在 dev 下 `src/<name>.ts`、prod 下 `dist/<name>.js`。
+ * env.ts 自身：dev 在 `src/common/env.ts`，prod 被 tsup 内联进 `dist/<chunk>.js`。
+ * 因此从 env.ts 看，dev 走 `../<name>`、prod 走 `./<name>` 即可命中正确目录。
+ *
+ * 早期 API 让调用方在自己源文件里 `new URL("./serve", import.meta.url)`，对顶层
+ * caller（src/index.ts）巧合可用，但 src/terminal/、src/serve/ 这类嵌套 caller 在 src 下
+ * 写 `../serve` 才对、tsup 把所有 chunk 拍平到 dist/ 根目录后又指错位置。把解析集中到
+ * env.ts 这一处，调用方只传 entry 名，避免两层布局的相对路径陷阱。
+ */
+export function resolveTopLevelScript(name: string): URL {
+  const baseDir = IS_DEV
+    ? new URL("../", import.meta.url) // src/common/env.ts → src/
+    : new URL("./", import.meta.url); // dist/<chunk>.js → dist/
+  return new URL(name, baseDir);
+}
+
+/**
  * spawn 一个 Node 脚本作为后台 detached 子进程。
  *
- * scriptBaseUrl 是**不带扩展名**的脚本 URL；helper 根据 IS_DEV 自动补扩展名并选运行时：
+ * 第一个参数支持两种形式：
+ *   - 顶层 entry 名（"serve" / "session-worker"）：内部按 dev/prod 布局解析为
+ *     `src/<name>.ts` 或 `dist/<name>.js`。生产代码用这种形式。
+ *   - URL：fixture / 测试用，调用方自己用 `new URL("./xxx", import.meta.url)` 构造。
+ *
+ * helper 根据 IS_DEV 自动补扩展名并选运行时：
  *   dev: 执行 `node --import tsx <path>.ts`
  *   prod: 执行 `node <path>.js`
  *
- * 调用方用 `new URL("./相对路径", import.meta.url)` 构造，不需要预先计算 __dirname。
- *
  * @example
- *   // terminal.ts 拉起 serve daemon，自动把子进程 stderr 和异常退出接入 terminalLogger：
- *   spawnScript(new URL("./serve", import.meta.url), [], { logger: terminalLogger });
- *
- *   // serve.ts 拉起 session-worker 并传额外参数：
- *   spawnScript(new URL("./session-worker", import.meta.url), [sessionId, sockPath], { logger });
+ *   spawnScript("serve", [], { logger: terminalLogger });
+ *   spawnScript("session-worker", [sessionId, sockPath], { logger });
  */
 export function spawnScript(
-  scriptBaseUrl: URL,
+  script: string | URL,
   args: readonly string[] = [],
   options: SpawnScriptOptions = {},
 ): ChildProcess {
@@ -42,6 +59,7 @@ export function spawnScript(
   // logger 传入时默认打开 stderr pipe；调用方显式传了 stdio 则尊重调用方。
   const stdio = rest.stdio ?? (logger ? ["ignore", "ignore", "pipe"] : "ignore");
 
+  const scriptBaseUrl = typeof script === "string" ? resolveTopLevelScript(script) : script;
   const basePath = fileURLToPath(scriptBaseUrl);
   const scriptPath = `${basePath}${IS_DEV ? ".ts" : ".js"}`;
   const runtimeArgs = IS_DEV ? ["--import", "tsx", scriptPath, ...args] : [scriptPath, ...args];

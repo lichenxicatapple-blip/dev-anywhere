@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ChildProcess } from "node:child_process";
-import { spawnScript } from "#src/common/env.js";
+import { fileURLToPath } from "node:url";
+import { resolveTopLevelScript, spawnScript } from "#src/common/env.js";
 import { createLoggerFake } from "./test-fakes.js";
 
 // 等待子进程彻底结束（exit + 所有 stdio 流关闭），保证 stderr 的 data 事件已派发完
@@ -57,6 +58,28 @@ describe("spawnScript without logger", () => {
     const child = spawnScript(fixtureUrl, ["stderr", "1"], { unref: false });
     await waitForClose(child);
     expect(child.stderr).toBeNull();
+  });
+});
+
+// Regression: serve-bootstrap.ts / worker-registry.ts 嵌在 src/terminal/ 与 src/serve/ 子目录，
+// 早期 API 让调用方写 `new URL("../serve", import.meta.url)`——src 下相对父目录是对的，但 tsup
+// 把所有 chunk 拍平到 dist/ 根目录后，`../serve` 反而跳出 dist/ 命中包根目录，daemon 启动报
+// `Cannot find module '.../proxy/serve.js'`。这两条用例守住"按 entry 名解析必须落在和 env.ts
+// 同布局的目录"——dev 下与 env.ts 同在 src/ 下、prod 下与 chunk 同在 dist/ 下。
+describe("resolveTopLevelScript", () => {
+  it("points to src/<name> when env.ts runs from source layout (dev/test)", () => {
+    const url = resolveTopLevelScript("serve");
+    const path = fileURLToPath(url);
+    // vitest 跑源码 IS_DEV 为 true，此时应解析到 apps/proxy/src/serve（spawnScript 再补 .ts 后缀）
+    expect(path.endsWith("/apps/proxy/src/serve")).toBe(true);
+  });
+
+  it("composes the entry name verbatim without escaping the package root", () => {
+    const url = resolveTopLevelScript("session-worker");
+    const path = fileURLToPath(url);
+    expect(path.endsWith("/apps/proxy/src/session-worker")).toBe(true);
+    // 关键防回归：不能再出现 `../<name>` 把路径推到 apps/proxy/<name> 这一层
+    expect(path).not.toMatch(/\/apps\/proxy\/session-worker$/);
   });
 });
 
