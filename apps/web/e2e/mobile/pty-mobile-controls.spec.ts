@@ -23,14 +23,17 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     const controls = emuPage.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
 
-    // clear (\x15) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + enter (\r).
+    // clear (\x15) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
     await emuPage.locator('[data-slot="pty-mobile-key-clear"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-left"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-right"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-up"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-down"]').click();
+    await emuPage.locator('[data-slot="pty-mobile-key-ctrl-s"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-enter"]').click();
 
-    await expect.poll(() => readRawPtyInput(emuPage)).toContain("\x15\x1b[D\x1b[C\x1b[A\x1b[B\r");
+    await expect
+      .poll(() => readRawPtyInput(emuPage))
+      .toContain("\x15\x1b[D\x1b[C\x1b[A\x1b[B\x13\r");
   });
 });

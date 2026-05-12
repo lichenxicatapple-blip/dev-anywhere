@@ -11,7 +11,7 @@ const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 
 // 移动端浮层按键 (2 行):
-//   Row1: [Tab ][⇧Tab][^T  ][  .  ][ ↑ ][  .  ]
+//   Row1: [Tab ][⇧Tab][^T  ][  .  ][ ↑ ][ ^S ]
 //   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
 //   Enter 在最右, 跨 2 行高亮
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
@@ -56,7 +56,13 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
           icon={ArrowUp}
           onPress={() => onInput("\x1b[A")}
         />
-        <ArrowSpacer />
+        <SinglePressKey
+          label="发送 Ctrl+S"
+          slot="pty-mobile-key-ctrl-s"
+          onPress={() => onInput("\x13")}
+        >
+          ^S
+        </SinglePressKey>
 
         <SinglePressKey
           label="清空当前输入"

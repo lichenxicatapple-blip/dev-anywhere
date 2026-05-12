@@ -48,12 +48,14 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-t"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-c"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-b"]'));
+    await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-s"]'));
     await page.locator('[data-slot="pty-mobile-key-tab"]').click();
     await page.locator('[data-slot="pty-mobile-key-shift-tab"]').click();
     await page.locator('[data-slot="pty-mobile-key-ctrl-t"]').click();
     await page.locator('[data-slot="pty-mobile-key-ctrl-b"]').click();
     await page.locator('[data-slot="pty-mobile-key-ctrl-c"]').click();
     await page.locator('[data-slot="pty-mobile-key-clear"]').click();
+    await page.locator('[data-slot="pty-mobile-key-ctrl-s"]').click();
     await page.locator('[data-slot="pty-mobile-key-left"]').click();
     await page.locator('[data-slot="pty-mobile-key-right"]').click();
     await page.locator('[data-slot="pty-mobile-key-up"]').click();
@@ -61,7 +63,7 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await page.locator('[data-slot="pty-mobile-key-enter"]').click();
     await expect
       .poll(() => readRawPtyInput(page))
-      .toContain("abc\n\t\x1b[Z\x14\x02\x03\x15\x1b[D\x1b[C\x1b[A\x1b[B\r");
+      .toContain("abc\n\t\x1b[Z\x14\x02\x03\x15\x13\x1b[D\x1b[C\x1b[A\x1b[B\r");
 
     await page.evaluate(() =>
       window.__devAnywhereSetVisualViewport?.({
