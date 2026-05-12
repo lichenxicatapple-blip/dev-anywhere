@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -195,33 +195,46 @@ function proxyDataRoot(): string {
   return join(homedir(), ".dev-anywhere", "profiles", proxyProfile, "data");
 }
 
-function clipboardDir(cwd: string, sessionId: string): string {
-  return join(cwd, ".dev-anywhere", "clipboard", sessionId);
+// 上传文件统一落 os.tmpdir()/dev-anywhere/, 平铺单层, 跟 sessionId 解耦, 跟 user
+// repo .gitignore 完全脱钩 (commit 55ad4c4f)。spec 用 snapshot 前后 diff 找新文件。
+function uploadRoot(): string {
+  return join(tmpdir(), "dev-anywhere");
 }
 
-async function waitForUploadedImage(cwd: string, sessionId: string): Promise<string> {
-  const dir = clipboardDir(cwd, sessionId);
+function snapshotUploadRoot(): Set<string> {
+  const root = uploadRoot();
+  if (!existsSync(root)) return new Set();
+  return new Set(readdirSync(root));
+}
+
+async function waitForNewUploadedFile(
+  before: Set<string>,
+  prefix: string,
+  ext: string,
+): Promise<string> {
+  const root = uploadRoot();
   for (let i = 0; i < 80; i += 1) {
-    if (existsSync(dir)) {
-      const file = readdirSync(dir).find((entry) => entry.endsWith(".png"));
-      if (file) return join(dir, file);
+    if (existsSync(root)) {
+      const fresh = readdirSync(root).find(
+        (entry) => !before.has(entry) && entry.startsWith(prefix) && entry.endsWith(ext),
+      );
+      if (fresh) return join(root, fresh);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`uploaded clipboard image not found for ${sessionId}`);
+  throw new Error(`uploaded ${prefix}*${ext} not found under ${root}`);
 }
 
-function expectUploadedBytes(path: string): void {
-  expect([...readFileSync(path)]).toEqual(pngBytes);
+function expectUploadedBytes(path: string, expected: number[] | Buffer): void {
+  expect([...readFileSync(path)]).toEqual([...expected]);
 }
 
 function cleanupSessionData(sessionId: string): void {
   rmSync(join(proxyDataRoot(), sessionId), { recursive: true, force: true });
 }
 
-function expectProjectClipboardIgnored(cwd: string): void {
-  const lines = readFileSync(join(cwd, ".gitignore"), "utf-8").split(/\r?\n/).filter(Boolean);
-  expect(lines.filter((line) => line.trim() === ".dev-anywhere/")).toHaveLength(1);
+function cleanupUploadedFile(path: string | undefined): void {
+  if (path) rmSync(path, { force: true });
 }
 
 async function terminalText(page: Page, sessionId: string): Promise<string> {
@@ -274,6 +287,8 @@ test.describe("real clipboard image chain", () => {
 
     let jsonSessionId: string | undefined;
     let ptySessionId: string | undefined;
+    let jsonUpload: string | undefined;
+    let ptyUpload: string | undefined;
 
     try {
       jsonSessionId = await createSession(page, { mode: "json", cwd: jsonCwd });
@@ -282,23 +297,23 @@ test.describe("real clipboard image chain", () => {
       });
       const input = page.getByLabel("输入聊天消息");
       await input.fill("inspect ");
+      const jsonBefore = snapshotUploadRoot();
       await dispatchImagePaste(input);
 
-      const jsonUpload = await waitForUploadedImage(jsonCwd, jsonSessionId);
-      expectUploadedBytes(jsonUpload);
-      expectProjectClipboardIgnored(jsonCwd);
-      const jsonRelativePath = relative(jsonCwd, jsonUpload);
-      await expect(input).toHaveValue(`inspect @${jsonRelativePath} `);
-      await previewJsonImagePath(page, jsonRelativePath);
+      jsonUpload = await waitForNewUploadedFile(jsonBefore, "paste-", ".png");
+      expectUploadedBytes(jsonUpload, pngBytes);
+      // 文件落 tmp 绝对路径, 不再相对 cwd, 不再追加 user .gitignore (commit 55ad4c4f)。
+      await expect(input).toHaveValue(`inspect @${jsonUpload} `);
+      await previewJsonImagePath(page, jsonUpload);
 
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
       await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible({ timeout: 20_000 });
+      const ptyBefore = snapshotUploadRoot();
       await dispatchImagePaste(page.locator('[data-slot="pty-terminal"]'));
 
-      const ptyUpload = await waitForUploadedImage(ptyCwd, ptySessionId);
-      expectUploadedBytes(ptyUpload);
-      expectProjectClipboardIgnored(ptyCwd);
+      ptyUpload = await waitForNewUploadedFile(ptyBefore, "paste-", ".png");
+      expectUploadedBytes(ptyUpload, pngBytes);
       const visiblePtyNameFragment = basename(ptyUpload).split("-").at(-1) ?? basename(ptyUpload);
       await expect
         .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
@@ -306,6 +321,8 @@ test.describe("real clipboard image chain", () => {
         })
         .toContain(visiblePtyNameFragment);
     } finally {
+      cleanupUploadedFile(jsonUpload);
+      cleanupUploadedFile(ptyUpload);
       if (jsonSessionId) {
         await terminateSession(page, jsonSessionId).catch(() => undefined);
         cleanupSessionData(jsonSessionId);
@@ -324,6 +341,7 @@ test.describe("real clipboard image chain", () => {
     mkdirSync(ptyCwd, { recursive: true });
     writeFileSync(join(ptyCwd, ".gitignore"), "node_modules/\n");
     let ptySessionId: string | undefined;
+    let uploadedAbs: string | undefined;
     try {
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
@@ -332,23 +350,23 @@ test.describe("real clipboard image chain", () => {
       // 真实链路: input.change → fileToUploadPayload → relay.uploadFile → proxy 落盘 → "@<path> " sendRaw。
       const fileBytes = Buffer.from("hello dev-anywhere\n", "utf-8");
       const fileName = `notes-${Date.now()}.txt`;
+      const before = snapshotUploadRoot();
       await page
         .locator('input[data-slot="chat-menu-upload-file-input"]')
         .setInputFiles({ name: fileName, mimeType: "text/plain", buffer: fileBytes });
 
-      const uploadedRelative = `.dev-anywhere/uploads/${ptySessionId}/${fileName}`;
-      const uploadedAbs = join(ptyCwd, uploadedRelative);
-      await expect.poll(() => existsSync(uploadedAbs), { timeout: 15_000 }).toBe(true);
-      expect(readFileSync(uploadedAbs)).toEqual(fileBytes);
-      expectProjectClipboardIgnored(ptyCwd);
+      // 文件落 os.tmpdir()/dev-anywhere/up-<6 nanoid>.txt (commit 55ad4c4f)。
+      uploadedAbs = await waitForNewUploadedFile(before, "up-", ".txt");
+      expectUploadedBytes(uploadedAbs, fileBytes);
 
       // 等到 xterm 回放出 @<path>, 证明终端 stdin 收到了 mention 文本
       await expect
         .poll(async () => compactTerminalText(await terminalText(page, ptySessionId!)), {
           timeout: 20_000,
         })
-        .toContain(`@${uploadedRelative}`.replace(/\s+/g, ""));
+        .toContain(`@${uploadedAbs}`.replace(/\s+/g, ""));
     } finally {
+      cleanupUploadedFile(uploadedAbs);
       if (ptySessionId) {
         await terminateSession(page, ptySessionId).catch(() => undefined);
         cleanupSessionData(ptySessionId);
