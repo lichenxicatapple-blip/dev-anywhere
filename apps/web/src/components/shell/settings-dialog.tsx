@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { ArrowLeft, ChevronRight, Monitor, Server } from "lucide-react";
+import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import {
@@ -151,7 +152,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <VersionRow
               icon={<Monitor className="size-4" aria-hidden="true" />}
               label="Web"
-              value={__APP_VERSION__}
+              value={packageInfo.version}
               detail="当前浏览器加载的版本"
             />
             <VersionRow
