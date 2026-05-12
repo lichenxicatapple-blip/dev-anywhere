@@ -1,14 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { extname, join } from "node:path";
 import { nanoid } from "nanoid";
 import { ControlErrorCode } from "@dev-anywhere/shared";
-import { serviceLogger } from "../common/logger.js";
-import { DATA_DIR } from "../common/paths.js";
 
-// 单租户场景下文件上传上限大于剪贴板图片: 视频 / 日志包等可能 30-50MB。
+// 落系统临时目录避免污染 user repo / 触发 .gitignore: CLI agent 看到绝对路径不受 cwd
+// 内 ignore 规则限制。文件名平铺单层 + 6 位随机后缀, 控制 mention 长度。
+// 用户原 fileName 只取扩展, 不保留主干 (中文 / 长名 / 空格都会让 mention 变长)。
+const DEFAULT_DATA_DIR = join(tmpdir(), "dev-anywhere");
 const MAX_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_FILE_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_FILE_UPLOAD_BYTES / 3) * 4;
-const SAFE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
+const SAFE_EXT_RE = /^[A-Za-z0-9]{1,6}$/;
 
 export type FileUploadRequest = {
   sessionId: string;
@@ -22,13 +24,11 @@ export type FileUploadResult = {
   // 失败时不填,避免空字符串通过 schema 的 z.string().optional() 校验。
   path?: string;
   error?: string;
-  errorCode?: ControlErrorCode;
+  errorCode?: (typeof ControlErrorCode)[keyof typeof ControlErrorCode];
 };
 
 type FileUploadOptions = {
   dataDir?: string;
-  cwd?: string;
-  now?: () => number;
   randomSuffix?: () => string;
 };
 
@@ -52,69 +52,11 @@ function decodeBase64File(dataBase64: string): Buffer {
   return buffer;
 }
 
-function sanitizeFileName(fileName: string, fallbackPrefix: string, suffix: string): string {
-  const base = basename(fileName).trim();
-  if (base && SAFE_FILENAME_RE.test(base)) return base;
-  // 含路径分隔符 / 非 ASCII / 控制字符等不安全名: 拆出扩展名 (若仍合法) 并接随机后缀。
-  const extMatch = base.match(/\.([A-Za-z0-9]{1,6})$/);
-  const ext = extMatch ? `.${extMatch[1]}` : "";
-  return `${fallbackPrefix}-${suffix}${ext}`;
-}
-
-function resolveChildDir(rootPath: string, ...segments: string[]): string {
-  const root = resolve(rootPath);
-  const target = resolve(root, ...segments);
-  const rel = relative(root, target);
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error("会话路径无效");
-  }
-  return target;
-}
-
-function normalizeGitignoreLine(line: string): string {
-  return line.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-}
-
-function ensureProjectUploadIgnored(cwd: string): void {
-  const gitignorePath = join(cwd, ".gitignore");
-  if (!existsSync(gitignorePath)) return;
-  try {
-    const current = readFileSync(gitignorePath, "utf-8");
-    const alreadyIgnored = current
-      .split(/\r?\n/)
-      .some((line) => normalizeGitignoreLine(line) === ".dev-anywhere");
-    if (alreadyIgnored) return;
-    const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-    writeFileSync(gitignorePath, `${current}${separator}.dev-anywhere/\n`);
-  } catch {
-    // best-effort
-  }
-}
-
-function trySaveProjectUpload(options: {
-  cwd?: string;
-  sessionId: string;
-  fileName: string;
-  buffer: Buffer;
-}): FileUploadResult | null {
-  if (!options.cwd) return null;
-  try {
-    const cwd = resolve(options.cwd);
-    if (!statSync(cwd).isDirectory()) return null;
-    const uploadsRoot = resolve(cwd, ".dev-anywhere", "uploads");
-    const uploadDir = resolveChildDir(uploadsRoot, options.sessionId);
-    const path = join(uploadDir, options.fileName);
-    mkdirSync(uploadDir, { recursive: true });
-    writeFileSync(path, options.buffer, { mode: 0o600 });
-    ensureProjectUploadIgnored(cwd);
-    return { success: true, path: relative(cwd, path) };
-  } catch (err) {
-    serviceLogger.warn(
-      { sessionId: options.sessionId, cwd: options.cwd, error: String(err) },
-      "Project upload write failed; falling back to data dir",
-    );
-    return null;
-  }
+function safeExtension(fileName: string): string {
+  // 单段扩展, 多扩展 (.tar.gz / .min.js) 只保留最后一段; agent 看 mimeType 即可,
+  // 路径里只需要保留类型 hint。非 ASCII / 含路径分隔符等的扩展直接丢。
+  const raw = extname(fileName).slice(1).toLowerCase();
+  return SAFE_EXT_RE.test(raw) ? `.${raw}` : "";
 }
 
 export async function saveFileUpload(
@@ -123,26 +65,12 @@ export async function saveFileUpload(
 ): Promise<FileUploadResult> {
   try {
     const buffer = decodeBase64File(request.dataBase64);
-    const now = options.now ?? Date.now;
     const suffix = options.randomSuffix?.() ?? nanoid(6);
-    const stamped = new Date(now())
-      .toISOString()
-      .replace(/[-:T.Z]/g, "")
-      .slice(0, 14);
-    const fileName = sanitizeFileName(request.fileName, `upload-${stamped}`, suffix);
+    const fileName = `up-${suffix}${safeExtension(request.fileName)}`;
+    const dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
+    const path = join(dataDir, fileName);
 
-    const projectResult = trySaveProjectUpload({
-      cwd: options.cwd,
-      sessionId: request.sessionId,
-      fileName,
-      buffer,
-    });
-    if (projectResult) return projectResult;
-
-    const dataDir = options.dataDir ?? DATA_DIR;
-    const uploadDir = resolveChildDir(dataDir, request.sessionId, "uploads");
-    const path = join(uploadDir, fileName);
-    mkdirSync(uploadDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     writeFileSync(path, buffer, { mode: 0o600 });
     return { success: true, path };
   } catch (err) {

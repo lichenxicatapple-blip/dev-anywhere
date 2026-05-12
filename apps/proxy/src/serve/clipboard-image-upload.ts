@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { ControlErrorCode } from "@dev-anywhere/shared";
-import { serviceLogger } from "../common/logger.js";
-import { DATA_DIR } from "../common/paths.js";
 
+// 落系统临时目录避免污染 user repo / 触发 .gitignore: CLI agent 看到绝对路径不受 cwd
+// 内 ignore 规则限制。文件名平铺单层、6 位随机后缀, 不带 sessionId / 时间戳, 控制 mention
+// 长度 (用户在 prompt 里看到 @<path> 越短越好)。
+const DEFAULT_DATA_DIR = join(tmpdir(), "dev-anywhere");
 const MAX_CLIPBOARD_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_CLIPBOARD_IMAGE_BASE64_LENGTH = Math.ceil(MAX_CLIPBOARD_IMAGE_BYTES / 3) * 4;
 const IMAGE_EXTENSIONS: ReadonlyMap<string, string> = new Map([
@@ -26,23 +29,13 @@ type ClipboardImageUploadResult = {
   // 失败时不填,避免空字符串通过 schema 的 z.string().optional() 校验。
   path?: string;
   error?: string;
-  errorCode?: ControlErrorCode;
+  errorCode?: (typeof ControlErrorCode)[keyof typeof ControlErrorCode];
 };
 
 type ClipboardImageUploadOptions = {
   dataDir?: string;
-  cwd?: string;
-  now?: () => number;
   randomSuffix?: () => string;
 };
-
-function formatTimestamp(ms: number): string {
-  const [date, time = "000000"] = new Date(ms)
-    .toISOString()
-    .replace(/\.\d{3}Z$/, "")
-    .split("T");
-  return `${date.replace(/-/g, "")}-${time.replace(/:/g, "")}`;
-}
 
 function normalizeBase64(input: string): string {
   return input.replace(/^data:[^;]+;base64,/i, "").replace(/\s/g, "");
@@ -64,70 +57,6 @@ function decodeBase64Image(dataBase64: string): Buffer {
   return buffer;
 }
 
-function resolveChildDir(rootPath: string, ...segments: string[]): string {
-  const root = resolve(rootPath);
-  const uploadDir = resolve(root, ...segments);
-  const relativePath = relative(root, uploadDir);
-  if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
-    throw new Error("会话路径无效");
-  }
-  return uploadDir;
-}
-
-function resolveSessionClipboardDir(dataDir: string, sessionId: string): string {
-  return resolveChildDir(dataDir, sessionId, "clipboard");
-}
-
-function normalizeGitignoreLine(line: string): string {
-  return line.trim().replace(/^\/+/, "").replace(/\/+$/, "");
-}
-
-function ensureProjectClipboardIgnored(cwd: string): void {
-  const gitignorePath = join(cwd, ".gitignore");
-  if (!existsSync(gitignorePath)) return;
-
-  try {
-    const current = readFileSync(gitignorePath, "utf-8");
-    const alreadyIgnored = current
-      .split(/\r?\n/)
-      .some((line) => normalizeGitignoreLine(line) === ".dev-anywhere");
-    if (alreadyIgnored) return;
-
-    const separator = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
-    writeFileSync(gitignorePath, `${current}${separator}.dev-anywhere/\n`);
-  } catch {
-    // Ignore-file updates are best-effort; image upload should still succeed.
-  }
-}
-
-function trySaveProjectClipboardImage(options: {
-  cwd?: string;
-  sessionId: string;
-  fileName: string;
-  buffer: Buffer;
-}): ClipboardImageUploadResult | null {
-  if (!options.cwd) return null;
-
-  try {
-    const cwd = resolve(options.cwd);
-    if (!statSync(cwd).isDirectory()) return null;
-    const clipboardRoot = resolve(cwd, ".dev-anywhere", "clipboard");
-    const uploadDir = resolveChildDir(clipboardRoot, options.sessionId);
-    const path = join(uploadDir, options.fileName);
-
-    mkdirSync(uploadDir, { recursive: true });
-    writeFileSync(path, options.buffer, { mode: 0o600 });
-    ensureProjectClipboardIgnored(cwd);
-    return { success: true, path: relative(cwd, path) };
-  } catch (err) {
-    serviceLogger.warn(
-      { sessionId: options.sessionId, cwd: options.cwd, error: String(err) },
-      "Project clipboard image write failed; falling back to data dir",
-    );
-    return null;
-  }
-}
-
 export function saveClipboardImageUpload(
   request: ClipboardImageUploadRequest,
   options: ClipboardImageUploadOptions = {},
@@ -143,22 +72,12 @@ export function saveClipboardImageUpload(
 
   try {
     const buffer = decodeBase64Image(request.dataBase64);
-    const now = options.now ?? Date.now;
     const suffix = options.randomSuffix?.() ?? nanoid(6);
-    const fileName = `pasted-${formatTimestamp(now())}-${suffix}.${extension}`;
-    const projectResult = trySaveProjectClipboardImage({
-      cwd: options.cwd,
-      sessionId: request.sessionId,
-      fileName,
-      buffer,
-    });
-    if (projectResult) return projectResult;
+    const fileName = `paste-${suffix}.${extension}`;
+    const dataDir = options.dataDir ?? DEFAULT_DATA_DIR;
+    const path = join(dataDir, fileName);
 
-    const dataDir = options.dataDir ?? DATA_DIR;
-    const uploadDir = resolveSessionClipboardDir(dataDir, request.sessionId);
-    const path = join(uploadDir, fileName);
-
-    mkdirSync(uploadDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     writeFileSync(path, buffer, { mode: 0o600 });
     return { success: true, path };
   } catch (err) {

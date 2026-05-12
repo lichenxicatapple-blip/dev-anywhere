@@ -104,8 +104,7 @@ export class RelayInputHandlers {
     const { sessionId, requestId } = msg;
     if (!sessionId) return;
 
-    const session = this.deps.sessionManager.getSession(sessionId);
-    if (!session) {
+    if (!this.deps.sessionManager.getSession(sessionId)) {
       this.deps.relayConnection.sendRaw(
         serializeControl({
           type: "clipboard_image_upload_response",
@@ -120,17 +119,12 @@ export class RelayInputHandlers {
       return;
     }
 
-    const result = saveClipboardImageUpload(
-      {
-        sessionId,
-        mimeType: msg.mimeType,
-        dataBase64: msg.dataBase64,
-        fileName: msg.fileName,
-      },
-      {
-        cwd: session.cwd,
-      },
-    );
+    const result = saveClipboardImageUpload({
+      sessionId,
+      mimeType: msg.mimeType,
+      dataBase64: msg.dataBase64,
+      fileName: msg.fileName,
+    });
 
     this.deps.relayConnection.sendRaw(
       serializeControl({
@@ -234,8 +228,7 @@ export class RelayInputHandlers {
     const { sessionId, requestId, mimeType, dataBase64, fileName } = msg;
     if (!sessionId) return;
 
-    const session = this.deps.sessionManager.getSession(sessionId);
-    if (!session) {
+    if (!this.deps.sessionManager.getSession(sessionId)) {
       this.deps.relayConnection.sendRaw(
         serializeControl({
           type: "file_upload_response",
@@ -250,10 +243,7 @@ export class RelayInputHandlers {
       return;
     }
 
-    const result = await saveFileUpload(
-      { sessionId, mimeType, dataBase64, fileName },
-      { cwd: session.cwd },
-    );
+    const result = await saveFileUpload({ sessionId, mimeType, dataBase64, fileName });
 
     this.deps.relayConnection.sendRaw(
       serializeControl({
