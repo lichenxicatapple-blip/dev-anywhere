@@ -20,6 +20,8 @@ if (Number.isFinite(nodeMajor) && nodeMajor >= 25) {
 
 export default defineConfig({
   testDir: "./e2e",
+  // L4 mobile spec 只在 device-mobile-android project 跑, 别让 layout/device-pc 项目误扫.
+  testIgnore: ["**/e2e/mobile/**"],
   timeout: 30000,
   use: {
     baseURL: BASE_URL,
@@ -45,5 +47,14 @@ export default defineConfig({
       use: { viewport: { width: 1280, height: 800 } },
     },
     { name: "device-pc", use: {} },
+    // L4: 真 Android emu, 通过 connectOverCDP 挂上去, spec 在 e2e/mobile/ 下并自带 fixture.
+    // 前置: scripts/test-mobile.sh 起 vite + adb forward + chrome 9222.
+    {
+      name: "device-mobile-android",
+      testDir: "./e2e/mobile",
+      // 全局 testIgnore 默认会过滤 e2e/mobile, 这里清空让本 project 能看到自己的 spec.
+      testIgnore: [],
+      use: {},
+    },
   ],
 });

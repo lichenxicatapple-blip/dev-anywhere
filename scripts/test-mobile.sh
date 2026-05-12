@@ -20,12 +20,24 @@ fi
 
 ARTIFACT_DIR="${ROOT}/artifacts/test-mobile"
 BASE_URL="http://127.0.0.1:${TIER_MOBILE_VITE_PORT}"
+CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 
 mkdir -p "$ARTIFACT_DIR"
-trap 'e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
+trap 'adb forward --remove "tcp:$CDP_PORT" 2>/dev/null || true; e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
 smoke_use_stable_node
 smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL"
 e2e_mobile_setup_adb_reverse
+adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
 
-echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} adb=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)"
-echo "[mobile] Phase 1 骨架就位; Phase 2 接 CDP headless 跑器 (lib 抽自 scripts/emu-debug.mjs)."
+if ! curl -s "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
+  echo "ERROR: CDP forward built but http://localhost:$CDP_PORT not reachable." >&2
+  echo "Open Chrome on the emulator at least once to register chrome_devtools_remote." >&2
+  exit 3
+fi
+
+echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)"
+
+cd "$ROOT/apps/web"
+MOBILE_VITE_BASE_URL="$BASE_URL" \
+MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+  exec ./node_modules/.bin/playwright test --project=device-mobile-android "$@"
