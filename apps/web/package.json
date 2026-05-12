@@ -9,7 +9,6 @@
     "preview": "vite preview",
     "build:icons": "node scripts/build-icons.mjs",
     "test": "vitest run",
-    "test:e2e": "bash ../../scripts/web-e2e.sh",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {

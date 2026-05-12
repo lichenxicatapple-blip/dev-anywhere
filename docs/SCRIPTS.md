@@ -81,7 +81,7 @@ Agent CLI paths can be overridden:
 | `pnpm test:layout`                                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
 | `pnpm test:pc`                                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
 | `pnpm test:mobile`                                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
-| `bash scripts/web-e2e.sh --base-url http://127.0.0.1:5175 -- e2e/pc/pty-smoke.spec.ts --project=device-pc` | Run selected Playwright specs against an explicit Web URL.                                                         |
+| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test-pc.sh e2e/pc/pty-smoke.spec.ts`                 | Run selected Playwright specs against an explicit Web URL.                                                           |
 
 ## Advanced Diagnostics
 

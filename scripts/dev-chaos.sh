@@ -319,38 +319,38 @@ web_http_ok() {
 run_real_ui_smoke() {
   local label="$1"
   echo "+ UI smoke: $label"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- e2e/pc/real-chaos.spec.ts --project=device-pc
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh e2e/pc/real-chaos.spec.ts
 }
 
 run_relay_down_ui_smoke() {
   echo "+ UI smoke: relay down state"
   DEV_ANYWHERE_EXPECT_RELAY_DOWN=1 WEB_BASE_URL="$WEB_BASE_URL" \
-    pnpm --filter @dev-anywhere/web run test:e2e -- e2e/pc/real-chaos.spec.ts --project=device-pc
+    bash scripts/test-pc.sh e2e/pc/real-chaos.spec.ts
 }
 
 run_render_chaos_smoke() {
   echo "+ UI smoke: PTY render-time stale snapshot and duplicate frame handling"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/pty-smoke.spec.ts --project=device-pc --grep "stale render"
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/pty-smoke.spec.ts --grep "stale render"
 }
 
 run_protocol_chaos_smoke() {
   echo "+ UI smoke: requestId snapshot and approval recovery chaos"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/protocol-chaos.spec.ts --project=device-pc
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/protocol-chaos.spec.ts
 }
 
 run_websocket_reconnect_chaos_smoke() {
   echo "+ UI smoke: client WebSocket reconnect state recovery"
-  WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/websocket-chaos.spec.ts --project=device-pc
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/websocket-chaos.spec.ts
 }
 
 run_real_provider_approval_smoke() {
   echo "+ UI smoke: real Claude/Codex hosted PTY approval"
   DEV_ANYWHERE_REAL_PROVIDER_CWD="$HOSTED_PTY_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/real-provider-approval.spec.ts --project=device-pc
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/real-provider-approval.spec.ts
 }
 
 run_hosted_pty_exit_chaos_smoke() {
@@ -359,8 +359,8 @@ run_hosted_pty_exit_chaos_smoke() {
   DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/hosted-pty-chaos.spec.ts --project=device-pc
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/hosted-pty-chaos.spec.ts
 }
 
 run_local_runtime_pty_chaos_smoke() {
@@ -370,16 +370,16 @@ run_local_runtime_pty_chaos_smoke() {
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD="$LOCAL_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN="$LOCAL_PTY_CHAOS_BIN" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/real-local-pty-chaos.spec.ts --project=device-pc
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/real-local-pty-chaos.spec.ts
 }
 
 run_json_worker_chaos_smoke() {
   echo "+ UI smoke: real Claude JSON worker approval and relay restart"
   DEV_ANYWHERE_JSON_WORKER_CHAOS=1 \
     DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD="$JSON_WORKER_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" pnpm --filter @dev-anywhere/web run test:e2e -- \
-    e2e/pc/real-json-worker-chaos.spec.ts --project=device-pc
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    e2e/pc/real-json-worker-chaos.spec.ts
 }
 
 create_hosted_pty_chaos_provider() {
