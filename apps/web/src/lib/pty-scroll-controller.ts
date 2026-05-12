@@ -172,9 +172,23 @@ export function attachPtyScrollController(
 
   const notifyAtBottom = (): void => {
     const next = getCurrentAnchor().isAtBottom;
-    // 只在 false → true 真实过渡时清 intent。初次 attach 时 lastAtBottom === null，
-    // 即使容器恰好在底部，也要保留 caller 传入的 initialUserHasVerticalScrollIntent。
-    if (next && lastAtBottom === false && !touchScrollActive) {
+    const buffer = term.buffer.active;
+    const { cellH } = getDims();
+    // 在底 + 仍有 intent + 不在 touch + 不是初次 attach + buffer/cellH 数据有意义 → 清 intent。
+    // 不要求 false → true 过渡: longHost 模式下 isAtBottom = cursorInViewport, 小幅 wheel
+    // (光标仍在视野) atBottom 一直是 true, 旧条件 (lastAtBottom === false) 永远不成立,
+    // intent 一旦被 wheel set 就清不掉, output 永久 paused。
+    // lastAtBottom !== null 守护初次 attach 的 caller 传入 initialIntent。
+    // cellH > 0 && bufferLength > 0 跳过 reconnect 空容器的 transient 几何判断, 不误清
+    // 用户跨周期保留的回看意图。
+    if (
+      next &&
+      userHasVerticalScrollIntent &&
+      !touchScrollActive &&
+      lastAtBottom !== null &&
+      cellH > 0 &&
+      buffer.length > 0
+    ) {
       setUserHasVerticalScrollIntent(false);
     }
     if (lastAtBottom === next) return;
