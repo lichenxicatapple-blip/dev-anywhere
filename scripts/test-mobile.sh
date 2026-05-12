@@ -83,6 +83,10 @@ for spec in "${SPECS[@]}"; do
   echo ""
   echo "=== $spec ==="
   reset_chrome || { EXIT_CODE=1; continue; }
+  # WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
+  # mobile 跑独立 vite 在 5174 不是 host 5173, 不让 helpers 默认值 5173 把 emu 带去
+  # connection refused。
+  WEB_BASE_URL="$BASE_URL" \
   MOBILE_VITE_BASE_URL="$BASE_URL" \
   MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
     ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec" || EXIT_CODE=$?
