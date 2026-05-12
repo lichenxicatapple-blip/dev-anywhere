@@ -270,10 +270,7 @@ class TerminalSession {
       this.socket,
       (msg: IpcMessage) => {
         if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
-          log.debug(
-            { sessionId: this.sessionId, bytes: msg.data.length },
-            "Remote input received",
-          );
+          log.debug({ sessionId: this.sessionId, bytes: msg.data.length }, "Remote input received");
           this.ptyManager?.write(msg.data);
         } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
           this.detachRemoteView();

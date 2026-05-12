@@ -78,8 +78,8 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   // Radix DropdownMenu 用 Portal + pointer events, jsdom 下交互复杂。这里跳过菜单 UI,
-   // 直接触发 hidden input 的 change—— input 仍由 ChatHeader 渲染出来 (PTY 模式), 测的是
-   // 菜单选完文件后的核心 handler: uploadFile 调用 + "@<path> " 写终端。
+  // 直接触发 hidden input 的 change—— input 仍由 ChatHeader 渲染出来 (PTY 模式), 测的是
+  // 菜单选完文件后的核心 handler: uploadFile 调用 + "@<path> " 写终端。
   function getUploadInput(container: HTMLElement): HTMLInputElement {
     const input = container.querySelector(
       'input[data-slot="chat-menu-upload-file-input"]',
@@ -132,8 +132,6 @@ describe("ChatHeader PTY upload menu", () => {
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
     const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
-    expect(
-      container.querySelector('input[data-slot="chat-menu-upload-file-input"]'),
-    ).toBeNull();
+    expect(container.querySelector('input[data-slot="chat-menu-upload-file-input"]')).toBeNull();
   });
 });

@@ -10,9 +10,12 @@ class ClientWs {
   private reqId = 0;
   private waiters = new Map<string, (msg: unknown) => void>();
   private opened: Promise<void>;
+  private jsonListeners = new Set<(msg: Record<string, unknown>) => void>();
+  private binaryListeners = new Set<(buf: ArrayBuffer) => void>();
 
   constructor(url: string) {
     this.ws = new WebSocket(url);
+    this.ws.binaryType = "arraybuffer";
     this.opened = new Promise((resolveFn, reject) => {
       this.ws.addEventListener("open", () => resolveFn(), { once: true });
       this.ws.addEventListener(
@@ -22,18 +25,32 @@ class ClientWs {
       );
     });
     this.ws.addEventListener("message", (e: MessageEvent) => {
-      try {
-        const raw =
-          typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data as ArrayBuffer);
-        const msg = JSON.parse(raw) as { requestId?: string };
-        if (msg.requestId && this.waiters.has(msg.requestId)) {
-          this.waiters.get(msg.requestId)!(msg);
-          this.waiters.delete(msg.requestId);
+      if (typeof e.data === "string") {
+        try {
+          const msg = JSON.parse(e.data) as Record<string, unknown>;
+          const requestId = msg.requestId as string | undefined;
+          if (requestId && this.waiters.has(requestId)) {
+            this.waiters.get(requestId)!(msg);
+            this.waiters.delete(requestId);
+          }
+          for (const handler of this.jsonListeners) handler(msg);
+        } catch {
+          /* not JSON */
         }
-      } catch {
-        /* binary frame */
+      } else if (e.data instanceof ArrayBuffer) {
+        for (const handler of this.binaryListeners) handler(e.data);
       }
     });
+  }
+
+  onJson(handler: (msg: Record<string, unknown>) => void): () => void {
+    this.jsonListeners.add(handler);
+    return () => this.jsonListeners.delete(handler);
+  }
+
+  onBinary(handler: (buf: ArrayBuffer) => void): () => void {
+    this.binaryListeners.add(handler);
+    return () => this.binaryListeners.delete(handler);
   }
 
   async ready(): Promise<void> {
@@ -70,6 +87,12 @@ export interface SessionViaRelay {
   proxyId: string;
   cwd: string;
   mode: "pty" | "json";
+  // 主动发协议消息到 relay (e.g. session_subscribe / user_input).
+  send: (payload: Record<string, unknown>) => void;
+  // 订阅所有 JSON envelope (含 broadcast). 返回 dispose.
+  onJson: (handler: (msg: Record<string, unknown>) => void) => () => void;
+  // 订阅 binary PTY frame. 返回 dispose. payload 解码: 1B sid 长度 + sid + 4B seq + bytes.
+  onBinary: (handler: (buf: ArrayBuffer) => void) => () => void;
   // teardown: 发 session_terminate 并关 ws.
   terminate: () => Promise<void>;
 }
@@ -120,6 +143,9 @@ export async function spawnSessionViaRelay(
     proxyId,
     cwd: options.cwd,
     mode: options.mode,
+    send: (payload) => ws.send(payload),
+    onJson: (handler) => ws.onJson(handler),
+    onBinary: (handler) => ws.onBinary(handler),
     terminate: async () => {
       try {
         await ws.request("session_terminate", { sessionId }).catch(() => {});

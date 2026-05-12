@@ -99,11 +99,7 @@ describe("probeWebglRenderModel", () => {
 describe("diffModelAgainstBuffer", () => {
   function build(cols: number, rows: number, viewportY: number, codes: number[][]) {
     const term = fakeTerminal({ cols, rows, viewportY, codes: codes.slice() });
-    const cells = makeModelCells(
-      cols,
-      rows,
-      codes.slice(viewportY, viewportY + rows),
-    );
+    const cells = makeModelCells(cols, rows, codes.slice(viewportY, viewportY + rows));
     const model: ProbedRenderModel = { cells, cols, rows, indicesPerCell: 4 };
     return { term, model };
   }
@@ -212,7 +208,9 @@ describe("diffModelAgainstBuffer", () => {
   it("caps mismatch list and flags truncated", () => {
     const cols = 100;
     const rows = 5;
-    const bufferCodes = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 0x41));
+    const bufferCodes = Array.from({ length: rows }, () =>
+      Array.from({ length: cols }, () => 0x41),
+    );
     const modelCodes = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 0x42));
     const term = fakeTerminal({ cols, rows, viewportY: 0, codes: bufferCodes });
     const cells = makeModelCells(cols, rows, modelCodes);

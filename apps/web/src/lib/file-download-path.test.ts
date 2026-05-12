@@ -19,9 +19,7 @@ describe("file-download-path extraction", () => {
   });
 
   it("excludes image extensions so image-preview link provider can claim them", () => {
-    expect(extractFileDownloadPaths("/tmp/shot.png and /tmp/log.txt")).toEqual([
-      "/tmp/log.txt",
-    ]);
+    expect(extractFileDownloadPaths("/tmp/shot.png and /tmp/log.txt")).toEqual(["/tmp/log.txt"]);
     expect(isFileDownloadPath("./pic.jpeg")).toBe(false);
     expect(isFileDownloadPath("./pic.gif")).toBe(false);
     expect(isFileDownloadPath("./pic.webp")).toBe(false);
@@ -41,9 +39,7 @@ describe("file-download-path extraction", () => {
   });
 
   it("matches double-extension archives and TS/JS source files", () => {
-    expect(extractFileDownloadPaths("Created ./build/out.tar.gz")).toEqual([
-      "./build/out.tar.gz",
-    ]);
+    expect(extractFileDownloadPaths("Created ./build/out.tar.gz")).toEqual(["./build/out.tar.gz"]);
     expect(extractFileDownloadPaths("see ../dist/bundle.min.js end")).toEqual([
       "../dist/bundle.min.js",
     ]);

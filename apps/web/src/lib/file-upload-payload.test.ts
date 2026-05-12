@@ -48,10 +48,9 @@ describe("uploadFileAndShowToast", () => {
       file: makeFile(),
     });
     expect(path).toBe(".dev-anywhere/uploads/s1/notes.txt");
-    expect(toastSuccess).toHaveBeenCalledWith(
-      "已上传 .dev-anywhere/uploads/s1/notes.txt",
-      { id: "loading-id" },
-    );
+    expect(toastSuccess).toHaveBeenCalledWith("已上传 .dev-anywhere/uploads/s1/notes.txt", {
+      id: "loading-id",
+    });
     expect(toastDismiss).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
   });

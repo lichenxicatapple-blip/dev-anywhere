@@ -4,11 +4,7 @@ import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } f
 import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
-import {
-  providerValues,
-  ptyOwnerValues,
-  sessionModeValues,
-} from "../constants/enums.js";
+import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -226,11 +222,7 @@ const relayControlDefinitions = [
   ),
 
   // PTY 语义状态，从 Envelope 迁移到 Control 层
-  control(
-    "pty_state",
-    { sessionId: IdSchema, payload: PtyStatePayloadSchema },
-    "proxy_to_client",
-  ),
+  control("pty_state", { sessionId: IdSchema, payload: PtyStatePayloadSchema }, "proxy_to_client"),
 
   // Provider 语义状态，来自 Claude/Codex hook 等结构化事件，不从 PTY 字节推断
   control(
@@ -275,11 +267,7 @@ const relayControlDefinitions = [
   ),
 
   // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
-  control(
-    "remote_input_raw",
-    { sessionId: IdSchema, data: z.string() },
-    "client_to_proxy",
-  ),
+  control("remote_input_raw", { sessionId: IdSchema, data: z.string() }, "client_to_proxy"),
   control(
     "clipboard_image_upload",
     {
@@ -487,11 +475,7 @@ const relayControlDefinitions = [
     { sessionId: IdSchema, payload: ToolApprovePayloadSchema },
     "client_to_proxy",
   ),
-  control(
-    "tool_deny",
-    { sessionId: IdSchema, payload: ToolDenyPayloadSchema },
-    "client_to_proxy",
-  ),
+  control("tool_deny", { sessionId: IdSchema, payload: ToolDenyPayloadSchema }, "client_to_proxy"),
 
   // proxy 确认用户决策已进入 provider/worker 路径；web 用它更新审批卡片状态
   control(

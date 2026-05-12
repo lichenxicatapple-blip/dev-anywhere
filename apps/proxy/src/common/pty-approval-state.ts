@@ -12,9 +12,7 @@ export function shouldReleaseApprovalWait(options: {
   return options.signalState !== "approval_wait";
 }
 
-export function stateAfterApprovalRelease(
-  signalState: PtySemanticState | null,
-): PtySemanticState {
+export function stateAfterApprovalRelease(signalState: PtySemanticState | null): PtySemanticState {
   // title-only 释放（signal.state===null）= codex 取消审批语义，等用户下一轮输入。
   if (signalState === null) return "turn_complete";
   return signalState !== "approval_wait" ? signalState : "working";

@@ -81,11 +81,7 @@ function rejectNotBound(ws: ClientSocket): void {
   );
 }
 
-function rejectProxySelect(
-  ws: ClientSocket,
-  requestId: string | undefined,
-  proxyId: string,
-): void {
+function rejectProxySelect(ws: ClientSocket, requestId: string | undefined, proxyId: string): void {
   ws.send(
     JSON.stringify({
       type: "proxy_select_response",

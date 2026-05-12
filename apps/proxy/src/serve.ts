@@ -25,10 +25,7 @@ import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
-import {
-  applyPtyStateToSession,
-  type PtySessionBridgeDeps,
-} from "./serve/pty-session-bridge.js";
+import { applyPtyStateToSession, type PtySessionBridgeDeps } from "./serve/pty-session-bridge.js";
 import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
 import { createEventBridge } from "./serve/event-bridge.js";
 import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
@@ -279,7 +276,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     // reconnect 后看到陈旧状态。属于服务降级而非健康降级, 用 error 级别让 ops 能接到告警。
     void controlHandlers.reinitializeOnReconnect().catch((err: unknown) => {
       serviceLogger.error(
-        { error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined },
+        {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
         "reinitializeOnReconnect failed: client may see stale state until next manual sync",
       );
     });

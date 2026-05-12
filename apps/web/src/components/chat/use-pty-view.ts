@@ -21,10 +21,7 @@ import {
 } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
-import {
-  attachPtyScrollController,
-  type PtyScrollState,
-} from "@/lib/pty-scroll-controller";
+import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
@@ -168,8 +165,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const { ptyInputFocused, suppressPtyFocus, handleFocusCapture, handleBlurCapture } = focus;
-  const showMobilePtyControls =
-    touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+  const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
 
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
 
@@ -270,10 +266,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
-      if (
-        userHasVerticalScrollIntentRef.current &&
-        !follow.hasNewFramesWhileAwayRef.current
-      ) {
+      if (userHasVerticalScrollIntentRef.current && !follow.hasNewFramesWhileAwayRef.current) {
         follow.setHasNewFramesWhileAway(true);
       }
     };

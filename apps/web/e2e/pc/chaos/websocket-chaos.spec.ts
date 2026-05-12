@@ -242,7 +242,10 @@ test.describe("WebSocket reconnect chaos", () => {
         !window.matchMedia("(pointer: coarse), (hover: none)").matches,
     );
     if (!isDesktopUX) {
-      test.skip(true, "mobile/touch UX: 断线时新建会话弹窗不保留,relay 不入队的契约由 desktop 验证");
+      test.skip(
+        true,
+        "mobile/touch UX: 断线时新建会话弹窗不保留,relay 不入队的契约由 desktop 验证",
+      );
     }
     await selectFakeProxy(page);
     await page.getByRole("button", { name: "新建会话" }).first().click();

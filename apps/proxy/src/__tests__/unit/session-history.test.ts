@@ -529,19 +529,14 @@ describe("readSessionMessages", () => {
     expect(oldest.nextBefore).toBeUndefined();
   });
 
-  it.each([
-    "../etc/passwd",
-    "..",
-    "foo/bar",
-    "foo\0bar",
-    "foo bar",
-    "",
-    "with.dot",
-  ])("rejects path-unsafe session id %j", async (badId) => {
-    const messages = await readSessionMessages(badId);
-    expect(messages).toEqual([]);
-    const page = await readSessionMessagesPage(badId, { limit: 5 });
-    expect(page.messages).toEqual([]);
-    expect(page.hasMore).toBe(false);
-  });
+  it.each(["../etc/passwd", "..", "foo/bar", "foo\0bar", "foo bar", "", "with.dot"])(
+    "rejects path-unsafe session id %j",
+    async (badId) => {
+      const messages = await readSessionMessages(badId);
+      expect(messages).toEqual([]);
+      const page = await readSessionMessagesPage(badId, { limit: 5 });
+      expect(page.messages).toEqual([]);
+      expect(page.hasMore).toBe(false);
+    },
+  );
 });

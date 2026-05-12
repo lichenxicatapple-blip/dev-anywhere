@@ -30,8 +30,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     await emitLineAndAwait(emuPage, "see ./scripts/test.sh for details\r\n", "./scripts/test.sh");
 
     const result = await emuPage.evaluate(
-      ({ sid, needle }) =>
-        window.__ccTest?.pty.activateLink(sid, "file-download", needle, "none"),
+      ({ sid, needle }) => window.__ccTest?.pty.activateLink(sid, "file-download", needle, "none"),
       { sid: SESSION_ID, needle: "./scripts/test.sh" },
     );
     expect(result?.triggered).toBe(true);
@@ -64,8 +63,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     );
 
     const result = await emuPage.evaluate(
-      ({ sid, needle }) =>
-        window.__ccTest?.pty.activateLink(sid, "image-preview", needle, "none"),
+      ({ sid, needle }) => window.__ccTest?.pty.activateLink(sid, "image-preview", needle, "none"),
       { sid: SESSION_ID, needle: "./tmp/preview.png" },
     );
     expect(result?.triggered).toBe(true);

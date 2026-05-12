@@ -1,9 +1,5 @@
 import type { Socket } from "node:net";
-import {
-  encodeBinaryFrame,
-  serializeControl,
-  type AgentStatusPayload,
-} from "@dev-anywhere/shared";
+import { encodeBinaryFrame, serializeControl, type AgentStatusPayload } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { createIpcReader, serializeIpc, type IpcMessage } from "../ipc/ipc-protocol.js";
 import type { ProviderHookContext } from "../providers/index.js";

@@ -169,7 +169,10 @@ describe("phase-machine request failure handling", () => {
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
       requestProxyInfo: vi.fn().mockResolvedValue({
         homePath: "/h",
-        agentCli: { claude: { available: true, command: "c" }, codex: { available: true, command: "c" } },
+        agentCli: {
+          claude: { available: true, command: "c" },
+          codex: { available: true, command: "c" },
+        },
       }),
       requestSessionHistory: vi.fn().mockRejectedValue(new Error("relay down")),
       selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
@@ -208,9 +211,7 @@ describe("phase-machine proxy_offline preserves session list for cold-start rout
   beforeEach(() => {
     resetAppStore();
     useSessionStore.setState({
-      sessions: [
-        { sessionId: "s1", mode: "json", provider: "claude", state: "idle" },
-      ],
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
       sessionListLoaded: true,
     });
   });

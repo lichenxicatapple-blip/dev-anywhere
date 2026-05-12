@@ -242,9 +242,7 @@ function ImagePreviewDialog({
               )}
               data-slot="image-preview-img"
               data-loaded={imageLoaded ? "true" : "false"}
-              onClick={() =>
-                setZoomMode((prev) => (prev === "fit" ? "actual" : "fit"))
-              }
+              onClick={() => setZoomMode((prev) => (prev === "fit" ? "actual" : "fit"))}
               onLoad={(event) => {
                 event.currentTarget.dataset.loaded = "true";
                 setLoadedSrc(src);

@@ -131,7 +131,7 @@ describe("createPtyFrameWriteBuffer", () => {
     const writer = createPtyFrameWriteBuffer(target, {});
 
     // 1. 同步写 snapshot 字符串（dispose 之前），底层 target 立即拿到
-    let capturedCallback: (() => void) = () => {};
+    let capturedCallback: () => void = () => {};
     target.write = vi.fn((data, callback) => {
       target.calls.push(["write", data]);
       // 模拟 xterm 把 snapshot callback 推迟，dispose 之后才回调

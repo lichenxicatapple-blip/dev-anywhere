@@ -16,9 +16,7 @@ test.describe("L4 mobile / PTY approval hint", () => {
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 60 }, (_, i) => `output ${i}\r\n`).join(""),
-      );
+      window.__ptySmoke.sendPty(Array.from({ length: 60 }, (_, i) => `output ${i}\r\n`).join(""));
     });
 
     await emuPage.evaluate(() => window.__ptySmoke.setPtyState("approval_wait"));

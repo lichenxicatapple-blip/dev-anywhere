@@ -54,12 +54,16 @@ describe("createXtermTerminal font invalidation", () => {
     try {
       const result = await createXtermTerminal(container);
 
-      const addedListeners = addEventListener.mock.calls.filter((args) => args[0] === "loadingdone");
+      const addedListeners = addEventListener.mock.calls.filter(
+        (args) => args[0] === "loadingdone",
+      );
       expect(addedListeners.length).toBe(1);
 
       result.dispose();
 
-      const removedListeners = removeEventListener.mock.calls.filter((args) => args[0] === "loadingdone");
+      const removedListeners = removeEventListener.mock.calls.filter(
+        (args) => args[0] === "loadingdone",
+      );
       // 同一个 listener 函数引用必须被解绑, 避免 dispose 后 leak + 后续 clearTextureAtlas
       // 在已 dispose 的 webglAddon 上误触发。
       expect(removedListeners.length).toBe(1);

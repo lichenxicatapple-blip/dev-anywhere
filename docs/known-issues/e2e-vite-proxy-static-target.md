@@ -11,12 +11,12 @@ E2E fixture (`apps/web/e2e/fixtures/local-runtime.ts`) 起的 isolated relay+pro
 
 ## 已评估方案
 
-| 方案 | 可行性 | 不采纳原因 |
-|---|---|---|
-| vite proxy `target` 用 router function | ✗ | vite server.proxy 不暴露 router option, 需 fork vite |
-| vite plugin 写 middleware 自定义代理 + web 端 ws 连接带 query 选 target | ✓ | 要改前端业务代码 (ws connect 路径污染), 工程债扩散 |
-| per-spec-file vite restart with dynamic env | ✓ | ~3s/spec 启动开销, 跟当前 per-spec chrome reset (~10s) 同量级, 收益不显著 |
-| http-proxy sidecar 独立服务 | ✓ | 多一个进程, 多一份 lifecycle 管理代码 |
+| 方案                                                                    | 可行性 | 不采纳原因                                                                |
+| ----------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| vite proxy `target` 用 router function                                  | ✗      | vite server.proxy 不暴露 router option, 需 fork vite                      |
+| vite plugin 写 middleware 自定义代理 + web 端 ws 连接带 query 选 target | ✓      | 要改前端业务代码 (ws connect 路径污染), 工程债扩散                        |
+| per-spec-file vite restart with dynamic env                             | ✓      | ~3s/spec 启动开销, 跟当前 per-spec chrome reset (~10s) 同量级, 收益不显著 |
+| http-proxy sidecar 独立服务                                             | ✓      | 多一个进程, 多一份 lifecycle 管理代码                                     |
 
 ## 当前规避方式
 

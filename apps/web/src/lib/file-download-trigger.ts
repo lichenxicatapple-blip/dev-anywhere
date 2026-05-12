@@ -11,9 +11,7 @@ type DownloadOpts = {
   path: string;
 };
 
-type DownloadResult =
-  | { ok: true; size: number }
-  | { ok: false; error: string };
+type DownloadResult = { ok: true; size: number } | { ok: false; error: string };
 
 export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadResult> {
   const startedAt = Date.now();

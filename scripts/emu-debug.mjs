@@ -78,7 +78,8 @@ class CdpSession {
       } else if (m.method === "Runtime.consoleAPICalled") {
         for (const h of this.consoleHandlers) h(m.params);
       } else if (m.method === "Log.entryAdded") {
-        for (const h of this.consoleHandlers) h({ type: "log", args: [{ value: m.params.entry.text }] });
+        for (const h of this.consoleHandlers)
+          h({ type: "log", args: [{ value: m.params.entry.text }] });
       }
     });
   }
@@ -188,7 +189,9 @@ const cmds = {
     const dur = Number(ms ?? 5000);
     const { sess } = await attach();
     sess.onConsole((p) => {
-      const args = (p.args ?? []).map((a) => a.value ?? a.description ?? a.unserializableValue ?? "?");
+      const args = (p.args ?? []).map(
+        (a) => a.value ?? a.description ?? a.unserializableValue ?? "?",
+      );
       console.log(`[${p.type}] ${args.join(" ")}`);
     });
     await sess.send("Log.enable");

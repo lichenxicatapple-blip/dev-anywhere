@@ -160,9 +160,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         const sent = await sentFakeRelayMessages(page);
         return sent.some(
           (m: FakeRelayMessage) =>
-            m.type === "image_preview_request" &&
-            m.sessionId === "claude-pty" &&
-            m.path === path,
+            m.type === "image_preview_request" && m.sessionId === "claude-pty" && m.path === path,
         );
       })
       .toBe(true);

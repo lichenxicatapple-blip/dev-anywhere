@@ -117,10 +117,7 @@ function decodeChar(code: number): string {
   }
 }
 
-export function diffModelAgainstBuffer(
-  term: Terminal,
-  model: ProbedRenderModel,
-): RenderDiffReport {
+export function diffModelAgainstBuffer(term: Terminal, model: ProbedRenderModel): RenderDiffReport {
   const { cells, cols, rows, indicesPerCell } = model;
   const buffer = term.buffer.active;
   const viewportY = buffer.viewportY;

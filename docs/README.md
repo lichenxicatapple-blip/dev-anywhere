@@ -18,7 +18,7 @@ This directory contains public documentation for operating and releasing DEV Any
 
 记录已知但根因未定的问题 + 下次复现时的取数 playbook, 见 [`known-issues/`](known-issues/):
 
-| Document                                                            | Status                                                        |
-| ------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [`pty-blank-render.md`](known-issues/pty-blank-render.md)           | 移动端 PTY viewport 偶发空白带, 已修若干候选成因, 待真机数据回归。 |
-| [`pty-garbling.md`](known-issues/pty-garbling.md)                   | PTY 渲染偶发乱码 / 叠字 / U+FFFD, 已修若干 atlas 成因, 待真机数据回归。 |
+| Document                                                  | Status                                                                  |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [`pty-blank-render.md`](known-issues/pty-blank-render.md) | 移动端 PTY viewport 偶发空白带, 已修若干候选成因, 待真机数据回归。      |
+| [`pty-garbling.md`](known-issues/pty-garbling.md)         | PTY 渲染偶发乱码 / 叠字 / U+FFFD, 已修若干 atlas 成因, 待真机数据回归。 |

@@ -1,8 +1,4 @@
-import {
-  serializeControl,
-  type AgentStatusPayload,
-  type SessionState,
-} from "@dev-anywhere/shared";
+import { serializeControl, type AgentStatusPayload, type SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { disposeSeqCounter, getSeqCounterFor } from "../common/seq-counter.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
@@ -42,10 +38,7 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
   const touchActivity = (sessionId: string): boolean =>
     touchSessionActivity(deps.sessionManager, deps.relayConnection, sessionId);
 
-  const emitAgentStatus = (
-    sessionId: string,
-    phase: AgentStatusPayload["phase"],
-  ): void => {
+  const emitAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
     const session = deps.sessionManager.getSession(sessionId);
     if (!session) return;
     const payload: AgentStatusPayload = {

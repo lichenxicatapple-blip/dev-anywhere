@@ -220,10 +220,7 @@ export class RelayInputHandlers {
       }),
     );
     if (result.success) {
-      serviceLogger.info(
-        { sessionId, path, size: result.size },
-        "File download handled",
-      );
+      serviceLogger.info({ sessionId, path, size: result.size }, "File download handled");
     } else {
       // 失败必带 errorCode + error, 否则只看 success=false 不知道是 ENOENT / EACCES / 超大 / 不是文件。
       serviceLogger.warn(

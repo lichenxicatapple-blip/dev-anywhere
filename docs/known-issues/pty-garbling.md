@@ -20,11 +20,11 @@ PTY 终端渲染偶发出现"乱码", 通常是以下几类形态之一:
 
 ## What we already addressed
 
-| Commit | 候选成因 |
-| --- | --- |
-| `f01cf45d` | WebGL context loss (sleep/wake / 标签后台 / GPU 进程崩溃) 后 atlas 指向 stale texture slot, 重绘时显示前一帧残留字符。`onContextLoss` 重新加载 WebGL addon, 触发 atlas 重建。 |
+| Commit     | 候选成因                                                                                                                                                                          |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `f01cf45d` | WebGL context loss (sleep/wake / 标签后台 / GPU 进程崩溃) 后 atlas 指向 stale texture slot, 重绘时显示前一帧残留字符。`onContextLoss` 重新加载 WebGL addon, 触发 atlas 重建。     |
 | `c51fd815` | 引入 `__devAnywherePtyRenderDebug`: `setRenderer("dom")` 切回 DOM renderer 绕开 atlas, `forceRedraw()` 强制 `xterm.refresh()` 整屏重绘。给现场一条无须发版的恢复路径 + 验证手段。 |
-| —— | xterm `UnicodeGraphemesAddon` 启用, 让 grapheme cluster (含 CJK / emoji ZWJ) 的 cell width 计算用最新 Unicode 表, 减少 atlas 把双字节 cell 拆错的概率。 |
+| ——         | xterm `UnicodeGraphemesAddon` 启用, 让 grapheme cluster (含 CJK / emoji ZWJ) 的 cell width 计算用最新 Unicode 表, 减少 atlas 把双字节 cell 拆错的概率。                           |
 
 ## Diagnostic playbook
 
@@ -39,25 +39,25 @@ PTY 终端渲染偶发出现"乱码", 通常是以下几类形态之一:
 控制台跑:
 
 ```js
-window.__devAnywherePtyRenderDebug.dumpState()
+window.__devAnywherePtyRenderDebug.dumpState();
 ```
 
 会自动 copy 到剪贴板 (含 ANSI 序列 + 元信息)。粘进 issue。
 
 dump 里要看的几条:
 
-| 信号 | 含义 |
-| --- | --- |
-| `serialized` 含 `�` (即 `�`) | UTF-8 解码错位 / atlas 把双字节 cell 拆错 — **乱码最可观测的指纹** |
-| `serialized` 完全正常但截图显示错乱 | xterm 内部 buffer 是对的, 是渲染层 (atlas) 在出问题 |
-| `serialized` 本身就错乱 | 是数据层 (PTY 字节流 / 解码) 在出问题, 跟 renderer 无关 |
+| 信号                                | 含义                                                               |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `serialized` 含 `�` (即 `�`)        | UTF-8 解码错位 / atlas 把双字节 cell 拆错 — **乱码最可观测的指纹** |
+| `serialized` 完全正常但截图显示错乱 | xterm 内部 buffer 是对的, 是渲染层 (atlas) 在出问题                |
+| `serialized` 本身就错乱             | 是数据层 (PTY 字节流 / 解码) 在出问题, 跟 renderer 无关            |
 
 ### 3. 切 DOM renderer 验证
 
 ```js
-window.__devAnywherePtyRenderDebug.setRenderer("dom")
+window.__devAnywherePtyRenderDebug.setRenderer("dom");
 // 然后刷新 (DOM renderer 在新建 terminal 时生效)
-location.reload()
+location.reload();
 ```
 
 刷新后乱码消失 → 几乎可以确定是 WebGL atlas 嫌疑 (atlas eviction / 双字节 cell 拆错 / context loss 漏检)。
@@ -66,8 +66,8 @@ location.reload()
 排查完恢复:
 
 ```js
-window.__devAnywherePtyRenderDebug.setRenderer("webgl")
-location.reload()
+window.__devAnywherePtyRenderDebug.setRenderer("webgl");
+location.reload();
 ```
 
 ### 4. forceRedraw 试恢复
@@ -75,7 +75,7 @@ location.reload()
 如果不想刷新 (想保留现场再多取数据), 可以试:
 
 ```js
-window.__devAnywherePtyRenderDebug.forceRedraw()
+window.__devAnywherePtyRenderDebug.forceRedraw();
 ```
 
 会调用 `xterm.refresh(0, rows-1)` 整屏强刷。

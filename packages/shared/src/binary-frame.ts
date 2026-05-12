@@ -36,11 +36,7 @@ export function encodeBinaryFrame(
   frame.set(sidBytes, SID_LEN_BYTES);
   const seqOffset = SID_LEN_BYTES + sidBytes.length;
   // little-endian 与 Node 端 Buffer.writeUInt32LE / 浏览器 DataView setUint32(_, _, true) 保持一致
-  new DataView(frame.buffer, frame.byteOffset + seqOffset, SEQ_BYTES).setUint32(
-    0,
-    outputSeq,
-    true,
-  );
+  new DataView(frame.buffer, frame.byteOffset + seqOffset, SEQ_BYTES).setUint32(0, outputSeq, true);
   frame.set(data, seqOffset + SEQ_BYTES);
   return frame;
 }

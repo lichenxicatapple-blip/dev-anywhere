@@ -21,10 +21,7 @@ interface HookEventRouterDeps {
   nextSeq?: (sessionId: string) => number;
 }
 
-import {
-  toolInputFromPayload,
-  toolNameFromPayload,
-} from "./hook-payload-helpers.js";
+import { toolInputFromPayload, toolNameFromPayload } from "./hook-payload-helpers.js";
 
 export class HookEventRouter {
   constructor(private readonly deps: HookEventRouterDeps) {}

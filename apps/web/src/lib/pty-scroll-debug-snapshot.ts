@@ -84,8 +84,7 @@ export function buildPtyScrollDebugSnapshot(
     0,
     Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
   );
-  const viewportHostCoverage =
-    container.clientHeight > 0 ? overlap / container.clientHeight : 0;
+  const viewportHostCoverage = container.clientHeight > 0 ? overlap / container.clientHeight : 0;
 
   return {
     ts: performance.now(),

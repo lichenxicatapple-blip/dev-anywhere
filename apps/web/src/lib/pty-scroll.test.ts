@@ -146,17 +146,23 @@ describe("PTY scroll geometry", () => {
   describe("computeHostTop", () => {
     it("ydisp 0, host shorter than visible: pin to bottom of visible (verticalOffset)", () => {
       // host = 480, visible = 600 → verticalOffset = 120, ydisp 0 ⇒ top = 120
-      expect(computeHostTop({ ydisp: 0, rows: 24, cellH: 20, visibleContentHeight: 600 })).toBe(120);
+      expect(computeHostTop({ ydisp: 0, rows: 24, cellH: 20, visibleContentHeight: 600 })).toBe(
+        120,
+      );
     });
 
     it("ydisp > 0 inside scrollback: top = ydisp*cellH + verticalOffset", () => {
       // host 480 < visible 600, ydisp = 5, cellH = 20 ⇒ 100 + 120 = 220
-      expect(computeHostTop({ ydisp: 5, rows: 24, cellH: 20, visibleContentHeight: 600 })).toBe(220);
+      expect(computeHostTop({ ydisp: 5, rows: 24, cellH: 20, visibleContentHeight: 600 })).toBe(
+        220,
+      );
     });
 
     it("host taller than visible: verticalOffset = 0, top = ydisp*cellH", () => {
       // host 1080 > visible 729, ydisp = 8, cellH = 20 ⇒ 160
-      expect(computeHostTop({ ydisp: 8, rows: 54, cellH: 20, visibleContentHeight: 729 })).toBe(160);
+      expect(computeHostTop({ ydisp: 8, rows: 54, cellH: 20, visibleContentHeight: 729 })).toBe(
+        160,
+      );
     });
 
     it("visibleContentHeight undefined: verticalOffset = 0", () => {

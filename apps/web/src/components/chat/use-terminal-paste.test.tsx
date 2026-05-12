@@ -127,10 +127,7 @@ describe("useTerminalPaste", () => {
     expect(event.stopPropagation).toHaveBeenCalled();
     expect(uploadClipboardImageFromPaste).toHaveBeenCalledTimes(1);
     expect(uploadFileAndShowToast).not.toHaveBeenCalled();
-    expect(sendRemoteInputRaw).toHaveBeenCalledWith(
-      "s1",
-      "@.dev-anywhere/clipboard/s1/shot.png ",
-    );
+    expect(sendRemoteInputRaw).toHaveBeenCalledWith("s1", "@.dev-anywhere/clipboard/s1/shot.png ");
     expect(onAfterPaste).toHaveBeenCalled();
   });
 
@@ -176,10 +173,7 @@ describe("useTerminalPaste", () => {
       expect.objectContaining({ sessionId: "s1", file }),
     );
     expect(uploadClipboardImageFromPaste).not.toHaveBeenCalled();
-    expect(sendRemoteInputRaw).toHaveBeenCalledWith(
-      "s1",
-      "@.dev-anywhere/uploads/s1/notes.txt ",
-    );
+    expect(sendRemoteInputRaw).toHaveBeenCalledWith("s1", "@.dev-anywhere/uploads/s1/notes.txt ");
     expect(onAfterPaste).toHaveBeenCalled();
   });
 

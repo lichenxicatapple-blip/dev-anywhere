@@ -119,7 +119,6 @@ describe("RelayRegistry", () => {
       expect(registry.getProxy("p1")).toBe(ws2);
       expect(registry.isProxyOnline("p1")).toBe(true);
     });
-
   });
 
   describe("session tracking", () => {

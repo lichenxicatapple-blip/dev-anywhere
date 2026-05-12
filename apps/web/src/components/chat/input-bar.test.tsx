@@ -1,21 +1,15 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  uploadClipboardImage,
-  uploadFile,
-  sendEnvelope,
-  toastError,
-  toastLoading,
-  toastDismiss,
-} = vi.hoisted(() => ({
-  uploadClipboardImage: vi.fn(),
-  uploadFile: vi.fn(),
-  sendEnvelope: vi.fn(),
-  toastError: vi.fn(),
-  toastLoading: vi.fn(() => "loading-id"),
-  toastDismiss: vi.fn(),
-}));
+const { uploadClipboardImage, uploadFile, sendEnvelope, toastError, toastLoading, toastDismiss } =
+  vi.hoisted(() => ({
+    uploadClipboardImage: vi.fn(),
+    uploadFile: vi.fn(),
+    sendEnvelope: vi.fn(),
+    toastError: vi.fn(),
+    toastLoading: vi.fn(() => "loading-id"),
+    toastDismiss: vi.fn(),
+  }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {

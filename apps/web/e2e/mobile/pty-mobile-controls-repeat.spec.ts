@@ -25,8 +25,9 @@ test.describe("L4 mobile / PTY soft controls long-press repeat", () => {
     await emuPage.waitForTimeout(600);
     await left.evaluate((el) => el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
 
-    // raw input 应包含至少 3 次 \x1b[D (1 首发 + hold 后多次 repeat).
-    const occurrences = (await readRawPtyInput(emuPage)).match(/\x1b\[D/g)?.length ?? 0;
+    // raw input 应包含至少 3 次 ESC[D (1 首发 + hold 后多次 repeat).
+    const raw = await readRawPtyInput(emuPage);
+    const occurrences = raw.split("[D").length - 1;
     expect(occurrences).toBeGreaterThanOrEqual(3);
   });
 });

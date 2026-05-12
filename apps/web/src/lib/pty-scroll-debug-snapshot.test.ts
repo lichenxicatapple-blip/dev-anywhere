@@ -1,9 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
-import {
-  buildPtyScrollDebugSnapshot,
-  type PtyScrollDebugProbe,
-} from "./pty-scroll-debug-snapshot";
+import { buildPtyScrollDebugSnapshot, type PtyScrollDebugProbe } from "./pty-scroll-debug-snapshot";
 
 function defineSize(el: HTMLElement, sizes: { clientHeight?: number; clientWidth?: number }): void {
   if (sizes.clientHeight !== undefined) {

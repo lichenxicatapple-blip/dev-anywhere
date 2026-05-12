@@ -338,9 +338,7 @@ test.describe("real clipboard image chain", () => {
 
       const uploadedRelative = `.dev-anywhere/uploads/${ptySessionId}/${fileName}`;
       const uploadedAbs = join(ptyCwd, uploadedRelative);
-      await expect
-        .poll(() => existsSync(uploadedAbs), { timeout: 15_000 })
-        .toBe(true);
+      await expect.poll(() => existsSync(uploadedAbs), { timeout: 15_000 }).toBe(true);
       expect(readFileSync(uploadedAbs)).toEqual(fileBytes);
       expectProjectClipboardIgnored(ptyCwd);
 

@@ -37,13 +37,10 @@ describe("/api/status, /api/proxies, /api/clients auth", () => {
   describe("dev mode (proxyToken not configured)", () => {
     beforeEach(() => start({}));
 
-    it.each(["/api/status", "/api/proxies", "/api/clients"])(
-      "%s 公开放行",
-      async (path) => {
-        const res = await get(path);
-        expect(res.status).toBe(200);
-      },
-    );
+    it.each(["/api/status", "/api/proxies", "/api/clients"])("%s 公开放行", async (path) => {
+      const res = await get(path);
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("public-relay mode (proxyToken configured)", () => {

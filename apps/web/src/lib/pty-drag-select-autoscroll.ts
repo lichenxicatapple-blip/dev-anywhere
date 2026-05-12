@@ -10,7 +10,6 @@
 //      pointer 没动 + 不滚就不派发, 避免无害但密集的事件。
 //   4. pointerup / pointercancel / 切到 touch 即停。
 
-
 interface DragSelectOptions {
   container: HTMLElement;
   host: HTMLElement;

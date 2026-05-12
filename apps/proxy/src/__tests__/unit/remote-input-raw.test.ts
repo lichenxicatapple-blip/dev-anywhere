@@ -72,5 +72,4 @@ describe("serve.ts remote_input_raw forwarding semantics", () => {
       }
     }
   });
-
 });

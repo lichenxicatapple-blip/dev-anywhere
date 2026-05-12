@@ -85,7 +85,9 @@ describe("createLogger", () => {
 
     await flushLogger(logger, 1000);
 
-    const files = readdirSync(logDir).filter((f) => f.startsWith("async-flush-") && f.endsWith(".log"));
+    const files = readdirSync(logDir).filter(
+      (f) => f.startsWith("async-flush-") && f.endsWith(".log"),
+    );
     expect(files.length).toBe(1);
     const content = readFileSync(join(logDir, files[0]), "utf-8");
     expect(content).toContain("line-a");

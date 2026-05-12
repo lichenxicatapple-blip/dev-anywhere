@@ -561,5 +561,4 @@ describe("RelayControlSchema", () => {
     expect(ClientToProxyRelayControlTypes.has("terminal_resize_request")).toBe(true);
     expect(ProxyToClientRelayControlTypes.has("terminal_resize_request")).toBe(false);
   });
-
 });
