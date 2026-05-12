@@ -45,6 +45,16 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
     },
   },
+  // Playwright e2e fixture: 用 `use(...)` 注入依赖不是 React hook;
+  // 空 destructure `{}` 表示显式无 fixture 依赖; 空 catch{} 是有意吞调试错误.
+  {
+    files: ["apps/web/e2e/fixtures/**/*.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "no-empty-pattern": "off",
+      "no-empty": "off",
+    },
+  },
   // proxy 进程边界：terminal/serve/worker 三进程的私有代码不可互相导入。
   // common/ 和 ipc/ 是共享层，任意进程都可以用。
   // 下面四组规则覆盖了四种情形：三个进程各自的私有代码目录，以及共享层自身。

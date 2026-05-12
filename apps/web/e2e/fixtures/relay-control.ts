@@ -1,20 +1,12 @@
 // 共享: client WS 连 relay + register/select/session_create 协议套路.
 // hostedPty / jsonMode fixture 的差别只在 session_create 的 mode 字段, 其余走同一条路.
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
+// 用 Node 22+ 内置 WebSocket (W3C EventTarget 风格).
 import type { LocalRuntime } from "./local-runtime";
-
-const require = createRequire(import.meta.url);
-const WebSocket = require(resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../../node_modules/.pnpm/ws@8.20.0/node_modules/ws",
-)) as typeof import("ws");
 
 const REQ_TIMEOUT_MS = 15_000;
 
 class ClientWs {
-  private ws: import("ws").WebSocket;
+  private ws: WebSocket;
   private reqId = 0;
   private waiters = new Map<string, (msg: unknown) => void>();
   private opened: Promise<void>;
@@ -22,12 +14,18 @@ class ClientWs {
   constructor(url: string) {
     this.ws = new WebSocket(url);
     this.opened = new Promise((resolveFn, reject) => {
-      this.ws.once("open", () => resolveFn());
-      this.ws.once("error", reject);
+      this.ws.addEventListener("open", () => resolveFn(), { once: true });
+      this.ws.addEventListener(
+        "error",
+        () => reject(new Error(`relay-control: ws error connecting ${url}`)),
+        { once: true },
+      );
     });
-    this.ws.on("message", (raw: Buffer) => {
+    this.ws.addEventListener("message", (e: MessageEvent) => {
       try {
-        const msg = JSON.parse(raw.toString()) as { requestId?: string };
+        const raw =
+          typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data as ArrayBuffer);
+        const msg = JSON.parse(raw) as { requestId?: string };
         if (msg.requestId && this.waiters.has(msg.requestId)) {
           this.waiters.get(msg.requestId)!(msg);
           this.waiters.delete(msg.requestId);

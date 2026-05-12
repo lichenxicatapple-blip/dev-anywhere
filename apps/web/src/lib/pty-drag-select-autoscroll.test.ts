@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   attachPtyDragSelectAutoscroll,
   type DragSelectDebugSnapshot,
@@ -89,7 +89,10 @@ function createHarness(opts: {
   };
 }
 
-function pointerDown(target: Element, opts: { x: number; y: number; type?: string; button?: number }): void {
+function pointerDown(
+  target: Element,
+  opts: { x: number; y: number; type?: string; button?: number },
+): void {
   const event = new PointerEvent("pointerdown", {
     pointerType: opts.type ?? "mouse",
     button: opts.button ?? 0,

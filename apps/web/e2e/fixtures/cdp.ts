@@ -6,12 +6,15 @@ import { test as base } from "@playwright/test";
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://localhost:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://localhost:5174";
 
-interface MobileFixtures {
+interface MobileWorkerFixtures {
   emuBrowser: Browser;
+}
+
+interface MobileTestFixtures {
   emuPage: Page;
 }
 
-export const test = base.extend<MobileFixtures>({
+export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   // 整个 worker 复用一个 browser 连接, 减少 CDP attach 抖动.
   emuBrowser: [
     async ({}, use) => {
