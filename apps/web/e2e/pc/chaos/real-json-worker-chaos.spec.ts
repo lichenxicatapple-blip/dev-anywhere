@@ -12,7 +12,7 @@ const relayPort = "3100";
 const proxyProfile = "local";
 const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 async function selectFirstProxy(page: Page): Promise<void> {
   const switcher = page.locator('[data-slot="proxy-switcher-trigger"]').first();

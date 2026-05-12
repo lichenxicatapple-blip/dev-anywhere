@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
+import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../../helpers";
 
 async function dropClientSocket(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => {

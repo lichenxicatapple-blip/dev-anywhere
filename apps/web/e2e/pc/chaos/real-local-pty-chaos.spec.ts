@@ -16,7 +16,7 @@ const chaosRoot =
 const proxyProfile = "local";
 const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 test.setTimeout(120_000);
 
