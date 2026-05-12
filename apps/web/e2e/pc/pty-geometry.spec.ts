@@ -111,26 +111,30 @@ test.describe("PTY geometry edges", () => {
     const box = await terminal.boundingBox();
     if (!box) throw new Error("pty terminal has no bounding box");
 
-    // 拖到右边缘 (距右沿 5px), 进入 EDGE_PX (28) 区域, autoscroll 多帧推 scrollLeft
+    // 拖到右边缘 (距右沿 5px), 进入 EDGE_PX (28) 区域, autoscroll 多帧推 scrollLeft.
+    // 等 scrollLeft 真的越过 initialScrollLeft 而不硬等固定毫秒.
     await page.mouse.move(box.x + 60, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width - 5, box.y + box.height / 2, { steps: 8 });
-    await page.waitForTimeout(400);
-
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBeGreaterThan(initialScrollLeft);
     const scrolledRight = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
-    expect(scrolledRight).toBeGreaterThan(initialScrollLeft);
 
-    // 拖回左边缘, scrollLeft 回退 (用户的真实复现路径: \r 把光标拉回行首)
+    // 拖回左边缘, scrollLeft 回退到比 scrolledRight 小.
     await page.mouse.move(box.x + 5, box.y + box.height / 2, { steps: 8 });
-    await page.waitForTimeout(400);
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBeLessThan(scrolledRight);
     const scrolledBack = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
     expect(scrolledBack).toBeLessThan(scrolledRight);
 
-    // pointerup 后停 raf, scrollLeft 不再变化
+    // pointerup 后停 raf, scrollLeft 不再变化. 取若干次采样检查稳态.
     await page.mouse.up();
     const afterUp = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
-    await page.waitForTimeout(200);
-    const stillSame = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
-    expect(stillSame).toBe(afterUp);
+    for (let i = 0; i < 5; i++) {
+      const sample = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+      expect(sample).toBe(afterUp);
+    }
   });
 });

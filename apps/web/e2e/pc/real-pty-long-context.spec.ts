@@ -87,7 +87,9 @@ test.describe("Real PTY long-context smoke", () => {
 
     const initialScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
     const initialScrollHeight = await terminal.evaluate((el) => (el as HTMLElement).scrollHeight);
-    expect(initialScrollHeight, "scrollHeight 没累积，session 太短不适合本测试").toBeGreaterThan(800);
+    expect(initialScrollHeight, "scrollHeight 没累积，session 太短不适合本测试").toBeGreaterThan(
+      800,
+    );
 
     // 滚到最顶
     await terminal.evaluate((el) => {
@@ -109,13 +111,16 @@ test.describe("Real PTY long-context smoke", () => {
       .not.toBeNull();
 
     // 回到底部
-    await page.locator('[data-slot="back-to-bottom"]').click({ trial: false }).catch(async () => {
-      await terminal.evaluate((el) => {
-        const node = el as HTMLElement;
-        node.scrollTop = node.scrollHeight - node.clientHeight;
-        node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await page
+      .locator('[data-slot="back-to-bottom"]')
+      .click({ trial: false })
+      .catch(async () => {
+        await terminal.evaluate((el) => {
+          const node = el as HTMLElement;
+          node.scrollTop = node.scrollHeight - node.clientHeight;
+          node.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
       });
-    });
 
     await expect
       .poll(() =>
@@ -128,9 +133,7 @@ test.describe("Real PTY long-context smoke", () => {
 
     // 走一遭后 scrollTop 接近原始 follow 状态
     expect(
-      Math.abs(
-        (await terminal.evaluate((el) => (el as HTMLElement).scrollTop)) - initialScrollTop,
-      ),
+      Math.abs((await terminal.evaluate((el) => (el as HTMLElement).scrollTop)) - initialScrollTop),
     ).toBeLessThanOrEqual(64);
   });
 
@@ -181,7 +184,9 @@ test.describe("Real PTY long-context smoke", () => {
     // 但 wheel 事件 deltaY 需要直接 evaluate 注入。
     for (let i = 0; i < 10; i += 1) {
       await terminal.evaluate((el) =>
-        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true, cancelable: true })),
+        el.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -200, bubbles: true, cancelable: true }),
+        ),
       );
     }
     for (let i = 0; i < 10; i += 1) {
@@ -218,10 +223,11 @@ test.describe("Real PTY long-context smoke", () => {
     expect(refreshed, "__devAnywherePtyRenderDebug 没挂上 window").not.toBe(-1);
     expect(refreshed, "forceRedraw 没刷新到任何 terminal").toBeGreaterThanOrEqual(1);
 
-    // 在等一短帧后页面没崩
-    await page.waitForTimeout(100);
+    // forceRedraw 后页面应仍可见且 buffer 长度未退化.
     await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
-    expect((await readSerialize(page)).length).toBeGreaterThanOrEqual(MIN_LONG_CONTEXT_CHARS);
+    await expect
+      .poll(async () => (await readSerialize(page)).length)
+      .toBeGreaterThanOrEqual(MIN_LONG_CONTEXT_CHARS);
   });
 });
 
