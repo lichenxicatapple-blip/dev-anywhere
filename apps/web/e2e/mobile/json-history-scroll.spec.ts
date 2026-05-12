@@ -46,8 +46,10 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
       el.scrollTop = Math.max(0, el.scrollHeight / 2);
       el.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
+    // BackToBottom visible=true 时 inert=false (interactive); visible=false 时
+    // inert=true (隔离交互 / AT)。用 IDL property 断言避开 attribute 序列化差异。
     const backToBottom = emuPage.locator('[data-slot="back-to-bottom"]');
-    await expect(backToBottom).toHaveAttribute("aria-hidden", "false", { timeout: 10_000 });
+    await expect(backToBottom).toHaveJSProperty("inert", false, { timeout: 10_000 });
 
     // 流式追加新内容. 用户在翻历史, auto-follow sticky 不该把 isAtBottom 翻回 true.
     await emuPage.evaluate(() => {
@@ -56,8 +58,8 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
       hooks.chat.appendAssistantText("fo-sess", "\nstreaming new while user reading history\n");
       hooks.chat.markTurnComplete("fo-sess");
     });
-    // 新消息出现 (有新消息 indicator), back-to-bottom 仍 aria-hidden=false (没被抢回底).
-    await expect(emuPage.locator('[aria-label="有新消息"]')).toBeVisible();
-    await expect(backToBottom).toHaveAttribute("aria-hidden", "false");
+    // 新消息出现 (有新消息 indicator), back-to-bottom 仍 interactive (没被抢回底).
+    await expect(emuPage.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
+    await expect(backToBottom).toHaveJSProperty("inert", false);
   });
 });

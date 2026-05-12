@@ -92,6 +92,11 @@ export function attachPtyScrollController(
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
   let userHasVerticalScrollIntent = initialUserHasVerticalScrollIntent;
+  // user 最近主动 scroll (wheel / touch / scrollbar drag) 的时间戳。notifyAtBottom
+  // 释放 intent 必须落在这个时间窗内, 否则 reconnect 后 layout 重置触发的 transient
+  // isAtBottom=true 会错误清掉跨周期保留的回看意图。
+  let lastUserScrollAt = -Infinity;
+  const USER_SCROLL_INTENT_WINDOW_MS = 250;
   let pendingProgrammaticScrollTop: number | null = null;
   let touchScrollActive = false;
   let touchStartY: number | null = null;
@@ -172,23 +177,14 @@ export function attachPtyScrollController(
 
   const notifyAtBottom = (): void => {
     const next = getCurrentAnchor().isAtBottom;
-    const buffer = term.buffer.active;
-    const { cellH } = getDims();
-    // 在底 + 仍有 intent + 不在 touch + 不是初次 attach + buffer/cellH 数据有意义 → 清 intent。
+    // 在底 + 仍有 intent + 不在 touch + user 刚刚主动 scroll → 清 intent。
     // 不要求 false → true 过渡: longHost 模式下 isAtBottom = cursorInViewport, 小幅 wheel
     // (光标仍在视野) atBottom 一直是 true, 旧条件 (lastAtBottom === false) 永远不成立,
     // intent 一旦被 wheel set 就清不掉, output 永久 paused。
-    // lastAtBottom !== null 守护初次 attach 的 caller 传入 initialIntent。
-    // cellH > 0 && bufferLength > 0 跳过 reconnect 空容器的 transient 几何判断, 不误清
-    // 用户跨周期保留的回看意图。
-    if (
-      next &&
-      userHasVerticalScrollIntent &&
-      !touchScrollActive &&
-      lastAtBottom !== null &&
-      cellH > 0 &&
-      buffer.length > 0
-    ) {
+    // lastUserScrollAt 时间窗守护 reconnect 重建时 layout 误判的 transient atBottom=true,
+    // 那种情况没 user 操作不该清掉跨周期保留的回看意图。
+    const userJustScrolled = performance.now() - lastUserScrollAt < USER_SCROLL_INTENT_WINDOW_MS;
+    if (next && userHasVerticalScrollIntent && !touchScrollActive && userJustScrolled) {
       setUserHasVerticalScrollIntent(false);
     }
     if (lastAtBottom === next) return;
@@ -271,6 +267,7 @@ export function attachPtyScrollController(
 
   const scrollToRatio = (ratio: number): void => {
     trace("scroll-to-ratio:start");
+    lastUserScrollAt = performance.now();
     setUserHasVerticalScrollIntent(true);
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const clamped = Math.max(0, Math.min(1, ratio));
@@ -283,6 +280,7 @@ export function attachPtyScrollController(
     trace("wheel");
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     if (maxScrollTop <= 0) return;
+    lastUserScrollAt = performance.now();
     setUserHasVerticalScrollIntent(true);
     const next = Math.max(0, Math.min(maxScrollTop, container.scrollTop + deltaY));
     if (next === container.scrollTop) {
@@ -587,6 +585,7 @@ export function attachPtyScrollController(
     touchScrollActive = true;
     touchStartY = event.touches?.[0]?.clientY ?? null;
     touchReviewNotified = false;
+    lastUserScrollAt = performance.now();
     setUserHasVerticalScrollIntent(true);
     trace("touchstart");
   };
@@ -594,6 +593,7 @@ export function attachPtyScrollController(
   const onTouchMove = (event: TouchEvent): void => {
     const currentY = event.touches?.[0]?.clientY ?? null;
     trace("touchmove");
+    lastUserScrollAt = performance.now();
     if (touchStartY === null || currentY === null) return;
     if (Math.abs(currentY - touchStartY) < 8 || touchReviewNotified) return;
     touchReviewNotified = true;

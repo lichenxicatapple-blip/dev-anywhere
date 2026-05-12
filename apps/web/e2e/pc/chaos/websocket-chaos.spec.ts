@@ -225,7 +225,7 @@ test.describe("WebSocket reconnect chaos", () => {
     await expect
       .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
       .toContain("new output after reconnect");
-    await expect(page.locator('[aria-label="有新消息"]')).toBeVisible();
+    await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
     const scrollTopAfterReconnectOutput = await terminal.evaluate(
       (el) => (el as HTMLElement).scrollTop,
     );

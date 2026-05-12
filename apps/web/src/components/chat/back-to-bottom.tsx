@@ -33,10 +33,8 @@ export function BackToBottom({ visible, hasNewMessages, onClick, className }: Ba
     >
       <ArrowDown aria-hidden="true" />
       <span
-        // 红点是装饰元素, 永远 aria-hidden 即可; 文案"有新消息"放到外层 button
-        // aria-label 上更合适 (但当前 aria-label="回到底部" 就已经说明意图, 红点
-        // 状态对 AT 用户不重要)。
         aria-hidden="true"
+        data-slot="back-to-bottom-new-indicator"
         className={cn(
           "absolute top-0 right-0 -mt-1 -mr-1 w-2 h-2 rounded-full bg-primary",
           "transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",

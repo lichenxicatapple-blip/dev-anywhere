@@ -29,7 +29,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expect(backToBottom).toBeVisible();
 
     await backToBottom.click();
-    await expect(backToBottom).toHaveAttribute("aria-hidden", "true");
+    await expect(backToBottom).toHaveJSProperty("inert", true);
     await expect
       .poll(() =>
         terminal.evaluate((el) => {
@@ -64,7 +64,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       window.__ptySmoke.sendPty("frame-while-user-scrolled-up\r\n");
     });
 
-    await expect(emuPage.locator('[aria-label="有新消息"]')).toBeVisible();
+    await expect(emuPage.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
     const afterScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
     expect(afterScrollTop).toBeLessThanOrEqual(beforeScrollTop + 8);
   });

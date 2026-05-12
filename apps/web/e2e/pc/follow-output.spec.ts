@@ -354,19 +354,19 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
 
   test("hidden at bottom", async ({ page }) => {
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveAttribute("aria-hidden", "true");
+    await expect(btb).toHaveJSProperty("inert", true);
   });
 
   test("within 8px threshold keeps button hidden", async ({ page }) => {
     await scrollBy(page, 5);
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveAttribute("aria-hidden", "true");
+    await expect(btb).toHaveJSProperty("inert", true);
   });
 
   test("crossing threshold (10px) reveals button", async ({ page }) => {
     await scrollBy(page, 10);
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveAttribute("aria-hidden", "false");
+    await expect(btb).toHaveJSProperty("inert", false);
   });
 
   test("button position is sticky; does not scroll with content", async ({ page }) => {
@@ -401,12 +401,12 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
   test("button geometry stays stable when it fades out at bottom", async ({ page }) => {
     await scrollBy(page, 200);
     const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveAttribute("aria-hidden", "false");
+    await expect(btb).toHaveJSProperty("inert", false);
     const visibleBox = await btb.boundingBox();
     expect(visibleBox).not.toBeNull();
 
     await scrollToBottom(page);
-    await expect(btb).toHaveAttribute("aria-hidden", "true");
+    await expect(btb).toHaveJSProperty("inert", true);
     const hiddenBox = await btb.boundingBox();
     expect(hiddenBox).not.toBeNull();
 
@@ -421,7 +421,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     const btb = page.locator('[data-slot="back-to-bottom"]');
     await expect(btb).toBeVisible();
     await btb.click();
-    await expect(btb).toHaveAttribute("aria-hidden", "true");
+    await expect(btb).toHaveJSProperty("inert", true);
     // expect.poll 让 click → scroll-to-bottom → react re-render 跑完, 再断言 gap.
     await expect
       .poll(() =>
@@ -436,10 +436,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
 
   test("new message while scrolled up shows has-new-messages indicator", async ({ page }) => {
     await scrollBy(page, 300);
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
-      "aria-hidden",
-      "false",
-    );
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", false);
 
     // 追加新消息, 不 auto-follow (因为 isAtBottom=false)
     await page.evaluate(() => {
@@ -455,7 +452,7 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
       });
     });
 
-    const hasNewIndicator = page.locator('[aria-label="有新消息"]');
+    const hasNewIndicator = page.locator('[data-slot="back-to-bottom-new-indicator"]');
     await expect(hasNewIndicator).toBeVisible();
   });
 
@@ -479,9 +476,6 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
         }),
       )
       .toBeLessThanOrEqual(8);
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", true);
   });
 });

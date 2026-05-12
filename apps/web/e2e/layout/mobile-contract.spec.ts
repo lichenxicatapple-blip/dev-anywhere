@@ -166,10 +166,10 @@ test.describe("mobile UX contract", () => {
 
     const root = page.locator("[data-keyboard-offset]").first();
     await expect(root).toHaveAttribute("data-keyboard-offset", /[1-9]\d*/);
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
+    // BackToBottom 在 visible=false 时用 inert 隔离交互 + AT (替代 aria-hidden +
+    // tabIndex, 后者不阻止 retain focus 会触发浏览器警告)。inert 是 IDL boolean
+    // property, attribute 序列化是 ""; 用 JS property 断言更稳。
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", true);
     await expect
       .poll(() => listIsPinnedToBottom(page.locator('[data-slot="message-list"]')))
       .toBe(true);

@@ -57,17 +57,14 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await page.evaluate(() => {
       window.__ptySmoke.sendPty("new output while reviewing history\r\n");
     });
-    await expect(page.locator('[aria-label="有新消息"]')).toBeVisible();
+    await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
     const scrollTopAfterNewFrame = await page
       .locator('[data-slot="pty-terminal"]')
       .evaluate((el) => (el as HTMLElement).scrollTop);
     expect(scrollTopAfterNewFrame).toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
 
     await page.locator('[data-slot="back-to-bottom"]').click();
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", true);
     await expect
       .poll(async () =>
         page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
@@ -173,7 +170,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       window.__ptySmoke.sendPty("frame-after-native-scroll\r\n");
     });
 
-    await expect(page.locator('[aria-label="有新消息"]')).toBeVisible();
+    await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
