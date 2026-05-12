@@ -1,5 +1,5 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
-import { ArrowLeft, Minus, MoreVertical, Plus, Upload } from "lucide-react";
+import { ArrowLeft, ImageIcon, Minus, MoreVertical, Plus, Upload } from "lucide-react";
 import { useRef, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -102,7 +102,11 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
 
   // PTY 模式上传文件: 触发隐藏 input → 读字节 → relay.uploadFile → 把返回路径作为
   // "@<path> " 文本写到终端 stdin, 用户接着回车或自己拼到命令里 (与图片粘贴同形状)。
+  // 图片 / 文件分两个 input: 部分 Android Chrome (vivo 等 OEM 定制) 在点击没设
+  // accept 的 file input 时会预申请相机权限。拆开后"上传文件"路径用排除 image/video
+  // 的 accept, 不再触发相机授权弹窗。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   async function handleFilePicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
@@ -194,6 +198,13 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-muted-foreground">文件</DropdownMenuLabel>
               <DropdownMenuItem
+                data-slot="chat-menu-upload-image"
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <ImageIcon aria-hidden="true" />
+                上传图片
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 data-slot="chat-menu-upload-file"
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -264,15 +275,28 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         </DropdownMenuContent>
       </DropdownMenu>
       {isPty ? (
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          data-slot="chat-menu-upload-file-input"
-          onChange={(event) => {
-            void handleFilePicked(event);
-          }}
-        />
+        <>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            data-slot="chat-menu-upload-image-input"
+            onChange={(event) => {
+              void handleFilePicked(event);
+            }}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/*,text/*"
+            className="hidden"
+            data-slot="chat-menu-upload-file-input"
+            onChange={(event) => {
+              void handleFilePicked(event);
+            }}
+          />
+        </>
       ) : null}
     </div>
   );

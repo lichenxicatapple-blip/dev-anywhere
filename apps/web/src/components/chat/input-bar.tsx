@@ -11,10 +11,13 @@ import {
   type ChangeEvent,
   type DragEvent as ReactDragEvent,
 } from "react";
-import { Paperclip } from "lucide-react";
+import { ImageIcon, Paperclip, Upload } from "lucide-react";
+import { VisuallyHidden } from "radix-ui";
 import type { CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { useAppStore } from "@/stores/app-store";
@@ -266,7 +269,12 @@ export function InputBar({ sessionId }: InputBarProps) {
   // 任意文件上传: picker (Paperclip 按钮) 和 drag-drop 共用同一上传逻辑。
   // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
   // image paste 的 insertTextAtSelection / insertedMentions 跟踪逻辑。
+  // 图片 / 文件分两个 input: Android Chrome (vivo 等 OEM 定制) 在点击没设 accept 的
+  // file input 时会预申请相机权限。拆开后"上传文件"路径用排除 image/video 的 accept,
+  // 不再触发相机授权弹窗; "上传图片" 路径明确想选图, 即使弹相机也符合预期。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const uploadAndInsertFile = useCallback(
@@ -418,17 +426,19 @@ export function InputBar({ sessionId }: InputBarProps) {
             aria-busy={clipboardImageUploading}
           />
           <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-11 md:size-9"
-              aria-label="上传文件"
-              data-slot="input-attach-button"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Paperclip aria-hidden="true" />
-            </Button>
+            <AttachMenu
+              open={attachOpen}
+              onOpenChange={setAttachOpen}
+              isDesktop={isDesktop}
+              onPickImage={() => {
+                setAttachOpen(false);
+                imageInputRef.current?.click();
+              }}
+              onPickFile={() => {
+                setAttachOpen(false);
+                fileInputRef.current?.click();
+              }}
+            />
             <InputMenu />
             <SendButton
               sessionId={sessionId}
@@ -440,14 +450,116 @@ export function InputBar({ sessionId }: InputBarProps) {
         </div>
       </form>
       <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        data-slot="input-attach-image-input"
+        onChange={(event) => {
+          void handleFilePicked(event);
+        }}
+      />
+      <input
         ref={fileInputRef}
         type="file"
+        accept="application/*,text/*"
         className="hidden"
         data-slot="input-attach-file-input"
         onChange={(event) => {
           void handleFilePicked(event);
         }}
       />
+    </div>
+  );
+}
+
+interface AttachMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  isDesktop: boolean;
+  onPickImage: () => void;
+  onPickFile: () => void;
+}
+
+function AttachMenu({ open, onOpenChange, isDesktop, onPickImage, onPickFile }: AttachMenuProps) {
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-11 md:size-9"
+      aria-label="附加"
+      data-slot="input-attach-button"
+    >
+      <Paperclip aria-hidden="true" />
+    </Button>
+  );
+
+  if (isDesktop) {
+    return (
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverContent align="end" className="w-44 p-1">
+          <AttachMenuItems variant="popover" onPickImage={onPickImage} onPickFile={onPickFile} />
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetTrigger asChild>{trigger}</SheetTrigger>
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
+        className="h-auto gap-0 rounded-t-xl bg-popover pt-2 pb-[max(theme(spacing.2),env(safe-area-inset-bottom))] border-t-0"
+      >
+        <VisuallyHidden.Root>
+          <SheetTitle>附加内容</SheetTitle>
+        </VisuallyHidden.Root>
+        <div
+          aria-hidden="true"
+          className="mx-auto mb-1 h-1 w-10 rounded-full bg-border"
+          data-slot="sheet-drag-handle"
+        />
+        <AttachMenuItems variant="sheet" onPickImage={onPickImage} onPickFile={onPickFile} />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function AttachMenuItems({
+  variant,
+  onPickImage,
+  onPickFile,
+}: {
+  variant: "popover" | "sheet";
+  onPickImage: () => void;
+  onPickFile: () => void;
+}) {
+  const itemH = variant === "sheet" ? "h-12" : "h-9";
+  const itemPad = variant === "sheet" ? "px-4" : "px-2";
+  const itemClass = `flex w-full items-center gap-2 rounded-sm text-left text-sm hover:bg-accent hover:text-accent-foreground ${itemH} ${itemPad}`;
+  return (
+    <div className="flex flex-col" data-slot="input-attach-menu">
+      <button
+        type="button"
+        className={itemClass}
+        data-slot="input-attach-menu-image"
+        onClick={onPickImage}
+      >
+        <ImageIcon aria-hidden="true" className="size-4" />
+        上传图片
+      </button>
+      <button
+        type="button"
+        className={itemClass}
+        data-slot="input-attach-menu-file"
+        onClick={onPickFile}
+      >
+        <Upload aria-hidden="true" className="size-4" />
+        上传文件
+      </button>
     </div>
   );
 }
