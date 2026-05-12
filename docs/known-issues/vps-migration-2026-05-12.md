@@ -35,9 +35,17 @@ Permission denied (publickey).
 
 ### 坑 3: ssh User 不是 ubuntu 而是 root
 
-阿里云 Ubuntu 22.04 镜像默认用户是 `root`, 不是 Ubuntu / Debian 镜像约定的 `ubuntu`. 而项目 `~/.ssh/config` `Host dev-anywhere` 的 `User ubuntu` 是从腾讯云时代留下的.
+不同云厂商 + 不同镜像默认 ssh user 不一致, 项目 `~/.ssh/config` 里 `User ubuntu` 是从腾讯云时代留下的, 切阿里云 Ubuntu 22.04 后默认 user 变成 `root`. 几个常见情况 (本项目不假设, 由用户根据自己 vps 实际填):
 
-**解**: 改 `~/.ssh/config` 的 `User root`, 或者 `--ssh root@host` 显式覆盖. install-relay.sh 现在 (`scripts/install-relay.sh`) 已支持 `--ssh user@host` 形式.
+| 云 / 镜像                | 默认 user        |
+| ------------------------ | ---------------- |
+| 阿里云 Ubuntu / CentOS   | `root`           |
+| AWS Ubuntu / Debian      | `ubuntu` / `admin` |
+| AWS Amazon Linux / RHEL  | `ec2-user`       |
+| GCP                      | 用户名 (创建时自定义) |
+| 自建 / VPS provider      | 看管理员配置      |
+
+**解**: 改 `~/.ssh/config` 的 `User <对应值>`, 或 `--ssh user@host` 显式覆盖. install-relay.sh 和 check-prerequisite.sh 都接受 `user@host` 形式.
 
 ### 坑 4: 安全组入方向 80/443 默认关闭
 

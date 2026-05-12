@@ -2,7 +2,8 @@
 # 在跑 install-relay.sh 之前 dry-run 检查目标 VPS 是否就绪. 不修改任何东西, 只报告.
 # 检查项来自 v0.2.4 切阿里云时实地撞过的坑:
 #   1. SSH 可用性 + host key (旧机器重装会导致本地 known_hosts 残留)
-#   2. SSH 用户 (阿里云 Ubuntu 默认 root, 项目 ssh config 之前用 ubuntu)
+#   2. SSH 远端 user 探测 + sudo 能力 (脚本不假设特定 user, 通过 `id -un` 探测;
+#      非 root 时再探 NOPASSWD sudo 是否配好)
 #   3. docker / docker compose v2
 #   4. apt-get 或 yum (certbot 安装会用到)
 #   5. 80 / 443 端口入方向 (LE HTTP-01 challenge 需要 80 公网可达)
@@ -10,7 +11,10 @@
 #
 # 用法:
 #   bash scripts/check-prerequisite.sh <ssh-host> <domain>
-#   例: bash scripts/check-prerequisite.sh root@1.2.3.4 dev-anywhere.example.com
+#   例:
+#     bash scripts/check-prerequisite.sh root@1.2.3.4 dev-anywhere.example.com
+#     bash scripts/check-prerequisite.sh ubuntu@1.2.3.4 dev-anywhere.example.com
+#     bash scripts/check-prerequisite.sh my-aws-host dev-anywhere.example.com  # 用 ssh config 里的 User
 set -euo pipefail
 
 SSH_HOST="${1:?Usage: check-prerequisite.sh <ssh-host> <domain>}"
@@ -52,8 +56,14 @@ fi
 if SSH_USER="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$SSH_HOST" "id -un" 2>&1)" && [ "${SSH_USER:0:1}" != " " ]; then
   ok "SSH 公钥认证通过, 远端 user=$SSH_USER"
 else
-  fail "SSH 公钥认证失败. ${SSH_USER}"
-  fail "  → 阿里云控制台导入公钥并绑定实例, 或 Workbench 进 vps 把公钥追加到 ~/.ssh/authorized_keys"
+  fail "SSH 公钥认证失败: ${SSH_USER}"
+  fail "  排查方向 (按命中概率):"
+  fail "  1) 用户名错: 不同云镜像默认 user 不同 (阿里云 Ubuntu 用 root / AWS Ubuntu 用 ubuntu /"
+  fail "     RHEL 系用 ec2-user 或 admin / 自建机器随管理员配置). 试: --ssh root@host 或 ubuntu@host"
+  fail "  2) 公钥未加: 通过云厂商提供的 web 终端 (阿里云 Workbench / AWS Session Manager /"
+  fail "     腾讯云 OrcaTerm / 物理控制台) 进机器, 把本地 ~/.ssh/id_*.pub 追加到目标 user 的"
+  fail "     ~/.ssh/authorized_keys 并 chmod 600"
+  fail "  3) 端口问题: 22 端口被云厂商安全组挡掉 (但你能 timeout 而不是 refused 才是这条)"
   echo ""
   echo "Summary: $PASS passed, $FAIL failed, $WARN warnings"
   exit 1
@@ -89,7 +99,13 @@ ok "user=$REMOTE_USER, os=$REMOTE_OS"
 if [ "$REMOTE_USER" = "root" ]; then
   ok "user=root, install-relay.sh 不需要 sudo"
 else
-  warn "user=$REMOTE_USER (非 root), install-relay.sh 需 sudo 权限运行"
+  # install-relay.sh --ssh 模式 server 端用 sudo. 探一下 user 有没有免密 sudo.
+  if ssh -o BatchMode=yes "$SSH_HOST" "sudo -n true" 2>/dev/null; then
+    ok "user=$REMOTE_USER (非 root), 但配了 NOPASSWD sudo, install-relay.sh 能跑"
+  else
+    warn "user=$REMOTE_USER (非 root) 且 sudo 需密码, install-relay.sh --ssh 会卡在 sudo 提示"
+    warn "  → 改 ssh 直接登 root, 或在远端 visudo 给该 user 配 NOPASSWD"
+  fi
 fi
 
 if [[ "$DOCKER_VER" == missing* ]]; then
