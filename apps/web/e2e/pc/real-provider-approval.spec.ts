@@ -14,7 +14,7 @@ const approvalTimeoutMs = Number(
 );
 const relayPort = "3100";
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const codexReadyPattern = /Do you trust|Ready|Find and fix a bug|OpenAI Codex|Run \/review/i;
 const codexUpdatePromptPattern =
   /Update available|Skip until next version|Press enter to continue/i;
