@@ -106,6 +106,34 @@ describe("attachPtyTerminalController", () => {
     expect(h.terminal.focus).toHaveBeenCalledTimes(1);
   });
 
+  // 触屏入口要传 noop scheduleAutoFocus, 不让进会话立刻给 helper textarea 抛 focus
+  // (Android Chrome / iOS Safari 看到 focus 立刻起 IME, 视口被键盘吃掉一半)。
+  it("skips auto-focus when scheduleAutoFocus is a no-op (touch device opt-out)", async () => {
+    const h = createHarness();
+    const noop = vi.fn();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+      scheduleAutoFocus: noop,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // 即便注入的 schedule 立即被调过, 它不再调回调函数, focus 永远不发生。
+    expect(noop).toHaveBeenCalledTimes(1);
+    expect(h.terminal.focus).not.toHaveBeenCalled();
+
+    // 用户主动点 PTY (pointerdown) 仍然要拿到 focus, 这条手动入口不能被这次改动破坏。
+    h.host.dispatchEvent(new Event("pointerdown"));
+    expect(h.terminal.focus).toHaveBeenCalledTimes(1);
+  });
+
   it("does not auto-focus after disposal", async () => {
     vi.useFakeTimers();
     const h = createHarness();

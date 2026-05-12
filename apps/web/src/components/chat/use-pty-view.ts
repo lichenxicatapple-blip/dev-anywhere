@@ -294,6 +294,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       sessionId,
       ws,
       relay,
+      // 触屏设备进入会话时不自动聚焦 xterm helper textarea, 否则 Android/iOS 立刻起 IME 把
+      // 视口压成一半, 用户还没看清当前 PTY 内容键盘已遮; 桌面保留 RAF auto-focus。
+      // 用户想敲字仍可点 PTY 区域 (handleTerminalContainerMouseDown / pointerdown 都挂了
+      // terminal.focus)。
+      scheduleAutoFocus: touchEditingSurface ? () => {} : undefined,
       createTerminal: async (terminalHost) => {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,

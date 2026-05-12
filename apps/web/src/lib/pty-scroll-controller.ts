@@ -1,5 +1,11 @@
 import type { Terminal } from "@xterm/xterm";
-import { computePtyHostLayout, computeScrollTarget, ydispToScrollTop } from "./pty-scroll";
+import {
+  computeHostTop,
+  computePtyHostLayout,
+  computeScrollAnchor,
+  computeScrollTarget,
+  ydispToScrollTop,
+} from "./pty-scroll";
 import { appendPtyScrollTrace, isPtyScrollTraceEnabled } from "./pty-scroll-trace";
 import type { PtyScrollDebugProbe } from "./pty-scroll-debug-snapshot";
 import { parsePx } from "./pty-style-utils";
@@ -97,6 +103,15 @@ export function attachPtyScrollController(
   // measure 不到尺寸 → 这条路径漏掉一次 sync。用这个标志让 relayout / onRender 在 cellH
   // 恢复后立刻补一次 sync,不依赖用户再滚一下。
   let pendingContainerSyncRetry = false;
+  // followCursorY 主动改写 scrollTop 后,容器 scroll 事件会走 onContainerScroll,几何上
+  // !atBottom 会被解释成"用户回看"并把 intent 置 true,下次 followCursorY 就被 intent 卡住。
+  // 用这个 mark 把"我们刚刚程序化滚到这里"这条信息透传给 onContainerScroll,让它别误判。
+  let pendingFollowCursorScrollTop: number | null = null;
+  // 进入页面时按"几何贴底"一次定锚 (终端心智), 之后只在"光标行真的变了"时让
+  // followCursorY 接管把光标拉回视野。无变动的 onRender 帧 (focus 切换 / theme 重绘 /
+  // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
+  // UX 跳变。null 表示"还没记录过", 等同于"上一帧没看到光标行"。
+  let prevCursorBufferRow: number | null = null;
 
   const setUserHasVerticalScrollIntent = (value: boolean): void => {
     if (userHasVerticalScrollIntent === value) return;
@@ -133,11 +148,30 @@ export function attachPtyScrollController(
     onScrollStateChange(state);
   };
 
-  const computeIsAtBottom = (): boolean =>
-    container.scrollTop + container.clientHeight >= container.scrollHeight - atBottomThreshold;
+  // anchor 集中化: isAtBottom / bottomScrollTop / cursorInViewport 三件事按
+  // host 是否高于可视区分两条路, 这条分支只在 computeScrollAnchor 里出现一次,
+  // 其他地方都拿这个快照。每次调用都从当前 DOM/term 取最新值, 不缓存。
+  const getCurrentAnchor = () => {
+    const { cellH } = getDims();
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const buffer = term.buffer.active;
+    return computeScrollAnchor({
+      rows: term.rows,
+      cellH,
+      bufferLength: buffer.length,
+      cursorBufferRow: buffer.viewportY + buffer.cursorY,
+      visibleContentHeight: Math.max(0, container.clientHeight - paddingTop - paddingBottom),
+      paddingTop,
+      paddingBottom,
+      containerScrollTop: container.scrollTop,
+      containerScrollHeight: container.scrollHeight,
+      containerClientHeight: container.clientHeight,
+      atBottomThreshold,
+    });
+  };
 
   const notifyAtBottom = (): void => {
-    const next = computeIsAtBottom();
+    const next = getCurrentAnchor().isAtBottom;
     // 只在 false → true 真实过渡时清 intent。初次 attach 时 lastAtBottom === null，
     // 即使容器恰好在底部，也要保留 caller 传入的 initialUserHasVerticalScrollIntent。
     if (next && lastAtBottom === false && !touchScrollActive) {
@@ -178,7 +212,7 @@ export function attachPtyScrollController(
         document.activeElement?.getAttribute("aria-label") ??
         document.activeElement?.tagName ??
         null,
-      atBottom: computeIsAtBottom(),
+      atBottom: getCurrentAnchor().isAtBottom,
       touchActive: touchScrollActive,
       userIntent: userHasVerticalScrollIntent,
       ...extra,
@@ -187,14 +221,10 @@ export function attachPtyScrollController(
 
   const positionHostAt = (ydisp: number, cellH: number, visibleContentHeight?: number): void => {
     if (cellH <= 0) return;
-    const hostHeight = term.rows * cellH;
-    const verticalOffset =
-      visibleContentHeight !== undefined && hostHeight < visibleContentHeight
-        ? visibleContentHeight - hostHeight
-        : 0;
+    const top = computeHostTop({ ydisp, rows: term.rows, cellH, visibleContentHeight });
     setStyle(host, "position", "absolute");
     setStyle(host, "left", "0px");
-    setStyle(host, "top", `${Math.max(0, ydisp * cellH + verticalOffset)}px`);
+    setStyle(host, "top", `${top}px`);
     trace("host-position", { ydisp });
   };
 
@@ -210,9 +240,13 @@ export function attachPtyScrollController(
     }
     const { cellH } = getDims();
     if (cellH !== 0) positionHostAt(maxYdisp, cellH);
-    const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const nextScrollTop = getCurrentAnchor().bottomScrollTop;
     container.scrollTop = nextScrollTop;
     pendingProgrammaticScrollTop = nextScrollTop;
+    // 把当前光标行作为基线记下: 紧接其后的 onRender 走 followCursorY 时, prev == current 跳过,
+    // 不会把刚刚摆到几何底的视口又拉成 cursor 居中。光标真的"动"了 (claude 重画 / 用户敲)
+    // 才让 followCursorY 接管。
+    prevCursorBufferRow = term.buffer.active.viewportY + term.buffer.active.cursorY;
     notifyScroll();
     // 清零必须放在最末尾: container.scrollTop = nextScrollTop 会同步触发 onContainerScroll →
     // syncContainerScroll, 此时若 cellH=0 会重新置位 retry flag。开头清零的话这里又会被覆盖,
@@ -311,8 +345,8 @@ export function attachPtyScrollController(
   const handlePendingNewFrame = (): PendingFrameResult => {
     if (!hasNewFrame()) return "none";
     consumeNewFrame();
-    // 重连或 snapshot 重放时 DOM 尺寸会短暂变化，computeIsAtBottom 可能误判。
-    // 用户已经表达过回看历史时，以用户意图为准，避免新输出把视图强行拉到底。
+    // 重连或 snapshot 重放时 DOM 尺寸会短暂变化, anchor.isAtBottom 可能误判。
+    // 用户已经表达过回看历史时, 以用户意图为准, 避免新输出把视图强行拉到底。
     if (!userHasVerticalScrollIntent) {
       scrollToBottom();
       return "followed";
@@ -355,7 +389,19 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
-    const atBottom = computeIsAtBottom();
+    // followCursorY 自己刚刚程序化设了 scrollTop,不能让本次 scroll 事件被当成"用户回看"
+    // 而把 intent 置 true; 也不要走 scrollToBottom 兜底,否则会和 followCursorY 互踩。
+    const isPendingFollowCursorScroll =
+      pendingFollowCursorScrollTop !== null &&
+      Math.abs(container.scrollTop - pendingFollowCursorScrollTop) <= 1;
+    if (isPendingFollowCursorScroll) {
+      pendingFollowCursorScrollTop = null;
+      pendingProgrammaticScrollTop = null;
+      notifyScroll();
+      return;
+    }
+    pendingFollowCursorScrollTop = null;
+    const atBottom = getCurrentAnchor().isAtBottom;
     const isPendingProgrammaticScroll =
       pendingProgrammaticScrollTop !== null &&
       Math.abs(container.scrollTop - pendingProgrammaticScrollTop) <= 1 &&
@@ -444,6 +490,42 @@ export function attachPtyScrollController(
     trace("relayout:end");
   };
 
+  // server-owned rows 场景下 host 可能比可视区高, host 内只能看到一段 N 行子窗口。光标
+  // 行落在 N 行外就肉眼看不见, 用户只能盲输 (原 bug 现场)。
+  // 设计: 进入页面靠 scrollToBottom 几何贴底定锚, followCursorY 只在"光标行真动了"那一帧
+  // 把视口拉到光标处。无变动的 onRender 帧 (focus 切换 / theme 重绘 / 同 buffer 重 paint)
+  // 不该改 scrollTop, 否则进入瞬间就跳成 cursor 居中, 失去终端"贴底"心智。
+  const followCursorY = (): void => {
+    if (userHasVerticalScrollIntent) {
+      // intent=true 期间 (用户主动回看) 完全让出, 同时丢弃 prev 记录, 让回到底部后的下次
+      // 光标变动重新进入跟随。否则用户拖回去的轨迹会被记成 prev, 释放 intent 后第一次比对
+      // 就误判为"光标变了"而拉一下。
+      prevCursorBufferRow = null;
+      return;
+    }
+    const { cellH } = getDims();
+    if (cellH <= 0) return;
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const hostHeight = term.rows * cellH;
+    if (hostHeight <= visibleContentHeight) {
+      // host 装得下, 几何贴底等于光标可见, 走原路径就行, 不需要 followCursorY 介入。
+      // 顺手清 prev 防止下次进入 host>vch 时拿旧 buffer 的行号比对。
+      prevCursorBufferRow = null;
+      return;
+    }
+    const buffer = term.buffer.active;
+    const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+    if (prevCursorBufferRow === cursorBufferRow) return;
+    prevCursorBufferRow = cursorBufferRow;
+    const anchor = getCurrentAnchor();
+    if (anchor.cursorInViewport) return;
+    // anchor.bottomScrollTop 在 long-host 分支里就是把光标行像素居中后的目标 scrollTop。
+    if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) return;
+    pendingFollowCursorScrollTop = anchor.bottomScrollTop;
+    container.scrollTop = anchor.bottomScrollTop;
+  };
+
   // 长行场景下光标跟着输入向右移到屏外, 把 scrollLeft 调到能让光标位于视窗中部 (留出
   // 左右上下文)。仅在光标真正出视窗时触发, 用户主动横向滚动到不同区域时不打扰。
   const followCursorX = (): void => {
@@ -469,6 +551,7 @@ export function attachPtyScrollController(
     if (pendingContainerSyncRetry) syncContainerScroll();
     handlePendingNewFrame();
     followCursorX();
+    followCursorY();
     notifyScroll();
   };
 

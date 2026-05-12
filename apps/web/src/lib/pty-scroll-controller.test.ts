@@ -66,6 +66,7 @@ function createTerminal(lineTextByIndex: Record<number, string> = {}) {
         length: 100,
         viewportY: 0,
         cursorX: 0,
+        cursorY: 0,
         getLine: (idx: number) => ({
           translateToString: () => lineTextByIndex[idx] ?? "",
         }),
@@ -81,12 +82,15 @@ function createTerminal(lineTextByIndex: Record<number, string> = {}) {
       return { dispose: disposeRender };
     }),
   } as unknown as Terminal & {
+    rows: number;
+    cols: number;
     scrollToLine: ReturnType<typeof vi.fn>;
     buffer: {
       active: {
         length: number;
         viewportY: number;
         cursorX: number;
+        cursorY: number;
         getLine: (idx: number) => unknown;
       };
     };
@@ -811,7 +815,7 @@ describe("attachPtyScrollController", () => {
     );
   });
 
-  it("relayout keeps bottom pinned after terminal metrics change", () => {
+  it("relayout keeps cursor pinned in viewport after terminal metrics make host taller than container", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
     const controller = attachPtyScrollController({
@@ -827,12 +831,18 @@ describe("attachPtyScrollController", () => {
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) throw new Error("missing xterm screen");
 
+    // 屏幕变大让 cellH 从 20 涨到 30, host 高度变 600 而容器仍 400 → host > viewport。
+    // 真实浏览器会随 spacer.style.height 同步刷 container.scrollHeight, 在 jsdom 里手动同步。
     defineSize(screen, { clientHeight: 600, clientWidth: 800 });
+    defineScrollHeight(container, 3000);
     controller.relayout();
 
     expect(spacer.style.height).toBe("3000px");
     expect(host.style.height).toBe("600px");
-    expect(container.scrollTop).toBe(1600);
+    // scrollTop 不再是 scrollHeight-clientHeight (=2600), 而是 maxYdisp*cellH=2400, 把光标
+    // 行(buffer 第 80 行, cursorY=0)放到视窗顶部; 否则 host 上半段被剪到视窗外, 光标看不见。
+    // 用 cursor 而非几何底是因为 buffer 末尾常有 trailing empty rows, 几何贴底反而空。
+    expect(container.scrollTop).toBe(2400);
     expect(host.style.top).toBe("2400px");
   });
 
@@ -1197,5 +1207,105 @@ describe("attachPtyScrollController", () => {
     expect(disposeScroll).toHaveBeenCalledTimes(1);
     expect(disposeRender).toHaveBeenCalledTimes(1);
     expect(resizeDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // proxy-hosted PTY: xterm.rows 来自 server (52 行, host=1040px), mobile 容器键盘弹起后
+  // 压扁到 200px。host > viewport 时, buffer 末尾常常是 trailing empty rows (claude prompt
+  // 之后即空), 纯几何贴底反而显示空白把真内容推出视窗 → 用 cursor 行作为锚点。
+  describe("when host is taller than viewport (server-owned rows + mobile keyboard)", () => {
+    function setupTallHost(opts: { cursorY: number; viewportY?: number }) {
+      const { container, spacer, host, xterm } = createDom();
+      defineSize(container, { clientHeight: 200, clientWidth: 800 });
+      const screen = host.querySelector(".xterm-screen") as HTMLElement;
+      defineSize(screen, { clientHeight: 1040, clientWidth: 800 });
+      const { terminal, emitRender, emitScroll } = createTerminal({});
+      terminal.rows = 52;
+      terminal.buffer.active.length = 905;
+      terminal.buffer.active.viewportY = opts.viewportY ?? 853;
+      terminal.buffer.active.cursorY = opts.cursorY;
+      // spacer = max(905*20, 853*20+200) = 18100; padding=0 in tests so scrollHeight matches.
+      defineScrollHeight(container, 18100);
+      return { container, spacer, host, xterm, terminal, emitRender, emitScroll };
+    }
+
+    function attach(
+      params: ReturnType<typeof setupTallHost>,
+      extra: Partial<Parameters<typeof attachPtyScrollController>[0]> = {},
+    ) {
+      const { container, spacer, host, terminal } = params;
+      return attachPtyScrollController({
+        container,
+        spacer,
+        host,
+        term: terminal,
+        hasNewFrame: () => false,
+        consumeNewFrame: vi.fn(),
+        hasNewFramesWhileAway: () => false,
+        setNewFramesWhileAway: vi.fn(),
+        ...extra,
+      });
+    }
+
+    it("anchors viewport on cursor row when host > vch on entry (geometric bottom would land on trailing empty rows)", () => {
+      const params = setupTallHost({ cursorY: 0 });
+      attach(params);
+      // 几何贴底是 17900, 但那块在 buffer trailing empty 区。光标在 row 853 (host top), 像素 17060。
+      // computeBottomScrollTop: target = 17060 - (200-20)/2 = 16970, 夹到 minScrollTop=17060
+      // (= maxYdisp*cellH, 再低就改 ydisp 了) → 光标停在视窗顶部行。
+      expect(params.container.scrollTop).toBe(17060);
+    });
+
+    it("centers cursor when cursor sits mid-host on entry", () => {
+      const params = setupTallHost({ cursorY: 25 });
+      attach(params);
+      // cursorBufferRow=878, cursorPx=17560, target=17560-(200-20)/2=17470, 在 [17060, 17900] 内。
+      expect(params.container.scrollTop).toBe(17470);
+    });
+
+    it("first onRender after entry leaves scrollTop alone when cursor row is unchanged", () => {
+      const params = setupTallHost({ cursorY: 25 });
+      attach(params);
+      expect(params.container.scrollTop).toBe(17470);
+
+      // focus 切换 / theme 重绘 类的"无变动 onRender"不能掀构图。followCursorY 仅在光标行
+      // 真的变了那一帧介入 (prevCursorBufferRow guard)。
+      params.emitRender();
+      expect(params.container.scrollTop).toBe(17470);
+    });
+
+    it("followCursorY re-centers when cursor moves to a row outside the current viewport", () => {
+      const params = setupTallHost({ cursorY: 0 });
+      attach(params);
+      // 进入: scrollTop=17060, 视窗 [17068, 17260]。光标 cursorBufferRow=853, pixel 17060,
+      // 在视窗顶 (cursorPx >= viewportTop)。
+      expect(params.container.scrollTop).toBe(17060);
+
+      // 光标跳到 row 25 (cursorBufferRow=878, pixel 17560), 不在 [17068, 17260] 内。
+      params.terminal.buffer.active.cursorY = 25;
+      params.emitRender();
+
+      expect(params.container.scrollTop).toBe(17470);
+    });
+
+    it("reports atBottom=true under cursor-aware path because cursor is in viewport", () => {
+      const params = setupTallHost({ cursorY: 25 });
+      const onAtBottomChange = vi.fn();
+      attach(params, { onAtBottomChange });
+      // scrollTop=17470 离几何底 17900 还有距离, 但 host > vch 分支看的是"光标在视窗内", 是 →
+      // BackToBottom 不该亮。
+      expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+    });
+
+    it("does not auto-scroll when user has expressed scroll intent (entry or follow)", () => {
+      const params = setupTallHost({ cursorY: 0 });
+      attach(params, { initialUserHasVerticalScrollIntent: true });
+      // intent=true 时进入既不 scrollToBottom 也不 followCursorY, scrollTop 保持 0 (默认)。
+      expect(params.container.scrollTop).toBe(0);
+
+      params.terminal.buffer.active.cursorY = 25;
+      params.emitRender();
+      // 光标动了也不抢: 用户主动回看路径神圣不可侵犯。
+      expect(params.container.scrollTop).toBe(0);
+    });
   });
 });

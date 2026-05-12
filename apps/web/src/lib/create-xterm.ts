@@ -73,6 +73,18 @@ export async function createXtermTerminal(
   let webglDisposed = false;
   let activeRenderer: PtyRendererKind = "dom";
 
+  // Sarasa Fixed SC 是 cn-font-split 切片字体, 按 unicode-range 懒加载 — shard 直到首次出现
+  // 对应字符才会被 fetch。await document.fonts.ready 在 xterm 创建时只能等"已声明的字体",
+  // 此时 shard 都还没被请求, fonts.ready 立刻 resolve, WebGL atlas 用 fallback glyph 把那
+  // 几格 (• U+2022 / ❯ ▣ 等 claude-code 状态字符) cache 成错的纹理; 后续 shard 到达后,
+  // atlas 不刷不会重画。重进会话才"正常"是因为 shard 已在浏览器缓存里, atlas 第一次构建就对。
+  // 监听 document.fonts.loadingdone, 每批字体落定后 clear atlas, 让下一帧用真字体重绘。
+  const onFontsLoadingDone = (): void => {
+    if (webglDisposed) return;
+    webglAddon?.clearTextureAtlas();
+  };
+  document.fonts.addEventListener("loadingdone", onFontsLoadingDone);
+
   function loadWebgl(): void {
     if (webglDisposed) return;
     try {
@@ -107,6 +119,7 @@ export async function createXtermTerminal(
     getWebglAddon: () => webglAddon,
     dispose: () => {
       webglDisposed = true;
+      document.fonts.removeEventListener("loadingdone", onFontsLoadingDone);
       webglAddon?.dispose();
       terminal.dispose();
     },
