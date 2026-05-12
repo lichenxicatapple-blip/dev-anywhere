@@ -2,6 +2,11 @@
 import { mobileBaseUrl, test, expect } from "../fixtures/cdp";
 
 test.describe("L4 mobile / CDP attach", () => {
+  // emuPage 是 worker-shared, 其他 spec 跑后 url 已经偏离根. 这里自己 goto 重置.
+  test.beforeEach(async ({ emuPage }) => {
+    await emuPage.goto(`${mobileBaseUrl}/`);
+  });
+
   test("connects to Android emulator Chrome and loads dev server", async ({ emuPage }) => {
     await expect(emuPage).toHaveURL(new RegExp(`^${mobileBaseUrl.replace(/[/.]/g, "\\$&")}`));
     const title = await emuPage.title();

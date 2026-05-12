@@ -38,6 +38,42 @@ fi
 echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)"
 
 cd "$ROOT/apps/web"
-MOBILE_VITE_BASE_URL="$BASE_URL" \
-MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
-  exec ./node_modules/.bin/playwright test --project=device-mobile-android "$@"
+
+# Android Chrome over CDP 不支持 newContext 隔离 + page.close 不真删 tab + addInitScript
+# 不能 unregister, 跨 spec file 共用同一 chrome 进程会 navigation race. 解决方案是
+# 每个 spec file 都给它一个干净 chrome 进程: force-stop + 重启 + adb forward 重建 +
+# playwright 单独跑该 spec. 同 spec file 内多 test 仍共享 page (worker scope).
+reset_chrome() {
+  adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+  sleep 2
+  adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
+  sleep 6
+  adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
+  for _ in 1 2 3 4 5; do
+    if curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "ERROR: chrome 重启后 CDP 5s 内仍不响应" >&2
+  return 1
+}
+
+if [[ "$#" -gt 0 ]]; then
+  SPECS=("$@")
+else
+  # macOS 默认 bash 3.2 没 mapfile, 用 glob 展开
+  SPECS=(e2e/mobile/*.spec.ts)
+fi
+
+EXIT_CODE=0
+for spec in "${SPECS[@]}"; do
+  echo ""
+  echo "=== $spec ==="
+  reset_chrome || { EXIT_CODE=1; continue; }
+  MOBILE_VITE_BASE_URL="$BASE_URL" \
+  MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+    ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec" || EXIT_CODE=$?
+done
+
+exit "$EXIT_CODE"

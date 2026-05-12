@@ -1,7 +1,7 @@
 // PTY 输入相关 e2e: 基础按键, 移动端 on-screen controls, IME 全角符号.
 import { expect, test } from "@playwright/test";
 import { expectTouchTarget } from "../mobile-helpers";
-import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "./pty-fixture";
+import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-input";
 

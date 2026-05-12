@@ -1,7 +1,7 @@
 // PTY 滚动 e2e: back-to-bottom, 新消息提示, approval-wait 视图保持, resize 重新订阅,
 // 触摸滚动期间不抢回底部.
 import { expect, test } from "@playwright/test";
-import { expectPtyTerminalMounted, setupPtyChat } from "./pty-fixture";
+import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-scroll";
 

@@ -4,13 +4,24 @@ import { expect } from "@playwright/test";
 // 本地 Vite 默认端口 5173；CI 或外部 relay-served 部署可通过 WEB_BASE_URL 覆盖
 export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
 
-// 清理 DEV Anywhere 写入的 localStorage key 并刷新页面，恢复到首次访问状态
+// 清理 DEV Anywhere 写入的 localStorage key 并刷新页面，恢复到首次访问状态.
+// emu Chrome over CDP 上 evaluate 期间偶发 "Execution context was destroyed",
+// 等 page idle 再 evaluate, evaluate 失败时容忍重试.
 export async function resetLocalState(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const keys = Object.keys(localStorage).filter((k) => k.startsWith("dev_anywhere_"));
-    keys.forEach((k) => localStorage.removeItem(k));
-  });
-  await page.reload();
+  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await page.evaluate(() => {
+        const keys = Object.keys(localStorage).filter((k) => k.startsWith("dev_anywhere_"));
+        keys.forEach((k) => localStorage.removeItem(k));
+      });
+      break;
+    } catch (err) {
+      if (attempt === 1) throw err;
+      await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
+    }
+  }
+  await page.reload({ timeout: 20_000 });
 }
 
 export type FakeRelayMessage = Record<string, unknown>;

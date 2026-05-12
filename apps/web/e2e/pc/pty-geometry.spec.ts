@@ -2,7 +2,7 @@
 // 1. 小字号下 viewport 末端不留多余空隙 (xterm baseY 与 viewportY 对齐);
 // 2. 容器横向 overflow 时鼠标拖拽到边缘自动横向滚屏 (autoscroll 模块端到端).
 import { expect, test } from "@playwright/test";
-import { expectPtyTerminalMounted, installPtyFakeRelay, setupPtyChat } from "./pty-fixture";
+import { expectPtyTerminalMounted, installPtyFakeRelay, setupPtyChat } from "../pty-fixture";
 import { BASE_URL, resetLocalState } from "../helpers";
 
 const SESSION_ID = "pty-geometry";

@@ -1,7 +1,7 @@
 // ptyScrollTrace 诊断开关 e2e: ?ptyScrollTrace=1 启动 / hash 变化后启用,
 // 两条路径都能录到 container-scroll.
 import { expect, test } from "@playwright/test";
-import { expectPtyTerminalMounted, setupPtyChat } from "./pty-fixture";
+import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-trace";
 

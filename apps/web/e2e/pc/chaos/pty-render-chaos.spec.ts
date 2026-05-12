@@ -1,7 +1,7 @@
 // PTY 渲染层对乱序 / 过期 / 重复帧的防御 e2e (故障注入维度,
 // 与功能性 PTY 行为分到 chaos/ 子目录).
 import { expect, test } from "@playwright/test";
-import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
+import { expectPtyTerminalMounted, setupPtyChat } from "../../pty-fixture";
 
 const SESSION_ID = "pty-render-chaos";
 

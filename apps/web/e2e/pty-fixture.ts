@@ -2,8 +2,8 @@
 // 每个 spec 用自己的 sessionId, 通过 setupPtyChat 完成 init+reload+resetLocal 流程.
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "../helpers";
-import { installVisualViewportMock } from "../mobile-helpers";
+import { BASE_URL, resetLocalState } from "./helpers";
+import { installVisualViewportMock } from "./mobile-helpers";
 
 export type PtyFakeRelayOptions = {
   sessionId: string;
@@ -205,19 +205,28 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
   );
 }
 
-export async function expectPtyTerminalMounted(page: Page): Promise<void> {
-  await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+export async function expectPtyTerminalMounted(
+  page: Page,
+  options: { timeout?: number } = {},
+): Promise<void> {
+  const timeout = options.timeout ?? 5_000;
+  await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible({ timeout });
   await expect
-    .poll(async () => {
-      return page.evaluate(() => {
-        const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
-        const textarea = document.querySelector<HTMLTextAreaElement>(
-          '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
-        );
-        if (!screen || !textarea) return false;
-        return screen.clientWidth > 0 && screen.clientHeight > 0;
-      });
-    })
+    .poll(
+      async () => {
+        return page.evaluate(() => {
+          const screen = document.querySelector<HTMLElement>(
+            '[data-slot="pty-host"] .xterm-screen',
+          );
+          const textarea = document.querySelector<HTMLTextAreaElement>(
+            '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
+          );
+          if (!screen || !textarea) return false;
+          return screen.clientWidth > 0 && screen.clientHeight > 0;
+        });
+      },
+      { timeout },
+    )
     .toBeTruthy();
 }
 
@@ -241,6 +250,8 @@ export type SetupPtyChatOptions = {
   sessionId: string;
   query?: string;
   withVisualViewportMock?: boolean;
+  // mobile L4 spec 用 mobileBaseUrl, PC L3 用默认 BASE_URL.
+  baseUrl?: string;
 };
 
 export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Promise<void> {
@@ -248,7 +259,8 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
     await installVisualViewportMock(page);
   }
   const query = options.query ?? "";
-  const url = `${BASE_URL}/#/chat/${options.sessionId}?mode=pty${query}`;
+  const baseUrl = options.baseUrl ?? BASE_URL;
+  const url = `${baseUrl}/#/chat/${options.sessionId}?mode=pty${query}`;
   await installPtyFakeRelay(page, { sessionId: options.sessionId });
   await page.goto(url);
   await resetLocalState(page);
