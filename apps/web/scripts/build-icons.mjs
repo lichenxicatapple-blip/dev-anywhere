@@ -8,6 +8,9 @@ const PUBLIC = resolve(HERE, "../public");
 const SRC = resolve(PUBLIC, "brand-icon.svg");
 
 const PNG_TARGETS = [
+  { name: "pwa-64x64.png", size: 64 },
+  { name: "pwa-192x192.png", size: 192 },
+  { name: "pwa-512x512.png", size: 512 },
   { name: "apple-touch-icon-180x180.png", size: 180 },
   { name: "maskable-icon-512x512.png", size: 512 },
 ];
