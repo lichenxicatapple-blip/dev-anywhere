@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
 async function openJsonPreview(page: Page, path: string): Promise<void> {
   const input = page.getByLabel("输入聊天消息");

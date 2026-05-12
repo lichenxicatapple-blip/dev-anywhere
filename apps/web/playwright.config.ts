@@ -19,41 +19,44 @@ if (Number.isFinite(nodeMajor) && nodeMajor >= 25) {
 }
 
 export default defineConfig({
+  // 每个 project 显式指定 testDir 对齐 tier (e2e/layout/ / e2e/pc/ / e2e/mobile/).
+  // 顶层 testDir 留给 ad-hoc 命令行直接传相对路径.
   testDir: "./e2e",
-  // L4 mobile spec 只在 device-mobile-android project 跑, 别让 layout/device-pc 项目误扫.
-  testIgnore: ["**/e2e/mobile/**"],
   timeout: 30000,
-  use: {
-    baseURL: BASE_URL,
-  },
-  // 项目名映射四层测试 (unit / layout / pc / mobile):
-  // L2 layout-* = viewport 模拟, 仅查布局断点; L3 device-pc = 真桌面 Chromium 跑交互.
-  // L4 (Android emu) 不在这里, 走 scripts/test-mobile.sh.
+  use: { baseURL: BASE_URL },
   projects: [
+    // L2 layout-*: viewport 模拟, 只查响应式断点, e2e/layout/.
     {
       name: "layout-mobile-small",
+      testDir: "./e2e/layout",
       use: { viewport: { width: 375, height: 667 }, hasTouch: true },
     },
     {
       name: "layout-mobile",
+      testDir: "./e2e/layout",
       use: { viewport: { width: 390, height: 844 }, hasTouch: true },
     },
     {
       name: "layout-mobile-landscape",
+      testDir: "./e2e/layout",
       use: { viewport: { width: 844, height: 390 }, hasTouch: true },
     },
     {
       name: "layout-desktop",
+      testDir: "./e2e/layout",
       use: { viewport: { width: 1280, height: 800 } },
     },
-    { name: "device-pc", use: {} },
-    // L4: 真 Android emu, 通过 connectOverCDP 挂上去, spec 在 e2e/mobile/ 下并自带 fixture.
+    // L3 device-pc: 真桌面 Chromium, e2e/pc/.
+    {
+      name: "device-pc",
+      testDir: "./e2e/pc",
+      use: {},
+    },
+    // L4 device-mobile-android: 真 Android emu via CDP, e2e/mobile/.
     // 前置: scripts/test-mobile.sh 起 vite + adb forward + chrome 9222.
     {
       name: "device-mobile-android",
       testDir: "./e2e/mobile",
-      // 全局 testIgnore 默认会过滤 e2e/mobile, 这里清空让本 project 能看到自己的 spec.
-      testIgnore: [],
       use: {},
     },
   ],

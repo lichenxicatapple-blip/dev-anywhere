@@ -27,9 +27,6 @@
     "test:layout": "bash scripts/test-layout.sh",
     "test:pc": "bash scripts/test-pc.sh",
     "test:mobile": "bash scripts/test-mobile.sh",
-    "mobile:smoke": "bash scripts/mobile-smoke.sh",
-    "mobile:smoke:full": "bash scripts/mobile-smoke.sh --full",
-    "mobile:smoke:simulator": "bash scripts/mobile-smoke.sh --simulator",
     "dev-anywhere": "node apps/proxy/dist/index.js",
     "proxy": "pnpm --filter @dev-anywhere/proxy run dev --",
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tier 2 - Playwright viewport, 布局/响应式断点回归. 不验真触屏.
+# Tier 2 - Playwright viewport, 布局/响应式断点回归. e2e/layout/ 下全 spec.
+# 触屏 / IME / 字体 / canvas 渲染由 L4 (test-mobile.sh, Android emu) 负责.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -19,5 +20,4 @@ WEB_BASE_URL="$BASE_URL" exec ./node_modules/.bin/playwright test \
   --project=layout-mobile \
   --project=layout-mobile-landscape \
   --project=layout-desktop \
-  e2e/mobile-contract.spec.ts \
   "$@"

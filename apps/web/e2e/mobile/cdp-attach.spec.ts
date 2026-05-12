@@ -1,5 +1,5 @@
 // L4 烟雾用例: 验证 CDP 通道立得起来, 模拟器 Chrome 真能加载页面.
-import { mobileBaseUrl, test, expect } from "./fixtures";
+import { mobileBaseUrl, test, expect } from "../fixtures/cdp";
 
 test.describe("L4 mobile / CDP attach", () => {
   test("connects to Android emulator Chrome and loads dev server", async ({ emuPage }) => {

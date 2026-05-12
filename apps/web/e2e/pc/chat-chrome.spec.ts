@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "./helpers";
-import { expectTouchTarget } from "./mobile-helpers";
+import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
+import { expectTouchTarget } from "../mobile-helpers";
 
 async function installWakeLockMock(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(() => {

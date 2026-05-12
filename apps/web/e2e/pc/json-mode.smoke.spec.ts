@@ -1,5 +1,5 @@
 // jsonMode fixture 烟雾用例: relay+proxy → client 协议 → 创 mode=json 的 session, worker spawn claude.
-import { expect, test } from "./fixtures/json-mode";
+import { expect, test } from "../fixtures/json-mode";
 
 test.describe("jsonMode fixture", () => {
   test("creates a json-mode session via relay control protocol", async ({ jsonMode }) => {

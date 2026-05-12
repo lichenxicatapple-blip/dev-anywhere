@@ -81,11 +81,7 @@ Agent CLI paths can be overridden:
 | `pnpm test:layout`                                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
 | `pnpm test:pc`                                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
 | `pnpm test:mobile`                                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
-| `pnpm mobile:smoke`                                                                                   | Mobile contract + real local relay/proxy smoke (legacy combo, awaiting Phase 4 migration).                           |
-| `pnpm mobile:smoke -- --profile qa --relay local --relay-port 3101 --base-url http://127.0.0.1:5175`  | Mobile smoke against an explicit local profile, relay, and Web URL.                                                  |
-| `pnpm mobile:smoke:full`                                                                              | Include real session creation/termination in the mobile smoke.                                                       |
-| `pnpm mobile:smoke:simulator`                                                                         | Capture iOS Simulator Safari screenshots after the mobile smoke.                                                     |
-| `bash scripts/web-e2e.sh --base-url http://127.0.0.1:5175 -- e2e/pty-smoke.spec.ts --project=device-pc` | Run selected Playwright specs against an explicit Web URL.                                                         |
+| `bash scripts/web-e2e.sh --base-url http://127.0.0.1:5175 -- e2e/pc/pty-smoke.spec.ts --project=device-pc` | Run selected Playwright specs against an explicit Web URL.                                                         |
 
 ## Advanced Diagnostics
 

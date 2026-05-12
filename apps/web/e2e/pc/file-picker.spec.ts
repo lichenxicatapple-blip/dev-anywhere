@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "../helpers";
 
 test.describe("FilePathPicker @ trigger (InputBar mode=insert)", () => {
   test.use({ viewport: { width: 1280, height: 800 } });

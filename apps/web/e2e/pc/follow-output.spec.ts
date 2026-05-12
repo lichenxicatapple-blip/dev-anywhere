@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay } from "../helpers";
 
 // 向 chat-store 注入 N 条消息, 使消息列表能触发滚动
 // 依赖 main.tsx 在 dev build 装的 window.__ccTest 钩子, 无需动态 import 源码

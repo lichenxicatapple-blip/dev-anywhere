@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, installFakeRelay } from "./helpers";
+import { BASE_URL, installFakeRelay } from "../helpers";
 
 // 移动端 < md 下 ProxySelect 以 ProxySwitcher layout="page" 形式直接挂在 AppShell 主区
 // 没有在线 proxy 时 EmptyState 会兜底, 有 proxy 时渲染 data-slot="proxy-item" 列表

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, installFakeRelay, selectFakeProxy } from "./helpers";
+import { BASE_URL, installFakeRelay, selectFakeProxy } from "../helpers";
 import webPackage from "../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;

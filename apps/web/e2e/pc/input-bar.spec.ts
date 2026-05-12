@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
 test.describe("InputBar — slash command picker", () => {
   test.use({ viewport: { width: 1280, height: 800 } });

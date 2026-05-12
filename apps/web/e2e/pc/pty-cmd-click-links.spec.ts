@@ -11,7 +11,7 @@ import {
   installFakeRelay,
   sentFakeRelayMessages,
   type FakeRelayMessage,
-} from "./helpers";
+} from "../helpers";
 
 test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 

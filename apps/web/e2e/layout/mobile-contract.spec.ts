@@ -4,14 +4,14 @@ import {
   installFakeRelay,
   selectFakeProxy,
   sentFakeRelayMessages,
-} from "./helpers";
+} from "../helpers";
 import {
   MOBILE_VIEWPORTS,
   expectAllVisibleTouchTargets,
   expectNoHorizontalDocumentOverflow,
   expectTouchTarget,
   installVisualViewportMock,
-} from "./mobile-helpers";
+} from "../mobile-helpers";
 
 test.describe("mobile UX contract", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });

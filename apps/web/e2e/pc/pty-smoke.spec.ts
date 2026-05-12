@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "./helpers";
-import { expectTouchTarget, installVisualViewportMock } from "./mobile-helpers";
+import { BASE_URL, resetLocalState } from "../helpers";
+import { expectTouchTarget, installVisualViewportMock } from "../mobile-helpers";
 
 const SESSION_ID = "pty-smoke";
 

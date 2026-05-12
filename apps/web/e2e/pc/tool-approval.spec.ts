@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay } from "../helpers";
 
 test.describe("ToolApprovalCard — keyboard shortcuts", () => {
   test.use({ viewport: { width: 1280, height: 800 } });

@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { expectNoHorizontalDocumentOverflow, expectTouchTarget } from "./mobile-helpers";
+import { expectNoHorizontalDocumentOverflow, expectTouchTarget } from "../mobile-helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_LOCAL_SMOKE === "1";
 const createRealSessions = process.env.DEV_ANYWHERE_REAL_CREATE_SESSION_SMOKE === "1";

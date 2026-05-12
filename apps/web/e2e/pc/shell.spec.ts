@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, resetLocalState } from "./helpers";
+import { BASE_URL, resetLocalState } from "../helpers";
 
 test.describe("AppShell layout — mobile (< md)", () => {
   test.use({ viewport: { width: 390, height: 844 } });

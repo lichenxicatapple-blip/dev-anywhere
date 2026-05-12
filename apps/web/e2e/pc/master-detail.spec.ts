@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "./helpers";
+import { BASE_URL, gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "../helpers";
 
 test.describe("Master-detail — 桌面端即时会话切换", () => {
   test.use({ viewport: { width: 1280, height: 800 } });

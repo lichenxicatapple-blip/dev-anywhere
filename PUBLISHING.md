@@ -35,8 +35,8 @@ pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm release:check
+pnpm test:layout
 pnpm test:pc
-pnpm mobile:smoke
 pnpm test:mobile
 
 # 3. Commit, tag, and push
@@ -47,7 +47,7 @@ git push origin main
 git push origin vX.Y.Z
 ```
 
-Use `pnpm mobile:smoke --full` when the release changes mobile chat, PTY, history loading, session creation, or provider routing. It touches the real local relay/proxy chain and can create temporary sessions.
+When the release touches mobile-specific behavior (chat / PTY / history / session create / provider routing), run `pnpm test:mobile` against an Android emulator before tagging.
 
 After pushing the tag, wait for the release workflow:
 

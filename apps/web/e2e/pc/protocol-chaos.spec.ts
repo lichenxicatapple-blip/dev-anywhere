@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { BASE_URL, installFakeRelay, selectFakeProxy } from "./helpers";
+import { BASE_URL, installFakeRelay, selectFakeProxy } from "../helpers";
 
 test.describe("protocol chaos", () => {
   test.beforeEach(async ({ page }) => {

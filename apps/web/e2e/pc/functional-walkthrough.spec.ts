@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "./helpers";
+import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
 
 async function terminateSessionFromList(page: Page, sessionId: string): Promise<void> {
   await page.goto(`${page.url().split("#")[0]}#/sessions`);

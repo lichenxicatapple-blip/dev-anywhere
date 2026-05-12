@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "./helpers";
+import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
 async function dispatchImagePaste(target: Locator): Promise<void> {
   await target.evaluate((node) => {

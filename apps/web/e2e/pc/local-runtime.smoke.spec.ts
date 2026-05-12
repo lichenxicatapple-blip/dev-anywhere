@@ -1,5 +1,5 @@
 // localRuntime fixture 的烟雾用例: relay+proxy 真起得来, 拆得干净.
-import { expect, test } from "./fixtures/local-runtime";
+import { expect, test } from "../fixtures/local-runtime";
 
 test.describe("localRuntime fixture", () => {
   test("brings up isolated relay and registers a proxy", async ({ localRuntime }) => {
