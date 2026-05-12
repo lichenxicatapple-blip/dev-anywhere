@@ -31,6 +31,8 @@ async function scrollBy(page: Page, pxFromBottom: number): Promise<void> {
     (el as HTMLElement).scrollTop = el.scrollHeight - (el as HTMLElement).clientHeight - amount;
     el.dispatchEvent(new Event("scroll"));
   }, pxFromBottom);
+  // user-gesture timing mock: auto-follow sticky 状态机区分"程序自动 scroll" vs
+  // "用户 manual scroll" 需要看 scroll 事件之间的间隔, 200ms 让 react 当作 user 抢走焦点.
   await page.waitForTimeout(200);
 }
 
@@ -260,7 +262,6 @@ test.describe("ChatJsonView — wide message layout", () => {
     });
 
     await expect(page.locator('[data-slot="message-row"]')).toHaveCount(3);
-    await page.waitForTimeout(300);
 
     const metrics = await page.evaluate(() => {
       const list = document.querySelector<HTMLElement>('[data-slot="message-list"]');
@@ -382,7 +383,15 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
         el.dispatchEvent(new Event("scroll"));
       }
     });
-    await page.waitForTimeout(200);
+    // 等 scrollTop 真到 100 (event 已 dispatch + react render 拍稳).
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+          return el?.scrollTop ?? -1;
+        }),
+      )
+      .toBe(100);
     const second = await btb.boundingBox();
     expect(second).not.toBeNull();
     expect(Math.abs((first!.y ?? 0) - (second!.y ?? 0))).toBeLessThan(2);
@@ -412,15 +421,17 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     const btb = page.locator('[data-slot="back-to-bottom"]');
     await expect(btb).toBeVisible();
     await btb.click();
-    await page.waitForTimeout(500);
     await expect(btb).toHaveAttribute("aria-hidden", "true");
-    const gap = await page.evaluate(() => {
-      const el = document.querySelector('[data-slot="message-list"]') as HTMLElement | null;
-      if (!el) return null;
-      return el.scrollHeight - (el.scrollTop + el.clientHeight);
-    });
-    expect(gap).not.toBeNull();
-    expect(gap!).toBeLessThanOrEqual(8);
+    // expect.poll 让 click → scroll-to-bottom → react re-render 跑完, 再断言 gap.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+          if (!el) return -1;
+          return el.scrollHeight - (el.scrollTop + el.clientHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(8);
   });
 
   test("new message while scrolled up shows has-new-messages indicator", async ({ page }) => {
@@ -443,7 +454,6 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
         toolCalls: [],
       });
     });
-    await page.waitForTimeout(300);
 
     const hasNewIndicator = page.locator('[aria-label="有新消息"]');
     await expect(hasNewIndicator).toBeVisible();
@@ -458,15 +468,17 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
       hooks.chat.appendAssistantText("fo-sess", "\ntail streamed text\n");
       hooks.chat.markTurnComplete("fo-sess");
     });
-    await page.waitForTimeout(300);
 
-    const gap = await page.evaluate(() => {
-      const el = document.querySelector('[data-slot="message-list"]') as HTMLElement | null;
-      if (!el) return null;
-      return el.scrollHeight - (el.scrollTop + el.clientHeight);
-    });
-    expect(gap).not.toBeNull();
-    expect(gap!).toBeLessThanOrEqual(8);
+    // auto-follow 应把 scrollTop 推到底, gap 收敛到 ≤ 8.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+          if (!el) return -1;
+          return el.scrollHeight - (el.scrollTop + el.clientHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(8);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveAttribute(
       "aria-hidden",
       "true",
