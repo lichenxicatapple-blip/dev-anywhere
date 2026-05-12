@@ -146,17 +146,20 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 <span>等待审批</span>
               </div>
             )}
-            {presentation === "relay-disconnected" ? (
-              <ConnectionLostPanel variant="relay" />
-            ) : presentation === "proxy-offline" ? (
-              <ConnectionLostPanel variant="proxy" />
-            ) : presentation === "session-ended" ? (
+            {presentation === "session-ended" ? (
               // wasAutoRestored 时副作用马上跳走, 这里渲染空白避免一帧 TerminatedSessionPanel 闪烁
               wasAutoRestoredRef.current ? null : <TerminatedSessionPanel mode={mode} />
             ) : mode === "pty" ? (
               <ChatPtyView sessionId={id} ptyOwner={session?.ptyOwner} />
             ) : (
               <ChatJsonView sessionId={id} />
+            )}
+            {(presentation === "relay-disconnected" || presentation === "proxy-offline") && (
+              // Overlay 不替代 chat 主体: PTY 视图 unmount 会销毁 xterm 实例, BackToBottom
+              // hasNewMessages 等组件状态也丢. 重连后用户期待原状态续上, panel 浮在上层挡住即可。
+              <ConnectionLostPanel
+                variant={presentation === "relay-disconnected" ? "relay" : "proxy"}
+              />
             )}
           </div>
           {mode === "json" && presentation === "ok" && (
@@ -199,7 +202,7 @@ function ConnectionLostPanel({ variant }: { variant: "relay" | "proxy" }) {
       : "目标开发机当前未在线。请确认开发机上 dev-anywhere proxy 守护进程在运行，或返回会话列表选择其他开发机。";
   return (
     <div
-      className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center bg-background"
+      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 px-6 text-center bg-background"
       data-slot="connection-lost-panel"
       data-variant={variant}
       role="status"
