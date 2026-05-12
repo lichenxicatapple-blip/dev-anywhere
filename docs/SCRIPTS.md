@@ -77,12 +77,15 @@ Agent CLI paths can be overridden:
 | `pnpm knip`                                                                                           | Check unused dependencies, exports, and entry points.                                                                |
 | `pnpm release:check`                                                                                  | Build release artifacts, inspect npm package contents, and smoke-test the installed command with an isolated `HOME`. |
 | `pnpm release:smoke`                                                                                  | Run desktop, mobile, PTY, clipboard, and chaos smoke gates against the explicit `local` profile.                     |
-| `pnpm desktop:smoke`                                                                                  | Run the local desktop Playwright guard.                                                                              |
-| `pnpm mobile:smoke`                                                                                   | Run mobile layout contracts and local relay/proxy smoke checks.                                                      |
-| `pnpm mobile:smoke -- --profile qa --relay local --relay-port 3101 --base-url http://127.0.0.1:5175`  | Run mobile smoke against an explicit local profile, relay, and Web URL.                                              |
+| `pnpm test:unit`                                                                                      | Tier 1 — Vitest across workspaces.                                                                                   |
+| `pnpm test:layout`                                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
+| `pnpm test:pc`                                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
+| `pnpm test:mobile`                                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
+| `pnpm mobile:smoke`                                                                                   | Mobile contract + real local relay/proxy smoke (legacy combo, awaiting Phase 4 migration).                           |
+| `pnpm mobile:smoke -- --profile qa --relay local --relay-port 3101 --base-url http://127.0.0.1:5175`  | Mobile smoke against an explicit local profile, relay, and Web URL.                                                  |
 | `pnpm mobile:smoke:full`                                                                              | Include real session creation/termination in the mobile smoke.                                                       |
 | `pnpm mobile:smoke:simulator`                                                                         | Capture iOS Simulator Safari screenshots after the mobile smoke.                                                     |
-| `bash scripts/web-e2e.sh --base-url http://127.0.0.1:5175 -- e2e/pty-smoke.spec.ts --project=desktop` | Run selected Playwright specs against an explicit Web URL.                                                           |
+| `bash scripts/web-e2e.sh --base-url http://127.0.0.1:5175 -- e2e/pty-smoke.spec.ts --project=device-pc` | Run selected Playwright specs against an explicit Web URL.                                                         |
 
 ## Advanced Diagnostics
 

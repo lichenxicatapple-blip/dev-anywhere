@@ -6,10 +6,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 pnpm dev:restart -- --profile local --relay local --relay-port 3100 --web-port 5173
-pnpm desktop:smoke
+pnpm test:pc
 pnpm mobile:smoke -- --profile local --relay local --relay-port 3100 --base-url http://localhost:5173
-bash scripts/web-e2e.sh --base-url http://localhost:5173 -- e2e/pty-smoke.spec.ts e2e/clipboard-image.spec.ts e2e/image-preview.spec.ts --project=desktop
+bash scripts/web-e2e.sh --base-url http://localhost:5173 -- e2e/pty-smoke.spec.ts e2e/clipboard-image.spec.ts e2e/image-preview.spec.ts --project=device-pc
 DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 \
   WEB_BASE_URL=http://localhost:5173 \
-  pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-clipboard-image.spec.ts --project=desktop
+  pnpm --filter @dev-anywhere/web run test:e2e -- e2e/real-clipboard-image.spec.ts --project=device-pc
 pnpm dev:chaos -- --profile local --relay local --relay-port 3100 --web-port 5173 --base-url http://localhost:5173
+pnpm test:mobile

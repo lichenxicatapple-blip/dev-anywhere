@@ -35,8 +35,9 @@ pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm release:check
-pnpm desktop:smoke
+pnpm test:pc
 pnpm mobile:smoke
+pnpm test:mobile
 
 # 3. Commit, tag, and push
 git add -A

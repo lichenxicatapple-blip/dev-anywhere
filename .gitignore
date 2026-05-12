@@ -17,3 +17,4 @@ artifacts/
 !apps/web/public/*.png
 !docs/assets/*.png
 .dev-anywhere/
+apps/web/e2e/fixtures/sessions/.runtime/
