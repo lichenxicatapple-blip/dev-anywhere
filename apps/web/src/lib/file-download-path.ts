@@ -3,12 +3,14 @@
 
 // 负 lookbehind 防止匹配 URL (https://... 里的 //example...) 或路径中段 (a/b/c.txt 不该从 b 切)。
 // 路径主干用 greedy `*` 而非 lazy `*?`: 双扩展 (.tar.gz / .min.js / .d.ts) 在 lazy 下只会匹配
-// 到第一个扩展段 (`.tar`) 即停止。greedy 模式下 `[^\s...]*` 延伸到下一空白前, 扩展子表达式
+// 到第一个扩展段 (`.tar`) 即停止。greedy 模式下延伸到下一空白前, 扩展子表达式
 // `\.[A-Za-z0-9]{1,8}` 回溯到最末段, 支持任意层数扩展。
 // 起始字符放开 (不再要求 ./ / .. .dev-anywhere/), 因此 README.md / package.json / docs/foo.md
 // 这类裸相对路径也能识别。stem 校验在 isFileDownloadPath 里做, 排除 5.0 / 1.2.3 这种版本号噪音。
+// 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 防止中文文本里夹杂 ASCII
+// 触发起点后 greedy 扩展把整段中文框成 link。
 const FILE_PATH_RE =
-  /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][^\s`"'<>]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
+  /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
 

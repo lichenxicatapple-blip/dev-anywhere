@@ -3,8 +3,10 @@
 // lookahead 不接受 `.<字母数字>` 紧跟其后, 防 archive.png.bak 被截到 archive.png
 // (image 扩展是固定白名单, 不存在双扩展场景, 比 file-download 更严格)。
 // trailing `.` 仍允许 (句末标点), 由 trimPathToken 清理。
+// 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 否则
+// "中文@./...png" lazy 扩展会从中文 ASCII (logo) 起点啃到尾部 .png, 把整段框成 link。
 const IMAGE_PATH_RE =
-  /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][^\s`"'<>]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/gi;
+  /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 
 function trimPathToken(value: string): string {

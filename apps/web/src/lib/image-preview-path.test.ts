@@ -41,4 +41,17 @@ describe("image preview path detection", () => {
     expect(isImagePreviewPath("../a.png")).toBe(true);
     expect(isImagePreviewPath(".dev-anywhere/x.png")).toBe(true);
   });
+
+  it("does not extend a match across non-ASCII text into a later @path token", () => {
+    // 中文里夹 ASCII 单词 (logo) 会触发 regex 起始点; 严格白名单字符集不放行中文,
+    // lazy 不能把整段中文 + @ 都吞进 link, 链接范围只限于真正的 @./...png。
+    expect(
+      extractImagePreviewPaths(
+        "小logo好像没把我们的logo内容展示全，参考截图@./.dev-anywhere/clipboard/sid/foo.png",
+      ),
+    ).toEqual(["./.dev-anywhere/clipboard/sid/foo.png"]);
+    expect(
+      extractImagePreviewPaths("中文 @/var/folders/abc/T/dev-anywhere/paste-A7Bx9k.png 末尾"),
+    ).toEqual(["/var/folders/abc/T/dev-anywhere/paste-A7Bx9k.png"]);
+  });
 });
