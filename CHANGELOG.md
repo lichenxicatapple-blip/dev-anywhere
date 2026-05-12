@@ -4,6 +4,26 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.6] - 2026-05-13
+
+### 新增
+
+- PTY 移动端控制条加 Ctrl+S (^S, `\x13`). 占原右上空位 (上排末列), ↑↓←→ 十字布局不动 (commit 9b515a91).
+
+### 变更
+
+- chat 异常态展示统一. auto-restore 落到已死 session 时静默退到 `/sessions` + toast "上次会话已结束", 不让用户停在 TerminatedSessionPanel 上多点一次. 区分 "AppShell 把我拽来" (sessionStorage `dev-anywhere:restored-target` 一次性消费) vs "用户手敲 URL / 直接 refresh" — 后者保留 TerminatedSessionPanel, 不静默重定向. 同时 chat 主体在 relay 断 / 开发机离线 时被 `ConnectionLostPanel` 替代 (mode-aware 文案: "中继连接已中断" / "开发机未连接"), 之前是 chat 主体一片空仅靠 4px 色带 StatusLine 提示, 信息密度太低 (commit 7bf329c9).
+- 品牌图标主体再缩小. SVG glyph scale 24 → 22, translate `(64 77)` → `(80 115)`. 左右 padding 64px → 80px (12.5% → 15.6%, 更接近 iOS 产品图标安全区习惯), 云朵 bbox (不含 cursor 下划线) 垂直居中到 canvas 几何中心, 上下 padding 严格对称 (146px). PNG 全套 (favicon / apple-touch / maskable / pwa 64-512) 同步重生 (commit 2de7d4cc).
+
+### 修复
+
+- 设置 → 版本页 Web 字段在 package.json 版本 bump 后仍显示旧版本: `__APP_VERSION__` 是 vite `define` 启动时静态注入, dev server 不重启不会重新计算. 改为 `settings-dialog.tsx` 直接 `import packageInfo from "../../../package.json" with { type: "json" }`, 走 vite 模块依赖图 + HMR, package.json 改一次就跟着变 (commit e9bd93dd).
+
+### 工具
+
+- e2e helpers `setProxyOnline(online)`: 通过 fake-relay 同步 proxy 在线状态 (推 `proxy_offline` / `proxy_online` 事件 + 后续 `proxy_list_response` 在线字段也跟随), 让 chat 异常态 spec 可重现 — 之前只推事件、后续 list 还报 online:true 会让 phase-machine 把 proxyOnline 又翻回 true (commit 7bf329c9).
+- e2e 新增覆盖 chat 异常态: PC `chat-presentation.spec.ts` 5 条 (auto-restore 死会话静默退 / 仍活的不跳 / 用户主动 URL 不静默 / relay 断 / proxy 离线) + L4 真机 `chat-presentation.spec.ts` 2 条 (PWA 冷启动场景 + 移动视口 panel 无水平溢出). PC `pty-input.spec.ts` / L4 `pty-mobile-controls.spec.ts` 同步加 ^S touch target + raw 序列断言 (commits 7bf329c9, 9b515a91).
+
 ## [0.2.5] - 2026-05-13
 
 ### 修复
