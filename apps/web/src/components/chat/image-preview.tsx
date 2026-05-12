@@ -8,7 +8,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Copy, Download, Image as ImageIcon, Maximize2, Minimize2 } from "lucide-react";
+import { Copy, Download, Image as ImageIcon } from "lucide-react";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -166,9 +167,6 @@ function ImagePreviewDialog({
 }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
-  // "actual" 模式下取消 fit 约束, 容器允许滚动平移; 切回时回到 object-contain。
-  // 切换通过点击图片或工具栏按钮触发, 也覆盖移动端大图无法看完整的诉求。
-  const [zoomMode, setZoomMode] = useState<"fit" | "actual">("fit");
   const src =
     state.status === "ready" && state.mimeType && state.dataBase64
       ? `data:${state.mimeType};base64,${state.dataBase64}`
@@ -181,7 +179,6 @@ function ImagePreviewDialog({
 
   useEffect(() => {
     setLoadedSrc((current) => (current === src ? current : ""));
-    setZoomMode("fit");
   }, [src]);
 
   async function copyPath(): Promise<void> {
@@ -219,41 +216,51 @@ function ImagePreviewDialog({
         </DialogHeader>
 
         <div
-          className={cn(
-            "dev-image-preview-stage relative flex min-h-[18rem] min-w-0 rounded-md border border-border/70 max-sm:min-h-0",
-            zoomMode === "fit"
-              ? "items-center justify-center overflow-hidden"
-              : "items-start justify-start overflow-auto",
-          )}
+          className="dev-image-preview-stage relative flex min-h-[18rem] min-w-0 items-center justify-center overflow-hidden rounded-md border border-border/70 max-sm:min-h-0"
           data-slot="image-preview-stage"
-          data-zoom-mode={zoomMode}
           aria-busy={showLoading}
         >
           {showLoading && <ImagePreviewLoading dimmed={state.status === "ready"} />}
           {state.status === "error" && <ImagePreviewError error={state.error ?? "图片预览失败"} />}
           {showDecodeError && <ImagePreviewError error={decodeErrorMessage} />}
           {state.status === "ready" && !showDecodeError && (
-            <img
-              src={src}
-              alt={state.path}
-              className={cn(
-                "relative z-10 translate-y-1 cursor-zoom-in opacity-0 transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] data-[loaded=true]:translate-y-0 data-[loaded=true]:opacity-100 motion-reduce:transition-none",
-                zoomMode === "fit" ? "max-h-full max-w-full object-contain" : "cursor-zoom-out",
-              )}
-              data-slot="image-preview-img"
-              data-loaded={imageLoaded ? "true" : "false"}
-              onClick={() => setZoomMode((prev) => (prev === "fit" ? "actual" : "fit"))}
-              onLoad={(event) => {
-                event.currentTarget.dataset.loaded = "true";
-                setLoadedSrc(src);
-              }}
-              onError={() => {
-                setDecodeError({
-                  src,
-                  message: "浏览器无法解码这张图片，请确认文件没有损坏",
-                });
-              }}
-            />
+            // wheel / pinch / drag 一起承担缩放 + 平移; doubleClick reset 回 fit。
+            // wrapper 撑满 stage, content 内 img 保持 max-w/h + object-contain, 在
+            // initialScale=1 时即"fit-to-window", 用户上滚 / 双指捏开 / 双击放大都自然过渡。
+            <TransformWrapper
+              key={src}
+              minScale={1}
+              maxScale={8}
+              centerOnInit
+              limitToBounds
+              wheel={{ step: 0.15 }}
+              pinch={{ step: 5 }}
+              doubleClick={{ mode: "reset" }}
+            >
+              <TransformComponent
+                wrapperClass="!h-full !w-full"
+                contentClass="!h-full !w-full flex items-center justify-center"
+              >
+                <img
+                  src={src}
+                  alt={state.path}
+                  className="relative z-10 max-h-full max-w-full translate-y-1 object-contain opacity-0 transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] data-[loaded=true]:translate-y-0 data-[loaded=true]:opacity-100 motion-reduce:transition-none"
+                  data-slot="image-preview-img"
+                  data-loaded={imageLoaded ? "true" : "false"}
+                  draggable={false}
+                  onLoad={(event) => {
+                    event.currentTarget.dataset.loaded = "true";
+                    setLoadedSrc(src);
+                  }}
+                  onError={() => {
+                    setDecodeError({
+                      src,
+                      message: "浏览器无法解码这张图片，请确认文件没有损坏",
+                    });
+                  }}
+                />
+              </TransformComponent>
+            </TransformWrapper>
           )}
         </div>
 
@@ -269,26 +276,6 @@ function ImagePreviewDialog({
                 : " "}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setZoomMode((prev) => (prev === "fit" ? "actual" : "fit"))}
-              disabled={state.status !== "ready" || showDecodeError}
-              aria-label={zoomMode === "fit" ? "切到原始尺寸 (可滚动查看完整图)" : "回到适应窗口"}
-              data-slot="image-preview-zoom-toggle"
-            >
-              {zoomMode === "fit" ? (
-                <>
-                  <Maximize2 aria-hidden="true" />
-                  原始尺寸
-                </>
-              ) : (
-                <>
-                  <Minimize2 aria-hidden="true" />
-                  适应窗口
-                </>
-              )}
-            </Button>
             <Button
               variant="outline"
               size="sm"
