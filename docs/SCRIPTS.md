@@ -68,20 +68,22 @@ Agent CLI paths can be overridden:
 
 ## Verification
 
-| Command                                                                                               | Purpose                                                                                                              |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `pnpm format:check`                                                                                   | Check formatting with Prettier.                                                                                      |
-| `pnpm lint`                                                                                           | Run ESLint and source-comment reference checks.                                                                      |
-| `pnpm typecheck`                                                                                      | Run TypeScript build-mode checks.                                                                                    |
-| `pnpm test`                                                                                           | Run the Vitest suite.                                                                                                |
-| `pnpm knip`                                                                                           | Check unused dependencies, exports, and entry points.                                                                |
-| `pnpm release:check`                                                                                  | Build release artifacts, inspect npm package contents, and smoke-test the installed command with an isolated `HOME`. |
-| `pnpm release:smoke`                                                                                  | Run desktop, mobile, PTY, clipboard, and chaos smoke gates against the explicit `local` profile.                     |
-| `pnpm test:unit`                                                                                      | Tier 1 — Vitest across workspaces.                                                                                   |
-| `pnpm test:layout`                                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
-| `pnpm test:pc`                                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
-| `pnpm test:mobile`                                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
-| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test-pc.sh e2e/pc/pty-smoke.spec.ts`                 | Run selected Playwright specs against an explicit Web URL.                                                           |
+| Command                                                                               | Purpose                                                                                                              |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pnpm format:check`                                                                   | Check formatting with Prettier.                                                                                      |
+| `pnpm lint`                                                                           | Run ESLint and source-comment reference checks.                                                                      |
+| `pnpm typecheck`                                                                      | Run TypeScript build-mode checks.                                                                                    |
+| `pnpm test`                                                                           | Run the Vitest suite.                                                                                                |
+| `pnpm knip`                                                                           | Check unused dependencies, exports, and entry points.                                                                |
+| `pnpm release:check`                                                                  | Build release artifacts, inspect npm package contents, and smoke-test the installed command with an isolated `HOME`. |
+| `pnpm release:smoke`                                                                  | Run desktop, mobile, PTY, clipboard, and chaos smoke gates against the explicit `local` profile.                     |
+| `pnpm test:unit`                                                                      | Tier 1 — Vitest across workspaces.                                                                                   |
+| `pnpm test:layout`                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
+| `pnpm test:pc`                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
+| `pnpm test:mobile`                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
+| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test-pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                           |
+
+测试分层和 fixture 选型的完整说明见 [docs/TESTING.md](./TESTING.md)。
 
 ## Advanced Diagnostics
 
