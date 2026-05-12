@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { pickRouteToRestore } from "./route-restore";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  consumeRestoredTarget,
+  markRestoredTarget,
+  pickRouteToRestore,
+} from "./route-restore";
 
 describe("pickRouteToRestore", () => {
   it("restores last chat route on cold-start landing at root", () => {
@@ -50,5 +54,32 @@ describe("pickRouteToRestore", () => {
         lastRoute: "/sessions",
       }),
     ).toBeNull();
+  });
+});
+
+describe("restored target one-shot store", () => {
+  beforeEach(() => {
+    globalThis.sessionStorage?.clear();
+  });
+
+  it("returns null when no restored target was ever marked", () => {
+    expect(consumeRestoredTarget()).toBeNull();
+  });
+
+  it("returns the marked target on first consume", () => {
+    markRestoredTarget("/chat/abc?mode=pty");
+    expect(consumeRestoredTarget()).toBe("/chat/abc?mode=pty");
+  });
+
+  it("clears the target after the first consume so later calls return null", () => {
+    markRestoredTarget("/chat/abc?mode=pty");
+    consumeRestoredTarget();
+    expect(consumeRestoredTarget()).toBeNull();
+  });
+
+  it("overwrites a previous target if mark is called twice", () => {
+    markRestoredTarget("/chat/old?mode=json");
+    markRestoredTarget("/chat/new?mode=pty");
+    expect(consumeRestoredTarget()).toBe("/chat/new?mode=pty");
   });
 });

@@ -6,6 +6,7 @@
 
 const LAST_CHAT_ROUTE_KEY = "dev-anywhere:last-chat-route";
 const RESTORED_FLAG_KEY = "dev-anywhere:route-restored";
+const RESTORED_TARGET_KEY = "dev-anywhere:restored-target";
 
 // 决定是否要从 lastRoute 恢复。纯函数, 方便单测覆盖所有路径组合。
 export function pickRouteToRestore(opts: {
@@ -59,5 +60,26 @@ export function markRestoredThisSession(): void {
     globalThis.sessionStorage?.setItem(RESTORED_FLAG_KEY, "1");
   } catch {
     // 同上
+  }
+}
+
+// auto-restore 落地的具体 chat URL 一次性记录, 让 ChatPage 能区分 "用户主动敲 URL"
+// vs "我们把它拽过来"。后者撞 routeSessionEnded 时直接 silent redirect 回 /sessions,
+// 不让用户停在 TerminatedSessionPanel。一次性消费, 避免后续手动回到同一 URL 又被重定向。
+export function markRestoredTarget(target: string): void {
+  try {
+    globalThis.sessionStorage?.setItem(RESTORED_TARGET_KEY, target);
+  } catch {
+    // 同上
+  }
+}
+
+export function consumeRestoredTarget(): string | null {
+  try {
+    const target = globalThis.sessionStorage?.getItem(RESTORED_TARGET_KEY) ?? null;
+    if (target !== null) globalThis.sessionStorage?.removeItem(RESTORED_TARGET_KEY);
+    return target;
+  } catch {
+    return null;
   }
 }

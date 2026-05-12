@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AgentStatusPayload, SessionInfo } from "@dev-anywhere/shared";
-import { isRouteSessionEnded, resolveChatStatusState } from "./chat-status";
+import {
+  isRouteSessionEnded,
+  resolveChatPresentation,
+  resolveChatStatusState,
+} from "./chat-status";
 
 const baseSession: SessionInfo = {
   sessionId: "s1",
@@ -110,5 +114,37 @@ describe("ChatPage session lifecycle derivation", () => {
         hasPendingApproval: false,
       }),
     ).toBe("idle");
+  });
+});
+
+describe("resolveChatPresentation", () => {
+  it("renders chat content when relay + proxy are up and session is alive", () => {
+    expect(
+      resolveChatPresentation({ connected: true, proxyOnline: true, routeSessionEnded: false }),
+    ).toBe("ok");
+  });
+
+  it("flags relay-disconnected when client websocket is down regardless of proxy state", () => {
+    expect(
+      resolveChatPresentation({ connected: false, proxyOnline: true, routeSessionEnded: false }),
+    ).toBe("relay-disconnected");
+  });
+
+  it("does not downgrade to proxy-offline if relay itself is down (proxy state unknown)", () => {
+    expect(
+      resolveChatPresentation({ connected: false, proxyOnline: false, routeSessionEnded: true }),
+    ).toBe("relay-disconnected");
+  });
+
+  it("flags proxy-offline when relay is up but the dev-machine proxy is not online", () => {
+    expect(
+      resolveChatPresentation({ connected: true, proxyOnline: false, routeSessionEnded: false }),
+    ).toBe("proxy-offline");
+  });
+
+  it("flags session-ended only after both relay and proxy are confirmed up", () => {
+    expect(
+      resolveChatPresentation({ connected: true, proxyOnline: true, routeSessionEnded: true }),
+    ).toBe("session-ended");
   });
 });

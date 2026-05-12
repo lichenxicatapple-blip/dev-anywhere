@@ -39,6 +39,7 @@ declare global {
       releaseConnections(): void;
       setImagePreviewDelay(ms: number): void;
       setImagePreviewDataBase64(value: string): void;
+      setProxyOnline(online: boolean): void;
     };
   }
 }
@@ -114,6 +115,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     );
     const heldSockets = new Set<FakeRelayWebSocket>();
     let holdConnections = false;
+    let proxyOnlineState = true;
     let imagePreviewDelayMs = 0;
     const ptyBuffers = new Map<string, string>();
 
@@ -571,7 +573,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
             {
               proxyId: "proxy-1",
               name: "Local Mac",
-              online: true,
+              online: proxyOnlineState,
               sessions: sessions.map((s) => s.sessionId),
             },
           ],
@@ -659,6 +661,16 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       setImagePreviewDataBase64(value: string) {
         imagePreviewDataBase64 = value;
+      },
+      setProxyOnline(online: boolean) {
+        if (proxyOnlineState === online) return;
+        proxyOnlineState = online;
+        const socket = window.__devAnywhereE2E!.socket as FakeRelayWebSocket | null;
+        if (!socket) return;
+        socket.emitJson({
+          type: online ? "proxy_online" : "proxy_offline",
+          proxyId: "proxy-1",
+        });
       },
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;

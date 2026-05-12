@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
 import {
   hasRestoredThisSession,
+  markRestoredTarget,
   markRestoredThisSession,
   pickRouteToRestore,
   readLastChatRoute,
@@ -85,7 +86,11 @@ export function AppShell() {
       lastRoute: readLastChatRoute(),
     });
     markRestoredThisSession();
-    if (target) navigate(target, { replace: true });
+    if (target) {
+      // 标 chat 页一会儿能识别 "我是被 auto-restore 拽来的", 撞已死会话时 silent 退回 /sessions
+      markRestoredTarget(target);
+      navigate(target, { replace: true });
+    }
     // 只在首挂载跑, 不依赖 location/navigate 变化重跑
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
