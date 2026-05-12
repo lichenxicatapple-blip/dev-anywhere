@@ -44,6 +44,9 @@ cd "$ROOT/apps/web"
 # 每个 spec file 都给它一个干净 chrome 进程: force-stop + 重启 + adb forward 重建 +
 # playwright 单独跑该 spec. 同 spec file 内多 test 仍共享 page (worker scope).
 reset_chrome() {
+  # force-stop 后 chrome restore session 把 tab 全恢复, page.close 在 emu 上又不真删
+  # tab, 跑多了累积几十个 tab 会让 page.goto / locator 操作 timeout. CDP /json/close
+  # endpoint 是真能 close target 的, 拿它把多余 tab 关掉留 1 个干净的.
   adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
   sleep 2
   adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
@@ -51,12 +54,21 @@ reset_chrome() {
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
   for _ in 1 2 3 4 5; do
     if curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
-      return 0
+      break
     fi
     sleep 2
   done
-  echo "ERROR: chrome 重启后 CDP 5s 内仍不响应" >&2
-  return 1
+  if ! curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
+    echo "ERROR: chrome 重启后 CDP 5s 内仍不响应" >&2
+    return 1
+  fi
+  # 关掉除 [0] 之外所有 stale tab. python3 拆 json (jq 不一定全装).
+  STALE_IDS="$(curl -s "http://localhost:$CDP_PORT/json" | python3 -c \
+    "import json, sys; print(' '.join(t['id'] for t in json.load(sys.stdin)[1:]))" 2>/dev/null || true)"
+  for id in $STALE_IDS; do
+    curl -s "http://localhost:$CDP_PORT/json/close/$id" >/dev/null || true
+  done
+  sleep 1
 }
 
 if [[ "$#" -gt 0 ]]; then

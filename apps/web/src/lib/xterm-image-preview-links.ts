@@ -95,9 +95,14 @@ export function registerImagePreviewLinkProvider(
           underline: true,
           pointerCursor: true,
         },
-        // 防误触: 仅在 cmd / ctrl 修饰下才打开预览。普通阅读路径文本不应触发任何动作。
+        // PC: cmd/ctrl + click 防误触, 普通 click 只是阅读路径文本不触发.
+        // 平板 / 手机触屏 (pointer: coarse) 没修饰键, tap 即触发; 平板接外置键盘
+        // 走修饰键路径也照样 work.
         activate: (event) => {
-          if (!event.metaKey && !event.ctrlKey) return;
+          const isTouchSurface = window.matchMedia(
+            "(pointer: coarse), (hover: none)",
+          ).matches;
+          if (!isTouchSurface && !event.metaKey && !event.ctrlKey) return;
           onPreview(match.path);
         },
       }));
