@@ -52,14 +52,16 @@ reset_chrome() {
   adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
   sleep 6
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
-  for _ in 1 2 3 4 5; do
+  # 头两次 spec 跑撞冷启动 emu chrome 需要 ~25s 才注册 chrome_devtools_remote;
+  # 旧 5 × 2s 过紧, 给 15 × 2s = 30s 兜底, 之后 spec 已 warm 不会等满。
+  for _ in $(seq 1 15); do
     if curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
       break
     fi
     sleep 2
   done
   if ! curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
-    echo "ERROR: chrome 重启后 CDP 5s 内仍不响应" >&2
+    echo "ERROR: chrome 重启后 CDP 30s 内仍不响应" >&2
     return 1
   fi
   # 关掉除 [0] 之外所有 stale tab. python3 拆 json (jq 不一定全装).
