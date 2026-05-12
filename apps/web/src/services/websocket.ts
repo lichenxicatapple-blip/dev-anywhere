@@ -69,6 +69,10 @@ export class WebSocketManager {
 
   private wakeReconnect(): void {
     if (this.closed || this.connected) return;
+    // 老 ws 还在 CONNECTING: 不打断它, 浏览器会输出 "WebSocket is closed before
+    // the connection is established" 警告且新建一份会跟它 race, stale 事件互相
+    // 覆盖 this.ws 直到出 InvalidStateError CONNECTING。等它自己 OPEN 或 close。
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
     // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
     this.reconnectAttempt = 0;
     this.cancelReconnectTimer();
@@ -152,7 +156,13 @@ export class WebSocketManager {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
+    // wakeReconnect / connect() 重新建链时, 老 ws 的 close / open 事件可能在新 ws
+    // 已替换 this.ws 之后才异步 fire (尤其老 ws 是 CONNECTING 被 close 时)。所有
+    // listener 都用 ws !== this.ws 早返, 避免 stale 事件污染 this.connected /
+    // this.ws / 触发额外 reconnect 导致多 ws 互相覆盖, 最终 status handler 拿到
+    // 错位的 connected 状态调 send 撞上 CONNECTING ws → InvalidStateError。
     ws.addEventListener("open", () => {
+      if (this.ws !== ws) return;
       this.connected = true;
       this.reconnectAttempt = 0;
       this.statusHandlers.forEach((h) => h(true));
@@ -160,6 +170,7 @@ export class WebSocketManager {
     });
 
     ws.addEventListener("message", (event) => {
+      if (this.ws !== ws) return;
       if (event.data instanceof ArrayBuffer) {
         this.dispatchBinary(new Uint8Array(event.data));
       } else {
@@ -169,6 +180,7 @@ export class WebSocketManager {
     });
 
     ws.addEventListener("close", () => {
+      if (this.ws !== ws) return;
       this.connected = false;
       this.ws = null;
       this.statusHandlers.forEach((h) => h(false));

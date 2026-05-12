@@ -58,6 +58,69 @@ describe("WebSocketManager", () => {
     manager.close();
   });
 
+  it("ignores open / close events from a stale ws that survived a replacing reconnect", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+
+    // FakeWebSocket.close() 默认同步 dispatch close event; 现实里 close 一个 CONNECTING
+    // ws 后浏览器会异步 fire close event, 跟下一个 ws 创建有 race。延迟到 microtask
+    // 模拟这个异步性, 才能复现"老 ws close 在新 ws 已经替换 this.ws 之后才 fire"。
+    let firePendingClose: (() => void) | null = null;
+    ws1.close = function () {
+      this.readyState = FakeWebSocket.CLOSED;
+      firePendingClose = () => this.dispatchEvent(new Event("close"));
+    };
+
+    // 第二次 connect 等价 wakeReconnect: close 老 ws + 立即 doConnect 新 ws
+    manager.connect("ws://relay/client");
+    const ws2 = sockets[1]!;
+    expect(ws2).not.toBe(ws1);
+
+    let statusObserved: boolean | null = null;
+    manager.onStatusChange((connected) => {
+      statusObserved = connected;
+      if (connected) manager.send("register");
+    });
+
+    // 触发 ws1 的 stale close: 老的 close listener 闭包持有 ws1, 但 this.ws 现在是
+    // ws2。修前: 老 listener 把 this.ws=null + scheduleReconnect → 又创建 ws3, ws2
+    // 之后 open 时 this.ws 已被覆盖, register 写到错误 ws (CONNECTING) → 线上
+    // InvalidStateError。修后: stale guard 直接 return, ws2 仍是 active。
+    firePendingClose!();
+    expect(sockets.length).toBe(2);
+
+    ws2.open();
+    expect(statusObserved).toBe(true);
+    expect(ws2.sent).toEqual(["register"]);
+
+    manager.close();
+  });
+
+  it("does not abort a still-CONNECTING ws when wakeReconnect fires", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    expect(ws1.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    // visibilitychange 在 ws1 还 CONNECTING 时触发 wakeReconnect: 旧实现会 close
+    // 老 ws (浏览器输出 "closed before connection established") + 立即 doConnect。
+    // 新实现检测 readyState=CONNECTING 时直接 return, 让 ws1 自己跑完。
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // 仍然是 ws1, 没 close, 没创建 ws2。
+    expect(sockets.length).toBe(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    manager.close();
+  });
+
   it("removes wake listeners on close so document/window do not retain the manager", () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 
