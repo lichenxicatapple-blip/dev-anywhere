@@ -319,13 +319,13 @@ web_http_ok() {
 run_real_ui_smoke() {
   local label="$1"
   echo "+ UI smoke: $label"
-  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh e2e/pc/chaos/real-chaos.spec.ts
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
 }
 
 run_relay_down_ui_smoke() {
   echo "+ UI smoke: relay down state"
   DEV_ANYWHERE_EXPECT_RELAY_DOWN=1 WEB_BASE_URL="$WEB_BASE_URL" \
-    bash scripts/test-pc.sh e2e/pc/chaos/real-chaos.spec.ts
+    bash scripts/test-pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
 }
 
 run_render_chaos_smoke() {
@@ -360,7 +360,7 @@ run_hosted_pty_exit_chaos_smoke() {
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER="$provider" \
     WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
-    e2e/pc/chaos/hosted-pty-chaos.spec.ts
+    e2e/pc/chaos/integration/hosted-pty-chaos.spec.ts
 }
 
 run_local_runtime_pty_chaos_smoke() {
@@ -371,7 +371,7 @@ run_local_runtime_pty_chaos_smoke() {
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN="$LOCAL_PTY_CHAOS_BIN" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER="$provider" \
     WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
-    e2e/pc/chaos/real-local-pty-chaos.spec.ts
+    e2e/pc/chaos/integration/real-local-pty-chaos.spec.ts
 }
 
 run_json_worker_chaos_smoke() {
@@ -379,7 +379,7 @@ run_json_worker_chaos_smoke() {
   DEV_ANYWHERE_JSON_WORKER_CHAOS=1 \
     DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD="$JSON_WORKER_CHAOS_CWD" \
     WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
-    e2e/pc/chaos/real-json-worker-chaos.spec.ts
+    e2e/pc/chaos/integration/real-json-worker-chaos.spec.ts
 }
 
 create_hosted_pty_chaos_provider() {

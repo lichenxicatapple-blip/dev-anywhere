@@ -24,7 +24,10 @@ test.describe("hosted PTY real chaos", () => {
   test(`removes a hosted ${provider} PTY session when the provider process exits under an attached Web UI`, async ({
     page,
   }) => {
-    test.skip(!enabled, "driven by scripts/dev-chaos.sh with a controlled provider binary");
+    test.skip(
+      !enabled,
+      "integration chaos: 需要 `pnpm dev:chaos` 编排起 dev backend 并注入 hosted PTY chaos provider 二进制 (DEV_ANYWHERE_HOSTED_PTY_CHAOS=1)",
+    );
 
     await page.goto("/#/sessions");
     await selectFirstProxy(page);

@@ -12,7 +12,7 @@ const relayPort = "3100";
 const proxyProfile = "local";
 const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 async function selectFirstProxy(page: Page): Promise<void> {
   const switcher = page.locator('[data-slot="proxy-switcher-trigger"]').first();
@@ -200,7 +200,10 @@ test.describe("real JSON worker chaos", () => {
   test("keeps Claude JSON worker usable across relay restart and pending approval replay", async ({
     page,
   }) => {
-    test.skip(!enabled, "driven by scripts/dev-chaos.sh with a controlled JSON worker provider");
+    test.skip(
+      !enabled,
+      "integration chaos: 需要 `pnpm dev:chaos` 编排起 backend 并注入 JSON worker chaos provider (DEV_ANYWHERE_JSON_WORKER_CHAOS=1)",
+    );
 
     const uniqueName = `dev-anywhere-json-worker-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
@@ -261,7 +264,10 @@ test.describe("real JSON worker chaos", () => {
   test("does not leave stale approval UI after proxy serve restarts during pending approval", async ({
     page,
   }) => {
-    test.skip(!enabled, "driven by scripts/dev-chaos.sh with a controlled JSON worker provider");
+    test.skip(
+      !enabled,
+      "integration chaos: 需要 `pnpm dev:chaos` 编排起 backend 并注入 JSON worker chaos provider (DEV_ANYWHERE_JSON_WORKER_CHAOS=1)",
+    );
 
     const uniqueName = `dev-anywhere-json-proxy-restart-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;

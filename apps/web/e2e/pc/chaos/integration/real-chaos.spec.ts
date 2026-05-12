@@ -20,7 +20,10 @@ test.describe("real local chaos UI", () => {
   test("keeps the real UI usable while relay duplicates, delays, and reorders control messages", async ({
     page,
   }) => {
-    test.skip(expectRelayDown, "normal usability smoke requires relay to be available");
+    test.skip(
+      expectRelayDown,
+      "integration chaos: 这条是 relay 健在时的可用性烟雾, 由 `pnpm dev:chaos` 在 chaos 阶段重启 relay 后跑 (DEV_ANYWHERE_EXPECT_RELAY_DOWN 不能为 1)",
+    );
 
     await page.goto("/#/sessions");
     await selectFirstProxy(page);
@@ -55,7 +58,10 @@ test.describe("real local chaos UI", () => {
   test("shows an understandable unavailable state when the real relay is down", async ({
     page,
   }) => {
-    test.skip(!expectRelayDown, "relay-down smoke is driven by scripts/dev-chaos.sh");
+    test.skip(
+      !expectRelayDown,
+      "integration chaos: 这条断言 relay 关闭后 UI 的不可用态, 需 `pnpm dev:chaos` 杀 relay 后驱动 (DEV_ANYWHERE_EXPECT_RELAY_DOWN=1)",
+    );
 
     await page.goto("/#/sessions");
 

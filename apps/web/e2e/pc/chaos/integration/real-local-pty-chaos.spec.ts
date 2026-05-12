@@ -16,7 +16,7 @@ const chaosRoot =
 const proxyProfile = "local";
 const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 test.setTimeout(120_000);
 
@@ -136,8 +136,11 @@ test.describe("real local runtime PTY chaos", () => {
   test(`keeps a local-terminal ${provider} PTY usable across serve restart and detach`, async ({
     page,
   }) => {
-    test.skip(!enabled, "driven by scripts/dev-chaos.sh with a controlled local PTY provider");
-    test.skip(!chaosBin, "DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN is required");
+    test.skip(
+      !enabled,
+      "integration chaos: 需要 `pnpm dev:chaos` 编排起 local PTY runtime 并注入 chaos provider (DEV_ANYWHERE_LOCAL_PTY_CHAOS=1 + DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN)",
+    );
+    test.skip(!chaosBin, "DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN missing");
 
     const uniqueName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
