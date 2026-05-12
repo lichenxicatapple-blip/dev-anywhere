@@ -1,7 +1,7 @@
 // localRuntime fixture: 起一个隔离的 relay + proxy daemon, spec 用完拆掉.
 // 端口动态拿, HOME 隔离到 /tmp/dev-anywhere-e2e-XXXX, 不动用户 ~/.dev-anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
@@ -52,6 +52,9 @@ export const test = base.extend<Record<never, never>, Fixtures>({
   localRuntime: [
     async ({}, use) => {
       const relayPort = await getFreePort();
+      // hook port 默认按 profile 名 hash, 多个 worker 用同 profile 名会撞.
+      // 动态分配, 通过 DEV_ANYWHERE_HOOK_PORT 透传给 daemon.
+      const hookPort = await getFreePort();
       const profileHome = mkdtempSync(join(HOME_BASE, HOME_PREFIX));
 
       const dotDir = join(profileHome, ".dev-anywhere");
@@ -106,13 +109,37 @@ export const test = base.extend<Record<never, never>, Fixtures>({
       const proxyStart = spawn(
         "node",
         [PROXY_DIST, "--profile", PROFILE_NAME, "serve", "start", "--relay", RELAY_NAME],
-        { cwd: REPO_ROOT, env: { ...process.env, HOME: profileHome }, stdio: ["ignore", "pipe", "pipe"] },
+        {
+          cwd: REPO_ROOT,
+          env: {
+            ...process.env,
+            HOME: profileHome,
+            DEV_ANYWHERE_HOOK_PORT: String(hookPort),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          // Playwright 父进程退出时, 默认 process group 内所有进程都收 SIGTERM. detached
+          // 让 proxyStart 启的 daemon 进自己的 group, 测试结束才不会被连带杀掉。
+          detached: true,
+        },
       );
-      captureLogs(proxyStart, "proxy-start");
+      proxyStart.unref();
+      let proxyStartStderr = "";
+      let proxyStartStdout = "";
+      proxyStart.stdout?.on("data", (b: Buffer) => {
+        proxyStartStdout += b.toString();
+      });
+      proxyStart.stderr?.on("data", (b: Buffer) => {
+        proxyStartStderr += b.toString();
+      });
       await new Promise<void>((resolveFn, reject) => {
-        proxyStart.on("exit", (code) =>
-          code === 0 ? resolveFn() : reject(new Error(`proxy serve start exited ${code}`)),
-        );
+        proxyStart.on("exit", (code) => {
+          if (code === 0) {
+            resolveFn();
+          } else {
+            const detail = `\n--- stdout ---\n${proxyStartStdout}\n--- stderr ---\n${proxyStartStderr}`;
+            reject(new Error(`proxy serve start exited ${code}${detail}`));
+          }
+        });
       });
 
       // proxy 注册成功 = relay /api/proxies 至少看到 1 条 (dev 模式无 token).
@@ -135,12 +162,30 @@ export const test = base.extend<Record<never, never>, Fixtures>({
           profileName: PROFILE_NAME,
           profileHome,
         });
+      } catch (err) {
+        // 失败时把 daemon log 拷一份到 /tmp/da-e2e-last-failure.log, 调试用 (cleanup 会 rm 原目录).
+        try {
+          const log = readFileSync(
+            join(profileHome, ".dev-anywhere/profiles/e2e/logs/service.log"),
+            "utf-8",
+          );
+          writeFileSync("/tmp/da-e2e-last-failure.log", log);
+        } catch {}
+        throw err;
       } finally {
         await new Promise<void>((r) => {
           const stop = spawn(
             "node",
             [PROXY_DIST, "--profile", PROFILE_NAME, "serve", "stop"],
-            { cwd: REPO_ROOT, env: { ...process.env, HOME: profileHome }, stdio: "ignore" },
+            {
+              cwd: REPO_ROOT,
+              env: {
+                ...process.env,
+                HOME: profileHome,
+                DEV_ANYWHERE_HOOK_PORT: String(hookPort),
+              },
+              stdio: "ignore",
+            },
           );
           stop.on("exit", () => r());
           setTimeout(() => r(), 5000).unref();
