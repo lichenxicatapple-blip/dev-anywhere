@@ -1,11 +1,11 @@
-// hostedPty fixture: localRuntime 之上加一个 mode=pty 的 session, claude PTY 由 proxy 托管.
-// 依赖真 claude CLI, 缺则 skip.
+// jsonMode fixture: localRuntime 之上加一个 mode=json 的 session, proxy spawn 出
+// session-worker, worker 跑 claude --input/output-format stream-json. 依赖真 claude CLI.
 import { execSync } from "node:child_process";
 import { test as runtimeTest } from "./local-runtime";
 import { spawnSessionViaRelay, type SessionViaRelay } from "./relay-control";
 
 interface Fixtures {
-  hostedPty: SessionViaRelay;
+  jsonMode: SessionViaRelay;
 }
 
 function claudeOnPath(): boolean {
@@ -18,13 +18,13 @@ function claudeOnPath(): boolean {
 }
 
 export const test = runtimeTest.extend<Fixtures>({
-  hostedPty: async ({ localRuntime }, use, testInfo) => {
+  jsonMode: async ({ localRuntime }, use, testInfo) => {
     if (!claudeOnPath()) {
-      testInfo.skip(true, "hostedPty fixture 需要真 claude CLI (PATH 找不到)");
+      testInfo.skip(true, "jsonMode fixture 需要真 claude CLI (PATH 找不到)");
       return;
     }
     const session = await spawnSessionViaRelay(localRuntime, {
-      mode: "pty",
+      mode: "json",
       cwd: "/tmp",
       provider: "claude",
     });
