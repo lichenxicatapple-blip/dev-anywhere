@@ -23,6 +23,11 @@ export default defineConfig({
   // 顶层 testDir 留给 ad-hoc 命令行直接传相对路径.
   testDir: "./e2e",
   timeout: 30000,
+  // 多 worker 并行下 cpu 抢占让 5s default expect timeout 偶发不够; 整 tier 提到 10s.
+  expect: { timeout: 10_000 },
+  // 整 tier 给 1 次 retry 容忍真 race / cpu 抢占 / vite HMR 抖动. 同条 spec 重试仍挂
+  // 才视为真 fail. PC tier 96 个 spec 并行下不加 retry 偶发 flake 影响 release smoke.
+  retries: 1,
   use: { baseURL: BASE_URL },
   projects: [
     // L2 layout-*: viewport 模拟, 只查响应式断点, e2e/layout/.

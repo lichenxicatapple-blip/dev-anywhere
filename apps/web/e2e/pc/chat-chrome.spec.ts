@@ -210,6 +210,7 @@ test.describe("ChatHeader compact navigation controls", () => {
 });
 
 test.describe("ChatHeader screen wake lock", () => {
+
   test("screen wake lock follows the chat page lifecycle", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installWakeLockMock(page);
