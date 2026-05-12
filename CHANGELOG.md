@@ -4,6 +4,30 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.5] - 2026-05-13
+
+### 修复
+
+- 上传文件 / 粘贴图片到 PTY 后 CLI agent (Claude Code / Codex) 看不到文件的 bug. 之前文件落在 `cwd/.dev-anywhere/{clipboard,uploads}/<sid>/` 相对路径, proxy 还会自动给 user repo 顶层 `.gitignore` 末尾追加 `.dev-anywhere/`. CLI 默认 respect `.gitignore`, 看到 `@.dev-anywhere/...` 不会读, 用户上传完 agent 没反应. 改为统一落 `os.tmpdir()/dev-anywhere/`, 返回绝对路径, 跟 user repo / `.gitignore` 完全脱钩 (commit 55ad4c4f). 文件名同时收紧到 `paste-<6 nanoid>.<ext>` / `up-<6 nanoid>.<ext>`, mention 路径长度从 ~80 字符降到 ~50.
+- 移动端 PTY / 聊天里 `@<path>` 链接范围识别错位: 中文文本里夹一个 ASCII 单词 (`logo` 等) 触发 `image-preview-path` / `file-download-path` 主干字符集 `[^\s\`"'<>]*?`, lazy 一路啃过中文 + `@` 抵达尾部 `.png`, 整段中文都被框成下划线. 主干改成严格 ASCII 路径白名单 `[A-Za-z0-9_./~%+,:=#-]` 后中文 / 全宽标点 / `@` 都挡住 (commit 8d6d6abe).
+- PTY 滚回底冻结: 输出过程中 wheel up 离开底部再滚回底, 渲染似冻结, 要点击 focus / blur 才恢复. longHost 模式 `isAtBottom = cursorInViewport`, 小幅 wheel 期间 atBottom 一直 true, `notifyAtBottom` 的 false→true 状态过渡条件不再触发, 不释放 `userHasVerticalScrollIntent`. 释放条件改为 "在底 + 还有 intent + 非触屏 + user 主动 wheel/touch/scrollbar 250ms 内", 时间窗 guard 防 reconnect 重建 controller 时 layout 重置 transient atBottom=true 错误清掉跨周期保留的回看意图 (commits 49100ade, e5fc51f4).
+- vivo Android Chrome 等 OEM 定制版点击没设 `accept` 的文件 input 时会预申请相机权限, 用户从聊天菜单点"上传文件"看到摄像头授权弹窗, 体感不好. 拆成"上传图片" + "上传文件"两条入口, accept 分别为 `image/*` 和 `application/*,text/*`, 文件路径不再触发相机授权 (commit e07ba49d).
+- WebSocket 重连竞态导致 `Failed to execute 'send' on 'WebSocket': Still in CONNECTING state` + "WebSocket is closed before the connection is established" 警告. wakeReconnect 在老 ws 还 CONNECTING 时主动 close + 立即 doConnect 新 ws, 老 ws close listener 异步 fire 时不区分 ws 实例, 把刚创建的新 ws `this.ws=null` 又 schedule 一轮重连, 多个 ws 并存互相覆盖. listener 加 stale-ws guard + wakeReconnect 检测到 CONNECTING 直接 return (commit fde0c1eb).
+- BackToBottom button 触发 "Blocked aria-hidden on element because its descendant retained focus" 警告. `aria-hidden + tabIndex=-1` 不阻止 retain focus, button 自己被 focus 后 visible 切 false 时 aria-hidden=true 违反 WAI-ARIA. 改用 `inert` (React 19 + 现代浏览器原生支持, 自动 blur stale focus + 对 AT 隐藏) (commit 40e4b07a).
+
+### 变更
+
+- 图片预览支持 wheel / pinch / drag 真正的连续缩放 + 双击复位, 拆掉 fit / actual 二档 toggle. 接 `react-zoom-pan-pinch` (~7KB gzip), 桌面 wheel cursor-anchored 缩放 + 鼠标 drag pan, 移动端双指 pinch zoom + 单指 pan, 双击 reset (commit 3f647ce9).
+- 移动端 PTY 控制条由 1 行扩到 2 行 (6 列 grid), 加 Tab / ⇧Tab / ^T / ^B 按键, 方向键按真实物理上下左右排列; chat header overflow 菜单的快捷键区域瘦身, Tab / ⇧Tab / ^T / ^C / ^B / 清空都挪到控制条, 菜单只留低频 Ctrl+O. BackToBottom 偏移同步从 4rem 调到 7rem 避免被控制条遮挡 (commit b8a9b1d3).
+- 品牌图标 SVG glyph 占画面比例从 87.5% 缩到 ~75%, 上下左右留白 ~12% 对齐 iOS 图标安全区惯例; 小尺寸 favicon / PWA install icon 边缘不再因抗锯齿像被切. `build-icons.mjs` 同时补上 `pwa-{64,192,512}.png` 三档目标, SVG 改一次全套 PNG 都同步生成. 顺手清掉死配置 `pwa-assets.config.ts` + `@vite-pwa/assets-generator` devDep (commit 1df6516e).
+
+### 工具
+
+- 图片预览缩放交互 e2e 覆盖: 桌面 wheel zoom / dblclick reset / mouse drag pan + 移动 chromium-emulation 用 CDP `Input.dispatchTouchEvent` 模拟两指 pinch (commit fc0d6016). L4 真机 image preview pinch zoom 在 `Medium_Phone_API_36.1` Android emu 上实测跑过, 跟 chromium-emulation 互补覆盖 native touch driver 路径 (commit 15a52460).
+- `scripts/check-prerequisite.sh` 错误提示从绑死阿里云改成通用文案, 容器镜像可来自任意 registry; 阿里云 vps 部署素材记录归档 (commits e8ac23de, 324de246).
+- `scripts/test-mobile.sh` 给 mobile spec 注入 `WEB_BASE_URL=$BASE_URL`, helpers 默认 5173 不再让 emu (adb reverse 只 forward 5174 + 6100) 撞 ERR_CONNECTION_REFUSED; pre-existing flake 之前靠 emu chrome 缓存 page 蒙混 (commit 3d6ab92d).
+- `e2e/pc/real-clipboard-image.spec.ts` 适配 upload 落 `os.tmpdir()` 新路径, 用前后 diff 定位本次 spec 落地的新文件, afterAll 清掉避免污染 tmp (commit 9dead2dd).
+
 ## [0.2.4] - 2026-05-12
 
 ### 修复
