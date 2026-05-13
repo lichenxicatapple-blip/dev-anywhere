@@ -77,6 +77,37 @@ test.describe("chat 页异常态展示", () => {
     await expect(page.locator('[data-slot="input-bar"][data-mode="json"]')).toHaveCount(0);
   });
 
+  test("用户主动从 chat 退到 /sessions 后, 模拟冷启动不再被 auto-restore 拽回", async ({
+    page,
+  }) => {
+    await installFakeRelay(page);
+    await selectFakeProxy(page);
+    // 进活的 chat (会自动写入 last-chat-route)
+    await page.goto(`${BASE_URL}/#/chat/json-sess?mode=json`);
+    await expect(page.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
+      timeout: 10_000,
+    });
+    // 主动离开 chat 回到 sessions: AppShell 应清掉 last-chat-route
+    await page.goto(`${BASE_URL}/#/sessions`);
+    await expect(page).toHaveURL(/#\/sessions/, { timeout: 5_000 });
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("dev-anywhere:last-chat-route")), {
+        timeout: 5_000,
+      })
+      .toBeNull();
+
+    // 模拟 PWA 冷启动: 清掉 sessionStorage 的 RESTORED 标记 + 跳到 root
+    await page.evaluate(() =>
+      sessionStorage.removeItem("dev-anywhere:route-restored"),
+    );
+    await page.goto(`${BASE_URL}/#/`);
+
+    // 由于 last-chat-route 已被清掉, AppShell 不会拽回 /chat/json-sess; 应停在 / 或 sessions
+    // (AppShell 会根据 proxy/会话状态自然推进, 但绝对不应是 chat URL)
+    await page.waitForTimeout(1_000);
+    await expect(page).not.toHaveURL(/#\/chat\//);
+  });
+
   test("proxy_offline 事件后 chat 主体被 ConnectionLostPanel(proxy) 替代", async ({ page }) => {
     await installFakeRelay(page);
     await selectFakeProxy(page);

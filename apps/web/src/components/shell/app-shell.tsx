@@ -12,6 +12,7 @@ import { getTopLevelSubtitle } from "@/lib/top-level-copy";
 import { cn } from "@/lib/utils";
 import { useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
 import {
+  clearLastChatRoute,
   hasRestoredThisSession,
   markRestoredTarget,
   markRestoredThisSession,
@@ -95,10 +96,19 @@ export function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 持续追踪当前 chat 路由, 落盘最后一次, 供下次冷启动恢复
+  // 持续追踪 chat 路由, 用户主动从 chat 离开 (chat → /sessions / chat → /) 视为放弃恢复意图,
+  // 清掉 last-chat-route, 防止下次冷启动 / PWA 拉起被拽回上一个会话。
+  // mount 时 isChatRoute=false 不算"离开" (cold-start 还没读 last-chat-route, 清了 restore 就没了);
+  // 用 ref 把 isChatRoute 从 false 起步的初始 render 跟后续 transition 区分。
+  const wasChatRouteRef = useRef(false);
   useEffect(() => {
-    if (!isChatRoute) return;
-    writeLastChatRoute(`${location.pathname}${location.search}`);
+    if (isChatRoute) {
+      wasChatRouteRef.current = true;
+      writeLastChatRoute(`${location.pathname}${location.search}`);
+    } else if (wasChatRouteRef.current) {
+      wasChatRouteRef.current = false;
+      clearLastChatRoute();
+    }
   }, [isChatRoute, location.pathname, location.search]);
 
   return (
