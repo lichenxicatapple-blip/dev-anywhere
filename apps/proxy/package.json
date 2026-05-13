@@ -1,6 +1,6 @@
 {
   "name": "@dev-anywhere/proxy",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Transparent local proxy for AI coding CLIs that bridges local sessions to a web/PWA client via a relay server.",
   "keywords": [
     "claude-code",
