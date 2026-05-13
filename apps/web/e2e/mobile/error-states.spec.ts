@@ -53,9 +53,15 @@ test.describe("L4 mobile / error UI states", () => {
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
     // 触发 agent CLI 自定义路径输入; 灌一条很长的伪路径, 验证 dialog 不水平溢出.
-    // emu Chrome 上 form 偶发 pointer event intercept, force click 跳过 actionability.
+    // emu Chrome 默认显示底部 chrome 工具栏, visual viewport 高度 (~428px) 远小于
+    // layout viewport (789px), dialog 底部按钮在 layout viewport 内 (button.top≈631) 但
+    // 落在 visual viewport 之外。playwright click 用 visual viewport 判定 actionability,
+    // 即便 force: true 也拒绝在 visual viewport 之外的 element rect 上 dispatch click。
+    // 改用 evaluate 调 native click(): 跟 user tap 等效, 不依赖 viewport intersect, 把
+    // dialog UX 验证 (横向溢出) 跟 emu Chrome chrome bar 占空间这层无关问题剥离。
     const cliPathCard = dialog.locator('[data-slot="agent-cli-path-card"]');
-    await cliPathCard.getByRole("button", { name: "指定路径" }).click({ force: true });
+    const cliPathButton = cliPathCard.getByRole("button", { name: "指定路径" });
+    await cliPathButton.evaluate((btn) => (btn as HTMLButtonElement).click());
     const cliPathInput = cliPathCard.locator('input[list^="agent-cli-path-"]');
     await expect(cliPathInput).toBeVisible();
     await cliPathInput.fill(

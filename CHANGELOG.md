@@ -11,9 +11,14 @@
 - JSON 模式发消息后只显示思考气泡, 无最终回复 (claude tool 调用场景全部受影响): `PreToolUse` hook 一直返回 `permissionDecision: "defer"`, claude CLI 2.1.140 在 `--output-format stream-json --input-format stream-json` 非交互模式下看到 `defer` 不再 fallback 到 `--permission-prompt-tool stdio` 路径, 直接以 `stop_reason: "tool_deferred"` 结束 turn — `result.result` 为空字符串, web 端只收到 `assistant_tool_use` + `turn_result`, 无最终 `assistant_message`, UI 思考气泡消失后没有任何回复, 刷新也看不到 (历史里本来就没有 assistant 文本)。改为返回 `permissionDecision: "ask"`, claude 通过 stdio 发 `control_request` (subtype=can_use_tool), 由 worker `handleControlRequest` → `approvalStrategy` → `forwardToRelay` → web 审批面板, 跟现有 broker 路径接上。`PreToolUse` hook 退回纯观察通道职责 (forward agent_status phase=tool_use), 决策权交给 stdio control 流 (commit TBD).
 - PTY 远端持续输出时用户向上滚动会被自动跳回底部 (PC + 移动端同症): longHost 模式 (host > viewport, 长会话 / 高 rows / 小字号默认走) 下 `isAtBottom = cursorInViewport`, 与几何 scrollTop 解耦。用户小幅 wheel up 后 cursor 仍在 viewport → atBottom 保持 true, `notifyAtBottom` 旧逻辑误判为"已回到底"立刻清掉刚 set 的 `userHasVerticalScrollIntent`, 下一帧 `handlePendingNewFrame` 见 !intent 触发 `scrollToBottom`。改为方向感知释放: `notifyAtBottom` 只通知 atBottom 变化, intent 释放下沉到 `scrollByWheelDelta` / `onContainerScroll` / `onTouchEnd`, 仅当用户主动向下滚 (`next > previous`) 抵达 atBottom 时清。`scrollByWheelDelta` 增加 clamp guard: 边界处 scrollTop 未实际变化时不重置 intent, 避免在底反复 wheel down 重新 pause output 导致后续帧无法 flush (commit TBD).
 
+### 变更
+
+- 新建会话 Dialog mobile 端阻止 Radix 默认 autofocus 首个 input。之前打开 dialog 立刻 focus "名称" 触发系统软键盘弹起, visual viewport 被键盘吃掉 ~300px, dialog 下半 (Agent CLI / 权限模式 / 创建按钮) 落在键盘下方, 用户在 emu Chrome 实际触屏上按不到。`DialogContent` 加 `onOpenAutoFocus={preventDefault}`, focus 留在 trigger button, ESC 仍可关闭, Tab 链路正常 (commit TBD).
+
 ### 工具
 
 - `pty-scroll-controller.test.ts` 加 longHost wheel up 不清 intent + wheel down 到底清 intent 两条单测; `e2e/pc/pty-scroll.spec.ts` 加 longHost (rows=60 强制 host > viewport) wheel up + 远端持续输出 deterministic 复现, 3x repeat 全过, 跟 `pty-scrollback-resume` (滚回底冻结) 互不干扰.
+- `e2e/mobile/error-states.spec.ts` 长 CLI 路径 spec 的 "指定路径" button click 改用 `evaluate(btn => btn.click())` 调 native click, 不走 playwright 的 visual viewport actionability。emu Chrome 默认显示底部工具栏, visual viewport (~428px) 远小于 layout viewport (~789px), dialog 底部按钮在 layout 内但 visual viewport 之外, playwright force=true 也拒绝在 visual viewport 之外 dispatch click。dialog UX 验证 (横向溢出) 跟 emu Chrome chrome bar 占空间这层无关问题剥离 (commit TBD).
 
 ## [0.2.6] - 2026-05-13
 
