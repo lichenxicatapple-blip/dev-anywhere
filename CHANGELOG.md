@@ -18,11 +18,17 @@
 ### 修复
 
 - 设置 → 版本页 Web 字段在 package.json 版本 bump 后仍显示旧版本: `__APP_VERSION__` 是 vite `define` 启动时静态注入, dev server 不重启不会重新计算. 改为 `settings-dialog.tsx` 直接 `import packageInfo from "../../../package.json" with { type: "json" }`, 走 vite 模块依赖图 + HMR, package.json 改一次就跟着变 (commit e9bd93dd).
+- ConnectionLostPanel 替代 chat 主体导致 PTY 视图 unmount: relay 短暂 hiccup 时 `ChatPtyView` 不渲染 → xterm 实例销毁 + BackToBottom hasNewMessages 等组件状态丢失, 重连后用户期待续上的状态没了. 改为 panel `absolute inset-0 z-30` 浮在 chat 主体上层, chat 主体保留 mounted, 重连后 panel 消失自然续上. websocket-chaos.spec.ts "force-follow PTY output after reconnect" 红回绿 (commit f427316f).
+- 用户主动从 chat 退到 `/sessions` 或顶层后, `dev-anywhere:last-chat-route` 仍留在 localStorage, PWA 冷启 / 关 tab 重开会被 auto-restore 拽回上一个 chat, 与用户主动离开的意图相反. AppShell 加 `wasChatRouteRef` 跟踪 isChatRoute transition, true → false 时清掉 last-chat-route. mount 起步 false 不算 transition, route-restore 冷启动仍能用 lastRoute 恢复 (commit cbb9f2ab).
 
 ### 工具
 
 - e2e helpers `setProxyOnline(online)`: 通过 fake-relay 同步 proxy 在线状态 (推 `proxy_offline` / `proxy_online` 事件 + 后续 `proxy_list_response` 在线字段也跟随), 让 chat 异常态 spec 可重现 — 之前只推事件、后续 list 还报 online:true 会让 phase-machine 把 proxyOnline 又翻回 true (commit 7bf329c9).
-- e2e 新增覆盖 chat 异常态: PC `chat-presentation.spec.ts` 5 条 (auto-restore 死会话静默退 / 仍活的不跳 / 用户主动 URL 不静默 / relay 断 / proxy 离线) + L4 真机 `chat-presentation.spec.ts` 2 条 (PWA 冷启动场景 + 移动视口 panel 无水平溢出). PC `pty-input.spec.ts` / L4 `pty-mobile-controls.spec.ts` 同步加 ^S touch target + raw 序列断言 (commits 7bf329c9, 9b515a91).
+- e2e 新增覆盖 chat 异常态: PC `chat-presentation.spec.ts` 6 条 (auto-restore 死会话静默退 / 仍活的不跳 / 用户主动 URL 不静默 / 主动离开 chat 后冷启不拽回 / relay 断 / proxy 离线) + L4 真机 `chat-presentation.spec.ts` 2 条 (PWA 冷启动场景 + 移动视口 panel 无水平溢出). PC `pty-input.spec.ts` / L4 `pty-mobile-controls.spec.ts` 同步加 ^S touch target + raw 序列断言 (commits 7bf329c9, cbb9f2ab, 9b515a91).
+
+### 清理
+
+- 删 `STORAGE_KEYS.sessionId` / `sessionMode` 两个死键: source 里只有 read + remove, 永没 write 路径. phase-machine 冷启动 / proxy_selecting+online 两处 savedSessionId 恢复路径读到永远 null, 走的是 else 分支. 删掉 key 和对应 read / remove / 路径分支后逻辑等价, `route-restore` (last-chat-route) 是唯一在工作的冷启动恢复机制. `cleanStorageForPhaseTransition` 仅保留 proxyId 清理 (commit 0f286501).
 
 ## [0.2.5] - 2026-05-13
 
