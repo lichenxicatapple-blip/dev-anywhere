@@ -20,6 +20,7 @@
 - 设置 → 版本页 Web 字段在 package.json 版本 bump 后仍显示旧版本: `__APP_VERSION__` 是 vite `define` 启动时静态注入, dev server 不重启不会重新计算. 改为 `settings-dialog.tsx` 直接 `import packageInfo from "../../../package.json" with { type: "json" }`, 走 vite 模块依赖图 + HMR, package.json 改一次就跟着变 (commit e9bd93dd).
 - ConnectionLostPanel 替代 chat 主体导致 PTY 视图 unmount: relay 短暂 hiccup 时 `ChatPtyView` 不渲染 → xterm 实例销毁 + BackToBottom hasNewMessages 等组件状态丢失, 重连后用户期待续上的状态没了. 改为 panel `absolute inset-0 z-30` 浮在 chat 主体上层, chat 主体保留 mounted, 重连后 panel 消失自然续上. websocket-chaos.spec.ts "force-follow PTY output after reconnect" 红回绿 (commit f427316f).
 - 用户主动从 chat 退到 `/sessions` 或顶层后, `dev-anywhere:last-chat-route` 仍留在 localStorage, PWA 冷启 / 关 tab 重开会被 auto-restore 拽回上一个 chat, 与用户主动离开的意图相反. AppShell 加 `wasChatRouteRef` 跟踪 isChatRoute transition, true → false 时清掉 last-chat-route. mount 起步 false 不算 transition, route-restore 冷启动仍能用 lastRoute 恢复 (commit cbb9f2ab).
+- PTY 横向滚动被光标拉回: 横向溢出场景 (长行 + 短宽视窗), 用户主动横向滚到光标视窗外后, 任意一次 PTY 输出 / cursor blink 触发 onRender → `followCursorX` 无条件 snap scrollLeft 回光标位置, 用户感受到"无形力量"。`followCursorY` 早就有 `userHasVerticalScrollIntent` 兜底, 横向缺这条对称机制。加 `userHasHorizontalScrollIntent` + `pendingFollowCursorScrollLeft` + `lastSeenScrollLeft`, `onContainerScroll` 区分用户主动滚 vs followCursorX 自己写, 用户 intent 设了之后 followCursorX 不再 snap; 看到光标 in viewport (用户滚回光标可见范围) 时清掉 intent 重新 engage (commit 029b95c9).
 
 ### 工具
 
