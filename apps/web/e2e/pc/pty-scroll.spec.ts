@@ -116,6 +116,79 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       .toBeGreaterThanOrEqual(2);
   });
 
+  // longHost 模式 (rows*cellH > visible content height) 下, isAtBottom = cursorInViewport。
+  // 用户 wheel up 一小段, cursor 仍可见 → atBottom 仍 true → bug 版 notifyAtBottom
+  // 立刻清掉 intent → output flush → scrollToBottom 拉回。
+  test("keeps user-scrolled position when remote keeps outputting after a small wheel-up (longHost)", async ({
+    page,
+  }) => {
+    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await expectPtyTerminalMounted(page);
+
+    // 拉到 longHost: rows=80 强制 hostHeight (rows*cellH) > container.clientHeight。
+    // PC 默认 viewport ~720, cellH ~19 → 24 行 host=456 还在 short-host;  60 行 host=1140 进 longHost。
+    await page.evaluate(() => {
+      window.__ptySmoke.resize(80, 60);
+    });
+    // 等 PTY 真的 resize 完: container.clientHeight 不动, 但 spacer.scrollHeight 跟 rows 走。
+    // 必须按 sessionId 取 terminal — describe 跑多 spec 时 __ccTestPtyTerminals 会留旧 entry。
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
+          SESSION_ID,
+        ),
+      )
+      .toBe(60);
+
+    // 输出大量行让 buffer.length > rows, 触发 longHost mode
+    await page.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from({ length: 80 }, (_, i) => `output line ${String(i).padStart(3, "0")}\r\n`).join(
+          "",
+        ),
+      );
+    });
+
+    const terminal = page.locator('[data-slot="pty-terminal"]');
+    await expect
+      .poll(() =>
+        terminal.evaluate((el) => {
+          const node = el as HTMLElement;
+          return node.scrollHeight - node.clientHeight;
+        }),
+      )
+      .toBeGreaterThan(100);
+
+    // wheel up 小幅 — cursor 应仍在 viewport (longHost: 60 rows host > viewport, 但
+    // viewport 末尾通常贴着光标行, 小 wheel 不会把 cursor 推出视野)
+    await terminal.hover();
+    await page.mouse.wheel(0, -80);
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
+      .toBeGreaterThan(0);
+    const scrollTopAfterWheel = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+
+    // 远端继续输出: bug 版本 → notifyAtBottom 误清 intent → flushOutput → scrollToBottom 拉回
+    for (let i = 0; i < 8; i++) {
+      await page.evaluate((idx) => {
+        window.__ptySmoke.sendPty(`continuous output ${idx}\r\n`);
+      }, i);
+    }
+    await page.waitForTimeout(400);
+
+    const afterOutput = await terminal.evaluate((el) => {
+      const node = el as HTMLElement;
+      return {
+        scrollTop: node.scrollTop,
+        max: node.scrollHeight - node.clientHeight,
+      };
+    });
+    // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, 但 scrollTop 跟着新 max 应保留
+    // 用户原本停留的相对位置, 至少与原 scrollTopAfterWheel 不差太多)
+    expect(afterOutput.scrollTop).toBeLessThan(afterOutput.max - 30);
+  });
+
   test("does not pin users to bottom when PTY output arrives during native touch scroll", async ({
     page,
   }) => {

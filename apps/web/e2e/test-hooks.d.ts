@@ -72,6 +72,7 @@ declare global {
     __ccTestPtyTerminals?: Map<
       string,
       {
+        rows: number;
         buffer: {
           active: {
             viewportY: number;

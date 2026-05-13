@@ -92,14 +92,10 @@ export function attachPtyScrollController(
   let lastAtBottom: boolean | null = null;
   let lastScrollStateKey = "";
   let userHasVerticalScrollIntent = initialUserHasVerticalScrollIntent;
-  // user 最近主动 scroll (wheel / touch / scrollbar drag) 的时间戳。notifyAtBottom
-  // 释放 intent 必须落在这个时间窗内, 否则 reconnect 后 layout 重置触发的 transient
-  // isAtBottom=true 会错误清掉跨周期保留的回看意图。
-  let lastUserScrollAt = -Infinity;
-  const USER_SCROLL_INTENT_WINDOW_MS = 250;
   let pendingProgrammaticScrollTop: number | null = null;
   let touchScrollActive = false;
   let touchStartY: number | null = null;
+  let touchStartScrollTop: number | null = null;
   let touchReviewNotified = false;
   let lastSpacerUpdateAt: number | null = null;
   // cellH=0 时 syncContainerScroll 早返回不能动 host/viewportY,但用户的 scrollTop 已经
@@ -120,6 +116,11 @@ export function attachPtyScrollController(
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
   let userHasHorizontalScrollIntent = false;
   let lastSeenScrollLeft = 0;
+  // 纵向同样需要"用户向下滚到底"的方向判定来释放 intent。longHost 模式下
+  // isAtBottom = cursorInViewport, 用户小幅 wheel up 时 cursor 仍可见 → atBottom 仍 true,
+  // 仅看 atBottom + 时间窗会把刚 set 的 intent 立刻清掉。改成跟 onContainerScroll 拿到的
+  // delta 比对: 只有 scrollTop 真的增大且抵达 atBottom 时才认为用户主动收起回看意图。
+  let lastSeenScrollTop = 0;
   // 进入页面时按"几何贴底"一次定锚 (终端心智), 之后只在"光标行真的变了"时让
   // followCursorY 接管把光标拉回视野。无变动的 onRender 帧 (focus 切换 / theme 重绘 /
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
@@ -185,16 +186,6 @@ export function attachPtyScrollController(
 
   const notifyAtBottom = (): void => {
     const next = getCurrentAnchor().isAtBottom;
-    // 在底 + 仍有 intent + 不在 touch + user 刚刚主动 scroll → 清 intent。
-    // 不要求 false → true 过渡: longHost 模式下 isAtBottom = cursorInViewport, 小幅 wheel
-    // (光标仍在视野) atBottom 一直是 true, 旧条件 (lastAtBottom === false) 永远不成立,
-    // intent 一旦被 wheel set 就清不掉, output 永久 paused。
-    // lastUserScrollAt 时间窗守护 reconnect 重建时 layout 误判的 transient atBottom=true,
-    // 那种情况没 user 操作不该清掉跨周期保留的回看意图。
-    const userJustScrolled = performance.now() - lastUserScrollAt < USER_SCROLL_INTENT_WINDOW_MS;
-    if (next && userHasVerticalScrollIntent && !touchScrollActive && userJustScrolled) {
-      setUserHasVerticalScrollIntent(false);
-    }
     if (lastAtBottom === next) return;
     lastAtBottom = next;
     onAtBottomChange?.(next);
@@ -275,7 +266,6 @@ export function attachPtyScrollController(
 
   const scrollToRatio = (ratio: number): void => {
     trace("scroll-to-ratio:start");
-    lastUserScrollAt = performance.now();
     setUserHasVerticalScrollIntent(true);
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const clamped = Math.max(0, Math.min(1, ratio));
@@ -288,15 +278,23 @@ export function attachPtyScrollController(
     trace("wheel");
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     if (maxScrollTop <= 0) return;
-    lastUserScrollAt = performance.now();
-    setUserHasVerticalScrollIntent(true);
-    const next = Math.max(0, Math.min(maxScrollTop, container.scrollTop + deltaY));
-    if (next === container.scrollTop) {
+    const previous = container.scrollTop;
+    const next = Math.max(0, Math.min(maxScrollTop, previous + deltaY));
+    if (next === previous) {
+      // 已经 clamp 到边界 (顶 / 底), 真实 scrollTop 不动 — 不该把 intent 再 set 一遍,
+      // 否则用户在底反复 wheel down 会把 output 重新 pause。
       notifyScroll();
       return;
     }
+    setUserHasVerticalScrollIntent(true);
     container.scrollTop = next;
+    lastSeenScrollTop = next;
     syncContainerScroll();
+    // 向下滚到底 (next > previous 且抵达 atBottom) 释放 intent。向上滚不清, 即便
+    // longHost 模式下 cursor 仍可见 (atBottom 仍 true)。
+    if (next > previous && getCurrentAnchor().isAtBottom) {
+      setUserHasVerticalScrollIntent(false);
+    }
   };
 
   const scrollToXRatio = (ratio: number): void => {
@@ -418,6 +416,10 @@ export function attachPtyScrollController(
       pendingFollowCursorScrollLeft = null;
       lastSeenScrollLeft = container.scrollLeft;
     }
+    // 纵向 delta: 区分用户主动向下滚 vs 向上滚, 用于 intent 释放方向判定。每条
+    // scroll 事件都更新 lastSeen, 程序化与用户路径共用。
+    const verticalDelta = container.scrollTop - lastSeenScrollTop;
+    lastSeenScrollTop = container.scrollTop;
     if (syncing.external) {
       notifyScroll();
       return;
@@ -447,6 +449,12 @@ export function attachPtyScrollController(
     pendingProgrammaticScrollTop = null;
     if (!atBottom) {
       setUserHasVerticalScrollIntent(true);
+    } else if (verticalDelta > 0 && userHasVerticalScrollIntent && !touchScrollActive) {
+      // 仅当用户主动向下滚 (delta > 0) 抵达 atBottom 时释放 intent, 让 output 重新跟随。
+      // 向上滚 (delta < 0 或 0) 不清, 即便几何上 cursor 仍在 viewport (longHost 边界场景)。
+      // touchScrollActive 期间不在这里释放, 由 onTouchEnd 单独按 touchstart→touchend 的
+      // scrollTop 净位移判定。
+      setUserHasVerticalScrollIntent(false);
     }
     syncContainerScroll();
   };
@@ -613,8 +621,8 @@ export function attachPtyScrollController(
   const onTouchStart = (event: TouchEvent): void => {
     touchScrollActive = true;
     touchStartY = event.touches?.[0]?.clientY ?? null;
+    touchStartScrollTop = container.scrollTop;
     touchReviewNotified = false;
-    lastUserScrollAt = performance.now();
     setUserHasVerticalScrollIntent(true);
     trace("touchstart");
   };
@@ -622,7 +630,6 @@ export function attachPtyScrollController(
   const onTouchMove = (event: TouchEvent): void => {
     const currentY = event.touches?.[0]?.clientY ?? null;
     trace("touchmove");
-    lastUserScrollAt = performance.now();
     if (touchStartY === null || currentY === null) return;
     if (Math.abs(currentY - touchStartY) < 8 || touchReviewNotified) return;
     touchReviewNotified = true;
@@ -633,7 +640,19 @@ export function attachPtyScrollController(
   const onTouchEnd = (): void => {
     touchScrollActive = false;
     touchStartY = null;
+    // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
+    // 用于 onContainerScroll 的 touchScrollActive 期间跳过释放后的兜底。
+    const startScrollTop = touchStartScrollTop;
+    touchStartScrollTop = null;
     touchReviewNotified = false;
+    if (
+      startScrollTop !== null &&
+      container.scrollTop > startScrollTop &&
+      userHasVerticalScrollIntent &&
+      getCurrentAnchor().isAtBottom
+    ) {
+      setUserHasVerticalScrollIntent(false);
+    }
     notifyAtBottom();
     trace("touchend");
   };

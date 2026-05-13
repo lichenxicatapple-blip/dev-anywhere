@@ -4,6 +4,16 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.7] - 2026-05-13
+
+### 修复
+
+- PTY 远端持续输出时用户向上滚动会被自动跳回底部 (PC + 移动端同症): longHost 模式 (host > viewport, 长会话 / 高 rows / 小字号默认走) 下 `isAtBottom = cursorInViewport`, 与几何 scrollTop 解耦。用户小幅 wheel up 后 cursor 仍在 viewport → atBottom 保持 true, `notifyAtBottom` 旧逻辑误判为"已回到底"立刻清掉刚 set 的 `userHasVerticalScrollIntent`, 下一帧 `handlePendingNewFrame` 见 !intent 触发 `scrollToBottom`。改为方向感知释放: `notifyAtBottom` 只通知 atBottom 变化, intent 释放下沉到 `scrollByWheelDelta` / `onContainerScroll` / `onTouchEnd`, 仅当用户主动向下滚 (`next > previous`) 抵达 atBottom 时清。`scrollByWheelDelta` 增加 clamp guard: 边界处 scrollTop 未实际变化时不重置 intent, 避免在底反复 wheel down 重新 pause output 导致后续帧无法 flush (commit TBD).
+
+### 工具
+
+- `pty-scroll-controller.test.ts` 加 longHost wheel up 不清 intent + wheel down 到底清 intent 两条单测; `e2e/pc/pty-scroll.spec.ts` 加 longHost (rows=60 强制 host > viewport) wheel up + 远端持续输出 deterministic 复现, 3x repeat 全过, 跟 `pty-scrollback-resume` (滚回底冻结) 互不干扰.
+
 ## [0.2.6] - 2026-05-13
 
 ### 新增

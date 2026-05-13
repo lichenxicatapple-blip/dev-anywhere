@@ -643,6 +643,77 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
   });
 
+  // longHost 模式下 (host > viewport, 移动端 / 高 rows / 小字号), isAtBottom = cursorInViewport。
+  // 用户 wheel up 一小段, cursor 仍在 viewport, atBottom 仍 true。bug 版 notifyAtBottom
+  // 把 "atBottom + userJustScrolled + intent" 当成 "用户已回到底", 立刻清掉 intent;
+  // 紧接而来的 PTY 输出走 handlePendingNewFrame → scrollToBottom 拉回, 用户感受到无形力量。
+  // 修复语义: intent 释放只在用户主动向下滚到底时触发, 向上滚永远不清。
+  it("does not release vertical scroll intent on a small wheel-up that keeps cursor visible (longHost)", () => {
+    const { container, spacer, host } = createDom();
+    // 让 visibleContentHeight (container.clientHeight) < hostHeight (rows*cellH=20*20=400)
+    // 进入 longHost 分支
+    defineSize(container, { clientHeight: 300 });
+    defineScrollHeight(container, 2000);
+    const { terminal } = createTerminal({ 19: "prompt" });
+    terminal.buffer.active.cursorY = 0;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    // attachPtyScrollController 起手 scrollToBottom, viewportY=80 (maxYdisp), scrollTop=1600。
+    // cursor 像素位置 = 80 * 20 = 1600, viewport [1600, 1900), cursorInViewport=true。
+
+    onUserVerticalScrollIntentChange.mockClear();
+
+    // wheel up 100px — viewport 变 [1500, 1800), cursor 1600 仍在区间内 → atBottom=true,
+    // userJustScrolled=true。bug 版会把 intent 清回 false。
+    const event = new WheelEvent("wheel", { deltaY: -100, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
+    const calls = onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0]);
+    expect(calls).not.toContain(false);
+  });
+
+  // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。
+  it("releases vertical scroll intent when user wheels down back to bottom", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 300 });
+    defineScrollHeight(container, 2000);
+    const { terminal } = createTerminal({ 19: "prompt" });
+    terminal.buffer.active.cursorY = 0;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    // wheel up 让 intent 进入 true, scrollTop 1600 → 1300
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -300, cancelable: true }));
+    onUserVerticalScrollIntentChange.mockClear();
+
+    // wheel down 把 scrollTop 拉回 1600 (光标 1600 仍在 viewport, atBottom=true 保持)
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, cancelable: true }));
+
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+  });
+
   it("owns wheel scrolling instead of leaving it to xterm internals", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
