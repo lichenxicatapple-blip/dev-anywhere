@@ -3,8 +3,6 @@ type StorageKind = "local" | "session";
 export const STORAGE_KEYS = {
   clientId: "dev_anywhere_clientId",
   proxyId: "dev_anywhere_proxyId",
-  sessionId: "dev_anywhere_sessionId",
-  sessionMode: "dev_anywhere_sessionMode",
   ptyFontSize: "dev_anywhere_ptyFontSize",
   chatContentFontSize: "dev_anywhere_chatContentFontSize",
   sidebarCollapsed: "dev_anywhere_sidebarCollapsed",

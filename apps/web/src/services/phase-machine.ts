@@ -7,12 +7,7 @@ import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
-import {
-  readStorageValue,
-  removeStorageValue,
-  STORAGE_KEYS,
-  writeStorageValue,
-} from "@/lib/storage-keys";
+import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 
 export interface Timers {
   reconnect: ReturnType<typeof setTimeout> | null;
@@ -207,26 +202,11 @@ export async function handleRelayMessage(
           const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
           useAppStore.getState().setProxy(savedProxyId, proxyInfo?.name || null);
           useAppStore.getState().setProxyOnline(true);
-          // 冷启动绑定成功后拉取 session 列表 + 历史
+          // 冷启动绑定成功后拉取 session 列表 + 历史; 路由由 route-restore (AppShell)
+          // 按 last-chat-route 决定, 这里只推进 phase 状态。
           requestProxyState(relay);
           requestSessionHistory(relay);
-          const savedSessionId = readStorageValue("local", STORAGE_KEYS.sessionId);
-          const currentHash = window.location.hash;
-          const sessionStillExists =
-            savedSessionId && proxyInfo?.sessions?.includes(savedSessionId);
-          if (savedSessionId && sessionStillExists) {
-            const mode = readStorageValue("local", STORAGE_KEYS.sessionMode) || "json";
-            useAppStore.getState().setPhase("chatting");
-            if (!currentHash.includes("/chat/")) {
-              router.navigate(`/chat/${savedSessionId}?mode=${mode}`);
-            }
-          } else {
-            if (savedSessionId && !sessionStillExists) {
-              removeStorageValue("local", STORAGE_KEYS.sessionId);
-              removeStorageValue("local", STORAGE_KEYS.sessionMode);
-            }
-            useAppStore.getState().setPhase("session_browsing");
-          }
+          useAppStore.getState().setPhase("session_browsing");
           return;
         }
         timers.coldStartDone = false;
@@ -254,16 +234,8 @@ export async function handleRelayMessage(
       if (s.phase === "proxy_selecting" && selected?.online) {
         const restored = await restoreSelectedProxyBinding(relay, selected);
         if (restored) {
-          const savedSessionId = readStorageValue("local", STORAGE_KEYS.sessionId);
-          const sessionStillExists = savedSessionId && selected.sessions?.includes(savedSessionId);
-          if (savedSessionId && sessionStillExists) {
-            const mode = readStorageValue("local", STORAGE_KEYS.sessionMode) || "json";
-            useAppStore.getState().transitionToPhase("chatting");
-            router.navigate(`/chat/${savedSessionId}?mode=${mode}`);
-          } else {
-            useAppStore.getState().transitionToPhase("session_browsing");
-            router.navigate("/sessions");
-          }
+          useAppStore.getState().transitionToPhase("session_browsing");
+          router.navigate("/sessions");
         }
         return;
       }

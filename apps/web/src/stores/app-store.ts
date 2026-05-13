@@ -78,13 +78,9 @@ function loadClientId(): string {
   return id;
 }
 
-function cleanStorageForPhaseTransition(prev: AppPhase, next: AppPhase): void {
+function cleanStorageForPhaseTransition(_prev: AppPhase, next: AppPhase): void {
   if (next === "proxy_selecting") {
     removeStorageValue("local", STORAGE_KEYS.proxyId);
-    removeStorageValue("local", STORAGE_KEYS.sessionId);
-  }
-  if (next === "session_browsing" && prev === "chatting") {
-    removeStorageValue("local", STORAGE_KEYS.sessionId);
   }
 }
 
