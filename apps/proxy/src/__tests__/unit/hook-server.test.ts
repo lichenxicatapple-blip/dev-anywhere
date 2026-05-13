@@ -183,10 +183,14 @@ describe("HookServer", () => {
     });
 
     expect(response.status).toBe(200);
+    // claude CLI 2.1.140 在 PreToolUse 看到 "defer" 会直接结束 turn (stop_reason="tool_deferred",
+    // result.result=""), UI 仅收到 assistant_tool_use + turn_result, 无最终 assistant_message。
+    // 改 "ask" 让 claude 走 stdio control_request 路径, 由 worker handleControlRequest →
+    // approvalStrategy → forwardToRelay → web 审批面板, 跟 hook 观察通道职责剥离。
     await expect(response.json()).resolves.toEqual({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
-        permissionDecision: "defer",
+        permissionDecision: "ask",
       },
     });
     expect(permissionBroker.listSession("s1")).toHaveLength(0);

@@ -8,6 +8,7 @@
 
 ### 修复
 
+- JSON 模式发消息后只显示思考气泡, 无最终回复 (claude tool 调用场景全部受影响): `PreToolUse` hook 一直返回 `permissionDecision: "defer"`, claude CLI 2.1.140 在 `--output-format stream-json --input-format stream-json` 非交互模式下看到 `defer` 不再 fallback 到 `--permission-prompt-tool stdio` 路径, 直接以 `stop_reason: "tool_deferred"` 结束 turn — `result.result` 为空字符串, web 端只收到 `assistant_tool_use` + `turn_result`, 无最终 `assistant_message`, UI 思考气泡消失后没有任何回复, 刷新也看不到 (历史里本来就没有 assistant 文本)。改为返回 `permissionDecision: "ask"`, claude 通过 stdio 发 `control_request` (subtype=can_use_tool), 由 worker `handleControlRequest` → `approvalStrategy` → `forwardToRelay` → web 审批面板, 跟现有 broker 路径接上。`PreToolUse` hook 退回纯观察通道职责 (forward agent_status phase=tool_use), 决策权交给 stdio control 流 (commit TBD).
 - PTY 远端持续输出时用户向上滚动会被自动跳回底部 (PC + 移动端同症): longHost 模式 (host > viewport, 长会话 / 高 rows / 小字号默认走) 下 `isAtBottom = cursorInViewport`, 与几何 scrollTop 解耦。用户小幅 wheel up 后 cursor 仍在 viewport → atBottom 保持 true, `notifyAtBottom` 旧逻辑误判为"已回到底"立刻清掉刚 set 的 `userHasVerticalScrollIntent`, 下一帧 `handlePendingNewFrame` 见 !intent 触发 `scrollToBottom`。改为方向感知释放: `notifyAtBottom` 只通知 atBottom 变化, intent 释放下沉到 `scrollByWheelDelta` / `onContainerScroll` / `onTouchEnd`, 仅当用户主动向下滚 (`next > previous`) 抵达 atBottom 时清。`scrollByWheelDelta` 增加 clamp guard: 边界处 scrollTop 未实际变化时不重置 intent, 避免在底反复 wheel down 重新 pause output 导致后续帧无法 flush (commit TBD).
 
 ### 工具
