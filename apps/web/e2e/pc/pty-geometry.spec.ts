@@ -71,6 +71,52 @@ test.describe("PTY geometry edges", () => {
     expect(metrics?.viewportY).toBe(metrics?.baseY);
   });
 
+  // 用户横向滚动后, followCursorX 不应在 onRender 时把 scrollLeft 拉回光标位置。
+  // bug 表现 (修复前): 横向溢出场景, 用户主动滚到光标视窗外, 任意一次 PTY 输出 /
+  // cursor blink 触发 onRender, scrollLeft 被强行写回光标位置, 用户感受到"无形力量"。
+  test("does not snap horizontal scroll back to cursor after user scrolls away", async ({
+    page,
+  }) => {
+    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await expectPtyTerminalMounted(page);
+
+    // 撑横向 overflow (spacer 2000px), cursor 默认在 col 0 / cursorPxX=0
+    await page.evaluate(() => {
+      const spacer = document.querySelector<HTMLElement>('[data-slot="pty-spacer"]');
+      if (!spacer) throw new Error("pty-spacer not mounted");
+      spacer.style.width = "2000px";
+      spacer.style.minWidth = "2000px";
+    });
+
+    const terminal = page.locator('[data-slot="pty-terminal"]');
+    await expect
+      .poll(() =>
+        terminal.evaluate(
+          (el) => (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth,
+        ),
+      )
+      .toBe(true);
+
+    // 用户主动横向滚到中段 — viewport 不再包含 col 0 (cursor 所在位置)
+    const userScrollLeft = 500;
+    await terminal.evaluate((el, target) => {
+      (el as HTMLElement).scrollLeft = target;
+    }, userScrollLeft);
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBe(userScrollLeft);
+
+    // 触发若干 onRender — PTY 增量输出会让 cursor 从 col 0 推进到 col N。N 仍小于 viewport
+    // 起始 (scrollLeft=500) → cursor 不在 viewport 内 → bug 版本 followCursorX 会强行 snap 回。
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.__ptySmoke.sendPty("B"));
+    }
+
+    await page.waitForTimeout(300);
+    const finalScrollLeft = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
+    expect(finalScrollLeft).toBe(userScrollLeft);
+  });
+
   // PTY 容器横向有 overflow 时, 鼠标拖拽到边缘应该自动横向滚屏。
   //
   // 这条 e2e 钉死容器层的可观测行为 (scrollLeft 真的动了, autoscroll 模块在真 DOM 真

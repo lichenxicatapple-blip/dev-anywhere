@@ -112,6 +112,14 @@ export function attachPtyScrollController(
   // !atBottom 会被解释成"用户回看"并把 intent 置 true,下次 followCursorY 就被 intent 卡住。
   // 用这个 mark 把"我们刚刚程序化滚到这里"这条信息透传给 onContainerScroll,让它别误判。
   let pendingFollowCursorScrollTop: number | null = null;
+  // 横向同样需要区分 "我们刚刚 followCursorX 改 scrollLeft" vs "用户主动横向滚",
+  // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
+  // 误把这次改写当成用户滚动 → 状态错乱。
+  let pendingFollowCursorScrollLeft: number | null = null;
+  // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
+  // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
+  let userHasHorizontalScrollIntent = false;
+  let lastSeenScrollLeft = 0;
   // 进入页面时按"几何贴底"一次定锚 (终端心智), 之后只在"光标行真的变了"时让
   // followCursorY 接管把光标拉回视野。无变动的 onRender 帧 (focus 切换 / theme 重绘 /
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
@@ -397,6 +405,19 @@ export function attachPtyScrollController(
 
   const onContainerScroll = (): void => {
     trace("container-scroll");
+    // 横向 scroll 意图检测: 跟 followCursorX 的程序化写入区分。我们刚改 scrollLeft
+    // 不算 user intent; 其它路径下 scrollLeft 与上次记录不同 → 视为用户主动横向滚动。
+    const horizontalChanged = container.scrollLeft !== lastSeenScrollLeft;
+    if (horizontalChanged) {
+      const isPendingFollowCursorScrollLeft =
+        pendingFollowCursorScrollLeft !== null &&
+        Math.abs(container.scrollLeft - pendingFollowCursorScrollLeft) <= 1;
+      if (!isPendingFollowCursorScrollLeft) {
+        userHasHorizontalScrollIntent = true;
+      }
+      pendingFollowCursorScrollLeft = null;
+      lastSeenScrollLeft = container.scrollLeft;
+    }
     if (syncing.external) {
       notifyScroll();
       return;
@@ -539,7 +560,8 @@ export function attachPtyScrollController(
   };
 
   // 长行场景下光标跟着输入向右移到屏外, 把 scrollLeft 调到能让光标位于视窗中部 (留出
-  // 左右上下文)。仅在光标真正出视窗时触发, 用户主动横向滚动到不同区域时不打扰。
+  // 左右上下文)。仅在光标真正出视窗时触发; 用户主动横向滚到光标视窗外后, 通过
+  // userHasHorizontalScrollIntent 持续抑制直到用户滚回到光标可见范围。
   const followCursorX = (): void => {
     if (container.scrollWidth <= container.clientWidth) return;
     const { cellW } = getDims();
@@ -547,10 +569,17 @@ export function attachPtyScrollController(
     const cursorPxX = term.buffer.active.cursorX * cellW;
     const viewportLeft = container.scrollLeft;
     const viewportRight = viewportLeft + container.clientWidth;
-    if (cursorPxX >= viewportLeft && cursorPxX <= viewportRight) return;
+    const cursorInViewportX = cursorPxX >= viewportLeft && cursorPxX <= viewportRight;
+    if (cursorInViewportX) {
+      // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
+      if (userHasHorizontalScrollIntent) userHasHorizontalScrollIntent = false;
+      return;
+    }
+    if (userHasHorizontalScrollIntent) return;
     const target = Math.max(0, cursorPxX - container.clientWidth / 2);
     const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    container.scrollLeft = Math.min(maxScrollLeft, target);
+    pendingFollowCursorScrollLeft = Math.min(maxScrollLeft, target);
+    container.scrollLeft = pendingFollowCursorScrollLeft;
   };
 
   const onRender = (): void => {
