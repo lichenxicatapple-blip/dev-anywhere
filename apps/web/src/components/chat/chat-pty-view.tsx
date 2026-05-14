@@ -73,7 +73,7 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
               : "right-12"
         }
         onClick={() => {
-          view.scrollToBottom();
+          view.scrollToBottom("backToBottomBtn");
           view.clearNewFramesWhileAway();
         }}
       />

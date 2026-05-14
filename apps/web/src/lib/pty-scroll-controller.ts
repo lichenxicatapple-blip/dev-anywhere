@@ -32,7 +32,9 @@ interface PtyScrollControllerOptions {
 interface PtyScrollController {
   dispose: () => void;
   relayout: () => void;
-  scrollToBottom: () => void;
+  // reason 是 trace label, 让用户报回的 trace 能区分哪条外部路径触发了 scrollToBottom
+  // (rawInput / backToBottomButton / 内部 follow / init / ...)。
+  scrollToBottom: (reason?: string) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
@@ -130,6 +132,7 @@ export function attachPtyScrollController(
   const setUserHasVerticalScrollIntent = (value: boolean): void => {
     if (userHasVerticalScrollIntent === value) return;
     userHasVerticalScrollIntent = value;
+    trace(value ? "intent:set" : "intent:clear");
     onUserVerticalScrollIntentChange?.(value);
   };
 
@@ -196,6 +199,31 @@ export function attachPtyScrollController(
     notifyScrollState();
   };
 
+  // focus 字段加细 — 之前只录 aria-label 或 tagName, 用户 trace 里看到 "BUTTON"
+  // 不知道是哪个按钮。补 data-slot / id / class 摘要, 让 trace 能直接定位元素。
+  const describeFocus = (): string | null => {
+    const el = document.activeElement;
+    if (!el) return null;
+    const aria = el.getAttribute("aria-label") ?? "";
+    const tag = el.tagName;
+    const slot =
+      typeof el.closest === "function"
+        ? (el.closest("[data-slot]")?.getAttribute("data-slot") ?? "")
+        : "";
+    const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
+    const cls =
+      typeof el.className === "string" && el.className
+        ? "." +
+          el.className
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .join(".")
+        : "";
+    if (aria) return `${aria}|${tag}${id}${cls}{${slot}}`;
+    return `${tag}${id}${cls}{${slot}}`;
+  };
+
   const trace = (event: string, extra: { ydisp?: number } = {}): void => {
     if (!isPtyScrollTraceEnabled()) return;
     const containerRect = container.getBoundingClientRect();
@@ -217,10 +245,7 @@ export function attachPtyScrollController(
       viewportY: term.buffer.active.viewportY,
       bufferLength: term.buffer.active.length,
       hostTop: host.style.top,
-      focus:
-        document.activeElement?.getAttribute("aria-label") ??
-        document.activeElement?.tagName ??
-        null,
+      focus: describeFocus(),
       atBottom: getCurrentAnchor().isAtBottom,
       touchActive: touchScrollActive,
       userIntent: userHasVerticalScrollIntent,
@@ -237,8 +262,8 @@ export function attachPtyScrollController(
     trace("host-position", { ydisp });
   };
 
-  const scrollToBottom = (): void => {
-    trace("scroll-to-bottom:start");
+  const scrollToBottom = (reason: string = "internal"): void => {
+    trace(`scroll-to-bottom:start[${reason}]`);
     setUserHasVerticalScrollIntent(false);
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
     syncing.internal = true;
@@ -277,12 +302,16 @@ export function attachPtyScrollController(
     if (deltaY === 0) return;
     trace("wheel");
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-    if (maxScrollTop <= 0) return;
+    if (maxScrollTop <= 0) {
+      trace("wheel:max-zero");
+      return;
+    }
     const previous = container.scrollTop;
     const next = Math.max(0, Math.min(maxScrollTop, previous + deltaY));
     if (next === previous) {
       // 已经 clamp 到边界 (顶 / 底), 真实 scrollTop 不动 — 不该把 intent 再 set 一遍,
       // 否则用户在底反复 wheel down 会把 output 重新 pause。
+      trace("wheel:clamped");
       notifyScroll();
       return;
     }
@@ -366,9 +395,11 @@ export function attachPtyScrollController(
     // 重连或 snapshot 重放时 DOM 尺寸会短暂变化, anchor.isAtBottom 可能误判。
     // 用户已经表达过回看历史时, 以用户意图为准, 避免新输出把视图强行拉到底。
     if (!userHasVerticalScrollIntent) {
-      scrollToBottom();
+      trace("pending-frame:follow");
+      scrollToBottom("pendingFrame");
       return "followed";
     }
+    trace("pending-frame:hold");
     if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
     }
@@ -443,7 +474,7 @@ export function attachPtyScrollController(
       !userHasVerticalScrollIntent;
     if (!atBottom && isPendingProgrammaticScroll) {
       pendingProgrammaticScrollTop = null;
-      scrollToBottom();
+      scrollToBottom("programmaticDrift");
       return;
     }
     pendingProgrammaticScrollTop = null;
@@ -473,7 +504,7 @@ export function attachPtyScrollController(
       // reconnect 时新 buffer 短暂为空，空容器 + 跨周期保留的 intent 会被 wasAtBottom
       // 误清掉。只在 !intent（"未明示意图"）时按 atBottom 跟底。
       if (pendingFrame === "none" && !userHasVerticalScrollIntent) {
-        scrollToBottom();
+        scrollToBottom("termScroll");
         return;
       }
       const { cellH } = getDims();
@@ -507,7 +538,7 @@ export function attachPtyScrollController(
     // wasAtBottom 已经包含在 notifyAtBottom 的 false→true 过渡里负责清 intent，
     // 这里只需对"无意图"时跟底，避免 reconnect 空容器误清 intent。
     if (pendingFrame === "none" && !userHasVerticalScrollIntent) {
-      scrollToBottom();
+      scrollToBottom("relayout");
       return;
     }
 
@@ -608,11 +639,12 @@ export function attachPtyScrollController(
   if (userHasVerticalScrollIntent) {
     notifyScroll();
   } else {
-    scrollToBottom();
+    scrollToBottom("init");
   }
 
   const onWheel = (event: WheelEvent): void => {
     if (event.deltaY === 0) return;
+    trace("wheel:enter");
     event.preventDefault();
     event.stopPropagation();
     scrollByWheelDelta(event.deltaY);
@@ -663,6 +695,35 @@ export function attachPtyScrollController(
   container.addEventListener("touchend", onTouchEnd, { passive: true });
   container.addEventListener("touchcancel", onTouchEnd, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
+
+  // window 级 wheel sniffer (capture-phase): 不论 wheel 是否能到 container, 都能看到
+  // 事件确实发生 + 目标是哪个元素 + 谁先 preventDefault 了。trace 里区分两种"看不到 wheel"的
+  // 情形 — (a) 用户根本没滚 vs (b) 滚了但 button / popover 等吃掉了。仅诊断用,
+  // 不修改任何控制流; 只在 trace 启用时录入。
+  const onWindowWheelSniff = (event: WheelEvent): void => {
+    if (!isPtyScrollTraceEnabled()) return;
+    const target = event.target as Element | null;
+    const reachesContainer =
+      target === container || (target instanceof Node && container.contains(target));
+    const targetSlot =
+      target && typeof target.closest === "function"
+        ? (target.closest("[data-slot]")?.getAttribute("data-slot") ?? "")
+        : "";
+    const targetTag = target?.tagName ?? "";
+    const targetCls =
+      target && typeof (target as Element).className === "string" && (target as Element).className
+        ? "." +
+          ((target as Element).className as string)
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .join(".")
+        : "";
+    trace(
+      `wheel:window deltaY=${Math.round(event.deltaY)} reachesContainer=${reachesContainer ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0} target=${targetTag}${targetCls}{${targetSlot}}`,
+    );
+  };
+  window.addEventListener("wheel", onWindowWheelSniff, { passive: true, capture: true });
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
   // host 自身的尺寸由 updateSpacer 主动写，再 observe 它会形成"写→ ResizeObserver
@@ -696,6 +757,7 @@ export function attachPtyScrollController(
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
       container.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("wheel", onWindowWheelSniff, { capture: true });
       dispScroll.dispose();
       dispRender.dispose();
       dispWriteParsed?.dispose();

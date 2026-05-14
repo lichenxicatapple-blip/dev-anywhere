@@ -189,6 +189,95 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     expect(afterOutput.scrollTop).toBeLessThan(afterOutput.max - 30);
   });
 
+  // 用户复现路径: 长 PTY 会话进入 /compact, 进度行不停 \r 重写 + 偶尔追加新行,
+  // 屏幕几乎每帧都在重绘; 这时 wheel 上滚, 被持续输出"拉回"底部。
+  // 跟前一条 longHost 测试的差别: 那条测试 wheel 完才输出 (顺序), 这条是
+  // wheel 发生在 stream 进行中 (并发), pendingFrame 已经被排队 + RAF 还在
+  // flush 的状态。
+  test("does not pin to bottom when wheel-up occurs mid-stream of continuous PTY output (longHost, /compact pattern)", async ({
+    page,
+  }) => {
+    await setupPtyChat(page, { sessionId: SESSION_ID, query: "&ptyScrollTrace=1" });
+    await expectPtyTerminalMounted(page);
+
+    await page.evaluate(() => {
+      window.__ptySmoke.resize(80, 60);
+    });
+    await expect
+      .poll(() =>
+        page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0, SESSION_ID),
+      )
+      .toBe(60);
+
+    // 先填一段历史让 longHost 真正生效 (host > viewport, 有可滚距离)
+    await page.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from(
+          { length: 200 },
+          (_, i) => `history ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    const terminal = page.locator('[data-slot="pty-terminal"]');
+    await expect
+      .poll(() =>
+        terminal.evaluate((el) => {
+          const node = el as HTMLElement;
+          return node.scrollHeight - node.clientHeight;
+        }),
+      )
+      .toBeGreaterThan(500);
+
+    // 启动 /compact 风格的连续输出: 每帧 \r 重写进度 + 频繁追加新行让
+    // buffer 持续增长 (claude /compact 期间会输出 compacting messages 并不断新增进度行)。
+    // 不 await, 让它跟后续 wheel 操作并发发生。
+    await page.evaluate(() => {
+      type AnyWindow = Window & { __ptyCompactRunning?: boolean };
+      const w = window as AnyWindow;
+      w.__ptyCompactRunning = true;
+      let i = 0;
+      const tick = (): void => {
+        if (!w.__ptyCompactRunning) return;
+        const idx = i++;
+        // 每 4 帧追加一行新内容 (buffer.length 增长), 其余只 \r 重写
+        const payload =
+          idx % 4 === 3
+            ? `\rcompacting ${idx}\r\nnew compacted message ${idx}\r\n`
+            : `\rcompacting ${idx}`;
+        window.__ptySmoke.sendPty(payload);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    // 让 stream 进入稳态 (xterm 已经在 60Hz onRender + onFramePending), 并等
+    // buffer 涨到足够大确保我们仍在 atBottom 时 max 已经显著 > 初始值
+    await page.waitForTimeout(220);
+
+    // 用户复现是 wheel up 一次就有问题, 但单次 wheel 实际是 wheel event 序列 (~几个)。
+    // 模拟用户连续 wheel 几次表达回看意图。
+    await terminal.hover();
+    for (let i = 0; i < 3; i++) {
+      await page.mouse.wheel(0, -80);
+      await page.waitForTimeout(40);
+    }
+
+    // 继续让 stream 跑一会, 看用户的 scrollTop 会不会被拉回去
+    await page.waitForTimeout(500);
+
+    await page.evaluate(() => {
+      type AnyWindow = Window & { __ptyCompactRunning?: boolean };
+      (window as AnyWindow).__ptyCompactRunning = false;
+    });
+    await page.waitForTimeout(80);
+
+    const finalState = await terminal.evaluate((el) => {
+      const node = el as HTMLElement;
+      return { scrollTop: node.scrollTop, max: node.scrollHeight - node.clientHeight };
+    });
+    expect(finalState.scrollTop).toBeLessThan(finalState.max - 30);
+  });
+
   test("does not pin users to bottom when PTY output arrives during native touch scroll", async ({
     page,
   }) => {
