@@ -33,8 +33,11 @@ interface PtyScrollController {
   dispose: () => void;
   relayout: () => void;
   // reason 是 trace label, 让用户报回的 trace 能区分哪条外部路径触发了 scrollToBottom
-  // (rawInput / backToBottomButton / 内部 follow / init / ...)。
-  scrollToBottom: (reason?: string) => void;
+  // (rawInput / backToBottomButton / 内部 follow / init / ...)。opts.force=true 是
+  // 用户明示动作 (BackToBottom 按钮 / init / 修 stale state) 才能压过 userIntent;
+  // 默认被动 caller (rawInput / pendingFrame / relayout / termScroll) 在 intent=true
+  // 时整段 no-op。把 invariant 收到 controller 内部, 新加 caller 默认就对。
+  scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
@@ -277,7 +280,19 @@ export function attachPtyScrollController(
     });
   };
 
-  const scrollToBottom = (reason: string = "internal"): void => {
+  const scrollToBottom = (
+    reason: string = "internal",
+    opts: { force?: boolean } = {},
+  ): void => {
+    // 默认 respect intent: intent=true (用户在回看) 时整段 no-op, 不清 intent / 不 trace /
+    // 不写 scrollTop / 不写 host。被动 caller (rawInput / pendingFrame / relayout /
+    // termScroll) 应当被回看意图压过, 否则用户每次想看历史都会被远端 / xterm onData
+    // 自动响应 / 焦点切换之类的事件无形拉走。
+    // force=true 是用户明示动作 (BackToBottom / init / 修 stale state programmaticDrift)
+    // 的 opt-out, 这条路径仍清 intent + 拉底, 表示"用户想从回看模式退出回到 follow"。
+    if (!opts.force && userHasVerticalScrollIntent) {
+      return;
+    }
     // no-op 早返: 已在底 + intent=false + viewportY=maxYdisp → 不工作不 trace。
     // pendingContainerSyncRetry=false 语义保留 (scrollToBottom 永远清干净 stale state)。
     const expectedYdisp = Math.max(0, term.buffer.active.length - term.rows);

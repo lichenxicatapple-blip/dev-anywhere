@@ -73,7 +73,8 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
               : "right-12"
         }
         onClick={() => {
-          view.scrollToBottom("backToBottomBtn");
+          // 用户明示动作: 压过 intent (即便用户在回看, 点这个按钮就是要退出回看)。
+          view.scrollToBottom("backToBottomBtn", { force: true });
           view.clearNewFramesWhileAway();
         }}
       />

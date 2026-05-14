@@ -527,6 +527,67 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(0);
   });
 
+  // scrollToBottom 默认 respect intent: 用户在回看 (intent=true) 时, 任何被动调用 (rawInput
+  // echo / xterm onData 自动响应 / pendingFrame / relayout / termScroll) 都不该把视图拉走。
+  // 显式 force=true 是用户明示动作 (点 BackToBottom 按钮 / init / programmaticDrift 修 stale)
+  // 才能压过 intent。这把 invariant 集中在 controller 内部, 新加 caller 默认就对。
+  it("scrollToBottom respects user vertical scroll intent by default (no force)", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    container.scrollTop = 100;
+    onUserVerticalScrollIntentChange.mockClear();
+    terminal.scrollToLine.mockClear();
+
+    // rawInput / pendingFrame 等被动 caller 不传 force → controller 内部默认 respect intent。
+    controller.scrollToBottom("rawInput");
+
+    expect(container.scrollTop).toBe(100);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    const intentCalls = onUserVerticalScrollIntentChange.mock.calls.map((c) => c[0]);
+    expect(intentCalls).not.toContain(false);
+  });
+
+  it("scrollToBottom with force overrides user intent (BackToBottom button semantics)", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    container.scrollTop = 100;
+    onUserVerticalScrollIntentChange.mockClear();
+
+    controller.scrollToBottom("backToBottomBtn", { force: true });
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+  });
+
   it("owns at-bottom state and exposes scrollToBottom", () => {
     const { container, spacer, host } = createDom();
     const onAtBottomChange = vi.fn();
@@ -549,7 +610,8 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
 
-    controller.scrollToBottom();
+    // BackToBottom 按钮路径用 force: true 压过 intent (用户明示动作)。
+    controller.scrollToBottom("backToBottomBtn", { force: true });
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
@@ -1150,14 +1212,14 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    // 触发 cellH=0 → 用户 scroll → flag 置 true
+    // 触发 cellH=0 → 用户 scroll → flag 置 true。container.scroll 同时 set intent=true。
     defineSize(screen, { clientHeight: 0, clientWidth: 0 });
     container.scrollTop = 600;
     container.dispatchEvent(new Event("scroll"));
     expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(true);
 
-    // scrollToBottom (无论是用户点 BackToBottom, 还是自动 follow 路径) 必须清掉 flag
-    ctrl.scrollToBottom();
+    // 用户点 BackToBottom 用 force: true 路径压过 intent, 必须清掉 flag。
+    ctrl.scrollToBottom("backToBottomBtn", { force: true });
     expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(false);
   });
 

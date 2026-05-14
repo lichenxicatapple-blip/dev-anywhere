@@ -4,6 +4,12 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.11] - 2026-05-14
+
+### 修复
+
+- PTY 远端持续输出 + 用户 wheel 上回看时, 在某次 `xterm.onData` (用户敲键盘 / xterm cursor query 自动响应 / bracketed paste 等) 之后视图被强行拉回底部。`scrollToBottom` 内部加默认 `respect intent` 守护——被动 caller (`rawInput` / `pendingFrame` / `relayout` / `termScroll`) 在用户回看 (intent=true) 时整段 no-op; 仅 BackToBottom 按钮等用户明示动作显式 `force: true` 才能压过 intent。把 invariant 收到 controller, 新加 caller 默认就对。
+
 ## [0.2.10] - 2026-05-14
 
 ### 可观测性

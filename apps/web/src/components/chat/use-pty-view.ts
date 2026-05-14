@@ -88,7 +88,7 @@ interface UsePtyViewResult {
   connectionOverlay: { connecting: boolean; subscribeDelayed: boolean };
   containerPaddingBottom: number;
   traceEnabled: boolean;
-  scrollToBottom: (reason?: string) => void;
+  scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   clearNewFramesWhileAway: () => void;
@@ -105,7 +105,7 @@ interface UsePtyViewResult {
 
 interface ScrollControllerHandle {
   relayout: () => void;
-  scrollToBottom: (reason?: string) => void;
+  scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
 }
@@ -471,9 +471,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // === 暴露给 JSX 的命令式句柄（稳定 useCallback，内部读 ref 拿当前 controller）===
   // reason 默认 "viewExternal" — 当 BackToBottom 按钮等明确入口外调时, caller 可传具体 label。
-  const scrollToBottom = useCallback((reason: string = "viewExternal"): void => {
-    scrollControllerRef.current?.scrollToBottom(reason);
-  }, []);
+  const scrollToBottom = useCallback(
+    (reason: string = "viewExternal", opts?: { force?: boolean }): void => {
+      scrollControllerRef.current?.scrollToBottom(reason, opts);
+    },
+    [],
+  );
   const scrollToRatio = useCallback((ratio: number): void => {
     scrollControllerRef.current?.scrollToRatio(ratio);
   }, []);
