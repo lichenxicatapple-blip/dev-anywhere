@@ -224,7 +224,15 @@ export function attachPtyScrollController(
     return `${tag}${id}${cls}{${slot}}`;
   };
 
-  const trace = (event: string, extra: { ydisp?: number } = {}): void => {
+  const trace = (
+    event: string,
+    extra: {
+      ydisp?: number;
+      details?: string;
+      vvHeightDelta?: number;
+      vvOffsetDelta?: number;
+    } = {},
+  ): void => {
     if (!isPtyScrollTraceEnabled()) return;
     const containerRect = container.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
@@ -256,10 +264,17 @@ export function attachPtyScrollController(
   const positionHostAt = (ydisp: number, cellH: number, visibleContentHeight?: number): void => {
     if (cellH <= 0) return;
     const top = computeHostTop({ ydisp, rows: term.rows, cellH, visibleContentHeight });
+    const prevTopPx = host.style.top;
+    const nextTopPx = `${top}px`;
     setStyle(host, "position", "absolute");
     setStyle(host, "left", "0px");
-    setStyle(host, "top", `${top}px`);
-    trace("host-position", { ydisp });
+    setStyle(host, "top", nextTopPx);
+    // host.top 没变那一帧 (focus 切换 / theme 重绘 / 同 buffer 重 paint) 不 trace, 减少稳态噪音。
+    if (prevTopPx === nextTopPx) return;
+    trace("host-position", {
+      ydisp,
+      details: `${prevTopPx || "0px"}->${nextTopPx}`,
+    });
   };
 
   const scrollToBottom = (reason: string = "internal"): void => {
@@ -548,6 +563,7 @@ export function attachPtyScrollController(
       // 把 viewportY 和 host 补齐——再走"按 viewportY 强制对齐 scrollTop"那条路,否则会把
       // 用户的 scrollTop yank 回旧 viewportY 对应位置。
       if (pendingContainerSyncRetry) {
+        trace("pending-sync-retry-fire");
         syncContainerScroll();
       } else {
         container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
@@ -573,10 +589,14 @@ export function attachPtyScrollController(
       // 光标变动重新进入跟随。否则用户拖回去的轨迹会被记成 prev, 释放 intent 后第一次比对
       // 就误判为"光标变了"而拉一下。
       prevCursorBufferRow = null;
+      trace("followCursor:skip", { details: "intent" });
       return;
     }
     const { cellH } = getDims();
-    if (cellH <= 0) return;
+    if (cellH <= 0) {
+      trace("followCursor:skip", { details: "cellH=0" });
+      return;
+    }
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const hostHeight = term.rows * cellH;
@@ -584,18 +604,37 @@ export function attachPtyScrollController(
       // host 装得下, 几何贴底等于光标可见, 走原路径就行, 不需要 followCursorY 介入。
       // 顺手清 prev 防止下次进入 host>vch 时拿旧 buffer 的行号比对。
       prevCursorBufferRow = null;
+      trace("followCursor:skip", { details: "shortHost" });
       return;
     }
     const buffer = term.buffer.active;
     const cursorBufferRow = buffer.viewportY + buffer.cursorY;
-    if (prevCursorBufferRow === cursorBufferRow) return;
+    if (prevCursorBufferRow === cursorBufferRow) {
+      trace("followCursor:skip", { details: `cursorRow=${cursorBufferRow} unchanged` });
+      return;
+    }
+    const prevRow = prevCursorBufferRow;
     prevCursorBufferRow = cursorBufferRow;
     const anchor = getCurrentAnchor();
-    if (anchor.cursorInViewport) return;
+    if (anchor.cursorInViewport) {
+      trace("followCursor:skip", {
+        details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} inViewport`,
+      });
+      return;
+    }
     // anchor.bottomScrollTop 在 long-host 分支里就是把光标行像素居中后的目标 scrollTop。
-    if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) return;
+    if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) {
+      trace("followCursor:skip", {
+        details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} aligned`,
+      });
+      return;
+    }
     pendingFollowCursorScrollTop = anchor.bottomScrollTop;
+    const prevScrollTop = container.scrollTop;
     container.scrollTop = anchor.bottomScrollTop;
+    trace("followCursor:hit", {
+      details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} scrollTop=${Math.round(prevScrollTop)}->${Math.round(anchor.bottomScrollTop)}`,
+    });
   };
 
   // 长行场景下光标跟着输入向右移到屏外, 把 scrollLeft 调到能让光标位于视窗中部 (留出
@@ -628,7 +667,10 @@ export function attachPtyScrollController(
     // handlePendingNewFrame 在 follow 路径里会调 scrollToBottom 改写 scrollTop,
     // 后跑的 syncContainerScroll 就会按"被改写后的 scrollTop"重新对齐,等于无视
     // 用户原本想停留的位置。先 sync 让 user-intent 落地,再 handle pending frame。
-    if (pendingContainerSyncRetry) syncContainerScroll();
+    if (pendingContainerSyncRetry) {
+      trace("pending-sync-retry-fire");
+      syncContainerScroll();
+    }
     handlePendingNewFrame();
     followCursorX();
     followCursorY();
@@ -669,7 +711,7 @@ export function attachPtyScrollController(
     trace("touchmove:review");
   };
 
-  const onTouchEnd = (): void => {
+  const finishTouchGesture = (): void => {
     touchScrollActive = false;
     touchStartY = null;
     // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
@@ -686,15 +728,54 @@ export function attachPtyScrollController(
       setUserHasVerticalScrollIntent(false);
     }
     notifyAtBottom();
+  };
+
+  const onTouchEnd = (): void => {
+    finishTouchGesture();
     trace("touchend");
+  };
+
+  const onTouchCancel = (): void => {
+    // iOS momentum scroll 被 visualViewport 重排打断 / 系统手势接管时 fire。
+    // touchend 永远不会再来, 必须按 touchend 同等清理 intent / state。
+    finishTouchGesture();
+    trace("touchcancel");
   };
 
   container.addEventListener("wheel", onWheel, { passive: false, capture: true });
   container.addEventListener("touchstart", onTouchStart, { passive: true });
   container.addEventListener("touchmove", onTouchMove, { passive: true });
   container.addEventListener("touchend", onTouchEnd, { passive: true });
-  container.addEventListener("touchcancel", onTouchEnd, { passive: true });
+  container.addEventListener("touchcancel", onTouchCancel, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
+
+  // visualViewport 软键盘 / iOS Safari 地址栏收合 / 缩放等会改 vv.height / offsetTop, 触发
+  // 容器 reflow + xterm onRender; 没独立 trace 时只能在别的事件里捎带快照, 看不出 reflow 边界。
+  // 移动端文本上下抖动嫌疑路径: vv:resize/scroll → onRender → followCursorY 串起来。
+  let prevVvHeight: number | null = null;
+  let prevVvOffsetTop: number | null = null;
+  const onVvResize = (): void => {
+    if (!isPtyScrollTraceEnabled()) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const dh = prevVvHeight === null ? 0 : vv.height - prevVvHeight;
+    const dy = prevVvOffsetTop === null ? 0 : vv.offsetTop - prevVvOffsetTop;
+    prevVvHeight = vv.height;
+    prevVvOffsetTop = vv.offsetTop;
+    trace("vv:resize", { vvHeightDelta: dh, vvOffsetDelta: dy });
+  };
+  const onVvScroll = (): void => {
+    if (!isPtyScrollTraceEnabled()) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const dh = prevVvHeight === null ? 0 : vv.height - prevVvHeight;
+    const dy = prevVvOffsetTop === null ? 0 : vv.offsetTop - prevVvOffsetTop;
+    prevVvHeight = vv.height;
+    prevVvOffsetTop = vv.offsetTop;
+    trace("vv:scroll", { vvHeightDelta: dh, vvOffsetDelta: dy });
+  };
+  window.visualViewport?.addEventListener("resize", onVvResize);
+  window.visualViewport?.addEventListener("scroll", onVvScroll);
 
   // window 级 wheel sniffer (capture-phase): 不论 wheel 是否能到 container, 都能看到
   // 事件确实发生 + 目标是哪个元素 + 谁先 preventDefault 了。trace 里区分两种"看不到 wheel"的
@@ -756,8 +837,10 @@ export function attachPtyScrollController(
       container.removeEventListener("touchstart", onTouchStart);
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
-      container.removeEventListener("touchcancel", onTouchEnd);
+      container.removeEventListener("touchcancel", onTouchCancel);
       window.removeEventListener("wheel", onWindowWheelSniff, { capture: true });
+      window.visualViewport?.removeEventListener("resize", onVvResize);
+      window.visualViewport?.removeEventListener("scroll", onVvScroll);
       dispScroll.dispose();
       dispRender.dispose();
       dispWriteParsed?.dispose();

@@ -48,7 +48,7 @@ describe("pty scroll trace", () => {
   });
 
   it("keeps only the most recent trace entries", () => {
-    for (let i = 0; i < 505; i += 1) {
+    for (let i = 0; i < 5005; i += 1) {
       appendPtyScrollTrace({
         t: i,
         event: `event-${i}`,
@@ -62,7 +62,7 @@ describe("pty scroll trace", () => {
       });
     }
 
-    expect(window.__devAnywherePtyScrollTrace).toHaveLength(500);
+    expect(window.__devAnywherePtyScrollTrace).toHaveLength(5000);
     expect(window.__devAnywherePtyScrollTrace?.[0]?.event).toBe("event-5");
   });
 

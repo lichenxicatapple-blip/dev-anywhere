@@ -48,7 +48,7 @@ describe("json scroll trace", () => {
   });
 
   it("keeps only recent trace entries", () => {
-    for (let i = 0; i < 505; i += 1) {
+    for (let i = 0; i < 5005; i += 1) {
       appendJsonScrollTrace({
         t: i,
         event: `event-${i}`,
@@ -63,7 +63,7 @@ describe("json scroll trace", () => {
       });
     }
 
-    expect(window.__devAnywhereJsonScrollTrace).toHaveLength(500);
+    expect(window.__devAnywhereJsonScrollTrace).toHaveLength(5000);
     expect(window.__devAnywhereJsonScrollTrace?.[0]?.event).toBe("event-5");
   });
 

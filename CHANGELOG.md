@@ -4,6 +4,12 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.9] - 2026-05-14
+
+### 可观测性
+
+- PTY 滚动诊断 trace 进一步加固。`?ptyScrollTrace=1` 现录 `vv:resize` / `vv:scroll` (visualViewport 软键盘 reflow)、`touchcancel`、`pending-sync-retry-fire`、`followCursor:hit/skip` (含 cursor 行 + scrollTop 转换); ring buffer 500 → 5000; 稳态相同 (event, scrollTop, viewportY, hostTop) 折叠为单行 + `+N` 计数, 用户输入 / vv / followCursor 等关键信号不参与去重; 新增 `vvHDelta` / `vvODelta` / `details` 列。无功能变化。
+
 ## [0.2.8] - 2026-05-14
 
 ### 可观测性

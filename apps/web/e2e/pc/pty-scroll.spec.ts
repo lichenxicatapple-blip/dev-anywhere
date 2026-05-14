@@ -167,7 +167,6 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeGreaterThan(0);
-    const scrollTopAfterWheel = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
 
     // 远端继续输出: bug 版本 → notifyAtBottom 误清 intent → flushOutput → scrollToBottom 拉回
     for (let i = 0; i < 8; i++) {
@@ -184,8 +183,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
         max: node.scrollHeight - node.clientHeight,
       };
     });
-    // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, 但 scrollTop 跟着新 max 应保留
-    // 用户原本停留的相对位置, 至少与原 scrollTopAfterWheel 不差太多)
+    // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, scrollTop 跟新 max 应保留相对位置)
     expect(afterOutput.scrollTop).toBeLessThan(afterOutput.max - 30);
   });
 
