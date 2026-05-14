@@ -66,6 +66,46 @@ describe("pty scroll trace", () => {
     expect(window.__devAnywherePtyScrollTrace?.[0]?.event).toBe("event-5");
   });
 
+  it("folds steady-state cycles where unique events repeat in the same order", () => {
+    // 真实稳态: 每帧 render → pending-frame:follow → scroll-to-bottom:start[pendingFrame] → end →
+    // followCursor:skip → relayout:start → scroll-to-bottom:start[relayout] → end 8 条 unique events 轮流
+    // fire, last-only dedup 失效 (相邻两条永远不同 event), entries 暴涨。
+    // 期望: 同名事件折叠到该名字的最近 entry, cycle 内每个 event 各保留 1 条 + repeat 计数。
+    const cycle = [
+      "render",
+      "pending-frame:follow",
+      "scroll-to-bottom:start[pendingFrame]",
+      "scroll-to-bottom:end",
+      "followCursor:skip",
+      "relayout:start",
+      "scroll-to-bottom:start[relayout]",
+      "scroll-to-bottom:end",
+    ];
+    const cycleCount = 100;
+    for (let cycleIdx = 0; cycleIdx < cycleCount; cycleIdx += 1) {
+      for (const event of cycle) {
+        appendPtyScrollTrace({
+          t: cycleIdx * 10 + cycle.indexOf(event),
+          event,
+          scrollTop: 90126,
+          scrollHeight: 90976,
+          clientHeight: 850,
+          viewportY: 5000,
+          bufferLength: 5052,
+          hostTop: "90000px",
+          focus: null,
+        });
+      }
+    }
+    const stored = window.__devAnywherePtyScrollTrace ?? [];
+    expect(stored.length).toBeLessThanOrEqual(cycle.length * 2);
+    // scroll-to-bottom:end 在 cycle 里出现两次 (pendingFrame 后 + relayout 后), 严格按 (event,
+    // scrollTop, viewportY, hostTop) 折叠时这两次是同一 key, 总条数 cycle.length 或 -1。
+    // 任何前一次 cycle 的 events 也不该残留, 按 dedup 设计每个 event 名应只剩最新 1 条。
+    const eventNames = stored.map((entry) => entry.event);
+    expect(new Set(eventNames).size).toBe(stored.length);
+  });
+
   it("formats a compact report for mobile copy/paste", () => {
     appendPtyScrollTrace({
       t: 100,

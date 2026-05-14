@@ -4,6 +4,12 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.10] - 2026-05-14
+
+### 可观测性
+
+- PTY 滚动诊断 trace 稳态去重 v0.2.9 设计补漏。dedup 改 `Map<event, lastEntryRef>` 按事件名追踪 (v0.2.9 仅看 entries 末尾, cycle 内 8 条 unique events 轮流 fire 时永不命中); `scrollToBottom` 在已贴底 + intent=false + viewportY=maxYdisp 时整段 no-op (不 trace 不写 scrollTop 不写 host); 删 `pending-frame:follow/hold` (reason 已在 `scroll-to-bottom:start[pendingFrame]`)、`relayout:start/end` (子路径自带 trace)、`followCursor:skip cursorRow unchanged` 三类稳态噪音。补 dedup cycle 折叠 unit 覆盖。无功能变化。
+
 ## [0.2.9] - 2026-05-14
 
 ### 可观测性

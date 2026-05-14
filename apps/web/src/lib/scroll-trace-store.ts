@@ -40,6 +40,9 @@ export function createScrollTraceStore<T extends ScrollTraceEntryBase>(
   options: ScrollTraceStoreOptions<T>,
 ): ScrollTraceStore<T> {
   const { windowKey, urlParam, storageKey, maxEntries = 5000, dedupeKey } = options;
+  // 按事件名追踪最近一次 push 的 entry 引用。dedup 必须 lookup 同名事件的最近一条而不是 entries 末尾,
+  // 否则 cycle 内不同 event 互相隔开 (render → A → B → render → A → B ...) 时 last-only dedup 全失效。
+  const lastByEvent = new Map<string, T>();
 
   // URL flag 命中后落一次 localStorage，路由切换 (HashRouter 改 hash 会丢 query)
   // 后 isEnabled() 仍能从 localStorage 读到 enabled 状态。
@@ -82,19 +85,37 @@ export function createScrollTraceStore<T extends ScrollTraceEntryBase>(
     append(entry) {
       if (typeof window === "undefined") return;
       const entries = getStore();
-      const last = entries.length > 0 ? entries[entries.length - 1] : undefined;
-      if (last && dedupeKey) {
+      if (dedupeKey) {
         const incomingKey = dedupeKey(entry);
-        const lastKey = dedupeKey(last);
-        if (incomingKey !== null && lastKey !== null && incomingKey === lastKey) {
-          last.t = entry.t;
-          last.repeat = (last.repeat ?? 0) + 1;
-          setStore(entries);
-          return;
+        if (incomingKey !== null) {
+          const last = lastByEvent.get(entry.event);
+          if (last && dedupeKey(last) === incomingKey && entries.includes(last)) {
+            last.t = entry.t;
+            last.repeat = (last.repeat ?? 0) + 1;
+            // 命中 dedup 时把已有 entry 移到末尾, entries 保持"最近一次发生"时间序;
+            // 否则 trace report 里会看到时间倒退的旧条目混在新条目中间。
+            const idx = entries.indexOf(last);
+            if (idx >= 0 && idx !== entries.length - 1) {
+              entries.splice(idx, 1);
+              entries.push(last);
+            }
+            setStore(entries);
+            return;
+          }
         }
       }
       entries.push(entry);
-      if (entries.length > maxEntries) entries.splice(0, entries.length - maxEntries);
+      if (dedupeKey) lastByEvent.set(entry.event, entry);
+      if (entries.length > maxEntries) {
+        const removed = entries.splice(0, entries.length - maxEntries);
+        if (dedupeKey) {
+          for (const e of removed) {
+            if (lastByEvent.get(e.event) === e) {
+              lastByEvent.delete(e.event);
+            }
+          }
+        }
+      }
       setStore(entries);
     },
     getAll: getStore,

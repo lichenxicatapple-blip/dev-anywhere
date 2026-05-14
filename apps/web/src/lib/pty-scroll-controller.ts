@@ -278,6 +278,17 @@ export function attachPtyScrollController(
   };
 
   const scrollToBottom = (reason: string = "internal"): void => {
+    // no-op 早返: 已在底 + intent=false + viewportY=maxYdisp → 不工作不 trace。
+    // pendingContainerSyncRetry=false 语义保留 (scrollToBottom 永远清干净 stale state)。
+    const expectedYdisp = Math.max(0, term.buffer.active.length - term.rows);
+    if (
+      !userHasVerticalScrollIntent &&
+      term.buffer.active.viewportY === expectedYdisp &&
+      Math.abs(container.scrollTop - getCurrentAnchor().bottomScrollTop) <= 1
+    ) {
+      pendingContainerSyncRetry = false;
+      return;
+    }
     trace(`scroll-to-bottom:start[${reason}]`);
     setUserHasVerticalScrollIntent(false);
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
@@ -410,11 +421,10 @@ export function attachPtyScrollController(
     // 重连或 snapshot 重放时 DOM 尺寸会短暂变化, anchor.isAtBottom 可能误判。
     // 用户已经表达过回看历史时, 以用户意图为准, 避免新输出把视图强行拉到底。
     if (!userHasVerticalScrollIntent) {
-      trace("pending-frame:follow");
+      // follow/hold 冗余, scrollToBottom 内部已 trace `scroll-to-bottom:start[pendingFrame]` 标 reason。
       scrollToBottom("pendingFrame");
       return "followed";
     }
-    trace("pending-frame:hold");
     if (!hasNewFramesWhileAway()) {
       setNewFramesWhileAway(true);
     }
@@ -545,7 +555,8 @@ export function attachPtyScrollController(
   };
 
   const relayout = (): void => {
-    trace("relayout:start");
+    // start/end 不 trace, layout 真改了 (host-position) / scrollToBottom 真触发 / pending-sync-retry-fire
+    // 这些子路径自己有独立 trace, 框 trace 是稳态噪音。
     updateSpacer();
     const pendingFrame = handlePendingNewFrame();
     if (pendingFrame === "followed") return;
@@ -575,7 +586,6 @@ export function attachPtyScrollController(
     // idempotent guard (lastAtBottom / lastScrollStateKey),重复调用直接早返回。保持收尾
     // 一行 notifyScroll 让 relayout 主路径读起来线性,不为了这一次冗余加分支。
     notifyScroll();
-    trace("relayout:end");
   };
 
   // server-owned rows 场景下 host 可能比可视区高, host 内只能看到一段 N 行子窗口。光标
@@ -610,7 +620,7 @@ export function attachPtyScrollController(
     const buffer = term.buffer.active;
     const cursorBufferRow = buffer.viewportY + buffer.cursorY;
     if (prevCursorBufferRow === cursorBufferRow) {
-      trace("followCursor:skip", { details: `cursorRow=${cursorBufferRow} unchanged` });
+      // 稳态每帧 cursor 不变, trace 这条只产生噪音, 不诊断任何问题。
       return;
     }
     const prevRow = prevCursorBufferRow;
