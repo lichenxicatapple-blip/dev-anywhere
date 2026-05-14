@@ -746,6 +746,46 @@ describe("attachPtyScrollController", () => {
     expect(calls).not.toContain(false);
   });
 
+  // wheel 后浏览器 async 派发的 scroll event 在 fire 时, scrollTop 可能因 subpixel rounding
+  // 略大于 wheel 写入值; verticalDelta > 0 不该被解读为"用户向下滚到底"释放 intent, 因为
+  // 用户实际是向上滚 (next < previous)。invariant: wheel up 路径下 onContainerScroll 看到的
+  // scroll event 不能让 intent 被清。
+  it("does not release vertical intent on subpixel scroll jitter after wheel-up", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 300 });
+    defineScrollHeight(container, 2000);
+    const { terminal } = createTerminal({ 19: "prompt" });
+    // cursor 居中 viewport, longHost 路径下 wheel up 小段 + 后续 jitter 维持 cursorInViewport=true
+    // (即 atBottom=true)。bug 路径只在 atBottom=true && verticalDelta>0 时 fire。
+    terminal.buffer.active.cursorY = 7;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    // 初始: viewportY=80, scrollTop=1600, cursorPx=1740 在 viewport [1600,1900] 内。
+
+    // wheel up 100: scrollTop 1600→1500, viewportY 80→75, cursorPx=1640 在 [1500,1800] 内。
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, cancelable: true }));
+    onUserVerticalScrollIntentChange.mockClear();
+
+    // 浏览器异步 fire scroll, 此时 subpixel jitter 让 scrollTop=1501; cursorPx=1640 仍在
+    // viewport [1501,1801] 内, atBottom 仍 true。
+    container.scrollTop = 1501;
+    container.dispatchEvent(new Event("scroll"));
+
+    const intentCalls = onUserVerticalScrollIntentChange.mock.calls.map((c) => c[0]);
+    expect(intentCalls).not.toContain(false);
+  });
+
   // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。
   it("releases vertical scroll intent when user wheels down back to bottom", () => {
     const { container, spacer, host } = createDom();

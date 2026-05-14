@@ -4,6 +4,12 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.12] - 2026-05-14
+
+### 修复
+
+- PTY 长会话 wheel 上回看时偶发被拉回底部 (v0.2.11 修了 `scrollToBottom` 不主动清 intent, 但 `onContainerScroll` 路径仍会清)。`onContainerScroll` 释放 intent 的 `verticalDelta > 0` 改为 `verticalDelta > atBottomThreshold` (默认 8px), 屏蔽浏览器 async scroll event 的 subpixel jitter (用户 wheel up 后 scroll event fire 时 `container.scrollTop` 可能比 wheel 写入值 ±1px, 被误判为"用户向下滚到底"清掉回看意图)。补 wheel + subpixel scroll 复现 unit 覆盖。
+
 ## [0.2.11] - 2026-05-14
 
 ### 修复

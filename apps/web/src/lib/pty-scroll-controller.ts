@@ -520,11 +520,17 @@ export function attachPtyScrollController(
     pendingProgrammaticScrollTop = null;
     if (!atBottom) {
       setUserHasVerticalScrollIntent(true);
-    } else if (verticalDelta > 0 && userHasVerticalScrollIntent && !touchScrollActive) {
-      // 仅当用户主动向下滚 (delta > 0) 抵达 atBottom 时释放 intent, 让 output 重新跟随。
-      // 向上滚 (delta < 0 或 0) 不清, 即便几何上 cursor 仍在 viewport (longHost 边界场景)。
-      // touchScrollActive 期间不在这里释放, 由 onTouchEnd 单独按 touchstart→touchend 的
-      // scrollTop 净位移判定。
+    } else if (
+      verticalDelta > atBottomThreshold &&
+      userHasVerticalScrollIntent &&
+      !touchScrollActive
+    ) {
+      // 用户主动向下滚抵达 atBottom 时释放 intent, 让 output 重新跟随。阈值 atBottomThreshold
+      // (默认 8px) 屏蔽浏览器 subpixel rounding / 浮点 jitter — wheel up 后 async scroll event
+      // fire 时 container.scrollTop 可能比 wheel 写入值 ±1px, verticalDelta=+1 不该被解读为
+      // "用户向下滚到底"。向上滚 (delta < 0 或 0) 不清, 即便几何上 cursor 仍在 viewport
+      // (longHost 边界场景)。touchScrollActive 期间不在这里释放, 由 onTouchEnd 单独按
+      // touchstart→touchend 的 scrollTop 净位移判定。
       setUserHasVerticalScrollIntent(false);
     }
     syncContainerScroll();
