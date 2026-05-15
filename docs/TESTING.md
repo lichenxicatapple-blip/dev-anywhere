@@ -78,6 +78,28 @@ PTY vertical intent 的 set / clear / keep 语义属于纯状态机:
 
 不要把每个历史 incident 都复制成 controller test。历史 incident 的根因如果是 intent 仲裁, 应该落到 FSM transition table; controller 只保留少量端到端接线保护。
 
+### PTY 测试 inventory
+
+当前 PTY 测试按职责分成这些桶。新增或清理测试时先找桶, 不要因为某个线上事故直接新增一条横跨多层的大测试。
+
+| 桶                            | 文件                                                                                                                         | 保留理由                                                                            | 新增规则                                             |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Intent FSM                    | `src/lib/pty-vertical-intent-fsm.test.ts`                                                                                    | 唯一验证 vertical intent set/clear/keep transition table 的地方                     | 每个新 transition 加 1 条 table case; 不写 DOM/xterm |
+| Scroll geometry pure funcs    | `src/lib/pty-scroll.test.ts`                                                                                                 | 验证 spacer/host/anchor/ydisp 纯几何                                                | 几何公式变化才加                                     |
+| Scroll controller integration | `src/lib/pty-scroll-controller.test.ts`                                                                                      | 验证 DOM scrollTop、host style、xterm viewportY、ResizeObserver、pending retry 接线 | 只加有 DOM/xterm 副作用的用例                        |
+| Trace/debug observability     | `src/lib/pty-scroll-trace.test.ts`, `src/lib/pty-scroll-debug-snapshot.test.ts`                                              | 保证用户复制出来的 trace/snapshot 能定位问题                                        | 新字段必须有格式化断言                               |
+| PTY protocol/session unit     | `src/lib/pty-session-transport.test.ts`, `src/lib/pty-frame-write-buffer.test.ts`, `src/lib/pty-terminal-controller.test.ts` | 协议、buffer、terminal lifecycle 的 L1 边界                                         | 不测视觉滚动                                         |
+| PC browser behavior           | `e2e/pc/pty-*.spec.ts`                                                                                                       | 浏览器真实事件、fakeRelay 下的用户流程                                              | 同一风险已有 L1 覆盖时只保留 1 条 smoke              |
+| Mobile browser behavior       | `e2e/mobile/pty-*.spec.ts`, `e2e/layout/pty-*.spec.ts`                                                                       | 触屏、IME、visualViewport、布局契约                                                 | 只测 PC/desktop 无法代表的移动差异                   |
+| Real backend / chaos          | `e2e/pc/real-pty-*.spec.ts`, `e2e/pc/chaos/**/pty*.spec.ts`                                                                  | 真 PTY、daemon restart、relay/proxy 故障                                            | 缺真实进程或重连语义时才放这里                       |
+
+清理优先级:
+
+1. 如果 test 只断言 intent 是否 set/clear, 移到 FSM table 或删除重复项。
+2. 如果 test 同时断言 scrollTop / viewportY / host.style, 留在 controller integration。
+3. 如果 E2E 与 L1/L2 覆盖同一事实, E2E 只保留一条用户路径 smoke。
+4. 不因一次 incident 同时在 FSM、controller、PC E2E、mobile E2E 各加一条; 先定位根因属于哪个桶。
+
 ## 添加新 spec 决策树
 
 ```

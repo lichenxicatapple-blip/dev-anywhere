@@ -1,109 +1,14 @@
-import type { Terminal } from "@xterm/xterm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachPtyScrollController, type PtyScrollState } from "./pty-scroll-controller";
-
-type Handler = () => void;
-
-function defineSize(el: HTMLElement, sizes: { clientHeight?: number; clientWidth?: number }): void {
-  if (sizes.clientHeight !== undefined) {
-    Object.defineProperty(el, "clientHeight", { configurable: true, value: sizes.clientHeight });
-  }
-  if (sizes.clientWidth !== undefined) {
-    Object.defineProperty(el, "clientWidth", { configurable: true, value: sizes.clientWidth });
-  }
-}
-
-function defineScrollHeight(el: HTMLElement, scrollHeight: number): void {
-  Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
-}
-
-function defineScrollWidth(el: HTMLElement, scrollWidth: number): void {
-  Object.defineProperty(el, "scrollWidth", { configurable: true, value: scrollWidth });
-}
-
-function createDom() {
-  const container = document.createElement("div") as HTMLDivElement;
-  const spacer = document.createElement("div") as HTMLDivElement;
-  const host = document.createElement("div") as HTMLDivElement;
-  const xterm = document.createElement("div");
-  const screen = document.createElement("div");
-  xterm.className = "xterm";
-  screen.className = "xterm-screen";
-  host.append(xterm, screen);
-  defineSize(container, { clientHeight: 400, clientWidth: 800 });
-  defineScrollHeight(container, 2000);
-  defineScrollWidth(container, 800);
-  defineSize(screen, { clientHeight: 400, clientWidth: 800 });
-  return { container, spacer, host, xterm };
-}
-
-function markUserVerticalScrollIntent(container: HTMLElement): void {
-  container.dispatchEvent(new Event("touchstart"));
-}
-
-function touchEvent(type: string, clientY: number): TouchEvent {
-  const event = new Event(type, { bubbles: true }) as TouchEvent;
-  Object.defineProperty(event, "touches", {
-    configurable: true,
-    value: type === "touchend" || type === "touchcancel" ? [] : [{ clientY }],
-  });
-  return event;
-}
-
-function createTerminal(lineTextByIndex: Record<number, string> = {}) {
-  let scrollHandler: Handler = () => {};
-  let renderHandler: Handler = () => {};
-  const disposeScroll = vi.fn();
-  const disposeRender = vi.fn();
-  const scrollToLine = vi.fn((ydisp: number) => {
-    terminal.buffer.active.viewportY = ydisp;
-  });
-  const terminal = {
-    rows: 20,
-    cols: 80,
-    buffer: {
-      active: {
-        length: 100,
-        viewportY: 0,
-        cursorX: 0,
-        cursorY: 0,
-        getLine: (idx: number) => ({
-          translateToString: () => lineTextByIndex[idx] ?? "",
-        }),
-      },
-    },
-    scrollToLine,
-    onScroll: vi.fn((handler: Handler) => {
-      scrollHandler = handler;
-      return { dispose: disposeScroll };
-    }),
-    onRender: vi.fn((handler: Handler) => {
-      renderHandler = handler;
-      return { dispose: disposeRender };
-    }),
-  } as unknown as Terminal & {
-    rows: number;
-    cols: number;
-    scrollToLine: ReturnType<typeof vi.fn>;
-    buffer: {
-      active: {
-        length: number;
-        viewportY: number;
-        cursorX: number;
-        cursorY: number;
-        getLine: (idx: number) => unknown;
-      };
-    };
-  };
-
-  return {
-    terminal,
-    emitScroll: () => scrollHandler(),
-    emitRender: () => renderHandler(),
-    disposeScroll,
-    disposeRender,
-  };
-}
+import {
+  createPtyScrollDom as createDom,
+  createPtyScrollTerminal as createTerminal,
+  defineScrollHeight,
+  defineScrollWidth,
+  defineSize,
+  markUserVerticalScrollIntent,
+  touchEvent,
+} from "./pty-scroll-controller.test-utils";
 
 describe("attachPtyScrollController", () => {
   let resizeDisconnect: ReturnType<typeof vi.fn>;
@@ -126,6 +31,8 @@ describe("attachPtyScrollController", () => {
     vi.unstubAllGlobals();
   });
 
+  // Layout and xterm viewport synchronization. These tests belong here because they assert
+  // DOM scrollTop / host style / xterm viewportY side effects, not pure intent transitions.
   it("initializes spacer and host layout from xterm metrics", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -207,6 +114,9 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("140px");
   });
 
+  // Vertical intent integration. The set/clear state table lives in
+  // pty-vertical-intent-fsm.test.ts; this block only proves controller events and xterm/DOM
+  // side effects are wired to that FSM correctly.
   it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
@@ -705,6 +615,8 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
   });
 
+  // Wheel integration around cursor-aware bottom. Pure "should clear intent?" semantics are
+  // FSM coverage; these tests verify controller geometry produces the right bottom signal.
   // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。
   it("releases vertical scroll intent when user wheels down back to bottom", () => {
     const { container, spacer, host } = createDom();
@@ -827,6 +739,8 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(65);
   });
 
+  // Horizontal scroll is intentionally not part of the vertical intent FSM. Keep these tests
+  // in controller coverage until horizontal scrolling gets its own model.
   // 长行(终端宽度 cols=80, 内容延伸到 cols * 2 等), 光标随输入移到屏外右侧时,
   // 水平滚动条应该自动把光标拉回视窗中部, 留出左右上下文而不是贴着光标。
   it("auto-scrolls horizontally to center the cursor when it leaves the viewport", () => {
@@ -976,6 +890,8 @@ describe("attachPtyScrollController", () => {
     );
   });
 
+  // Relayout and transient measurement recovery. These cases protect cellH=0 / stale layout
+  // races and should not move into the pure intent FSM.
   it("relayout keeps cursor pinned in viewport after terminal metrics make host taller than container", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -1277,6 +1193,7 @@ describe("attachPtyScrollController", () => {
     expect(ctrl.getDebugProbe().pendingContainerSyncRetry).toBe(false);
   });
 
+  // Observer/lifecycle hygiene.
   // syncing.{internal,external} 泄漏审查记录:
   //   - syncing.internal: 仅在 scrollToYdisp / scrollToBottom 里围着 term.scrollToLine 那一行 set/restore,
   //     try/finally 保证 scrollToLine 抛错也会复位。其它语句 (positionHostAt / scrollTop 写入 / notifyScroll)
