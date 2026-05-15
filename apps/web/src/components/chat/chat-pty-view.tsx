@@ -105,6 +105,7 @@ function PtyScrollTraceButton() {
     <button
       type="button"
       className="absolute left-3 top-3 z-30 rounded border border-[#4A4A4A] bg-[#1E1E1E]/90 px-2 py-1 text-[11px] text-[#C8C8C8]"
+      onPointerDown={(event) => event.preventDefault()}
       onClick={handleClick}
       data-slot="pty-scroll-trace-copy"
     >
