@@ -33,6 +33,13 @@ export const MessageBubble = memo(function MessageBubble({
     );
   }
 
+  const streamingCursor = message.isPartial ? (
+    <span
+      className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
+      aria-label="streaming"
+    />
+  ) : null;
+
   return (
     <article data-slot="message-bubble" data-role={role} className="px-4 py-2">
       <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-start">
@@ -40,15 +47,9 @@ export const MessageBubble = memo(function MessageBubble({
           className="w-fit max-w-[88%] min-w-0 rounded-md bg-card text-foreground px-4 py-2"
           style={contentStyle}
         >
-          <MarkdownView text={message.text} />
+          <MarkdownView text={message.text} trailingInline={streamingCursor} />
           <ImagePreviewLinks text={message.text} />
           <FileDownloadLinks text={message.text} />
-          {message.isPartial && (
-            <span
-              className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
-              aria-label="streaming"
-            />
-          )}
         </div>
       </div>
     </article>

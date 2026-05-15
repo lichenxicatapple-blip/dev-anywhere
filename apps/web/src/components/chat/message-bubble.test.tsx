@@ -54,6 +54,23 @@ describe("MessageBubble", () => {
     screen.getByLabelText("streaming");
   });
 
+  it("keeps the streaming cursor inline with the final markdown paragraph", () => {
+    render(
+      <MessageBubble
+        message={makeMessage({
+          id: "a-inline-cursor",
+          role: "assistant",
+          text: "好,2-3 个项目 + 公共 proxy 已配置,那抽离是合理的。",
+          isPartial: true,
+        })}
+      />,
+    );
+
+    const cursor = screen.getByLabelText("streaming");
+    expect(cursor.parentElement?.tagName.toLowerCase()).toBe("p");
+    expect(cursor.previousSibling?.textContent).toContain("合理的");
+  });
+
   it("does not render cursor for user messages even if isPartial true", () => {
     render(
       <MessageBubble

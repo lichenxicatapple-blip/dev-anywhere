@@ -4,12 +4,48 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
-import { memo, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, memo, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface MarkdownViewProps {
   text: string;
   tone?: "default" | "on-primary";
+  trailingInline?: ReactNode;
+}
+
+const TRAILING_INLINE_MARKER = "\uE000";
+
+function replaceTrailingInlineMarker(node: ReactNode, trailingInline: ReactNode): ReactNode {
+  if (typeof node === "string") {
+    const markerIndex = node.indexOf(TRAILING_INLINE_MARKER);
+    if (markerIndex === -1) return node;
+    return (
+      <>
+        {node.slice(0, markerIndex)}
+        {trailingInline}
+        {node.slice(markerIndex + TRAILING_INLINE_MARKER.length)}
+      </>
+    );
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child) => replaceTrailingInlineMarker(child, trailingInline));
+  }
+
+  if (isValidElement<{ children?: ReactNode }>(node) && node.props.children) {
+    return cloneElement(
+      node,
+      undefined,
+      replaceTrailingInlineMarker(node.props.children, trailingInline),
+    );
+  }
+
+  return node;
+}
+
+function renderWithTrailingInline(children: ReactNode, trailingInline?: ReactNode): ReactNode {
+  if (!trailingInline) return children;
+  return Children.map(children, (child) => replaceTrailingInlineMarker(child, trailingInline));
 }
 
 // 代码块: 与表格同策略, 外包 not-prose + overflow-x-auto 容器承担滚动
@@ -27,7 +63,10 @@ function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
 export const MarkdownView = memo(function MarkdownView({
   text,
   tone = "default",
+  trailingInline,
 }: MarkdownViewProps) {
+  const markdownText = trailingInline ? `${text}${TRAILING_INLINE_MARKER}` : text;
+
   return (
     <div
       className={cn(
@@ -46,6 +85,12 @@ export const MarkdownView = memo(function MarkdownView({
           // 会吃上 prose 默认的 rgba(0,0,0,.5) 黑底, 与 CodeBlock 内部 wrapper 形成两层
           // 这里让 <pre> 透传, 由 code 分支的 CodeBlock 独占包装
           pre: ({ children }) => <>{children}</>,
+          p: ({ children, ...rest }) => (
+            <p {...rest}>{renderWithTrailingInline(children, trailingInline)}</p>
+          ),
+          li: ({ children, ...rest }) => (
+            <li {...rest}>{renderWithTrailingInline(children, trailingInline)}</li>
+          ),
           a: ({ href, children, ...rest }) => (
             <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
               {children}
@@ -101,7 +146,7 @@ export const MarkdownView = memo(function MarkdownView({
           ),
         }}
       >
-        {text}
+        {markdownText}
       </Markdown>
     </div>
   );
