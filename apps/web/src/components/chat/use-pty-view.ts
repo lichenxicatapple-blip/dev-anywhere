@@ -133,6 +133,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
+  const mobileLayoutDebugRef = useRef({
+    keyboardOffset: 0,
+    hasSeenSoftKeyboard: false,
+    showMobilePtyControls: false,
+    touchEditingSurface: false,
+    ptyInputFocused: false,
+    containerPaddingBottom: 0,
+  });
   // attachPtyDragSelectAutoscroll 在 onTerminalReady 内部 attach 而 registerTerminal
   // 在它之前发生, 用 ref 把 snapshot 取数函数传给 debug API。
   const dragSelectSnapshotRef = useRef<(() => DragSelectDebugSnapshot) | null>(null);
@@ -166,6 +174,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const { ptyInputFocused, suppressPtyFocus, handleFocusCapture, handleBlurCapture } = focus;
   const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+
+  mobileLayoutDebugRef.current = {
+    keyboardOffset,
+    hasSeenSoftKeyboard,
+    showMobilePtyControls,
+    touchEditingSurface,
+    ptyInputFocused,
+    containerPaddingBottom: mobileLayoutDebugRef.current.containerPaddingBottom,
+  };
 
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
 
@@ -373,18 +390,73 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
 
-        registerPtyDebugSnapshotProvider(() => ({
-          ...buildPtyScrollDebugSnapshot(scrollCtrl.getDebugProbe, {
-            container,
-            spacer,
-            host,
-            term: xterm,
-          }),
-          frame: {
-            lastWriteAt: lastFrameWriteAtRef.current,
-            pendingNewFrame: pendingNewFrameRef.current,
-          },
-        }));
+        registerPtyDebugSnapshotProvider(() => {
+          const rectOf = (el: Element | null) => {
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            return {
+              top: rect.top,
+              bottom: rect.bottom,
+              height: rect.height,
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+            };
+          };
+          const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
+          const chatRoot = document.querySelector("[data-keyboard-offset]");
+          const visualViewport = window.visualViewport;
+          const controlsRect = rectOf(controls);
+          const visualBottom = visualViewport?.height ?? window.innerHeight;
+          return {
+            ...buildPtyScrollDebugSnapshot(scrollCtrl.getDebugProbe, {
+              container,
+              spacer,
+              host,
+              term: xterm,
+            }),
+            mobileLayout: {
+              ...mobileLayoutDebugRef.current,
+              window: {
+                innerHeight: window.innerHeight,
+                outerHeight: window.outerHeight,
+                documentClientHeight: document.documentElement.clientHeight,
+              },
+              visualViewport: visualViewport
+                ? {
+                    height: visualViewport.height,
+                    width: visualViewport.width,
+                    offsetTop: visualViewport.offsetTop,
+                    pageTop: visualViewport.pageTop,
+                    scale: visualViewport.scale,
+                  }
+                : null,
+              chatRoot: {
+                dataKeyboardOffset: chatRoot?.getAttribute("data-keyboard-offset") ?? null,
+                rect: rectOf(chatRoot),
+              },
+              ptyViewRect: rectOf(container.parentElement),
+              containerRect: rectOf(container),
+              controlsRect,
+              controlsOverflowBelowVisualViewport:
+                controlsRect === null ? null : controlsRect.bottom - visualBottom,
+              activeElement:
+                document.activeElement instanceof HTMLElement
+                  ? {
+                      tag: document.activeElement.tagName,
+                      ariaLabel: document.activeElement.getAttribute("aria-label"),
+                      slot: document.activeElement
+                        .closest("[data-slot]")
+                        ?.getAttribute("data-slot"),
+                    }
+                  : null,
+            },
+            frame: {
+              lastWriteAt: lastFrameWriteAtRef.current,
+              pendingNewFrame: pendingNewFrameRef.current,
+            },
+          };
+        });
 
         const dragSelect = attachPtyDragSelectAutoscroll({ container, host });
         dragSelectDispose = dragSelect.dispose;
@@ -500,6 +572,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     : scrollState.horizontalScrollable
       ? 32
       : 8;
+  mobileLayoutDebugRef.current.containerPaddingBottom = containerPaddingBottom;
 
   useEffect(() => {
     relayoutSchedulerRef.current?.schedule();
