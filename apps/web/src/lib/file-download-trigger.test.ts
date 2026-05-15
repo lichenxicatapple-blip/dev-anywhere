@@ -66,7 +66,7 @@ describe("triggerFileDownload", () => {
     expect(relay.requestFileDownload).toHaveBeenCalledWith("s1", "/tmp/build.log");
   });
 
-  it("returns error when proxy reports failure", async () => {
+  it("returns an error with the requested path when proxy reports failure", async () => {
     const relay = makeRelayWithResponse({
       success: false,
       error: "文件不存在",
@@ -76,11 +76,11 @@ describe("triggerFileDownload", () => {
 
     const result = await triggerFileDownload({ relay, sessionId: "s1", path: "/missing.log" });
 
-    expect(result).toEqual({ ok: false, error: "文件不存在" });
+    expect(result).toEqual({ ok: false, error: "下载失败：/missing.log（文件不存在）" });
     expect(clickSpy).not.toHaveBeenCalled();
   });
 
-  it("translates errorCode into Chinese, ignoring raw fs error string", async () => {
+  it("translates errorCode into Chinese and includes the requested path", async () => {
     const relay = makeRelayWithResponse({
       success: false,
       error: "ENOENT: no such file or directory, lstat '/abs/missing'",
@@ -91,7 +91,7 @@ describe("triggerFileDownload", () => {
 
     const result = await triggerFileDownload({ relay, sessionId: "s1", path: "/abs/missing" });
 
-    expect(result).toEqual({ ok: false, error: "文件不存在" });
+    expect(result).toEqual({ ok: false, error: "下载失败：/abs/missing（文件不存在）" });
     expect(clickSpy).not.toHaveBeenCalled();
   });
 
@@ -104,7 +104,7 @@ describe("triggerFileDownload", () => {
 
     const result = await triggerFileDownload({ relay, sessionId: "s1", path: "/tmp/x.log" });
 
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, error: "下载失败：/tmp/x.log" });
     expect(clickSpy).not.toHaveBeenCalled();
   });
 });

@@ -87,7 +87,9 @@ describe("FileDownloadLinks", () => {
     fireEvent.click(screen.getByRole("button", { name: /README\.md/ }));
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith("文件不存在", { id: "loading-id" }),
+      expect(toastError).toHaveBeenCalledWith("下载失败：README.md（文件不存在）", {
+        id: "loading-id",
+      }),
     );
     expect(toastSuccess).not.toHaveBeenCalled();
   });

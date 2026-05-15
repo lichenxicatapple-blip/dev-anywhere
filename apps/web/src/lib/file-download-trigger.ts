@@ -17,11 +17,12 @@ export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadR
   const startedAt = Date.now();
   const resp = await opts.relay.requestFileDownload(opts.sessionId, opts.path);
   if (!resp.success || !resp.dataBase64 || !resp.mimeType) {
-    const errorMessage = describeControlError({
+    const reason = describeControlError({
       errorCode: resp.errorCode,
       rawError: resp.error,
       fallback: "下载失败",
     });
+    const errorMessage = describeFileDownloadFailure(opts.path, reason);
     console.debug("[file-download] failed", {
       sessionId: opts.sessionId,
       path: opts.path,
@@ -56,6 +57,12 @@ export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadR
     durationMs: Date.now() - startedAt,
   });
   return { ok: true, size };
+}
+
+function describeFileDownloadFailure(path: string, reason: string): string {
+  const trimmed = reason.trim();
+  if (!trimmed || trimmed === "下载失败") return `下载失败：${path}`;
+  return `下载失败：${path}（${trimmed}）`;
 }
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
