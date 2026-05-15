@@ -20,11 +20,20 @@ vi.mock("@/components/toast", () => ({
   },
 }));
 
-import { FileDownloadLinks, FileDownloadProvider } from "./file-download-link";
+import { FileDownloadProvider, useFileDownload } from "./file-download-link";
 
 afterEach(cleanup);
 
-describe("FileDownloadLinks", () => {
+function DownloadProbe({ path }: { path: string }) {
+  const { download } = useFileDownload();
+  return (
+    <button type="button" onClick={() => download(path)}>
+      download
+    </button>
+  );
+}
+
+describe("FileDownloadProvider", () => {
   beforeEach(() => {
     requestFileDownload.mockReset();
     toastLoading.mockReset();
@@ -36,27 +45,13 @@ describe("FileDownloadLinks", () => {
     HTMLAnchorElement.prototype.click = vi.fn() as unknown as () => void;
   });
 
-  function renderWithProvider(text: string) {
+  function renderWithProvider(path: string) {
     return render(
       <FileDownloadProvider sessionId="s1">
-        <FileDownloadLinks text={text} />
+        <DownloadProbe path={path} />
       </FileDownloadProvider>,
     );
   }
-
-  it("renders nothing when text contains no recognizable file paths", () => {
-    const { container } = renderWithProvider("hello world");
-    expect(container.querySelector('[data-slot="file-download-links"]')).toBeNull();
-  });
-
-  it("renders one button per file path, skipping image paths (image-preview claims them)", () => {
-    renderWithProvider("see README.md and shot.png and ./build/out.tar.gz");
-    const buttons = screen.getAllByRole("button");
-    const labels = buttons.map((b) => b.textContent?.trim());
-    expect(labels).toContain("README.md");
-    expect(labels).toContain("./build/out.tar.gz");
-    expect(labels).not.toContain("shot.png");
-  });
 
   it("triggers requestFileDownload with sessionId + path on click", async () => {
     requestFileDownload.mockResolvedValueOnce({
@@ -66,9 +61,9 @@ describe("FileDownloadLinks", () => {
       size: 2,
       path: "docs/foo.md",
     });
-    renderWithProvider("look at docs/foo.md");
+    renderWithProvider("docs/foo.md");
 
-    fireEvent.click(screen.getByRole("button", { name: /docs\/foo\.md/ }));
+    fireEvent.click(screen.getByRole("button", { name: "download" }));
 
     await waitFor(() => expect(requestFileDownload).toHaveBeenCalledWith("s1", "docs/foo.md"));
     await waitFor(() =>
@@ -82,9 +77,9 @@ describe("FileDownloadLinks", () => {
       error: "ENOENT: no such file",
       errorCode: "PATH_NOT_FOUND",
     });
-    renderWithProvider("missing README.md ?");
+    renderWithProvider("README.md");
 
-    fireEvent.click(screen.getByRole("button", { name: /README\.md/ }));
+    fireEvent.click(screen.getByRole("button", { name: "download" }));
 
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith("下载失败：README.md（文件不存在）", {

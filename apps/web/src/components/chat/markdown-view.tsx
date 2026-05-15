@@ -1,11 +1,15 @@
 // Markdown 视图: react-markdown + GFM + rehype-highlight (github-dark)
 // 强制 skipHtml + disallowedElements 防御 XSS (RESEARCH §2.7)
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
 import { Children, cloneElement, isValidElement, memo, type ReactNode } from "react";
+import { Download, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { findInlinePathLinks, type InlinePathLinkKind } from "@/lib/inline-path-links";
+import { useFileDownload } from "./file-download-link";
+import { useImagePreview } from "./image-preview";
 
 interface MarkdownViewProps {
   text: string;
@@ -14,6 +18,15 @@ interface MarkdownViewProps {
 }
 
 const TRAILING_INLINE_MARKER = "\uE000";
+const INLINE_PATH_SCHEME = "dev-anywhere-path:";
+
+type MarkdownAstNode = {
+  type: string;
+  value?: string;
+  url?: string;
+  title?: string | null;
+  children?: MarkdownAstNode[];
+};
 
 function replaceTrailingInlineMarker(node: ReactNode, trailingInline: ReactNode): ReactNode {
   if (typeof node === "string") {
@@ -48,6 +61,122 @@ function renderWithTrailingInline(children: ReactNode, trailingInline?: ReactNod
   return Children.map(children, (child) => replaceTrailingInlineMarker(child, trailingInline));
 }
 
+function encodeInlinePathHref(kind: InlinePathLinkKind, path: string): string {
+  return `${INLINE_PATH_SCHEME}${kind}:${encodeURIComponent(path)}`;
+}
+
+function decodeInlinePathHref(href: string): { kind: InlinePathLinkKind; path: string } | null {
+  if (!href.startsWith(INLINE_PATH_SCHEME)) return null;
+  const rest = href.slice(INLINE_PATH_SCHEME.length);
+  const separator = rest.indexOf(":");
+  if (separator === -1) return null;
+  const kind = rest.slice(0, separator);
+  if (kind !== "file" && kind !== "image") return null;
+  return { kind, path: decodeURIComponent(rest.slice(separator + 1)) };
+}
+
+function markdownUrlTransform(value: string, key: string, node: unknown): string {
+  if (value.startsWith(INLINE_PATH_SCHEME)) return value;
+  void key;
+  void node;
+  return defaultUrlTransform(value);
+}
+
+function linkifyTextNode(value: string): MarkdownAstNode[] {
+  const matches = findInlinePathLinks(value);
+  if (matches.length === 0) return [{ type: "text", value }];
+
+  const nodes: MarkdownAstNode[] = [];
+  let offset = 0;
+  for (const match of matches) {
+    if (match.start > offset) {
+      nodes.push({ type: "text", value: value.slice(offset, match.start) });
+    }
+    nodes.push({
+      type: "link",
+      url: encodeInlinePathHref(match.kind, match.path),
+      title: null,
+      children: [{ type: "text", value: match.path }],
+    });
+    offset = match.end;
+  }
+  if (offset < value.length) nodes.push({ type: "text", value: value.slice(offset) });
+  return nodes;
+}
+
+function linkifyInlinePathNodes(node: MarkdownAstNode): void {
+  if (!node.children) return;
+  const nextChildren: MarkdownAstNode[] = [];
+  for (const child of node.children) {
+    if (child.type === "text" && typeof child.value === "string") {
+      nextChildren.push(...linkifyTextNode(child.value));
+      continue;
+    }
+    if (
+      !["link", "linkReference", "definition", "inlineCode", "code", "html", "yaml"].includes(
+        child.type,
+      )
+    ) {
+      linkifyInlinePathNodes(child);
+    }
+    nextChildren.push(child);
+  }
+  node.children = nextChildren;
+}
+
+function remarkInlinePathLinks() {
+  return (tree: MarkdownAstNode) => {
+    linkifyInlinePathNodes(tree);
+  };
+}
+
+function InlinePathAction({
+  href,
+  children,
+  tone,
+}: {
+  href: string;
+  children: ReactNode;
+  tone: "default" | "on-primary";
+}) {
+  const decoded = decodeInlinePathHref(href);
+  const { download } = useFileDownload();
+  const { openImagePreview } = useImagePreview();
+
+  if (!decoded) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  }
+
+  const isImage = decoded.kind === "image";
+  const Icon = isImage ? ImageIcon : Download;
+  return (
+    <button
+      type="button"
+      data-slot={isImage ? "inline-image-preview-link" : "inline-file-download-link"}
+      title={decoded.path}
+      aria-label={`${isImage ? "预览" : "下载"} ${decoded.path}`}
+      className={cn(
+        "inline cursor-pointer items-baseline rounded-sm border-0 bg-transparent p-0 font-mono text-[0.95em] underline decoration-dotted underline-offset-2 transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        tone === "on-primary"
+          ? "text-primary-foreground hover:bg-primary-foreground/10"
+          : "text-[var(--color-status-working)] hover:bg-accent/70",
+      )}
+      onClick={() => {
+        if (isImage) openImagePreview(decoded.path);
+        else download(decoded.path);
+      }}
+    >
+      <Icon className="mr-1 inline size-3 align-[-0.125em]" aria-hidden="true" />
+      {children}
+    </button>
+  );
+}
+
 // 代码块: 与表格同策略, 外包 not-prose + overflow-x-auto 容器承担滚动
 // 直接在 <pre> 上加 overflow-x 会被 prose / highlight.js 注入样式干扰, 分层更稳
 function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
@@ -76,8 +205,9 @@ export const MarkdownView = memo(function MarkdownView({
       style={{ fontSize: "inherit" }}
     >
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkInlinePathLinks]}
         rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        urlTransform={markdownUrlTransform}
         skipHtml
         disallowedElements={["script", "iframe", "object", "embed"]}
         components={{
@@ -91,10 +221,10 @@ export const MarkdownView = memo(function MarkdownView({
           li: ({ children, ...rest }) => (
             <li {...rest}>{renderWithTrailingInline(children, trailingInline)}</li>
           ),
-          a: ({ href, children, ...rest }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+          a: ({ href = "", children }) => (
+            <InlinePathAction href={href} tone={tone}>
               {children}
-            </a>
+            </InlinePathAction>
           ),
           code: ({ className, children, ...rest }) => {
             const isBlock = typeof className === "string" && className.includes("language-");

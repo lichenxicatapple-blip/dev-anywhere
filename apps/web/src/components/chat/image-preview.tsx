@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { describeControlError } from "@/lib/control-error-message";
-import { extractImagePreviewPaths } from "@/lib/image-preview-path";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
 
@@ -118,41 +117,6 @@ export function ImagePreviewProvider({
       {children}
       <ImagePreviewDialog open={open} onOpenChange={setOpen} state={state} />
     </ImagePreviewContext.Provider>
-  );
-}
-
-export function ImagePreviewLinks({
-  text,
-  tone = "default",
-}: {
-  text: string;
-  tone?: "default" | "on-primary";
-}) {
-  const paths = extractImagePreviewPaths(text);
-  const { openImagePreview } = useImagePreview();
-  if (paths.length === 0) return null;
-
-  return (
-    <div className="not-prose mt-2 flex flex-wrap gap-1.5" data-slot="image-preview-links">
-      {paths.map((path) => (
-        <button
-          key={path}
-          type="button"
-          className={cn(
-            "inline-flex max-w-full items-center gap-1.5 rounded-sm border px-2 py-1 text-xs transition-colors",
-            tone === "on-primary"
-              ? "border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground hover:bg-primary-foreground/16"
-              : "border-border bg-muted/45 text-foreground hover:bg-accent hover:text-accent-foreground",
-          )}
-          title={path}
-          data-slot="image-preview-link"
-          onClick={() => openImagePreview(path)}
-        >
-          <ImageIcon aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="truncate">{path}</span>
-        </button>
-      ))}
-    </div>
   );
 }
 

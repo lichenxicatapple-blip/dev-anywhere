@@ -1,7 +1,5 @@
 import { memo } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
-import { FileDownloadLinks } from "./file-download-link";
-import { ImagePreviewLinks } from "./image-preview";
 import { MarkdownView } from "./markdown-view";
 
 interface MessageBubbleProps {
@@ -25,8 +23,6 @@ export const MessageBubble = memo(function MessageBubble({
             style={contentStyle}
           >
             <MarkdownView text={message.text} tone="on-primary" />
-            <ImagePreviewLinks text={message.text} tone="on-primary" />
-            <FileDownloadLinks text={message.text} tone="on-primary" />
           </div>
         </div>
       </article>
@@ -48,8 +44,6 @@ export const MessageBubble = memo(function MessageBubble({
           style={contentStyle}
         >
           <MarkdownView text={message.text} trailingInline={streamingCursor} />
-          <ImagePreviewLinks text={message.text} />
-          <FileDownloadLinks text={message.text} />
         </div>
       </div>
     </article>

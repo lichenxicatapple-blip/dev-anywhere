@@ -2,6 +2,7 @@ import { afterEach, describe, it, expect } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MessageBubble } from "./message-bubble";
 import { ImagePreviewProvider } from "./image-preview";
+import { FileDownloadProvider } from "./file-download-link";
 import type { ChatMessage } from "@/stores/chat-store";
 
 // vitest 不自动 cleanup, 手工 afterEach 否则相邻 render 的 DOM 会累积
@@ -111,5 +112,61 @@ describe("MessageBubble", () => {
     );
 
     screen.getByRole("button", { name: /shot\.png/ });
+  });
+
+  it("renders file paths inline and does not duplicate them as bottom download chips", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-file-link",
+            role: "assistant",
+            text: "See README.md for details.",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    const paragraph = container.querySelector("p");
+    const inlineLink = paragraph?.querySelector('[data-slot="inline-file-download-link"]');
+    expect(inlineLink?.textContent).toBe("README.md");
+    expect(container.querySelector('[data-slot="file-download-links"]')).toBeNull();
+  });
+
+  it("renders image paths inline and does not duplicate them as bottom preview chips", () => {
+    const { container } = render(
+      <ImagePreviewProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-image-link",
+            role: "assistant",
+            text: "Screenshot: .dev-anywhere/clipboard/s1/shot.png",
+          })}
+        />
+      </ImagePreviewProvider>,
+    );
+
+    const paragraph = container.querySelector("p");
+    const inlineLink = paragraph?.querySelector('[data-slot="inline-image-preview-link"]');
+    expect(inlineLink?.textContent).toBe(".dev-anywhere/clipboard/s1/shot.png");
+    expect(container.querySelector('[data-slot="image-preview-links"]')).toBeNull();
+  });
+
+  it("does not rewrite existing markdown links or inline code into file actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-no-rewrite",
+            role: "assistant",
+            text: "Keep [README.md](https://example.com/readme) and `package.json` as-is.",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+    expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.com/readme");
+    expect(container.querySelector("code")?.textContent).toBe("package.json");
   });
 });
