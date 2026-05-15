@@ -27,10 +27,11 @@ function createRouter(options: {
   jsonTurnStart?: ReturnType<typeof vi.fn>;
   relaySend?: (data: string) => void;
   relayConnection?: ReturnType<typeof createRelayConnectionFake>;
-  workerSpawn?: () => number;
+  workerSpawn?: (sessionId: string, options?: unknown) => number;
   workerConnect?: () => Promise<Socket | null>;
   workerTerminateProcess?: (sessionId: string) => boolean;
   cleanupHookContext?: (sessionId: string) => void;
+  hostedStart?: (options: unknown) => number;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -64,6 +65,7 @@ function createRouter(options: {
     relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
     hostedPtyRegistry: {
+      start: options.hostedStart ?? vi.fn(() => 1234),
       write: options.hostedWrite ?? vi.fn(() => false),
       snapshot: vi.fn(() => false),
       resize: vi.fn(() => false),
@@ -235,6 +237,51 @@ describe("RelayRouter input routing", () => {
     }
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes permissionMode to JSON worker spawn during session_create", () => {
+    const workerSpawn = vi.fn((_sessionId: string, _options?: unknown) => 1234);
+    const router = createRouter({
+      mode: "json",
+      workerSpawn,
+    });
+
+    router.handle({
+      type: "session_create",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "json",
+      permissionMode: "plan",
+    });
+
+    expect(workerSpawn).toHaveBeenCalledTimes(1);
+    expect(workerSpawn.mock.calls[0][1]).toMatchObject({
+      cwd: "/tmp",
+      permissionMode: "plan",
+    });
+  });
+
+  it("passes permissionMode to hosted PTY start during session_create", () => {
+    const hostedStart = vi.fn((_options: unknown) => 1234);
+    const router = createRouter({
+      mode: "pty",
+      hostedStart,
+    });
+
+    router.handle({
+      type: "session_create",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "pty",
+      permissionMode: "bypassPermissions",
+    });
+
+    expect(hostedStart).toHaveBeenCalledTimes(1);
+    expect(hostedStart.mock.calls[0][0]).toMatchObject({
+      provider: "codex",
+      cwd: "/tmp",
+      permissionMode: "bypassPermissions",
+    });
   });
 
   it("drops batch user_input for PTY sessions", () => {

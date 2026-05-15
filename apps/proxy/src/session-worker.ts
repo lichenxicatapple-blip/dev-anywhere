@@ -3,6 +3,7 @@ import { mkdirSync, unlinkSync, existsSync, chmodSync } from "node:fs";
 import {
   JsonSession,
   ToolWhitelist,
+  createPermissionModeApprovalStrategy,
   createRelayApprovalStrategy,
   type StreamJsonEvent,
   type ClaudePermissionMode,
@@ -95,7 +96,10 @@ const session = new JsonSession({
   permissionMode: workerPermissionMode,
   includePartialMessages: workerStreamDelta,
   hook: workerHook,
-  approvalStrategy: createRelayApprovalStrategy(whitelist, forwardToRelay),
+  approvalStrategy: createPermissionModeApprovalStrategy(
+    workerPermissionMode,
+    createRelayApprovalStrategy(whitelist, forwardToRelay),
+  ),
   onEvent: (event: StreamJsonEvent) => {
     // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
     if (event.type === "system" && typeof event.session_id === "string") {

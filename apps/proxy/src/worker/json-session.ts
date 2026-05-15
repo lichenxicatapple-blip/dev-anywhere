@@ -79,6 +79,33 @@ export function createRelayApprovalStrategy(
   };
 }
 
+const editToolNames = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
+
+export function createPermissionModeApprovalStrategy(
+  permissionMode: ClaudePermissionMode | undefined,
+  fallback: ApprovalStrategy,
+): ApprovalStrategy {
+  switch (permissionMode) {
+    case "bypassPermissions":
+    case "dontAsk":
+      return async () => ({ behavior: "allow", message: "Auto-approved by permission mode" });
+    case "acceptEdits":
+      return async (toolName, input) => {
+        if (editToolNames.has(toolName)) {
+          return { behavior: "allow", message: "Auto-approved edit by permission mode" };
+        }
+        return fallback(toolName, input);
+      };
+    case "plan":
+      return async () => ({
+        behavior: "deny",
+        message: "Tool use denied by plan mode.",
+      });
+    default:
+      return fallback;
+  }
+}
+
 export class JsonSession {
   private child: ChildProcess | null = null;
   private stderrChunks: string[] = [];

@@ -125,6 +125,28 @@ describe("Claude provider", () => {
     });
   });
 
+  it("passes all supported Claude permission modes to stream-json and PTY commands", () => {
+    const modes = ["default", "auto", "acceptEdits", "plan", "bypassPermissions"] as const;
+
+    for (const permissionMode of modes) {
+      const jsonCommand = CLAUDE_PROVIDER.buildJsonCommand(
+        { permissionMode },
+        { PATH: "/usr/bin" },
+      );
+      expect(jsonCommand.args).toEqual(
+        expect.arrayContaining(["--permission-mode", permissionMode]),
+      );
+
+      withExecutable("claude", (claudeBin) => {
+        const ptyCommand = CLAUDE_PROVIDER.buildTerminalCommand(
+          { args: ["--continue"], permissionMode },
+          { CLAUDE_BIN: claudeBin },
+        );
+        expect(ptyCommand.args).toEqual(["--permission-mode", permissionMode, "--continue"]);
+      });
+    }
+  });
+
   it("injects session-scoped Claude hook settings and env", () => {
     const hook = {
       provider: "claude" as const,
