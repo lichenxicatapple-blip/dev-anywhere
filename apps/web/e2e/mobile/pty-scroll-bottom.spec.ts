@@ -3,6 +3,15 @@
 // 2. 滚到上方 (远离 bottom) 期间新输出不抢回底, "有新消息" 浮起.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
+import {
+  backToBottom,
+  backToBottomNewIndicator,
+  expectPtyAtBottom,
+  readPtyScrollMetrics,
+  scrollPtyToTop,
+  sendPtyLines,
+  sendPtyOutput,
+} from "../pty-scroll-helpers";
 
 const SESSION_ID = "mobile-pty-scroll";
 
@@ -13,31 +22,16 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 120 }, (_, i) => `line ${String(i).padStart(3, "0")}\r\n`).join(""),
-      );
-    });
+    await sendPtyLines(emuPage, { count: 120 });
 
-    const terminal = emuPage.locator('[data-slot="pty-terminal"]');
-    await terminal.evaluate((el) => {
-      (el as HTMLElement).scrollTop = 0;
-      el.dispatchEvent(new Event("scroll"));
-    });
+    await scrollPtyToTop(emuPage);
 
-    const backToBottom = emuPage.locator('[data-slot="back-to-bottom"]');
-    await expect(backToBottom).toBeVisible();
+    const button = backToBottom(emuPage);
+    await expect(button).toBeVisible();
 
-    await backToBottom.click();
-    await expect(backToBottom).toHaveJSProperty("inert", true);
-    await expect
-      .poll(() =>
-        terminal.evaluate((el) => {
-          const node = el as HTMLElement;
-          return node.scrollHeight - node.clientHeight - node.scrollTop;
-        }),
-      )
-      .toBeLessThanOrEqual(8);
+    await button.click();
+    await expect(button).toHaveJSProperty("inert", true);
+    await expectPtyAtBottom(emuPage);
   });
 
   test("new PTY output while scrolled up surfaces 有新消息 indicator without snapping to bottom", async ({
@@ -46,26 +40,16 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 120 }, (_, i) => `line ${String(i).padStart(3, "0")}\r\n`).join(""),
-      );
-    });
+    await sendPtyLines(emuPage, { count: 120 });
 
-    const terminal = emuPage.locator('[data-slot="pty-terminal"]');
-    await terminal.evaluate((el) => {
-      (el as HTMLElement).scrollTop = 0;
-      el.dispatchEvent(new Event("scroll"));
-    });
-    await expect(emuPage.locator('[data-slot="back-to-bottom"]')).toBeVisible();
-    const beforeScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+    await scrollPtyToTop(emuPage);
+    await expect(backToBottom(emuPage)).toBeVisible();
+    const beforeScrollTop = (await readPtyScrollMetrics(emuPage)).scrollTop;
 
-    await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty("frame-while-user-scrolled-up\r\n");
-    });
+    await sendPtyOutput(emuPage, "frame-while-user-scrolled-up\r\n");
 
-    await expect(emuPage.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
-    const afterScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+    await expect(backToBottomNewIndicator(emuPage)).toBeVisible();
+    const afterScrollTop = (await readPtyScrollMetrics(emuPage)).scrollTop;
     expect(afterScrollTop).toBeLessThanOrEqual(beforeScrollTop + 8);
   });
 });

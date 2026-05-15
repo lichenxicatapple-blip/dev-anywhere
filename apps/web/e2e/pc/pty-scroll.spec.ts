@@ -2,6 +2,25 @@
 // 触摸滚动期间不抢回底部.
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
+import {
+  backToBottom,
+  backToBottomNewIndicator,
+  enterLongHostMode,
+  expectBackToBottomClearance,
+  expectPtyAtBottom,
+  expectPtyScrollable,
+  expectPtySessionSubscribeCount,
+  ptyApprovalHint,
+  ptyInput,
+  ptyScrollbar,
+  ptyTerminal,
+  readPtyScrollMetrics,
+  resizePty,
+  scrollPtyToTop,
+  sendPtyLines,
+  sendPtyOutput,
+  setPtyState,
+} from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scroll";
 
@@ -15,105 +34,37 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       () => window.matchMedia("(pointer: coarse), (hover: none)").matches,
     );
 
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 90 }, (_, i) => `line ${String(i).padStart(2, "0")}\r\n`).join(""),
-      );
-    });
-    await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
+    await sendPtyLines(page, { count: 90, pad: 2 });
+    await expect(ptyScrollbar(page)).toHaveClass(/opacity-100/);
 
-    await page.locator('[data-slot="pty-terminal"]').hover();
-    await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
-      el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -1200 }));
-      (el as HTMLElement).scrollTop = 0;
-      el.dispatchEvent(new Event("scroll"));
-    });
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
+    await ptyTerminal(page).hover();
+    await scrollPtyToTop(page, { wheelDeltaY: -1200 });
+    await expect(backToBottom(page)).toBeVisible();
+    await expectBackToBottomClearance(page, { touchEditingSurface });
 
-    const backToBottomScrollbarGap = async () => {
-      const button = await page.locator('[data-slot="back-to-bottom"]').boundingBox();
-      const scrollbar = await page.locator('[data-slot="pty-scrollbar"]').boundingBox();
-      if (!button || !scrollbar) return -1;
-      return Math.round(scrollbar.x - (button.x + button.width));
-    };
-    const backToBottomViewportGap = async () => {
-      const button = await page.locator('[data-slot="back-to-bottom"]').boundingBox();
-      const viewport = page.viewportSize();
-      if (!button || !viewport) return -1;
-      return Math.round(viewport.width - (button.x + button.width));
-    };
-    if (touchEditingSurface) {
-      await expect.poll(backToBottomViewportGap).toBeGreaterThanOrEqual(20);
-      await expect.poll(backToBottomViewportGap).toBeLessThanOrEqual(32);
-    } else {
-      await expect.poll(backToBottomScrollbarGap).toBeGreaterThanOrEqual(12);
-      await expect.poll(backToBottomScrollbarGap).toBeLessThanOrEqual(20);
-    }
-
-    const scrollTopBeforeNewFrame = await page
-      .locator('[data-slot="pty-terminal"]')
-      .evaluate((el) => (el as HTMLElement).scrollTop);
-
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty("new output while reviewing history\r\n");
-    });
-    await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
-    const scrollTopAfterNewFrame = await page
-      .locator('[data-slot="pty-terminal"]')
-      .evaluate((el) => (el as HTMLElement).scrollTop);
+    const scrollTopBeforeNewFrame = (await readPtyScrollMetrics(page)).scrollTop;
+    await sendPtyOutput(page, "new output while reviewing history\r\n");
+    await expect(backToBottomNewIndicator(page)).toBeVisible();
+    const scrollTopAfterNewFrame = (await readPtyScrollMetrics(page)).scrollTop;
     expect(scrollTopAfterNewFrame).toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
 
-    await page.locator('[data-slot="back-to-bottom"]').click();
-    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", true);
-    await expect
-      .poll(async () =>
-        page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
-          const node = el as HTMLElement;
-          return node.scrollTop + node.clientHeight >= node.scrollHeight - 8;
-        }),
-      )
-      .toBeTruthy();
+    await backToBottom(page).click();
+    await expect(backToBottom(page)).toHaveJSProperty("inert", true);
+    await expectPtyAtBottom(page);
 
-    const beforeApprovalChrome = await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
-      const node = el as HTMLElement;
-      return {
-        scrollTop: node.scrollTop,
-        clientHeight: node.clientHeight,
-        scrollHeight: node.scrollHeight,
-      };
-    });
-    await page.evaluate(() => window.__ptySmoke.setPtyState("approval_wait"));
-    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
-    const afterApprovalChrome = await page.locator('[data-slot="pty-terminal"]').evaluate((el) => {
-      const node = el as HTMLElement;
-      return {
-        scrollTop: node.scrollTop,
-        clientHeight: node.clientHeight,
-        scrollHeight: node.scrollHeight,
-      };
-    });
+    const beforeApprovalChrome = await readPtyScrollMetrics(page);
+    await setPtyState(page, "approval_wait");
+    await expect(ptyApprovalHint(page)).toBeVisible();
+    const afterApprovalChrome = await readPtyScrollMetrics(page);
     expect(afterApprovalChrome.clientHeight).toBe(beforeApprovalChrome.clientHeight);
     expect(afterApprovalChrome.scrollTop).toBeGreaterThan(0);
     expect(afterApprovalChrome.scrollTop).toBeGreaterThanOrEqual(
       beforeApprovalChrome.scrollTop - 8,
     );
 
-    await page.evaluate(() => window.__ptySmoke.resize(100, 30));
+    await resizePty(page, 100, 30);
     await expectPtyTerminalMounted(page);
-    await expect
-      .poll(async () =>
-        page.evaluate(
-          () =>
-            window.__ptySmoke.sent.filter((raw) => {
-              try {
-                return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
-              } catch {
-                return false;
-              }
-            }).length,
-        ),
-      )
-      .toBeGreaterThanOrEqual(2);
+    await expectPtySessionSubscribeCount(page, 2);
   });
 
   // longHost 模式 (rows*cellH > visible content height) 下, isAtBottom = cursorInViewport。
@@ -127,38 +78,13 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     // 拉到 longHost: rows=80 强制 hostHeight (rows*cellH) > container.clientHeight。
     // PC 默认 viewport ~720, cellH ~19 → 24 行 host=456 还在 short-host;  60 行 host=1140 进 longHost。
-    await page.evaluate(() => {
-      window.__ptySmoke.resize(80, 60);
-    });
-    // 等 PTY 真的 resize 完: container.clientHeight 不动, 但 spacer.scrollHeight 跟 rows 走。
-    // 必须按 sessionId 取 terminal — describe 跑多 spec 时 __ccTestPtyTerminals 会留旧 entry。
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
-          SESSION_ID,
-        ),
-      )
-      .toBe(60);
+    await enterLongHostMode(page, { sessionId: SESSION_ID });
 
     // 输出大量行让 buffer.length > rows, 触发 longHost mode
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 80 }, (_, i) => `output line ${String(i).padStart(3, "0")}\r\n`).join(
-          "",
-        ),
-      );
-    });
+    await sendPtyLines(page, { count: 80, prefix: "output line" });
 
-    const terminal = page.locator('[data-slot="pty-terminal"]');
-    await expect
-      .poll(() =>
-        terminal.evaluate((el) => {
-          const node = el as HTMLElement;
-          return node.scrollHeight - node.clientHeight;
-        }),
-      )
-      .toBeGreaterThan(100);
+    const terminal = ptyTerminal(page);
+    await expectPtyScrollable(page, 100);
 
     // wheel up 小幅 — cursor 应仍在 viewport (longHost: 60 rows host > viewport, 但
     // viewport 末尾通常贴着光标行, 小 wheel 不会把 cursor 推出视野)
@@ -170,21 +96,13 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     // 远端继续输出: bug 版本 → notifyAtBottom 误清 intent → flushOutput → scrollToBottom 拉回
     for (let i = 0; i < 8; i++) {
-      await page.evaluate((idx) => {
-        window.__ptySmoke.sendPty(`continuous output ${idx}\r\n`);
-      }, i);
+      await sendPtyOutput(page, `continuous output ${i}\r\n`);
     }
     await page.waitForTimeout(400);
 
-    const afterOutput = await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      return {
-        scrollTop: node.scrollTop,
-        max: node.scrollHeight - node.clientHeight,
-      };
-    });
+    const afterOutput = await readPtyScrollMetrics(page);
     // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, scrollTop 跟新 max 应保留相对位置)
-    expect(afterOutput.scrollTop).toBeLessThan(afterOutput.max - 30);
+    expect(afterOutput.scrollTop).toBeLessThan(afterOutput.maxScrollTop - 30);
   });
 
   // 用户复现路径: 长 PTY 会话进入 /compact, 进度行不停 \r 重写 + 偶尔追加新行,
@@ -198,33 +116,12 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await setupPtyChat(page, { sessionId: SESSION_ID, query: "&ptyScrollTrace=1" });
     await expectPtyTerminalMounted(page);
 
-    await page.evaluate(() => {
-      window.__ptySmoke.resize(80, 60);
-    });
-    await expect
-      .poll(() =>
-        page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0, SESSION_ID),
-      )
-      .toBe(60);
+    await enterLongHostMode(page, { sessionId: SESSION_ID });
 
     // 先填一段历史让 longHost 真正生效 (host > viewport, 有可滚距离)
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from(
-          { length: 200 },
-          (_, i) => `history ${String(i).padStart(3, "0")}\r\n`,
-        ).join(""),
-      );
-    });
-    const terminal = page.locator('[data-slot="pty-terminal"]');
-    await expect
-      .poll(() =>
-        terminal.evaluate((el) => {
-          const node = el as HTMLElement;
-          return node.scrollHeight - node.clientHeight;
-        }),
-      )
-      .toBeGreaterThan(500);
+    await sendPtyLines(page, { count: 200, prefix: "history" });
+    const terminal = ptyTerminal(page);
+    await expectPtyScrollable(page, 500);
 
     // 启动 /compact 风格的连续输出: 每帧 \r 重写进度 + 频繁追加新行让
     // buffer 持续增长 (claude /compact 期间会输出 compacting messages 并不断新增进度行)。
@@ -269,11 +166,8 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     });
     await page.waitForTimeout(80);
 
-    const finalState = await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      return { scrollTop: node.scrollTop, max: node.scrollHeight - node.clientHeight };
-    });
-    expect(finalState.scrollTop).toBeLessThan(finalState.max - 30);
+    const finalState = await readPtyScrollMetrics(page);
+    expect(finalState.scrollTop).toBeLessThan(finalState.maxScrollTop - 30);
   });
 
   test("does not pin users to bottom when PTY output arrives during native touch scroll", async ({
@@ -282,24 +176,11 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 140 }, (_, i) => `stream line ${String(i).padStart(3, "0")}\r\n`).join(
-          "",
-        ),
-      );
-    });
-    const terminal = page.locator('[data-slot="pty-terminal"]');
-    await expect
-      .poll(() =>
-        terminal.evaluate((el) => {
-          const node = el as HTMLElement;
-          return node.scrollHeight - node.clientHeight;
-        }),
-      )
-      .toBeGreaterThan(0);
+    await sendPtyLines(page, { count: 140, prefix: "stream line" });
+    const terminal = ptyTerminal(page);
+    await expectPtyScrollable(page);
 
-    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await ptyInput(page).focus();
     await expect
       .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
       .toBe("Terminal input");
@@ -309,9 +190,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       Object.defineProperty(touchstart, "touches", { value: [{ clientY: 520 }] });
       el.dispatchEvent(touchstart);
     });
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty("frame-before-native-scroll\r\n");
-    });
+    await sendPtyOutput(page, "frame-before-native-scroll\r\n");
     await terminal.evaluate((el) => {
       const touchmove = new Event("touchmove", { bubbles: true }) as TouchEvent;
       Object.defineProperty(touchmove, "touches", { value: [{ clientY: 460 }] });
@@ -324,13 +203,11 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect
       .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
       .not.toBe("Terminal input");
-    const scrollTopBeforeNewFrame = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+    const scrollTopBeforeNewFrame = (await readPtyScrollMetrics(page)).scrollTop;
 
-    await page.evaluate(() => {
-      window.__ptySmoke.sendPty("frame-after-native-scroll\r\n");
-    });
+    await sendPtyOutput(page, "frame-after-native-scroll\r\n");
 
-    await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
+    await expect(backToBottomNewIndicator(page)).toBeVisible();
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);

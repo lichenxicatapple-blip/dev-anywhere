@@ -100,6 +100,16 @@ PTY vertical intent 的 set / clear / keep 语义属于纯状态机:
 3. 如果 E2E 与 L1/L2 覆盖同一事实, E2E 只保留一条用户路径 smoke。
 4. 不因一次 incident 同时在 FSM、controller、PC E2E、mobile E2E 各加一条; 先定位根因属于哪个桶。
 
+### PTY E2E 质量规则
+
+PTY browser spec 的职责是验证真浏览器事件、fakeRelay wiring、设备差异和用户流程, 不承担 intent transition 的穷举。
+
+- `apps/web/e2e/pty-scroll-helpers.ts` 是 PTY scroll E2E 的公共入口。新增 browser scroll spec 时优先复用 `ptyTerminal`, `sendPtyLines`, `readPtyScrollMetrics`, `scrollPtyToTop`, `expectPtyAtBottom`, `expectPtyScrollable`, `enterLongHostMode` 等 helper。
+- spec 文件里不要重复写 `[data-slot="pty-terminal"]` 选择器和 `scrollHeight - clientHeight - scrollTop` 公式。若需要新可观测量, 先加到 helper 并命名。
+- PC E2E 保留 fakeRelay 下的真实 wheel / click / resize / approval wiring smoke; 不为每个 FSM transition 新增 PC 测试。
+- Mobile E2E 只覆盖 PC 无法代表的真 Android / touch / visualViewport 差异。若与 PC 只差 selector 或 scroll math, 不新增 mobile 用例。
+- `/compact`、longHost、native touch scroll 这类线上事故路径可以保留 E2E, 但每条用例必须说明浏览器层独有风险: 并发 RAF 输出、真 wheel 序列、焦点/textarea、touch 取消或设备 viewport。
+
 ## 添加新 spec 决策树
 
 ```
