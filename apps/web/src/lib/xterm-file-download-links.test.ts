@@ -86,6 +86,17 @@ describe("xterm file download links", () => {
     expect(onDownload).not.toHaveBeenCalled();
   });
 
+  it("does not link display-truncated paths with ellipsis segments", () => {
+    const onDownload = vi.fn();
+    const captured = provideAndActivate(
+      onDownload,
+      { metaKey: true },
+      "apps/proxy/.../osc-extractor.test.ts",
+    );
+    expect(captured.text).toBeUndefined();
+    expect(onDownload).not.toHaveBeenCalled();
+  });
+
   // 触屏设备 (pointer: coarse) 没修饰键, plain tap 即触发. PC anti-misclick gate
   // 不应阻止移动端用户点链接打开下载.
   describe("touch surface (mobile / tablet without keyboard)", () => {

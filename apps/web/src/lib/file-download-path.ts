@@ -45,6 +45,7 @@ export function isFileDownloadPath(value: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return false;
   if (IMAGE_EXT_RE.test(path)) return false;
   if (!FILE_EXT_RE.test(path)) return false;
+  if (path.split("/").includes("...")) return false;
   return isPlausibleFileNameStem(path);
 }
 

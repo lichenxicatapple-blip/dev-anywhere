@@ -34,6 +34,12 @@ describe("file-download-path extraction", () => {
     expect(extractFileDownloadPaths("./src/components")).toEqual([]);
   });
 
+  it("rejects display-truncated paths with ellipsis path segments", () => {
+    expect(extractFileDownloadPaths("apps/proxy/.../osc-extractor.test.ts")).toEqual([]);
+    expect(extractFileDownloadPaths("packages/shared/.../relay-control.test.ts")).toEqual([]);
+    expect(isFileDownloadPath("apps/web/.../pty-scroll.test.ts")).toBe(false);
+  });
+
   it("dedupes repeated paths", () => {
     expect(extractFileDownloadPaths("/a.log /a.log /a.log")).toEqual(["/a.log"]);
   });
