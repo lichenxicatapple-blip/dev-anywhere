@@ -133,6 +133,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
+  const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
     hasSeenSoftKeyboard: false,
@@ -576,11 +577,21 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   useEffect(() => {
     relayoutSchedulerRef.current?.schedule();
+    const keyboardOpen = keyboardOffset > 0;
+    const previous = keyboardFollowStateRef.current;
+    const shouldForceKeyboardFollow =
+      showMobilePtyControls &&
+      keyboardOpen &&
+      (!previous.keyboardOpen || !previous.controlsVisible);
+    keyboardFollowStateRef.current = {
+      keyboardOpen,
+      controlsVisible: showMobilePtyControls,
+    };
     if (showMobilePtyControls) {
-      if (keyboardOffset > 0) {
+      if (shouldForceKeyboardFollow) {
         scrollControllerRef.current?.scrollToBottom("keyboardOffset", { force: true });
         clearNewFramesWhileAway();
-      } else {
+      } else if (!keyboardOpen) {
         rawInputFollowSchedulerRef.current?.schedule();
       }
     }

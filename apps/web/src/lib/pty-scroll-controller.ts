@@ -385,10 +385,12 @@ export function attachPtyScrollController(
     // no-op 早返: 已在底 + intent=false + viewportY=maxYdisp → 不工作不 trace。
     // pendingContainerSyncRetry=false 语义保留 (scrollToBottom 永远清干净 stale state)。
     const expectedYdisp = Math.max(0, term.buffer.active.length - term.rows);
+    const anchor = getCurrentAnchor();
     if (
       !userHasVerticalScrollIntent() &&
       term.buffer.active.viewportY === expectedYdisp &&
-      Math.abs(container.scrollTop - getCurrentAnchor().bottomScrollTop) <= 1
+      (Math.abs(container.scrollTop - anchor.bottomScrollTop) <= 1 ||
+        (!opts.force && anchor.isAtBottom))
     ) {
       pendingContainerSyncRetry = false;
       return;

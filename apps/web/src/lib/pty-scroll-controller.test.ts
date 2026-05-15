@@ -771,6 +771,44 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("does not re-center on passive output when keyboard height jitters but cursor remains visible", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "112px";
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    defineScrollHeight(container, 8920);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1000, clientWidth: 2160 });
+    const { terminal, emitRender } = createTerminal({ 417: "live prompt" });
+    terminal.rows = 50;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 440;
+    terminal.buffer.active.cursorY = 27;
+    let hasNewFrame = false;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBeCloseTo(8236.5);
+
+    defineSize(container, { clientHeight: 365 });
+    hasNewFrame = true;
+    emitRender();
+
+    expect(container.scrollTop).toBeCloseTo(8236.5);
+  });
+
   it("keeps vertical review intent on a small wheel-down while still far from bottom (longHost)", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 787, clientWidth: 1640 });
