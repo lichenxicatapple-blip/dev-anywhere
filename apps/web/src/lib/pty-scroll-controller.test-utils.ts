@@ -59,6 +59,7 @@ export type PtyScrollTestTerminal = Terminal & {
   buffer: {
     active: {
       length: number;
+      baseY: number;
       viewportY: number;
       cursorX: number;
       cursorY: number;
@@ -81,6 +82,9 @@ export function createPtyScrollTerminal(lineTextByIndex: Record<number, string> 
     buffer: {
       active: {
         length: 100,
+        get baseY() {
+          return Math.max(0, terminal.buffer.active.length - terminal.rows);
+        },
         viewportY: 0,
         cursorX: 0,
         cursorY: 0,

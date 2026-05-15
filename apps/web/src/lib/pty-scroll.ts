@@ -60,7 +60,9 @@ interface ScrollAnchorInput {
   rows: number;
   cellH: number;
   bufferLength: number;
-  // 光标在 buffer 中的绝对行 (term.buffer.active.viewportY + .cursorY)
+  // 光标在 live buffer 中的绝对行 (term.buffer.active.baseY + .cursorY)。
+  // viewportY 会随用户回看历史变化，不能用来定位 live cursor；否则回看时会把
+  // 光标错误投影到历史视窗里，让 cursor-aware atBottom 误判为 true。
   cursorBufferRow: number;
   // container.clientHeight 扣掉上下 padding
   visibleContentHeight: number;

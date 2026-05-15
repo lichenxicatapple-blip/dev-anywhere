@@ -716,6 +716,48 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(false);
   });
 
+  it("treats long-host history review as away from live cursor even when viewport-local cursor is visible", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 5340);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1000, clientWidth: 2160 });
+    const { terminal, emitRender } = createTerminal({ 242: "live prompt" });
+    terminal.rows = 50;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 265;
+    terminal.buffer.active.cursorY = 27;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBeCloseTo(4533);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1800, cancelable: true }));
+
+    expect(terminal.buffer.active.viewportY).toBeLessThan(terminal.buffer.active.baseY);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
+    const reviewedScrollTop = container.scrollTop;
+    onUserVerticalScrollIntentChange.mockClear();
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    emitRender();
+
+    expect(container.scrollTop).toBeCloseTo(reviewedScrollTop + 120);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(false);
+  });
+
   it("owns wheel scrolling instead of leaving it to xterm internals", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });

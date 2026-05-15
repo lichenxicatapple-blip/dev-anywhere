@@ -102,7 +102,7 @@ export function buildPtyScrollDebugSnapshot(
     Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
   );
   const viewportHostCoverage = container.clientHeight > 0 ? overlap / container.clientHeight : 0;
-  const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+  const cursorBufferRow = buffer.baseY + buffer.cursorY;
   const anchor = computeScrollAnchor({
     rows: term.rows,
     cellH,

@@ -52,7 +52,7 @@ function makeRefs(opts: {
       active: {
         length: opts.bufferLength,
         viewportY: opts.viewportY,
-        baseY: 0,
+        baseY: Math.max(0, opts.bufferLength - (opts.rows ?? 20)),
         cursorX: 0,
         cursorY: 0,
       },
@@ -188,7 +188,7 @@ describe("buildPtyScrollDebugSnapshot", () => {
     expect(snap.anchor).toEqual(
       expect.objectContaining({
         atBottom: false,
-        cursorBufferRow: 20,
+        cursorBufferRow: 80,
       }),
     );
     expect(snap.prevCursorBufferRow).toBe(19);

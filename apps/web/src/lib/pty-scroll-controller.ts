@@ -187,7 +187,7 @@ export function attachPtyScrollController(
       rows: term.rows,
       cellH,
       bufferLength: buffer.length,
-      cursorBufferRow: buffer.viewportY + buffer.cursorY,
+      cursorBufferRow: buffer.baseY + buffer.cursorY,
       visibleContentHeight: Math.max(0, container.clientHeight - paddingTop - paddingBottom),
       paddingTop,
       paddingBottom,
@@ -250,7 +250,7 @@ export function attachPtyScrollController(
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const buffer = term.buffer.active;
-    const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+    const cursorBufferRow = buffer.baseY + buffer.cursorY;
     const anchor = computeScrollAnchor({
       rows: term.rows,
       cellH,
@@ -409,7 +409,7 @@ export function attachPtyScrollController(
     // 把当前光标行作为基线记下: 紧接其后的 onRender 走 followCursorY 时, prev == current 跳过,
     // 不会把刚刚摆到几何底的视口又拉成 cursor 居中。光标真的"动"了 (claude 重画 / 用户敲)
     // 才让 followCursorY 接管。
-    prevCursorBufferRow = term.buffer.active.viewportY + term.buffer.active.cursorY;
+    prevCursorBufferRow = term.buffer.active.baseY + term.buffer.active.cursorY;
     notifyScroll();
     // 清零必须放在最末尾: container.scrollTop = nextScrollTop 会同步触发 onContainerScroll →
     // syncContainerScroll, 此时若 cellH=0 会重新置位 retry flag。开头清零的话这里又会被覆盖,
@@ -761,7 +761,7 @@ export function attachPtyScrollController(
       return;
     }
     const buffer = term.buffer.active;
-    const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+    const cursorBufferRow = buffer.baseY + buffer.cursorY;
     if (prevCursorBufferRow === cursorBufferRow) {
       // 稳态每帧 cursor 不变, trace 这条只产生噪音, 不诊断任何问题。
       return;
