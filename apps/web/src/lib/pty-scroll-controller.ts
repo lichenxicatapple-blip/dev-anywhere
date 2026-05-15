@@ -6,6 +6,11 @@ import {
   computeScrollTarget,
   ydispToScrollTop,
 } from "./pty-scroll";
+import {
+  decideCursorAwareClamp,
+  decideScrollToBottomAction,
+  decideTouchMoveBoundary,
+} from "./pty-follow-policy";
 import { appendPtyScrollTrace, isPtyScrollTraceEnabled } from "./pty-scroll-trace";
 import {
   canPassiveFollow,
@@ -379,19 +384,23 @@ export function attachPtyScrollController(
     // 自动响应 / 焦点切换之类的事件无形拉走。
     // force=true 是用户明示动作 (BackToBottom / init / 修 stale state programmaticDrift)
     // 的 opt-out, 这条路径仍清 intent + 拉底, 表示"用户想从回看模式退出回到 follow"。
-    if (!opts.force && userHasVerticalScrollIntent()) {
-      return;
-    }
     // no-op 早返: 已在底 + intent=false + viewportY=maxYdisp → 不工作不 trace。
     // pendingContainerSyncRetry=false 语义保留 (scrollToBottom 永远清干净 stale state)。
     const expectedYdisp = Math.max(0, term.buffer.active.length - term.rows);
     const anchor = getCurrentAnchor();
-    if (
-      !userHasVerticalScrollIntent() &&
-      term.buffer.active.viewportY === expectedYdisp &&
-      (Math.abs(container.scrollTop - anchor.bottomScrollTop) <= 1 ||
-        (!opts.force && anchor.isAtBottom))
-    ) {
+    const action = decideScrollToBottomAction({
+      force: opts.force ?? false,
+      reviewing: userHasVerticalScrollIntent(),
+      viewportY: term.buffer.active.viewportY,
+      expectedYdisp,
+      scrollTop: container.scrollTop,
+      bottomScrollTop: anchor.bottomScrollTop,
+      atBottom: anchor.isAtBottom,
+    }).action;
+    if (action === "blocked-by-review") {
+      return;
+    }
+    if (action === "noop") {
       pendingContainerSyncRetry = false;
       return;
     }
@@ -585,17 +594,21 @@ export function attachPtyScrollController(
   const clampCursorAwareBottomOverscroll = (rawScrollTop: number): number => {
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const anchor = getCurrentAnchor();
-    const hasCursorAwareBottom = anchor.bottomScrollTop < domMaxScrollTop - 1;
-    if (!hasCursorAwareBottom || rawScrollTop <= anchor.bottomScrollTop + 1) {
-      return rawScrollTop;
+    const decision = decideCursorAwareClamp({
+      rawScrollTop,
+      bottomScrollTop: anchor.bottomScrollTop,
+      domMaxScrollTop,
+    });
+    if (decision.action === "keep") {
+      return decision.scrollTop;
     }
     trace("container-scroll:clamp-cursor-bottom", {
-      details: `prev=${rawScrollTop} next=${anchor.bottomScrollTop} domMax=${domMaxScrollTop}`,
+      details: `prev=${rawScrollTop} next=${decision.scrollTop} domMax=${domMaxScrollTop}`,
     });
-    container.scrollTop = anchor.bottomScrollTop;
+    container.scrollTop = decision.scrollTop;
     pendingProgrammaticScrollTop = null;
     pendingFollowCursorScrollTop = null;
-    return anchor.bottomScrollTop;
+    return decision.scrollTop;
   };
 
   const preventTouchMovePastCursorAwareBottom = (
@@ -604,17 +617,20 @@ export function attachPtyScrollController(
   ): void => {
     const previousY = lastTouchClientY;
     lastTouchClientY = currentY;
-    if (previousY === null || currentY === null) return;
     // On touch screens, finger-up means content scrollTop increases. At cursor-aware
     // bottom this native scroll has no useful terminal state to expose; letting it
     // happen creates an 8px compositor bounce that the next render then snaps back.
-    const wantsScrollDown = currentY < previousY;
-    if (!wantsScrollDown) return;
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const anchor = getCurrentAnchor();
-    const hasCursorAwareBottom = anchor.bottomScrollTop < domMaxScrollTop - 1;
-    const atCursorAwareBottom = container.scrollTop >= anchor.bottomScrollTop - 1;
-    if (!hasCursorAwareBottom || !atCursorAwareBottom || !anchor.isAtBottom) return;
+    const decision = decideTouchMoveBoundary({
+      previousClientY: previousY,
+      currentClientY: currentY,
+      scrollTop: container.scrollTop,
+      bottomScrollTop: anchor.bottomScrollTop,
+      domMaxScrollTop,
+      atBottom: anchor.isAtBottom,
+    });
+    if (decision.action === "allow") return;
 
     touchTriedBeyondCursorAwareBottom = true;
     touchGestureMaxScrollTop = Math.max(
