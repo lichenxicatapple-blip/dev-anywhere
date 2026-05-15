@@ -247,8 +247,9 @@ function compactTerminalText(text: string): string {
 
 async function previewJsonImagePath(page: Page, imagePath: string): Promise<void> {
   await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+  await expect(page.locator('[data-slot="image-preview-links"]')).toHaveCount(0);
   const previewLink = page
-    .locator('[data-slot="image-preview-link"]', { hasText: imagePath })
+    .locator('[data-slot="inline-image-preview-link"]', { hasText: imagePath })
     .first();
   await expect(previewLink).toBeVisible({ timeout: 20_000 });
   await previewLink.click();
