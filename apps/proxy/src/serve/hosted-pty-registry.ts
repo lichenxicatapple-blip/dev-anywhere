@@ -10,7 +10,13 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
-import { extractOscSequences, extractOscSignals } from "../common/osc-extractor.js";
+import {
+  appendPtySemanticTextTail,
+  extractOscSequences,
+  extractOscSignals,
+  extractTextSignals,
+} from "../common/osc-extractor.js";
+import { shouldReleaseTextApprovalOnInput } from "../common/pty-approval-state.js";
 import { decidePtySemanticTransition } from "../common/pty-semantic-machine.js";
 import {
   CLAUDE_PROVIDER,
@@ -65,6 +71,8 @@ interface HostedPtySession {
   lastOutputTime: number;
   currentState: PtySemanticState;
   outputSeq: number;
+  semanticTextTail: string;
+  textApprovalWaitActive: boolean;
 }
 
 export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: string): string[] {
@@ -132,6 +140,8 @@ export class HostedPtyRegistry {
       lastOutputTime: 0,
       currentState: "turn_complete",
       outputSeq: 0,
+      semanticTextTail: "",
+      textApprovalWaitActive: false,
     };
     this.sessions.set(options.sessionId, hosted);
 
@@ -164,6 +174,7 @@ export class HostedPtyRegistry {
   write(sessionId: string, data: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
+    this.releaseTextApprovalOnInput(sessionId, hosted, data);
     hosted.child.write(data);
     return true;
   }
@@ -223,7 +234,16 @@ export class HostedPtyRegistry {
 
     const oscSequences = extractOscSequences(data);
     const session = this.deps.sessionManager.getSession(sessionId);
-    const signal = extractOscSignals(data, session?.provider);
+    const oscSignal = extractOscSignals(data, session?.provider);
+    hosted.semanticTextTail = appendPtySemanticTextTail(hosted.semanticTextTail, data);
+    const textSignal = oscSignal
+      ? null
+      : extractTextSignals(hosted.semanticTextTail, session?.provider);
+    const signal = oscSignal ?? textSignal;
+    if (textSignal?.state === "approval_wait") {
+      hosted.textApprovalWaitActive = true;
+      hosted.semanticTextTail = "";
+    }
     if (oscSequences.length > 0) {
       serviceLogger.debug(
         {
@@ -244,12 +264,30 @@ export class HostedPtyRegistry {
       currentState: hosted.currentState,
       signal: signal ?? null,
       sessionStateIsWaitingApproval: session?.state === SessionState.WAITING_APPROVAL,
+      allowTitleOnlyApprovalRelease: !hosted.textApprovalWaitActive,
     });
     hosted.currentState = decision.nextState;
+    if (decision.nextState !== "approval_wait") {
+      hosted.textApprovalWaitActive = false;
+    }
     if (!decision.emit) return;
 
     this.sendPtyState(sessionId, decision.nextState, decision.meta);
     this.deps.applyPtyStateToSession(sessionId, decision.nextState);
+  }
+
+  private releaseTextApprovalOnInput(
+    sessionId: string,
+    hosted: HostedPtySession,
+    data: string,
+  ): void {
+    if (!hosted.textApprovalWaitActive || hosted.currentState !== "approval_wait") return;
+    if (!shouldReleaseTextApprovalOnInput(data)) return;
+
+    hosted.textApprovalWaitActive = false;
+    hosted.currentState = "working";
+    this.sendPtyState(sessionId, "working");
+    this.deps.applyPtyStateToSession(sessionId, "working");
   }
 
   private checkIdle(sessionId: string): void {

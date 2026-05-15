@@ -52,6 +52,20 @@ interface DevAnywherePtyDebugSnapshot {
   spacer: { height: number };
   host: { top: number; height: number; expectedTop: number; topDrift: number };
   container: { scrollTop: number; clientHeight: number };
+  anchor: {
+    atBottom: boolean;
+    cursorInViewport: boolean;
+    cursorBufferRow: number;
+    bottomScrollTop: number;
+    scrollTopDeltaToBottom: number;
+  };
+  intent: { vertical: boolean; horizontal: boolean };
+  pending: {
+    programmaticScrollTop: number | null;
+    followCursorScrollTop: number | null;
+    followCursorScrollLeft: number | null;
+    containerSyncRetry: boolean;
+  };
   viewportHostCoverage: number;
   pendingContainerSyncRetry: boolean;
 }

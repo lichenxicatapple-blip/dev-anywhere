@@ -34,9 +34,32 @@ export interface PtyDebugSnapshot {
   };
   cell: { h: number; w: number };
   visibleContentHeight: number;
+  anchor: {
+    atBottom: boolean;
+    cursorInViewport: boolean;
+    cursorBufferRow: number;
+    bottomScrollTop: number;
+    scrollTopDeltaToBottom: number;
+  };
+  intent: {
+    vertical: boolean;
+    horizontal: boolean;
+  };
   pinned: boolean;
   pendingProgrammaticScrollTop: number | null;
+  pendingFollowCursorScrollTop: number | null;
+  pendingFollowCursorScrollLeft: number | null;
+  prevCursorBufferRow: number | null;
+  lastSeenScrollTop: number;
+  lastSeenScrollLeft: number;
   touchScrollActive: boolean;
+  syncing: { internal: boolean; external: boolean };
+  pending: {
+    programmaticScrollTop: number | null;
+    followCursorScrollTop: number | null;
+    followCursorScrollLeft: number | null;
+    containerSyncRetry: boolean;
+  };
   // 用当前 buffer / cell 重新跑一次 computePtyHostLayout 得到的 spacer 期望高度，
   // 与 spacer.height 一起暴露便于检测漂移（updateSpacer 与渲染之间任意 race 的标志）。
   expectedSpacerHeight: number;

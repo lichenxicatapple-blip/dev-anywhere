@@ -132,11 +132,17 @@ export function attachPtyScrollController(
   // UX 跳变。null 表示"还没记录过", 等同于"上一帧没看到光标行"。
   let prevCursorBufferRow: number | null = null;
 
-  const setUserHasVerticalScrollIntent = (value: boolean): void => {
+  const setUserHasVerticalScrollIntent = (value: boolean, details?: string): void => {
     if (userHasVerticalScrollIntent === value) return;
     userHasVerticalScrollIntent = value;
-    trace(value ? "intent:set" : "intent:clear");
+    trace(value ? "intent:set" : "intent:clear", details ? { details } : {});
     onUserVerticalScrollIntentChange?.(value);
+  };
+
+  const setUserHasHorizontalScrollIntent = (value: boolean, details?: string): void => {
+    if (userHasHorizontalScrollIntent === value) return;
+    userHasHorizontalScrollIntent = value;
+    trace(value ? "horizontal-intent:set" : "horizontal-intent:clear", details ? { details } : {});
   };
 
   const getScrollState = (): PtyScrollState => ({
@@ -216,12 +222,7 @@ export function attachPtyScrollController(
     const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
     const cls =
       typeof el.className === "string" && el.className
-        ? "." +
-          el.className
-            .split(/\s+/)
-            .filter(Boolean)
-            .slice(0, 2)
-            .join(".")
+        ? "." + el.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".")
         : "";
     if (aria) return `${aria}|${tag}${id}${cls}{${slot}}`;
     return `${tag}${id}${cls}{${slot}}`;
@@ -230,6 +231,9 @@ export function attachPtyScrollController(
   const trace = (
     event: string,
     extra: {
+      action?: string;
+      reason?: string;
+      scope?: string;
       ydisp?: number;
       details?: string;
       vvHeightDelta?: number;
@@ -240,12 +244,54 @@ export function attachPtyScrollController(
     const containerRect = container.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
     const visualViewport = window.visualViewport;
+    const { cellH, cellW } = getDims();
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const buffer = term.buffer.active;
+    const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+    const anchor = computeScrollAnchor({
+      rows: term.rows,
+      cellH,
+      bufferLength: buffer.length,
+      cursorBufferRow,
+      visibleContentHeight,
+      paddingTop,
+      paddingBottom,
+      containerScrollTop: container.scrollTop,
+      containerScrollHeight: container.scrollHeight,
+      containerClientHeight: container.clientHeight,
+      atBottomThreshold,
+    });
+    const currentHostTop = parsePx(host.style.top);
+    const expectedHostTop =
+      cellH > 0
+        ? computeHostTop({
+            ydisp: buffer.viewportY,
+            rows: term.rows,
+            cellH,
+            visibleContentHeight,
+          })
+        : 0;
+    const currentHostHeight = parsePx(host.style.height);
+    const viewportTop = container.scrollTop;
+    const viewportBottom = viewportTop + container.clientHeight;
+    const hostBottom = currentHostTop + currentHostHeight;
+    const hostOverlap = Math.max(
+      0,
+      Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
+    );
     appendPtyScrollTrace({
       t: performance.now(),
       event,
+      scope: extra.scope,
+      action: extra.action,
+      reason: extra.reason,
       scrollTop: container.scrollTop,
+      scrollLeft: container.scrollLeft,
       scrollHeight: container.scrollHeight,
+      scrollWidth: container.scrollWidth,
       clientHeight: container.clientHeight,
+      clientWidth: container.clientWidth,
       innerHeight: window.innerHeight,
       visualViewportHeight: visualViewport?.height,
       visualViewportOffsetTop: visualViewport?.offsetTop,
@@ -253,11 +299,26 @@ export function attachPtyScrollController(
       containerBottom: containerRect.bottom,
       hostRectTop: hostRect.top,
       hostRectBottom: hostRect.bottom,
-      viewportY: term.buffer.active.viewportY,
-      bufferLength: term.buffer.active.length,
+      viewportY: buffer.viewportY,
+      bufferLength: buffer.length,
       hostTop: host.style.top,
+      cellH,
+      cellW,
+      cursorX: buffer.cursorX,
+      cursorY: buffer.cursorY,
+      cursorBufferRow,
+      cursorInViewport: anchor.cursorInViewport,
+      anchorBottomScrollTop: anchor.bottomScrollTop,
+      pendingProgrammaticScrollTop,
+      pendingFollowCursorScrollTop,
+      pendingFollowCursorScrollLeft,
+      pendingContainerSyncRetry,
+      horizontalIntent: userHasHorizontalScrollIntent,
+      prevCursorBufferRow,
+      hostTopDrift: currentHostTop - expectedHostTop,
+      viewportHostCoverage: container.clientHeight > 0 ? hostOverlap / container.clientHeight : 0,
       focus: describeFocus(),
-      atBottom: getCurrentAnchor().isAtBottom,
+      atBottom: anchor.isAtBottom,
       touchActive: touchScrollActive,
       userIntent: userHasVerticalScrollIntent,
       ...extra,
@@ -280,10 +341,7 @@ export function attachPtyScrollController(
     });
   };
 
-  const scrollToBottom = (
-    reason: string = "internal",
-    opts: { force?: boolean } = {},
-  ): void => {
+  const scrollToBottom = (reason: string = "internal", opts: { force?: boolean } = {}): void => {
     // 默认 respect intent: intent=true (用户在回看) 时整段 no-op, 不清 intent / 不 trace /
     // 不写 scrollTop / 不写 host。被动 caller (rawInput / pendingFrame / relayout /
     // termScroll) 应当被回看意图压过, 否则用户每次想看历史都会被远端 / xterm onData
@@ -305,7 +363,10 @@ export function attachPtyScrollController(
       return;
     }
     trace(`scroll-to-bottom:start[${reason}]`);
-    setUserHasVerticalScrollIntent(false);
+    setUserHasVerticalScrollIntent(
+      false,
+      `site=scrollToBottom reason=${reason} force=${opts.force ?? false}`,
+    );
     const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
     syncing.internal = true;
     try {
@@ -342,7 +403,11 @@ export function attachPtyScrollController(
   const scrollByWheelDelta = (deltaY: number): void => {
     if (deltaY === 0) return;
     trace("wheel");
-    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    // In long-host mode the real pinned bottom is cursor-aware, and can sit above
+    // the DOM geometric bottom. Wheel scrolling must use that same boundary;
+    // otherwise wheel-down at bottom overshoots, then pending output snaps back.
+    const maxScrollTop = Math.min(domMaxScrollTop, getCurrentAnchor().bottomScrollTop);
     if (maxScrollTop <= 0) {
       trace("wheel:max-zero");
       return;
@@ -362,8 +427,15 @@ export function attachPtyScrollController(
     syncContainerScroll();
     // 向下滚到底 (next > previous 且抵达 atBottom) 释放 intent。向上滚不清, 即便
     // longHost 模式下 cursor 仍可见 (atBottom 仍 true)。
-    if (next > previous && getCurrentAnchor().isAtBottom) {
-      setUserHasVerticalScrollIntent(false);
+    if (
+      next > previous &&
+      next >= maxScrollTop - atBottomThreshold &&
+      getCurrentAnchor().isAtBottom
+    ) {
+      setUserHasVerticalScrollIntent(
+        false,
+        `site=scrollByWheelDelta prev=${previous} next=${next} max=${maxScrollTop} delta=${deltaY}`,
+      );
     }
   };
 
@@ -482,7 +554,10 @@ export function attachPtyScrollController(
         pendingFollowCursorScrollLeft !== null &&
         Math.abs(container.scrollLeft - pendingFollowCursorScrollLeft) <= 1;
       if (!isPendingFollowCursorScrollLeft) {
-        userHasHorizontalScrollIntent = true;
+        setUserHasHorizontalScrollIntent(
+          true,
+          `site=onContainerScroll prev=${lastSeenScrollLeft} next=${container.scrollLeft}`,
+        );
       }
       pendingFollowCursorScrollLeft = null;
       lastSeenScrollLeft = container.scrollLeft;
@@ -531,7 +606,10 @@ export function attachPtyScrollController(
       // "用户向下滚到底"。向上滚 (delta < 0 或 0) 不清, 即便几何上 cursor 仍在 viewport
       // (longHost 边界场景)。touchScrollActive 期间不在这里释放, 由 onTouchEnd 单独按
       // touchstart→touchend 的 scrollTop 净位移判定。
-      setUserHasVerticalScrollIntent(false);
+      setUserHasVerticalScrollIntent(
+        false,
+        `site=onContainerScroll delta=${verticalDelta} scrollTop=${container.scrollTop}`,
+      );
     }
     syncContainerScroll();
   };
@@ -620,12 +698,12 @@ export function attachPtyScrollController(
       // 光标变动重新进入跟随。否则用户拖回去的轨迹会被记成 prev, 释放 intent 后第一次比对
       // 就误判为"光标变了"而拉一下。
       prevCursorBufferRow = null;
-      trace("followCursor:skip", { details: "intent" });
+      trace("followCursorY:skip", { details: "intent" });
       return;
     }
     const { cellH } = getDims();
     if (cellH <= 0) {
-      trace("followCursor:skip", { details: "cellH=0" });
+      trace("followCursorY:skip", { details: "cellH=0" });
       return;
     }
     const { paddingTop, paddingBottom } = getVerticalInsets();
@@ -635,7 +713,7 @@ export function attachPtyScrollController(
       // host 装得下, 几何贴底等于光标可见, 走原路径就行, 不需要 followCursorY 介入。
       // 顺手清 prev 防止下次进入 host>vch 时拿旧 buffer 的行号比对。
       prevCursorBufferRow = null;
-      trace("followCursor:skip", { details: "shortHost" });
+      trace("followCursorY:skip", { details: "shortHost" });
       return;
     }
     const buffer = term.buffer.active;
@@ -648,14 +726,14 @@ export function attachPtyScrollController(
     prevCursorBufferRow = cursorBufferRow;
     const anchor = getCurrentAnchor();
     if (anchor.cursorInViewport) {
-      trace("followCursor:skip", {
+      trace("followCursorY:skip", {
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} inViewport`,
       });
       return;
     }
     // anchor.bottomScrollTop 在 long-host 分支里就是把光标行像素居中后的目标 scrollTop。
     if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) {
-      trace("followCursor:skip", {
+      trace("followCursorY:skip", {
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} aligned`,
       });
       return;
@@ -663,7 +741,7 @@ export function attachPtyScrollController(
     pendingFollowCursorScrollTop = anchor.bottomScrollTop;
     const prevScrollTop = container.scrollTop;
     container.scrollTop = anchor.bottomScrollTop;
-    trace("followCursor:hit", {
+    trace("followCursorY:hit", {
       details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} scrollTop=${Math.round(prevScrollTop)}->${Math.round(anchor.bottomScrollTop)}`,
     });
   };
@@ -681,14 +759,26 @@ export function attachPtyScrollController(
     const cursorInViewportX = cursorPxX >= viewportLeft && cursorPxX <= viewportRight;
     if (cursorInViewportX) {
       // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
-      if (userHasHorizontalScrollIntent) userHasHorizontalScrollIntent = false;
+      setUserHasHorizontalScrollIntent(
+        false,
+        `site=followCursorX cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
+      );
+      trace("followCursorX:skip", { details: "cursorInViewport" });
       return;
     }
-    if (userHasHorizontalScrollIntent) return;
+    if (userHasHorizontalScrollIntent) {
+      trace("followCursorX:skip", {
+        details: `horizontalIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
+      });
+      return;
+    }
     const target = Math.max(0, cursorPxX - container.clientWidth / 2);
     const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
     pendingFollowCursorScrollLeft = Math.min(maxScrollLeft, target);
     container.scrollLeft = pendingFollowCursorScrollLeft;
+    trace("followCursorX:hit", {
+      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} target=${pendingFollowCursorScrollLeft}`,
+    });
   };
 
   const onRender = (): void => {
@@ -756,7 +846,10 @@ export function attachPtyScrollController(
       userHasVerticalScrollIntent &&
       getCurrentAnchor().isAtBottom
     ) {
-      setUserHasVerticalScrollIntent(false);
+      setUserHasVerticalScrollIntent(
+        false,
+        `site=finishTouchGesture startScroll=${startScrollTop} endScroll=${container.scrollTop}`,
+      );
     }
     notifyAtBottom();
   };
@@ -854,8 +947,17 @@ export function attachPtyScrollController(
       paddingBottom,
       canvasLastY: cellH > 0 && cellW > 0 ? getCachedCanvasLastY() : -1,
       userHasVerticalScrollIntent,
+      userHasHorizontalScrollIntent,
       pendingProgrammaticScrollTop,
+      pendingFollowCursorScrollTop,
+      pendingFollowCursorScrollLeft,
+      prevCursorBufferRow,
+      lastSeenScrollTop,
+      lastSeenScrollLeft,
       touchScrollActive,
+      syncingInternal: syncing.internal,
+      syncingExternal: syncing.external,
+      atBottomThreshold,
       lastSpacerUpdateAt,
       pendingContainerSyncRetry,
     };

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { extractOscSequences, extractOscSignals } from "#src/common/osc-extractor.js";
+import {
+  appendPtySemanticTextTail,
+  extractOscSequences,
+  extractOscSignals,
+  extractTextSignals,
+  normalizePtySemanticText,
+} from "#src/common/osc-extractor.js";
 
 describe("extractOscSignals", () => {
   it("extracts OSC sequences in frame order", () => {
@@ -100,5 +106,72 @@ describe("extractOscSignals", () => {
       "some terminal output before\x1b]9;needs your permission: Write\x07more output after";
     const result = extractOscSignals(data);
     expect(result).toEqual({ state: "approval_wait", tool: "Write" });
+  });
+
+  it("normalizes ANSI-wrapped PTY text for semantic detection", () => {
+    const text = normalizePtySemanticText("\x1b[1mHook PreToolUse:Bash\x1b[0m\r\nDo you want?");
+
+    expect(text).toContain("Hook PreToolUse:Bash");
+    expect(text).toContain("Do you want?");
+    expect(text).not.toContain("\x1b");
+  });
+
+  it("returns approval_wait for Claude hook command confirmation text", () => {
+    const text = [
+      "Hook PreToolUse:Bash requires confirmation for this command. [settings]",
+      "settings.json to update hooks",
+      "Do you want to proceed?",
+      "1. Yes",
+      "2. No",
+    ].join("\n");
+
+    const result = extractTextSignals(text, "claude");
+
+    expect(result).toEqual({
+      state: "approval_wait",
+      tool: "Bash",
+      title: "Hook confirmation: Bash",
+    });
+  });
+
+  it("returns approval_wait for Claude hook tool confirmation text", () => {
+    const text = [
+      "Hook PreToolUse:WebSearch requires confirmation for this tool. [settings]",
+      "settings.json to update hooks",
+      "Do you want to proceed?",
+      "1. Yes",
+      "2. Yes, and don't ask again for Web Search commands in /Users/catli/MyApps/dev-anywhere",
+      "3. No",
+    ].join("\n");
+
+    const result = extractTextSignals(text, "claude");
+
+    expect(result).toEqual({
+      state: "approval_wait",
+      tool: "WebSearch",
+      title: "Hook confirmation: WebSearch",
+    });
+  });
+
+  it("detects Claude hook confirmation across PTY chunks", () => {
+    let tail = "";
+    tail = appendPtySemanticTextTail(
+      tail,
+      "Hook PreToolUse:Bash requires confirmation for this command.",
+    );
+    expect(extractTextSignals(tail, "claude")).toBeNull();
+
+    tail = appendPtySemanticTextTail(tail, "\nDo you want to proceed?\n1. Yes\n2. No");
+
+    expect(extractTextSignals(tail, "claude")).toEqual(
+      expect.objectContaining({ state: "approval_wait", tool: "Bash" }),
+    );
+  });
+
+  it("does not treat Claude hook confirmation text as Codex approval", () => {
+    const text =
+      "Hook PreToolUse:Bash requires confirmation for this command.\nDo you want to proceed?";
+
+    expect(extractTextSignals(text, "codex")).toBeNull();
   });
 });

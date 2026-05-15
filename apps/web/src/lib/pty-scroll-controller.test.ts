@@ -816,6 +816,75 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("does not wheel down past the cursor-aware bottom in longHost mode", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 300 });
+    defineScrollHeight(container, 2000);
+    const { terminal } = createTerminal({ 19: "prompt" });
+    // longHost bottom is cursor-aware: DOM maxScrollTop is 1700, but the cursor-centered
+    // anchor is 1600. Continuing to wheel down at that anchor must not push the browser
+    // to the DOM geometric bottom, or pending output will pull it back and visibly jitter.
+    terminal.buffer.active.cursorY = 7;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+    onUserVerticalScrollIntentChange.mockClear();
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+
+    expect(container.scrollTop).toBe(1600);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
+  });
+
+  it("keeps vertical review intent on a small wheel-down while still far from bottom (longHost)", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 787, clientWidth: 1640 });
+    defineScrollHeight(container, 4990);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 936, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 109: "reviewed prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 275;
+    terminal.buffer.active.viewportY = 80;
+    terminal.buffer.active.cursorY = 29;
+
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+      onUserVerticalScrollIntentChange,
+    });
+    controller.relayout();
+    expect(container.scrollTop).toBe(1440);
+    onUserVerticalScrollIntentChange.mockClear();
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+
+    expect(container.scrollTop).toBe(1560);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(false);
+  });
+
   it("owns wheel scrolling instead of leaving it to xterm internals", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });

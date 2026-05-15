@@ -22,6 +22,9 @@ interface PtyTransitionInput {
   // WAITING_APPROVAL 而本地 currentState 还停在 working 时，本帧仍应被解释为审批等待中。
   // terminal.ts 没有这个上下文，传 false / undefined 即可。
   sessionStateIsWaitingApproval?: boolean;
+  // Codex 的审批取消依赖 title-only OSC 释放；Claude hook 文本审批期间也会继续发普通
+  // title-only spinner，此时不能把它当成审批结束。
+  allowTitleOnlyApprovalRelease?: boolean;
 }
 
 interface PtyTransitionResult {
@@ -41,7 +44,12 @@ function withMeta(signal: PtySignal | null | undefined): { title?: string; tool?
 }
 
 export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTransitionResult {
-  const { currentState, signal, sessionStateIsWaitingApproval } = input;
+  const {
+    currentState,
+    signal,
+    sessionStateIsWaitingApproval,
+    allowTitleOnlyApprovalRelease = true,
+  } = input;
 
   // 1. 显式 approval_wait 信号：进入 / 维持审批等待。
   if (signal?.state === "approval_wait") {
@@ -54,6 +62,7 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
     shouldReleaseApprovalWait({
       currentState,
       signalState: signal === null ? undefined : signal.state,
+      allowTitleOnlyRelease: allowTitleOnlyApprovalRelease,
     })
   ) {
     return {

@@ -1,5 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
-import { computePtyHostLayout } from "./pty-scroll";
+import { computePtyHostLayout, computeScrollAnchor } from "./pty-scroll";
 import { parsePx } from "./pty-style-utils";
 import type { PtyDebugSnapshot } from "./pty-debug-snapshot";
 
@@ -13,8 +13,17 @@ export interface PtyScrollDebugProbe {
   paddingBottom: number;
   canvasLastY: number;
   userHasVerticalScrollIntent: boolean;
+  userHasHorizontalScrollIntent: boolean;
   pendingProgrammaticScrollTop: number | null;
+  pendingFollowCursorScrollTop: number | null;
+  pendingFollowCursorScrollLeft: number | null;
+  prevCursorBufferRow: number | null;
+  lastSeenScrollTop: number;
+  lastSeenScrollLeft: number;
   touchScrollActive: boolean;
+  syncingInternal: boolean;
+  syncingExternal: boolean;
+  atBottomThreshold: number;
   lastSpacerUpdateAt: number | null;
   pendingContainerSyncRetry: boolean;
 }
@@ -85,6 +94,20 @@ export function buildPtyScrollDebugSnapshot(
     Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
   );
   const viewportHostCoverage = container.clientHeight > 0 ? overlap / container.clientHeight : 0;
+  const cursorBufferRow = buffer.viewportY + buffer.cursorY;
+  const anchor = computeScrollAnchor({
+    rows: term.rows,
+    cellH,
+    bufferLength: buffer.length,
+    cursorBufferRow,
+    visibleContentHeight,
+    paddingTop,
+    paddingBottom,
+    containerScrollTop: container.scrollTop,
+    containerScrollHeight: container.scrollHeight,
+    containerClientHeight: container.clientHeight,
+    atBottomThreshold: probe.atBottomThreshold,
+  });
 
   return {
     ts: performance.now(),
@@ -118,9 +141,32 @@ export function buildPtyScrollDebugSnapshot(
     },
     cell: { h: cellH, w: cellW },
     visibleContentHeight,
+    anchor: {
+      atBottom: anchor.isAtBottom,
+      cursorInViewport: anchor.cursorInViewport,
+      cursorBufferRow,
+      bottomScrollTop: anchor.bottomScrollTop,
+      scrollTopDeltaToBottom: container.scrollTop - anchor.bottomScrollTop,
+    },
+    intent: {
+      vertical: probe.userHasVerticalScrollIntent,
+      horizontal: probe.userHasHorizontalScrollIntent,
+    },
     pinned: !probe.userHasVerticalScrollIntent,
     pendingProgrammaticScrollTop: probe.pendingProgrammaticScrollTop,
+    pendingFollowCursorScrollTop: probe.pendingFollowCursorScrollTop,
+    pendingFollowCursorScrollLeft: probe.pendingFollowCursorScrollLeft,
+    prevCursorBufferRow: probe.prevCursorBufferRow,
+    lastSeenScrollTop: probe.lastSeenScrollTop,
+    lastSeenScrollLeft: probe.lastSeenScrollLeft,
     touchScrollActive: probe.touchScrollActive,
+    syncing: { internal: probe.syncingInternal, external: probe.syncingExternal },
+    pending: {
+      programmaticScrollTop: probe.pendingProgrammaticScrollTop,
+      followCursorScrollTop: probe.pendingFollowCursorScrollTop,
+      followCursorScrollLeft: probe.pendingFollowCursorScrollLeft,
+      containerSyncRetry: probe.pendingContainerSyncRetry,
+    },
     expectedSpacerHeight,
     spacerDrift: currentSpacerHeight - expectedSpacerHeight,
     lastSpacerUpdateAt: probe.lastSpacerUpdateAt,

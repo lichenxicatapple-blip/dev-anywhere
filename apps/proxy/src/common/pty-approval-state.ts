@@ -6,9 +6,11 @@ import type { PtySemanticState } from "@dev-anywhere/shared";
 export function shouldReleaseApprovalWait(options: {
   currentState: PtySemanticState;
   signalState: PtySemanticState | null | undefined;
+  allowTitleOnlyRelease?: boolean;
 }): boolean {
   if (options.currentState !== "approval_wait") return false;
   if (options.signalState === undefined) return false;
+  if (options.signalState === null && options.allowTitleOnlyRelease === false) return false;
   return options.signalState !== "approval_wait";
 }
 
@@ -16,4 +18,18 @@ export function stateAfterApprovalRelease(signalState: PtySemanticState | null):
   // title-only 释放（signal.state===null）= codex 取消审批语义，等用户下一轮输入。
   if (signalState === null) return "turn_complete";
   return signalState !== "approval_wait" ? signalState : "working";
+}
+
+export function shouldReleaseTextApprovalOnInput(data: string): boolean {
+  if (data.includes("\r") || data.includes("\n")) return true;
+  return (
+    data === "1" ||
+    data === "2" ||
+    data === "y" ||
+    data === "Y" ||
+    data === "n" ||
+    data === "N" ||
+    data === "\x1b" ||
+    data === "\x03"
+  );
 }

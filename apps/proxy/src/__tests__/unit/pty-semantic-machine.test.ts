@@ -65,6 +65,18 @@ describe("decidePtySemanticTransition", () => {
       expect(r.emit).toBe(true);
       expect(r.meta?.title).toBe("codex-probe");
     });
+
+    it("文本审批期间 approval_wait + title-only signal → 继续 approval_wait", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "approval_wait",
+        signal: { state: null, title: "⠂ Claude Code" },
+        allowTitleOnlyApprovalRelease: false,
+      });
+
+      expect(r.nextState).toBe("approval_wait");
+      expect(r.emit).toBe(true);
+      expect(r.meta?.title).toBe("⠂ Claude Code");
+    });
   });
 
   describe("规则 3: 审批上下文兜底", () => {

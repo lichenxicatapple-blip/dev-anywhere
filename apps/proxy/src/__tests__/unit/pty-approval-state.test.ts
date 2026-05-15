@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  shouldReleaseTextApprovalOnInput,
   shouldReleaseApprovalWait,
   stateAfterApprovalRelease,
 } from "#src/common/pty-approval-state.js";
@@ -23,6 +24,16 @@ describe("PTY approval state transitions", () => {
         signalState: null,
       }),
     ).toBe(true);
+  });
+
+  it("keeps approval wait on title-only signals when title-only release is disabled", () => {
+    expect(
+      shouldReleaseApprovalWait({
+        currentState: "approval_wait",
+        signalState: null,
+        allowTitleOnlyRelease: false,
+      }),
+    ).toBe(false);
   });
 
   it("keeps approval wait when no signal is present (signalState=undefined)", () => {
@@ -61,5 +72,17 @@ describe("PTY approval state transitions", () => {
 
   it("maps working signalState release to working", () => {
     expect(stateAfterApprovalRelease("working")).toBe("working");
+  });
+
+  it("releases text-only approval when the user submits a decision", () => {
+    expect(shouldReleaseTextApprovalOnInput("\r")).toBe(true);
+    expect(shouldReleaseTextApprovalOnInput("1")).toBe(true);
+    expect(shouldReleaseTextApprovalOnInput("2")).toBe(true);
+    expect(shouldReleaseTextApprovalOnInput("\x1b")).toBe(true);
+  });
+
+  it("does not release text-only approval for navigation keys", () => {
+    expect(shouldReleaseTextApprovalOnInput("\x1b[A")).toBe(false);
+    expect(shouldReleaseTextApprovalOnInput("\t")).toBe(false);
   });
 });

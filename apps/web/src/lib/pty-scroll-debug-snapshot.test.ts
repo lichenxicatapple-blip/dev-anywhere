@@ -19,6 +19,8 @@ function makeRefs(opts: {
   viewportY: number;
   bufferLength: number;
   rows?: number;
+  scrollHeight?: number;
+  scrollWidth?: number;
 }) {
   const container = document.createElement("div") as HTMLDivElement;
   const spacer = document.createElement("div") as HTMLDivElement;
@@ -27,6 +29,14 @@ function makeRefs(opts: {
   Object.defineProperty(container, "scrollTop", {
     configurable: true,
     value: opts.scrollTop,
+  });
+  Object.defineProperty(container, "scrollHeight", {
+    configurable: true,
+    value: opts.scrollHeight ?? 2000,
+  });
+  Object.defineProperty(container, "scrollWidth", {
+    configurable: true,
+    value: opts.scrollWidth ?? 800,
   });
   spacer.style.height = "2000px";
   spacer.style.width = "800px";
@@ -59,8 +69,17 @@ const probe = (overrides: Partial<PtyScrollDebugProbe> = {}): PtyScrollDebugProb
   paddingBottom: 0,
   canvasLastY: -1,
   userHasVerticalScrollIntent: false,
+  userHasHorizontalScrollIntent: false,
   pendingProgrammaticScrollTop: null,
+  pendingFollowCursorScrollTop: null,
+  pendingFollowCursorScrollLeft: null,
+  prevCursorBufferRow: null,
+  lastSeenScrollTop: 0,
+  lastSeenScrollLeft: 0,
   touchScrollActive: false,
+  syncingInternal: false,
+  syncingExternal: false,
+  atBottomThreshold: 8,
   lastSpacerUpdateAt: null,
   pendingContainerSyncRetry: false,
   ...overrides,
@@ -121,6 +140,49 @@ describe("buildPtyScrollDebugSnapshot", () => {
     );
 
     expect(snap.pendingContainerSyncRetry).toBe(true);
+  });
+
+  it("reports structured anchor, intent, and pending state", () => {
+    const refs = makeRefs({
+      scrollTop: 400,
+      clientHeight: 400,
+      hostTop: "400px",
+      hostHeight: "400px",
+      viewportY: 20,
+      bufferLength: 100,
+    });
+
+    const snap = buildPtyScrollDebugSnapshot(
+      () =>
+        probe({
+          userHasVerticalScrollIntent: true,
+          userHasHorizontalScrollIntent: true,
+          pendingFollowCursorScrollTop: 420,
+          pendingFollowCursorScrollLeft: 64,
+          pendingContainerSyncRetry: true,
+          prevCursorBufferRow: 19,
+          lastSeenScrollTop: 390,
+          lastSeenScrollLeft: 12,
+        }),
+      refs,
+    );
+
+    expect(snap.intent).toEqual({ vertical: true, horizontal: true });
+    expect(snap.pending).toEqual({
+      programmaticScrollTop: null,
+      followCursorScrollTop: 420,
+      followCursorScrollLeft: 64,
+      containerSyncRetry: true,
+    });
+    expect(snap.anchor).toEqual(
+      expect.objectContaining({
+        atBottom: false,
+        cursorBufferRow: 20,
+      }),
+    );
+    expect(snap.prevCursorBufferRow).toBe(19);
+    expect(snap.lastSeenScrollTop).toBe(390);
+    expect(snap.lastSeenScrollLeft).toBe(12);
   });
 
   it("matches positionHostAt's verticalOffset for small-buffer hosts", () => {

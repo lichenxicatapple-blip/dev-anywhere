@@ -10,8 +10,14 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { extractOscSequences, extractOscSignals } from "./common/osc-extractor.js";
+import {
+  appendPtySemanticTextTail,
+  extractOscSequences,
+  extractOscSignals,
+  extractTextSignals,
+} from "./common/osc-extractor.js";
 import { createFSM, type PtySemanticState } from "@dev-anywhere/shared";
+import { shouldReleaseTextApprovalOnInput } from "./common/pty-approval-state.js";
 import { decidePtySemanticTransition } from "./common/pty-semantic-machine.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
@@ -62,6 +68,8 @@ class TerminalSession {
   private lastOutputTime = 0;
   private idleChecker: IdleChecker | null = null;
   private currentPtyState: PtySemanticState = "turn_complete";
+  private semanticTextTail = "";
+  private textApprovalWaitActive = false;
   // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   private serializeAddon: SerializeAddon | null = null;
@@ -197,7 +205,16 @@ class TerminalSession {
     }
 
     const oscSequences = extractOscSequences(data);
-    const signal = extractOscSignals(data, this.provider.id);
+    const oscSignal = extractOscSignals(data, this.provider.id);
+    this.semanticTextTail = appendPtySemanticTextTail(this.semanticTextTail, data);
+    const textSignal = oscSignal
+      ? null
+      : extractTextSignals(this.semanticTextTail, this.provider.id);
+    const signal = oscSignal ?? textSignal;
+    if (textSignal?.state === "approval_wait") {
+      this.textApprovalWaitActive = true;
+      this.semanticTextTail = "";
+    }
     if (oscSequences.length > 0) {
       log.debug(
         {
@@ -217,8 +234,12 @@ class TerminalSession {
     const decision = decidePtySemanticTransition({
       currentState: this.currentPtyState,
       signal: signal ?? null,
+      allowTitleOnlyApprovalRelease: !this.textApprovalWaitActive,
     });
     this.currentPtyState = decision.nextState;
+    if (decision.nextState !== "approval_wait") {
+      this.textApprovalWaitActive = false;
+    }
     if (decision.emit) {
       this.sendPtyState(decision.nextState, decision.meta);
     }
@@ -252,6 +273,15 @@ class TerminalSession {
     );
   }
 
+  private releaseTextApprovalOnInput(data: string): void {
+    if (!this.textApprovalWaitActive || this.currentPtyState !== "approval_wait") return;
+    if (!shouldReleaseTextApprovalOnInput(data)) return;
+
+    this.textApprovalWaitActive = false;
+    this.currentPtyState = "working";
+    this.sendPtyState("working");
+  }
+
   private replayCurrentPtyState(): void {
     if (this.currentPtyState === "turn_complete") return;
     this.sendPtyState(this.currentPtyState);
@@ -271,6 +301,7 @@ class TerminalSession {
       (msg: IpcMessage) => {
         if (msg.type === "pty_input" && msg.sessionId === this.sessionId) {
           log.debug({ sessionId: this.sessionId, bytes: msg.data.length }, "Remote input received");
+          this.releaseTextApprovalOnInput(msg.data);
           this.ptyManager?.write(msg.data);
         } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
           this.detachRemoteView();

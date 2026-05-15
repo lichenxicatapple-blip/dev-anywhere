@@ -33,6 +33,11 @@ describe("pty scroll trace", () => {
     }
     window.history.replaceState(null, "", "/");
     window.__devAnywherePtyScrollTrace = undefined;
+    delete (
+      window as typeof window & {
+        __devAnywherePtyDebug?: () => unknown;
+      }
+    ).__devAnywherePtyDebug;
   });
 
   it("can be enabled from a hash-routed chat URL", () => {
@@ -128,6 +133,41 @@ describe("pty scroll trace", () => {
 
     expect(report).toContain("DEV Anywhere PTY scroll trace");
     expect(report).toContain("container-scroll");
+    expect(report).toContain("scope\taction\treason");
     expect(report).toContain("scrollMinusHost");
+    expect(report).toContain("debugSnapshot=");
+  });
+
+  it("includes the current debug snapshot in the copied report", () => {
+    (window as unknown as Record<string, unknown>).__devAnywherePtyDebug = () => ({
+      intent: { vertical: true, horizontal: false },
+      anchor: { atBottom: false },
+    });
+
+    const report = formatPtyScrollTraceReport();
+
+    expect(report).toContain('"intent"');
+    expect(report).toContain('"vertical": true');
+    expect(report).toContain('"atBottom": false');
+  });
+
+  it("normalizes dynamic event names into scope, action, and reason columns", () => {
+    appendPtyScrollTrace({
+      t: 100,
+      event: "scroll-to-bottom:start[pendingFrame]",
+      scrollTop: 42,
+      scrollHeight: 1000,
+      clientHeight: 500,
+      viewportY: 2,
+      bufferLength: 100,
+      hostTop: "36px",
+      focus: null,
+    });
+
+    const report = formatPtyScrollTraceReport();
+
+    expect(report).toContain(
+      "scroll-to-bottom:start[pendingFrame]\tscroll-to-bottom\tstart\tpendingFrame",
+    );
   });
 });

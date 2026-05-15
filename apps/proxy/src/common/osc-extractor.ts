@@ -19,6 +19,16 @@ interface OscSequence {
   text: string;
 }
 
+// Keep enough recent text to bridge PTY chunk splits without retaining whole scrollback.
+const SEMANTIC_TEXT_TAIL_MAX = 4096;
+
+// eslint-disable-next-line no-control-regex
+const OSC_SEQUENCE_PATTERN = /\x1b\](?:\d+);[^\x07\x1b]*?(?:\x07|\x1b\\)/g;
+// eslint-disable-next-line no-control-regex
+const CSI_SEQUENCE_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex
+const SIMPLE_ESC_PATTERN = /\x1b[@-Z\\-_]/g;
+
 export function extractOscSequences(rawData: string): OscSequence[] {
   const regex = new RegExp(OSC_PATTERN.source, OSC_PATTERN.flags);
   const matches: OscSequence[] = [];
@@ -40,6 +50,48 @@ function lastSequence(matches: OscSequence[], code: number): OscSequence | undef
 
 function isCodexActionRequiredTitle(title: string): boolean {
   return /\bAction Required\b/i.test(title);
+}
+
+export function normalizePtySemanticText(rawData: string): string {
+  return rawData
+    .replace(OSC_SEQUENCE_PATTERN, " ")
+    .replace(CSI_SEQUENCE_PATTERN, " ")
+    .replace(SIMPLE_ESC_PATTERN, " ")
+    .replace(/\r/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n+/g, "\n")
+    .trim();
+}
+
+export function appendPtySemanticTextTail(previous: string, chunk: string): string {
+  const next = `${previous}\n${normalizePtySemanticText(chunk)}`.slice(-SEMANTIC_TEXT_TAIL_MAX);
+  return next.trim();
+}
+
+function extractClaudeTextSignal(text: string): PtyStateEvent | null {
+  const toolMatch = text.match(/\bHook\s+PreToolUse:([A-Za-z0-9_.:-]+)/i);
+  if (
+    toolMatch?.[1] &&
+    /\brequires confirmation for this (?:command|tool)\b/i.test(text) &&
+    /\bDo you want to proceed\?/i.test(text)
+  ) {
+    return {
+      state: "approval_wait",
+      tool: toolMatch[1],
+      title: `Hook confirmation: ${toolMatch[1]}`,
+    };
+  }
+  return null;
+}
+
+export function extractTextSignals(
+  semanticText: string,
+  provider?: PtySignalProvider,
+): PtyStateEvent | null {
+  if (provider === "claude") {
+    return extractClaudeTextSignal(semanticText);
+  }
+  return null;
 }
 
 // 从 PTY 原始数据中提取 OSC 语义信号。
