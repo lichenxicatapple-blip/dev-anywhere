@@ -4,6 +4,17 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.2.13] - 2026-05-16
+
+### 修复
+
+- PTY 滚动在 Claude `/compact` 等持续输出场景下的底部抖动、回看后轻微下滑被拉回底部、移动端触底继续滑动产生的 bounce 抖动。垂直滚动意图收口到 transition table / policy 层, 并补充 touch、软键盘、底部钳制、trace 诊断与桌面/移动端回归覆盖。
+- 移动端 PTY 输入体验: 软键盘弹起时输入区域不再被遮挡, 控制键区压缩空白并加入 ESC, 方向键改为更易识别的专用背景。
+- JSON 聊天模式工具审批卡宽度越界、助手回复中的独立蓝色光标行、审批等待状态未同步到侧边栏等 UI 状态问题。
+- JSON 文件/图片引用改为消息正文内联动作链接, 移除底部重复附件兜底; 文件不存在 toast 现在包含路径上下文, 便于定位误点或缺失资源。
+- JSON permission mode 真正作用到 worker control_request 仲裁: `bypassPermissions` 直接放行, `acceptEdits` 自动接受编辑类工具, `plan` 拒绝工具执行且不弹审批, `default/auto` 保持远程审批/Provider 判定语义。新增创建会话模式矩阵、provider args、worker spawn、真实 Claude JSON 行为 e2e 覆盖。
+- 清理两个既有打包 warning: 根 `package.json` 重复 `test:unit` 脚本和字体 CSS 构建缺失提示。
+
 ## [0.2.12] - 2026-05-14
 
 ### 修复
