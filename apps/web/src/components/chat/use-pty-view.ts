@@ -577,9 +577,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     relayoutSchedulerRef.current?.schedule();
     if (showMobilePtyControls) {
-      rawInputFollowSchedulerRef.current?.schedule();
+      if (keyboardOffset > 0) {
+        scrollControllerRef.current?.scrollToBottom("keyboardOffset", { force: true });
+        clearNewFramesWhileAway();
+      } else {
+        rawInputFollowSchedulerRef.current?.schedule();
+      }
     }
-  }, [keyboardOffset, showMobilePtyControls, containerPaddingBottom]);
+  }, [keyboardOffset, showMobilePtyControls, containerPaddingBottom, clearNewFramesWhileAway]);
 
   const focusHandlers = useMemo<FocusHandlers>(
     () => ({
