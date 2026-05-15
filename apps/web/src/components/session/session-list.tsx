@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useMatch } from "react-router";
 import { ChevronRight, Plus, Loader2 } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
+import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,6 +24,7 @@ import { CreateSessionDialog } from "./create-session-dialog";
 import { SessionTerminationDialog } from "./session-termination-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
+import { resolveSessionRowState } from "@/lib/session-row-state";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -31,6 +33,9 @@ interface SessionListProps {
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
+  const agentStatusBySessionId = useSessionStore((s) => s.agentStatusBySessionId);
+  const ptyStateBySessionId = useSessionStore((s) => s.ptyStateBySessionId);
+  const chatBySessionId = useChatStore((s) => s.bySessionId);
   // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
   const chatMatch = useMatch("/chat/:id");
   const activeSessionId = chatMatch?.params.id ?? null;
@@ -84,6 +89,20 @@ export function SessionList({ layout }: SessionListProps) {
       else next.add(provider);
       return next;
     });
+  }
+
+  function withDisplayState(session: SessionInfo): SessionInfo {
+    const hasPendingApproval =
+      session.mode === "json" &&
+      (chatBySessionId[session.sessionId]?.pendingApprovals.some((a) => a.status === "pending") ??
+        false);
+    const displayState = resolveSessionRowState({
+      session,
+      agentStatus: agentStatusBySessionId[session.sessionId],
+      ptyState: ptyStateBySessionId[session.sessionId],
+      hasPendingApproval,
+    });
+    return displayState === session.state ? session : { ...session, state: displayState };
   }
 
   const hasActive = sessions.length > 0;
@@ -177,7 +196,7 @@ export function SessionList({ layout }: SessionListProps) {
               {group.sessions.map((s) => (
                 <SessionRow
                   key={s.sessionId}
-                  session={s}
+                  session={withDisplayState(s)}
                   selected={s.sessionId === activeSessionId}
                   now={now}
                   onClick={() => handleRowClick(s.sessionId, s.mode)}
