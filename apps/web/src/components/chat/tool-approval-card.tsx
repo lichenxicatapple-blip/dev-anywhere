@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentType } from "react";
+import { useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -53,6 +53,15 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
   const isResolved = approval.status !== "pending";
   const Icon = toolIcon(approval.toolName);
 
+  function renderContainer(content: ReactNode) {
+    if (container === "floating") return content;
+    return (
+      <div data-slot="tool-approval-row" className="dev-message-rail mx-auto w-full min-w-0">
+        {content}
+      </div>
+    );
+  }
+
   function send(decision: "allow" | "deny", whitelistTool = false) {
     if (acted || isResolved) return;
     const relay = relayClientRef;
@@ -84,12 +93,13 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
   if (isResolved) {
     const color =
       approval.status === "approved" ? "text-[var(--color-status-success)]" : "text-destructive";
-    return (
+    return renderContainer(
       <div
         data-slot="tool-approval-card"
         data-status={approval.status}
         className={cn(
           "rounded-md border border-border bg-card px-3 py-2 text-xs",
+          container === "inline" && "w-full min-w-0 max-w-full",
           container === "floating" && "fixed bottom-4 right-4 max-w-[360px] shadow-lg",
         )}
       >
@@ -97,11 +107,11 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
         <span className="text-muted-foreground ml-2">
           {approval.status === "approved" ? "已允许" : "已拒绝"}
         </span>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return renderContainer(
     <div
       ref={cardRef}
       tabIndex={-1}
@@ -109,6 +119,7 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
       data-status="pending"
       className={cn(
         "rounded-md border border-border bg-card p-3 flex flex-col gap-3 ring-2 ring-ring/40",
+        container === "inline" && "w-full min-w-0 max-w-full",
         container === "floating" && "fixed bottom-4 right-4 w-[360px] max-w-[90vw] shadow-lg z-20",
       )}
       role="region"
@@ -122,8 +133,11 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
         className="flex min-h-11 min-w-0 items-center gap-2 rounded p-2 text-left -m-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-0 md:p-1 md:-m-1"
       >
         <Icon className="size-4 shrink-0 text-[var(--color-status-warning)]" aria-hidden="true" />
-        <span className="font-semibold text-sm">{approval.toolName}</span>
-        <span className="text-xs text-muted-foreground flex-1 truncate font-mono">
+        <span className="shrink-0 font-semibold text-sm">{approval.toolName}</span>
+        <span
+          data-slot="tool-approval-summary"
+          className="min-w-0 text-xs text-muted-foreground flex-1 truncate font-mono"
+        >
           {summary.summary}
         </span>
         {expanded ? (
@@ -170,6 +184,6 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
   );
 }
