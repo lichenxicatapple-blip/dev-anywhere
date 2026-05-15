@@ -5,7 +5,11 @@ async function openJsonPreview(page: Page, path: string): Promise<void> {
   const input = page.getByLabel("输入聊天消息");
   await input.fill(`inspect @${path}`);
   await page.locator('[data-slot="send-button"][data-variant="send"]').click();
-  await page.locator('[data-slot="image-preview-link"]', { hasText: path }).click();
+  await page
+    .locator('[data-slot="inline-image-preview-link"], [data-slot="image-preview-link"]', {
+      hasText: path,
+    })
+    .click();
 }
 
 async function expectPreviewReady(page: Page, path: string): Promise<void> {
@@ -52,7 +56,11 @@ test.describe("image preview", () => {
       await expectPreviewReady(page, path);
 
       await closePreview(page);
-      await page.locator('[data-slot="image-preview-link"]', { hasText: path }).click();
+      await page
+        .locator('[data-slot="inline-image-preview-link"], [data-slot="image-preview-link"]', {
+          hasText: path,
+        })
+        .click();
       await expectPreviewReady(page, path);
     });
 
@@ -101,13 +109,16 @@ test.describe("image preview", () => {
       // 双击 reset 回 fit: lib 的 dblclick listener 用原生 addEventListener 挂在
       // .react-transform-wrapper 上, target 必须是 wrapper 的后代; 直接对 component
       // dispatchEvent 走 bubble 路径, 跟真双击等价但不受 hit testing / stage clip 影响。
-      await page.evaluate(({ x, y }) => {
-        const component = document.querySelector<HTMLElement>(".react-transform-component");
-        if (!component) throw new Error("react-transform-component not found");
-        component.dispatchEvent(
-          new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
-        );
-      }, { x: cx, y: cy });
+      await page.evaluate(
+        ({ x, y }) => {
+          const component = document.querySelector<HTMLElement>(".react-transform-component");
+          if (!component) throw new Error("react-transform-component not found");
+          component.dispatchEvent(
+            new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+          );
+        },
+        { x: cx, y: cy },
+      );
       await expect
         .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
         .toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
@@ -215,7 +226,10 @@ test.describe("image preview", () => {
       ];
       await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(20) });
       for (const offset of [40, 80, 120, 160, 200]) {
-        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points(offset) });
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: points(offset),
+        });
       }
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
@@ -225,13 +239,16 @@ test.describe("image preview", () => {
       await page.waitForTimeout(400);
 
       // 双击 reset 复用桌面同思路, 直接 dispatch dblclick 不依赖 hit testing。
-      await page.evaluate(({ x, y }) => {
-        const component = document.querySelector<HTMLElement>(".react-transform-component");
-        if (!component) throw new Error("react-transform-component not found");
-        component.dispatchEvent(
-          new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
-        );
-      }, { x: cx, y: cy });
+      await page.evaluate(
+        ({ x, y }) => {
+          const component = document.querySelector<HTMLElement>(".react-transform-component");
+          if (!component) throw new Error("react-transform-component not found");
+          component.dispatchEvent(
+            new MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
+          );
+        },
+        { x: cx, y: cy },
+      );
       await expect
         .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
         .toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
