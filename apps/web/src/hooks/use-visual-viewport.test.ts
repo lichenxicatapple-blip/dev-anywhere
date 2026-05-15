@@ -1,0 +1,59 @@
+import { describe, expect, it } from "vitest";
+import { computeVisualViewportBottomOffset } from "./use-visual-viewport";
+
+describe("computeVisualViewportBottomOffset", () => {
+  it("returns 0 when the visual viewport matches the layout viewport", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 800,
+        visualViewportOffsetTop: 0,
+        baselineViewportHeight: 800,
+      }),
+    ).toBe(0);
+  });
+
+  it("returns the bottom inset when the soft keyboard only shrinks visualViewport", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 460,
+        visualViewportOffsetTop: 0,
+        baselineViewportHeight: 800,
+      }),
+    ).toBe(340);
+  });
+
+  it("keeps browser chrome viewport changes from creating keyboard padding", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 688,
+        visualViewportOffsetTop: 0,
+        baselineViewportHeight: 800,
+      }),
+    ).toBe(0);
+  });
+
+  it("uses the pre-keyboard baseline when Android also shrinks innerHeight", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 480,
+        visualViewportHeight: 480,
+        visualViewportOffsetTop: 0,
+        baselineViewportHeight: 800,
+      }),
+    ).toBe(320);
+  });
+
+  it("subtracts visualViewport offsetTop from the keyboard inset", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 460,
+        visualViewportOffsetTop: 20,
+        baselineViewportHeight: 800,
+      }),
+    ).toBe(320);
+  });
+});

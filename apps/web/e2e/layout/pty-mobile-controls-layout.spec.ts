@@ -23,6 +23,17 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     const controls = page.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
 
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+    await expect(page.locator("[data-keyboard-offset]").first()).toHaveAttribute(
+      "data-keyboard-offset",
+      /[1-9]\d*/,
+    );
+
     // 2 行布局: 容器内 grid 2 行 × 6 列, 容器 py-1.5 (12px) + 2*h-11 (88px) +
     // gap-1 (4px) + border-t (1px) ≈ 105px。给 ±15px 容差 (字体行高 / 边框 / shadow)。
     const controlsBox = await controls.boundingBox();
@@ -53,6 +64,11 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     const maxH = Math.max(...heights);
     const minH = Math.min(...heights);
     expect(maxH - minH).toBeLessThanOrEqual(1);
+
+    const visualViewportHeight = await page.evaluate(
+      () => window.visualViewport?.height ?? window.innerHeight,
+    );
+    expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(visualViewportHeight + 1);
 
     // BackToBottom 出现时不能被控制条遮挡: BTB 底部坐标 < 控制条顶部坐标。
     // 用滚动制造 BTB 可见 (xterm 历史向上滚)。这里直接跳过断言可见, 改用样式断言:

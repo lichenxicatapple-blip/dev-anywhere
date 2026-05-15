@@ -501,6 +501,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       ? 32
       : 8;
 
+  useEffect(() => {
+    relayoutSchedulerRef.current?.schedule();
+    if (showMobilePtyControls) {
+      rawInputFollowSchedulerRef.current?.schedule();
+    }
+  }, [keyboardOffset, showMobilePtyControls, containerPaddingBottom]);
+
   const focusHandlers = useMemo<FocusHandlers>(
     () => ({
       onFocusCapture: handleFocusCapture,
