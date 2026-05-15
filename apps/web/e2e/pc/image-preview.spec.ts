@@ -5,11 +5,7 @@ async function openJsonPreview(page: Page, path: string): Promise<void> {
   const input = page.getByLabel("输入聊天消息");
   await input.fill(`inspect @${path}`);
   await page.locator('[data-slot="send-button"][data-variant="send"]').click();
-  await page
-    .locator('[data-slot="inline-image-preview-link"], [data-slot="image-preview-link"]', {
-      hasText: path,
-    })
-    .click();
+  await page.locator('[data-slot="inline-image-preview-link"]', { hasText: path }).click();
 }
 
 async function expectPreviewReady(page: Page, path: string): Promise<void> {
@@ -56,11 +52,7 @@ test.describe("image preview", () => {
       await expectPreviewReady(page, path);
 
       await closePreview(page);
-      await page
-        .locator('[data-slot="inline-image-preview-link"], [data-slot="image-preview-link"]', {
-          hasText: path,
-        })
-        .click();
+      await page.locator('[data-slot="inline-image-preview-link"]', { hasText: path }).click();
       await expectPreviewReady(page, path);
     });
 

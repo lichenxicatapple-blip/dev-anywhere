@@ -20,7 +20,7 @@ test.describe("L4 mobile / image preview pinch zoom", () => {
     await input.click();
     await input.fill(`inspect @${PATH}`);
     await emuPage.locator('[data-slot="send-button"][data-variant="send"]').click();
-    await emuPage.locator('[data-slot="image-preview-link"]', { hasText: PATH }).click();
+    await emuPage.locator('[data-slot="inline-image-preview-link"]', { hasText: PATH }).click();
 
     await expect(emuPage.locator('[data-slot="image-preview-img"]')).toHaveAttribute(
       "data-loaded",
