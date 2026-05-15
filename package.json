@@ -9,7 +9,6 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:unit": "TEST_SCOPE=unit vitest run",
     "test:integration": "TEST_SCOPE=integration vitest run",
     "typecheck": "tsc -b",
     "knip": "knip",
