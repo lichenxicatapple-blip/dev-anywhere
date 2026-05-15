@@ -124,6 +124,9 @@ export function attachPtyScrollController(
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
   // 误把这次改写当成用户滚动 → 状态错乱。
   let pendingFollowCursorScrollLeft: number | null = null;
+  // touch native scroll 可能先把 container 推过 cursor-aware bottom, 再被我们 clamp 回来。
+  // touchend 释放回看意图时不能只看最终 scrollTop, 还要知道这次手势是否确实向下到过底部。
+  let touchGestureMaxScrollTop: number | null = null;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
   let userHasHorizontalScrollIntent = false;
@@ -575,6 +578,22 @@ export function attachPtyScrollController(
     trace("container-sync:end", { ydisp });
   };
 
+  const clampCursorAwareBottomOverscroll = (rawScrollTop: number): number => {
+    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const anchor = getCurrentAnchor();
+    const hasCursorAwareBottom = anchor.bottomScrollTop < domMaxScrollTop - 1;
+    if (!hasCursorAwareBottom || rawScrollTop <= anchor.bottomScrollTop + 1) {
+      return rawScrollTop;
+    }
+    trace("container-scroll:clamp-cursor-bottom", {
+      details: `prev=${rawScrollTop} next=${anchor.bottomScrollTop} domMax=${domMaxScrollTop}`,
+    });
+    container.scrollTop = anchor.bottomScrollTop;
+    pendingProgrammaticScrollTop = null;
+    pendingFollowCursorScrollTop = null;
+    return anchor.bottomScrollTop;
+  };
+
   const onContainerScroll = (): void => {
     trace("container-scroll");
     // 横向 scroll 意图检测: 跟 followCursorX 的程序化写入区分。我们刚改 scrollLeft
@@ -595,13 +614,18 @@ export function attachPtyScrollController(
     }
     // 纵向 delta: 区分用户主动向下滚 vs 向上滚, 用于 intent 释放方向判定。每条
     // scroll 事件都更新 lastSeen, 程序化与用户路径共用。
-    const verticalDelta = container.scrollTop - lastSeenScrollTop;
-    lastSeenScrollTop = container.scrollTop;
+    const rawScrollTop = container.scrollTop;
+    const verticalDelta = rawScrollTop - lastSeenScrollTop;
+    if (verticalIntent.touchActive) {
+      touchGestureMaxScrollTop = Math.max(touchGestureMaxScrollTop ?? rawScrollTop, rawScrollTop);
+    }
+    const effectiveScrollTop = clampCursorAwareBottomOverscroll(rawScrollTop);
+    lastSeenScrollTop = effectiveScrollTop;
     if (syncing.external) {
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "external-sync",
-        scrollTop: container.scrollTop,
+        scrollTop: effectiveScrollTop,
         atCursorAwareBottom: getCurrentAnchor().isAtBottom,
         verticalDelta,
       });
@@ -612,14 +636,14 @@ export function attachPtyScrollController(
     // 而把 intent 置 true; 也不要走 scrollToBottom 兜底,否则会和 followCursorY 互踩。
     const isPendingFollowCursorScroll =
       pendingFollowCursorScrollTop !== null &&
-      Math.abs(container.scrollTop - pendingFollowCursorScrollTop) <= 1;
+      Math.abs(effectiveScrollTop - pendingFollowCursorScrollTop) <= 1;
     if (isPendingFollowCursorScroll) {
       pendingFollowCursorScrollTop = null;
       pendingProgrammaticScrollTop = null;
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "programmatic-follow",
-        scrollTop: container.scrollTop,
+        scrollTop: effectiveScrollTop,
         atCursorAwareBottom: getCurrentAnchor().isAtBottom,
         verticalDelta,
       });
@@ -630,14 +654,14 @@ export function attachPtyScrollController(
     const atBottom = getCurrentAnchor().isAtBottom;
     const isPendingProgrammaticScroll =
       pendingProgrammaticScrollTop !== null &&
-      Math.abs(container.scrollTop - pendingProgrammaticScrollTop) <= 1 &&
+      Math.abs(effectiveScrollTop - pendingProgrammaticScrollTop) <= 1 &&
       canPassiveFollow(verticalIntent);
     if (!atBottom && isPendingProgrammaticScroll) {
       pendingProgrammaticScrollTop = null;
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "programmatic-bottom",
-        scrollTop: container.scrollTop,
+        scrollTop: effectiveScrollTop,
         atCursorAwareBottom: atBottom,
         verticalDelta,
       });
@@ -651,7 +675,7 @@ export function attachPtyScrollController(
     dispatchVerticalIntent({
       type: "container-scroll",
       source: "user",
-      scrollTop: container.scrollTop,
+      scrollTop: effectiveScrollTop,
       atCursorAwareBottom: atBottom,
       verticalDelta,
     });
@@ -858,6 +882,7 @@ export function attachPtyScrollController(
   };
 
   const onTouchStart = (event: TouchEvent): void => {
+    touchGestureMaxScrollTop = container.scrollTop;
     dispatchVerticalIntent({
       type: "touch-start",
       clientY: event.touches?.[0]?.clientY ?? null,
@@ -880,9 +905,14 @@ export function attachPtyScrollController(
   const finishTouchGesture = (type: "touch-end" | "touch-cancel"): void => {
     // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
     // onContainerScroll 的 touchActive 期间不释放, 由 FSM 在 touch end/cancel 统一判定。
+    const scrollTopForIntent =
+      touchGestureMaxScrollTop === null
+        ? container.scrollTop
+        : Math.max(container.scrollTop, touchGestureMaxScrollTop);
+    touchGestureMaxScrollTop = null;
     dispatchVerticalIntent({
       type,
-      scrollTop: container.scrollTop,
+      scrollTop: scrollTopForIntent,
       atCursorAwareBottom: getCurrentAnchor().isAtBottom,
     });
     notifyAtBottom();

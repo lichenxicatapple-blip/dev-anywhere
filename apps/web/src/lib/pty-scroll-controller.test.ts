@@ -678,6 +678,58 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
 
+  it("clamps native touch scroll past cursor-aware bottom before pending output can snap back", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 5800);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1000, clientWidth: 2160 });
+    const { terminal, emitRender } = createTerminal({ 265: "live prompt" });
+    terminal.rows = 50;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 288;
+    terminal.buffer.active.cursorY = 27;
+    let hasNewFrame = false;
+    const setNewFramesWhileAway = vi.fn();
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBeCloseTo(5013);
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    onUserVerticalScrollIntentChange.mockClear();
+    container.scrollTop = 5166;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBeCloseTo(5013);
+    expect(terminal.buffer.active.viewportY).toBe(238);
+
+    container.dispatchEvent(touchEvent("touchend", 280));
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+
+    hasNewFrame = true;
+    emitRender();
+
+    expect(container.scrollTop).toBeCloseTo(5013);
+    expect(setNewFramesWhileAway).not.toHaveBeenCalledWith(true);
+  });
+
   it("keeps vertical review intent on a small wheel-down while still far from bottom (longHost)", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 787, clientWidth: 1640 });
