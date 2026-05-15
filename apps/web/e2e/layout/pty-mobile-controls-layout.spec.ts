@@ -69,6 +69,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       () => window.visualViewport?.height ?? window.innerHeight,
     );
     expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(visualViewportHeight + 1);
+    expect(visualViewportHeight - (controlsBox.y + controlsBox.height)).toBeLessThanOrEqual(24);
 
     // BackToBottom 出现时不能被控制条遮挡: BTB 底部坐标 < 控制条顶部坐标。
     // 用滚动制造 BTB 可见 (xterm 历史向上滚)。这里直接跳过断言可见, 改用样式断言:

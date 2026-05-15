@@ -44,7 +44,7 @@ export function markUserVerticalScrollIntent(container: HTMLElement): void {
 }
 
 export function touchEvent(type: string, clientY: number): TouchEvent {
-  const event = new Event(type, { bubbles: true }) as TouchEvent;
+  const event = new Event(type, { bubbles: true, cancelable: true }) as TouchEvent;
   Object.defineProperty(event, "touches", {
     configurable: true,
     value: type === "touchend" || type === "touchcancel" ? [] : [{ clientY }],

@@ -18,7 +18,10 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
-import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
+import {
+  useVisualViewportBottomOffset,
+  useVisualViewportLayoutBottomInset,
+} from "@/hooks/use-visual-viewport";
 import { isRouteSessionEnded, resolveChatPresentation, resolveChatStatusState } from "./chat-status";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
@@ -48,8 +51,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const presentation = resolveChatPresentation({ connected, proxyOnline, routeSessionEnded });
   const navigate = useNavigate();
   const location = useLocation();
-  // iOS/Android 软键盘高度: 用 paddingBottom 把整个 flex-col 列上挤, flex-1 min-h-0 的 PTY/JSON 区会同步缩短, 底部气泡/PTY 尾行自动跟 InputBar 一起挪到键盘之上
+  // keyboardOffset 表示键盘是否打开/大概高度；layoutKbInset 才是当前 layout viewport 仍被
+  // 键盘覆盖的物理 inset。Android Chrome 常会直接压缩 layout viewport，此时再 padding
+  // 会二次避让，在 PTY controls 和键盘之间制造一条黑带。
   const kbOffset = useVisualViewportBottomOffset();
+  const layoutKbInset = useVisualViewportLayoutBottomInset();
 
   // 区分 "用户主动敲 chat URL / refresh" vs "AppShell auto-restore 把我拽来"。
   // 仅当当前 URL 等于 RESTORED_TARGET 时算后者, 一次性消费, 避免后续手动回访被重定向。
@@ -129,8 +135,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       <FileDownloadProvider sessionId={id}>
         <div
           className="flex flex-col h-full"
-          style={{ paddingBottom: kbOffset || "env(safe-area-inset-bottom)" }}
+          style={{ paddingBottom: layoutKbInset || "env(safe-area-inset-bottom)" }}
           data-keyboard-offset={kbOffset}
+          data-keyboard-layout-inset={layoutKbInset}
         >
           <ChatHeader sessionId={id} mode={mode} />
           <StatusLine state={statusState} />

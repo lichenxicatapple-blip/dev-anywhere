@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeVisualViewportBottomOffset } from "./use-visual-viewport";
+import {
+  computeVisualViewportBottomOffset,
+  computeVisualViewportLayoutBottomInset,
+} from "./use-visual-viewport";
 
 describe("computeVisualViewportBottomOffset", () => {
   it("returns 0 when the visual viewport matches the layout viewport", () => {
@@ -55,5 +58,37 @@ describe("computeVisualViewportBottomOffset", () => {
         baselineViewportHeight: 800,
       }),
     ).toBe(320);
+  });
+});
+
+describe("computeVisualViewportLayoutBottomInset", () => {
+  it("returns the current inset when the keyboard overlays the layout viewport", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 460,
+        visualViewportOffsetTop: 0,
+      }),
+    ).toBe(340);
+  });
+
+  it("returns 0 when Android already resized the layout viewport", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 480,
+        visualViewportHeight: 480,
+        visualViewportOffsetTop: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it("ignores small browser chrome viewport changes", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 800,
+        visualViewportHeight: 688,
+        visualViewportOffsetTop: 0,
+      }),
+    ).toBe(0);
   });
 });

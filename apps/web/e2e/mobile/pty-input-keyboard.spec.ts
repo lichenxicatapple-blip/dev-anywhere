@@ -67,6 +67,11 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
             .querySelector("[data-keyboard-offset]")
             ?.getAttribute("data-keyboard-offset") ?? "0",
         ),
+        keyboardLayoutInset: Number(
+          document
+            .querySelector("[data-keyboard-layout-inset]")
+            ?.getAttribute("data-keyboard-layout-inset") ?? "0",
+        ),
         visualViewportHeight: window.visualViewport?.height ?? window.innerHeight,
       };
     });
@@ -76,6 +81,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       metrics.visualViewportHeight + 2,
     );
+    expect(metrics.visualViewportHeight - (metrics.controlsBottom ?? 0)).toBeLessThanOrEqual(24);
   });
 
   test("preserves IME-transformed full-width punctuation on emu Chrome", async ({ emuPage }) => {

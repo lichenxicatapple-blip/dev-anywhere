@@ -34,6 +34,19 @@ export function computeVisualViewportBottomOffset({
   return Math.max(currentBottomInset, baselineBottomInset, 0);
 }
 
+export function computeVisualViewportLayoutBottomInset({
+  layoutViewportHeight,
+  visualViewportHeight,
+  visualViewportOffsetTop,
+}: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight">): number {
+  const currentBottomInset =
+    layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
+  const currentRatio = visualViewportHeight / Math.max(layoutViewportHeight, 1);
+  const currentLooksLikeKeyboard =
+    currentBottomInset > 0 && currentRatio < SOFT_KEYBOARD_VIEWPORT_RATIO;
+  return currentLooksLikeKeyboard ? Math.max(currentBottomInset, 0) : 0;
+}
+
 export function useVisualViewportHeightVar(): void {
   useEffect(() => {
     const vv = window.visualViewport;
@@ -120,4 +133,40 @@ export function useVisualViewportBottomOffset(): number {
   }, []);
 
   return offset;
+}
+
+export function useVisualViewportLayoutBottomInset(): number {
+  const [inset, setInset] = useState(0);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      setInset(
+        computeVisualViewportLayoutBottomInset({
+          layoutViewportHeight: window.innerHeight,
+          visualViewportHeight: vv.height,
+          visualViewportOffsetTop: vv.offsetTop,
+        }),
+      );
+    };
+
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+
+    const onBlur = () => {
+      setTimeout(update, 300);
+    };
+    window.addEventListener("focusout", onBlur);
+
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      window.removeEventListener("focusout", onBlur);
+    };
+  }, []);
+
+  return inset;
 }

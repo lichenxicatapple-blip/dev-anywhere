@@ -127,6 +127,8 @@ export function attachPtyScrollController(
   // touch native scroll 可能先把 container 推过 cursor-aware bottom, 再被我们 clamp 回来。
   // touchend 释放回看意图时不能只看最终 scrollTop, 还要知道这次手势是否确实向下到过底部。
   let touchGestureMaxScrollTop: number | null = null;
+  let lastTouchClientY: number | null = null;
+  let touchTriedBeyondCursorAwareBottom = false;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
   let userHasHorizontalScrollIntent = false;
@@ -594,6 +596,37 @@ export function attachPtyScrollController(
     return anchor.bottomScrollTop;
   };
 
+  const preventTouchMovePastCursorAwareBottom = (
+    event: TouchEvent,
+    currentY: number | null,
+  ): void => {
+    const previousY = lastTouchClientY;
+    lastTouchClientY = currentY;
+    if (previousY === null || currentY === null) return;
+    // On touch screens, finger-up means content scrollTop increases. At cursor-aware
+    // bottom this native scroll has no useful terminal state to expose; letting it
+    // happen creates an 8px compositor bounce that the next render then snaps back.
+    const wantsScrollDown = currentY < previousY;
+    if (!wantsScrollDown) return;
+    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const anchor = getCurrentAnchor();
+    const hasCursorAwareBottom = anchor.bottomScrollTop < domMaxScrollTop - 1;
+    const atCursorAwareBottom = container.scrollTop >= anchor.bottomScrollTop - 1;
+    if (!hasCursorAwareBottom || !atCursorAwareBottom || !anchor.isAtBottom) return;
+
+    touchTriedBeyondCursorAwareBottom = true;
+    touchGestureMaxScrollTop = Math.max(
+      touchGestureMaxScrollTop ?? container.scrollTop,
+      anchor.bottomScrollTop,
+    );
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    trace("touchmove:prevent-cursor-bottom", {
+      details: `scrollTop=${container.scrollTop} bottom=${anchor.bottomScrollTop} domMax=${domMaxScrollTop}`,
+    });
+  };
+
   const onContainerScroll = (): void => {
     trace("container-scroll");
     // 横向 scroll 意图检测: 跟 followCursorX 的程序化写入区分。我们刚改 scrollLeft
@@ -882,10 +915,13 @@ export function attachPtyScrollController(
   };
 
   const onTouchStart = (event: TouchEvent): void => {
+    const startY = event.touches?.[0]?.clientY ?? null;
     touchGestureMaxScrollTop = container.scrollTop;
+    lastTouchClientY = startY;
+    touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
       type: "touch-start",
-      clientY: event.touches?.[0]?.clientY ?? null,
+      clientY: startY,
       scrollTop: container.scrollTop,
     });
     trace("touchstart");
@@ -894,6 +930,7 @@ export function attachPtyScrollController(
   const onTouchMove = (event: TouchEvent): void => {
     const currentY = event.touches?.[0]?.clientY ?? null;
     trace("touchmove");
+    preventTouchMovePastCursorAwareBottom(event, currentY);
     const result = dispatchVerticalIntent({
       type: "touch-move",
       clientY: currentY,
@@ -908,8 +945,16 @@ export function attachPtyScrollController(
     const scrollTopForIntent =
       touchGestureMaxScrollTop === null
         ? container.scrollTop
-        : Math.max(container.scrollTop, touchGestureMaxScrollTop);
+        : Math.max(
+            container.scrollTop,
+            touchGestureMaxScrollTop,
+            touchTriedBeyondCursorAwareBottom && verticalIntent.touchStartScrollTop !== null
+              ? verticalIntent.touchStartScrollTop + atBottomThreshold + 1
+              : container.scrollTop,
+          );
     touchGestureMaxScrollTop = null;
+    lastTouchClientY = null;
+    touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
       type,
       scrollTop: scrollTopForIntent,
@@ -932,7 +977,7 @@ export function attachPtyScrollController(
 
   container.addEventListener("wheel", onWheel, { passive: false, capture: true });
   container.addEventListener("touchstart", onTouchStart, { passive: true });
-  container.addEventListener("touchmove", onTouchMove, { passive: true });
+  container.addEventListener("touchmove", onTouchMove, { passive: false });
   container.addEventListener("touchend", onTouchEnd, { passive: true });
   container.addEventListener("touchcancel", onTouchCancel, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
