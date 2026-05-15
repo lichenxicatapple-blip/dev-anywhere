@@ -34,6 +34,50 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     await expect.poll(() => readRawPtyInput(emuPage)).toContain("abc");
   });
 
+  test("raises the Android soft keyboard and keeps PTY controls above it", async ({ emuPage }) => {
+    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await emuPage.locator('[data-slot="pty-terminal"]').click();
+    await expect(
+      emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
+    ).toBeFocused();
+
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(() =>
+            Number(
+              document
+                .querySelector("[data-keyboard-offset]")
+                ?.getAttribute("data-keyboard-offset") ?? "0",
+            ),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(0);
+
+    const metrics = await emuPage.evaluate(() => {
+      const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
+      const controlsRect = controls?.getBoundingClientRect();
+      return {
+        controlsBottom: controlsRect ? controlsRect.y + controlsRect.height : null,
+        keyboardOffset: Number(
+          document
+            .querySelector("[data-keyboard-offset]")
+            ?.getAttribute("data-keyboard-offset") ?? "0",
+        ),
+        visualViewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      };
+    });
+
+    expect(metrics.keyboardOffset).toBeGreaterThan(0);
+    expect(metrics.controlsBottom).not.toBeNull();
+    expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      metrics.visualViewportHeight + 2,
+    );
+  });
+
   test("preserves IME-transformed full-width punctuation on emu Chrome", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
