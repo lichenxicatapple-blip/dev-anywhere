@@ -69,6 +69,9 @@ const probe = (overrides: Partial<PtyScrollDebugProbe> = {}): PtyScrollDebugProb
   paddingBottom: 0,
   canvasLastY: -1,
   userHasVerticalScrollIntent: false,
+  verticalIntentMode: "following",
+  verticalIntentSource: "none",
+  verticalIntentTransitionId: "attach.following",
   userHasHorizontalScrollIntent: false,
   pendingProgrammaticScrollTop: null,
   pendingFollowCursorScrollTop: null,
@@ -156,6 +159,9 @@ describe("buildPtyScrollDebugSnapshot", () => {
       () =>
         probe({
           userHasVerticalScrollIntent: true,
+          verticalIntentMode: "reviewing",
+          verticalIntentSource: "touch",
+          verticalIntentTransitionId: "touch.start",
           userHasHorizontalScrollIntent: true,
           pendingFollowCursorScrollTop: 420,
           pendingFollowCursorScrollLeft: 64,
@@ -168,6 +174,11 @@ describe("buildPtyScrollDebugSnapshot", () => {
     );
 
     expect(snap.intent).toEqual({ vertical: true, horizontal: true });
+    expect(snap.verticalIntent).toEqual({
+      mode: "reviewing",
+      source: "touch",
+      transitionId: "touch.start",
+    });
     expect(snap.pending).toEqual({
       programmaticScrollTop: null,
       followCursorScrollTop: 420,

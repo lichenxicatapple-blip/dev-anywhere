@@ -2,6 +2,11 @@ import type { Terminal } from "@xterm/xterm";
 import { computePtyHostLayout, computeScrollAnchor } from "./pty-scroll";
 import { parsePx } from "./pty-style-utils";
 import type { PtyDebugSnapshot } from "./pty-debug-snapshot";
+import type {
+  PtyVerticalIntentMode,
+  PtyVerticalIntentSource,
+  PtyVerticalIntentTransitionId,
+} from "./pty-vertical-intent-fsm";
 
 // scroll controller 内部读得到、debug snapshot 需要但生产逻辑不需要暴露的瞬态。
 // 把这些剥到 probe 里，scroll controller 的生产接口只暴露事件 / 几何 / 滚动控制；
@@ -13,6 +18,9 @@ export interface PtyScrollDebugProbe {
   paddingBottom: number;
   canvasLastY: number;
   userHasVerticalScrollIntent: boolean;
+  verticalIntentMode: PtyVerticalIntentMode;
+  verticalIntentSource: PtyVerticalIntentSource;
+  verticalIntentTransitionId: PtyVerticalIntentTransitionId;
   userHasHorizontalScrollIntent: boolean;
   pendingProgrammaticScrollTop: number | null;
   pendingFollowCursorScrollTop: number | null;
@@ -151,6 +159,11 @@ export function buildPtyScrollDebugSnapshot(
     intent: {
       vertical: probe.userHasVerticalScrollIntent,
       horizontal: probe.userHasHorizontalScrollIntent,
+    },
+    verticalIntent: {
+      mode: probe.verticalIntentMode,
+      source: probe.verticalIntentSource,
+      transitionId: probe.verticalIntentTransitionId,
     },
     pinned: !probe.userHasVerticalScrollIntent,
     pendingProgrammaticScrollTop: probe.pendingProgrammaticScrollTop,

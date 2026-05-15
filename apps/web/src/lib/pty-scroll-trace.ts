@@ -6,6 +6,11 @@ import {
   uniqueNumbers,
 } from "./scroll-trace-store";
 import { parsePx } from "./pty-style-utils";
+import type {
+  PtyVerticalIntentMode,
+  PtyVerticalIntentSource,
+  PtyVerticalIntentTransitionId,
+} from "./pty-vertical-intent-fsm";
 
 export interface PtyScrollTraceEntry {
   t: number;
@@ -50,6 +55,9 @@ export interface PtyScrollTraceEntry {
   atBottom?: boolean;
   touchActive?: boolean;
   userIntent?: boolean;
+  intentMode?: PtyVerticalIntentMode;
+  intentSource?: PtyVerticalIntentSource;
+  intentTransition?: PtyVerticalIntentTransitionId;
   ydisp?: number;
   // 自由格式补充信息: hostTop delta / cursor row / followCursor 判定路径 / scroll-to-bottom 命中状态等。
   details?: string;
@@ -169,6 +177,9 @@ export function formatPtyScrollTraceReport(): string {
       entry.atBottom ? "bottom" : "",
       entry.touchActive ? "touch" : "",
       entry.userIntent ? "intent" : "",
+      entry.intentMode ?? "",
+      entry.intentSource ?? "",
+      entry.intentTransition ?? "",
       entry.horizontalIntent ? "hIntent" : "",
       entry.pendingContainerSyncRetry ? "syncRetry" : "",
       entry.pendingProgrammaticScrollTop ?? "",
@@ -190,7 +201,7 @@ export function formatPtyScrollTraceReport(): string {
     `focus=${focusValues}`,
     "debugSnapshot=",
     JSON.stringify(debugSnapshot, null, 2),
-    "t\tevent\tscope\taction\treason\tscrollTop\tscrollLeft\tscrollHeight\tscrollWidth\tviewportY\tydisp\thostTop\tscrollMinusHost\thostTopDrift\tviewportHostCoverage\tclientHeight\tclientWidth\tcellH\tcellW\tcursorX\tcursorY\tcursorBufferRow\tcursorInViewport\tanchorBottomScrollTop\tvvHeight\tvvTop\tvvHDelta\tvvODelta\tatBottom\ttouch\tintent\thIntent\tpendingSyncRetry\tpendingProgrammaticY\tpendingFollowY\tpendingFollowX\tprevCursorBufferRow\tdetails\tfocus",
+    "t\tevent\tscope\taction\treason\tscrollTop\tscrollLeft\tscrollHeight\tscrollWidth\tviewportY\tydisp\thostTop\tscrollMinusHost\thostTopDrift\tviewportHostCoverage\tclientHeight\tclientWidth\tcellH\tcellW\tcursorX\tcursorY\tcursorBufferRow\tcursorInViewport\tanchorBottomScrollTop\tvvHeight\tvvTop\tvvHDelta\tvvODelta\tatBottom\ttouch\tintent\tintentMode\tintentSource\tintentTransition\thIntent\tpendingSyncRetry\tpendingProgrammaticY\tpendingFollowY\tpendingFollowX\tprevCursorBufferRow\tdetails\tfocus",
     ...lines,
   ].join("\n");
 }

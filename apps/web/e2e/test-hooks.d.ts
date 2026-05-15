@@ -60,6 +60,11 @@ interface DevAnywherePtyDebugSnapshot {
     scrollTopDeltaToBottom: number;
   };
   intent: { vertical: boolean; horizontal: boolean };
+  verticalIntent: {
+    mode: "following" | "reviewing";
+    source: string;
+    transitionId: string;
+  };
   pending: {
     programmaticScrollTop: number | null;
     followCursorScrollTop: number | null;

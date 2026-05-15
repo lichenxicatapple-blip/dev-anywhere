@@ -45,6 +45,18 @@ export interface PtyDebugSnapshot {
     vertical: boolean;
     horizontal: boolean;
   };
+  verticalIntent: {
+    mode: "following" | "reviewing";
+    source:
+      | "none"
+      | "initial"
+      | "wheel"
+      | "native-scroll"
+      | "touch"
+      | "ratio-scroll"
+      | "programmatic-bottom";
+    transitionId: string;
+  };
   pinned: boolean;
   pendingProgrammaticScrollTop: number | null;
   pendingFollowCursorScrollTop: number | null;

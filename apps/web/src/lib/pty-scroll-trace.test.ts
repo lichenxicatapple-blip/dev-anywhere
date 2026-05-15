@@ -127,6 +127,9 @@ describe("pty scroll trace", () => {
       atBottom: false,
       touchActive: true,
       userIntent: true,
+      intentMode: "reviewing",
+      intentSource: "touch",
+      intentTransition: "touch.start",
     });
 
     const report = formatPtyScrollTraceReport();
@@ -135,6 +138,8 @@ describe("pty scroll trace", () => {
     expect(report).toContain("container-scroll");
     expect(report).toContain("scope\taction\treason");
     expect(report).toContain("scrollMinusHost");
+    expect(report).toContain("intentMode\tintentSource\tintentTransition");
+    expect(report).toContain("reviewing\ttouch\ttouch.start");
     expect(report).toContain("debugSnapshot=");
   });
 
