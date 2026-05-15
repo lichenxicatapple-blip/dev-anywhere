@@ -121,7 +121,20 @@ describe("PTY follow policy", () => {
           domMaxScrollTop: 7746,
           atBottom: true,
         }),
-      ).toEqual({ action: "prevent" });
+      ).toEqual({ action: "prevent", scrollTop: 7593 });
+    });
+
+    it("prevents a finger-up move that would cross into the cursor-aware bottom gap", () => {
+      expect(
+        decideTouchMoveBoundary({
+          previousClientY: 320,
+          currentClientY: 300,
+          scrollTop: 8605,
+          bottomScrollTop: 8613,
+          domMaxScrollTop: 8766,
+          atBottom: false,
+        }),
+      ).toEqual({ action: "prevent", scrollTop: 8613 });
     });
 
     it("allows finger-down movement away from cursor-aware bottom", () => {

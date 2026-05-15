@@ -632,10 +632,20 @@ export function attachPtyScrollController(
     });
     if (decision.action === "allow") return;
 
+    if (
+      decision.scrollTop !== undefined &&
+      Math.abs(container.scrollTop - decision.scrollTop) > 1
+    ) {
+      container.scrollTop = decision.scrollTop;
+      pendingProgrammaticScrollTop = null;
+      pendingFollowCursorScrollTop = null;
+      syncContainerScroll();
+    }
+
     touchTriedBeyondCursorAwareBottom = true;
     touchGestureMaxScrollTop = Math.max(
       touchGestureMaxScrollTop ?? container.scrollTop,
-      anchor.bottomScrollTop,
+      decision.scrollTop ?? anchor.bottomScrollTop,
     );
     if (event.cancelable) {
       event.preventDefault();

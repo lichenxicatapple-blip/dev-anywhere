@@ -771,6 +771,43 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("snaps to cursor-aware bottom when a touchmove would cross into the native bottom gap", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 9400);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1000, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 445: "live prompt" });
+    terminal.rows = 50;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 468;
+    terminal.buffer.active.cursorY = 27;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBeCloseTo(8613);
+
+    container.scrollTop = 8605;
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    const move = touchEvent("touchmove", 300);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(true);
+    expect(container.scrollTop).toBeCloseTo(8613);
+  });
+
   it("does not re-center on passive output when keyboard height jitters but cursor remains visible", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";

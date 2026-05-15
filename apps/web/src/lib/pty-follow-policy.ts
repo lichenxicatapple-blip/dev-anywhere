@@ -58,6 +58,7 @@ export interface TouchMoveBoundaryInput {
 
 export interface TouchMoveBoundaryResult {
   action: "allow" | "prevent";
+  scrollTop?: number;
 }
 
 export function decideTouchMoveBoundary(input: TouchMoveBoundaryInput): TouchMoveBoundaryResult {
@@ -66,9 +67,14 @@ export function decideTouchMoveBoundary(input: TouchMoveBoundaryInput): TouchMov
   }
   const wantsScrollDown = input.currentClientY < input.previousClientY;
   const hasCursorAwareBottom = input.bottomScrollTop < input.domMaxScrollTop - 1;
+  if (!wantsScrollDown || !hasCursorAwareBottom) {
+    return { action: "allow" };
+  }
   const atCursorAwareBottom = input.scrollTop >= input.bottomScrollTop - 1;
-  if (wantsScrollDown && hasCursorAwareBottom && atCursorAwareBottom && input.atBottom) {
-    return { action: "prevent" };
+  const projectedScrollTop = input.scrollTop + (input.previousClientY - input.currentClientY);
+  const wouldCrossCursorAwareBottom = projectedScrollTop >= input.bottomScrollTop - 1;
+  if ((atCursorAwareBottom && input.atBottom) || wouldCrossCursorAwareBottom) {
+    return { action: "prevent", scrollTop: input.bottomScrollTop };
   }
   return { action: "allow" };
 }
