@@ -11,7 +11,7 @@ const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 
 // 移动端浮层按键 (2 行):
-//   Row1: [Tab ][⇧Tab][^T  ][  .  ][ ↑ ][ ^S ]
+//   Row1: [Esc ][Tab ][⇧Tab][^T  ][ ↑ ][ ^S ]
 //   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
 //   Enter 在最右, 跨 2 行高亮
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
@@ -28,6 +28,13 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
         role="group"
         aria-label="辅助按键"
       >
+        <SinglePressKey
+          label="发送 Escape"
+          slot="pty-mobile-key-esc"
+          onPress={() => onInput("\x1b")}
+        >
+          Esc
+        </SinglePressKey>
         <SinglePressKey
           label="发送 Tab"
           slot="pty-mobile-key-tab"
@@ -49,7 +56,6 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
         >
           ^T
         </SinglePressKey>
-        <ArrowSpacer />
         <RepeatableKey
           label="光标上移"
           slot="pty-mobile-key-up"
@@ -123,16 +129,13 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
   );
 }
 
-// 占位格保持 grid 对齐, 用于 ↑ 上方左右两侧的 cross 形状。
-function ArrowSpacer() {
-  return <div aria-hidden="true" className="h-9" />;
-}
-
 const KEY_BUTTON_OUTER_CLASS =
   "inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white";
 
 const KEY_PILL_CLASS =
   "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] px-1 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
+const ARROW_KEY_PILL_CLASS =
+  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#465A72] bg-[#202A34] px-1 text-xs font-mono text-[#DDEBFF] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
 
 interface SinglePressKeyProps {
   label: string;
@@ -215,7 +218,7 @@ function RepeatableKey({ label, slot, icon: Icon, onPress }: RepeatableKeyProps)
         onPress();
       }}
     >
-      <span className={KEY_PILL_CLASS}>
+      <span className={ARROW_KEY_PILL_CLASS}>
         <Icon aria-hidden="true" className="size-4" />
       </span>
     </button>

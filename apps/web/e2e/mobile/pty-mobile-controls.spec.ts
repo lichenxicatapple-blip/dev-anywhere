@@ -1,4 +1,4 @@
-// PTY 移动端软控制按键全流程在真 emu 上: clear / 上下左右 / enter 都正确发出 raw input.
+// PTY 移动端软控制按键全流程在真 emu 上: esc / clear / 上下左右 / enter 都正确发出 raw input.
 // L2 mobile-contract pty test 只验证 terminal visible, L4 钉死全部按键的 raw 序列.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
@@ -8,7 +8,9 @@ const SESSION_ID = "mobile-pty-controls";
 test.describe("L4 mobile / PTY soft controls full key sequence", () => {
   test.setTimeout(60_000);
 
-  test("clear / arrows / enter buttons emit correct raw escape sequences", async ({ emuPage }) => {
+  test("esc / clear / arrows / enter buttons emit correct raw escape sequences", async ({
+    emuPage,
+  }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
@@ -23,7 +25,8 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     const controls = emuPage.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
 
-    // clear (\x15) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
+    // esc (\x1b) + clear (\x15) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
+    await emuPage.locator('[data-slot="pty-mobile-key-esc"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-clear"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-left"]').click();
     await emuPage.locator('[data-slot="pty-mobile-key-right"]').click();
@@ -34,6 +37,6 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
 
     await expect
       .poll(() => readRawPtyInput(emuPage))
-      .toContain("\x15\x1b[D\x1b[C\x1b[A\x1b[B\x13\r");
+      .toContain("\x1b\x15\x1b[D\x1b[C\x1b[A\x1b[B\x13\r");
   });
 });

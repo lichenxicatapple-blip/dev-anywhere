@@ -46,6 +46,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     // 文本键 / icon 键 / 第一个 / 最后一个。
     const sampleSlots = [
       "pty-mobile-key-tab",
+      "pty-mobile-key-esc",
       "pty-mobile-key-clear",
       "pty-mobile-key-up",
       "pty-mobile-key-right",
