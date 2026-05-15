@@ -67,6 +67,17 @@ e2e/pc/chaos/
 
 `fixtures-contract.spec.ts` 自检三个 fixture 的最小协议契约, 别处 spec 用 fixture 出错时先看这条是否过.
 
+## PTY scroll intent 测试边界
+
+PTY vertical intent 的 set / clear / keep 语义属于纯状态机:
+
+- 纯 "should intent set/clear?" 行为写在 `apps/web/src/lib/pty-vertical-intent-fsm.test.ts`。
+- 每新增一个 intent transition, 必须补一条 transition table case, 并让 transition id 覆盖守卫通过。
+- `apps/web/src/lib/pty-scroll-controller.test.ts` 只测 DOM / xterm 集成副作用: scrollTop 写入、viewportY 同步、host/spacer 几何、pending sync retry、cursor-aware bottom、事件 wiring。
+- 只有当 intent transition 会产生 DOM/xterm 可观察副作用时, 才额外加 controller integration test。
+
+不要把每个历史 incident 都复制成 controller test。历史 incident 的根因如果是 intent 仲裁, 应该落到 FSM transition table; controller 只保留少量端到端接线保护。
+
 ## 添加新 spec 决策树
 
 ```
