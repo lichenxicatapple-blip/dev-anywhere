@@ -18,10 +18,10 @@ COPY apps/web/ apps/web/
 RUN pnpm --filter @dev-anywhere/shared build
 RUN pnpm --filter @dev-anywhere/web build
 
-# 生产阶段: nginx 静态服务 + 反代 relay
+# 生产阶段: nginx 静态服务; 公网 TLS 和 relay 分流由宿主机 nginx 负责
 FROM nginx:alpine AS runner
 
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
-COPY apps/relay/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 443
+EXPOSE 80

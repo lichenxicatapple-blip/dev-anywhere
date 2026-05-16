@@ -169,4 +169,41 @@ describe("MessageBubble", () => {
     expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.com/readme");
     expect(container.querySelector("code")?.textContent).toBe("package.json");
   });
+
+  it("does not render bare domains as file download actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-bare-domain",
+            role: "assistant",
+            text: "If it persists, check status.claude.com.",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+    expect(container.textContent).toContain("status.claude.com");
+  });
+
+  it("renders bare domains as external links instead of download actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-bare-domain-link",
+            role: "assistant",
+            text: "If it persists, check status.claude.com.",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+    const link = container.querySelector<HTMLAnchorElement>('[data-slot="inline-web-link"]');
+    expect(link?.textContent).toBe("status.claude.com");
+    expect(link?.getAttribute("href")).toBe("https://status.claude.com");
+    expect(link?.querySelector(".lucide-external-link")).not.toBeNull();
+  });
 });

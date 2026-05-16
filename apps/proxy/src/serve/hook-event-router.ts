@@ -15,8 +15,8 @@ interface HookEventRouterDeps {
   relayConnection: RelayConnection;
   agentStatusRegistry: AgentStatusRegistry;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
-  // session.mode 决定审批解除后的转换目标：JSON 模式不允许 WAITING_APPROVAL → WORKING
-  // （观察通道粒度问题，见 session-manager.ts JSON_TRANSITIONS 注释），需让 onTurnResult 直接 → IDLE。
+  // session.mode 决定审批解除后的转换目标：allow 后 PTY/JSON 都应回到 WORKING,
+  // deny 则直接回 IDLE。
   getSessionMode?: (sessionId: string) => "json" | "pty" | undefined;
   nextSeq?: (sessionId: string) => number;
 }
@@ -67,19 +67,13 @@ export class HookEventRouter {
     outcome: "allow" | "deny",
     context?: { toolName?: string; toolInput?: Record<string, unknown> },
   ): void {
-    // 状态机走向按 outcome × mode 分四档（详见 session-manager.ts 的 JSON_TRANSITIONS / PTY_TRANSITIONS 边表）：
+    // 状态机走向按 outcome 分两档（详见 session-manager.ts 的 JSON_TRANSITIONS / PTY_TRANSITIONS 边表）：
     //  - deny：双通道都直接回 IDLE，本轮终结
-    //  - allow + PTY：claude 继续输出，OSC 信号将驱动后续状态，先 → WORKING
-    //  - allow + JSON：观察粒度不到中间 WORKING，主动转换会被 FSM 拒绝；
-    //    交给 onTurnResult 一次性 WAITING_APPROVAL → IDLE
+    //  - allow：CLI/worker 已收到 control_response，agent 会继续跑，先 → WORKING
     if (outcome === "deny") {
       this.deps.changeSessionState(sessionId, SessionState.IDLE);
     } else {
-      const mode = this.deps.getSessionMode?.(sessionId);
-      if (mode === "pty") {
-        this.deps.changeSessionState(sessionId, SessionState.WORKING);
-      }
-      // mode === "json" 或 undefined：不主动转换状态，交给后续观察事件
+      this.deps.changeSessionState(sessionId, SessionState.WORKING);
     }
     this.forwardAgentStatus(
       {

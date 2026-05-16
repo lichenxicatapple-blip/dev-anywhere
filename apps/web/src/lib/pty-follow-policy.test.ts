@@ -150,6 +150,21 @@ describe("PTY follow policy", () => {
       ).toEqual({ action: "allow" });
     });
 
+    it("allows horizontal-dominant movement at cursor-aware bottom", () => {
+      expect(
+        decideTouchMoveBoundary({
+          previousClientX: 260,
+          currentClientX: 160,
+          previousClientY: 320,
+          currentClientY: 314,
+          scrollTop: 7593,
+          bottomScrollTop: 7593,
+          domMaxScrollTop: 7746,
+          atBottom: true,
+        }),
+      ).toEqual({ action: "allow" });
+    });
+
     it("allows finger-up movement before reaching cursor-aware bottom", () => {
       expect(
         decideTouchMoveBoundary({

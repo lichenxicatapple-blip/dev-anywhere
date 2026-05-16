@@ -1,6 +1,25 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { MarkdownView } from "./markdown-view";
+
+const originalMatchMedia = window.matchMedia;
+
+afterEach(() => {
+  window.matchMedia = originalMatchMedia;
+});
+
+function mockCoarsePointer(matches: boolean): void {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
 
 describe("MarkdownView XSS 防护", () => {
   it("drops script tags", () => {
@@ -31,6 +50,34 @@ describe("MarkdownView XSS 防护", () => {
     const link = container.querySelector("a");
     expect(link?.getAttribute("target")).toBe("_blank");
     expect(link?.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("opens external links on desktop only with cmd/ctrl click", () => {
+    mockCoarsePointer(false);
+    const { container } = render(<MarkdownView text={"[click](https://example.com)"} />);
+    const link = container.querySelector("a");
+    expect(link).not.toBeNull();
+
+    const plainClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+    expect(link?.dispatchEvent(plainClick)).toBe(false);
+    expect(plainClick.defaultPrevented).toBe(true);
+
+    const modifiedClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+    });
+    expect(link?.dispatchEvent(modifiedClick)).toBe(true);
+    expect(modifiedClick.defaultPrevented).toBe(false);
+  });
+
+  it("opens external links on mobile tap without modifiers", () => {
+    mockCoarsePointer(true);
+    const { container } = render(<MarkdownView text={"[click](https://example.com)"} />);
+    const link = container.querySelector("a");
+    const plainTap = new MouseEvent("click", { bubbles: true, cancelable: true });
+    expect(link?.dispatchEvent(plainTap)).toBe(true);
+    expect(plainTap.defaultPrevented).toBe(false);
   });
 
   // GFM 表格在超出 bubble 宽度时需横向滚动, 关键是 <table> 外必须有 overflow-x 容器

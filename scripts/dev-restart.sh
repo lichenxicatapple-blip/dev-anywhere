@@ -215,6 +215,11 @@ if [ ! -d "$FONT_DIR/sarasa-fixed-sc" ] && [ -d "$PACKAGE_FONT_DIR/sarasa-fixed-
   cp -R "$PACKAGE_FONT_DIR/sarasa-fixed-sc" "$FONT_DIR/"
 fi
 
+WEB_SCHEME="http"
+if [[ -n "${DEV_ANYWHERE_WEB_HTTPS_CERT:-}" || -n "${DEV_ANYWHERE_WEB_HTTPS_KEY:-}" ]]; then
+  WEB_SCHEME="https"
+fi
+
 echo ""
 echo "=== Building shared protocol package ==="
 pnpm --filter @dev-anywhere/shared run build
@@ -242,7 +247,7 @@ echo ""
 echo "=== All services restarted ==="
 echo "  Log run: $LOG_RUN_ID"
 echo "  Relay: http://localhost:$RELAY_PORT"
-echo "  Web:   http://localhost:$WEB_PORT"
+echo "  Web:   $WEB_SCHEME://localhost:$WEB_PORT"
 echo "  Proxy profile: $DEV_PROFILE"
 echo "  Proxy relay: $DEV_RELAY"
 echo ""

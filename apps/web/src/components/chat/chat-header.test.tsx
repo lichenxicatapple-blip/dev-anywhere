@@ -191,4 +191,44 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.getByText("终端字号")).not.toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
   });
+
+  it("keeps the font-size stepper compact enough for mobile menu width", async () => {
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const menu = await waitFor(() => {
+      const element = document.querySelector('[data-slot="chat-overflow-menu"]');
+      if (!(element instanceof HTMLElement)) {
+        throw new Error("chat overflow menu was not rendered");
+      }
+      return element;
+    });
+    const row = menu.querySelector('[data-slot="chat-menu-font-row"]');
+    const label = menu.querySelector('[data-slot="chat-menu-font-label"]');
+    const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
+    const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
+
+    expect(row?.className).toContain("flex");
+    expect(label?.className).toContain("whitespace-nowrap");
+    expect(label?.className).toContain("flex-1");
+    expect(label?.textContent).toMatch(/^(聊天|终端)字号$/);
+    expect(stepper?.className).toContain("inline-flex");
+    expect(stepper?.className).not.toContain("border");
+    expect(larger?.className).toContain("size-8");
+  });
+
+  it("keeps the page interactive while the overflow menu is open so mobile outside taps can dismiss it", async () => {
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-slot="chat-overflow-menu"]')).not.toBeNull();
+    });
+
+    expect(document.body.style.pointerEvents).not.toBe("none");
+  });
 });

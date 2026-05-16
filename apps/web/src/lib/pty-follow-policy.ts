@@ -48,6 +48,8 @@ export function decideCursorAwareClamp(input: CursorAwareClampInput): CursorAwar
 }
 
 export interface TouchMoveBoundaryInput {
+  previousClientX?: number | null;
+  currentClientX?: number | null;
   previousClientY: number | null;
   currentClientY: number | null;
   scrollTop: number;
@@ -64,6 +66,18 @@ export interface TouchMoveBoundaryResult {
 export function decideTouchMoveBoundary(input: TouchMoveBoundaryInput): TouchMoveBoundaryResult {
   if (input.previousClientY === null || input.currentClientY === null) {
     return { action: "allow" };
+  }
+  if (
+    input.previousClientX !== undefined &&
+    input.currentClientX !== undefined &&
+    input.previousClientX !== null &&
+    input.currentClientX !== null
+  ) {
+    const dx = Math.abs(input.currentClientX - input.previousClientX);
+    const dy = Math.abs(input.currentClientY - input.previousClientY);
+    if (dx > dy) {
+      return { action: "allow" };
+    }
   }
   const wantsScrollDown = input.currentClientY < input.previousClientY;
   const hasCursorAwareBottom = input.bottomScrollTop < input.domMaxScrollTop - 1;

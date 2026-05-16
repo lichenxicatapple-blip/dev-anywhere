@@ -3,6 +3,7 @@ interface PtyScrollMetrics {
   rows: number;
   cols: number;
   viewportY: number;
+  cursorY?: number;
   cellH: number;
   cellW: number;
   visibleContentHeight?: number;
@@ -47,6 +48,22 @@ export function computePtyHostLayout(
     : 0;
   const maxYdisp = Math.max(0, metrics.bufferLength - metrics.rows);
   const minSpacerHeightForLastViewport = maxYdisp * metrics.cellH + visibleContentHeight;
+  const longHost = visibleContentHeight > 0 && hostHeight > visibleContentHeight;
+  if (longHost && metrics.cursorY !== undefined) {
+    const cursorY = Math.max(0, Math.min(metrics.rows - 1, metrics.cursorY));
+    const minScrollTop = maxYdisp * metrics.cellH;
+    const maxHostScrollTop = minScrollTop + hostHeight - visibleContentHeight;
+    const target =
+      minScrollTop + cursorY * metrics.cellH - (visibleContentHeight - metrics.cellH) / 2;
+    const bottomScrollTop = Math.max(minScrollTop, Math.min(maxHostScrollTop, target));
+    return {
+      spacerHeight: bottomScrollTop + visibleContentHeight,
+      spacerWidth: metrics.cols * metrics.cellW,
+      hostWidth: metrics.cols * metrics.cellW,
+      hostHeight,
+      hostPaddingTop,
+    };
+  }
   return {
     spacerHeight: Math.max(metrics.bufferLength * metrics.cellH, minSpacerHeightForLastViewport),
     spacerWidth: metrics.cols * metrics.cellW,

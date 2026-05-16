@@ -140,7 +140,7 @@ describe("HookEventRouter", () => {
   // 审批解除路径按 outcome × mode 四档行为：
   //   PTY + allow → WORKING（OSC 信号将驱动后续状态）
   //   PTY + deny  → IDLE（FSM 直接接受）
-  //   JSON + allow → 不主动转换（FSM 拒绝 WAITING_APPROVAL → WORKING；交给 onTurnResult）
+  //   JSON + allow → WORKING（让 UI 立即退出等待审批并恢复响应中状态）
   //   JSON + deny  → IDLE
   it("PTY + allow hook permission resolution → WORKING", () => {
     const relay = createRelayConnectionFake();
@@ -202,10 +202,7 @@ describe("HookEventRouter", () => {
     expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
   });
 
-  it("JSON + allow hook permission resolution does not transition (waits for onTurnResult)", () => {
-    // B1 回归保护：JSON FSM 中 WAITING_APPROVAL → WORKING 不是合法边，
-    // 老实现无差别先 → WORKING 会被 FSM 拒绝且不再转换，session 卡死在 WAITING_APPROVAL。
-    // 修复后 JSON+allow 路径不主动转换状态，由 onTurnResult 一次性 → IDLE。
+  it("JSON + allow hook permission resolution → WORKING", () => {
     const relay = createRelayConnectionFake();
     const states: Array<[string, SessionState]> = [];
     const agentStatusRegistry = new AgentStatusRegistry();
@@ -222,7 +219,7 @@ describe("HookEventRouter", () => {
 
     router.onPermissionResolved("s1", "claude", "req-1", "allow");
 
-    expect(states).toEqual([]);
+    expect(states).toEqual([["s1", SessionState.WORKING]]);
     // agent_status 仍要 emit，让 UI 反馈"工具被批准"
     const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
     if (status.type === "agent_status") {

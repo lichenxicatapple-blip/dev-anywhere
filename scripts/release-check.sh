@@ -6,6 +6,9 @@ cd "$ROOT"
 
 echo "=== Check release scripts ==="
 bash -n scripts/install-relay.sh
+bash -n scripts/lib/install-relay-render.sh
+bash scripts/install-relay-render.test.sh
+bash scripts/web-nginx-config.test.sh
 bash -n scripts/dev-restart.sh
 bash -n scripts/dev-health.sh
 bash -n scripts/dev-relay-restart.sh

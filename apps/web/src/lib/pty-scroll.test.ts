@@ -66,6 +66,36 @@ describe("PTY scroll geometry", () => {
     ).toBe(2400);
   });
 
+  it("caps long-host spacer at the cursor-aware bottom when the live cursor is near the top", () => {
+    const metrics = {
+      bufferLength: 209,
+      rows: 54,
+      cols: 270,
+      viewportY: 155,
+      cellH: 20,
+      cellW: 8,
+      visibleContentHeight: 594,
+      cursorY: 13,
+    };
+
+    expect(computePtyHostLayout(metrics, 13)?.spacerHeight).toBe(3694);
+  });
+
+  it("keeps enough long-host spacer to center a mid-screen cursor without exposing trailing rows", () => {
+    const metrics = {
+      bufferLength: 905,
+      rows: 52,
+      cols: 80,
+      viewportY: 853,
+      cellH: 20,
+      cellW: 10,
+      visibleContentHeight: 200,
+      cursorY: 25,
+    };
+
+    expect(computePtyHostLayout(metrics, 25)?.spacerHeight).toBe(17670);
+  });
+
   // 移动端窄高度: rows*cellH 远大于 visibleContentHeight, cold-start padding 若按 host 自身
   // 算出 (rows-1-canvasLastY)*cellH, 会把内容压到 host 内部远低于 visible 截断点的位置,
   // 整屏看不见。padding 的"底参考"必须夹到 min(host, visible)。

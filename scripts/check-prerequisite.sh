@@ -6,7 +6,7 @@
 #      非 root 时再探 NOPASSWD sudo 是否配好)
 #   3. docker / docker compose v2
 #   4. apt-get 或 yum (certbot 安装会用到)
-#   5. 80 / 443 端口入方向 (LE HTTP-01 challenge 需要 80 公网可达)
+#   5. 80 / 443 端口入方向 (LE HTTP-01 challenge 需要 80 公网可达; host nginx 可复用)
 #   6. 域名 DNS A 记录是否解析到当前 VPS IP
 #
 # 用法:
@@ -75,6 +75,7 @@ REMOTE_PROBE="$(ssh -o BatchMode=yes "$SSH_HOST" "
   echo OS=\$(. /etc/os-release && echo \"\$ID \$VERSION_ID\")
   echo DOCKER=\$(command -v docker >/dev/null && docker --version 2>/dev/null || echo missing)
   echo COMPOSE=\$(docker compose version 2>/dev/null | head -1 || echo missing)
+  echo NGINX=\$(command -v nginx >/dev/null && nginx -v 2>&1 || echo missing)
   echo APT=\$(command -v apt-get >/dev/null && echo yes || echo no)
   echo YUM=\$(command -v yum >/dev/null && echo yes || echo no)
   echo CERTBOT=\$(command -v certbot >/dev/null && certbot --version 2>/dev/null || echo missing)
@@ -88,6 +89,7 @@ REMOTE_USER=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^USER=/{sub(/^USER=/,"")
 REMOTE_OS=$(printf   '%s\n' "$REMOTE_PROBE" | awk -F= '/^OS=/{sub(/^OS=/,""); print; exit}')
 DOCKER_VER=$(printf  '%s\n' "$REMOTE_PROBE" | awk -F= '/^DOCKER=/{sub(/^DOCKER=/,""); print; exit}')
 COMPOSE_VER=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^COMPOSE=/{sub(/^COMPOSE=/,""); print; exit}')
+NGINX_VER=$(printf   '%s\n' "$REMOTE_PROBE" | awk -F= '/^NGINX=/{sub(/^NGINX=/,""); print; exit}')
 APT=$(printf         '%s\n' "$REMOTE_PROBE" | awk -F= '/^APT=/{sub(/^APT=/,""); print; exit}')
 YUM=$(printf         '%s\n' "$REMOTE_PROBE" | awk -F= '/^YUM=/{sub(/^YUM=/,""); print; exit}')
 CERTBOT_VER=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^CERTBOT=/{sub(/^CERTBOT=/,""); print; exit}')
@@ -120,6 +122,12 @@ else
   ok "$COMPOSE_VER"
 fi
 
+if [[ "$NGINX_VER" == missing* ]]; then
+  warn "nginx 没装. install-relay.sh 会安装并用宿主机 nginx 统一反代 80/443"
+else
+  ok "$NGINX_VER"
+fi
+
 if [ "$APT" = "yes" ] || [ "$YUM" = "yes" ]; then
   ok "包管理器: apt-get=$APT, yum=$YUM (certbot 安装可用)"
 else
@@ -133,15 +141,19 @@ else
 fi
 
 if [[ "$PORT80" == free* ]]; then
-  ok "vps 80 端口空闲 (LE HTTP-01 challenge 用)"
+  ok "vps 80 端口空闲 (installer 会启动 host nginx 处理 LE HTTP-01 challenge)"
+elif [[ "$PORT80" == *nginx* ]]; then
+  ok "vps 80 端口已由 nginx 占用, installer 会复用 host nginx"
 else
-  warn "80 端口已有进程: $PORT80 (LE 申请期间会冲突)"
+  warn "80 端口已有非 nginx 进程: $PORT80 (host nginx 反代会冲突)"
 fi
 
 if [[ "$PORT443" == free* ]]; then
-  ok "vps 443 端口空闲"
+  ok "vps 443 端口空闲 (installer 会启动 host nginx)"
+elif [[ "$PORT443" == *nginx* ]]; then
+  ok "vps 443 端口已由 nginx 占用, installer 会复用 host nginx"
 else
-  warn "443 端口已有进程: $PORT443 (install-relay.sh 启 nginx 时会冲突)"
+  warn "443 端口已有非 nginx 进程: $PORT443 (host nginx 反代会冲突)"
 fi
 
 section "Inbound 80 / 443 (LE challenge + 服务暴露)"

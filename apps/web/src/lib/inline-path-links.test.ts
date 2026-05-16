@@ -21,4 +21,14 @@ describe("inline path link detection", () => {
       findInlinePathLinks("https://example.com/file.txt Node 22.4.0 apps/web/.../x.test.ts"),
     ).toEqual([]);
   });
+
+  it("rejects bare domains while keeping bare filenames", () => {
+    expect(findInlinePathLinks("check status.claude.com and dev-anywhere.vita-tools.top")).toEqual(
+      [],
+    );
+    expect(findInlinePathLinks("check README.md and package.json")).toEqual([
+      { kind: "file", path: "README.md", start: 6, end: 15 },
+      { kind: "file", path: "package.json", start: 20, end: 32 },
+    ]);
+  });
 });

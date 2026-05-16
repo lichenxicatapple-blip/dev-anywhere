@@ -61,6 +61,7 @@ export function buildPtyScrollDebugSnapshot(
         rows: term.rows,
         cols: term.cols,
         viewportY: buffer.viewportY,
+        cursorY: buffer.cursorY,
         cellH,
         cellW,
         visibleContentHeight,

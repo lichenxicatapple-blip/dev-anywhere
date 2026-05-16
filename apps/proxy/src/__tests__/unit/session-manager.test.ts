@@ -223,12 +223,12 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
     });
 
-    it("JSON session rejects waiting_approval -> working (proxy cannot observe mid-approval resumption)", () => {
+    it("JSON session allows waiting_approval -> working after approval is resolved", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
-      expect(manager.updateState(s.id, SessionState.WORKING)).toBe(false);
-      expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
+      expect(manager.updateState(s.id, SessionState.WORKING)).toBe(true);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
     });
 
     it("throws for non-existent session", () => {

@@ -10,6 +10,12 @@
 //      pointer 没动 + 不滚就不派发, 避免无害但密集的事件。
 //   4. pointerup / pointercancel / 切到 touch 即停。
 
+import {
+  DEFAULT_EDGE_AUTOSCROLL_MAX_SPEED_PX,
+  DEFAULT_EDGE_AUTOSCROLL_PX,
+  getEdgeAutoscrollDelta,
+} from "./pty-edge-autoscroll";
+
 interface DragSelectOptions {
   container: HTMLElement;
   host: HTMLElement;
@@ -38,8 +44,8 @@ export interface DragSelectAutoscroll {
   getDebugSnapshot: () => DragSelectDebugSnapshot;
 }
 
-const DEFAULT_EDGE_PX = 28;
-const DEFAULT_MAX_SPEED_PX = 14;
+const DEFAULT_EDGE_PX = DEFAULT_EDGE_AUTOSCROLL_PX;
+const DEFAULT_MAX_SPEED_PX = DEFAULT_EDGE_AUTOSCROLL_MAX_SPEED_PX;
 
 export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSelectAutoscroll {
   const {
@@ -89,33 +95,19 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     if (!dragging) return;
     const rect = container.getBoundingClientRect();
 
-    let dx = 0;
-    const distLeft = pointerX - rect.left;
-    const distRight = rect.right - pointerX;
-    if (distLeft < edgePx && container.scrollLeft > 0) {
-      const factor = Math.min(1, Math.max(0, 1 - distLeft / edgePx));
-      dx = -Math.ceil(maxSpeedPx * factor);
-    } else if (distRight < edgePx) {
-      const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-      if (container.scrollLeft < maxScrollLeft) {
-        const factor = Math.min(1, Math.max(0, 1 - distRight / edgePx));
-        dx = Math.ceil(maxSpeedPx * factor);
-      }
-    }
-
-    let dy = 0;
-    const distTop = pointerY - rect.top;
-    const distBottom = rect.bottom - pointerY;
-    if (distTop < edgePx && container.scrollTop > 0) {
-      const factor = Math.min(1, Math.max(0, 1 - distTop / edgePx));
-      dy = -Math.ceil(maxSpeedPx * factor);
-    } else if (distBottom < edgePx) {
-      const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      if (container.scrollTop < maxScrollTop) {
-        const factor = Math.min(1, Math.max(0, 1 - distBottom / edgePx));
-        dy = Math.ceil(maxSpeedPx * factor);
-      }
-    }
+    const { dx, dy } = getEdgeAutoscrollDelta({
+      pointerX,
+      pointerY,
+      rect,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+      scrollWidth: container.scrollWidth,
+      scrollHeight: container.scrollHeight,
+      clientWidth: container.clientWidth,
+      clientHeight: container.clientHeight,
+      edgePx,
+      maxSpeedPx,
+    });
 
     if (dx !== 0) container.scrollLeft += dx;
     if (dy !== 0) container.scrollTop += dy;

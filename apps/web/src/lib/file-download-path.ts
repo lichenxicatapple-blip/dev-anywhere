@@ -13,6 +13,8 @@ const FILE_PATH_RE =
   /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
+const DOMAIN_TLD_RE =
+  /^(?:com|net|org|io|dev|app|top|cn|ai|co|me|xyz|site|online|cloud|tools|tech|info|biz|us|uk|de|jp|fr|ru|nl|in)$/i;
 
 function trimPathToken(value: string): string {
   return value
@@ -40,9 +42,28 @@ function isPlausibleFileNameStem(path: string): boolean {
   return /[A-Za-z_-]/.test(finalSegment);
 }
 
+function isBareDomainLike(path: string): boolean {
+  if (
+    path.startsWith("/") ||
+    path.startsWith("./") ||
+    path.startsWith("../") ||
+    path.startsWith(".dev-anywhere/") ||
+    path.includes("/")
+  ) {
+    return false;
+  }
+
+  const labels = path.split(".");
+  if (labels.length < 2) return false;
+  const tld = labels.at(-1) ?? "";
+  if (!DOMAIN_TLD_RE.test(tld)) return false;
+  return labels.every((label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+}
+
 export function isFileDownloadPath(value: string): boolean {
   const path = trimPathToken(value);
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return false;
+  if (isBareDomainLike(path)) return false;
   if (IMAGE_EXT_RE.test(path)) return false;
   if (!FILE_EXT_RE.test(path)) return false;
   if (path.split("/").includes("...")) return false;

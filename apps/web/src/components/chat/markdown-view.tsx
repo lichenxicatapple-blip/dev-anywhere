@@ -4,10 +4,18 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
-import { Children, cloneElement, isValidElement, memo, type ReactNode } from "react";
-import { Download, Image as ImageIcon } from "lucide-react";
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  memo,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { Download, ExternalLink, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { findInlinePathLinks, type InlinePathLinkKind } from "@/lib/inline-path-links";
+import { findInlineWebLinks } from "@/lib/inline-web-links";
 import { useFileDownload } from "./file-download-link";
 import { useImagePreview } from "./image-preview";
 
@@ -82,22 +90,57 @@ function markdownUrlTransform(value: string, key: string, node: unknown): string
   return defaultUrlTransform(value);
 }
 
+type InlineAutoLinkMatch =
+  | {
+      type: "path";
+      kind: InlinePathLinkKind;
+      path: string;
+      start: number;
+      end: number;
+    }
+  | {
+      type: "web";
+      text: string;
+      url: string;
+      start: number;
+      end: number;
+    };
+
 function linkifyTextNode(value: string): MarkdownAstNode[] {
-  const matches = findInlinePathLinks(value);
+  const matches: InlineAutoLinkMatch[] = [
+    ...findInlinePathLinks(value).map((match) => ({
+      type: "path" as const,
+      ...match,
+    })),
+    ...findInlineWebLinks(value).map((match) => ({
+      type: "web" as const,
+      ...match,
+    })),
+  ].sort((a, b) => a.start - b.start || (a.type === "path" ? -1 : 1));
   if (matches.length === 0) return [{ type: "text", value }];
 
   const nodes: MarkdownAstNode[] = [];
   let offset = 0;
   for (const match of matches) {
+    if (match.start < offset) continue;
     if (match.start > offset) {
       nodes.push({ type: "text", value: value.slice(offset, match.start) });
     }
-    nodes.push({
-      type: "link",
-      url: encodeInlinePathHref(match.kind, match.path),
-      title: null,
-      children: [{ type: "text", value: match.path }],
-    });
+    if (match.type === "path") {
+      nodes.push({
+        type: "link",
+        url: encodeInlinePathHref(match.kind, match.path),
+        title: null,
+        children: [{ type: "text", value: match.path }],
+      });
+    } else {
+      nodes.push({
+        type: "link",
+        url: match.url,
+        title: null,
+        children: [{ type: "text", value: match.text }],
+      });
+    }
     offset = match.end;
   }
   if (offset < value.length) nodes.push({ type: "text", value: value.slice(offset) });
@@ -144,8 +187,22 @@ function InlinePathAction({
   const { openImagePreview } = useImagePreview();
 
   if (!decoded) {
+    const isExternalWebLink = /^https?:\/\//i.test(href);
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-slot={isExternalWebLink ? "inline-web-link" : undefined}
+        title="移动端点按打开；桌面端按 Cmd/Ctrl 点击打开"
+        className={isExternalWebLink ? "inline-flex items-baseline gap-1" : undefined}
+        onClick={(event) => {
+          if (!shouldOpenExternalLink(event)) event.preventDefault();
+        }}
+      >
+        {isExternalWebLink && (
+          <ExternalLink className="inline size-3 align-[-0.125em]" aria-hidden="true" />
+        )}
         {children}
       </a>
     );
@@ -175,6 +232,17 @@ function InlinePathAction({
       {children}
     </button>
   );
+}
+
+function isCoarsePointer(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(pointer: coarse), (hover: none)").matches;
+}
+
+function shouldOpenExternalLink(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
+  if (!/^https?:\/\//i.test(event.currentTarget.href)) return true;
+  if (event.metaKey || event.ctrlKey) return true;
+  return isCoarsePointer();
 }
 
 // 代码块: 与表格同策略, 外包 not-prose + overflow-x-auto 容器承担滚动

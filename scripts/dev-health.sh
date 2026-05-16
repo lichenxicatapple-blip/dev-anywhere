@@ -108,6 +108,10 @@ else
   DEFAULT_PROXY_LOG_DIR="$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs"
 fi
 PROXY_LOG_DIR="${PROXY_LOG_DIR:-$DEFAULT_PROXY_LOG_DIR}"
+WEB_SCHEME="http"
+if [[ -n "${DEV_ANYWHERE_WEB_HTTPS_CERT:-}" || -n "${DEV_ANYWHERE_WEB_HTTPS_KEY:-}" ]]; then
+  WEB_SCHEME="https"
+fi
 
 EXIT_CODE=0
 RELAY_PIDS=""
@@ -277,7 +281,7 @@ scan_log "proxy service" "$PROXY_LOG_DIR/service.log" "$SERVICE_PID"
 scan_log "proxy terminal" "$PROXY_LOG_DIR/terminal.log" "$TERMINAL_PIDS"
 
 section "Manual Smoke"
-echo "Open: http://localhost:$WEB_PORT"
+echo "Open: $WEB_SCHEME://localhost:$WEB_PORT"
 echo "Create a real hosted terminal from Web:"
 echo "  1. New session -> select Terminal mode -> Agent CLI Claude Code or Codex"
 echo "  2. Send a short message; verify per-key input, Shift+Enter, Ctrl+C menu, session terminate"

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
@@ -13,6 +14,19 @@ function normalizeRelayTarget(target: string | undefined): { http: string; ws: s
 }
 
 const relayTarget = normalizeRelayTarget(process.env.DEV_ANYWHERE_WEB_RELAY_TARGET);
+
+function loadHttpsConfig() {
+  const keyPath = process.env.DEV_ANYWHERE_WEB_HTTPS_KEY;
+  const certPath = process.env.DEV_ANYWHERE_WEB_HTTPS_CERT;
+  if (!keyPath && !certPath) return undefined;
+  if (!keyPath || !certPath) {
+    throw new Error("DEV_ANYWHERE_WEB_HTTPS_KEY and DEV_ANYWHERE_WEB_HTTPS_CERT must be set together");
+  }
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  };
+}
 
 export default defineConfig({
   plugins: [
@@ -78,6 +92,7 @@ export default defineConfig({
     },
   },
   server: {
+    https: loadHttpsConfig(),
     port: 5173,
     proxy: {
       "/client": {

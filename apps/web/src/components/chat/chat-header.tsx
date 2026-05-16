@@ -209,7 +209,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
       >
         <ChatSessionTitle title={title} isPtyTitle={isLivePtyTitle} />
       </span>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -291,28 +291,28 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
             </>
           ) : null}
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
-          <div className="px-2 pb-1.5" data-slot="chat-menu-font-control">
+          <div className="px-2 pb-1" data-slot="chat-menu-font-control">
             <div
-              className="flex min-h-12 items-center gap-2 rounded-sm py-1"
+              className="flex min-h-10 items-center gap-2.5"
               data-slot="chat-menu-font-row"
             >
               <ChatMenuIcon>
                 <Type aria-hidden="true" />
               </ChatMenuIcon>
               <span
-                className="min-w-0 flex-1 text-sm text-foreground"
+                className="min-w-0 flex-1 whitespace-nowrap text-sm text-foreground"
                 data-slot="chat-menu-font-label"
               >
                 {isPty ? "终端字号" : "聊天字号"}
               </span>
               <div
-                className="ml-auto inline-flex h-11 items-center rounded-md border border-border bg-muted/35"
+                className="inline-flex shrink-0 items-center gap-1"
                 data-slot="chat-menu-font-stepper"
               >
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-8 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize <= minFontSize}
                   aria-label="字号变小"
                   data-slot="chat-menu-font-smaller"
@@ -324,7 +324,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                   <Minus aria-hidden="true" />
                 </Button>
                 <span
-                  className="flex h-11 min-w-12 items-center justify-center rounded-sm px-2 text-sm tabular-nums text-foreground"
+                  className="flex h-8 min-w-10 items-center justify-center text-sm tabular-nums text-foreground"
                   data-slot="chat-menu-font-size"
                 >
                   {fontSize}px
@@ -332,7 +332,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-8 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize >= MAX_CHAT_FONT_SIZE}
                   aria-label="字号变大"
                   data-slot="chat-menu-font-larger"

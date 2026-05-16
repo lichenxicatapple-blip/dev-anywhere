@@ -91,9 +91,9 @@ const JSON_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
     SessionState.TERMINATED,
   ],
   [SessionState.WAITING_APPROVAL]: [
-    // 粒度丢失：审批解除后 claude 继续跑，proxy 观察不到中间的 WORKING 信号，
-    // 直到 result event 才感知 → onTurnResult 一次性从 WAITING_APPROVAL 跳到 IDLE。
-    // 因此不列 WAITING_APPROVAL → WORKING 这条边。
+    // 审批解除后 worker 已把 control_response 写回 CLI，agent 会继续执行工具/生成。
+    // 即使 stream-json 后续只在 result event 才给出最终内容，UI 也必须立即退出等待审批态。
+    SessionState.WORKING,
     SessionState.IDLE,
     // 审批死锁：control_response 写 worker stdin 失败 → onChannelBroken。
     // 这是 ERROR 态最明确的落地场景，让 UI 能区分 "正在等用户决定" 和 "审批通道坏了"。

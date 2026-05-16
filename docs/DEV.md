@@ -31,6 +31,97 @@ Used only by the test suites; setting them in normal usage is a no-op.
 | `TEST_SCOPE`   | `vitest.config.ts` (multiple)              | `unit` runs only `*.test.ts`; `integration` runs only `__tests__/integration/**`. Driven by `pnpm test:unit` / `pnpm test:integration`. |
 | `WEB_BASE_URL` | `apps/web/playwright.config.ts`, e2e tests | Override the URL Playwright opens (default `http://localhost:5173`).                                                                    |
 
+## Real-device HTTPS dev
+
+Use this when a bug only reproduces on a physical phone and depends on browser secure-context APIs, such as `navigator.clipboard.writeText`. LAN HTTP (`http://192.168.x.x:5173`) is fast but not a secure context. Public tunnels are HTTPS but add too much latency for touch/scroll debugging. A local trusted CA keeps traffic on the LAN and still gives the browser a trusted HTTPS origin.
+
+1. Pick the LAN IP the phone can reach:
+
+```bash
+LAN_IP="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"
+echo "$LAN_IP"
+```
+
+2. Generate a local CA and a server certificate for that IP:
+
+```bash
+CERT_DIR="$HOME/.dev-anywhere/certs"
+mkdir -p "$CERT_DIR"
+
+openssl genrsa -out "$CERT_DIR/dev-anywhere-local-ca.key" 2048
+openssl req -x509 -new -nodes \
+  -key "$CERT_DIR/dev-anywhere-local-ca.key" \
+  -sha256 -days 825 \
+  -subj "/CN=DEV Anywhere Local CA" \
+  -out "$CERT_DIR/dev-anywhere-local-ca.crt"
+
+cat >"$CERT_DIR/dev-anywhere-$LAN_IP.ext" <<EOF
+subjectAltName = IP:$LAN_IP,IP:127.0.0.1,DNS:localhost
+extendedKeyUsage = serverAuth
+keyUsage = digitalSignature,keyEncipherment
+EOF
+
+openssl genrsa -out "$CERT_DIR/dev-anywhere-$LAN_IP.key" 2048
+openssl req -new \
+  -key "$CERT_DIR/dev-anywhere-$LAN_IP.key" \
+  -subj "/CN=$LAN_IP" \
+  -out "$CERT_DIR/dev-anywhere-$LAN_IP.csr"
+openssl x509 -req \
+  -in "$CERT_DIR/dev-anywhere-$LAN_IP.csr" \
+  -CA "$CERT_DIR/dev-anywhere-local-ca.crt" \
+  -CAkey "$CERT_DIR/dev-anywhere-local-ca.key" \
+  -CAcreateserial \
+  -out "$CERT_DIR/dev-anywhere-$LAN_IP.crt" \
+  -days 825 -sha256 \
+  -extfile "$CERT_DIR/dev-anywhere-$LAN_IP.ext"
+```
+
+3. Serve the CA file so the phone can install it:
+
+```bash
+python3 -m http.server 8765 --bind 0.0.0.0 --directory "$HOME/.dev-anywhere/certs"
+```
+
+Open this on the phone and install the CA certificate:
+
+```text
+http://<LAN_IP>:8765/dev-anywhere-local-ca.crt
+```
+
+On Android this is a user-installed CA and the system may show a standard network-monitoring warning. Remove `DEV Anywhere Local CA` from the phone's credential settings after testing if it is no longer needed.
+
+4. Start the local stack with HTTPS enabled:
+
+```bash
+CERT_DIR="$HOME/.dev-anywhere/certs"
+DEV_ANYWHERE_WEB_HTTPS_CERT="$CERT_DIR/dev-anywhere-$LAN_IP.crt" \
+DEV_ANYWHERE_WEB_HTTPS_KEY="$CERT_DIR/dev-anywhere-$LAN_IP.key" \
+pnpm dev:restart -- --profile local --relay local --relay-port 3100 --web-port 5173
+```
+
+5. Open the web UI on the phone:
+
+```text
+https://<LAN_IP>:5173
+```
+
+For a specific session, append the hash route as usual:
+
+```text
+https://<LAN_IP>:5173/#/chat/<session-id>?mode=pty
+```
+
+If Clipboard API still fails, verify from the phone browser console:
+
+```js
+window.isSecureContext;
+Boolean(navigator.clipboard?.writeText);
+```
+
+Both should be `true` / `true`. Clipboard writes still require a user gesture; test by tapping the app's copy button, not by running `writeText` from an arbitrary async callback.
+
+To return to normal HTTP dev, restart without the two `DEV_ANYWHERE_WEB_HTTPS_*` variables.
+
 ## E2E chaos toggles
 
 The web e2e tests have a "real local chain" mode that brings up a full proxy + relay + web stack and injects deliberate failures. The toggles are env-only and gated by per-suite enable flags.

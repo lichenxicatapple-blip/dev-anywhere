@@ -760,6 +760,41 @@ describe("attachPtyScrollController", () => {
     expect(setNewFramesWhileAway).not.toHaveBeenCalledWith(true);
   });
 
+  it("does not expose native vertical scroll range below the cursor-aware bottom", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 40,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1080, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 168: "live prompt" });
+    terminal.rows = 54;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 209;
+    terminal.buffer.active.cursorY = 13;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(container.scrollTop).toBe(3100);
+    expect(spacer.style.overflow).toBe("hidden");
+    expect(container.scrollHeight - container.clientHeight).toBe(3100);
+  });
+
   it("prevents touchmove from starting native overscroll at the cursor-aware bottom", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
@@ -776,6 +811,7 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.length = 417;
     terminal.buffer.active.cursorY = 27;
     const onUserVerticalScrollIntentChange = vi.fn();
+    const onTouchBoundaryPrevent = vi.fn();
 
     attachPtyScrollController({
       container,
@@ -787,6 +823,7 @@ describe("attachPtyScrollController", () => {
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
+      onTouchBoundaryPrevent,
     });
     expect(container.scrollTop).toBeCloseTo(7593);
 
@@ -796,6 +833,7 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(move);
 
     expect(move.defaultPrevented).toBe(true);
+    expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
 
     container.dispatchEvent(touchEvent("touchend", 280));
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
@@ -1154,7 +1192,7 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 3000);
     controller.relayout();
 
-    expect(spacer.style.height).toBe("3000px");
+    expect(spacer.style.height).toBe("2800px");
     expect(host.style.height).toBe("600px");
     // scrollTop 不再是 scrollHeight-clientHeight (=2600), 而是 maxYdisp*cellH=2400, 把光标
     // 行(buffer 第 80 行, cursorY=0)放到视窗顶部; 否则 host 上半段被剪到视窗外, 光标看不见。
@@ -1185,7 +1223,7 @@ describe("attachPtyScrollController", () => {
     defineSize(screen, { clientHeight: 600, clientWidth: 800 });
     controller.relayout();
 
-    expect(spacer.style.height).toBe("3000px");
+    expect(spacer.style.height).toBe("2800px");
     expect(container.scrollTop).toBe(210);
     expect(host.style.top).toBe("210px");
   });

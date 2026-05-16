@@ -10,6 +10,7 @@ This guide covers the hosted path: a VPS runs the relay and web client, while ea
 - SSH access to the VPS with a user that can run `sudo`.
 - Outbound HTTPS access from the VPS so it can install packages, request Let's Encrypt certificates, and pull Docker images.
 - Docker Compose v2 on the VPS, or permission for the installer to install Docker.
+- nginx on the VPS, or permission for the installer to install and start nginx.
 - Node.js 20+ on each developer machine.
 - Claude Code or Codex installed locally on each developer machine.
 
@@ -41,7 +42,7 @@ sudo ufw enable
 ssh ubuntu@dev-anywhere.example.com 'sudo -v'
 ```
 
-The installer can install Docker and certbot on apt/yum based distributions. If you prefer to install them yourself, make sure `docker compose version` and `certbot --version` work before deployment.
+The installer can install Docker, nginx, and certbot on apt/yum based distributions. If you prefer to install them yourself, make sure `docker compose version`, `nginx -v`, and `certbot --version` work before deployment.
 
 The default image registry is the public Aliyun ACR mirror used by this project. If you want GHCR instead, pass `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip` when running the installer.
 
@@ -59,10 +60,17 @@ Or run directly on the VPS:
 sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
 ```
 
-The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
+The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/etc/nginx/conf.d/dev-anywhere.conf`, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
 
 - `dev-anywhere-relay`
-- `dev-anywhere-nginx`
+- `dev-anywhere-web`
+
+The Docker containers bind only to loopback ports on the VPS:
+
+- `127.0.0.1:3100` → relay
+- `127.0.0.1:8080` → web
+
+Host nginx owns public `80/443` and routes only this domain to those loopback ports. This keeps the VPS ready for more services: add another nginx server block for the next domain or path instead of letting another container bind `80/443`.
 
 The final output includes:
 
@@ -151,11 +159,19 @@ Upgrade to a new published image tag:
 sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
 ```
 
+If another local service already uses the default loopback ports, override them:
+
+```bash
+sudo env DEV_ANYWHERE_RELAY_PORT=13100 DEV_ANYWHERE_WEB_PORT=18080 IMAGE_TAG=latest \
+  ./scripts/install-relay.sh dev-anywhere.example.com
+```
+
 Check service health:
 
 ```bash
 curl -fsS https://dev-anywhere.example.com/health
 ssh ubuntu@dev-anywhere.example.com 'cd /opt/dev-anywhere && sudo docker compose ps'
+ssh ubuntu@dev-anywhere.example.com 'sudo nginx -t'
 ```
 
 Rotate tokens by editing `/opt/dev-anywhere/.env` and restarting:

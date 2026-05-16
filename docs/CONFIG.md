@@ -102,6 +102,8 @@ The relay reads only environment variables — it has no config file.
 | Variable                        | Read by                    | Default                 | Purpose                                                                                                                    |
 | ------------------------------- | -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `DEV_ANYWHERE_WEB_RELAY_TARGET` | `apps/web` Vite dev server | `http://localhost:3100` | Which relay the dev server proxies `/client` and `/fonts` to. Production builds rely on same-origin nginx routing instead. |
+| `DEV_ANYWHERE_WEB_HTTPS_CERT`   | `apps/web` Vite dev server | unset                   | Optional TLS certificate path for local HTTPS dev. Must be set together with `DEV_ANYWHERE_WEB_HTTPS_KEY`.                 |
+| `DEV_ANYWHERE_WEB_HTTPS_KEY`    | `apps/web` Vite dev server | unset                   | Optional TLS private key path for local HTTPS dev. Used for real-device testing of secure-context browser APIs.            |
 
 ## CLI flags
 

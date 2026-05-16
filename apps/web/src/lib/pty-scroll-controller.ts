@@ -39,6 +39,7 @@ interface PtyScrollControllerOptions {
   initialUserHasVerticalScrollIntent?: boolean;
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
+  onTouchBoundaryPrevent?: () => void;
   atBottomThreshold?: number;
 }
 
@@ -87,6 +88,7 @@ export function attachPtyScrollController(
     initialUserHasVerticalScrollIntent = false,
     onUserVerticalScrollIntentChange,
     onTouchReviewStart,
+    onTouchBoundaryPrevent,
     atBottomThreshold = 8,
   } = options;
 
@@ -132,6 +134,7 @@ export function attachPtyScrollController(
   // touch native scroll 可能先把 container 推过 cursor-aware bottom, 再被我们 clamp 回来。
   // touchend 释放回看意图时不能只看最终 scrollTop, 还要知道这次手势是否确实向下到过底部。
   let touchGestureMaxScrollTop: number | null = null;
+  let lastTouchClientX: number | null = null;
   let lastTouchClientY: number | null = null;
   let touchTriedBeyondCursorAwareBottom = false;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
@@ -524,6 +527,7 @@ export function attachPtyScrollController(
         rows: term.rows,
         cols: term.cols,
         viewportY: buffer.viewportY,
+        cursorY: buffer.cursorY,
         cellH,
         cellW,
         visibleContentHeight,
@@ -531,6 +535,7 @@ export function attachPtyScrollController(
       canvasLastY,
     );
     if (!layout) return;
+    setStyle(spacer, "overflow", "hidden");
     setStyle(spacer, "height", `${layout.spacerHeight}px`);
     setStyle(spacer, "width", `${layout.spacerWidth}px`);
     setStyle(host, "width", `${layout.hostWidth}px`);
@@ -619,9 +624,12 @@ export function attachPtyScrollController(
 
   const preventTouchMovePastCursorAwareBottom = (
     event: TouchEvent,
+    currentX: number | null,
     currentY: number | null,
   ): void => {
+    const previousX = lastTouchClientX;
     const previousY = lastTouchClientY;
+    lastTouchClientX = currentX;
     lastTouchClientY = currentY;
     // On touch screens, finger-up means content scrollTop increases. At cursor-aware
     // bottom this native scroll has no useful terminal state to expose; letting it
@@ -629,6 +637,8 @@ export function attachPtyScrollController(
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const anchor = getCurrentAnchor();
     const decision = decideTouchMoveBoundary({
+      previousClientX: previousX,
+      currentClientX: currentX,
       previousClientY: previousY,
       currentClientY: currentY,
       scrollTop: container.scrollTop,
@@ -649,6 +659,7 @@ export function attachPtyScrollController(
     }
 
     touchTriedBeyondCursorAwareBottom = true;
+    onTouchBoundaryPrevent?.();
     touchGestureMaxScrollTop = Math.max(
       touchGestureMaxScrollTop ?? container.scrollTop,
       decision.scrollTop ?? anchor.bottomScrollTop,
@@ -946,8 +957,11 @@ export function attachPtyScrollController(
   };
 
   const onTouchStart = (event: TouchEvent): void => {
-    const startY = event.touches?.[0]?.clientY ?? null;
+    const touch = event.touches?.[0] ?? null;
+    const startX = touch?.clientX ?? null;
+    const startY = touch?.clientY ?? null;
     touchGestureMaxScrollTop = container.scrollTop;
+    lastTouchClientX = startX;
     lastTouchClientY = startY;
     touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
@@ -959,9 +973,11 @@ export function attachPtyScrollController(
   };
 
   const onTouchMove = (event: TouchEvent): void => {
-    const currentY = event.touches?.[0]?.clientY ?? null;
+    const touch = event.touches?.[0] ?? null;
+    const currentX = touch?.clientX ?? null;
+    const currentY = touch?.clientY ?? null;
     trace("touchmove");
-    preventTouchMovePastCursorAwareBottom(event, currentY);
+    preventTouchMovePastCursorAwareBottom(event, currentX, currentY);
     const result = dispatchVerticalIntent({
       type: "touch-move",
       clientY: currentY,
@@ -984,6 +1000,7 @@ export function attachPtyScrollController(
               : container.scrollTop,
           );
     touchGestureMaxScrollTop = null;
+    lastTouchClientX = null;
     lastTouchClientY = null;
     touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
