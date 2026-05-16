@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.3.2] - 2026-05-16
+
+### 可观测性
+
+- PTY 跟随光标滚动诊断 trace 增补 raw input follow 的 scheduled/fire 事件、same-row skip 记录、`cursorDeltaRows` 与 `scrollDeltaToAnchor` 摘要和列，方便定位“输入后是否真的触发跟随、光标是否变化、离目标锚点差多少”。
+- 发布脚本新增紧急发布模式 `--emergency` / `RELEASE_EMERGENCY=1`，保留 `release:check` 构建与打包门禁，但跳过耗时的 `release:smoke`，用于快速上线诊断类补丁。
+
 ## [0.3.1] - 2026-05-16
 
 ### 修复
