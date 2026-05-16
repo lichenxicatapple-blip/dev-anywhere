@@ -14,6 +14,7 @@ export interface SessionInfo {
   createdAt: number;
   updatedAt: number;
   name?: string;
+  nameLocked?: boolean;
   cwd: string;
   // Claude CLI 自己生成的 session ID，和上面 id 字段无关
   // 用途：定位 ~/.claude/projects/<encoded-cwd>/<claudeSessionId>.jsonl 历史文件 / 支持 --resume
@@ -30,6 +31,8 @@ interface SessionManagerOptions {
 interface SessionRemoveContext {
   preserveProviderHooks?: boolean;
 }
+
+type PersistedSessionRecord = Omit<SessionInfo, "state">;
 
 // 两个观察通道的合法转换表分离：PTY 看 OSC 信号、JSON 看 stream-json 事件，各自的状态空间和规则不同。
 // terminated 是终态，不允许任何转出。
@@ -118,6 +121,7 @@ function isProviderId(value: unknown): value is ProviderId {
 
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
+  private pendingPtyReconnectMetadata: Map<string, PersistedSessionRecord> = new Map();
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
   private readonly reaperIntervalMs: number;
@@ -140,19 +144,32 @@ export class SessionManager {
     ptyOwner?: "local-terminal" | "proxy-hosted",
   ): SessionInfo {
     const now = Date.now();
+    const pendingPtyMetadata =
+      mode === "pty" && id !== undefined ? this.pendingPtyReconnectMetadata.get(id) : undefined;
+    const resolvedName =
+      pendingPtyMetadata?.nameLocked && pendingPtyMetadata.name !== undefined
+        ? pendingPtyMetadata.name
+        : name;
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
       provider,
       ...(mode === "pty" && ptyOwner !== undefined ? { ptyOwner } : {}),
       state: SessionState.IDLE,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: pendingPtyMetadata?.createdAt ?? now,
+      updatedAt: pendingPtyMetadata?.updatedAt ?? now,
       cwd,
       pid,
-      ...(name !== undefined ? { name } : {}),
+      ...(resolvedName !== undefined ? { name: resolvedName } : {}),
+      ...(pendingPtyMetadata?.nameLocked !== undefined
+        ? { nameLocked: pendingPtyMetadata.nameLocked }
+        : {}),
+      ...(pendingPtyMetadata?.claudeSessionId !== undefined
+        ? { claudeSessionId: pendingPtyMetadata.claudeSessionId }
+        : {}),
     };
     this.sessions.set(info.id, info);
+    this.pendingPtyReconnectMetadata.delete(info.id);
     this.save();
     serviceLogger.info({ sessionId: info.id, mode, provider, ptyOwner, name }, "Session created");
     return info;
@@ -263,6 +280,22 @@ export class SessionManager {
     this.save();
   }
 
+  renameSession(id: string, name: string): { success: boolean; name?: string; error?: string } {
+    const session = this.sessions.get(id);
+    if (!session) {
+      return { success: false, error: "Session not found" };
+    }
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return { success: false, error: "Session title cannot be empty" };
+    }
+    session.name = trimmed;
+    session.nameLocked = true;
+    this.save();
+    serviceLogger.info({ sessionId: id }, "Session renamed");
+    return { success: true, name: trimmed };
+  }
+
   startReaper(intervalMs: number = this.reaperIntervalMs): void {
     this.stopReaper();
     this.reaperTimer = setInterval(() => this.reap(), intervalMs);
@@ -307,19 +340,30 @@ export class SessionManager {
 
   private save(): void {
     // state 是对 claude 的观察值，进程死后无意义，不落盘。磁盘上只留 identity（id/mode/cwd/pid/...）。
-    const persisted = Array.from(this.sessions.values()).map((s) => ({
+    const persisted = [
+      ...Array.from(this.sessions.values()).map((s) => this.toPersistedRecord(s)),
+      ...Array.from(this.pendingPtyReconnectMetadata.values()).map((s) =>
+        this.toPersistedRecord(s),
+      ),
+    ];
+    const data = JSON.stringify(persisted, null, 2);
+    atomicWriteFileSync(this.persistPath, data, { ensureDir: true });
+  }
+
+  private toPersistedRecord(s: PersistedSessionRecord | SessionInfo): PersistedSessionRecord {
+    return {
       id: s.id,
       mode: s.mode,
       provider: s.provider,
+      ...(s.mode === "pty" && s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       cwd: s.cwd,
       pid: s.pid,
       ...(s.name !== undefined ? { name: s.name } : {}),
+      ...(s.nameLocked !== undefined ? { nameLocked: s.nameLocked } : {}),
       ...(s.claudeSessionId !== undefined ? { claudeSessionId: s.claudeSessionId } : {}),
-    }));
-    const data = JSON.stringify(persisted, null, 2);
-    atomicWriteFileSync(this.persistPath, data, { ensureDir: true });
+    };
   }
 
   private load(): void {
@@ -372,6 +416,7 @@ export class SessionManager {
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
+          this.pendingPtyReconnectMetadata.set(info.id, this.toPersistedRecord(info));
           serviceLogger.info(
             { sessionId: info.id, pid: info.pid },
             "PTY session skipped on load, terminal alive",

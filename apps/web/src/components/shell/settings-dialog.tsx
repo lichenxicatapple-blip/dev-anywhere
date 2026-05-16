@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowLeft, ChevronRight, Monitor, Server } from "lucide-react";
+import { ArrowLeft, AudioLines, ChevronRight, Monitor, Server } from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ type RelayHealthState =
   | { kind: "ready"; version: string; uptime: number }
   | { kind: "error"; message: string };
 
-type SettingsView = "menu" | "version";
+type SettingsView = "menu" | "version" | "voice";
 
 interface RelayHealthResponse {
   status?: string;
@@ -122,7 +122,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         showCloseButton={view === "menu"}
       >
         <DialogHeader>
-          {view === "version" ? (
+          {view !== "menu" ? (
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -135,8 +135,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <ArrowLeft className="size-4" aria-hidden="true" />
               </Button>
               <div className="space-y-2">
-                <DialogTitle>版本</DialogTitle>
-                <DialogDescription>当前 Web 与 Relay 的版本信息。</DialogDescription>
+                <DialogTitle>{view === "version" ? "版本" : "语音识别及合成"}</DialogTitle>
+                <DialogDescription className={view === "voice" ? "sr-only" : undefined}>
+                  {view === "version" ? "当前 Web 与 Relay 的版本信息" : "语音识别及合成"}
+                </DialogDescription>
               </div>
             </div>
           ) : (
@@ -163,8 +165,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               muted={relayHealth.kind === "error"}
             />
           </div>
+        ) : view === "voice" ? (
+          <div className="min-h-24" aria-hidden="true" />
         ) : (
           <div className="space-y-2">
+            <SettingsMenuItem
+              icon={<AudioLines className="size-4" aria-hidden="true" />}
+              label="语音识别及合成"
+              detail="语音输入与朗读设置"
+              onClick={() => setView("voice")}
+            />
             <SettingsMenuItem
               icon={<Server className="size-4" aria-hidden="true" />}
               label="版本"

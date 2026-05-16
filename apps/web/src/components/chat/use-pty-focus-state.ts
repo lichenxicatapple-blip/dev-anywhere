@@ -16,7 +16,7 @@ interface UsePtyFocusStateOptions {
 interface PtyFocusState {
   ptyInputFocused: boolean;
   // 进入抑制窗口：blur 当前焦点元素并屏蔽该时间窗内的所有 focus 重入。
-  suppressPtyFocus: () => void;
+  suppressPtyFocus: (options?: { blur?: boolean }) => void;
   // 直接挂到容器上的 onFocusCapture / onBlurCapture
   handleFocusCapture: (event: FocusEvent<HTMLDivElement>) => void;
   handleBlurCapture: () => void;
@@ -39,11 +39,16 @@ export function usePtyFocusState(options: UsePtyFocusStateOptions): PtyFocusStat
     setPtyInputFocused(Boolean(host && active instanceof HTMLElement && host.contains(active)));
   }, [xtermHostRef]);
 
-  const suppressPtyFocus = useCallback((): void => {
-    suppressPtyFocusUntilRef.current = performance.now() + FOCUS_SUPPRESSION_WINDOW_MS;
-    blurFocusedPtyInput();
-    setPtyInputFocused(false);
-  }, [blurFocusedPtyInput]);
+  const suppressPtyFocus = useCallback(
+    (options: { blur?: boolean } = {}): void => {
+      suppressPtyFocusUntilRef.current = performance.now() + FOCUS_SUPPRESSION_WINDOW_MS;
+      if (options.blur ?? true) {
+        blurFocusedPtyInput();
+        setPtyInputFocused(false);
+      }
+    },
+    [blurFocusedPtyInput],
+  );
 
   const handleFocusCapture = useCallback(
     (event: FocusEvent<HTMLDivElement>): void => {

@@ -24,6 +24,10 @@ const agentStatusPhaseValues = [
 export const SessionInfoSchema = z.object({
   sessionId: IdSchema,
   name: z.string().optional(),
+  // cwd 只用于展示完整路径/tooltip，不作为前端路由或权限判断来源。
+  cwd: z.string().optional(),
+  // true 表示 name 是用户显式命名，PTY UI 不再让 OSC terminal_title 覆盖它。
+  nameLocked: z.boolean().optional(),
   state: z.enum(sessionStateValues),
   mode: z.enum(sessionModeValues).optional(),
   provider: z.enum(providerValues),

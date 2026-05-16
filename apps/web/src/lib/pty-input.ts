@@ -13,6 +13,7 @@ interface RawInputTerminal {
 interface XtermRawInputOptions {
   onRawInput?: (data: string) => void;
   plainEnterBehavior?: "submit" | "linefeed";
+  isInputEnabled?: () => boolean;
 }
 
 const NATIVE_PUNCTUATION_TIMEOUT_MS = 16;
@@ -64,6 +65,7 @@ export function attachXtermRawInput(
   let nativeEchoSuppression: NativeEchoSuppression | undefined;
 
   const sendRawInput = (data: string): void => {
+    if (options.isInputEnabled && !options.isInputEnabled()) return;
     sendRemoteInputRaw(sessionId, data);
     options.onRawInput?.(data);
   };

@@ -77,6 +77,36 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("40px");
   });
 
+  it("positions the host before changing xterm viewport at a row boundary", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.buffer.active.viewportY = 10;
+    host.style.top = "200px";
+    terminal.scrollToLine.mockClear();
+    let hostTopDuringScrollToLine = "";
+    terminal.scrollToLine.mockImplementation((ydisp: number) => {
+      hostTopDuringScrollToLine = host.style.top;
+      terminal.buffer.active.viewportY = ydisp;
+    });
+
+    container.scrollTop = 199;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
+    expect(hostTopDuringScrollToLine).toBe("180px");
+    expect(host.style.top).toBe("180px");
+  });
+
   it("syncs native touch scroll to the matching terminal row immediately", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(

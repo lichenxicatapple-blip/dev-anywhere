@@ -248,6 +248,22 @@ const relayControlDefinitions = [
 
   // 远程终止 JSON 会话，client -> proxy
   control("session_terminate", { sessionId: IdSchema }, "client_to_proxy"),
+  control(
+    "session_rename",
+    { ...RequestIdShape, sessionId: IdSchema, name: z.string() },
+    "client_to_proxy",
+  ),
+  control(
+    "session_rename_response",
+    {
+      ...RequestIdShape,
+      sessionId: IdSchema,
+      success: z.boolean(),
+      name: z.string().optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
 
   // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
   control("session_worker_abort", { sessionId: IdSchema }, "client_to_proxy"),
@@ -529,6 +545,9 @@ const relayControlDefinitions = [
         mode: z.enum(sessionModeValues),
         provider: z.enum(providerValues),
         ptyOwner: z.enum(ptyOwnerValues).optional(),
+        cwd: z.string().optional(),
+        name: z.string().optional(),
+        nameLocked: z.boolean().optional(),
         state: z.enum(sessionStateValues),
       }),
     ),

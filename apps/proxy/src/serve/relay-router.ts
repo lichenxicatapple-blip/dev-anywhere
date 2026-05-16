@@ -1,6 +1,7 @@
 import type { Socket } from "node:net";
 import {
   MessageEnvelopeSchema,
+  ControlErrorCode,
   RelayControlSchema,
   SessionState,
   serializeControl,
@@ -199,6 +200,9 @@ export class RelayRouter {
       case "session_terminate":
         this.onSessionTerminate(msg);
         return;
+      case "session_rename":
+        this.onSessionRename(msg);
+        return;
       case "session_worker_abort":
         this.onSessionWorkerAbort(msg);
         return;
@@ -254,6 +258,37 @@ export class RelayRouter {
     serviceLogger.info(
       { sessionId: sid, success: result.success, action: result.action },
       "Session termination handled via relay",
+    );
+  }
+
+  private onSessionRename(msg: ControlMessage<"session_rename">): void {
+    const sid = msg.sessionId;
+    const requestId = msg.requestId;
+    const result = this.deps.sessionManager.renameSession(sid, msg.name);
+    if (result.success) {
+      this.deps.broadcastSessionList();
+      this.deps.relaySend(
+        serializeControl({
+          type: "session_rename_response",
+          requestId,
+          sessionId: sid,
+          success: true,
+          name: result.name,
+        }),
+      );
+      return;
+    }
+    const sessionExists = Boolean(this.deps.sessionManager.getSession(sid));
+    this.deps.relaySend(
+      serializeControl({
+        type: "session_rename_response",
+        requestId,
+        sessionId: sid,
+        success: false,
+        error:
+          result.error ?? (sessionExists ? "Session title cannot be empty" : "Session not found"),
+        errorCode: sessionExists ? ControlErrorCode.UNKNOWN : ControlErrorCode.SESSION_NOT_FOUND,
+      }),
     );
   }
 

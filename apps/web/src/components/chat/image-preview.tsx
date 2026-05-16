@@ -39,9 +39,12 @@ type ImagePreviewContextValue = {
 };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
+const NOOP_IMAGE_PREVIEW_CONTEXT: ImagePreviewContextValue = {
+  openImagePreview: () => undefined,
+};
 
 export function useImagePreview(): ImagePreviewContextValue {
-  return useContext(ImagePreviewContext) ?? { openImagePreview: () => undefined };
+  return useContext(ImagePreviewContext) ?? NOOP_IMAGE_PREVIEW_CONTEXT;
 }
 
 export function ImagePreviewProvider({

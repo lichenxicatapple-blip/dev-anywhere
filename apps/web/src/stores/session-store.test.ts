@@ -63,4 +63,30 @@ describe("session-store agent status", () => {
     expect(useSessionStore.getState().ptyStateBySessionId.s1).toBeUndefined();
     expect(useSessionStore.getState().ptyStateBySessionId.s2.state).toBe("working");
   });
+
+  it("marks renamed sessions as user locked without deleting OSC title diagnostics", () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "s1",
+          mode: "pty",
+          provider: "claude",
+          state: "idle",
+          name: "~/project",
+          cwd: "/Users/dev/project",
+        },
+      ],
+      ptyTitles: { s1: "✻ Working" },
+    });
+
+    useSessionStore.getState().renameSession("s1", "Release checklist");
+
+    expect(useSessionStore.getState().sessions[0]).toMatchObject({
+      sessionId: "s1",
+      name: "Release checklist",
+      nameLocked: true,
+      cwd: "/Users/dev/project",
+    });
+    expect(useSessionStore.getState().ptyTitles.s1).toBe("✻ Working");
+  });
 });

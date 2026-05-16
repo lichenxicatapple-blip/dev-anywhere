@@ -82,6 +82,12 @@ type FileUploadRequest = Omit<
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
+type SessionRenameResponse = Extract<RelayControlMessage, { type: "session_rename_response" }>;
+type SessionRenameResult = {
+  sessionId: string;
+  success: boolean;
+  name?: string;
+} & RequestError;
 type RequestError = { error?: string; errorCode?: ControlErrorCodeType };
 
 let requestSeq = 0;
@@ -525,6 +531,37 @@ export class RelayClient {
       "创建超时，请检查开发机连接后重试",
       timeoutMs,
     );
+  }
+
+  renameSession(
+    sessionId: string,
+    name: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<SessionRenameResult> {
+    const requestId = nextRequestId("session-rename");
+    return this.waitForMessage(
+      (msg): msg is SessionRenameResponse =>
+        msg.type === "session_rename_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "session_rename",
+            requestId,
+            sessionId,
+            name,
+          }),
+        ),
+      "重命名超时，请检查开发机连接后重试",
+      timeoutMs,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      success: resp.success,
+      name: resp.name,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
   }
 
   // 发送 MessageEnvelope

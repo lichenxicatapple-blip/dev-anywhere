@@ -17,12 +17,16 @@ describe("SessionListPayloadSchema", () => {
           provider: "claude",
           mode: "pty",
           ptyOwner: "local-terminal",
+          cwd: "/Users/dev/project",
+          nameLocked: true,
         },
         { sessionId: "s2", state: "working", provider: "codex" },
       ],
     });
     expect(result.sessions).toHaveLength(2);
     expect(result.sessions[0].name).toBe("sess1");
+    expect(result.sessions[0].cwd).toBe("/Users/dev/project");
+    expect(result.sessions[0].nameLocked).toBe(true);
     expect(result.sessions[0].provider).toBe("claude");
     expect(result.sessions[0].ptyOwner).toBe("local-terminal");
     expect(result.sessions[1].provider).toBe("codex");

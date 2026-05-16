@@ -45,7 +45,7 @@ interface PtyTerminalControllerOptions {
   attachRawInput: (
     term: PtyControlledTerminal,
     sessionId: string,
-    options?: { onRawInput?: (data: string) => void },
+    options?: { onRawInput?: (data: string) => void; isInputEnabled?: () => boolean },
   ) => Disposable;
   attachTransport?: PtyTransportAttacher;
   // 默认 requestAnimationFrame——首屏挂载完后下一帧 focus，让 xterm helper textarea 有时间附上。
@@ -55,6 +55,8 @@ interface PtyTerminalControllerOptions {
   onFramePending?: () => void;
   onFrameWritten?: () => void;
   onRawInput?: (data: string) => void;
+  isInputEnabled?: () => boolean;
+  canFocus?: () => boolean;
   onReady?: () => void;
   onSubscribeStarted?: () => void;
   onSubscribeDelayed?: () => void;
@@ -85,6 +87,8 @@ export function attachPtyTerminalController(
     onFramePending,
     onFrameWritten,
     onRawInput,
+    isInputEnabled,
+    canFocus = () => true,
     onReady,
     onSubscribeStarted,
     onSubscribeDelayed,
@@ -107,9 +111,14 @@ export function attachPtyTerminalController(
       }
 
       disposeTerminal = result.dispose;
-      disposeRawInput = attachRawInput(result.terminal, sessionId, { onRawInput }).dispose;
+      disposeRawInput = attachRawInput(result.terminal, sessionId, {
+        onRawInput,
+        ...(isInputEnabled ? { isInputEnabled } : {}),
+      }).dispose;
 
-      const focusTerminal = (): void => result.terminal.focus();
+      const focusTerminal = (): void => {
+        if (canFocus()) result.terminal.focus();
+      };
       host.addEventListener("pointerdown", focusTerminal, { passive: true });
       removeFocusHandler = () => host.removeEventListener("pointerdown", focusTerminal);
       onTerminalReady?.(result.terminal);

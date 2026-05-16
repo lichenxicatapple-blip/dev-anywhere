@@ -8,6 +8,7 @@ import { RelayRouter } from "#src/serve/relay-router.js";
 import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
+import type { SessionManager } from "#src/serve/session-manager.js";
 import type { Socket } from "node:net";
 import {
   createRelayConnectionFake,
@@ -32,6 +33,8 @@ function createRouter(options: {
   workerTerminateProcess?: (sessionId: string) => boolean;
   cleanupHookContext?: (sessionId: string) => void;
   hostedStart?: (options: unknown) => number;
+  sessionManager?: SessionManager;
+  broadcastSessionList?: () => void;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -39,19 +42,21 @@ function createRouter(options: {
   }
 
   return new RelayRouter({
-    sessionManager: {
-      getSession: (sessionId: string) =>
-        sessionId === "s1"
-          ? {
-              id: "s1",
-              mode: options.mode,
-              provider: "claude",
-              state: SessionState.IDLE,
-              cwd: "/tmp",
-              pid: 1,
-            }
-          : undefined,
-    } as never,
+    sessionManager:
+      options.sessionManager ??
+      ({
+        getSession: (sessionId: string) =>
+          sessionId === "s1"
+            ? {
+                id: "s1",
+                mode: options.mode,
+                provider: "claude",
+                state: SessionState.IDLE,
+                cwd: "/tmp",
+                pid: 1,
+              }
+            : undefined,
+      } as unknown as SessionManager),
     workerRegistry: createWorkerRegistryFake({
       send: options.workerSend,
       spawn: options.workerSpawn,
@@ -71,7 +76,7 @@ function createRouter(options: {
       resize: vi.fn(() => false),
       terminate: vi.fn(() => false),
     } as never,
-    broadcastSessionList: () => {},
+    broadcastSessionList: options.broadcastSessionList ?? (() => {}),
     broadcastSessionSync: () => {},
     jsonObserver: {
       onTurnStart: options.jsonTurnStart ?? vi.fn(),
@@ -281,6 +286,50 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       cwd: "/tmp",
       permissionMode: "bypassPermissions",
+    });
+  });
+
+  it("renames a session through relay and broadcasts the updated session list", () => {
+    const relay = createRelayConnectionFake();
+    const renameSession = vi.fn(() => ({ success: true, name: "Release checklist" }));
+    const broadcastSessionList = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      relayConnection: relay,
+      relaySend: relay.sendRaw,
+      broadcastSessionList,
+      sessionManager: {
+        getSession: (sessionId: string) =>
+          sessionId === "s1"
+            ? {
+                id: "s1",
+                mode: "json",
+                provider: "claude",
+                state: SessionState.IDLE,
+                cwd: "/tmp",
+                pid: 1,
+              }
+            : undefined,
+        renameSession,
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_rename",
+      requestId: "rename-1",
+      sessionId: "s1",
+      name: "  Release checklist  ",
+    });
+
+    expect(renameSession).toHaveBeenCalledWith("s1", "  Release checklist  ");
+    expect(broadcastSessionList).toHaveBeenCalledTimes(1);
+    const msg = RelayControlSchema.parse(JSON.parse(relay.raw[0]!));
+    expect(msg).toMatchObject({
+      type: "session_rename_response",
+      requestId: "rename-1",
+      sessionId: "s1",
+      success: true,
+      name: "Release checklist",
     });
   });
 

@@ -69,12 +69,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
       mode: "pty" | "json";
       provider: "claude" | "codex";
       lastActive: number;
+      cwd?: string;
+      nameLocked?: boolean;
     };
 
     const defaultSessions: FakeSession[] = [
       {
         sessionId: "claude-pty",
         name: "/home/dev/projects/sample-app/",
+        cwd: "/home/dev/projects/sample-app/",
         state: "idle",
         mode: "pty",
         provider: "claude",
@@ -83,6 +86,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       {
         sessionId: "codex-pty",
         name: "/home/dev/projects/dev-anywhere/",
+        cwd: "/home/dev/projects/dev-anywhere/",
         state: "working",
         mode: "pty",
         provider: "codex",
@@ -92,6 +96,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
         (sessionId, index) => ({
           sessionId,
           name: sessionId,
+          cwd: `/home/dev/projects/${sessionId}`,
           state: "idle" as const,
           mode: "json" as const,
           provider: "claude" as const,
@@ -443,6 +448,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
             sessions.unshift({
               sessionId,
               name: cwd,
+              cwd,
               state: "idle",
               mode,
               provider,
@@ -455,6 +461,35 @@ export async function installFakeRelay(page: Page): Promise<void> {
               sessionId,
               mode,
               provider,
+            });
+            this.emitJson(envelope("session_list", "system", { sessions }));
+            break;
+          }
+          case "session_rename": {
+            const sid = String(msg.sessionId ?? "");
+            const nextName = String(msg.name ?? "").trim();
+            const session = sessions.find((s) => s.sessionId === sid);
+            if (!session || !nextName) {
+              this.emitJson({
+                type: "session_rename_response",
+                requestId: msg.requestId,
+                sessionId: sid,
+                success: false,
+                error: !session ? "Session not found" : "Session title cannot be empty",
+                errorCode: !session ? "SESSION_NOT_FOUND" : "UNKNOWN",
+              });
+              break;
+            }
+            session.name = nextName;
+            session.nameLocked = true;
+            session.lastActive = Date.now();
+            persistSessions();
+            this.emitJson({
+              type: "session_rename_response",
+              requestId: msg.requestId,
+              sessionId: sid,
+              success: true,
+              name: nextName,
             });
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;

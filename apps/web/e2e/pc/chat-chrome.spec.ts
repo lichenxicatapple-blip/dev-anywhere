@@ -135,7 +135,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(menu.getByText("Permission mode")).toHaveCount(0);
     await expect(menu.getByText("切换权限模式")).toHaveCount(0);
     await expect(menu.getByText("快捷键")).toHaveCount(0);
-    await expect(menu.getByText("重命名")).toHaveCount(0);
+    await expect(menu.getByText("会话")).toBeVisible();
+    await expect(menu.getByText("重命名")).toBeVisible();
     await expect(menu.getByText("复制会话")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-terminate-item"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
@@ -148,6 +149,8 @@ test.describe("ChatHeader compact navigation controls", () => {
   test("font controls are aligned without overlap", async ({ page }) => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
 
+    const row = page.locator('[data-slot="chat-menu-font-row"]');
+    const label = page.locator('[data-slot="chat-menu-font-label"]');
     const stepper = page.locator('[data-slot="chat-menu-font-stepper"]');
     const smaller = page.locator('[data-slot="chat-menu-font-smaller"]');
     const value = page.locator('[data-slot="chat-menu-font-size"]');
@@ -156,21 +159,34 @@ test.describe("ChatHeader compact navigation controls", () => {
 
     await expect(stepper).toBeVisible();
 
-    const [stepperBox, smallerBox, valueBox, largerBox, resetBox] = await Promise.all([
-      stepper.boundingBox(),
-      smaller.boundingBox(),
-      value.boundingBox(),
-      larger.boundingBox(),
-      reset.boundingBox(),
-    ]);
+    const [rowBox, labelBox, stepperBox, smallerBox, valueBox, largerBox, resetBox] =
+      await Promise.all([
+        row.boundingBox(),
+        label.boundingBox(),
+        stepper.boundingBox(),
+        smaller.boundingBox(),
+        value.boundingBox(),
+        larger.boundingBox(),
+        reset.boundingBox(),
+      ]);
 
+    expect(rowBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
     expect(stepperBox).not.toBeNull();
     expect(smallerBox).not.toBeNull();
     expect(valueBox).not.toBeNull();
     expect(largerBox).not.toBeNull();
     expect(resetBox).not.toBeNull();
 
-    if (!stepperBox || !smallerBox || !valueBox || !largerBox || !resetBox) {
+    if (
+      !rowBox ||
+      !labelBox ||
+      !stepperBox ||
+      !smallerBox ||
+      !valueBox ||
+      !largerBox ||
+      !resetBox
+    ) {
       return;
     }
 
@@ -180,7 +196,9 @@ test.describe("ChatHeader compact navigation controls", () => {
     expect(
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
     ).toBeLessThanOrEqual(1);
-    expect(Math.abs(stepperBox.x - (resetBox.x + 8))).toBeLessThanOrEqual(2);
+    expect(stepperBox.x).toBeGreaterThan(labelBox.x + labelBox.width);
+    expect(stepperBox.x + stepperBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+    expect(resetBox.y).toBeGreaterThan(rowBox.y + rowBox.height - 1);
   });
 
   test("PTY overflow menu exposes terminal shortcuts", async ({ page }) => {
@@ -199,7 +217,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-b"]')).toHaveCount(0);
-    await expect(menu.getByText("显示")).toBeVisible();
+    await expect(menu.getByText("会话")).toBeVisible();
+    await expect(menu.getByText("显示")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
 
@@ -214,7 +233,6 @@ test.describe("ChatHeader compact navigation controls", () => {
 });
 
 test.describe("ChatHeader screen wake lock", () => {
-
   test("screen wake lock follows the chat page lifecycle", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installWakeLockMock(page);

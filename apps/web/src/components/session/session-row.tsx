@@ -20,6 +20,7 @@ interface SessionRowProps {
   // 由父层每 60s 推进的参考 now，驱动相对时间自刷新；省略时 formatRelativeTime 回退到 Date.now()
   now?: number;
   onClick: () => void;
+  onRename?: () => void;
   onTerminate?: () => void;
 }
 
@@ -70,13 +71,23 @@ function sessionModeLabel(mode: SessionInfo["mode"]): string {
   return "";
 }
 
-export function SessionRow({ session, selected, now, onClick, onTerminate }: SessionRowProps) {
+export function SessionRow({
+  session,
+  selected,
+  now,
+  onClick,
+  onRename,
+  onTerminate,
+}: SessionRowProps) {
   const lastActive = session.lastActive;
-  const rawName = session.name ?? session.sessionId;
+  const rawName = session.cwd ?? session.name ?? session.sessionId;
+  const formattedName = formatSessionName(session.name);
   const displayName =
-    formatSessionName(session.name) === "New Session"
-      ? session.sessionId.slice(0, 8)
-      : formatSessionName(session.name);
+    session.nameLocked && session.name
+      ? session.name
+      : formattedName === "New Session"
+        ? session.sessionId.slice(0, 8)
+        : formattedName;
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
   const lastActiveLabel = lastActive !== undefined ? formatRelativeTime(lastActive, now) : null;
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
@@ -149,7 +160,7 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
           </span>
         )}
       </button>
-      {onTerminate && (
+      {(onRename || onTerminate) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -164,16 +175,29 @@ export function SessionRow({ session, selected, now, onClick, onTerminate }: Ses
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" data-slot="session-row-menu">
-            <DropdownMenuItem
-              variant={isLocalTerminalPty ? undefined : "destructive"}
-              data-slot="session-row-terminate-item"
-              onSelect={(event) => {
-                event.stopPropagation();
-                onTerminate();
-              }}
-            >
-              {terminateLabel}
-            </DropdownMenuItem>
+            {onRename && (
+              <DropdownMenuItem
+                data-slot="session-row-rename-item"
+                onSelect={(event) => {
+                  event.stopPropagation();
+                  onRename();
+                }}
+              >
+                重命名
+              </DropdownMenuItem>
+            )}
+            {onTerminate && (
+              <DropdownMenuItem
+                variant="destructive"
+                data-slot="session-row-terminate-item"
+                onSelect={(event) => {
+                  event.stopPropagation();
+                  onTerminate();
+                }}
+              >
+                {terminateLabel}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

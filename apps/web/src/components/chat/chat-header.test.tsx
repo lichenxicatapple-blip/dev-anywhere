@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { uploadFile, toastError, toastLoading, toastSuccess, sendRawSpy } = vi.hoisted(() => ({
@@ -133,5 +133,62 @@ describe("ChatHeader PTY upload menu", () => {
     });
     const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
     expect(container.querySelector('input[data-slot="chat-menu-upload-file-input"]')).toBeNull();
+  });
+
+  it("keeps a user-renamed PTY title instead of OSC terminal titles", () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "s1",
+          mode: "pty",
+          provider: "claude",
+          state: "idle",
+          name: "Release checklist",
+          nameLocked: true,
+          cwd: "/Users/dev/project",
+        },
+      ],
+      ptyTitles: { s1: "✻ Working" },
+    });
+
+    const { container } = render(<ChatHeader sessionId="s1" mode="pty" />);
+
+    expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
+      "Release checklist",
+    );
+  });
+
+  it("keeps the overflow menu visually consistent with icons and grouped controls", async () => {
+    render(<ChatHeader sessionId="s1" mode="pty" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    menuTrigger.focus();
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const menu = await waitFor(() => {
+      const element = document.querySelector('[data-slot="chat-overflow-menu"]');
+      if (!(element instanceof HTMLElement)) {
+        throw new Error("chat overflow menu was not rendered");
+      }
+      return element;
+    });
+    const menuItemNames = ["重命名", "发送 Ctrl+O", "上传图片", "上传文件", "恢复默认"];
+
+    for (const name of menuItemNames) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    }
+
+    const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
+    expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
+    expect(
+      menu?.querySelector('[data-slot="chat-menu-font-row"] [data-slot="chat-menu-icon"]'),
+    ).not.toBeNull();
+    expect(menu?.querySelector('[data-slot="chat-menu-font-stepper"]')).not.toBeNull();
+    expect(screen.getByText("字号")).not.toBeNull();
+    expect(screen.getByText("终端字号")).not.toBeNull();
+    expect(screen.queryByText("显示")).toBeNull();
   });
 });

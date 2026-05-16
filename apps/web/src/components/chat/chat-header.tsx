@@ -1,6 +1,18 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
-import { ArrowLeft, ImageIcon, Minus, MoreVertical, Plus, Upload } from "lucide-react";
-import { useRef, type ChangeEvent } from "react";
+import {
+  ArrowLeft,
+  ImageIcon,
+  Keyboard,
+  Lightbulb,
+  Minus,
+  MoreVertical,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Type,
+  Upload,
+} from "lucide-react";
+import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +38,8 @@ import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
+import { cn } from "@/lib/utils";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -58,6 +72,35 @@ function ChatSessionTitle({ title, isPtyTitle }: { title: string; isPtyTitle: bo
   );
 }
 
+const menuItemClass = "min-h-9 gap-2.5";
+const menuLabelClass = "px-2 pb-1 pt-2 text-xs font-semibold text-muted-foreground";
+
+function ChatMenuIcon({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="chat-menu-icon"
+      className={cn(
+        "inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground [&_svg]:size-4",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ShortcutKeyIcon({ label }: { label: string }) {
+  return (
+    <ChatMenuIcon className="relative">
+      <Keyboard className="size-4" aria-hidden="true" />
+      <span className="absolute -right-1.5 -top-1 flex h-3 min-w-4 items-center justify-center rounded-[3px] border border-border bg-popover px-0.5 font-mono text-[7px] leading-none text-muted-foreground shadow-sm">
+        {label}
+      </span>
+    </ChatMenuIcon>
+  );
+}
+
 export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const navigate = useNavigate();
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
@@ -71,10 +114,17 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const setChatContentFontSize = useAppStore((s) => s.setChatContentFontSize);
   const resetPtyFontSize = useAppStore((s) => s.resetPtyFontSize);
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
+  const renameSession = useSessionStore((s) => s.renameSession);
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const isPty = mode === "pty" || session?.mode === "pty";
   const screenWakeLock = useScreenWakeLockScope(sessionId);
-  const title = (isPty && ptyTitle) || session?.name || sessionId.slice(0, 8);
+  const hasLockedName = Boolean(session?.nameLocked && session?.name);
+  const title =
+    (hasLockedName && session?.name) ||
+    (isPty && ptyTitle) ||
+    session?.name ||
+    sessionId.slice(0, 8);
+  const isLivePtyTitle = Boolean(isPty && ptyTitle && !hasLockedName);
   const fontSize = isPty
     ? ptyFontSize
     : getEffectiveChatContentFontSize(chatContentFontSize, touchEditingSurface);
@@ -107,6 +157,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   // 的 accept, 不再触发相机授权弹窗。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   async function handleFilePicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
@@ -119,6 +170,19 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
     }
     const path = await uploadFileAndShowToast({ relay, sessionId, file });
     if (path) sendRemoteInputRaw(sessionId, `@${path} `);
+  }
+
+  async function handleRename(targetSessionId: string, name: string): Promise<void> {
+    const relay = relayClientRef;
+    if (!relay) {
+      throw new Error("请先连接开发机");
+    }
+    const result = await relay.renameSession(targetSessionId, name);
+    if (!result.success) {
+      throw new Error(result.error ?? "重命名失败");
+    }
+    renameSession(targetSessionId, result.name ?? name);
+    toast.success("已重命名会话");
   }
 
   return (
@@ -143,7 +207,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         className="text-sm font-semibold truncate text-center px-2"
         data-slot="chat-session-title"
       >
-        <ChatSessionTitle title={title} isPtyTitle={Boolean(isPty && ptyTitle)} />
+        <ChatSessionTitle title={title} isPtyTitle={isLivePtyTitle} />
       </span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -158,100 +222,149 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-44"
+          className="w-64"
           style={{ maxWidth: "calc(100vw - 1rem)" }}
           data-slot="chat-overflow-menu"
         >
+          <DropdownMenuLabel className={menuLabelClass}>会话</DropdownMenuLabel>
+          <DropdownMenuItem
+            className={menuItemClass}
+            data-slot="chat-menu-rename"
+            onSelect={() => setRenameOpen(true)}
+          >
+            <ChatMenuIcon>
+              <Pencil aria-hidden="true" />
+            </ChatMenuIcon>
+            重命名
+          </DropdownMenuItem>
+          <DropdownMenuCheckboxItem
+            checked={screenWakeLock.active}
+            className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
+            disabled={screenWakeLock.pending || !screenWakeLock.supported}
+            data-slot="chat-menu-screen-wake-lock-item"
+            onCheckedChange={toggleScreenWakeLock}
+          >
+            <ChatMenuIcon>
+              <Lightbulb aria-hidden="true" />
+            </ChatMenuIcon>
+            <span className="min-w-0 flex-1">
+              {screenWakeLock.supported ? "屏幕常亮" : "屏幕常亮（浏览器不支持）"}
+            </span>
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
           {isPty ? (
             <>
               {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留
                   低频且不适合常驻浮层的 Ctrl+O。 */}
-              <DropdownMenuLabel className="text-muted-foreground">快捷键</DropdownMenuLabel>
+              <DropdownMenuLabel className={menuLabelClass}>快捷键</DropdownMenuLabel>
               <DropdownMenuItem
+                className={menuItemClass}
                 data-slot="chat-menu-send-ctrl-o"
                 onClick={() => sendRemoteInputRaw(sessionId, "\x0f")}
               >
+                <ShortcutKeyIcon label="^O" />
                 发送 Ctrl+O
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-muted-foreground">文件</DropdownMenuLabel>
+              <DropdownMenuLabel className={menuLabelClass}>文件</DropdownMenuLabel>
               <DropdownMenuItem
+                className={menuItemClass}
                 data-slot="chat-menu-upload-image"
                 onClick={() => imageInputRef.current?.click()}
               >
-                <ImageIcon aria-hidden="true" />
+                <ChatMenuIcon>
+                  <ImageIcon aria-hidden="true" />
+                </ChatMenuIcon>
                 上传图片
               </DropdownMenuItem>
               <DropdownMenuItem
+                className={menuItemClass}
                 data-slot="chat-menu-upload-file"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <Upload aria-hidden="true" />
+                <ChatMenuIcon>
+                  <Upload aria-hidden="true" />
+                </ChatMenuIcon>
                 上传文件
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           ) : null}
-          <DropdownMenuLabel className="text-muted-foreground">显示</DropdownMenuLabel>
-          <DropdownMenuCheckboxItem
-            checked={screenWakeLock.active}
-            className="justify-start pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
-            disabled={screenWakeLock.pending || !screenWakeLock.supported}
-            data-slot="chat-menu-screen-wake-lock-item"
-            onCheckedChange={toggleScreenWakeLock}
-          >
-            {screenWakeLock.supported ? "屏幕常亮" : "屏幕常亮（浏览器不支持）"}
-          </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel className="text-muted-foreground">
-            {isPty ? "终端字号" : "聊天字号"}
-          </DropdownMenuLabel>
-          <div className="px-2 pb-1" data-slot="chat-menu-font-control">
+          <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
+          <div className="px-2 pb-1.5" data-slot="chat-menu-font-control">
             <div
-              className="grid h-10 grid-cols-[2.75rem_minmax(3rem,1fr)_2.75rem] items-center gap-1"
-              data-slot="chat-menu-font-stepper"
+              className="flex min-h-12 items-center gap-2 rounded-sm py-1"
+              data-slot="chat-menu-font-row"
             >
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="-my-0.5 size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                disabled={fontSize <= minFontSize}
-                aria-label="字号变小"
-                data-slot="chat-menu-font-smaller"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  adjustFontSize(-1);
-                }}
-              >
-                <Minus aria-hidden="true" />
-              </Button>
+              <ChatMenuIcon>
+                <Type aria-hidden="true" />
+              </ChatMenuIcon>
               <span
-                className="flex h-8 min-w-[3rem] items-center justify-center rounded-sm bg-muted/45 text-sm tabular-nums text-foreground"
-                data-slot="chat-menu-font-size"
+                className="min-w-0 flex-1 text-sm text-foreground"
+                data-slot="chat-menu-font-label"
               >
-                {fontSize}px
+                {isPty ? "终端字号" : "聊天字号"}
               </span>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="-my-0.5 size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                disabled={fontSize >= MAX_CHAT_FONT_SIZE}
-                aria-label="字号变大"
-                data-slot="chat-menu-font-larger"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  adjustFontSize(1);
-                }}
+              <div
+                className="ml-auto inline-flex h-11 items-center rounded-md border border-border bg-muted/35"
+                data-slot="chat-menu-font-stepper"
               >
-                <Plus aria-hidden="true" />
-              </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  disabled={fontSize <= minFontSize}
+                  aria-label="字号变小"
+                  data-slot="chat-menu-font-smaller"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    adjustFontSize(-1);
+                  }}
+                >
+                  <Minus aria-hidden="true" />
+                </Button>
+                <span
+                  className="flex h-11 min-w-12 items-center justify-center rounded-sm px-2 text-sm tabular-nums text-foreground"
+                  data-slot="chat-menu-font-size"
+                >
+                  {fontSize}px
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-11 rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  disabled={fontSize >= MAX_CHAT_FONT_SIZE}
+                  aria-label="字号变大"
+                  data-slot="chat-menu-font-larger"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    adjustFontSize(1);
+                  }}
+                >
+                  <Plus aria-hidden="true" />
+                </Button>
+              </div>
             </div>
           </div>
-          <DropdownMenuItem data-slot="chat-menu-font-reset" onClick={resetFontSize}>
+          <DropdownMenuItem
+            className={menuItemClass}
+            data-slot="chat-menu-font-reset"
+            onClick={resetFontSize}
+          >
+            <ChatMenuIcon>
+              <RotateCcw aria-hidden="true" />
+            </ChatMenuIcon>
             恢复默认
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <SessionRenameDialog
+        open={renameOpen}
+        sessionId={sessionId}
+        initialName={session?.name}
+        onOpenChange={setRenameOpen}
+        onRename={handleRename}
+      />
       {isPty ? (
         <>
           <input

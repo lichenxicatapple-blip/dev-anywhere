@@ -21,6 +21,7 @@ import { compareProvider, providerLabel, type SessionProvider } from "@/lib/sess
 import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
+import { SessionRenameDialog } from "./session-rename-dialog";
 import { SessionTerminationDialog } from "./session-termination-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
@@ -35,6 +36,7 @@ export function SessionList({ layout }: SessionListProps) {
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const agentStatusBySessionId = useSessionStore((s) => s.agentStatusBySessionId);
   const ptyStateBySessionId = useSessionStore((s) => s.ptyStateBySessionId);
+  const renameSession = useSessionStore((s) => s.renameSession);
   const chatBySessionId = useChatStore((s) => s.bySessionId);
   // 选中态绑 URL: /chat/:id 命中当前行才高亮, 离开 chat 页 (/sessions, /) 自动全部无高亮
   const chatMatch = useMatch("/chat/:id");
@@ -45,6 +47,7 @@ export function SessionList({ layout }: SessionListProps) {
   const isLoading = !proxyListLoaded || (hasProxy && !sessionListLoaded);
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingRename, setPendingRename] = useState<SessionInfo | null>(null);
   const [pendingTermination, setPendingTermination] = useState<SessionInfo | null>(null);
   const [collapsedActiveProviders, setCollapsedActiveProviders] = useState<Set<SessionProvider>>(
     new Set(),
@@ -80,6 +83,19 @@ export function SessionList({ layout }: SessionListProps) {
       // 默认 4s 太长, 缩到 1.5s 即扫即过
       toast.info("正在终止会话", { duration: 1500 });
     }
+  }
+
+  async function handleRename(sessionId: string, name: string): Promise<void> {
+    const relay = relayClientRef;
+    if (!relay) {
+      throw new Error("请先连接开发机");
+    }
+    const result = await relay.renameSession(sessionId, name);
+    if (!result.success) {
+      throw new Error(result.error ?? "重命名失败");
+    }
+    renameSession(sessionId, result.name ?? name);
+    toast.success("已重命名会话");
   }
 
   function toggleActiveProvider(provider: SessionProvider) {
@@ -124,6 +140,15 @@ export function SessionList({ layout }: SessionListProps) {
           }}
           onConfirm={handleTerminate}
         />
+        <SessionRenameDialog
+          open={pendingRename !== null}
+          sessionId={pendingRename?.sessionId ?? null}
+          initialName={pendingRename?.name}
+          onOpenChange={(open) => {
+            if (!open) setPendingRename(null);
+          }}
+          onRename={handleRename}
+        />
       </>
     );
   }
@@ -149,6 +174,15 @@ export function SessionList({ layout }: SessionListProps) {
             if (!open) setPendingTermination(null);
           }}
           onConfirm={handleTerminate}
+        />
+        <SessionRenameDialog
+          open={pendingRename !== null}
+          sessionId={pendingRename?.sessionId ?? null}
+          initialName={pendingRename?.name}
+          onOpenChange={(open) => {
+            if (!open) setPendingRename(null);
+          }}
+          onRename={handleRename}
         />
       </div>
     );
@@ -200,6 +234,7 @@ export function SessionList({ layout }: SessionListProps) {
                   selected={s.sessionId === activeSessionId}
                   now={now}
                   onClick={() => handleRowClick(s.sessionId, s.mode)}
+                  onRename={() => setPendingRename(s)}
                   onTerminate={() => setPendingTermination(s)}
                 />
               ))}
@@ -242,6 +277,15 @@ export function SessionList({ layout }: SessionListProps) {
           }}
           onConfirm={handleTerminate}
         />
+        <SessionRenameDialog
+          open={pendingRename !== null}
+          sessionId={pendingRename?.sessionId ?? null}
+          initialName={pendingRename?.name}
+          onOpenChange={(open) => {
+            if (!open) setPendingRename(null);
+          }}
+          onRename={handleRename}
+        />
       </div>
     );
   }
@@ -264,6 +308,15 @@ export function SessionList({ layout }: SessionListProps) {
           if (!open) setPendingTermination(null);
         }}
         onConfirm={handleTerminate}
+      />
+      <SessionRenameDialog
+        open={pendingRename !== null}
+        sessionId={pendingRename?.sessionId ?? null}
+        initialName={pendingRename?.name}
+        onOpenChange={(open) => {
+          if (!open) setPendingRename(null);
+        }}
+        onRename={handleRename}
       />
     </>
   );

@@ -7,7 +7,7 @@ import { clearLastChatRoute, consumeRestoredTarget } from "@/lib/route-restore";
 import { toast } from "@/components/toast";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatJsonView } from "@/components/chat/chat-json-view";
-import { ChatPtyView } from "@/components/chat/chat-pty-view";
+import { PtyKeepAliveViewport } from "@/components/chat/pty-keepalive-provider";
 import { InputBar } from "@/components/chat/input-bar";
 import { FileDownloadProvider } from "@/components/chat/file-download-link";
 import { ImagePreviewProvider } from "@/components/chat/image-preview";
@@ -22,7 +22,11 @@ import {
   useVisualViewportBottomOffset,
   useVisualViewportLayoutBottomInset,
 } from "@/hooks/use-visual-viewport";
-import { isRouteSessionEnded, resolveChatPresentation, resolveChatStatusState } from "./chat-status";
+import {
+  isRouteSessionEnded,
+  resolveChatPresentation,
+  resolveChatStatusState,
+} from "./chat-status";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
 
@@ -155,9 +159,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             )}
             {presentation === "session-ended" ? (
               // wasAutoRestored 时副作用马上跳走, 这里渲染空白避免一帧 TerminatedSessionPanel 闪烁
-              wasAutoRestoredRef.current ? null : <TerminatedSessionPanel mode={mode} />
+              wasAutoRestoredRef.current ? null : (
+                <TerminatedSessionPanel mode={mode} />
+              )
             ) : mode === "pty" ? (
-              <ChatPtyView sessionId={id} ptyOwner={session?.ptyOwner} />
+              <PtyKeepAliveViewport sessionId={id} ptyOwner={session?.ptyOwner} />
             ) : (
               <ChatJsonView sessionId={id} />
             )}

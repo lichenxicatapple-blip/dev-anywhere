@@ -28,10 +28,19 @@ describe("session broadcast state source", () => {
   it("replays in-memory waiting approval state through session_list after browser refresh", () => {
     manager = makeSessionManager();
     const session = manager.createSession("pty", "/tmp/project", process.pid);
+    manager.renameSession(session.id, "Release checklist");
     manager.updateState(session.id, SessionState.WAITING_APPROVAL);
     const envelopes: Array<{
       type: string;
-      payload: { sessions: Array<{ sessionId: string; state: string }> };
+      payload: {
+        sessions: Array<{
+          sessionId: string;
+          state: string;
+          cwd?: string;
+          name?: string;
+          nameLocked?: boolean;
+        }>;
+      };
     }> = [];
     const relay = {
       sendEnvelope: (envelope: (typeof envelopes)[number]) => envelopes.push(envelope),
@@ -45,6 +54,9 @@ describe("session broadcast state source", () => {
       expect.objectContaining({
         sessionId: session.id,
         state: "waiting_approval",
+        cwd: "/tmp/project",
+        name: "Release checklist",
+        nameLocked: true,
       }),
     );
   });

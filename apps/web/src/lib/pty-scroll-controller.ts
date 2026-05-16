@@ -540,9 +540,18 @@ export function attachPtyScrollController(
     positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
   };
 
-  const scrollToYdisp = (ydisp: number): void => {
+  const syncViewportAndHostAt = (ydisp: number, cellH: number): void => {
+    if (ydisp === term.buffer.active.viewportY) {
+      positionHostAt(ydisp, cellH);
+      return;
+    }
+
     syncing.internal = true;
     try {
+      // Keep host geometry ahead of xterm's synchronous onScroll observers. Otherwise a
+      // one-row boundary crossing exposes a transient state where viewportY has changed
+      // but host.top is still one cell behind, which is visible as a small mobile jump.
+      positionHostAt(ydisp, cellH);
       term.scrollToLine(ydisp);
     } finally {
       syncing.internal = false;
@@ -583,10 +592,7 @@ export function attachPtyScrollController(
       cellH,
       cellW: 1,
     });
-    if (ydisp !== buffer.viewportY) {
-      scrollToYdisp(ydisp);
-    }
-    positionHostAt(ydisp, cellH);
+    syncViewportAndHostAt(ydisp, cellH);
     notifyScroll();
     trace("container-sync:end", { ydisp });
   };
@@ -771,10 +777,7 @@ export function attachPtyScrollController(
           cellH,
           cellW: 1,
         });
-        if (ydisp !== buffer.viewportY) {
-          scrollToYdisp(ydisp);
-        }
-        positionHostAt(ydisp, cellH);
+        syncViewportAndHostAt(ydisp, cellH);
       }
       notifyScroll();
     } finally {

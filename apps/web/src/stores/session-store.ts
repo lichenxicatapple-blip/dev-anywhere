@@ -29,6 +29,7 @@ interface SessionStoreState {
   setAgentStatus: (sessionId: string, status: AgentStatusPayload) => void;
   setPtyState: (sessionId: string, status: PtyStatePayload) => void;
   updateSessionName: (sessionId: string, name: string) => void;
+  renameSession: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
 }
@@ -105,6 +106,12 @@ export const useSessionStore = create<SessionStoreState>()(
       updateSessionName: (sessionId, name) =>
         set((state) => ({
           sessions: state.sessions.map((s) => (s.sessionId === sessionId ? { ...s, name } : s)),
+        })),
+      renameSession: (sessionId, name) =>
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.sessionId === sessionId ? { ...s, name, nameLocked: true } : s,
+          ),
         })),
       setPtyTitle: (sessionId, title) =>
         set((state) => ({

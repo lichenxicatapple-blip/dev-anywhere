@@ -54,7 +54,6 @@ export function usePtyTouchGesture({
       const dy = event.clientY - gesture.startY;
       if (!gesture.moved && Math.hypot(dx, dy) >= TAP_MOVE_THRESHOLD_PX) {
         gesture.moved = true;
-        suppressPtyFocus();
       }
       if (gesture.moved) event.stopPropagation();
     },

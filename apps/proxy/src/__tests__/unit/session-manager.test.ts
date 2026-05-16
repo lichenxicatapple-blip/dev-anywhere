@@ -338,6 +338,41 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("renameSession", () => {
+    it("stores a user locked display name and persists it", () => {
+      const s = manager.createSession("json", "/tmp/project", ALIVE_PID, "~/project");
+
+      const renamed = manager.renameSession(s.id, "  Release checklist  ");
+
+      expect(renamed).toEqual({ success: true, name: "Release checklist" });
+      expect(manager.getSession(s.id)).toMatchObject({
+        name: "Release checklist",
+        nameLocked: true,
+        cwd: "/tmp/project",
+      });
+
+      const manager2 = new SessionManager({ persistPath });
+      expect(manager2.getSession(s.id)).toMatchObject({
+        name: "Release checklist",
+        nameLocked: true,
+        cwd: "/tmp/project",
+      });
+      manager2.stopReaper();
+    });
+
+    it("rejects empty rename titles without changing the session", () => {
+      const s = manager.createSession("json", "/tmp/project", ALIVE_PID, "~/project");
+
+      const renamed = manager.renameSession(s.id, "   ");
+
+      expect(renamed.success).toBe(false);
+      expect(manager.getSession(s.id)).toMatchObject({
+        name: "~/project",
+      });
+      expect(manager.getSession(s.id)?.nameLocked).toBeUndefined();
+    });
+  });
+
   describe("persistence", () => {
     it("loads sessions from existing file on construction", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "persisted");
@@ -479,6 +514,35 @@ describe("SessionManager", () => {
       });
       // PTY 会话不加载到内存（即使进程存活），但也不触发 onSessionRemoved
       expect(removedIds).toHaveLength(0);
+      manager2.stopReaper();
+    });
+
+    it("keeps a user locked PTY name authoritative when the terminal reconnects after proxy restart", () => {
+      const pty = manager.createSession("pty", "/tmp/project", ALIVE_PID, "~/project");
+      manager.renameSession(pty.id, "Release checklist");
+
+      const manager2 = new SessionManager({ persistPath });
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+
+      const reconnected = manager2.createSession(
+        "pty",
+        "/tmp/project",
+        ALIVE_PID,
+        "~/project",
+        pty.id,
+        "claude",
+        "local-terminal",
+      );
+
+      expect(reconnected).toMatchObject({
+        id: pty.id,
+        name: "Release checklist",
+        nameLocked: true,
+      });
+      expect(manager2.getSession(pty.id)).toMatchObject({
+        name: "Release checklist",
+        nameLocked: true,
+      });
       manager2.stopReaper();
     });
 

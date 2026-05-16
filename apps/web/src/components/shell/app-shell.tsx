@@ -6,6 +6,7 @@ import { SettingsDialog } from "./settings-dialog";
 import { MobileBrandHero } from "@/components/brand/mobile-brand-hero";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
+import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { getTopLevelSubtitle } from "@/lib/top-level-copy";
@@ -134,17 +135,19 @@ export function AppShell() {
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar className="hidden md:flex" />
-        <main className="flex-1 overflow-hidden" role="main">
-          {/* 顶层移动页保留 hero 常驻；chat/session 切换仍保留轻量 fade。 */}
-          <div
-            key={isTopLevelRoute ? "top-level" : location.pathname}
-            className={cn(
-              "h-full",
-              !isTopLevelRoute && "animate-in fade-in-0 duration-200 motion-reduce:animate-none",
-            )}
-          >
-            <Outlet />
-          </div>
+        <main className="relative flex-1 overflow-hidden" role="main">
+          <PtyKeepAliveProvider>
+            {/* 顶层移动页保留 hero 常驻；chat/session 切换仍保留轻量 fade。 */}
+            <div
+              key={isTopLevelRoute ? "top-level" : location.pathname}
+              className={cn(
+                "h-full",
+                !isTopLevelRoute && "animate-in fade-in-0 duration-200 motion-reduce:animate-none",
+              )}
+            >
+              <Outlet />
+            </div>
+          </PtyKeepAliveProvider>
         </main>
       </div>
 

@@ -88,6 +88,31 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenNthCalledWith(2, "sess-1", "\x03");
   });
 
+  it("blocks raw input while the PTY view is not ready for interactive use", () => {
+    const { terminal, emitData, emitKey } = createTerminal();
+    const onRawInput = vi.fn();
+    let enabled = false;
+
+    attachXtermRawInput(terminal, "sess-1", {
+      onRawInput,
+      isInputEnabled: () => enabled,
+    });
+
+    emitData("old-typed-text");
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(onRawInput).not.toHaveBeenCalled();
+
+    enabled = true;
+    emitData("ready-text");
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "ready-text");
+    expect(onRawInput).toHaveBeenCalledWith("ready-text");
+
+    enabled = false;
+    const blockedEnter = emitKey(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true }));
+    expect(blockedEnter).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("maps Shift+Enter to LF instead of xterm's default Enter submit", () => {
     const { terminal, emitKey } = createTerminal();
     const onRawInput = vi.fn();

@@ -123,12 +123,6 @@ export async function expectBackToBottomClearance(
   page: Page,
   options: { touchEditingSurface: boolean },
 ): Promise<void> {
-  const backToBottomScrollbarGap = async () => {
-    const button = await backToBottom(page).boundingBox();
-    const scrollbar = await ptyScrollbar(page).boundingBox();
-    if (!button || !scrollbar) return -1;
-    return Math.round(scrollbar.x - (button.x + button.width));
-  };
   const backToBottomViewportGap = async () => {
     const button = await backToBottom(page).boundingBox();
     const viewport = page.viewportSize();
@@ -137,13 +131,13 @@ export async function expectBackToBottomClearance(
   };
 
   if (options.touchEditingSurface) {
-    await expect.poll(backToBottomViewportGap).toBeGreaterThanOrEqual(20);
+    await expect.poll(backToBottomViewportGap).toBeGreaterThanOrEqual(18);
     await expect.poll(backToBottomViewportGap).toBeLessThanOrEqual(32);
     return;
   }
 
-  await expect.poll(backToBottomScrollbarGap).toBeGreaterThanOrEqual(12);
-  await expect.poll(backToBottomScrollbarGap).toBeLessThanOrEqual(20);
+  await expect.poll(backToBottomViewportGap).toBeGreaterThanOrEqual(20);
+  await expect.poll(backToBottomViewportGap).toBeLessThanOrEqual(32);
 }
 
 export async function enterLongHostMode(

@@ -61,6 +61,7 @@ import { useTerminalPaste } from "./use-terminal-paste";
 interface UsePtyViewOptions {
   sessionId: string;
   ptyOwner?: "local-terminal" | "proxy-hosted";
+  active?: boolean;
   containerEl: HTMLDivElement | null;
   spacerRef: RefObject<HTMLDivElement | null>;
   xtermHostRef: RefObject<HTMLDivElement | null>;
@@ -116,7 +117,7 @@ interface TerminalControllerHandle {
 }
 
 export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
-  const { sessionId, ptyOwner, containerEl, spacerRef, xtermHostRef } = options;
+  const { sessionId, ptyOwner, active = true, containerEl, spacerRef, xtermHostRef } = options;
 
   // === sub-hooks (各自管自己的 state，互不依赖) ===
   const connection = usePtyConnectionState();
@@ -128,6 +129,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const terminalRef = useRef<Terminal | null>(null);
   const terminalControllerRef = useRef<TerminalControllerHandle | null>(null);
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
+  const activeRef = useRef(active);
+  const readyRef = useRef(false);
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
   const lastFrameWriteAtRef = useRef<number | null>(null);
@@ -166,6 +169,17 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const ptyPlainEnterBehavior = touchEditingSurface ? "linefeed" : "submit";
   const keyboardOffset = useVisualViewportBottomOffset();
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+  useEffect(() => {
+    readyRef.current = connection.ready;
+  }, [connection.ready]);
+
+  const canAcceptInput = useCallback((): boolean => {
+    return activeRef.current && readyRef.current;
+  }, []);
 
   useEffect(() => {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
@@ -211,11 +225,21 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const touchGestureHandlers = usePtyTouchGesture({ terminalRef, suppressPtyFocus });
 
-  const handlePasteCapture = useTerminalPaste({
+  const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
     terminalRef,
     onAfterPaste: () => rawInputFollowSchedulerRef.current?.schedule(),
   });
+  const handlePasteCapture = useCallback(
+    (event: ClipboardEvent<HTMLDivElement>): void => {
+      if (!canAcceptInput()) {
+        event.preventDefault();
+        return;
+      }
+      handleTerminalPasteCapture(event);
+    },
+    [canAcceptInput, handleTerminalPasteCapture],
+  );
 
   // 拖拽任意文件到终端容器: 上传后把 "@<path> " 写到 PTY stdin, 与 chat-header
   // upload menu 同样形状。dragover 必须 preventDefault 否则浏览器拒绝触发 drop。
@@ -235,6 +259,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       if (!file) return;
       event.preventDefault();
       setIsPtyDragOver(false);
+      if (!canAcceptInput()) return;
       const relay = relayClientRef;
       if (!relay) {
         toast.error("请先连接开发机");
@@ -243,11 +268,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const path = await uploadFileAndShowToast({ relay, sessionId, file });
       if (path) sendRemoteInputRaw(sessionId, `@${path} `);
     },
-    [sessionId],
+    [canAcceptInput, sessionId],
   );
 
   const handleTerminalContainerMouseDown = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>): void => {
+      if (!canAcceptInput()) {
+        event.preventDefault();
+        return;
+      }
       const target = event.target;
       if (target instanceof Element && target.closest(".xterm")) return;
       // 空白 spacer 区域不是 xterm DOM。浏览器默认 mousedown 会把焦点从 xterm
@@ -255,7 +284,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       event.preventDefault();
       terminalRef.current?.focus();
     },
-    [],
+    [canAcceptInput],
   );
 
   // === controller graph：单 effect 编排 terminal / scroll / resize ===
@@ -323,6 +352,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           ...rawOptions,
           plainEnterBehavior: ptyPlainEnterBehavior,
         }),
+      isInputEnabled: canAcceptInput,
+      canFocus: canAcceptInput,
       onTerminalReady: (term) => {
         const xterm = term as Terminal;
         terminalRef.current = xterm;
@@ -529,6 +560,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     follow.hasNewFramesWhileAwayRef,
     follow.setHasNewFramesWhileAway,
     ptyPlainEnterBehavior,
+    canAcceptInput,
     openImagePreview,
     suppressPtyFocus,
     webOwnsPtyGeometry,
@@ -541,6 +573,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     if (!term || !scroll) return;
     applyPtyFontSize(term, ptyFontSize, scroll.relayout);
   }, [ptyFontSize]);
+
+  useEffect(() => {
+    if (!active || !connection.ready || touchEditingSurface) return;
+    const id = requestAnimationFrame(() => terminalRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [active, connection.ready, touchEditingSurface]);
 
   // === 暴露给 JSX 的命令式句柄（稳定 useCallback，内部读 ref 拿当前 controller）===
   // reason 默认 "viewExternal" — 当 BackToBottom 按钮等明确入口外调时, caller 可传具体 label。
@@ -559,11 +597,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const sendMobileInput = useCallback(
     (data: string): void => {
+      if (!canAcceptInput()) return;
       sendRemoteInputRaw(sessionId, data);
       rawInputFollowSchedulerRef.current?.schedule();
       terminalRef.current?.focus();
     },
-    [sessionId],
+    [canAcceptInput, sessionId],
   );
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)

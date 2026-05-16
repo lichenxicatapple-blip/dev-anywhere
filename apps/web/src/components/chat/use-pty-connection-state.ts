@@ -20,6 +20,7 @@ export function usePtyConnectionState() {
   }, []);
 
   const markSubscribeStarted = useCallback(() => {
+    setReady(false);
     setSubscribeDelayed(false);
   }, []);
 

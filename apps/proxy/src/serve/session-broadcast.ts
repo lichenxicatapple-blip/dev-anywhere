@@ -13,7 +13,9 @@ function toSessionListPayload(s: SessionInfo) {
     ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
     state: s.state,
     lastActive: s.updatedAt,
+    cwd: s.cwd,
     ...(s.name !== undefined ? { name: s.name } : {}),
+    ...(s.nameLocked !== undefined ? { nameLocked: s.nameLocked } : {}),
   };
 }
 
@@ -62,6 +64,9 @@ export function broadcastSessionSync(relay: RelayConnection, session: SessionInf
           mode: session.mode,
           provider: session.provider,
           ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
+          cwd: session.cwd,
+          ...(session.name !== undefined ? { name: session.name } : {}),
+          ...(session.nameLocked !== undefined ? { nameLocked: session.nameLocked } : {}),
           state: session.state,
         },
       ],

@@ -31,10 +31,44 @@ describe("RelayControlSchema", () => {
     expect(isClientToProxyRelayControlType("tool_approve")).toBe(true);
     expect(isClientToProxyRelayControlType("tool_deny")).toBe(true);
     expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
+    expect(isClientToProxyRelayControlType("session_rename")).toBe(true);
     expect(isClientToProxyRelayControlType("session_list")).toBe(true);
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
     expect(isClientToProxyRelayControlType("permission_decision_result")).toBe(false);
     expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
+  });
+
+  it("parses session rename request and response with requestId correlation", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "session_rename",
+        requestId: "rename-1",
+        sessionId: "sess-1",
+        name: "Release checklist",
+      }),
+    ).toEqual({
+      type: "session_rename",
+      requestId: "rename-1",
+      sessionId: "sess-1",
+      name: "Release checklist",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "session_rename_response",
+        requestId: "rename-1",
+        sessionId: "sess-1",
+        success: true,
+        name: "Release checklist",
+      }),
+    ).toMatchObject({
+      type: "session_rename_response",
+      requestId: "rename-1",
+      sessionId: "sess-1",
+      success: true,
+      name: "Release checklist",
+    });
+    expect(isProxyToClientRelayControlType("session_rename_response")).toBe(true);
   });
 
   it("parses clipboard image upload request/response with requestId correlation", () => {

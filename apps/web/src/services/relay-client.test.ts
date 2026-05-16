@@ -187,6 +187,48 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("waits for matching session rename responses", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.renameSession("s1", "Release checklist");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "session_rename_response",
+      requestId: "other-request",
+      sessionId: "s1",
+      success: true,
+      name: "wrong",
+    });
+    ws.emit({
+      type: "session_rename_response",
+      requestId,
+      sessionId: "other-session",
+      success: true,
+      name: "wrong-session",
+    });
+    ws.emit({
+      type: "session_rename_response",
+      requestId,
+      sessionId: "s1",
+      success: true,
+      name: "Release checklist",
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "session_rename",
+      requestId,
+      sessionId: "s1",
+      name: "Release checklist",
+    });
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      success: true,
+      name: "Release checklist",
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
   it("waits for matching image preview responses", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestImagePreview("s1", ".dev-anywhere/clipboard/s1/shot.png");

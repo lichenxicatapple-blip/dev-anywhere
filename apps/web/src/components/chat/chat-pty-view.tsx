@@ -8,6 +8,7 @@ import { useRef, useState } from "react";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
+import { getPtyBackToBottomClassName } from "./pty-back-to-bottom-layout";
 import { PtyMobileControls } from "./pty-mobile-controls";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 import { usePtyView } from "./use-pty-view";
@@ -15,15 +16,16 @@ import { usePtyView } from "./use-pty-view";
 interface ChatPtyViewProps {
   sessionId: string;
   ptyOwner?: "local-terminal" | "proxy-hosted";
+  active?: boolean;
 }
 
-export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
+export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
 
-  const view = usePtyView({ sessionId, ptyOwner, containerEl, spacerRef, xtermHostRef });
+  const view = usePtyView({ sessionId, ptyOwner, active, containerEl, spacerRef, xtermHostRef });
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
@@ -65,13 +67,11 @@ export function ChatPtyView({ sessionId, ptyOwner }: ChatPtyViewProps) {
       <BackToBottom
         visible={!view.isAtBottom}
         hasNewMessages={view.hasNewFramesWhileAway}
-        className={
-          view.showMobilePtyControls
-            ? "right-6 bottom-[calc(env(safe-area-inset-bottom)+7rem)]"
-            : view.touchEditingSurface
-              ? "right-6"
-              : "right-12"
-        }
+        className={getPtyBackToBottomClassName({
+          showMobilePtyControls: view.showMobilePtyControls,
+          touchEditingSurface: view.touchEditingSurface,
+          horizontalScrollable: view.scrollState.horizontalScrollable,
+        })}
         onClick={() => {
           // 用户明示动作: 压过 intent (即便用户在回看, 点这个按钮就是要退出回看)。
           view.scrollToBottom("backToBottomBtn", { force: true });
