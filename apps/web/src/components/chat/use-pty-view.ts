@@ -128,6 +128,7 @@ interface UsePtyViewResult {
   scrollToXRatio: (ratio: number) => void;
   clearNewFramesWhileAway: () => void;
   sendMobileInput: (data: string) => void;
+  pasteMobileClipboard: () => void;
   handleTerminalContainerMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => void;
   handlePasteCapture: (event: ClipboardEvent<HTMLDivElement>) => void;
   pointerHandlers: PointerHandlers;
@@ -1026,6 +1027,28 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [canAcceptInput, scheduleRawInputFollow, sessionId],
   );
 
+  const pasteMobileClipboard = useCallback((): void => {
+    if (!canAcceptInput()) return;
+    const readText = navigator.clipboard?.readText?.bind(navigator.clipboard);
+    if (!window.isSecureContext || !readText) {
+      toast.error("无法读取剪贴板");
+      terminalRef.current?.focus();
+      return;
+    }
+
+    void readText()
+      .then((text) => {
+        if (!text) return;
+        sendRemoteInputRaw(sessionId, text);
+        scheduleRawInputFollow("paste");
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error && err.message ? err.message : "无法读取剪贴板";
+        toast.error(message);
+      })
+      .finally(() => terminalRef.current?.focus());
+  }, [canAcceptInput, scheduleRawInputFollow, sessionId]);
+
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
   // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
   const containerPaddingBottom = showMobilePtyControls
@@ -1086,6 +1109,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     scrollToXRatio,
     clearNewFramesWhileAway,
     sendMobileInput,
+    pasteMobileClipboard,
     handleTerminalContainerMouseDown,
     handlePasteCapture,
     pointerHandlers: touchGestureHandlers,

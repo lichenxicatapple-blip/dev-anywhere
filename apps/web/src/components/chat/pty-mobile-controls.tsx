@@ -1,8 +1,16 @@
 import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ClipboardPaste,
+  CornerDownLeft,
+} from "lucide-react";
 
 interface PtyMobileControlsProps {
   onInput: (data: string) => void;
+  onPaste: () => void;
 }
 
 // 长按重复触发节奏: 首发立即, 然后 300ms 延迟内单击退出, 之后 50ms 一次稳定 repeat。
@@ -13,10 +21,10 @@ const REPEAT_INTERVAL_MS = 50;
 // 移动端浮层按键 (2 行):
 //   Row1: [Esc ][Tab ][⇧Tab][^T  ][ ↑ ][ ^S ]
 //   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
-//   Enter 在最右, 跨 2 行高亮
+//   Paste / Enter 在最右, 各占一行
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
 // onPointerDown preventDefault 防把焦点抢走 xterm。
-export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
+export function PtyMobileControls({ onInput, onPaste }: PtyMobileControlsProps) {
   return (
     <div
       className="absolute inset-x-0 bottom-0 z-20 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 py-1.5 shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
@@ -110,21 +118,34 @@ export function PtyMobileControls({ onInput }: PtyMobileControlsProps) {
           onPress={() => onInput("\x1b[C")}
         />
       </div>
-      <button
-        type="button"
-        className="inline-flex w-[4.375rem] shrink-0 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
-        aria-label="回车"
-        data-slot="pty-mobile-key-enter"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => onInput("\r")}
-      >
-        {/* h-[5.25rem] = 2 × h-9 + gap-1 + 4px×2 边距, 跟左侧 h-11 外壳里 h-9 pill
-            的 4px 上下留白对齐 (y=4-88), 不再上下各多 4px。 */}
-        <span className="inline-flex h-[5.25rem] w-full items-center justify-center gap-1.5 rounded-[6px] border border-[#7A6046] bg-[#5A452E] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-          <CornerDownLeft aria-hidden="true" className="size-4" />
-          <span>回车</span>
-        </span>
-      </button>
+      <div className="grid w-[4.375rem] shrink-0 grid-rows-2 gap-1">
+        <button
+          type="button"
+          className="inline-flex h-11 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
+          aria-label="粘贴剪贴板"
+          data-slot="pty-mobile-key-paste"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={onPaste}
+        >
+          <span className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border border-[#4B5F54] bg-[#1F3028] px-1.5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <ClipboardPaste aria-hidden="true" className="size-3.5" />
+            <span>粘贴</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-11 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
+          aria-label="回车"
+          data-slot="pty-mobile-key-enter"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => onInput("\r")}
+        >
+          <span className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border border-[#7A6046] bg-[#5A452E] px-1.5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <CornerDownLeft aria-hidden="true" className="size-3.5" />
+            <span>回车</span>
+          </span>
+        </button>
+      </div>
     </div>
   );
 }

@@ -88,7 +88,9 @@ export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewP
           view.clearNewFramesWhileAway();
         }}
       />
-      {view.showMobilePtyControls ? <PtyMobileControls onInput={view.sendMobileInput} /> : null}
+      {view.showMobilePtyControls ? (
+        <PtyMobileControls onInput={view.sendMobileInput} onPaste={view.pasteMobileClipboard} />
+      ) : null}
       {view.ptySelectionHandles ? (
         <>
           <PtySelectionHandle
