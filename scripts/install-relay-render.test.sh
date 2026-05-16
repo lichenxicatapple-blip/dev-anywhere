@@ -48,6 +48,8 @@ nginx="$(
     "8080"
 )"
 assert_contains "$nginx" "server_name dev-anywhere.example.com;"
+assert_contains "$nginx" "listen 443 ssl http2;"
+assert_not_contains "$nginx" "http2 on;"
 assert_contains "$nginx" "ssl_certificate /etc/letsencrypt/live/relay/fullchain.pem;"
 assert_contains "$nginx" "location ~ ^/(proxy|client)$"
 assert_contains "$nginx" 'proxy_set_header Upgrade $http_upgrade;'
