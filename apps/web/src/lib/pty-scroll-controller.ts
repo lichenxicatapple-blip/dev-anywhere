@@ -54,6 +54,8 @@ interface PtyScrollController {
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
+  traceRawInputFollowScheduled: (source?: string) => void;
+  traceRawInputFollowFire: () => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
   getDebugProbe: () => PtyScrollDebugProbe;
 }
@@ -251,6 +253,8 @@ export function attachPtyScrollController(
       scope?: string;
       ydisp?: number;
       details?: string;
+      cursorDeltaRows?: number | null;
+      scrollDeltaToAnchor?: number;
       vvHeightDelta?: number;
       vvOffsetDelta?: number;
     } = {},
@@ -277,6 +281,14 @@ export function attachPtyScrollController(
       containerClientHeight: container.clientHeight,
       atBottomThreshold,
     });
+    const defaultCursorDeltaRows =
+      prevCursorBufferRow === null ? null : cursorBufferRow - prevCursorBufferRow;
+    const cursorDeltaRows =
+      extra.cursorDeltaRows !== undefined ? extra.cursorDeltaRows : defaultCursorDeltaRows;
+    const scrollDeltaToAnchor =
+      extra.scrollDeltaToAnchor !== undefined
+        ? extra.scrollDeltaToAnchor
+        : container.scrollTop - anchor.bottomScrollTop;
     const currentHostTop = parsePx(host.style.top);
     const expectedHostTop =
       cellH > 0
@@ -322,8 +334,10 @@ export function attachPtyScrollController(
       cursorX: buffer.cursorX,
       cursorY: buffer.cursorY,
       cursorBufferRow,
+      cursorDeltaRows,
       cursorInViewport: anchor.cursorInViewport,
       anchorBottomScrollTop: anchor.bottomScrollTop,
+      scrollDeltaToAnchor,
       pendingProgrammaticScrollTop,
       pendingFollowCursorScrollTop,
       pendingFollowCursorScrollLeft,
@@ -341,6 +355,14 @@ export function attachPtyScrollController(
       userIntent: userHasVerticalScrollIntent(),
       ...extra,
     });
+  };
+
+  const traceRawInputFollowScheduled = (source: string = "rawInput"): void => {
+    trace(`rawInputFollow:scheduled[${source}]`);
+  };
+
+  const traceRawInputFollowFire = (): void => {
+    trace("rawInputFollow:fire");
   };
 
   const dispatchVerticalIntent = (event: PtyVerticalIntentEvent): PtyVerticalIntentResult => {
@@ -862,14 +884,21 @@ export function attachPtyScrollController(
     const buffer = term.buffer.active;
     const cursorBufferRow = buffer.baseY + buffer.cursorY;
     if (prevCursorBufferRow === cursorBufferRow) {
-      // 稳态每帧 cursor 不变, trace 这条只产生噪音, 不诊断任何问题。
+      // 仅 trace 开启时记录 same-row skip, 帮助判断"没跟随"到底是光标未变还是策略阻断。
+      // 稳态同名事件会被 scroll trace store 折叠, 不让报告被 render 帧刷爆。
+      trace("followCursorY:skip[same-row]", {
+        cursorDeltaRows: 0,
+        details: `cursorRow=${cursorBufferRow} same-row`,
+      });
       return;
     }
     const prevRow = prevCursorBufferRow;
     prevCursorBufferRow = cursorBufferRow;
+    const cursorDeltaRows = prevRow === null ? null : cursorBufferRow - prevRow;
     const anchor = getCurrentAnchor();
     if (anchor.cursorInViewport) {
       trace("followCursorY:skip", {
+        cursorDeltaRows,
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} inViewport`,
       });
       return;
@@ -877,6 +906,7 @@ export function attachPtyScrollController(
     // anchor.bottomScrollTop 在 long-host 分支里就是把光标行像素居中后的目标 scrollTop。
     if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) {
       trace("followCursorY:skip", {
+        cursorDeltaRows,
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} aligned`,
       });
       return;
@@ -885,6 +915,8 @@ export function attachPtyScrollController(
     const prevScrollTop = container.scrollTop;
     container.scrollTop = anchor.bottomScrollTop;
     trace("followCursorY:hit", {
+      cursorDeltaRows,
+      scrollDeltaToAnchor: prevScrollTop - anchor.bottomScrollTop,
       details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} scrollTop=${Math.round(prevScrollTop)}->${Math.round(anchor.bottomScrollTop)}`,
     });
   };
@@ -1143,6 +1175,8 @@ export function attachPtyScrollController(
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,
+    traceRawInputFollowScheduled,
+    traceRawInputFollowFire,
     getDebugProbe,
   };
 }

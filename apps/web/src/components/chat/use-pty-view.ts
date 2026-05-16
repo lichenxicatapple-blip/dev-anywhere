@@ -155,6 +155,8 @@ interface ScrollControllerHandle {
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
+  traceRawInputFollowScheduled: (source?: string) => void;
+  traceRawInputFollowFire: () => void;
 }
 
 interface TerminalControllerHandle {
@@ -255,6 +257,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }
   if (!rawInputFollowSchedulerRef.current) {
     rawInputFollowSchedulerRef.current = createRafScheduler(() => {
+      scrollControllerRef.current?.traceRawInputFollowFire();
       scrollControllerRef.current?.scrollToBottom("rawInput");
       clearNewFramesWhileAway();
     });
@@ -267,6 +270,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       relayoutSchedulerRef.current = null;
       rawInputFollowSchedulerRef.current = null;
     };
+  }, []);
+
+  const scheduleRawInputFollow = useCallback((source: string = "rawInput"): void => {
+    scrollControllerRef.current?.traceRawInputFollowScheduled(source);
+    rawInputFollowSchedulerRef.current?.schedule();
   }, []);
 
   const selectionAnchorRef = useRef<TerminalSelectionPoint | null>(null);
@@ -639,7 +647,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
     terminalRef,
-    onAfterPaste: () => rawInputFollowSchedulerRef.current?.schedule(),
+    onAfterPaste: () => scheduleRawInputFollow("paste"),
   });
   const handlePasteCapture = useCallback(
     (event: ClipboardEvent<HTMLDivElement>): void => {
@@ -735,7 +743,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (): void => {
-      rawInputFollowSchedulerRef.current?.schedule();
+      scheduleRawInputFollow("rawInput");
     };
 
     let getWebglAddon: (() => Parameters<typeof probeWebglRenderModel>[0] | null) | null = null;
@@ -975,6 +983,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     canAcceptInput,
     openImagePreview,
     suppressPtyFocus,
+    scheduleRawInputFollow,
     webOwnsPtyGeometry,
   ]);
 
@@ -1011,10 +1020,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     (data: string): void => {
       if (!canAcceptInput()) return;
       sendRemoteInputRaw(sessionId, data);
-      rawInputFollowSchedulerRef.current?.schedule();
+      scheduleRawInputFollow("mobileControl");
       terminalRef.current?.focus();
     },
-    [canAcceptInput, sessionId],
+    [canAcceptInput, scheduleRawInputFollow, sessionId],
   );
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
@@ -1043,10 +1052,16 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         scrollControllerRef.current?.scrollToBottom("keyboardOffset", { force: true });
         clearNewFramesWhileAway();
       } else if (!keyboardOpen) {
-        rawInputFollowSchedulerRef.current?.schedule();
+        scheduleRawInputFollow("keyboardOffset");
       }
     }
-  }, [keyboardOffset, showMobilePtyControls, containerPaddingBottom, clearNewFramesWhileAway]);
+  }, [
+    keyboardOffset,
+    showMobilePtyControls,
+    containerPaddingBottom,
+    clearNewFramesWhileAway,
+    scheduleRawInputFollow,
+  ]);
 
   const focusHandlers = useMemo<FocusHandlers>(
     () => ({

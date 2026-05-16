@@ -175,4 +175,30 @@ describe("pty scroll trace", () => {
       "scroll-to-bottom:start[pendingFrame]\tscroll-to-bottom\tstart\tpendingFrame",
     );
   });
+
+  it("summarizes follow-cursor deltas in the copied report", () => {
+    appendPtyScrollTrace({
+      t: 100,
+      event: "followCursorY:hit",
+      scrollTop: 17470,
+      scrollHeight: 18100,
+      clientHeight: 200,
+      viewportY: 853,
+      bufferLength: 905,
+      hostTop: "17060px",
+      focus: null,
+      cursorY: 25,
+      cursorBufferRow: 878,
+      cursorDeltaRows: 25,
+      scrollDeltaToAnchor: -410,
+    } as Parameters<typeof appendPtyScrollTrace>[0]);
+
+    const report = formatPtyScrollTraceReport();
+
+    expect(report).toContain("cursorDeltaRows=25..25, scrollDeltaToAnchor=-410..-410");
+    expect(report).toContain(
+      "cursorBufferRow\tcursorDeltaRows\tcursorInViewport\tanchorBottomScrollTop\tscrollDeltaToAnchor",
+    );
+    expect(report).toContain("878\t25\t");
+  });
 });

@@ -41,8 +41,10 @@ export interface PtyScrollTraceEntry {
   cursorX?: number;
   cursorY?: number;
   cursorBufferRow?: number;
+  cursorDeltaRows?: number | null;
   cursorInViewport?: boolean;
   anchorBottomScrollTop?: number;
+  scrollDeltaToAnchor?: number;
   pendingProgrammaticScrollTop?: number | null;
   pendingFollowCursorScrollTop?: number | null;
   pendingFollowCursorScrollLeft?: number | null;
@@ -142,6 +144,12 @@ export function formatPtyScrollTraceReport(): string {
   const flips = countDirectionFlips(scrollValues);
   const hostTopDrifts = uniqueNumbers(rows.map((entry) => entry.hostTopDrift));
   const hostCoverages = uniqueNumbers(rows.map((entry) => entry.viewportHostCoverage));
+  const cursorDeltaRows = rows
+    .map((entry) => (entry.cursorDeltaRows === null ? undefined : entry.cursorDeltaRows))
+    .filter((value): value is number => value !== undefined);
+  const scrollDeltaToAnchors = rows
+    .map((entry) => entry.scrollDeltaToAnchor)
+    .filter((value): value is number => value !== undefined);
   const pendingSyncRetries = rows.filter((entry) => entry.pendingContainerSyncRetry).length;
   const horizontalIntentSamples = rows.filter((entry) => entry.horizontalIntent).length;
   const lines = rows.map((entry) =>
@@ -168,8 +176,10 @@ export function formatPtyScrollTraceReport(): string {
       entry.cursorX ?? "",
       entry.cursorY ?? "",
       entry.cursorBufferRow ?? "",
+      entry.cursorDeltaRows ?? "",
       entry.cursorInViewport ? "cursorY" : "",
       entry.anchorBottomScrollTop === undefined ? "" : round(entry.anchorBottomScrollTop),
+      entry.scrollDeltaToAnchor === undefined ? "" : round(entry.scrollDeltaToAnchor),
       entry.visualViewportHeight === undefined ? "" : round(entry.visualViewportHeight),
       entry.visualViewportOffsetTop === undefined ? "" : round(entry.visualViewportOffsetTop),
       entry.vvHeightDelta === undefined ? "" : round(entry.vvHeightDelta),
@@ -198,10 +208,11 @@ export function formatPtyScrollTraceReport(): string {
     `clientHeight=${clientHeights.join(",")}, visualViewportHeight=${visualHeights.join(",")}`,
     `hostTopDrift=${range(hostTopDrifts)}, viewportHostCoverage=${range(hostCoverages)}`,
     `horizontalIntentSamples=${horizontalIntentSamples}, pendingSyncRetrySamples=${pendingSyncRetries}`,
+    `cursorDeltaRows=${range(cursorDeltaRows)}, scrollDeltaToAnchor=${range(scrollDeltaToAnchors)}`,
     `focus=${focusValues}`,
     "debugSnapshot=",
     JSON.stringify(debugSnapshot, null, 2),
-    "t\tevent\tscope\taction\treason\tscrollTop\tscrollLeft\tscrollHeight\tscrollWidth\tviewportY\tydisp\thostTop\tscrollMinusHost\thostTopDrift\tviewportHostCoverage\tclientHeight\tclientWidth\tcellH\tcellW\tcursorX\tcursorY\tcursorBufferRow\tcursorInViewport\tanchorBottomScrollTop\tvvHeight\tvvTop\tvvHDelta\tvvODelta\tatBottom\ttouch\tintent\tintentMode\tintentSource\tintentTransition\thIntent\tpendingSyncRetry\tpendingProgrammaticY\tpendingFollowY\tpendingFollowX\tprevCursorBufferRow\tdetails\tfocus",
+    "t\tevent\tscope\taction\treason\tscrollTop\tscrollLeft\tscrollHeight\tscrollWidth\tviewportY\tydisp\thostTop\tscrollMinusHost\thostTopDrift\tviewportHostCoverage\tclientHeight\tclientWidth\tcellH\tcellW\tcursorX\tcursorY\tcursorBufferRow\tcursorDeltaRows\tcursorInViewport\tanchorBottomScrollTop\tscrollDeltaToAnchor\tvvHeight\tvvTop\tvvHDelta\tvvODelta\tatBottom\ttouch\tintent\tintentMode\tintentSource\tintentTransition\thIntent\tpendingSyncRetry\tpendingProgrammaticY\tpendingFollowY\tpendingFollowX\tprevCursorBufferRow\tdetails\tfocus",
     ...lines,
   ].join("\n");
 }

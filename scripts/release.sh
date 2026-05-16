@@ -6,20 +6,54 @@
 # CHANGELOG.md 必须在跑脚本前写好 ## [X.Y.Z] - YYYY-MM-DD entry。脚本只校验存在,
 # 不替你写——发布说明是创意工作, 自动生成不靠谱。
 #
-# 用法: bash scripts/release.sh 0.2.2
+# 用法:
+#   bash scripts/release.sh 0.2.2
+#   bash scripts/release.sh --emergency 0.2.2
+#
+# 紧急发布模式只跳过 release:smoke, 仍保留 release:check 的构建与打包完整性门禁。
+# 也可以用 RELEASE_EMERGENCY=1 bash scripts/release.sh 0.2.2。
 # 幂等: 失败重跑会检测 commit / tag 是否已存在并跳过, 不会创建重复 commit。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ "$#" -ne 1 ]]; then
+EMERGENCY="${RELEASE_EMERGENCY:-0}"
+TARGET_VERSION=""
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --emergency)
+      EMERGENCY=1
+      shift
+      ;;
+    --no-emergency)
+      EMERGENCY=0
+      shift
+      ;;
+    -*)
+      echo "ERROR: unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n "$TARGET_VERSION" ]]; then
+        echo "ERROR: unexpected extra argument: $1" >&2
+        exit 2
+      fi
+      TARGET_VERSION="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$TARGET_VERSION" ]]; then
   echo "usage: bash scripts/release.sh <version>" >&2
+  echo "       bash scripts/release.sh --emergency <version>" >&2
   echo "  example: bash scripts/release.sh 0.2.2" >&2
+  echo "  emergency: skips release:smoke only; release:check still runs" >&2
   exit 2
 fi
 
-TARGET_VERSION="$1"
 TAG="v${TARGET_VERSION}"
 
 if ! [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -37,6 +71,9 @@ PKG_FILES=(
 CURRENT_VERSION="$(node -p "require('./apps/proxy/package.json').version")"
 echo "Current version: $CURRENT_VERSION"
 echo "Target version:  $TARGET_VERSION"
+if [[ "$EMERGENCY" == "1" ]]; then
+  echo "Mode:            emergency (release:smoke skipped)"
+fi
 
 if [[ "$CURRENT_VERSION" == "$TARGET_VERSION" ]]; then
   # 幂等支路: bump 已经做过, 但 commit/tag/push 还没做完。允许继续。
@@ -87,8 +124,12 @@ fi
 echo "=== Run release:check ==="
 pnpm release:check
 
-echo "=== Run release:smoke ==="
-pnpm release:smoke
+if [[ "$EMERGENCY" == "1" ]]; then
+  echo "=== EMERGENCY RELEASE: skipping release:smoke ==="
+else
+  echo "=== Run release:smoke ==="
+  pnpm release:smoke
+fi
 
 echo "=== Bump 4 package.json to ${TARGET_VERSION} ==="
 for f in "${PKG_FILES[@]}"; do

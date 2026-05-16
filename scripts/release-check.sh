@@ -12,6 +12,7 @@ bash scripts/web-nginx-config.test.sh
 bash -n scripts/dev-restart.sh
 bash -n scripts/dev-health.sh
 bash -n scripts/dev-relay-restart.sh
+bash scripts/release-options.test.sh
 if ! grep -F 'REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"' scripts/install-relay.sh >/dev/null; then
   echo "Release installer must default to the Aliyun ACR deployment registry" >&2
   exit 1

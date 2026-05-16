@@ -29,6 +29,9 @@ describe("attachPtyScrollController", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    window.history.replaceState(null, "", "/");
+    (window as unknown as { __devAnywherePtyScrollTrace?: unknown }).__devAnywherePtyScrollTrace =
+      undefined;
   });
 
   // Layout and xterm viewport synchronization. These tests belong here because they assert
@@ -1627,6 +1630,48 @@ describe("attachPtyScrollController", () => {
       // 真的变了那一帧介入 (prevCursorBufferRow guard)。
       params.emitRender();
       expect(params.container.scrollTop).toBe(17470);
+    });
+
+    it("traces same-row followCursorY skips with zero cursor delta", () => {
+      window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
+      const params = setupTallHost({ cursorY: 25 });
+      attach(params);
+      (window as unknown as { __devAnywherePtyScrollTrace?: unknown[] })
+        .__devAnywherePtyScrollTrace = [];
+
+      params.emitRender();
+
+      const events =
+        (window as unknown as { __devAnywherePtyScrollTrace?: Array<Record<string, unknown>> })
+          .__devAnywherePtyScrollTrace ?? [];
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: "followCursorY:skip[same-row]",
+            cursorDeltaRows: 0,
+            scrollDeltaToAnchor: 0,
+          }),
+        ]),
+      );
+    });
+
+    it("traces raw input follow scheduling and fire events", () => {
+      window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
+      const params = setupTallHost({ cursorY: 25 });
+      const ctrl = attach(params);
+      (window as unknown as { __devAnywherePtyScrollTrace?: unknown[] })
+        .__devAnywherePtyScrollTrace = [];
+
+      ctrl.traceRawInputFollowScheduled("rawInput");
+      ctrl.traceRawInputFollowFire();
+
+      const events =
+        (window as unknown as { __devAnywherePtyScrollTrace?: Array<Record<string, unknown>> })
+          .__devAnywherePtyScrollTrace ?? [];
+      expect(events.map((event) => event.event)).toEqual([
+        "rawInputFollow:scheduled[rawInput]",
+        "rawInputFollow:fire",
+      ]);
     });
 
     it("followCursorY re-centers when cursor moves to a row outside the current viewport", () => {
