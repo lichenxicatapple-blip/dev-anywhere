@@ -83,6 +83,23 @@ describe("pty vertical intent FSM", () => {
     expect(result.outputPausedChanged).toBe(true);
   });
 
+  it("clears transient touch review when a bottom touch ends without scrolling", () => {
+    const touchingAtBottom = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
+      type: "touch-start",
+      clientY: 300,
+      scrollTop: 1600,
+    }).state;
+
+    const result = reducePtyVerticalIntent(touchingAtBottom, {
+      type: "touch-end",
+      scrollTop: 1600,
+      atCursorAwareBottom: true,
+    });
+
+    expect(result.state.mode).toBe("following");
+    expect(result.trace?.action).toBe("clear");
+  });
+
   const cases: Array<{
     id: (typeof PTY_VERTICAL_INTENT_TRANSITION_IDS)[number];
     initial: PtyVerticalIntentState;

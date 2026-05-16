@@ -399,6 +399,32 @@ describe("attachPtyScrollController", () => {
     expect(onTouchReviewStart).toHaveBeenCalledTimes(2);
   });
 
+  it("does not preserve review intent after a bottom tap without scroll movement", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchend", 300));
+
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
+      true,
+      false,
+    ]);
+  });
+
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();

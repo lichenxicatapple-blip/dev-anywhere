@@ -177,10 +177,14 @@ function assertNever(value: never): never {
 function finishTouchGesture(
   state: PtyVerticalIntentState,
   event: Extract<PtyVerticalIntentEvent, { type: "touch-end" | "touch-cancel" }>,
+  atBottomThreshold: number,
 ): PtyVerticalIntentResult {
   const transitionPrefix = event.type === "touch-end" ? "touch.end" : "touch.cancel";
   const movedDown =
     state.touchStartScrollTop !== null && event.scrollTop > state.touchStartScrollTop;
+  const stillAtTouchStartBottom =
+    state.touchStartScrollTop === null ||
+    event.scrollTop >= state.touchStartScrollTop - atBottomThreshold;
   const base = {
     ...state,
     touchActive: false,
@@ -189,7 +193,11 @@ function finishTouchGesture(
     touchReviewNotified: false,
     lastScrollTop: event.scrollTop,
   };
-  if (state.mode === "reviewing" && movedDown && event.atCursorAwareBottom) {
+  if (
+    state.mode === "reviewing" &&
+    event.atCursorAwareBottom &&
+    (movedDown || stillAtTouchStartBottom)
+  ) {
     return finish(
       state,
       {
@@ -363,7 +371,7 @@ export function reducePtyVerticalIntent(
     }
     case "touch-end":
     case "touch-cancel":
-      return finishTouchGesture(state, event);
+      return finishTouchGesture(state, event, atBottomThreshold);
     default:
       return assertNever(event);
   }
