@@ -367,6 +367,16 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [xtermHostRef],
   );
 
+  const getToolbarPositionForSelectionHandles = useCallback(
+    (handles: PtySelectionHandles): { left: number; top: number } => {
+      return getToolbarPosition(
+        (handles.anchor.left + handles.focus.left) / 2,
+        Math.min(handles.anchor.top, handles.focus.top),
+      );
+    },
+    [getToolbarPosition],
+  );
+
   const refreshSelectionHandles = useCallback((): void => {
     const anchor = selectionAnchorRef.current;
     const focusPoint = selectionFocusRef.current;
@@ -376,8 +386,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     }
     const handles = getSelectionHandles(anchor, focusPoint);
     setPtySelectionHandles(handles);
-    if (!handles) setPtySelectionToolbar(null);
-  }, [getSelectionHandles]);
+    if (!handles) {
+      setPtySelectionToolbar(null);
+      return;
+    }
+    setPtySelectionToolbar((current) =>
+      current ? getToolbarPositionForSelectionHandles(handles) : current,
+    );
+  }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
 
   const clearPtySelection = useCallback((): void => {
     selectionHandleDragCleanupRef.current?.();
@@ -601,14 +617,26 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       selectionAnchorRef.current = selected.anchor;
       selectionFocusRef.current = selected.focus;
       selectedPtyTextRef.current = selected.text;
-      setPtySelectionHandles(getSelectionHandles(selected.anchor, selected.focus));
-      setPtySelectionToolbar(getToolbarPosition(clientX, clientY));
+      const handles = getSelectionHandles(selected.anchor, selected.focus);
+      setPtySelectionHandles(handles);
+      setPtySelectionToolbar(
+        handles
+          ? getToolbarPositionForSelectionHandles(handles)
+          : getToolbarPosition(clientX, clientY),
+      );
       if (selectionLongPressStartedAtBottomRef.current) {
         scrollControllerRef.current?.scrollToBottom("selectionLongPress", { force: true });
       }
       selectionLongPressStartedAtBottomRef.current = false;
     },
-    [clearPtySelection, getSelectionHandles, getToolbarPosition, stopPtySelectionAutoscroll, xtermHostRef],
+    [
+      clearPtySelection,
+      getSelectionHandles,
+      getToolbarPosition,
+      getToolbarPositionForSelectionHandles,
+      stopPtySelectionAutoscroll,
+      xtermHostRef,
+    ],
   );
 
   const copyPtySelection = useCallback((): void => {

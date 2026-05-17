@@ -1,10 +1,13 @@
 // 真 Android Chrome: PTY 是 xterm canvas/WebGL, 不能依赖浏览器原生 DOM 文本选择。
 // 移动端长按应走 DEV Anywhere 自己的 xterm buffer 选区, 支持拖拽范围和边缘自动滚动。
 import type { Page } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
 const SESSION_ID = "mobile-pty-long-press-copy";
+const execFileAsync = promisify(execFile);
 
 declare global {
   interface Window {
@@ -12,6 +15,94 @@ declare global {
     __mobilePtySelectCalls?: Array<{ column: number; row: number; length: number; line: string }>;
     __mobilePtyCopiedText?: string;
   }
+}
+
+interface SelectionOverlayGeometry {
+  visualBottom: number;
+  visualRight: number;
+  toolbar: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+    width: number;
+    height: number;
+  } | null;
+  handles: Array<{
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+    centerX: number;
+    centerY: number;
+  }>;
+}
+
+async function readSelectionOverlayGeometry(page: Page): Promise<SelectionOverlayGeometry> {
+  return page.evaluate(() => {
+    const rectOf = (selector: string) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const handles = Array.from(
+      document.querySelectorAll('[data-slot="pty-selection-handle"]'),
+      (el) => {
+        const rect = el.getBoundingClientRect();
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          left: rect.left,
+          right: rect.right,
+          centerX: rect.left + rect.width / 2,
+          centerY: rect.top + rect.height / 2,
+        };
+      },
+    );
+    return {
+      visualBottom: window.visualViewport?.height ?? window.innerHeight,
+      visualRight: window.visualViewport?.width ?? window.innerWidth,
+      toolbar: rectOf('[data-slot="pty-selection-toolbar"]'),
+      handles,
+    };
+  });
+}
+
+function expectSelectionOverlayAttached(geometry: SelectionOverlayGeometry): void {
+  expect(geometry.toolbar).not.toBeNull();
+  expect(geometry.handles).toHaveLength(2);
+  if (!geometry.toolbar) throw new Error("selection toolbar geometry missing");
+  expect(geometry.toolbar.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.toolbar.bottom).toBeLessThanOrEqual(geometry.visualBottom + 2);
+
+  for (const handle of geometry.handles) {
+    expect(handle.centerX).toBeGreaterThanOrEqual(0);
+    expect(handle.centerX).toBeLessThanOrEqual(geometry.visualRight);
+    expect(handle.centerY).toBeGreaterThanOrEqual(0);
+    expect(handle.centerY).toBeLessThanOrEqual(geometry.visualBottom);
+  }
+
+  const handleTop = Math.min(...geometry.handles.map((handle) => handle.top));
+  const handleBottom = Math.max(...geometry.handles.map((handle) => handle.bottom));
+  const verticalGap =
+    geometry.toolbar.bottom < handleTop
+      ? handleTop - geometry.toolbar.bottom
+      : geometry.toolbar.top > handleBottom
+        ? geometry.toolbar.top - handleBottom
+        : 0;
+  const handleCenterX = geometry.handles.reduce((sum, handle) => sum + handle.centerX, 0) / 2;
+  const toolbarCenterX = (geometry.toolbar.left + geometry.toolbar.right) / 2;
+
+  expect(verticalGap).toBeLessThanOrEqual(96);
+  expect(Math.abs(toolbarCenterX - handleCenterX)).toBeLessThanOrEqual(160);
 }
 
 async function longPress(
@@ -378,48 +469,37 @@ test.describe("L4 mobile / PTY long press copy", () => {
       )
       .toBeLessThanOrEqual(2);
 
-    const geometry = await emuPage.evaluate(() => {
-      const rectOf = (selector: string) => {
-        const el = document.querySelector(selector);
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
-        return {
-          top: rect.top,
-          bottom: rect.bottom,
-          left: rect.left,
-          right: rect.right,
-          width: rect.width,
-          height: rect.height,
-        };
-      };
-      const handleRects = Array.from(
-        document.querySelectorAll('[data-slot="pty-selection-handle"]'),
-        (el) => {
-          const rect = el.getBoundingClientRect();
-          return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
-        },
-      );
-      return {
-        visualBottom: window.visualViewport?.height ?? window.innerHeight,
-        visualRight: window.visualViewport?.width ?? window.innerWidth,
-        toolbar: rectOf('[data-slot="pty-selection-toolbar"]'),
-        handles: handleRects,
-      };
-    });
-    expect(geometry.toolbar).not.toBeNull();
-    expect(geometry.toolbar?.top ?? -1).toBeGreaterThanOrEqual(0);
-    expect(geometry.toolbar?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-      geometry.visualBottom + 2,
-    );
-    expect(geometry.handles).toHaveLength(2);
-    for (const handle of geometry.handles) {
-      const centerX = (handle.left + handle.right) / 2;
-      const centerY = (handle.top + handle.bottom) / 2;
-      expect(centerX).toBeGreaterThanOrEqual(0);
-      expect(centerX).toBeLessThanOrEqual(geometry.visualRight);
-      expect(centerY).toBeGreaterThanOrEqual(0);
-      expect(centerY).toBeLessThanOrEqual(geometry.visualBottom);
-    }
+    expectSelectionOverlayAttached(await readSelectionOverlayGeometry(emuPage));
+
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(() =>
+            Number(
+              document
+                .querySelector("[data-keyboard-offset]")
+                ?.getAttribute("data-keyboard-offset") ?? "0",
+            ),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(0);
+    await execFileAsync("adb", ["shell", "input", "keyevent", "BACK"]);
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(() =>
+            Number(
+              document
+                .querySelector("[data-keyboard-offset]")
+                ?.getAttribute("data-keyboard-offset") ?? "0",
+            ),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(0);
+    await emuPage.waitForTimeout(1_200);
+    expectSelectionOverlayAttached(await readSelectionOverlayGeometry(emuPage));
   });
 
   test("tap outside clears the copy affordance and dragging handles adjusts the selection", async ({
