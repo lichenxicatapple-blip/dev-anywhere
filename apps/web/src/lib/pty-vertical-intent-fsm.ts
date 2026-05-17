@@ -68,8 +68,18 @@ export type PtyVerticalIntentEvent =
     }
   | { type: "touch-start"; clientY: number | null; scrollTop: number }
   | { type: "touch-move"; clientY: number | null; reviewThresholdPx: number }
-  | { type: "touch-end"; scrollTop: number; atCursorAwareBottom: boolean }
-  | { type: "touch-cancel"; scrollTop: number; atCursorAwareBottom: boolean };
+  | {
+      type: "touch-end";
+      scrollTop: number;
+      atCursorAwareBottom: boolean;
+      releaseOnSemanticBottom?: boolean;
+    }
+  | {
+      type: "touch-cancel";
+      scrollTop: number;
+      atCursorAwareBottom: boolean;
+      releaseOnSemanticBottom?: boolean;
+    };
 
 export interface PtyVerticalIntentResult {
   state: PtyVerticalIntentState;
@@ -196,7 +206,7 @@ function finishTouchGesture(
   if (
     state.mode === "reviewing" &&
     event.atCursorAwareBottom &&
-    (movedDown || stillAtTouchStartBottom)
+    (movedDown || stillAtTouchStartBottom || event.releaseOnSemanticBottom === true)
   ) {
     return finish(
       state,

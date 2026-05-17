@@ -1078,6 +1078,7 @@ export function attachPtyScrollController(
     const anchor = getCurrentAnchor();
     const stayedNearTouchStart =
       touchStartScrollTop === null || liveScrollTop >= touchStartScrollTop - atBottomThreshold;
+    const releaseOnSemanticBottom = touchStartedAtCursorAwareBottom && anchor.isAtBottom;
     const atCursorAwareBottomForIntent =
       anchor.isAtBottom ||
       (touchStartedAtCursorAwareBottom &&
@@ -1091,6 +1092,7 @@ export function attachPtyScrollController(
       type,
       scrollTop: liveScrollTop,
       atCursorAwareBottom: atCursorAwareBottomForIntent,
+      releaseOnSemanticBottom,
     });
     notifyAtBottom();
   };

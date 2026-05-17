@@ -584,6 +584,62 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
   });
 
+  it("keeps following after a keyboard-height bottom touch restores to the new semantic bottom", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    let scrollHeight = 21320;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 1061: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 1064;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(20686);
+
+    defineSize(container, { clientHeight: 365 });
+    scrollHeight = 21400;
+    controller.scrollToBottom("keyboardOffset", { force: true });
+    expect(container.scrollTop).toBe(21035);
+
+    container.dispatchEvent(touchEvent("touchstart", 210));
+    defineSize(container, { clientHeight: 634 });
+    scrollHeight = 21320;
+    container.scrollTop = 20240;
+    container.dispatchEvent(new Event("scroll"));
+    expect(container.scrollTop).toBe(20686);
+
+    onUserVerticalScrollIntentChange.mockClear();
+    container.dispatchEvent(touchEvent("touchend", 210));
+    controller.relayout();
+
+    expect(container.scrollTop).toBe(20686);
+    expect(host.style.top).toBe("20240px");
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
+  });
+
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();

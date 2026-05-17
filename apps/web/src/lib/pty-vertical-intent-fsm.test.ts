@@ -100,6 +100,25 @@ describe("pty vertical intent FSM", () => {
     expect(result.trace?.action).toBe("clear");
   });
 
+  it("clears touch review when viewport resize changes the raw bottom scrollTop", () => {
+    const touchingAtBottom = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
+      type: "touch-start",
+      clientY: 300,
+      scrollTop: 21035,
+    }).state;
+
+    const result = reducePtyVerticalIntent(touchingAtBottom, {
+      type: "touch-end",
+      scrollTop: 20686,
+      atCursorAwareBottom: true,
+      releaseOnSemanticBottom: true,
+    });
+
+    expect(result.state.mode).toBe("following");
+    expect(result.trace?.id).toBe("touch.end.bottom-down");
+    expect(result.trace?.action).toBe("clear");
+  });
+
   const cases: Array<{
     id: (typeof PTY_VERTICAL_INTENT_TRANSITION_IDS)[number];
     initial: PtyVerticalIntentState;
