@@ -425,6 +425,35 @@ describe("attachPtyScrollController", () => {
     ]);
   });
 
+  it("clears transient bottom touch intent when keyboard padding moves the bottom before touchend", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    defineScrollHeight(container, 2080);
+    container.dispatchEvent(touchEvent("touchend", 300));
+    controller.scrollToBottom("rawInput");
+
+    expect(container.scrollTop).toBe(1680);
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
+      true,
+      false,
+    ]);
+  });
+
   it("restores bottom when keyboard layout shifts scrollTop during a stationary bottom touch", () => {
     const visualViewport = new EventTarget();
     Object.assign(visualViewport, {

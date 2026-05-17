@@ -186,6 +186,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const lastFrameWriteAtRef = useRef<number | null>(null);
   const relayoutSchedulerRef = useRef<RafScheduler | null>(null);
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
+  const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
@@ -259,8 +260,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }
   if (!rawInputFollowSchedulerRef.current) {
     rawInputFollowSchedulerRef.current = createRafScheduler(() => {
+      const pending = pendingRawInputFollowRef.current ?? { reason: "rawInput", force: false };
+      pendingRawInputFollowRef.current = null;
       scrollControllerRef.current?.traceRawInputFollowFire();
-      scrollControllerRef.current?.scrollToBottom("rawInput");
+      scrollControllerRef.current?.scrollToBottom(
+        pending.reason,
+        pending.force ? { force: true } : undefined,
+      );
       clearNewFramesWhileAway();
     });
   }
@@ -274,10 +280,19 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
   }, []);
 
-  const scheduleRawInputFollow = useCallback((source: string = "rawInput"): void => {
-    scrollControllerRef.current?.traceRawInputFollowScheduled(source);
-    rawInputFollowSchedulerRef.current?.schedule();
-  }, []);
+  const scheduleRawInputFollow = useCallback(
+    (source: string = "rawInput", opts?: { force?: boolean }): void => {
+      const previous = pendingRawInputFollowRef.current;
+      const force = previous?.force === true || opts?.force === true;
+      pendingRawInputFollowRef.current = {
+        reason: opts?.force === true || !previous ? source : previous.reason,
+        force,
+      };
+      scrollControllerRef.current?.traceRawInputFollowScheduled(source);
+      rawInputFollowSchedulerRef.current?.schedule();
+    },
+    [],
+  );
 
   const selectionAnchorRef = useRef<TerminalSelectionPoint | null>(null);
   const selectionFocusRef = useRef<TerminalSelectionPoint | null>(null);
@@ -1028,7 +1043,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     (data: string): void => {
       if (!canAcceptInput()) return;
       sendRemoteInputRaw(sessionId, data);
-      scheduleRawInputFollow("mobileControl");
+      scheduleRawInputFollow("mobileControl", { force: true });
       terminalRef.current?.focus();
     },
     [canAcceptInput, scheduleRawInputFollow, sessionId],

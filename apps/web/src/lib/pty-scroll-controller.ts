@@ -136,6 +136,7 @@ export function attachPtyScrollController(
   // touch native scroll 可能先把 container 推过 cursor-aware bottom, 再被我们 clamp 回来。
   // touchend 释放回看意图时不能只看最终 scrollTop, 还要知道这次手势是否确实向下到过底部。
   let touchGestureMaxScrollTop: number | null = null;
+  let touchStartedAtCursorAwareBottom = false;
   let lastTouchClientX: number | null = null;
   let lastTouchClientY: number | null = null;
   let touchTriedBeyondCursorAwareBottom = false;
@@ -1030,6 +1031,7 @@ export function attachPtyScrollController(
     const startX = touch?.clientX ?? null;
     const startY = touch?.clientY ?? null;
     touchGestureMaxScrollTop = container.scrollTop;
+    touchStartedAtCursorAwareBottom = getCurrentAnchor().isAtBottom;
     lastTouchClientX = startX;
     lastTouchClientY = startY;
     touchTriedBeyondCursorAwareBottom = false;
@@ -1058,24 +1060,35 @@ export function attachPtyScrollController(
   const finishTouchGesture = (type: "touch-end" | "touch-cancel"): void => {
     // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
     // onContainerScroll 的 touchActive 期间不释放, 由 FSM 在 touch end/cancel 统一判定。
+    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
     const scrollTopForIntent =
       touchGestureMaxScrollTop === null
         ? container.scrollTop
         : Math.max(
             container.scrollTop,
             touchGestureMaxScrollTop,
-            touchTriedBeyondCursorAwareBottom && verticalIntent.touchStartScrollTop !== null
-              ? verticalIntent.touchStartScrollTop + atBottomThreshold + 1
+            touchTriedBeyondCursorAwareBottom && touchStartScrollTop !== null
+              ? touchStartScrollTop + atBottomThreshold + 1
               : container.scrollTop,
           );
+    const anchor = getCurrentAnchor();
+    const stayedNearTouchStart =
+      touchStartScrollTop === null ||
+      scrollTopForIntent >= touchStartScrollTop - atBottomThreshold;
+    const atCursorAwareBottomForIntent =
+      anchor.isAtBottom ||
+      (touchStartedAtCursorAwareBottom &&
+        !verticalIntent.touchReviewNotified &&
+        stayedNearTouchStart);
     touchGestureMaxScrollTop = null;
+    touchStartedAtCursorAwareBottom = false;
     lastTouchClientX = null;
     lastTouchClientY = null;
     touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
       type,
       scrollTop: scrollTopForIntent,
-      atCursorAwareBottom: getCurrentAnchor().isAtBottom,
+      atCursorAwareBottom: atCursorAwareBottomForIntent,
     });
     notifyAtBottom();
   };
