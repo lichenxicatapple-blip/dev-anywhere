@@ -4,6 +4,14 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.3.10] - 2026-05-18
+
+### 修复
+
+- 移动端 PTY 在底部长按/触发复制时，如果 Chrome 原生滚动把 long-host 容器临时拉回 host 顶部，会立即恢复到 cursor-aware bottom，并且 `touchend` 不再用旧的底部位置误清回看意图，避免状态显示为跟随底部但光标实际离开视口。
+- `dev-anywhere serve restart` 的服务清理流程改为幂等，避免 PID 文件已被提前删除时重启失败。
+- 发布包校验补充 proxy CLI shebang 覆盖，防止 npm 全局安装后的命令入口缺少 `node` shebang。
+
 ## [0.3.9] - 2026-05-17
 
 ### 修复
