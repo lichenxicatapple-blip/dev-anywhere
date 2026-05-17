@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,7 @@ import {
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
+import { unlinkIfPresent } from "./common/safe-unlink.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
 
@@ -37,8 +38,8 @@ function stopService(): boolean {
   } catch {
     console.error(`Process ${pid} not found, cleaning up stale files`);
   }
-  if (existsSync(PID_PATH)) unlinkSync(PID_PATH);
-  if (existsSync(SOCK_PATH)) unlinkSync(SOCK_PATH);
+  unlinkIfPresent(PID_PATH);
+  unlinkIfPresent(SOCK_PATH);
   writeFileSync(STOPPED_PATH, String(Date.now()));
   return true;
 }
@@ -158,7 +159,7 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
       // process.kill(pid, 0) 抛错表示进程不存在，继续启动
     }
   }
-  if (existsSync(STOPPED_PATH)) unlinkSync(STOPPED_PATH);
+  unlinkIfPresent(STOPPED_PATH);
 
   // stderr 走 pipe 由父 CLI 订阅：子进程 ready 前（pino logger 未接管）的启动错误
   // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。

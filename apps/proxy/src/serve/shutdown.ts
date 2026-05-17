@@ -1,5 +1,5 @@
-import { unlinkSync } from "node:fs";
 import { flushLogger, type Logger } from "@dev-anywhere/shared/logger";
+import { unlinkIfPresent } from "../common/safe-unlink.js";
 
 // 收尾步骤里依赖的所有外部资源都通过 deps 注入；shutdown 函数本身只负责正确顺序与
 // 单次执行守卫，便于以纯单元测试的方式覆盖双信号场景而不必拉起整个 service。
@@ -37,16 +37,8 @@ export function createServeShutdown(deps: ServeShutdownDeps): () => Promise<void
     deps.workerRegistryDestroyAll();
     deps.hostedPtyRegistryDestroyAll();
     deps.ipcServerClose();
-    try {
-      unlinkSync(deps.sockPath);
-    } catch {
-      // 关闭时 socket 文件可能已被删除
-    }
-    try {
-      unlinkSync(deps.pidPath);
-    } catch {
-      // 关闭时 PID 文件可能已被删除
-    }
+    unlinkIfPresent(deps.sockPath);
+    unlinkIfPresent(deps.pidPath);
     await flushLogger(deps.logger);
     exit(0);
   };

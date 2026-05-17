@@ -1,10 +1,11 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { connect, type Socket } from "node:net";
 import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "../common/logger.js";
 import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
+import { unlinkIfPresent } from "../common/safe-unlink.js";
 
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -34,7 +35,7 @@ export async function cleanupStaleResources(): Promise<void> {
       await flushLogger(serviceLogger);
       process.exit(1);
     }
-    unlinkSync(SOCK_PATH);
+    unlinkIfPresent(SOCK_PATH);
     serviceLogger.info("Removed stale socket file");
   }
 
@@ -48,7 +49,7 @@ export async function cleanupStaleResources(): Promise<void> {
       await flushLogger(serviceLogger);
       process.exit(1);
     }
-    unlinkSync(PID_PATH);
+    unlinkIfPresent(PID_PATH);
     serviceLogger.info("Removed stale PID file");
   }
 }
