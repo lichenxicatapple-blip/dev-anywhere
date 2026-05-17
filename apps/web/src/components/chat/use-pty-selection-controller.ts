@@ -289,6 +289,26 @@ export function usePtySelectionController(
     scrollState.scrollTop,
   ]);
 
+  useEffect(() => {
+    if (!hasPtySelectionHandles) return;
+    const visualViewport = window.visualViewport;
+    let raf = 0;
+    const scheduleRefresh = (): void => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(refreshSelectionHandles);
+    };
+
+    window.addEventListener("resize", scheduleRefresh);
+    visualViewport?.addEventListener("resize", scheduleRefresh);
+    visualViewport?.addEventListener("scroll", scheduleRefresh);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", scheduleRefresh);
+      visualViewport?.removeEventListener("resize", scheduleRefresh);
+      visualViewport?.removeEventListener("scroll", scheduleRefresh);
+    };
+  }, [hasPtySelectionHandles, refreshSelectionHandles]);
+
   const handlePtyLongPressStart = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
       const terminal = terminalRef.current;
