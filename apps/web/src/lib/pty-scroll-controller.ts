@@ -1119,6 +1119,7 @@ export function attachPtyScrollController(
   let prevVvOffsetTop: number | null = null;
   const onVvResize = (): void => {
     lastVisualViewportChangeAt = performance.now();
+    restoreStationaryTouchLayoutShift(container.scrollTop);
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;
@@ -1130,6 +1131,7 @@ export function attachPtyScrollController(
   };
   const onVvScroll = (): void => {
     lastVisualViewportChangeAt = performance.now();
+    restoreStationaryTouchLayoutShift(container.scrollTop);
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;

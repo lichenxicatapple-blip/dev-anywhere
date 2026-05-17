@@ -34,12 +34,14 @@ function dispatchTouch(type: string, target: HTMLElement, props: { clientX: numb
 function Harness({
   focus,
   suppress,
+  onLongPressCandidateStart,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
 }: {
   focus: () => void;
   suppress: () => void;
+  onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
@@ -48,6 +50,7 @@ function Harness({
   const handlers = usePtyTouchGesture({
     terminalRef,
     suppressPtyFocus: suppress,
+    onLongPressCandidateStart,
     onLongPressStart,
     onLongPressMove,
     onLongPressEnd,
@@ -62,6 +65,33 @@ function Harness({
 describe("usePtyTouchGesture", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("captures the long press candidate at touch start before delayed selection delivery", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressCandidateStart = vi.fn();
+    const onLongPressStart = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressCandidateStart={onLongPressCandidateStart}
+        onLongPressStart={onLongPressStart}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchPointer("pointerdown", xterm, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(onLongPressCandidateStart).toHaveBeenCalledWith({ clientX: 100, clientY: 100 });
+    expect(onLongPressStart).not.toHaveBeenCalled();
   });
 
   it("defers focus suppression until the touch scroll gesture ends", () => {

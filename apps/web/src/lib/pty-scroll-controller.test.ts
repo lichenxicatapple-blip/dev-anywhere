@@ -496,6 +496,48 @@ describe("attachPtyScrollController", () => {
     ]);
   });
 
+  it("restores bottom when a stationary bottom touch scroll jump happens before visualViewport resize", () => {
+    const visualViewport = new EventTarget();
+    Object.assign(visualViewport, {
+      height: 390,
+      width: 360,
+      offsetTop: 0,
+      pageTop: 0,
+      scale: 1,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: visualViewport,
+    });
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.scrollTop = 1200;
+    container.dispatchEvent(new Event("scroll"));
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+    container.dispatchEvent(touchEvent("touchend", 300));
+
+    expect(container.scrollTop).toBe(1600);
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
+      true,
+      false,
+    ]);
+  });
+
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();

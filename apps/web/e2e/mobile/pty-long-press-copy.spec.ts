@@ -102,6 +102,22 @@ async function installClipboardProbe(page: Page): Promise<void> {
   });
 }
 
+async function waitForSoftKeyboard(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(0);
+}
+
 test.describe("L4 mobile / PTY long press copy", () => {
   test.setTimeout(60_000);
 
@@ -284,6 +300,126 @@ test.describe("L4 mobile / PTY long press copy", () => {
     expect(handleBox.width).toBeGreaterThanOrEqual(40);
     expect(dotBox.width).toBeGreaterThanOrEqual(8);
     expect(dotBox.width).toBeLessThanOrEqual(13);
+  });
+
+  test("keeps copy handles anchored when long press closes the soft keyboard", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-keyboard-selection`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      query: "&ptyScrollTrace=1",
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from(
+          { length: 90 },
+          (_, i) => `KEYBOARD COPY LINE ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("KEYBOARD COPY LINE 089");
+
+    const terminal = emuPage.locator('[data-slot="pty-terminal"]');
+    await terminal.click();
+    await expect(
+      emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
+    ).toBeFocused();
+    await waitForSoftKeyboard(emuPage);
+
+    const target = await emuPage.evaluate((sid) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      if (!term || !screen || !container) return null;
+      const buffer = term.buffer.active;
+      const screenRect = screen.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const visualBottom = window.visualViewport?.height ?? window.innerHeight;
+      const cellWidth = screen.clientWidth / term.cols;
+      const cellHeight = screen.clientHeight / term.rows;
+      const top = Math.max(containerRect.top + 24, screenRect.top);
+      const bottom = Math.min(containerRect.bottom, visualBottom) - 64;
+      for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+        const y = screenRect.top + (row - buffer.viewportY + 0.5) * cellHeight;
+        const text = buffer.getLine(row)?.translateToString(true) ?? "";
+        if (y >= top && y <= bottom && text.includes("KEYBOARD COPY LINE")) {
+          return {
+            x: screenRect.left + cellWidth * 2,
+            y,
+            text,
+          };
+        }
+      }
+      return null;
+    }, sessionId);
+    if (!target) throw new Error("keyboard long-press target is not visible");
+
+    await longPress(emuPage, { x: target.x, y: target.y });
+
+    const copyButton = emuPage.getByRole("button", { name: "复制终端选区" });
+    const startHandle = emuPage.getByRole("button", { name: "调整选区起点" });
+    const endHandle = emuPage.getByRole("button", { name: "调整选区终点" });
+    await expect(copyButton).toBeVisible();
+    await expect(startHandle).toBeVisible();
+    await expect(endHandle).toBeVisible();
+
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() => {
+          const debug = window.__devAnywherePtyDebug?.();
+          if (!debug) return Number.NEGATIVE_INFINITY;
+          return Math.abs(debug.container.scrollTop - debug.anchor.bottomScrollTop);
+        }),
+      )
+      .toBeLessThanOrEqual(2);
+
+    const geometry = await emuPage.evaluate(() => {
+      const rectOf = (selector: string) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const handleRects = Array.from(
+        document.querySelectorAll('[data-slot="pty-selection-handle"]'),
+        (el) => {
+          const rect = el.getBoundingClientRect();
+          return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+        },
+      );
+      return {
+        visualBottom: window.visualViewport?.height ?? window.innerHeight,
+        visualRight: window.visualViewport?.width ?? window.innerWidth,
+        toolbar: rectOf('[data-slot="pty-selection-toolbar"]'),
+        handles: handleRects,
+      };
+    });
+    expect(geometry.toolbar).not.toBeNull();
+    expect(geometry.toolbar?.top ?? -1).toBeGreaterThanOrEqual(0);
+    expect(geometry.toolbar?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      geometry.visualBottom + 2,
+    );
+    expect(geometry.handles).toHaveLength(2);
+    for (const handle of geometry.handles) {
+      const centerX = (handle.left + handle.right) / 2;
+      const centerY = (handle.top + handle.bottom) / 2;
+      expect(centerX).toBeGreaterThanOrEqual(0);
+      expect(centerX).toBeLessThanOrEqual(geometry.visualRight);
+      expect(centerY).toBeGreaterThanOrEqual(0);
+      expect(centerY).toBeLessThanOrEqual(geometry.visualBottom);
+    }
   });
 
   test("tap outside clears the copy affordance and dragging handles adjusts the selection", async ({

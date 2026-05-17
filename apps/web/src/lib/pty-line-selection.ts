@@ -27,6 +27,11 @@ interface SelectTerminalTokenAtPointOptions extends TerminalPointAtClientOptions
 
 interface SelectTerminalInitialRangeAtPointOptions extends TerminalPointAtClientOptions {}
 
+interface SelectTerminalInitialRangeAtBufferPointOptions {
+  terminal: Terminal;
+  point: TerminalSelectionPoint;
+}
+
 interface SelectTerminalRangeOptions {
   terminal: Terminal;
   anchor: TerminalSelectionPoint;
@@ -353,6 +358,13 @@ export function selectTerminalInitialRangeAtPoint({
   });
   if (!point) return null;
 
+  return selectTerminalInitialRangeAtBufferPoint({ terminal, point });
+}
+
+export function selectTerminalInitialRangeAtBufferPoint({
+  terminal,
+  point,
+}: SelectTerminalInitialRangeAtBufferPointOptions): TerminalSelectionResult | null {
   const line = terminal.buffer.active.getLine(point.row);
   if (!line) return null;
 

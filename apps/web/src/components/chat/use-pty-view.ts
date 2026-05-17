@@ -40,6 +40,8 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
+import { computeScrollAnchor } from "@/lib/pty-scroll";
+import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import {
   registerPtyDebugSnapshotProvider,
   registerPtyTerminalWindowAccessor,
@@ -57,6 +59,7 @@ import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import {
   getClientPositionForTerminalPoint,
   getTerminalPointAtClient,
+  selectTerminalInitialRangeAtBufferPoint,
   selectTerminalInitialRangeAtPoint,
   selectTerminalRange,
   type TerminalSelectionPoint,
@@ -159,6 +162,7 @@ interface ScrollControllerHandle {
   scrollToXRatio: (ratio: number) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
+  getDebugProbe: () => PtyScrollDebugProbe;
 }
 
 interface TerminalControllerHandle {
@@ -296,6 +300,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const selectionAnchorRef = useRef<TerminalSelectionPoint | null>(null);
   const selectionFocusRef = useRef<TerminalSelectionPoint | null>(null);
+  const selectionLongPressCandidateRef = useRef<TerminalSelectionPoint | null>(null);
+  const selectionLongPressStartedAtBottomRef = useRef(false);
   const selectionDraggedRef = useRef(false);
   const selectedPtyTextRef = useRef("");
   const selectionAutoscrollFrameRef = useRef<number | null>(null);
@@ -377,6 +383,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     selectionHandleDragCleanupRef.current?.();
     selectionHandleDragCleanupRef.current = null;
     stopPtySelectionAutoscroll();
+    selectionLongPressCandidateRef.current = null;
+    selectionLongPressStartedAtBottomRef.current = false;
     selectionAnchorRef.current = null;
     selectionFocusRef.current = null;
     selectionDraggedRef.current = false;
@@ -385,6 +393,41 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     setPtySelectionToolbar(null);
     setPtySelectionHandles(null);
   }, [stopPtySelectionAutoscroll]);
+
+  const capturePtyLongPressCandidate = useCallback(
+    ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
+      const terminal = terminalRef.current;
+      const host = xtermHostRef.current;
+      selectionLongPressCandidateRef.current =
+        terminal && host ? getTerminalPointAtClient({ terminal, host, clientX, clientY }) : null;
+      const container = containerEl;
+      const scrollCtrl = scrollControllerRef.current;
+      if (!terminal || !container || !scrollCtrl) {
+        selectionLongPressStartedAtBottomRef.current = false;
+        return;
+      }
+      const probe = scrollCtrl.getDebugProbe();
+      const buffer = terminal.buffer.active;
+      const anchor = computeScrollAnchor({
+        rows: terminal.rows,
+        cellH: probe.cellH,
+        bufferLength: buffer.length,
+        cursorBufferRow: buffer.baseY + buffer.cursorY,
+        visibleContentHeight: Math.max(
+          0,
+          container.clientHeight - probe.paddingTop - probe.paddingBottom,
+        ),
+        paddingTop: probe.paddingTop,
+        paddingBottom: probe.paddingBottom,
+        containerScrollTop: container.scrollTop,
+        containerScrollHeight: container.scrollHeight,
+        containerClientHeight: container.clientHeight,
+        atBottomThreshold: probe.atBottomThreshold,
+      });
+      selectionLongPressStartedAtBottomRef.current = anchor.isAtBottom;
+    },
+    [containerEl, xtermHostRef],
+  );
 
   const applyPtySelectionRange = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }) => {
@@ -498,7 +541,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       if (!terminal || !host) return;
-      const point = getTerminalPointAtClient({ terminal, host, clientX, clientY });
+      const point =
+        getTerminalPointAtClient({ terminal, host, clientX, clientY }) ??
+        selectionLongPressCandidateRef.current;
       terminal.clearSelection();
       if (!point) {
         selectionAnchorRef.current = null;
@@ -540,7 +585,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const selected =
         selectionDraggedRef.current && anchor && focus
           ? selectTerminalRange({ terminal, anchor, focus })
-          : selectTerminalInitialRangeAtPoint({ terminal, host, clientX, clientY });
+          : selectTerminalInitialRangeAtPoint({ terminal, host, clientX, clientY }) ??
+            (selectionLongPressCandidateRef.current
+              ? selectTerminalInitialRangeAtBufferPoint({
+                  terminal,
+                  point: selectionLongPressCandidateRef.current,
+                })
+              : null);
+      selectionLongPressCandidateRef.current = null;
       if (!selected?.text) {
         clearPtySelection();
         return;
@@ -551,6 +603,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       selectedPtyTextRef.current = selected.text;
       setPtySelectionHandles(getSelectionHandles(selected.anchor, selected.focus));
       setPtySelectionToolbar(getToolbarPosition(clientX, clientY));
+      if (selectionLongPressStartedAtBottomRef.current) {
+        scrollControllerRef.current?.scrollToBottom("selectionLongPress", { force: true });
+      }
+      selectionLongPressStartedAtBottomRef.current = false;
     },
     [clearPtySelection, getSelectionHandles, getToolbarPosition, stopPtySelectionAutoscroll, xtermHostRef],
   );
@@ -662,6 +718,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const touchGestureHandlers = usePtyTouchGesture({
     terminalRef,
     suppressPtyFocus,
+    onLongPressCandidateStart: capturePtyLongPressCandidate,
     onLongPressStart: handlePtyLongPressStart,
     onLongPressMove: handlePtyLongPressMove,
     onLongPressEnd: handlePtyLongPressEnd,

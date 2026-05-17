@@ -38,6 +38,7 @@ interface PtyTouchGestureHandlers {
 interface UsePtyTouchGestureOptions {
   terminalRef: RefObject<Terminal | null>;
   suppressPtyFocus: () => void;
+  onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
@@ -46,6 +47,7 @@ interface UsePtyTouchGestureOptions {
 export function usePtyTouchGesture({
   terminalRef,
   suppressPtyFocus,
+  onLongPressCandidateStart,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
@@ -97,8 +99,9 @@ export function usePtyTouchGesture({
         markLongPress(gesture);
       }, LONG_PRESS_DELAY_MS);
       touchPointerRef.current = gesture;
+      onLongPressCandidateStart?.({ clientX, clientY });
     },
-    [markLongPress],
+    [markLongPress, onLongPressCandidateStart],
   );
 
   const updateGestureMove = useCallback(
