@@ -65,6 +65,8 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         readyState = FakeWebSocket.CONNECTING;
         sent: string[] = [];
         outputSeq = 0;
+        cols = 80;
+        rows = 24;
 
         constructor(url: string) {
           super();
@@ -182,14 +184,16 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
             type: "session_snapshot",
             sessionId,
             requestId,
-            cols: 80,
-            rows: 24,
+            cols: this.cols,
+            rows: this.rows,
             data,
             outputSeq: this.outputSeq,
           });
         }
 
         emitResize(cols: number, rows: number): void {
+          this.cols = cols;
+          this.rows = rows;
           this.emitJson({ type: "terminal_resize", sessionId, cols, rows });
         }
 
