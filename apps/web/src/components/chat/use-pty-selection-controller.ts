@@ -23,8 +23,6 @@ import {
   type PtySelectionHandles,
   type PtySelectionHandlePosition,
 } from "@/lib/pty-selection-layout";
-import { computeScrollAnchor } from "@/lib/pty-scroll";
-import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
 import {
   usePtySelectionGestureDriver,
@@ -51,7 +49,6 @@ interface PointerHandlers {
 interface SelectionScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  getDebugProbe: () => PtyScrollDebugProbe;
 }
 
 interface UsePtySelectionControllerOptions {
@@ -105,7 +102,6 @@ export function usePtySelectionController(
   const selectionLongPressClientStartRef = useRef<{ clientX: number; clientY: number } | null>(
     null,
   );
-  const selectionLongPressStartedAtBottomRef = useRef(false);
   const selectionDraggedRef = useRef(false);
   const selectedDownloadPathRef = useRef<string | null>(null);
   const selectedPtyTextRef = useRef("");
@@ -209,7 +205,6 @@ export function usePtySelectionController(
     stopPtySelectionGestureRef.current?.();
     selectionLongPressCandidateRef.current = null;
     selectionLongPressClientStartRef.current = null;
-    selectionLongPressStartedAtBottomRef.current = false;
     selectionAnchorRef.current = null;
     selectionFocusRef.current = null;
     selectionDraggedRef.current = false;
@@ -228,33 +223,8 @@ export function usePtySelectionController(
       selectionLongPressClientStartRef.current = { clientX, clientY };
       selectionLongPressCandidateRef.current =
         terminal && host ? getTerminalPointAtClient({ terminal, host, clientX, clientY }) : null;
-      const container = containerEl;
-      const scrollCtrl = scrollControllerRef.current;
-      if (!terminal || !container || !scrollCtrl) {
-        selectionLongPressStartedAtBottomRef.current = false;
-        return;
-      }
-      const probe = scrollCtrl.getDebugProbe();
-      const buffer = terminal.buffer.active;
-      const anchor = computeScrollAnchor({
-        rows: terminal.rows,
-        cellH: probe.cellH,
-        bufferLength: buffer.length,
-        cursorBufferRow: buffer.baseY + buffer.cursorY,
-        visibleContentHeight: Math.max(
-          0,
-          container.clientHeight - probe.paddingTop - probe.paddingBottom,
-        ),
-        paddingTop: probe.paddingTop,
-        paddingBottom: probe.paddingBottom,
-        containerScrollTop: container.scrollTop,
-        containerScrollHeight: container.scrollHeight,
-        containerClientHeight: container.clientHeight,
-        atBottomThreshold: probe.atBottomThreshold,
-      });
-      selectionLongPressStartedAtBottomRef.current = anchor.isAtBottom;
     },
-    [containerEl, scrollControllerRef, terminalRef, xtermHostRef],
+    [terminalRef, xtermHostRef],
   );
 
   const applyPtySelectionRange = useCallback(
@@ -470,12 +440,8 @@ export function usePtySelectionController(
       const linkPoint = candidate ?? endPoint;
       if (!selectionDraggedRef.current && !clientMoved && selectedPtyTextRef.current) {
         showToolbarForCurrentSelection();
-        if (selectionLongPressStartedAtBottomRef.current) {
-          scrollControllerRef.current?.scrollToBottom("selectionLongPress", { force: true });
-        }
         selectionLongPressCandidateRef.current = null;
         selectionLongPressClientStartRef.current = null;
-        selectionLongPressStartedAtBottomRef.current = false;
         return;
       }
       const linkSelection =
@@ -513,10 +479,6 @@ export function usePtySelectionController(
           ? getToolbarPositionForSelectionHandles(handles)
           : getToolbarPosition(clientX, clientY),
       );
-      if (selectionLongPressStartedAtBottomRef.current) {
-        scrollControllerRef.current?.scrollToBottom("selectionLongPress", { force: true });
-      }
-      selectionLongPressStartedAtBottomRef.current = false;
     },
     [
       clearPtySelection,
@@ -524,7 +486,6 @@ export function usePtySelectionController(
       getToolbarPosition,
       getToolbarPositionForSelectionHandles,
       showToolbarForCurrentSelection,
-      scrollControllerRef,
       terminalRef,
       xtermHostRef,
     ],
