@@ -133,6 +133,7 @@ interface UsePtyViewResult {
 interface ScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
+  restorePageResume: (opts: { wasFollowing: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -167,6 +168,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
+  const pageResumePendingRef = useRef(false);
+  const pageResumeWasFollowingRef = useRef(true);
+  const pageResumeFrameRef = useRef<number | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
     hasSeenSoftKeyboard: false,
@@ -254,10 +258,65 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return () => {
       relayoutSchedulerRef.current?.dispose();
       rawInputFollowSchedulerRef.current?.dispose();
+      if (pageResumeFrameRef.current !== null) {
+        cancelAnimationFrame(pageResumeFrameRef.current);
+        pageResumeFrameRef.current = null;
+      }
       relayoutSchedulerRef.current = null;
       rawInputFollowSchedulerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const cancelPendingFrame = (): void => {
+      if (pageResumeFrameRef.current === null) return;
+      cancelAnimationFrame(pageResumeFrameRef.current);
+      pageResumeFrameRef.current = null;
+    };
+
+    const rememberHiddenState = (): void => {
+      pageResumePendingRef.current = true;
+      pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
+      cancelPendingFrame();
+    };
+
+    const scheduleResumeRestore = (): void => {
+      if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
+      const wasFollowing = pageResumeWasFollowingRef.current;
+      cancelPendingFrame();
+      pageResumeFrameRef.current = requestAnimationFrame(() => {
+        pageResumeFrameRef.current = requestAnimationFrame(() => {
+          pageResumeFrameRef.current = null;
+          const scroll = scrollControllerRef.current;
+          if (!scroll) return;
+          scroll.restorePageResume({ wasFollowing });
+          if (wasFollowing) clearNewFramesWhileAway();
+          pageResumePendingRef.current = false;
+        });
+      });
+    };
+
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") {
+        rememberHiddenState();
+        return;
+      }
+      scheduleResumeRestore();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", rememberHiddenState);
+    window.addEventListener("pageshow", scheduleResumeRestore);
+    window.addEventListener("focus", scheduleResumeRestore);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", rememberHiddenState);
+      window.removeEventListener("pageshow", scheduleResumeRestore);
+      window.removeEventListener("focus", scheduleResumeRestore);
+      cancelPendingFrame();
+    };
+  }, [clearNewFramesWhileAway]);
 
   const scheduleRawInputFollow = useCallback(
     (source: string = "rawInput", opts?: { force?: boolean }): void => {

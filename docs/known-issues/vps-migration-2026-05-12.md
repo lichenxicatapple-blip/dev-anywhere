@@ -37,13 +37,13 @@ Permission denied (publickey).
 
 不同云厂商 + 不同镜像默认 ssh user 不一致, 项目 `~/.ssh/config` 里 `User ubuntu` 是从腾讯云时代留下的, 切阿里云 Ubuntu 22.04 后默认 user 变成 `root`. 几个常见情况 (本项目不假设, 由用户根据自己 vps 实际填):
 
-| 云 / 镜像                | 默认 user        |
-| ------------------------ | ---------------- |
-| 阿里云 Ubuntu / CentOS   | `root`           |
-| AWS Ubuntu / Debian      | `ubuntu` / `admin` |
-| AWS Amazon Linux / RHEL  | `ec2-user`       |
-| GCP                      | 用户名 (创建时自定义) |
-| 自建 / VPS provider      | 看管理员配置      |
+| 云 / 镜像               | 默认 user             |
+| ----------------------- | --------------------- |
+| 阿里云 Ubuntu / CentOS  | `root`                |
+| AWS Ubuntu / Debian     | `ubuntu` / `admin`    |
+| AWS Amazon Linux / RHEL | `ec2-user`            |
+| GCP                     | 用户名 (创建时自定义) |
+| 自建 / VPS provider     | 看管理员配置          |
 
 **解**: 改 `~/.ssh/config` 的 `User <对应值>`, 或 `--ssh user@host` 显式覆盖. install-relay.sh 和 check-prerequisite.sh 都接受 `user@host` 形式.
 

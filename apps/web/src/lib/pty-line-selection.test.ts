@@ -45,7 +45,7 @@ describe("selectTerminalLineAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 200 },
       clientHeight: { value: 200 },
@@ -76,7 +76,26 @@ describe("selectTerminalTokenAtPoint", () => {
           viewportY: 30,
           getLine: (row: number) =>
             row === 32
-              ? line([" ", " ", "p", "n", "p", "m", " ", "d", "e", "v", ":", "r", "e", "s", "t", "a", "r", "t"])
+              ? line([
+                  " ",
+                  " ",
+                  "p",
+                  "n",
+                  "p",
+                  "m",
+                  " ",
+                  "d",
+                  "e",
+                  "v",
+                  ":",
+                  "r",
+                  "e",
+                  "s",
+                  "t",
+                  "a",
+                  "r",
+                  "t",
+                ])
               : undefined,
         },
       },
@@ -87,7 +106,7 @@ describe("selectTerminalTokenAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 240, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 240, height: 200 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 240 },
       clientHeight: { value: 200 },
@@ -125,7 +144,7 @@ describe("selectTerminalTokenAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 200 },
       clientHeight: { value: 200 },
@@ -171,7 +190,7 @@ describe("selectTerminalInitialRangeAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 400, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 400, height: 200 }) as DOMRect;
 
     const selected = selectTerminalInitialRangeAtPoint({
       terminal,
@@ -196,7 +215,11 @@ describe("selectTerminalInitialRangeAtPoint", () => {
           viewportY: 30,
           getLine: (row: number) =>
             row === 32
-              ? line("run very-long-token-here now".split("").concat(Array.from({ length: 12 }, () => " ")))
+              ? line(
+                  "run very-long-token-here now"
+                    .split("")
+                    .concat(Array.from({ length: 12 }, () => " ")),
+                )
               : undefined,
         },
       },
@@ -207,7 +230,7 @@ describe("selectTerminalInitialRangeAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 400, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 400, height: 200 }) as DOMRect;
 
     const selected = selectTerminalInitialRangeAtPoint({
       terminal,
@@ -243,7 +266,7 @@ describe("selectTerminalInitialRangeAtPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 300, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 300, height: 200 }) as DOMRect;
 
     const selected = selectTerminalInitialRangeAtPoint({
       terminal,
@@ -301,7 +324,7 @@ describe("getTerminalPointAtClient", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 200 },
       clientHeight: { value: 200 },
@@ -332,7 +355,7 @@ describe("getClientPositionForTerminalPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 200 },
       clientHeight: { value: 200 },
@@ -370,7 +393,7 @@ describe("getClientPositionForTerminalPoint", () => {
     screen.className = "xterm-screen";
     host.append(screen);
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 } as DOMRect);
+      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
 
     expect(
       getClientPositionForTerminalPoint({

@@ -67,6 +67,39 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtySessionSubscribeCount(page, 2);
   });
 
+  test("restores page-resume scroll only when hidden while following bottom", async ({ page }) => {
+    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await expectPtyTerminalMounted(page);
+
+    await sendPtyLines(page, { count: 120, prefix: "resume-follow" });
+    await expectPtyAtBottom(page);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await ptyTerminal(page).evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollTop = 0;
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect
+      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
+      .toBeGreaterThan(100);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+    await expectPtyAtBottom(page);
+
+    await scrollPtyToTop(page);
+    await expect(backToBottom(page)).toBeVisible();
+    const reviewingMetrics = await readPtyScrollMetrics(page);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+    await page.waitForTimeout(100);
+
+    const afterReviewResume = await readPtyScrollMetrics(page);
+    expect(afterReviewResume.scrollTop).toBeLessThanOrEqual(reviewingMetrics.scrollTop + 8);
+    expect(afterReviewResume.bottomGap).toBeGreaterThan(100);
+  });
+
   // longHost 模式 (rows*cellH > visible content height) 下, isAtBottom = cursorInViewport。
   // 用户 wheel up 一小段, cursor 仍可见 → atBottom 仍 true → bug 版 notifyAtBottom
   // 立刻清掉 intent → output flush → scrollToBottom 拉回。

@@ -52,6 +52,10 @@ interface PtyScrollController {
   // 默认被动 caller (rawInput / pendingFrame / relayout / termScroll) 在 intent=true
   // 时整段 no-op。把 invariant 收到 controller 内部, 新加 caller 默认就对。
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
+  // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。调用方必须传入
+  // "页面隐藏前" 的语义状态,而不是恢复后的当前几何状态: 如果隐藏前在 follow,
+  // 则旧 scrollTop 是浏览器恢复噪音,需要强制回到底; 如果隐藏前在 review,保持用户位置。
+  restorePageResume: (opts: { wasFollowing: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -459,6 +463,16 @@ export function attachPtyScrollController(
     // 让 scrollToBottom 的"重置 stale state"语义不真。在所有同步副作用后再清,确保边界干净。
     pendingContainerSyncRetry = false;
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
+  };
+
+  const restorePageResume = ({ wasFollowing }: { wasFollowing: boolean }): void => {
+    if (!wasFollowing) {
+      trace("page-resume:preserve-review");
+      notifyScroll();
+      return;
+    }
+    updateSpacer();
+    scrollToBottom("pageResume", { force: true });
   };
 
   const scrollToRatio = (ratio: number): void => {
@@ -1073,8 +1087,7 @@ export function attachPtyScrollController(
           );
     const anchor = getCurrentAnchor();
     const stayedNearTouchStart =
-      touchStartScrollTop === null ||
-      scrollTopForIntent >= touchStartScrollTop - atBottomThreshold;
+      touchStartScrollTop === null || scrollTopForIntent >= touchStartScrollTop - atBottomThreshold;
     const atCursorAwareBottomForIntent =
       anchor.isAtBottom ||
       (touchStartedAtCursorAwareBottom &&
@@ -1227,6 +1240,7 @@ export function attachPtyScrollController(
     },
     relayout,
     scrollToBottom,
+    restorePageResume,
     scrollToRatio,
     scrollToXRatio,
     traceRawInputFollowScheduled,

@@ -29,8 +29,8 @@ dev-anywhere codex --model gpt-5.5
 
 ## Deployment
 
-| Script                     | Purpose                                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Script                     | Purpose                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `scripts/install-relay.sh` | Deploy relay + web to a VPS from published Docker images. Uses host nginx for public `80/443` and loopback Docker ports for DEV Anywhere. Supports local `--ssh` mode and direct VPS mode. |
 
 Production deployment should use `install-relay.sh`. It creates or reuses both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`.

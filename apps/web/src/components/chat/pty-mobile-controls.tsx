@@ -43,11 +43,7 @@ export function PtyMobileControls({ onInput, onPaste }: PtyMobileControlsProps) 
         >
           Esc
         </SinglePressKey>
-        <SinglePressKey
-          label="发送 Tab"
-          slot="pty-mobile-key-tab"
-          onPress={() => onInput("\t")}
-        >
+        <SinglePressKey label="发送 Tab" slot="pty-mobile-key-tab" onPress={() => onInput("\t")}>
           Tab
         </SinglePressKey>
         <SinglePressKey

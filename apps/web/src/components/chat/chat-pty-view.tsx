@@ -5,10 +5,7 @@
 // 编排（4 个 controller 的生命周期 + 调度器 + debug 注册）全部下沉到 usePtyView，
 // 本组件仅负责 DOM 结构与 JSX 接线。
 import { useRef, useState } from "react";
-import type {
-  PointerEvent as ReactPointerEvent,
-  TouchEvent as ReactTouchEvent,
-} from "react";
+import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";

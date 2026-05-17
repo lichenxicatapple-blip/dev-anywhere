@@ -97,9 +97,7 @@ test.describe("chat 页异常态展示", () => {
       .toBeNull();
 
     // 模拟 PWA 冷启动: 清掉 sessionStorage 的 RESTORED 标记 + 跳到 root
-    await page.evaluate(() =>
-      sessionStorage.removeItem("dev-anywhere:route-restored"),
-    );
+    await page.evaluate(() => sessionStorage.removeItem("dev-anywhere:route-restored"));
     await page.goto(`${BASE_URL}/#/`);
 
     // 由于 last-chat-route 已被清掉, AppShell 不会拽回 /chat/json-sess; 应停在 / 或 sessions

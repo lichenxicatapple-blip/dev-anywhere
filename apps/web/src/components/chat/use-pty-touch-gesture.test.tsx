@@ -21,7 +21,11 @@ function dispatchPointer(
   target.dispatchEvent(event);
 }
 
-function dispatchTouch(type: string, target: HTMLElement, props: { clientX: number; clientY: number }): void {
+function dispatchTouch(
+  type: string,
+  target: HTMLElement,
+  props: { clientX: number; clientY: number },
+): void {
   const event = new Event(type, { bubbles: true, cancelable: true });
   const touch = { clientX: props.clientX, clientY: props.clientY };
   Object.defineProperties(event, {

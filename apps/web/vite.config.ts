@@ -20,7 +20,9 @@ function loadHttpsConfig() {
   const certPath = process.env.DEV_ANYWHERE_WEB_HTTPS_CERT;
   if (!keyPath && !certPath) return undefined;
   if (!keyPath || !certPath) {
-    throw new Error("DEV_ANYWHERE_WEB_HTTPS_KEY and DEV_ANYWHERE_WEB_HTTPS_CERT must be set together");
+    throw new Error(
+      "DEV_ANYWHERE_WEB_HTTPS_KEY and DEV_ANYWHERE_WEB_HTTPS_CERT must be set together",
+    );
   }
   return {
     key: fs.readFileSync(keyPath),

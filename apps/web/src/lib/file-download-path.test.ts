@@ -87,7 +87,9 @@ describe("file-download-path extraction", () => {
     // 跟 image-preview-path 同样的失误形态: 中文里夹 ASCII 单词触发 regex 起始,
     // greedy 主干吞过中文到尾部 .ext, 把整段中文框成 link。严格白名单字符集挡住中文。
     expect(
-      extractFileDownloadPaths("中文 logo notes 备注 @/var/folders/abc/T/dev-anywhere/up-A7Bx9k.txt 末尾"),
+      extractFileDownloadPaths(
+        "中文 logo notes 备注 @/var/folders/abc/T/dev-anywhere/up-A7Bx9k.txt 末尾",
+      ),
     ).toEqual(["/var/folders/abc/T/dev-anywhere/up-A7Bx9k.txt"]);
   });
 });

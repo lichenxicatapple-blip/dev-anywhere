@@ -292,10 +292,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           ) : null}
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
           <div className="px-2 pb-1" data-slot="chat-menu-font-control">
-            <div
-              className="flex min-h-10 items-center gap-2.5"
-              data-slot="chat-menu-font-row"
-            >
+            <div className="flex min-h-10 items-center gap-2.5" data-slot="chat-menu-font-row">
               <ChatMenuIcon>
                 <Type aria-hidden="true" />
               </ChatMenuIcon>

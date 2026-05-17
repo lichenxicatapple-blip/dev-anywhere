@@ -18,8 +18,7 @@ export function computeVisualViewportBottomOffset({
   visualViewportOffsetTop,
   baselineViewportHeight,
 }: VisualViewportBottomOffsetInput): number {
-  const currentBottomInset =
-    layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
+  const currentBottomInset = layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
   const baselineBottomInset =
     baselineViewportHeight - visualViewportHeight - visualViewportOffsetTop;
   const currentRatio = visualViewportHeight / Math.max(layoutViewportHeight, 1);
@@ -39,8 +38,7 @@ export function computeVisualViewportLayoutBottomInset({
   visualViewportHeight,
   visualViewportOffsetTop,
 }: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight">): number {
-  const currentBottomInset =
-    layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
+  const currentBottomInset = layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
   const currentRatio = visualViewportHeight / Math.max(layoutViewportHeight, 1);
   const currentLooksLikeKeyboard =
     currentBottomInset > 0 && currentRatio < SOFT_KEYBOARD_VIEWPORT_RATIO;

@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  consumeRestoredTarget,
-  markRestoredTarget,
-  pickRouteToRestore,
-} from "./route-restore";
+import { consumeRestoredTarget, markRestoredTarget, pickRouteToRestore } from "./route-restore";
 
 describe("pickRouteToRestore", () => {
   it("restores last chat route on cold-start landing at root", () => {

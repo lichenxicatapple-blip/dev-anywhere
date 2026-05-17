@@ -15,9 +15,9 @@ test.describe("L4 mobile / chat overflow menu", () => {
     const menu = emuPage.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible({ timeout: 30_000 });
 
-    await expect.poll(() => emuPage.evaluate(() => document.body.style.pointerEvents)).not.toBe(
-      "none",
-    );
+    await expect
+      .poll(() => emuPage.evaluate(() => document.body.style.pointerEvents))
+      .not.toBe("none");
 
     await emuPage.locator('[data-slot="message-list"]').click({ position: { x: 16, y: 120 } });
     await expect(menu).toHaveCount(0);

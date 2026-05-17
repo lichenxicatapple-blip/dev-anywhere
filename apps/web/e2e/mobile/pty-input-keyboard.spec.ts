@@ -63,9 +63,8 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       return {
         controlsBottom: controlsRect ? controlsRect.y + controlsRect.height : null,
         keyboardOffset: Number(
-          document
-            .querySelector("[data-keyboard-offset]")
-            ?.getAttribute("data-keyboard-offset") ?? "0",
+          document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
+            "0",
         ),
         keyboardLayoutInset: Number(
           document

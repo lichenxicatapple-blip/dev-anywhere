@@ -19,11 +19,10 @@ const MIN_THUMB_WIDTH = 40;
 const SCROLL_ACTIVITY_HIDE_DELAY_MS = 900;
 
 // 滚动活动状态: 任意维度 scroll* 数值变化即视为活跃, 停止后 SCROLL_ACTIVITY_HIDE_DELAY_MS 内仍可见。
-function useScrollActivity(deps: ReadonlyArray<number>): boolean {
+function useScrollActivity(scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
   const [active, setActive] = useState(false);
   const timerRef = useRef<number | null>(null);
   const isFirstRunRef = useRef(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     // 首次挂载或初始 deps 不算用户滚动行为, 否则会让滚动条莫名闪一下
     if (isFirstRunRef.current) {
@@ -42,7 +41,7 @@ function useScrollActivity(deps: ReadonlyArray<number>): boolean {
         timerRef.current = null;
       }
     };
-  }, deps);
+  }, [scrollTop, scrollHeight, clientHeight]);
   return active;
 }
 
@@ -53,7 +52,7 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
   const dragThumbOffsetRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hovering, setHovering] = useState(false);
-  const scrolling = useScrollActivity([state.scrollTop, state.scrollHeight, state.clientHeight]);
+  const scrolling = useScrollActivity(state.scrollTop, state.scrollHeight, state.clientHeight);
   const reveal = scrolling || hovering || dragging;
   const geometry = useMemo(() => {
     if (!state.scrollable || state.scrollHeight <= 0 || state.clientHeight <= 0) {

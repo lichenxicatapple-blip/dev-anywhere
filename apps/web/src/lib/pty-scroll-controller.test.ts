@@ -670,6 +670,69 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("restores page resume to bottom when the page was hidden while following", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+
+    expect(container.scrollTop).toBe(1600);
+    onUserVerticalScrollIntentChange.mockClear();
+
+    // Chrome can restore the DOM scrollTop from page history before the PTY controller has
+    // re-established its semantic "following bottom" state.
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
+    terminal.scrollToLine.mockClear();
+    onUserVerticalScrollIntentChange.mockClear();
+
+    controller.restorePageResume({ wasFollowing: true });
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+  });
+
+  it("preserves review position on page resume when the page was hidden while reviewing", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    container.scrollTop = 100;
+    terminal.scrollToLine.mockClear();
+
+    controller.restorePageResume({ wasFollowing: false });
+
+    expect(container.scrollTop).toBe(100);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    const intentCalls = onUserVerticalScrollIntentChange.mock.calls.map((c) => c[0]);
+    expect(intentCalls).not.toContain(false);
+  });
+
   it("owns at-bottom state and exposes scrollToBottom", () => {
     const { container, spacer, host } = createDom();
     const onAtBottomChange = vi.fn();
@@ -1775,8 +1838,9 @@ describe("attachPtyScrollController", () => {
       window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
       const params = setupTallHost({ cursorY: 25 });
       attach(params);
-      (window as unknown as { __devAnywherePtyScrollTrace?: unknown[] })
-        .__devAnywherePtyScrollTrace = [];
+      (
+        window as unknown as { __devAnywherePtyScrollTrace?: unknown[] }
+      ).__devAnywherePtyScrollTrace = [];
 
       params.emitRender();
 
@@ -1798,8 +1862,9 @@ describe("attachPtyScrollController", () => {
       window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
       const params = setupTallHost({ cursorY: 25 });
       const ctrl = attach(params);
-      (window as unknown as { __devAnywherePtyScrollTrace?: unknown[] })
-        .__devAnywherePtyScrollTrace = [];
+      (
+        window as unknown as { __devAnywherePtyScrollTrace?: unknown[] }
+      ).__devAnywherePtyScrollTrace = [];
 
       ctrl.traceRawInputFollowScheduled("rawInput");
       ctrl.traceRawInputFollowFire();

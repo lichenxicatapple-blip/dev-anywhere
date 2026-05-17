@@ -21,11 +21,11 @@ interface TerminalPointAtClientOptions {
   cellHeight?: number;
 }
 
-interface SelectTerminalLineAtPointOptions extends TerminalPointAtClientOptions {}
+type SelectTerminalLineAtPointOptions = TerminalPointAtClientOptions;
 
-interface SelectTerminalTokenAtPointOptions extends TerminalPointAtClientOptions {}
+type SelectTerminalTokenAtPointOptions = TerminalPointAtClientOptions;
 
-interface SelectTerminalInitialRangeAtPointOptions extends TerminalPointAtClientOptions {}
+type SelectTerminalInitialRangeAtPointOptions = TerminalPointAtClientOptions;
 
 interface SelectTerminalInitialRangeAtBufferPointOptions {
   terminal: Terminal;
@@ -52,9 +52,10 @@ function getCellSize({
   host,
   cellWidth,
   cellHeight,
-}: Pick<TerminalPointAtClientOptions, "terminal" | "host" | "cellWidth" | "cellHeight">):
-  | { cellW: number; cellH: number }
-  | null {
+}: Pick<TerminalPointAtClientOptions, "terminal" | "host" | "cellWidth" | "cellHeight">): {
+  cellW: number;
+  cellH: number;
+} | null {
   if (cellWidth && cellHeight) return { cellW: cellWidth, cellH: cellHeight };
   return measureXtermCellSize(host, terminal);
 }

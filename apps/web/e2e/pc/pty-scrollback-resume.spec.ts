@@ -64,10 +64,9 @@ test.describe("PTY scrollback resume", () => {
     }, PROBE_TOKEN);
 
     await expect
-      .poll(
-        () => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID),
-        { timeout: 10_000 },
-      )
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID), {
+        timeout: 10_000,
+      })
       .toContain(PROBE_TOKEN);
   });
 });
