@@ -153,6 +153,7 @@ export function attachPtyScrollController(
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
   // UX 跳变。null 表示"还没记录过", 等同于"上一帧没看到光标行"。
   let prevCursorBufferRow: number | null = null;
+  let lastVisualViewportChangeAt: number | null = null;
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
 
@@ -644,6 +645,39 @@ export function attachPtyScrollController(
     return decision.scrollTop;
   };
 
+  const restoreStationaryTouchLayoutShift = (effectiveScrollTop: number): boolean => {
+    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
+    if (!verticalIntent.touchActive || verticalIntent.touchReviewNotified) return false;
+    if (touchStartScrollTop === null) return false;
+    if (
+      lastVisualViewportChangeAt === null ||
+      performance.now() - lastVisualViewportChangeAt > 500
+    ) {
+      return false;
+    }
+
+    const anchor = getCurrentAnchor();
+    const touchMaxScrollTop = touchGestureMaxScrollTop ?? touchStartScrollTop;
+    const startedAtCursorAwareBottom =
+      Math.max(touchStartScrollTop, touchMaxScrollTop) >=
+      anchor.bottomScrollTop - atBottomThreshold;
+    const jumpedAwayFromTouchStart = effectiveScrollTop < touchStartScrollTop - atBottomThreshold;
+    const jumpedAwayFromCurrentBottom =
+      effectiveScrollTop < anchor.bottomScrollTop - atBottomThreshold;
+    if (!startedAtCursorAwareBottom || !jumpedAwayFromTouchStart || !jumpedAwayFromCurrentBottom) {
+      return false;
+    }
+
+    trace("container-scroll:restore-touch-layout-bottom", {
+      details: `scrollTop=${effectiveScrollTop} bottom=${anchor.bottomScrollTop} touchStart=${touchStartScrollTop}`,
+    });
+    container.scrollTop = anchor.bottomScrollTop;
+    lastSeenScrollTop = anchor.bottomScrollTop;
+    touchGestureMaxScrollTop = Math.max(touchMaxScrollTop, anchor.bottomScrollTop);
+    syncContainerScroll();
+    return true;
+  };
+
   const preventTouchMovePastCursorAwareBottom = (
     event: TouchEvent,
     currentX: number | null,
@@ -769,6 +803,9 @@ export function attachPtyScrollController(
       return;
     }
     pendingProgrammaticScrollTop = null;
+    if (restoreStationaryTouchLayoutShift(effectiveScrollTop)) {
+      return;
+    }
     // 用户主动向下滚抵达 atBottom 时释放 intent, 让 output 重新跟随。阈值 atBottomThreshold
     // (默认 8px) 屏蔽浏览器 subpixel rounding / 浮点 jitter。atBottom alone 不是 clear 条件;
     // FSM 同时检查方向、来源以及 touchActive。
@@ -1068,6 +1105,7 @@ export function attachPtyScrollController(
   let prevVvHeight: number | null = null;
   let prevVvOffsetTop: number | null = null;
   const onVvResize = (): void => {
+    lastVisualViewportChangeAt = performance.now();
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;
@@ -1078,6 +1116,7 @@ export function attachPtyScrollController(
     trace("vv:resize", { vvHeightDelta: dh, vvOffsetDelta: dy });
   };
   const onVvScroll = (): void => {
+    lastVisualViewportChangeAt = performance.now();
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;

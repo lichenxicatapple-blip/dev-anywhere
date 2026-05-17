@@ -39,6 +39,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
 import {
   registerPtyDebugSnapshotProvider,
   registerPtyTerminalWindowAccessor,
@@ -302,9 +303,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   );
 
   const getToolbarPosition = useCallback((clientX: number, clientY: number): { left: number; top: number } => {
-    const left = Math.min(Math.max(clientX, 56), window.innerWidth - 56);
-    const top = Math.min(Math.max(clientY - 48, 56), window.innerHeight - 48);
-    return { left, top };
+    const visualViewport = window.visualViewport;
+    return computePtySelectionToolbarPosition({
+      clientX,
+      clientY,
+      viewportWidth: visualViewport?.width ?? window.innerWidth,
+      viewportHeight: visualViewport?.height ?? window.innerHeight,
+      viewportOffsetLeft: visualViewport?.offsetLeft ?? 0,
+      viewportOffsetTop: visualViewport?.offsetTop ?? 0,
+    });
   }, []);
 
   const stopPtySelectionAutoscroll = useCallback((): void => {
