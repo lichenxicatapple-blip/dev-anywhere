@@ -240,14 +240,17 @@ test.describe("ChatHeader screen wake lock", () => {
     await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
 
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    const menu = page.locator('[data-slot="chat-overflow-menu"]');
     const item = page.locator('[data-slot="chat-menu-screen-wake-lock-item"]');
     await expect(item).toBeVisible();
     await expect(item).toHaveAttribute("data-state", "unchecked");
 
     await item.click();
     await expect.poll(() => wakeLockTestCount(page, "requests")).toBe(1);
+    await expect(menu).toBeHidden();
 
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await expect(menu).toBeVisible();
     await expect(item).toHaveAttribute("data-state", "checked");
 
     await page.locator('[data-slot="chat-back-button"]').click();
