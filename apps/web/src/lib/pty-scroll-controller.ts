@@ -143,7 +143,6 @@ export function attachPtyScrollController(
   let touchStartedAtCursorAwareBottom = false;
   let lastTouchClientX: number | null = null;
   let lastTouchClientY: number | null = null;
-  let touchTriedBeyondCursorAwareBottom = false;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
   let userHasHorizontalScrollIntent = false;
@@ -664,12 +663,14 @@ export function attachPtyScrollController(
     const touchStartScrollTop = verticalIntent.touchStartScrollTop;
     if (!verticalIntent.touchActive || verticalIntent.touchReviewNotified) return false;
     if (touchStartScrollTop === null) return false;
-    if (
-      lastVisualViewportChangeAt === null ||
-      performance.now() - lastVisualViewportChangeAt > 500
-    ) {
-      return false;
-    }
+
+    const { cellH } = getDims();
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const longHost = cellH > 0 && term.rows * cellH > visibleContentHeight;
+    const recentVisualViewportChange =
+      lastVisualViewportChangeAt !== null && performance.now() - lastVisualViewportChangeAt <= 500;
+    if (!longHost && !recentVisualViewportChange) return false;
 
     const anchor = getCurrentAnchor();
     const touchMaxScrollTop = touchGestureMaxScrollTop ?? touchStartScrollTop;
@@ -729,7 +730,6 @@ export function attachPtyScrollController(
       syncContainerScroll();
     }
 
-    touchTriedBeyondCursorAwareBottom = true;
     onTouchBoundaryPrevent?.();
     touchGestureMaxScrollTop = Math.max(
       touchGestureMaxScrollTop ?? container.scrollTop,
@@ -1048,7 +1048,6 @@ export function attachPtyScrollController(
     touchStartedAtCursorAwareBottom = getCurrentAnchor().isAtBottom;
     lastTouchClientX = startX;
     lastTouchClientY = startY;
-    touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
       type: "touch-start",
       clientY: startY,
@@ -1075,19 +1074,10 @@ export function attachPtyScrollController(
     // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
     // onContainerScroll 的 touchActive 期间不释放, 由 FSM 在 touch end/cancel 统一判定。
     const touchStartScrollTop = verticalIntent.touchStartScrollTop;
-    const scrollTopForIntent =
-      touchGestureMaxScrollTop === null
-        ? container.scrollTop
-        : Math.max(
-            container.scrollTop,
-            touchGestureMaxScrollTop,
-            touchTriedBeyondCursorAwareBottom && touchStartScrollTop !== null
-              ? touchStartScrollTop + atBottomThreshold + 1
-              : container.scrollTop,
-          );
+    const liveScrollTop = container.scrollTop;
     const anchor = getCurrentAnchor();
     const stayedNearTouchStart =
-      touchStartScrollTop === null || scrollTopForIntent >= touchStartScrollTop - atBottomThreshold;
+      touchStartScrollTop === null || liveScrollTop >= touchStartScrollTop - atBottomThreshold;
     const atCursorAwareBottomForIntent =
       anchor.isAtBottom ||
       (touchStartedAtCursorAwareBottom &&
@@ -1097,10 +1087,9 @@ export function attachPtyScrollController(
     touchStartedAtCursorAwareBottom = false;
     lastTouchClientX = null;
     lastTouchClientY = null;
-    touchTriedBeyondCursorAwareBottom = false;
     dispatchVerticalIntent({
       type,
-      scrollTop: scrollTopForIntent,
+      scrollTop: liveScrollTop,
       atCursorAwareBottom: atCursorAwareBottomForIntent,
     });
     notifyAtBottom();

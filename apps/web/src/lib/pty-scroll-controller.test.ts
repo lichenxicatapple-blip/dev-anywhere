@@ -538,6 +538,52 @@ describe("attachPtyScrollController", () => {
     ]);
   });
 
+  it("restores cursor-aware bottom when a stationary long-host touch jumps to host top", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 40,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 1061: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 1064;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(20686);
+    expect(host.style.top).toBe("20240px");
+
+    container.dispatchEvent(touchEvent("touchstart", 550));
+    onUserVerticalScrollIntentChange.mockClear();
+    container.scrollTop = 20240;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(touchEvent("touchend", 550));
+
+    expect(container.scrollTop).toBe(20686);
+    expect(host.style.top).toBe("20240px");
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
+  });
+
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
