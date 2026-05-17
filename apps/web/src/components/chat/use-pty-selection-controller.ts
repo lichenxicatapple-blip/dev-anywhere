@@ -7,37 +7,31 @@ import type {
 import type { Terminal } from "@xterm/xterm";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
-import { getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
 import {
-  getClientPositionForTerminalPoint,
   getTerminalPointAtClient,
   selectTerminalInitialRangeAtBufferPoint,
   selectTerminalInitialRangeAtPoint,
   selectTerminalRange,
   type TerminalSelectionPoint,
 } from "@/lib/pty-line-selection";
+import {
+  computePtySelectionHandleMetrics,
+  computePtySelectionToolbarPositionForHandles,
+  getPtySelectionHandles,
+  type PtySelectionHandleMetrics,
+  type PtySelectionHandles,
+  type PtySelectionHandlePosition,
+} from "@/lib/pty-selection-layout";
 import { computeScrollAnchor } from "@/lib/pty-scroll";
 import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
-import { usePtyTouchGesture } from "./use-pty-touch-gesture";
+import {
+  usePtySelectionGestureDriver,
+  type PtySelectionHandleKind,
+} from "./use-pty-selection-gesture-driver";
 
-export type PtySelectionHandleKind = "anchor" | "focus";
-
-export interface PtySelectionHandlePosition {
-  left: number;
-  top: number;
-}
-
-export interface PtySelectionHandles {
-  anchor: PtySelectionHandlePosition;
-  focus: PtySelectionHandlePosition;
-}
-
-export interface PtySelectionHandleMetrics {
-  visualSize: number;
-  stemSize: number;
-  touchSize: number;
-}
+export type { PtySelectionHandleMetrics, PtySelectionHandles, PtySelectionHandlePosition };
+export type { PtySelectionHandleKind } from "./use-pty-selection-gesture-driver";
 
 interface PointerHandlers {
   onPointerDownCapture: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -101,22 +95,14 @@ export function usePtySelectionController(
   const selectionLongPressStartedAtBottomRef = useRef(false);
   const selectionDraggedRef = useRef(false);
   const selectedPtyTextRef = useRef("");
-  const selectionAutoscrollFrameRef = useRef<number | null>(null);
-  const selectionAutoscrollPointRef = useRef<{ clientX: number; clientY: number } | null>(null);
-  const selectionSuppressNativeTouchScrollRef = useRef(false);
-  const selectionDragHandleRef = useRef<PtySelectionHandleKind | null>(null);
-  const selectionHandleDragCleanupRef = useRef<(() => void) | null>(null);
+  const stopPtySelectionGestureRef = useRef<(() => void) | null>(null);
   const [ptySelectionToolbar, setPtySelectionToolbar] = useState<{
     left: number;
     top: number;
   } | null>(null);
   const [ptySelectionHandles, setPtySelectionHandles] = useState<PtySelectionHandles | null>(null);
   const ptySelectionHandleMetrics = useMemo<PtySelectionHandleMetrics>(
-    () => ({
-      visualSize: Math.round(Math.min(12, Math.max(8, ptyFontSize * 0.55))),
-      stemSize: Math.round(Math.min(11, Math.max(7, ptyFontSize * 0.5))),
-      touchSize: 44,
-    }),
+    () => computePtySelectionHandleMetrics(ptyFontSize),
     [ptyFontSize],
   );
 
@@ -135,46 +121,33 @@ export function usePtySelectionController(
     [],
   );
 
-  const stopPtySelectionAutoscroll = useCallback((): void => {
-    selectionAutoscrollPointRef.current = null;
-    selectionSuppressNativeTouchScrollRef.current = false;
-    selectionDragHandleRef.current = null;
-    if (selectionAutoscrollFrameRef.current === null) return;
-    cancelAnimationFrame(selectionAutoscrollFrameRef.current);
-    selectionAutoscrollFrameRef.current = null;
-  }, []);
-
   const getSelectionHandles = useCallback(
     (anchor: TerminalSelectionPoint, focus: TerminalSelectionPoint): PtySelectionHandles | null => {
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       if (!terminal || !host) return null;
-      const anchorPosition = getClientPositionForTerminalPoint({
+      return getPtySelectionHandles({
         terminal,
         host,
-        point: anchor,
-        affinity: "before",
+        anchor,
+        focus,
       });
-      const focusPosition = getClientPositionForTerminalPoint({
-        terminal,
-        host,
-        point: focus,
-        affinity: "after",
-      });
-      if (!anchorPosition || !focusPosition) return null;
-      return { anchor: anchorPosition, focus: focusPosition };
     },
     [terminalRef, xtermHostRef],
   );
 
   const getToolbarPositionForSelectionHandles = useCallback(
     (handles: PtySelectionHandles): { left: number; top: number } => {
-      return getToolbarPosition(
-        (handles.anchor.left + handles.focus.left) / 2,
-        Math.min(handles.anchor.top, handles.focus.top),
-      );
+      const visualViewport = window.visualViewport;
+      return computePtySelectionToolbarPositionForHandles({
+        handles,
+        viewportWidth: visualViewport?.width ?? window.innerWidth,
+        viewportHeight: visualViewport?.height ?? window.innerHeight,
+        viewportOffsetLeft: visualViewport?.offsetLeft ?? 0,
+        viewportOffsetTop: visualViewport?.offsetTop ?? 0,
+      });
     },
-    [getToolbarPosition],
+    [],
   );
 
   const refreshSelectionHandles = useCallback((): void => {
@@ -196,9 +169,7 @@ export function usePtySelectionController(
   }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
 
   const clearPtySelection = useCallback((): void => {
-    selectionHandleDragCleanupRef.current?.();
-    selectionHandleDragCleanupRef.current = null;
-    stopPtySelectionAutoscroll();
+    stopPtySelectionGestureRef.current?.();
     selectionLongPressCandidateRef.current = null;
     selectionLongPressStartedAtBottomRef.current = false;
     selectionAnchorRef.current = null;
@@ -208,7 +179,7 @@ export function usePtySelectionController(
     terminalRef.current?.clearSelection();
     setPtySelectionToolbar(null);
     setPtySelectionHandles(null);
-  }, [stopPtySelectionAutoscroll, terminalRef]);
+  }, [terminalRef]);
 
   const capturePtyLongPressCandidate = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
@@ -246,7 +217,15 @@ export function usePtySelectionController(
   );
 
   const applyPtySelectionRange = useCallback(
-    ({ clientX, clientY }: { clientX: number; clientY: number }) => {
+    ({
+      clientX,
+      clientY,
+      draggedHandle = "focus",
+    }: {
+      clientX: number;
+      clientY: number;
+      draggedHandle?: PtySelectionHandleKind;
+    }) => {
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       const anchor = selectionAnchorRef.current;
@@ -254,7 +233,6 @@ export function usePtySelectionController(
       if (!terminal || !host || !anchor) return null;
       const focus = getTerminalPointAtClient({ terminal, host, clientX, clientY });
       if (!focus) return null;
-      const draggedHandle = selectionDragHandleRef.current ?? "focus";
       const nextAnchor = draggedHandle === "anchor" ? focus : anchor;
       const nextFocus = draggedHandle === "focus" ? focus : (focusPoint ?? anchor);
       selectionAnchorRef.current = nextAnchor;
@@ -268,60 +246,17 @@ export function usePtySelectionController(
     [getSelectionHandles, terminalRef, xtermHostRef],
   );
 
-  const runPtySelectionAutoscroll = useCallback((): void => {
-    selectionAutoscrollFrameRef.current = null;
-    const point = selectionAutoscrollPointRef.current;
-    if (!point || !containerEl || !selectionAnchorRef.current) return;
-
-    const rect = containerEl.getBoundingClientRect();
-    const { dx, dy } = getEdgeAutoscrollDelta({
-      pointerX: point.clientX,
-      pointerY: point.clientY,
-      rect,
-      scrollLeft: containerEl.scrollLeft,
-      scrollTop: containerEl.scrollTop,
-      scrollWidth: containerEl.scrollWidth,
-      scrollHeight: containerEl.scrollHeight,
-      clientWidth: containerEl.clientWidth,
-      clientHeight: containerEl.clientHeight,
-      edgePx: 44,
-      maxSpeedPx: 18,
-    });
-
-    if (dx !== 0) containerEl.scrollLeft += dx;
-    if (dy !== 0) containerEl.scrollTop += dy;
-    if (dx !== 0 || dy !== 0) applyPtySelectionRange(point);
-
-    selectionAutoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
-  }, [applyPtySelectionRange, containerEl]);
-
-  const updatePtySelectionAutoscroll = useCallback(
-    (point: { clientX: number; clientY: number }): void => {
-      selectionAutoscrollPointRef.current = point;
-      if (selectionAutoscrollFrameRef.current !== null) return;
-      selectionAutoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
-    },
-    [runPtySelectionAutoscroll],
-  );
-
-  useEffect(() => stopPtySelectionAutoscroll, [stopPtySelectionAutoscroll]);
-
-  useEffect(() => {
-    if (!containerEl) return;
-    const suppressNativeScroll = (event: TouchEvent): void => {
-      if (!selectionSuppressNativeTouchScrollRef.current) return;
-      event.preventDefault();
-    };
-    containerEl.addEventListener("touchmove", suppressNativeScroll, {
-      capture: true,
-      passive: false,
-    });
-    return () => {
-      containerEl.removeEventListener("touchmove", suppressNativeScroll, {
-        capture: true,
-      });
-    };
-  }, [containerEl]);
+  const showToolbarForCurrentSelection = useCallback((): void => {
+    const anchor = selectionAnchorRef.current;
+    const focusPoint = selectionFocusRef.current;
+    if (!anchor || !focusPoint) {
+      setPtySelectionToolbar(null);
+      return;
+    }
+    const handles = getSelectionHandles(anchor, focusPoint);
+    setPtySelectionHandles(handles);
+    setPtySelectionToolbar(handles ? getToolbarPositionForSelectionHandles(handles) : null);
+  }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
 
   useEffect(() => {
     if (!ptySelectionToolbar && !ptySelectionHandles) return;
@@ -356,9 +291,6 @@ export function usePtySelectionController(
 
   const handlePtyLongPressStart = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
-      stopPtySelectionAutoscroll();
-      selectionSuppressNativeTouchScrollRef.current = true;
-      selectionDragHandleRef.current = "focus";
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       if (!terminal || !host) return;
@@ -381,22 +313,19 @@ export function usePtySelectionController(
       setPtySelectionToolbar(null);
       setPtySelectionHandles(null);
     },
-    [stopPtySelectionAutoscroll, terminalRef, xtermHostRef],
+    [terminalRef, xtermHostRef],
   );
 
   const handlePtyLongPressMove = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
-      selectionDragHandleRef.current = "focus";
       applyPtySelectionRange({ clientX, clientY });
-      updatePtySelectionAutoscroll({ clientX, clientY });
       setPtySelectionToolbar(null);
     },
-    [applyPtySelectionRange, updatePtySelectionAutoscroll],
+    [applyPtySelectionRange],
   );
 
   const handlePtyLongPressEnd = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
-      stopPtySelectionAutoscroll();
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       if (!terminal || !host) return;
@@ -441,7 +370,6 @@ export function usePtySelectionController(
       getToolbarPosition,
       getToolbarPositionForSelectionHandles,
       scrollControllerRef,
-      stopPtySelectionAutoscroll,
       terminalRef,
       xtermHostRef,
     ],
@@ -458,126 +386,53 @@ export function usePtySelectionController(
     });
   }, [clearPtySelection, terminalRef]);
 
-  const handlePtySelectionHandlePointerDown = useCallback(
-    (kind: PtySelectionHandleKind, event: ReactPointerEvent<HTMLElement>): void => {
-      event.preventDefault();
-      event.stopPropagation();
-      selectionHandleDragCleanupRef.current?.();
-      selectionDragHandleRef.current = kind;
-      selectionSuppressNativeTouchScrollRef.current = true;
-      setPtySelectionToolbar(null);
+  const isSelectionActive = useCallback((): boolean => selectionAnchorRef.current !== null, []);
 
-      let cleanup = (): void => {};
-      const move = (moveEvent: PointerEvent): void => {
-        if (moveEvent.cancelable) moveEvent.preventDefault();
-        const point = { clientX: moveEvent.clientX, clientY: moveEvent.clientY };
-        applyPtySelectionRange(point);
-        updatePtySelectionAutoscroll(point);
-      };
-      const finish = (finishEvent: PointerEvent): void => {
-        const point = { clientX: finishEvent.clientX, clientY: finishEvent.clientY };
-        applyPtySelectionRange(point);
-        cleanup();
-        selectionHandleDragCleanupRef.current = null;
-        stopPtySelectionAutoscroll();
-        if (selectedPtyTextRef.current)
-          setPtySelectionToolbar(getToolbarPosition(point.clientX, point.clientY));
-      };
-      const cancel = (): void => {
-        cleanup();
-        selectionHandleDragCleanupRef.current = null;
-        stopPtySelectionAutoscroll();
-      };
-      cleanup = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", finish);
-        window.removeEventListener("pointercancel", cancel);
-      };
-      selectionHandleDragCleanupRef.current = cleanup;
-      window.addEventListener("pointermove", move, { passive: false });
-      window.addEventListener("pointerup", finish, { once: true });
-      window.addEventListener("pointercancel", cancel, { once: true });
+  const handlePtySelectionHandleDragStart = useCallback((): void => {
+    setPtySelectionToolbar(null);
+  }, []);
+
+  const handlePtySelectionHandleDragMove = useCallback(
+    (kind: PtySelectionHandleKind, { clientX, clientY }: { clientX: number; clientY: number }) => {
+      applyPtySelectionRange({ clientX, clientY, draggedHandle: kind });
+      setPtySelectionToolbar(null);
     },
-    [
-      applyPtySelectionRange,
-      getToolbarPosition,
-      stopPtySelectionAutoscroll,
-      updatePtySelectionAutoscroll,
-    ],
+    [applyPtySelectionRange],
   );
 
-  const handlePtySelectionHandleTouchStart = useCallback(
-    (kind: PtySelectionHandleKind, event: ReactTouchEvent<HTMLElement>): void => {
-      if (selectionHandleDragCleanupRef.current) return;
-      const touch = event.touches[0] ?? event.changedTouches[0];
-      if (!touch) return;
-      event.preventDefault();
-      event.stopPropagation();
-      selectionDragHandleRef.current = kind;
-      selectionSuppressNativeTouchScrollRef.current = true;
-      setPtySelectionToolbar(null);
-
-      let cleanup = (): void => {};
-      const move = (moveEvent: TouchEvent): void => {
-        const nextTouch = moveEvent.touches[0] ?? moveEvent.changedTouches[0];
-        if (!nextTouch) return;
-        if (moveEvent.cancelable) moveEvent.preventDefault();
-        const point = { clientX: nextTouch.clientX, clientY: nextTouch.clientY };
-        applyPtySelectionRange(point);
-        updatePtySelectionAutoscroll(point);
-      };
-      const finish = (finishEvent: TouchEvent): void => {
-        const endTouch = finishEvent.changedTouches[0];
-        const point = endTouch
-          ? { clientX: endTouch.clientX, clientY: endTouch.clientY }
-          : selectionAutoscrollPointRef.current;
-        if (point) applyPtySelectionRange(point);
-        cleanup();
-        selectionHandleDragCleanupRef.current = null;
-        stopPtySelectionAutoscroll();
-        if (point && selectedPtyTextRef.current) {
-          setPtySelectionToolbar(getToolbarPosition(point.clientX, point.clientY));
-        }
-      };
-      const cancel = (): void => {
-        cleanup();
-        selectionHandleDragCleanupRef.current = null;
-        stopPtySelectionAutoscroll();
-      };
-      cleanup = () => {
-        window.removeEventListener("touchmove", move);
-        window.removeEventListener("touchend", finish);
-        window.removeEventListener("touchcancel", cancel);
-      };
-      selectionHandleDragCleanupRef.current = cleanup;
-      window.addEventListener("touchmove", move, { passive: false });
-      window.addEventListener("touchend", finish, { once: true });
-      window.addEventListener("touchcancel", cancel, { once: true });
+  const handlePtySelectionHandleDragEnd = useCallback(
+    (kind: PtySelectionHandleKind, point: { clientX: number; clientY: number } | null): void => {
+      if (point) {
+        applyPtySelectionRange({ ...point, draggedHandle: kind });
+      }
+      if (selectedPtyTextRef.current) showToolbarForCurrentSelection();
     },
-    [
-      applyPtySelectionRange,
-      getToolbarPosition,
-      stopPtySelectionAutoscroll,
-      updatePtySelectionAutoscroll,
-    ],
+    [applyPtySelectionRange, showToolbarForCurrentSelection],
   );
 
-  const pointerHandlers = usePtyTouchGesture({
+  const selectionGesture = usePtySelectionGestureDriver({
     terminalRef,
+    containerEl,
     suppressPtyFocus,
+    isSelectionActive,
     onLongPressCandidateStart: capturePtyLongPressCandidate,
     onLongPressStart: handlePtyLongPressStart,
     onLongPressMove: handlePtyLongPressMove,
     onLongPressEnd: handlePtyLongPressEnd,
+    onHandleDragStart: handlePtySelectionHandleDragStart,
+    onHandleDragMove: handlePtySelectionHandleDragMove,
+    onHandleDragEnd: handlePtySelectionHandleDragEnd,
+    onHandleDragCancel: handlePtySelectionHandleDragStart,
   });
+  stopPtySelectionGestureRef.current = selectionGesture.stopPtySelectionGesture;
 
   return {
-    pointerHandlers,
+    pointerHandlers: selectionGesture.pointerHandlers,
     ptySelectionToolbar,
     ptySelectionHandles,
     ptySelectionHandleMetrics,
     copyPtySelection,
-    handlePtySelectionHandlePointerDown,
-    handlePtySelectionHandleTouchStart,
+    handlePtySelectionHandlePointerDown: selectionGesture.handlePtySelectionHandlePointerDown,
+    handlePtySelectionHandleTouchStart: selectionGesture.handlePtySelectionHandleTouchStart,
   };
 }
