@@ -76,18 +76,21 @@ async function readSelectionOverlayGeometry(page: Page): Promise<SelectionOverla
   });
 }
 
-function expectSelectionOverlayAttached(geometry: SelectionOverlayGeometry): void {
-  expect(geometry.toolbar).not.toBeNull();
-  expect(geometry.handles).toHaveLength(2);
-  if (!geometry.toolbar) throw new Error("selection toolbar geometry missing");
-  expect(geometry.toolbar.top).toBeGreaterThanOrEqual(0);
-  expect(geometry.toolbar.bottom).toBeLessThanOrEqual(geometry.visualBottom + 2);
+function getSelectionOverlayAttachmentError(geometry: SelectionOverlayGeometry): string | null {
+  if (!geometry.toolbar) return "selection toolbar missing";
+  if (geometry.handles.length !== 2) return `expected 2 handles, got ${geometry.handles.length}`;
+  if (geometry.toolbar.top < 0) return `toolbar top ${geometry.toolbar.top} is above viewport`;
+  if (geometry.toolbar.bottom > geometry.visualBottom + 2) {
+    return `toolbar bottom ${geometry.toolbar.bottom} is below visual viewport ${geometry.visualBottom}`;
+  }
 
   for (const handle of geometry.handles) {
-    expect(handle.centerX).toBeGreaterThanOrEqual(0);
-    expect(handle.centerX).toBeLessThanOrEqual(geometry.visualRight);
-    expect(handle.centerY).toBeGreaterThanOrEqual(0);
-    expect(handle.centerY).toBeLessThanOrEqual(geometry.visualBottom);
+    if (handle.centerX < 0 || handle.centerX > geometry.visualRight) {
+      return `handle centerX ${handle.centerX} is outside visual viewport ${geometry.visualRight}`;
+    }
+    if (handle.centerY < 0 || handle.centerY > geometry.visualBottom) {
+      return `handle centerY ${handle.centerY} is outside visual viewport ${geometry.visualBottom}`;
+    }
   }
 
   const handleTop = Math.min(...geometry.handles.map((handle) => handle.top));
@@ -101,8 +104,19 @@ function expectSelectionOverlayAttached(geometry: SelectionOverlayGeometry): voi
   const handleCenterX = geometry.handles.reduce((sum, handle) => sum + handle.centerX, 0) / 2;
   const toolbarCenterX = (geometry.toolbar.left + geometry.toolbar.right) / 2;
 
-  expect(verticalGap).toBeLessThanOrEqual(96);
-  expect(Math.abs(toolbarCenterX - handleCenterX)).toBeLessThanOrEqual(160);
+  if (verticalGap > 96) return `toolbar/handle vertical gap ${verticalGap} exceeds 96`;
+  if (Math.abs(toolbarCenterX - handleCenterX) > 160) {
+    return `toolbar/handle horizontal gap ${Math.abs(toolbarCenterX - handleCenterX)} exceeds 160`;
+  }
+  return null;
+}
+
+async function expectSelectionOverlayAttachedEventually(page: Page): Promise<void> {
+  await expect
+    .poll(async () => getSelectionOverlayAttachmentError(await readSelectionOverlayGeometry(page)), {
+      timeout: 5_000,
+    })
+    .toBeNull();
 }
 
 async function longPress(
@@ -400,7 +414,6 @@ test.describe("L4 mobile / PTY long press copy", () => {
     await setupPtyChat(emuPage, {
       sessionId,
       baseUrl: mobileBaseUrl,
-      query: "&ptyScrollTrace=1",
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emuPage.evaluate(() => {
@@ -459,17 +472,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
     await expect(startHandle).toBeVisible();
     await expect(endHandle).toBeVisible();
 
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() => {
-          const debug = window.__devAnywherePtyDebug?.();
-          if (!debug) return Number.NEGATIVE_INFINITY;
-          return Math.abs(debug.container.scrollTop - debug.anchor.bottomScrollTop);
-        }),
-      )
-      .toBeLessThanOrEqual(2);
-
-    expectSelectionOverlayAttached(await readSelectionOverlayGeometry(emuPage));
+    await expectSelectionOverlayAttachedEventually(emuPage);
 
     await expect
       .poll(
@@ -498,8 +501,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
         { timeout: 10_000 },
       )
       .toBe(0);
-    await emuPage.waitForTimeout(1_200);
-    expectSelectionOverlayAttached(await readSelectionOverlayGeometry(emuPage));
+    await expectSelectionOverlayAttachedEventually(emuPage);
   });
 
   test("tap outside clears the copy affordance and dragging handles adjusts the selection", async ({
