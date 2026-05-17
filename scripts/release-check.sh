@@ -28,6 +28,10 @@ pnpm build
 
 echo ""
 echo "=== Check @dev-anywhere/proxy package contents ==="
+if [ "$(head -n 1 apps/proxy/dist/index.js)" != "#!/usr/bin/env node" ]; then
+  echo "Proxy bin dist/index.js must start with a node shebang for npm global execution" >&2
+  exit 1
+fi
 PROXY_PACK_JSON="$(cd apps/proxy && npm pack --dry-run --json --ignore-scripts)"
 PACK_JSON="$PROXY_PACK_JSON" node <<'NODE'
 const pack = JSON.parse(process.env.PACK_JSON)[0];
