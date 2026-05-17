@@ -135,8 +135,15 @@ export function usePtySelectionGestureDriver({
       capture: true,
       passive: false,
     });
+    document.addEventListener("touchmove", suppressNativeScroll, {
+      capture: true,
+      passive: false,
+    });
     return () => {
       containerEl.removeEventListener("touchmove", suppressNativeScroll, {
+        capture: true,
+      });
+      document.removeEventListener("touchmove", suppressNativeScroll, {
         capture: true,
       });
     };

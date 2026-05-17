@@ -95,12 +95,10 @@ export function registerFileDownloadLinkProvider(
           underline: true,
           pointerCursor: true,
         },
-        // PC: cmd/ctrl + click 防误触, 普通 click 只是阅读路径文本不触发.
-        // 平板 / 手机触屏 (pointer: coarse) 没修饰键, tap 即触发; 平板接外置键盘
-        // 走修饰键路径也照样 work (两条路径并存).
+        // cmd/ctrl + click 防误触。触屏 plain tap 同样不直接下载；移动端下载走
+        // 长按选区工具条，平板外接键盘仍可用 cmd/ctrl + click。
         activate: (event) => {
-          const isTouchSurface = window.matchMedia("(pointer: coarse), (hover: none)").matches;
-          if (!isTouchSurface && !event.metaKey && !event.ctrlKey) return;
+          if (!event.metaKey && !event.ctrlKey) return;
           onDownload(match.path);
         },
       }));

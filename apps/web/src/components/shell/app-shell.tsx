@@ -122,12 +122,17 @@ export function AppShell() {
         <Button
           variant="ghost"
           size="icon"
-          className="fixed right-4 top-[calc(env(safe-area-inset-top)+1.125rem)] z-30 size-11 rounded-full border border-border/80 bg-card/90 text-muted-foreground shadow-lg backdrop-blur hover:border-primary/45 hover:bg-accent hover:text-foreground md:hidden"
+          className="group fixed right-4 top-[calc(env(safe-area-inset-top)+1.125rem)] z-30 size-11 rounded-full border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground md:hidden"
           aria-label="设置"
           data-slot="mobile-settings-trigger"
           onClick={() => setSettingsOpen(true)}
         >
-          <Settings aria-hidden="true" />
+          <span
+            data-slot="mobile-settings-trigger-visual"
+            className="flex size-7 items-center justify-center rounded-full border border-border/80 bg-card/90 shadow-lg backdrop-blur transition-colors group-hover:border-primary/45 group-hover:bg-accent"
+          >
+            <Settings className="size-4" aria-hidden="true" />
+          </span>
         </Button>
       )}
 

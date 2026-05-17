@@ -19,4 +19,26 @@ describe("PtyMobileControls", () => {
     expect(onPaste).toHaveBeenCalledTimes(1);
     expect(onInput).toHaveBeenCalledWith("\r");
   });
+
+  it("clears Claude's whole agent input area with the TUI clear sequence", () => {
+    const onInput = vi.fn();
+    const onPaste = vi.fn();
+
+    render(<PtyMobileControls provider="claude" onInput={onInput} onPaste={onPaste} />);
+
+    fireEvent.click(document.querySelector('[data-slot="pty-mobile-key-clear"]')!);
+
+    expect(onInput).toHaveBeenCalledWith("\x1b\x1b");
+  });
+
+  it("clears Codex's whole agent input area through its Ctrl+C draft clear path", () => {
+    const onInput = vi.fn();
+    const onPaste = vi.fn();
+
+    render(<PtyMobileControls provider="codex" onInput={onInput} onPaste={onPaste} />);
+
+    fireEvent.click(document.querySelector('[data-slot="pty-mobile-key-clear"]')!);
+
+    expect(onInput).toHaveBeenCalledWith("\x03");
+  });
 });

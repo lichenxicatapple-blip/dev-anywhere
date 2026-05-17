@@ -32,7 +32,11 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
     async ({}, use) => {
       const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
       await use(browser);
-      await browser.close();
+      // The Android Chrome instance is owned by scripts/test-mobile.sh. Closing the
+      // CDP-connected Browser from Playwright can hang or tear down the device-side
+      // DevTools socket after a timed-out test, which makes retries connect to a
+      // dead endpoint. Let the worker process drop the websocket; the script
+      // force-stops Chrome before each spec file.
     },
     { scope: "worker" },
   ],

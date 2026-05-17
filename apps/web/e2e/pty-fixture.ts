@@ -7,11 +7,51 @@ import { installVisualViewportMock } from "./mobile-helpers";
 
 export type PtyFakeRelayOptions = {
   sessionId: string;
+  provider?: "claude" | "codex";
 };
 
+const PTY_FAKE_RELAY_ACTIVE_KEY = "__dev_anywhere_pty_fake_relay_active";
+
 export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptions): Promise<void> {
+  await page
+    .evaluate(
+      ({ key, sessionId, provider }) => {
+        sessionStorage.setItem(key, JSON.stringify({ sessionId, provider }));
+      },
+      {
+        key: PTY_FAKE_RELAY_ACTIVE_KEY,
+        sessionId: options.sessionId,
+        provider: options.provider ?? "claude",
+      },
+    )
+    .catch(() => {});
   await page.addInitScript(
-    ({ sessionId }) => {
+    ({ activeKey, sessionId, provider }) => {
+      const active = (() => {
+        try {
+          return JSON.parse(sessionStorage.getItem(activeKey) ?? "null") as {
+            sessionId?: string;
+            provider?: "claude" | "codex";
+          } | null;
+        } catch {
+          return null;
+        }
+      })();
+      const href = window.location.href;
+      const urlMatches =
+        href.includes(`/${encodeURIComponent(sessionId)}`) || href.includes(`/${sessionId}`);
+      if (active?.sessionId && active.sessionId !== sessionId) {
+        return;
+      }
+      if (!active?.sessionId && !urlMatches) {
+        return;
+      }
+      const installedKey = `__dev_anywhere_pty_fake_relay_${sessionId}`;
+      const alreadyInstalled = (window as unknown as Record<string, unknown>)[installedKey];
+      if (alreadyInstalled) return;
+      (window as unknown as Record<string, unknown>)[installedKey] = true;
+      const providerForSession = active?.provider ?? provider;
+
       type Listener = (event: Event) => void;
 
       class FakeWebSocket extends EventTarget {
@@ -85,7 +125,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
                   {
                     sessionId,
                     mode: "pty",
-                    provider: "claude",
+                    provider: providerForSession,
                     state: "working",
                     lastActive: Date.now(),
                   },
@@ -100,7 +140,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
               type: "agent_status",
               sessionId,
               payload: {
-                provider: "claude",
+                provider,
                 phase: "outputting",
                 seq: 1,
                 updatedAt: Date.now(),
@@ -201,7 +241,11 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       };
       window.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     },
-    { sessionId: options.sessionId },
+    {
+      activeKey: PTY_FAKE_RELAY_ACTIVE_KEY,
+      sessionId: options.sessionId,
+      provider: options.provider ?? "claude",
+    },
   );
 }
 
@@ -248,6 +292,7 @@ export async function readRawPtyInput(page: Page): Promise<string> {
 
 export type SetupPtyChatOptions = {
   sessionId: string;
+  provider?: "claude" | "codex";
   query?: string;
   withVisualViewportMock?: boolean;
   // mobile L4 spec 用 mobileBaseUrl, PC L3 用默认 BASE_URL.
@@ -261,9 +306,9 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
   const query = options.query ?? "";
   const baseUrl = options.baseUrl ?? BASE_URL;
   const url = `${baseUrl}/#/chat/${options.sessionId}?mode=pty${query}`;
-  await installPtyFakeRelay(page, { sessionId: options.sessionId });
+  await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
   await page.goto(url);
   await resetLocalState(page);
-  await installPtyFakeRelay(page, { sessionId: options.sessionId });
+  await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
   await page.goto(url);
 }

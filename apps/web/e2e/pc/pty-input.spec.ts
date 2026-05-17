@@ -65,7 +65,7 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await page.locator('[data-slot="pty-mobile-key-enter"]').click();
     await expect
       .poll(() => readRawPtyInput(page))
-      .toContain("abc\n\t\x1b[Z\x14\x1b\x02\x03\x15\x13\x1b[D\x1b[C\x1b[A\x1b[B\r");
+      .toContain("abc\n\t\x1b[Z\x14\x1b\x02\x03\x1b\x1b\x13\x1b[D\x1b[C\x1b[A\x1b[B\r");
 
     await page.evaluate(() =>
       window.__devAnywhereSetVisualViewport?.({
@@ -124,5 +124,24 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     });
 
     await expect.poll(() => readRawPtyInput(page)).toBe("，.");
+  });
+
+  test("uses Codex's Ctrl+C draft-clear path for the mobile clear button", async ({ page }) => {
+    await setupPtyChat(page, {
+      sessionId: "pty-input-codex-clear",
+      provider: "codex",
+      withVisualViewportMock: true,
+    });
+
+    const touchEditingSurface = await page.evaluate(
+      () => window.matchMedia("(pointer: coarse), (hover: none)").matches,
+    );
+    if (!touchEditingSurface) return;
+
+    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await expect(page.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
+    await page.locator('[data-slot="pty-mobile-key-clear"]').click();
+
+    await expect.poll(() => readRawPtyInput(page)).toContain("\x03");
   });
 });

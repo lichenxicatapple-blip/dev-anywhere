@@ -12,6 +12,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+const TOOLBAR_EDGE_PADDING = 64;
+
 export function computePtySelectionToolbarPosition({
   clientX,
   clientY,
@@ -23,7 +25,7 @@ export function computePtySelectionToolbarPosition({
   const minLeft = viewportOffsetLeft + 56;
   const maxLeft = viewportOffsetLeft + viewportWidth - 56;
   const minTop = viewportOffsetTop + 56;
-  const maxTop = viewportOffsetTop + viewportHeight - 48;
+  const maxTop = viewportOffsetTop + viewportHeight - TOOLBAR_EDGE_PADDING;
   return {
     left: clamp(clientX, minLeft, maxLeft),
     top: clamp(clientY - 48, minTop, maxTop),

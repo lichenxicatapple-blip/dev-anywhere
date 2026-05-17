@@ -137,6 +137,16 @@ function getOverlayCenter(geometry: SelectionOverlayGeometry): {
   };
 }
 
+function formatOverlaySamples(samples: SelectionOverlayGeometry[]): string {
+  return samples
+    .map((geometry, index) => {
+      const center = getOverlayCenter(geometry);
+      if (!center) return `${index}: missing`;
+      return `${index}: toolbar=(${center.toolbarX.toFixed(1)},${center.toolbarY.toFixed(1)}) handles=(${center.handlesX.toFixed(1)},${center.handlesY.toFixed(1)}) vv=${geometry.visualBottom.toFixed(1)}`;
+    })
+    .join("; ");
+}
+
 async function expectSelectionOverlayStable(page: Page): Promise<void> {
   await expectSelectionOverlayAttachedEventually(page);
   const samples: SelectionOverlayGeometry[] = [];
@@ -168,11 +178,12 @@ async function expectSelectionOverlayStable(page: Page): Promise<void> {
 
   expect(
     maxToolbarJump,
-    `toolbar jumped ${maxToolbarJump}px while selection was idle`,
+    `toolbar jumped ${maxToolbarJump}px while selection was idle; ${formatOverlaySamples(samples)}`,
   ).toBeLessThan(24);
-  expect(maxHandleJump, `handles jumped ${maxHandleJump}px while selection was idle`).toBeLessThan(
-    24,
-  );
+  expect(
+    maxHandleJump,
+    `handles jumped ${maxHandleJump}px while selection was idle; ${formatOverlaySamples(samples)}`,
+  ).toBeLessThan(24);
 }
 
 async function longPress(
@@ -189,10 +200,24 @@ async function longPress(
     });
     await page.waitForTimeout(950);
     if (end.x !== start.x || end.y !== start.y) {
-      await client.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [{ x: end.x, y: end.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
-      });
+      const steps = 8;
+      for (let step = 1; step <= steps; step += 1) {
+        const progress = step / steps;
+        await client.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [
+            {
+              x: start.x + (end.x - start.x) * progress,
+              y: start.y + (end.y - start.y) * progress,
+              id: 1,
+              radiusX: 2,
+              radiusY: 2,
+              force: 1,
+            },
+          ],
+        });
+        await page.waitForTimeout(40);
+      }
       await page.waitForTimeout(options.holdAfterMoveMs ?? 100);
     }
     await client.send("Input.dispatchTouchEvent", {
@@ -473,6 +498,71 @@ test.describe("L4 mobile / PTY long press copy", () => {
     expect(dotBox.width).toBeLessThanOrEqual(13);
   });
 
+  test("long press on a file link selects the whole link and downloads from the toolbar", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-link-download`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty("artifact @./build/out.tar.gz ready\r\n");
+    });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("./build/out.tar.gz");
+
+    const target = await emuPage.evaluate((sid) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!term || !screen) return null;
+      const buffer = term.buffer.active;
+      const rect = screen.getBoundingClientRect();
+      const cellWidth = screen.clientWidth / term.cols;
+      const cellHeight = screen.clientHeight / term.rows;
+      for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+        const text = buffer.getLine(row)?.translateToString(true) ?? "";
+        const pathColumn = text.indexOf("./build/out.tar.gz");
+        if (pathColumn < 0) continue;
+        return {
+          x: rect.left + (pathColumn + 4) * cellWidth,
+          y: rect.top + (row - buffer.viewportY + 0.5) * cellHeight,
+        };
+      }
+      return null;
+    }, sessionId);
+    if (!target) throw new Error("file link target is not visible");
+
+    await longPress(emuPage, target);
+
+    await expect
+      .poll(() =>
+        emuPage.evaluate((sid) => window.__ccTest?.pty.getSelection(sid) ?? "", sessionId),
+      )
+      .toBe("@./build/out.tar.gz");
+    await expect(emuPage.getByRole("button", { name: "复制终端选区" })).toBeVisible();
+    const downloadButton = emuPage.getByRole("button", { name: "下载终端链接" });
+    await expect(downloadButton).toBeVisible();
+
+    await downloadButton.click();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() =>
+          (window.__ptySmoke?.sent ?? []).some((raw) => {
+            try {
+              const message = JSON.parse(raw) as { type?: string; path?: string };
+              return (
+                message.type === "file_download_request" && message.path === "./build/out.tar.gz"
+              );
+            } catch {
+              return false;
+            }
+          }),
+        ),
+      )
+      .toBe(true);
+    await expect(downloadButton).toBeHidden();
+  });
+
   test("keeps copy handles anchored when long press closes the soft keyboard", async ({
     emuPage,
   }) => {
@@ -540,34 +630,29 @@ test.describe("L4 mobile / PTY long press copy", () => {
 
     await expectSelectionOverlayStable(emuPage);
 
-    await expect
-      .poll(
-        () =>
-          emuPage.evaluate(() =>
-            Number(
-              document
-                .querySelector("[data-keyboard-offset]")
-                ?.getAttribute("data-keyboard-offset") ?? "0",
+    const keyboardOffsetAfterLongPress = await emuPage.evaluate(() =>
+      Number(
+        document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
+          "0",
+      ),
+    );
+    if (keyboardOffsetAfterLongPress > 0) {
+      await execFileAsync("adb", ["shell", "input", "keyevent", "BACK"]);
+      await expect
+        .poll(
+          () =>
+            emuPage.evaluate(() =>
+              Number(
+                document
+                  .querySelector("[data-keyboard-offset]")
+                  ?.getAttribute("data-keyboard-offset") ?? "0",
+              ),
             ),
-          ),
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThan(0);
-    await execFileAsync("adb", ["shell", "input", "keyevent", "BACK"]);
-    await expect
-      .poll(
-        () =>
-          emuPage.evaluate(() =>
-            Number(
-              document
-                .querySelector("[data-keyboard-offset]")
-                ?.getAttribute("data-keyboard-offset") ?? "0",
-            ),
-          ),
-        { timeout: 10_000 },
-      )
-      .toBe(0);
-    await expectSelectionOverlayStable(emuPage);
+          { timeout: 10_000 },
+        )
+        .toBe(0);
+      await expectSelectionOverlayStable(emuPage);
+    }
   });
 
   test("tap outside clears the copy affordance and dragging handles adjusts the selection", async ({

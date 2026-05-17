@@ -3,6 +3,7 @@ import type { IBufferCell, IBufferLine, Terminal } from "@xterm/xterm";
 import {
   getClientPositionForTerminalPoint,
   getTerminalPointAtClient,
+  selectTerminalFileDownloadLinkAtBufferPoint,
   selectTerminalLineAtPoint,
   selectTerminalInitialRangeAtPoint,
   selectTerminalRange,
@@ -279,6 +280,69 @@ describe("selectTerminalInitialRangeAtPoint", () => {
 
     expect(selected?.text).toBe("alpha  beta gamma");
     expect(select).toHaveBeenCalledWith(0, 32, 17);
+  });
+});
+
+describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
+  it("selects the whole file download link and returns the download path", () => {
+    const select = vi.fn();
+    const terminal = {
+      rows: 10,
+      cols: 48,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) =>
+            row === 32
+              ? line(
+                  "see @./build/out.tar.gz for logs"
+                    .split("")
+                    .concat(Array.from({ length: 14 }, () => " ")),
+                )
+              : undefined,
+        },
+      },
+      select,
+    } as unknown as Terminal;
+
+    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+      terminal,
+      point: { row: 32, column: 13 },
+    });
+
+    expect(selected?.text).toBe("@./build/out.tar.gz");
+    expect(selected?.downloadPath).toBe("./build/out.tar.gz");
+    expect(select).toHaveBeenCalledWith(4, 32, 19);
+  });
+
+  it("returns null when the buffer point is outside a file download link", () => {
+    const select = vi.fn();
+    const terminal = {
+      rows: 10,
+      cols: 48,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) =>
+            row === 32
+              ? line(
+                  "see @./build/out.tar.gz for logs"
+                    .split("")
+                    .concat(Array.from({ length: 14 }, () => " ")),
+                )
+              : undefined,
+        },
+      },
+      select,
+    } as unknown as Terminal;
+
+    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+      terminal,
+      point: { row: 32, column: 25 },
+    });
+
+    expect(selected).toBeNull();
+    expect(select).not.toHaveBeenCalled();
   });
 });
 

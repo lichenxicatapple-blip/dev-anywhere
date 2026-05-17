@@ -4,8 +4,21 @@ import { useSessionStore } from "@/stores/session-store";
 import { PtyKeepAliveProvider, PtyKeepAliveViewport } from "./pty-keepalive-provider";
 
 vi.mock("./chat-pty-view", () => ({
-  ChatPtyView: ({ sessionId, active }: { sessionId: string; active?: boolean }) => (
-    <div data-slot="mock-chat-pty-view" data-session-id={sessionId} data-active={String(active)} />
+  ChatPtyView: ({
+    sessionId,
+    provider,
+    active,
+  }: {
+    sessionId: string;
+    provider?: "claude" | "codex";
+    active?: boolean;
+  }) => (
+    <div
+      data-slot="mock-chat-pty-view"
+      data-session-id={sessionId}
+      data-provider={provider}
+      data-active={String(active)}
+    />
   ),
 }));
 
@@ -55,6 +68,21 @@ describe("PtyKeepAliveProvider", () => {
         '[data-slot="pty-keepalive-entry"][data-session-id="pty-1"]',
       );
       expect(entry?.getAttribute("data-active")).toBe("true");
+    });
+  });
+
+  it("passes the session provider through the keep-alive layer", async () => {
+    const { container } = render(
+      <PtyKeepAliveProvider>
+        <div style={{ height: 200, width: 300 }}>
+          <PtyKeepAliveViewport sessionId="pty-1" provider="codex" ptyOwner="proxy-hosted" />
+        </div>
+      </PtyKeepAliveProvider>,
+    );
+
+    await waitFor(() => {
+      const view = container.querySelector('[data-slot="mock-chat-pty-view"]');
+      expect(view?.getAttribute("data-provider")).toBe("codex");
     });
   });
 

@@ -14,10 +14,10 @@ export function MobileBrandHero({ subtitle, action }: MobileBrandHeroProps) {
       data-slot="mobile-brand-hero"
       aria-label="DEV Anywhere"
     >
-      <div className="min-w-0 space-y-3 pr-14">
+      <div className="min-w-0 space-y-3 pr-12">
         <Typewriter
           texts={BRAND_TEXTS}
-          className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-bold tracking-normal"
+          className="dev-mobile-brand-typewriter max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-bold tracking-normal"
         />
         <p className="max-w-[34rem] text-sm leading-5 text-muted-foreground">{subtitle}</p>
         {action ? <div className="flex max-w-full min-w-0 pt-1">{action}</div> : null}

@@ -12,12 +12,14 @@ import {
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { touchPtyKeepAliveEntry, type PtyKeepAliveEntry } from "@/lib/pty-keepalive-cache";
+import type { SessionProvider } from "@/lib/session-provider";
 import { ImagePreviewProvider } from "./image-preview";
 import { ChatPtyView } from "./chat-pty-view";
 
 type PtyOwner = "local-terminal" | "proxy-hosted";
 
 interface CachedPtyEntry extends PtyKeepAliveEntry {
+  provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }
 
@@ -30,6 +32,7 @@ interface ViewportRect {
 
 interface ActivePtyView {
   sessionId: string;
+  provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }
 
@@ -76,7 +79,9 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
         activeSessionId: view.sessionId,
       });
       return touched.map((entry) =>
-        entry.sessionId === view.sessionId ? { ...entry, ptyOwner: view.ptyOwner } : entry,
+        entry.sessionId === view.sessionId
+          ? { ...entry, provider: view.provider, ptyOwner: view.ptyOwner }
+          : entry,
       );
     });
   }, []);
@@ -132,9 +137,11 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
 
 export function PtyKeepAliveViewport({
   sessionId,
+  provider,
   ptyOwner,
 }: {
   sessionId: string;
+  provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }) {
   const context = useContext(PtyKeepAliveContext);
@@ -147,9 +154,9 @@ export function PtyKeepAliveViewport({
   const { activate, deactivate, updateViewportRect } = context;
 
   useLayoutEffect(() => {
-    activate({ sessionId, ptyOwner });
+    activate({ sessionId, provider, ptyOwner });
     return () => deactivate(sessionId);
-  }, [activate, deactivate, sessionId, ptyOwner]);
+  }, [activate, deactivate, sessionId, provider, ptyOwner]);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -226,7 +233,12 @@ function PtyKeepAliveLayer({
             }}
           >
             <ImagePreviewProvider sessionId={entry.sessionId}>
-              <ChatPtyView sessionId={entry.sessionId} ptyOwner={entry.ptyOwner} active={active} />
+              <ChatPtyView
+                sessionId={entry.sessionId}
+                provider={entry.provider}
+                ptyOwner={entry.ptyOwner}
+                active={active}
+              />
             </ImagePreviewProvider>
           </div>
         );

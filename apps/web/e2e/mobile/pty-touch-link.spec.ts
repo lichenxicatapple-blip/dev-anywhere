@@ -1,6 +1,5 @@
-// 钉死 bug: 移动端 PTY 文件/图片路径 tap 应该触发预览/下载 (无 cmd/ctrl 修饰键).
-// PC 上 cmd+click 防误触, 但触屏没修饰键, 现行实现把所有触屏 tap 都拦掉,
-// 用户在手机上完全无法预览/下载 PTY 输出里的文件和图片.
+// 移动端 PTY 图片路径保留 tap 预览；文件下载路径 tap 不直接下载，避免误触。
+// 文件下载走长按选区工具条。
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
@@ -22,9 +21,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       .toContain(needle);
   }
 
-  test("tap on a PTY file path triggers file_download (no modifier on touch surface)", async ({
-    emuPage,
-  }) => {
+  test("tap on a PTY file path does not trigger file_download", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emitLineAndAwait(emuPage, "see ./scripts/test.sh for details\r\n", "./scripts/test.sh");
@@ -34,21 +31,20 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       { sid: SESSION_ID, needle: "./scripts/test.sh" },
     );
     expect(result?.triggered).toBe(true);
+    expect(result?.text).toBe("./scripts/test.sh");
 
-    // 触屏 tap 后 web 应当向 relay 发 file_download_request.
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() =>
-          (window.__ptySmoke?.sent ?? []).some((raw) => {
-            try {
-              return (JSON.parse(raw) as { type?: string }).type === "file_download_request";
-            } catch {
-              return false;
-            }
-          }),
-        ),
-      )
-      .toBe(true);
+    await emuPage.waitForTimeout(300);
+    expect(
+      await emuPage.evaluate(() =>
+        (window.__ptySmoke?.sent ?? []).some((raw) => {
+          try {
+            return (JSON.parse(raw) as { type?: string }).type === "file_download_request";
+          } catch {
+            return false;
+          }
+        }),
+      ),
+    ).toBe(false);
   });
 
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({

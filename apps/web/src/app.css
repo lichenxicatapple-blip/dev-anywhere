@@ -254,6 +254,23 @@ code.hljs,
     inset 0 -1px 0 color-mix(in srgb, var(--primary) 7%, transparent);
 }
 
+.dev-mobile-brand-typewriter {
+  font-size: 1.125rem;
+  line-height: 1.25;
+}
+
+@media (min-width: 360px) {
+  .dev-mobile-brand-typewriter {
+    font-size: 1.25rem;
+  }
+}
+
+@media (min-width: 420px) {
+  .dev-mobile-brand-typewriter {
+    font-size: 1.5rem;
+  }
+}
+
 .dev-sidebar-rail::before {
   position: absolute;
   top: 0;

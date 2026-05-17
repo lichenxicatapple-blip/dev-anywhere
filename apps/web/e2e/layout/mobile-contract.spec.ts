@@ -56,6 +56,52 @@ test.describe("mobile UX contract", () => {
     await expectNoHorizontalDocumentOverflow(page);
   });
 
+  test("mobile brand command fits the narrow phone header without shrinking the settings touch target", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 667 });
+    await page.goto("/");
+
+    const typewriter = page.locator(
+      '[data-slot="mobile-brand-hero"] [data-slot="brand-typewriter"]',
+    );
+    await expect(typewriter).toBeVisible();
+
+    const fit = await typewriter.evaluate((node) => {
+      const probe = node.cloneNode(true) as HTMLElement;
+      probe.textContent = "> /unlimited @anytime_";
+      probe.style.position = "fixed";
+      probe.style.left = "-10000px";
+      probe.style.top = "0";
+      probe.style.width = "max-content";
+      probe.style.maxWidth = "none";
+      probe.style.overflow = "visible";
+      document.body.appendChild(probe);
+      const result = {
+        available: node.clientWidth,
+        required: probe.getBoundingClientRect().width,
+        whiteSpace: getComputedStyle(node).whiteSpace,
+      };
+      probe.remove();
+      return result;
+    });
+    expect(fit.whiteSpace).toBe("nowrap");
+    expect(fit.required).toBeLessThanOrEqual(fit.available + 1);
+
+    const settings = page.locator('[data-slot="mobile-settings-trigger"]');
+    const settingsVisual = page.locator('[data-slot="mobile-settings-trigger-visual"]');
+    await expectTouchTarget(settings);
+    const [typewriterBox, visualBox] = await Promise.all([
+      typewriter.boundingBox(),
+      settingsVisual.boundingBox(),
+    ]);
+    expect(typewriterBox).not.toBeNull();
+    expect(visualBox).not.toBeNull();
+    expect(Math.abs((visualBox?.height ?? 0) - (typewriterBox?.height ?? 0))).toBeLessThanOrEqual(
+      7,
+    );
+  });
+
   test("mobile shell settings opens the shared settings dialog", async ({ page }) => {
     await selectFakeProxy(page);
     const settings = page.locator('[data-slot="mobile-settings-trigger"]');

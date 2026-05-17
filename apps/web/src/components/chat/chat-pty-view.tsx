@@ -7,6 +7,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
+import type { SessionProvider } from "@/lib/session-provider";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { getPtyBackToBottomClassName } from "./pty-back-to-bottom-layout";
@@ -16,11 +17,12 @@ import { usePtyView } from "./use-pty-view";
 
 interface ChatPtyViewProps {
   sessionId: string;
+  provider?: SessionProvider;
   ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
 }
 
-export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewProps) {
+export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
@@ -86,7 +88,11 @@ export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewP
         }}
       />
       {view.showMobilePtyControls ? (
-        <PtyMobileControls onInput={view.sendMobileInput} onPaste={view.pasteMobileClipboard} />
+        <PtyMobileControls
+          provider={provider}
+          onInput={view.sendMobileInput}
+          onPaste={view.pasteMobileClipboard}
+        />
       ) : null}
       {view.ptySelectionHandles ? (
         <>
@@ -110,7 +116,7 @@ export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewP
       ) : null}
       {view.ptySelectionToolbar ? (
         <div
-          className="fixed z-50 -translate-x-1/2 rounded-md border border-[#4A4A4A] bg-[#2B2B2B] p-1 shadow-lg"
+          className="fixed z-50 flex -translate-x-1/2 gap-1 rounded-md border border-[#4A4A4A] bg-[#2B2B2B] p-1 shadow-lg"
           style={{ left: view.ptySelectionToolbar.left, top: view.ptySelectionToolbar.top }}
           data-slot="pty-selection-toolbar"
         >
@@ -123,6 +129,17 @@ export function ChatPtyView({ sessionId, ptyOwner, active = true }: ChatPtyViewP
           >
             复制
           </button>
+          {view.ptySelectionDownloadPath ? (
+            <button
+              type="button"
+              className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none text-[#F2F2F2] hover:bg-[#3A3A3A] active:bg-[#454545]"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={view.downloadPtySelection}
+              aria-label="下载终端链接"
+            >
+              下载
+            </button>
+          ) : null}
         </div>
       ) : null}
       <PtyScrollbar state={view.scrollState} onScrollRatio={view.scrollToRatio} />

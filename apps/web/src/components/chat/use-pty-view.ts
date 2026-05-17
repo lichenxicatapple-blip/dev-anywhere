@@ -114,8 +114,10 @@ interface UsePtyViewResult {
   focusHandlers: FocusHandlers;
   ptySelectionToolbar: { left: number; top: number } | null;
   ptySelectionHandles: PtySelectionHandles | null;
+  ptySelectionDownloadPath: string | null;
   ptySelectionHandleMetrics: PtySelectionHandleMetrics;
   copyPtySelection: () => void;
+  downloadPtySelection: () => void;
   handlePtySelectionHandlePointerDown: (
     kind: PtySelectionHandleKind,
     event: ReactPointerEvent<HTMLElement>,
@@ -168,6 +170,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
+  const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeWasFollowingRef = useRef(true);
   const pageResumeFrameRef = useRef<number | null>(null);
@@ -332,15 +335,38 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
+  const downloadPtyPath = useCallback(
+    (path: string): void => {
+      const relay = relayClientRef;
+      if (!relay) {
+        toast.error("请先连接开发机");
+        return;
+      }
+      const toastId = toast.loading(`下载 ${path} ...`);
+      void triggerFileDownload({ relay, sessionId, path })
+        .then((result) => {
+          if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
+          else toast.error(result.error, { id: toastId });
+        })
+        .catch((err: unknown) => {
+          toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
+        });
+    },
+    [sessionId],
+  );
+
   const selection = usePtySelectionController({
     terminalRef,
     xtermHostRef,
     scrollControllerRef,
     containerEl,
     scrollState,
+    keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
+    onDownloadPath: downloadPtyPath,
   });
+  ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;
 
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
@@ -479,16 +505,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtyLinkProvider(sessionId, "image-preview", imageLinkRegistration.provider);
         const fileDownloadLinkRegistration = registerFileDownloadLinkProvider(
           xterm,
-          async (path) => {
-            const toastId = toast.loading(`下载 ${path} ...`);
-            try {
-              const result = await triggerFileDownload({ relay, sessionId, path });
-              if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
-              else toast.error(result.error, { id: toastId });
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
-            }
-          },
+          downloadPtyPath,
         );
         fileDownloadLinkDispose = fileDownloadLinkRegistration.dispose;
         registerPtyLinkProvider(sessionId, "file-download", fileDownloadLinkRegistration.provider);
@@ -679,6 +696,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     follow.setHasNewFramesWhileAway,
     ptyPlainEnterBehavior,
     canAcceptInput,
+    downloadPtyPath,
     openImagePreview,
     suppressPtyFocus,
     scheduleRawInputFollow,
@@ -756,7 +774,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   mobileLayoutDebugRef.current.containerPaddingBottom = containerPaddingBottom;
 
   useEffect(() => {
-    relayoutSchedulerRef.current?.schedule();
+    if (ptySelectionActiveRef.current) scrollControllerRef.current?.relayout();
+    else relayoutSchedulerRef.current?.schedule();
     const keyboardOpen = keyboardOffset > 0;
     const previous = keyboardFollowStateRef.current;
     const shouldForceKeyboardFollow =
@@ -768,7 +787,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       controlsVisible: showMobilePtyControls,
     };
     if (showMobilePtyControls) {
-      if (shouldForceKeyboardFollow) {
+      if (ptySelectionActiveRef.current) {
+        clearNewFramesWhileAway();
+      } else if (shouldForceKeyboardFollow) {
         scrollControllerRef.current?.scrollToBottom("keyboardOffset", { force: true });
         clearNewFramesWhileAway();
       } else if (!keyboardOpen) {
@@ -813,8 +834,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     focusHandlers,
     ptySelectionToolbar: selection.ptySelectionToolbar,
     ptySelectionHandles: selection.ptySelectionHandles,
+    ptySelectionDownloadPath: selection.ptySelectionDownloadPath,
     ptySelectionHandleMetrics: selection.ptySelectionHandleMetrics,
     copyPtySelection: selection.copyPtySelection,
+    downloadPtySelection: selection.downloadPtySelection,
     handlePtySelectionHandlePointerDown: selection.handlePtySelectionHandlePointerDown,
     handlePtySelectionHandleTouchStart: selection.handlePtySelectionHandleTouchStart,
     isPtyDragOver,

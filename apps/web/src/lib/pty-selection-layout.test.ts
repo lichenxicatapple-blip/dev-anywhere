@@ -31,6 +31,6 @@ describe("pty selection layout", () => {
       viewportOffsetTop: 0,
     });
 
-    expect(position).toEqual({ left: 120, top: 351.4 });
+    expect(position).toEqual({ left: 120, top: 335.4 });
   });
 });

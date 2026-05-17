@@ -97,8 +97,8 @@ describe("xterm file download links", () => {
     expect(onDownload).not.toHaveBeenCalled();
   });
 
-  // 触屏设备 (pointer: coarse) 没修饰键, plain tap 即触发. PC anti-misclick gate
-  // 不应阻止移动端用户点链接打开下载.
+  // 触屏设备 (pointer: coarse) 容易误触 PTY 输出里的路径；普通 tap 不应直接下载。
+  // 移动端下载走长按选区工具条，外接键盘仍保留 cmd/ctrl + click。
   describe("touch surface (mobile / tablet without keyboard)", () => {
     function withTouchSurface<T>(fn: () => T): T {
       const spy = vi.spyOn(window, "matchMedia").mockImplementation(
@@ -121,11 +121,11 @@ describe("xterm file download links", () => {
       }
     }
 
-    it("triggers download on plain tap (no modifier needed)", () => {
+    it("does not trigger download on plain tap", () => {
       withTouchSurface(() => {
         const onDownload = vi.fn();
         provideAndActivate(onDownload, {});
-        expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
+        expect(onDownload).not.toHaveBeenCalled();
       });
     });
 

@@ -27,23 +27,27 @@ trap 'adb forward --remove "tcp:$CDP_PORT" 2>/dev/null || true; e2e_mobile_teard
 smoke_use_stable_node
 smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL"
 e2e_mobile_setup_adb_reverse
+e2e_mobile_prepare_soft_keyboard
 adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
 
-if ! curl -s "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
-  echo "ERROR: CDP forward built but http://localhost:$CDP_PORT not reachable." >&2
-  echo "Open Chrome on the emulator at least once to register chrome_devtools_remote." >&2
-  exit 3
-fi
-
-echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)"
+echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=${ANDROID_SERIAL:-$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)}"
 
 cd "$ROOT/apps/web"
+
+mobile_cdp_ready() {
+  curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1
+}
 
 # Android Chrome over CDP 不支持 newContext 隔离 + page.close 不真删 tab + addInitScript
 # 不能 unregister, 跨 spec file 共用同一 chrome 进程会 navigation race. 解决方案是
 # 每个 spec file 都给它一个干净 chrome 进程: force-stop + 重启 + adb forward 重建 +
 # playwright 单独跑该 spec. 同 spec file 内多 test 仍共享 page (worker scope).
 reset_chrome() {
+  if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
+    echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
+    echo "Set TEST_MOBILE_ALLOW_REAL_DEVICE_RESET=1 only for a dedicated test device." >&2
+    return 1
+  fi
   # force-stop 后 chrome restore session 把 tab 全恢复, page.close 在 emu 上又不真删
   # tab, 跑多了累积几十个 tab 会让 page.goto / locator 操作 timeout. CDP /json/close
   # endpoint 是真能 close target 的, 拿它把多余 tab 关掉留 1 个干净的.
@@ -55,12 +59,12 @@ reset_chrome() {
   # 头两次 spec 跑撞冷启动 emu chrome 需要 ~25s 才注册 chrome_devtools_remote;
   # 旧 5 × 2s 过紧, 给 15 × 2s = 30s 兜底, 之后 spec 已 warm 不会等满。
   for _ in $(seq 1 15); do
-    if curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
+    if mobile_cdp_ready; then
       break
     fi
     sleep 2
   done
-  if ! curl -s -m 2 "http://localhost:$CDP_PORT/json/version" >/dev/null 2>&1; then
+  if ! mobile_cdp_ready; then
     echo "ERROR: chrome 重启后 CDP 30s 内仍不响应" >&2
     return 1
   fi

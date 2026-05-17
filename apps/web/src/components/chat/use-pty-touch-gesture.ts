@@ -35,6 +35,10 @@ interface PtyTouchGestureHandlers {
   onContextMenuCapture: (event: MouseEvent<HTMLDivElement>) => void;
 }
 
+function matchesGesturePointer(gesture: TouchGestureState, pointerId: number): boolean {
+  return gesture.pointerId === pointerId || pointerId === TOUCH_EVENT_POINTER_ID;
+}
+
 interface UsePtyTouchGestureOptions {
   terminalRef: RefObject<Terminal | null>;
   suppressPtyFocus: () => void;
@@ -107,7 +111,7 @@ export function usePtyTouchGesture({
   const updateGestureMove = useCallback(
     (pointerId: number, clientX: number, clientY: number): boolean => {
       const gesture = touchPointerRef.current;
-      if (!gesture || gesture.pointerId !== pointerId) return false;
+      if (!gesture || !matchesGesturePointer(gesture, pointerId)) return false;
       gesture.lastX = clientX;
       gesture.lastY = clientY;
       if (gesture.longPressed) {
@@ -126,9 +130,13 @@ export function usePtyTouchGesture({
   );
 
   const finishGesture = useCallback(
-    (pointerId: number): GestureFinishKind | null => {
+    (pointerId: number, point?: { clientX: number; clientY: number }): GestureFinishKind | null => {
       const gesture = touchPointerRef.current;
-      if (!gesture || gesture.pointerId !== pointerId) return null;
+      if (!gesture || !matchesGesturePointer(gesture, pointerId)) return null;
+      if (point) {
+        gesture.lastX = point.clientX;
+        gesture.lastY = point.clientY;
+      }
       touchPointerRef.current = null;
       clearLongPressTimer(gesture);
       if (gesture.longPressed) {
@@ -148,7 +156,7 @@ export function usePtyTouchGesture({
   const cancelGesture = useCallback(
     (pointerId: number): GestureFinishKind | null => {
       const gesture = touchPointerRef.current;
-      if (!gesture || gesture.pointerId !== pointerId) return null;
+      if (!gesture || !matchesGesturePointer(gesture, pointerId)) return null;
       clearLongPressTimer(gesture);
       touchPointerRef.current = null;
       if (gesture.longPressed) {
@@ -184,7 +192,9 @@ export function usePtyTouchGesture({
 
   const onPointerUpCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
-      if (finishGesture(event.pointerId)) event.stopPropagation();
+      if (finishGesture(event.pointerId, { clientX: event.clientX, clientY: event.clientY })) {
+        event.stopPropagation();
+      }
     },
     [finishGesture],
   );
@@ -224,7 +234,9 @@ export function usePtyTouchGesture({
 
   const onTouchEndCapture = useCallback(
     (event: TouchEvent<HTMLDivElement>): void => {
-      if (finishGesture(TOUCH_EVENT_POINTER_ID) === "longpress") event.stopPropagation();
+      const touch = event.changedTouches[0];
+      const point = touch ? { clientX: touch.clientX, clientY: touch.clientY } : undefined;
+      if (finishGesture(TOUCH_EVENT_POINTER_ID, point) === "longpress") event.stopPropagation();
     },
     [finishGesture],
   );

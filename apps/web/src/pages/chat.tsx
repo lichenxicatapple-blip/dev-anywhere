@@ -163,7 +163,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 <TerminatedSessionPanel mode={mode} />
               )
             ) : mode === "pty" ? (
-              <PtyKeepAliveViewport sessionId={id} ptyOwner={session?.ptyOwner} />
+              <PtyKeepAliveViewport
+                sessionId={id}
+                provider={session?.provider}
+                ptyOwner={session?.ptyOwner}
+              />
             ) : (
               <ChatJsonView sessionId={id} />
             )}

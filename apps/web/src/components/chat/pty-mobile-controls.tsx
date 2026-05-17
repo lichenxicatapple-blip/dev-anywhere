@@ -7,8 +7,10 @@ import {
   ClipboardPaste,
   CornerDownLeft,
 } from "lucide-react";
+import type { SessionProvider } from "@/lib/session-provider";
 
 interface PtyMobileControlsProps {
+  provider?: SessionProvider;
   onInput: (data: string) => void;
   onPaste: () => void;
 }
@@ -18,13 +20,17 @@ interface PtyMobileControlsProps {
 const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 
+function clearAgentInputSequence(provider: SessionProvider | undefined): string {
+  return provider === "codex" ? "\x03" : "\x1b\x1b";
+}
+
 // 移动端浮层按键 (2 行):
 //   Row1: [Esc ][Tab ][⇧Tab][^T  ][ ↑ ][ ^S ]
 //   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
 //   Paste / Enter 在最右, 各占一行
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
 // onPointerDown preventDefault 防把焦点抢走 xterm。
-export function PtyMobileControls({ onInput, onPaste }: PtyMobileControlsProps) {
+export function PtyMobileControls({ provider, onInput, onPaste }: PtyMobileControlsProps) {
   return (
     <div
       className="absolute inset-x-0 bottom-0 z-20 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 py-1.5 shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
@@ -75,9 +81,9 @@ export function PtyMobileControls({ onInput, onPaste }: PtyMobileControlsProps) 
         </SinglePressKey>
 
         <SinglePressKey
-          label="清空当前输入"
+          label="清空输入区"
           slot="pty-mobile-key-clear"
-          onPress={() => onInput("\x15")}
+          onPress={() => onInput(clearAgentInputSequence(provider))}
         >
           清空
         </SinglePressKey>

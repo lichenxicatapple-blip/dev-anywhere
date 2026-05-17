@@ -12,7 +12,7 @@ describe("computePtySelectionToolbarPosition", () => {
         viewportOffsetLeft: 0,
         viewportOffsetTop: 0,
       }),
-    ).toEqual({ left: 180, top: 351 });
+    ).toEqual({ left: 180, top: 335 });
   });
 
   it("honors visual viewport offsets", () => {
