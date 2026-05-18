@@ -21,7 +21,15 @@ export async function resetLocalState(page: Page): Promise<void> {
       await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
     }
   }
-  await page.reload({ timeout: 20_000 });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 20_000 });
+      return;
+    } catch (err) {
+      if (attempt === 2) throw err;
+      await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => {});
+    }
+  }
 }
 
 export type FakeRelayMessage = Record<string, unknown>;
