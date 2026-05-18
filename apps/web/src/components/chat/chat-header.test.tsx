@@ -188,7 +188,8 @@ describe("ChatHeader PTY upload menu", () => {
     ).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-stepper"]')).not.toBeNull();
     expect(screen.getByText("字号")).not.toBeNull();
-    expect(screen.getByText("终端字号")).not.toBeNull();
+    expect(screen.queryByText("终端字号")).toBeNull();
+    expect(screen.queryByText("聊天字号")).toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
   });
 
@@ -206,15 +207,12 @@ describe("ChatHeader PTY upload menu", () => {
       return element;
     });
     const row = menu.querySelector('[data-slot="chat-menu-font-row"]');
-    const label = menu.querySelector('[data-slot="chat-menu-font-label"]');
     const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
     const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
 
     expect(row?.className).toContain("grid");
-    expect(row?.className).toContain("grid-cols-[2rem_minmax(0,1fr)]");
-    expect(label?.className).toContain("whitespace-nowrap");
-    expect(label?.className).toContain("flex-1");
-    expect(label?.textContent).toMatch(/^(聊天|终端)字号$/);
+    expect(row?.className).toContain("grid-cols-[1.25rem_minmax(0,1fr)]");
+    expect(menu.querySelector('[data-slot="chat-menu-font-label"]')).toBeNull();
     expect(stepper?.className).toContain("inline-flex");
     expect(stepper?.className).toContain("col-start-2");
     expect(stepper?.className).not.toContain("border");

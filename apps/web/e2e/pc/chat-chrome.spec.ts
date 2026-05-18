@@ -150,42 +150,43 @@ test.describe("ChatHeader compact navigation controls", () => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
 
     const row = page.locator('[data-slot="chat-menu-font-row"]');
-    const label = page.locator('[data-slot="chat-menu-font-label"]');
     const stepper = page.locator('[data-slot="chat-menu-font-stepper"]');
     const smaller = page.locator('[data-slot="chat-menu-font-smaller"]');
     const value = page.locator('[data-slot="chat-menu-font-size"]');
     const larger = page.locator('[data-slot="chat-menu-font-larger"]');
     const reset = page.locator('[data-slot="chat-menu-font-reset"]');
+    const resetLabel = page.locator('[data-slot="chat-menu-font-reset-label"]');
 
     await expect(stepper).toBeVisible();
+    await expect(page.locator('[data-slot="chat-menu-font-label"]')).toHaveCount(0);
 
-    const [rowBox, labelBox, stepperBox, smallerBox, valueBox, largerBox, resetBox] =
+    const [rowBox, stepperBox, smallerBox, valueBox, largerBox, resetBox, resetLabelBox] =
       await Promise.all([
         row.boundingBox(),
-        label.boundingBox(),
         stepper.boundingBox(),
         smaller.boundingBox(),
         value.boundingBox(),
         larger.boundingBox(),
         reset.boundingBox(),
+        resetLabel.boundingBox(),
       ]);
 
     expect(rowBox).not.toBeNull();
-    expect(labelBox).not.toBeNull();
     expect(stepperBox).not.toBeNull();
     expect(smallerBox).not.toBeNull();
     expect(valueBox).not.toBeNull();
     expect(largerBox).not.toBeNull();
     expect(resetBox).not.toBeNull();
+    expect(resetLabelBox).not.toBeNull();
 
     if (
       !rowBox ||
-      !labelBox ||
       !stepperBox ||
       !smallerBox ||
       !valueBox ||
       !largerBox ||
-      !resetBox
+      !resetBox ||
+      !resetLabelBox
     ) {
       return;
     }
@@ -196,8 +197,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     expect(
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
     ).toBeLessThanOrEqual(1);
-    expect(stepperBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
-    expect(stepperBox.x).toBeGreaterThanOrEqual(labelBox.x - 1);
+    expect(stepperBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
+    expect(Math.abs(stepperBox.x - resetLabelBox.x)).toBeLessThanOrEqual(1);
     expect(stepperBox.x + stepperBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
     expect(resetBox.y).toBeGreaterThan(rowBox.y + rowBox.height - 1);
   });
