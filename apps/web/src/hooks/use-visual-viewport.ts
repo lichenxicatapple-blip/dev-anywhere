@@ -12,6 +12,11 @@ export interface VisualViewportBottomOffsetInput {
   baselineViewportHeight: number;
 }
 
+export interface VisualViewportInsets {
+  bottomOffset: number;
+  layoutBottomInset: number;
+}
+
 export function computeVisualViewportBottomOffset({
   layoutViewportHeight,
   visualViewportHeight,
@@ -74,7 +79,18 @@ export function useVisualViewportHeightVar(): void {
 }
 
 export function useVisualViewportBottomOffset(): number {
-  const [offset, setOffset] = useState(0);
+  return useVisualViewportInsets().bottomOffset;
+}
+
+export function useVisualViewportLayoutBottomInset(): number {
+  return useVisualViewportInsets().layoutBottomInset;
+}
+
+export function useVisualViewportInsets(): VisualViewportInsets {
+  const [insets, setInsets] = useState<VisualViewportInsets>({
+    bottomOffset: 0,
+    layoutBottomInset: 0,
+  });
   const baselineHeightRef = useRef(0);
   const lastWidthRef = useRef(0);
 
@@ -103,13 +119,25 @@ export function useVisualViewportBottomOffset(): number {
       // hardware-keyboard accessory bar. Only treat large viewport compression as the
       // soft keyboard; otherwise we add padding that creates a visible dead zone above
       // the Safari address bar.
-      setOffset(
-        computeVisualViewportBottomOffset({
-          layoutViewportHeight: window.innerHeight,
+      const layoutViewportHeight = window.innerHeight;
+      const next: VisualViewportInsets = {
+        bottomOffset: computeVisualViewportBottomOffset({
+          layoutViewportHeight,
           visualViewportHeight: visualHeight,
           visualViewportOffsetTop: visualTop,
           baselineViewportHeight: baselineHeightRef.current,
         }),
+        layoutBottomInset: computeVisualViewportLayoutBottomInset({
+          layoutViewportHeight,
+          visualViewportHeight: visualHeight,
+          visualViewportOffsetTop: visualTop,
+        }),
+      };
+      setInsets((previous) =>
+        previous.bottomOffset === next.bottomOffset &&
+        previous.layoutBottomInset === next.layoutBottomInset
+          ? previous
+          : next,
       );
     };
 
@@ -130,41 +158,5 @@ export function useVisualViewportBottomOffset(): number {
     };
   }, []);
 
-  return offset;
-}
-
-export function useVisualViewportLayoutBottomInset(): number {
-  const [inset, setInset] = useState(0);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const update = () => {
-      setInset(
-        computeVisualViewportLayoutBottomInset({
-          layoutViewportHeight: window.innerHeight,
-          visualViewportHeight: vv.height,
-          visualViewportOffsetTop: vv.offsetTop,
-        }),
-      );
-    };
-
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-
-    const onBlur = () => {
-      setTimeout(update, 300);
-    };
-    window.addEventListener("focusout", onBlur);
-
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      window.removeEventListener("focusout", onBlur);
-    };
-  }, []);
-
-  return inset;
+  return insets;
 }

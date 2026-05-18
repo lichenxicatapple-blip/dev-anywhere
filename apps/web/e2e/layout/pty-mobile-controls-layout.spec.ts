@@ -33,6 +33,22 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       "data-keyboard-offset",
       /[1-9]\d*/,
     );
+    await expect(page.locator("[data-keyboard-layout-inset]").first()).toHaveAttribute(
+      "data-keyboard-layout-inset",
+      /[1-9]\d*/,
+    );
+
+    await expect
+      .poll(async () => {
+        const box = await controls.boundingBox();
+        const visualViewportHeight = await page.evaluate(
+          () => window.visualViewport?.height ?? window.innerHeight,
+        );
+        if (!box) return false;
+        const bottom = box.y + box.height;
+        return bottom <= visualViewportHeight + 1 && visualViewportHeight - bottom <= 24;
+      })
+      .toBe(true);
 
     // 2 行布局: 容器内 grid 2 行 × 6 列, 容器 py-1.5 (12px) + 2*h-11 (88px) +
     // gap-1 (4px) + border-t (1px) ≈ 105px。给 ±15px 容差 (字体行高 / 边框 / shadow)。

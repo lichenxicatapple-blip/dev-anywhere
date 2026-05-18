@@ -18,10 +18,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
-import {
-  useVisualViewportBottomOffset,
-  useVisualViewportLayoutBottomInset,
-} from "@/hooks/use-visual-viewport";
+import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import {
   isRouteSessionEnded,
   resolveChatPresentation,
@@ -58,8 +55,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   // keyboardOffset 表示键盘是否打开/大概高度；layoutKbInset 才是当前 layout viewport 仍被
   // 键盘覆盖的物理 inset。Android Chrome 常会直接压缩 layout viewport，此时再 padding
   // 会二次避让，在 PTY controls 和键盘之间制造一条黑带。
-  const kbOffset = useVisualViewportBottomOffset();
-  const layoutKbInset = useVisualViewportLayoutBottomInset();
+  const { bottomOffset: kbOffset, layoutBottomInset: layoutKbInset } = useVisualViewportInsets();
 
   // 区分 "用户主动敲 chat URL / refresh" vs "AppShell auto-restore 把我拽来"。
   // 仅当当前 URL 等于 RESTORED_TARGET 时算后者, 一次性消费, 避免后续手动回访被重定向。
