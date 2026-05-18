@@ -293,18 +293,12 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
           <div className="px-2 pb-1" data-slot="chat-menu-font-control">
             <div
-              className="grid min-h-10 grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1 py-1"
+              className="grid min-h-10 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 py-1"
               data-slot="chat-menu-font-row"
             >
               <ChatMenuIcon>
                 <Type aria-hidden="true" />
               </ChatMenuIcon>
-              <span
-                className="min-w-0 flex-1 whitespace-nowrap text-sm text-foreground"
-                data-slot="chat-menu-font-label"
-              >
-                {isPty ? "终端字号" : "聊天字号"}
-              </span>
               <div
                 className="col-start-2 inline-flex w-fit shrink-0 items-center gap-1"
                 data-slot="chat-menu-font-stepper"
@@ -354,7 +348,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
             <ChatMenuIcon>
               <RotateCcw aria-hidden="true" />
             </ChatMenuIcon>
-            恢复默认
+            <span data-slot="chat-menu-font-reset-label">恢复默认</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

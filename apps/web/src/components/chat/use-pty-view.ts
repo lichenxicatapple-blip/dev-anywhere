@@ -163,6 +163,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const terminalControllerRef = useRef<TerminalControllerHandle | null>(null);
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
   const activeRef = useRef(active);
+  const previousActiveRef = useRef(active);
   const readyRef = useRef(false);
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
@@ -258,46 +259,47 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     });
   }
 
+  const cancelPendingResumeFrame = useCallback((): void => {
+    if (pageResumeFrameRef.current === null) return;
+    cancelAnimationFrame(pageResumeFrameRef.current);
+    pageResumeFrameRef.current = null;
+  }, []);
+
+  const rememberHiddenPtyState = useCallback((): void => {
+    pageResumePendingRef.current = true;
+    pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
+    cancelPendingResumeFrame();
+  }, [cancelPendingResumeFrame]);
+
+  const scheduleResumeRestore = useCallback((): void => {
+    if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
+    const wasFollowing = pageResumeWasFollowingRef.current;
+    cancelPendingResumeFrame();
+    pageResumeFrameRef.current = requestAnimationFrame(() => {
+      pageResumeFrameRef.current = requestAnimationFrame(() => {
+        pageResumeFrameRef.current = null;
+        const scroll = scrollControllerRef.current;
+        if (!scroll) return;
+        scroll.restorePageResume({ wasFollowing });
+        if (wasFollowing) clearNewFramesWhileAway();
+        pageResumePendingRef.current = false;
+      });
+    });
+  }, [cancelPendingResumeFrame, clearNewFramesWhileAway]);
+
   useEffect(() => {
     return () => {
       relayoutSchedulerRef.current?.dispose();
       rawInputFollowSchedulerRef.current?.dispose();
-      if (pageResumeFrameRef.current !== null) {
-        cancelAnimationFrame(pageResumeFrameRef.current);
-        pageResumeFrameRef.current = null;
-      }
+      cancelPendingResumeFrame();
       relayoutSchedulerRef.current = null;
       rawInputFollowSchedulerRef.current = null;
     };
-  }, []);
+  }, [cancelPendingResumeFrame]);
 
   useEffect(() => {
-    const cancelPendingFrame = (): void => {
-      if (pageResumeFrameRef.current === null) return;
-      cancelAnimationFrame(pageResumeFrameRef.current);
-      pageResumeFrameRef.current = null;
-    };
-
     const rememberHiddenState = (): void => {
-      pageResumePendingRef.current = true;
-      pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
-      cancelPendingFrame();
-    };
-
-    const scheduleResumeRestore = (): void => {
-      if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
-      const wasFollowing = pageResumeWasFollowingRef.current;
-      cancelPendingFrame();
-      pageResumeFrameRef.current = requestAnimationFrame(() => {
-        pageResumeFrameRef.current = requestAnimationFrame(() => {
-          pageResumeFrameRef.current = null;
-          const scroll = scrollControllerRef.current;
-          if (!scroll) return;
-          scroll.restorePageResume({ wasFollowing });
-          if (wasFollowing) clearNewFramesWhileAway();
-          pageResumePendingRef.current = false;
-        });
-      });
+      rememberHiddenPtyState();
     };
 
     const handleVisibilityChange = (): void => {
@@ -318,9 +320,20 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       window.removeEventListener("pagehide", rememberHiddenState);
       window.removeEventListener("pageshow", scheduleResumeRestore);
       window.removeEventListener("focus", scheduleResumeRestore);
-      cancelPendingFrame();
+      cancelPendingResumeFrame();
     };
-  }, [clearNewFramesWhileAway]);
+  }, [cancelPendingResumeFrame, rememberHiddenPtyState, scheduleResumeRestore]);
+
+  useEffect(() => {
+    const wasActive = previousActiveRef.current;
+    previousActiveRef.current = active;
+    if (wasActive === active) return;
+    if (!active) {
+      rememberHiddenPtyState();
+      return;
+    }
+    scheduleResumeRestore();
+  }, [active, rememberHiddenPtyState, scheduleResumeRestore]);
 
   const scheduleRawInputFollow = useCallback(
     (source: string = "rawInput", opts?: { force?: boolean }): void => {
