@@ -85,6 +85,21 @@ export function useScreenWakeLockScope(scopeKey: string): ScreenWakeLockState {
   }, [active, disable, enable]);
 
   useEffect(() => {
+    const releaseForBackground = (): void => {
+      void disable().catch(() => undefined);
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") releaseForBackground();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", releaseForBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", releaseForBackground);
+    };
+  }, [disable]);
+
+  useEffect(() => {
     return () => {
       scopeGenerationRef.current += 1;
       void disable().catch(() => undefined);

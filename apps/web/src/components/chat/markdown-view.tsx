@@ -119,6 +119,18 @@ function linkifyTextNode(value: string): MarkdownAstNode[] {
   ].sort((a, b) => a.start - b.start || (a.type === "path" ? -1 : 1));
   if (matches.length === 0) return [{ type: "text", value }];
 
+  return linkifyMatches(value, matches);
+}
+
+function linkifyInlineCodePathNode(value: string): MarkdownAstNode[] | null {
+  const matches: InlineAutoLinkMatch[] = findInlinePathLinks(value).map((match) => ({
+    type: "path" as const,
+    ...match,
+  }));
+  return matches.length > 0 ? linkifyMatches(value, matches) : null;
+}
+
+function linkifyMatches(value: string, matches: InlineAutoLinkMatch[]): MarkdownAstNode[] {
   const nodes: MarkdownAstNode[] = [];
   let offset = 0;
   for (const match of matches) {
@@ -147,7 +159,7 @@ function linkifyTextNode(value: string): MarkdownAstNode[] {
   return nodes;
 }
 
-function linkifyInlinePathNodes(node: MarkdownAstNode): void {
+function linkifyInlinePathNodes(node: MarkdownAstNode, insideTableCell = false): void {
   if (!node.children) return;
   const nextChildren: MarkdownAstNode[] = [];
   for (const child of node.children) {
@@ -155,12 +167,19 @@ function linkifyInlinePathNodes(node: MarkdownAstNode): void {
       nextChildren.push(...linkifyTextNode(child.value));
       continue;
     }
+    if (child.type === "inlineCode" && insideTableCell && typeof child.value === "string") {
+      const linked = linkifyInlineCodePathNode(child.value);
+      if (linked) {
+        nextChildren.push(...linked);
+        continue;
+      }
+    }
     if (
       !["link", "linkReference", "definition", "inlineCode", "code", "html", "yaml"].includes(
         child.type,
       )
     ) {
-      linkifyInlinePathNodes(child);
+      linkifyInlinePathNodes(child, insideTableCell || child.type === "tableCell");
     }
     nextChildren.push(child);
   }

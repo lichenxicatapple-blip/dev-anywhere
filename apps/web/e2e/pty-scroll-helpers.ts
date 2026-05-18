@@ -10,6 +10,29 @@ export interface PtyScrollMetrics {
   bottomGap: number;
 }
 
+export interface PtyHorizontalScrollMetrics {
+  scrollLeft: number;
+  scrollWidth: number;
+  clientWidth: number;
+  maxScrollLeft: number;
+  rightGap: number;
+}
+
+export interface PtyDebugSnapshot {
+  container: { scrollTop: number; clientHeight: number };
+  anchor: {
+    atBottom: boolean;
+    cursorInViewport: boolean;
+    bottomScrollTop: number;
+    scrollTopDeltaToBottom: number;
+  };
+  verticalIntent: {
+    mode: "following" | "reviewing";
+    source: string;
+    transitionId: string;
+  };
+}
+
 export function ptyTerminal(page: Page): Locator {
   return page.locator('[data-slot="pty-terminal"]');
 }
@@ -88,6 +111,26 @@ export async function readPtyScrollMetrics(page: Page): Promise<PtyScrollMetrics
       bottomGap: maxScrollTop - node.scrollTop,
     };
   });
+}
+
+export async function readPtyHorizontalScrollMetrics(
+  page: Page,
+): Promise<PtyHorizontalScrollMetrics> {
+  return ptyTerminal(page).evaluate((el) => {
+    const node = el as HTMLElement;
+    const maxScrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+    return {
+      scrollLeft: node.scrollLeft,
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      maxScrollLeft,
+      rightGap: maxScrollLeft - node.scrollLeft,
+    };
+  });
+}
+
+export async function readPtyDebugSnapshot(page: Page): Promise<PtyDebugSnapshot | null> {
+  return page.evaluate(() => window.__devAnywherePtyDebug?.() ?? null);
 }
 
 export async function scrollPtyToTop(

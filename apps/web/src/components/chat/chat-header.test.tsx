@@ -210,11 +210,13 @@ describe("ChatHeader PTY upload menu", () => {
     const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
     const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
 
-    expect(row?.className).toContain("flex");
+    expect(row?.className).toContain("grid");
+    expect(row?.className).toContain("grid-cols-[2rem_minmax(0,1fr)]");
     expect(label?.className).toContain("whitespace-nowrap");
     expect(label?.className).toContain("flex-1");
     expect(label?.textContent).toMatch(/^(聊天|终端)字号$/);
     expect(stepper?.className).toContain("inline-flex");
+    expect(stepper?.className).toContain("col-start-2");
     expect(stepper?.className).not.toContain("border");
     expect(larger?.className).toContain("size-8");
   });

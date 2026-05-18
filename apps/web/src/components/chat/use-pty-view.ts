@@ -138,6 +138,7 @@ interface ScrollControllerHandle {
   restorePageResume: (opts: { wasFollowing: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
+  resetHorizontalScroll: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
   getDebugProbe: () => PtyScrollDebugProbe;
@@ -335,6 +336,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
+  const resetHorizontalScrollAfterLineSubmit = useCallback((data: string, reason: string): void => {
+    if (!data.includes("\r") && !data.includes("\n")) return;
+    scrollControllerRef.current?.resetHorizontalScroll(reason);
+  }, []);
+
   const downloadPtyPath = useCallback(
     (path: string): void => {
       const relay = relayClientRef;
@@ -466,8 +472,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       relayoutSchedulerRef.current?.schedule();
     };
 
-    const onRawInput = (): void => {
+    const onRawInput = (data: string): void => {
       scheduleRawInputFollow("rawInput");
+      resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
 
     let getWebglAddon: (() => Parameters<typeof probeWebglRenderModel>[0] | null) | null = null;
@@ -700,6 +707,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     openImagePreview,
     suppressPtyFocus,
     scheduleRawInputFollow,
+    resetHorizontalScrollAfterLineSubmit,
     webOwnsPtyGeometry,
   ]);
 
@@ -737,9 +745,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       if (!canAcceptInput()) return;
       sendRemoteInputRaw(sessionId, data);
       scheduleRawInputFollow("mobileControl", { force: true });
+      resetHorizontalScrollAfterLineSubmit(data, "mobileControlEnter");
       terminalRef.current?.focus();
     },
-    [canAcceptInput, scheduleRawInputFollow, sessionId],
+    [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId],
   );
 
   const pasteMobileClipboard = useCallback((): void => {
@@ -754,15 +763,22 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     void readText()
       .then((text) => {
         if (!text) return;
+        const term = terminalRef.current;
+        if (term) {
+          // Let xterm apply bracketed paste mode and newline normalization, matching desktop paste.
+          term.paste(text);
+          return;
+        }
         sendRemoteInputRaw(sessionId, text);
         scheduleRawInputFollow("paste");
+        resetHorizontalScrollAfterLineSubmit(text, "pasteEnter");
       })
       .catch((err: unknown) => {
         const message = err instanceof Error && err.message ? err.message : "无法读取剪贴板";
         toast.error(message);
       })
       .finally(() => terminalRef.current?.focus());
-  }, [canAcceptInput, scheduleRawInputFollow, sessionId]);
+  }, [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId]);
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
   // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。

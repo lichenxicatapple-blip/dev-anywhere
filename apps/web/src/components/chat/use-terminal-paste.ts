@@ -11,7 +11,7 @@ import { toast } from "@/components/toast";
 // PTY 视图剪贴板粘贴:
 //   - 图片 (任意来源 Finder / 截屏 / 浏览器): 走 image upload, 写入 "@<path> " 提及文本
 //   - 其它任意文件: 走通用 file upload, 同样写入 "@<path> " 提及文本
-//   - 纯文本 / 无 file: 不拦截, 由 xterm 默认 paste 流程接管 (走 OSC 52 等)
+//   - 纯文本 / 无 file: 不拦截, 由 xterm 默认 paste 流程接管 (含 bracketed paste)
 
 interface UseTerminalPasteOptions {
   sessionId: string;

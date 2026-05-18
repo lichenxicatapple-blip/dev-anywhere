@@ -196,7 +196,8 @@ test.describe("ChatHeader compact navigation controls", () => {
     expect(
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
     ).toBeLessThanOrEqual(1);
-    expect(stepperBox.x).toBeGreaterThan(labelBox.x + labelBox.width);
+    expect(stepperBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height - 1);
+    expect(stepperBox.x).toBeGreaterThanOrEqual(labelBox.x - 1);
     expect(stepperBox.x + stepperBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
     expect(resetBox.y).toBeGreaterThan(rowBox.y + rowBox.height - 1);
   });
@@ -308,6 +309,21 @@ test.describe("ChatHeader screen wake lock", () => {
         }
       ).__devAnywhereWakeLockTest?.resolveRequest?.();
     });
+
+    await expect.poll(() => wakeLockTestCount(page, "releases")).toBe(1);
+  });
+
+  test("screen wake lock is released when the chat page goes to background", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installWakeLockMock(page);
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await page.locator('[data-slot="chat-menu-screen-wake-lock-item"]').click();
+    await expect.poll(() => wakeLockTestCount(page, "requests")).toBe(1);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
 
     await expect.poll(() => wakeLockTestCount(page, "releases")).toBe(1);
   });

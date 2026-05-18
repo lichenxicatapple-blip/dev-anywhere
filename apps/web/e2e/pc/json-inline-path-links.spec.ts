@@ -46,6 +46,28 @@ test.describe("JSON inline path links", () => {
       .toBe(true);
   });
 
+  test("downloads an inline-code file path from a markdown table cell", async ({ page }) => {
+    const path = "data/pipeline/sticker/sticker_classify.py";
+    await emitAssistantMessage(
+      page,
+      "| 文件 | 用到的符号 |\n" + "| - | - |\n" + `| \`${path}\` | LLMClient |`,
+    );
+
+    await expect(page.locator('[data-slot="file-download-links"]')).toHaveCount(0);
+    await page.locator("td [data-slot='inline-file-download-link']", { hasText: path }).click();
+
+    await expect
+      .poll(async () =>
+        (await sentFakeRelayMessages(page)).some(
+          (msg) =>
+            msg.type === "file_download_request" &&
+            msg.sessionId === "test-sess" &&
+            msg.path === path,
+        ),
+      )
+      .toBe(true);
+  });
+
   test("previews an image from the inline path without rendering a duplicate bottom chip", async ({
     page,
   }) => {

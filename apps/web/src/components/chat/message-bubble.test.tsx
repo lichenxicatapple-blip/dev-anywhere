@@ -133,6 +133,27 @@ describe("MessageBubble", () => {
     expect(container.querySelector('[data-slot="file-download-links"]')).toBeNull();
   });
 
+  it("renders inline-code file paths inside tables as download actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-table-file-link",
+            role: "assistant",
+            text:
+              "| 文件 | 用到的符号 |\n" +
+              "| - | - |\n" +
+              "| `data/pipeline/sticker/sticker_classify.py` | LLMClient |",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    const firstCell = container.querySelector("td");
+    const inlineLink = firstCell?.querySelector('[data-slot="inline-file-download-link"]');
+    expect(inlineLink?.textContent).toContain("data/pipeline/sticker/sticker_classify.py");
+  });
+
   it("renders image paths inline and does not duplicate them as bottom preview chips", () => {
     const { container } = render(
       <ImagePreviewProvider sessionId="s1">

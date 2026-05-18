@@ -110,7 +110,36 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
-  it("syncs native touch scroll to the matching terminal row immediately", () => {
+  it("defers host row jumps during native touch scroll until xterm renders the new row", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.buffer.active.viewportY = 10;
+    host.style.top = "200px";
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.scrollTop = 199.7;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
+    expect(host.style.top).toBe("200px");
+
+    emitRender();
+
+    expect(host.style.top).toBe("180px");
+  });
+
+  it("syncs native touch scroll to the matching terminal row before committing host position on render", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -121,7 +150,7 @@ describe("attachPtyScrollController", () => {
     );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -144,6 +173,10 @@ describe("attachPtyScrollController", () => {
     expect(queued).toHaveLength(0);
     expect(terminal.scrollToLine).toHaveBeenCalledTimes(2);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(7);
+    expect(host.style.top).toBe("1600px");
+
+    emitRender();
+
     expect(host.style.top).toBe("140px");
   });
 
@@ -638,6 +671,62 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(20686);
     expect(host.style.top).toBe("20240px");
     expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
+  });
+
+  it("keeps following when long-line input temporarily shrinks the scroll range", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "112px";
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    let scrollHeight = 89860;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal, emitRender } = createTerminal({ 4484: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 4487;
+    terminal.buffer.active.cursorX = 10;
+    terminal.buffer.active.cursorY = 49;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(89513);
+
+    // Consume the initial programmatic-bottom scroll marker so this reproduces the later
+    // raw-input path from the device trace, not just attach-time settling.
+    container.dispatchEvent(new Event("scroll"));
+    expect(controller.getDebugProbe().pendingProgrammaticScrollTop).toBeNull();
+    onUserVerticalScrollIntentChange.mockClear();
+
+    controller.traceRawInputFollowFire();
+    scrollHeight = 89624;
+    container.scrollTop = 89276;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
+
+    scrollHeight = 89860;
+    emitRender();
+
+    expect(container.scrollTop).toBe(89513);
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
   });
 
   it("treats native container scrolling away from bottom as user review intent", () => {
@@ -1352,6 +1441,64 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollLeft).toBe(800);
   });
 
+  it("keeps horizontal cursor following after a small browser scrollLeft nudge while typing", () => {
+    const { container, spacer, host } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    defineScrollWidth(container, 2184);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // Mobile browsers can nudge the scroll container horizontally while focusing the hidden
+    // textarea / soft keyboard. That is not the user reviewing horizontally and must not
+    // suppress followCursorX.
+    container.scrollLeft = 28;
+    container.dispatchEvent(new Event("scroll"));
+
+    terminal.buffer.active.cursorX = 50; // cursorPxX = 400, viewport [28, 388] -> just out of view
+    emitRender();
+
+    // Keep the cursor near the center: 400 - 360 / 2 = 220.
+    expect(container.scrollLeft).toBe(220);
+  });
+
+  it("treats a large unmarked native horizontal scroll as user review intent", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    container.scrollLeft = 500;
+    container.dispatchEvent(new Event("scroll"));
+
+    terminal.buffer.active.cursorX = 5; // cursorPxX = 50, viewport [500, 1300] -> left of view
+    emitRender();
+
+    expect(container.scrollLeft).toBe(500);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+  });
+
   it("does not adjust horizontal scroll when the cursor is already in view", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
@@ -1397,6 +1544,34 @@ describe("attachPtyScrollController", () => {
 
     // 中心目标: 50 - 400 = -350, clamp 到 0
     expect(container.scrollLeft).toBe(0);
+  });
+
+  it("resets horizontal scroll to line start immediately for raw input enter", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    terminal.buffer.active.cursorX = 120;
+    emitRender();
+    expect(container.scrollLeft).toBe(800);
+
+    controller.resetHorizontalScroll("rawInputEnter");
+
+    expect(container.scrollLeft).toBe(0);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(false);
+
+    emitRender();
+    expect(container.scrollLeft).toBe(800);
   });
 
   // 光标贴最右端时, target 会超过 maxScrollLeft, 必须 clamp 否则 scrollLeft 越界。
