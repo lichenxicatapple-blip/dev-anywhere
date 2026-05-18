@@ -61,12 +61,13 @@ test.describe("WebSocket reconnect chaos", () => {
       "waiting_approval",
     );
 
-    await dropClientSocket(page);
+    await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
       "data-state",
       "disconnected",
     );
 
+    await releaseHeldConnections(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
       "data-state",
       "waiting_approval",
@@ -88,12 +89,13 @@ test.describe("WebSocket reconnect chaos", () => {
       page.locator('[data-slot="tool-approval-card"][data-status="pending"]'),
     ).toHaveCount(1);
 
-    await dropClientSocket(page);
+    await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
       "data-state",
       "disconnected",
     );
 
+    await releaseHeldConnections(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
       "data-state",
       "waiting_approval",
