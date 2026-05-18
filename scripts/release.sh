@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 一键发布: 验证 CHANGELOG → release:check → release:smoke → bump 4 个 package.json
+# 一键发布: 验证发布源分支 → 验证 CHANGELOG → release:check → release:smoke → bump 4 个 package.json
 # → commit "release: vX.Y.Z" → tag vX.Y.Z → 确认后 push commit + tag。
 # CI (.github/workflows/release.yml) 监听 tag push 后自动 build/publish docker + npm。
+#
+# 发布必须基于 main，并且本地 main 必须与 origin/main 完全一致。
 #
 # CHANGELOG.md 必须在跑脚本前写好 ## [X.Y.Z] - YYYY-MM-DD entry。脚本只校验存在,
 # 不替你写——发布说明是创意工作, 自动生成不靠谱。
@@ -60,6 +62,23 @@ if ! [[ "$TARGET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "ERROR: version must be X.Y.Z (got: $TARGET_VERSION)" >&2
   exit 2
 fi
+
+echo "=== Verify release source branch ==="
+CURRENT_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+if [[ "$CURRENT_BRANCH" != "main" ]]; then
+  echo "ERROR: releases must be cut from main (current branch: ${CURRENT_BRANCH:-detached})" >&2
+  echo "Switch to main, merge the intended changes, then rerun this release." >&2
+  exit 1
+fi
+git fetch origin main --quiet
+LOCAL_MAIN="$(git rev-parse main)"
+REMOTE_MAIN="$(git rev-parse origin/main)"
+if [[ "$LOCAL_MAIN" != "$REMOTE_MAIN" ]]; then
+  echo "ERROR: local main does not match origin/main" >&2
+  echo "Run: git pull --ff-only origin main" >&2
+  exit 1
+fi
+echo "OK: release source is main and matches origin/main"
 
 PKG_FILES=(
   "apps/proxy/package.json"
