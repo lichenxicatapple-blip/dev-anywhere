@@ -539,6 +539,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
         });
 
+        const shouldRestorePageResumeOnAttach =
+          pageResumePendingRef.current && pageResumeWasFollowingRef.current;
+        if (shouldRestorePageResumeOnAttach) {
+          userHasVerticalScrollIntentRef.current = false;
+        }
+
         const scrollCtrl = attachPtyScrollController({
           container,
           spacer,
@@ -552,7 +558,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           setNewFramesWhileAway: follow.setHasNewFramesWhileAway,
           onAtBottomChange: follow.handleAtBottomChange,
           onScrollStateChange: setScrollState,
-          initialUserHasVerticalScrollIntent: userHasVerticalScrollIntentRef.current,
+          initialUserHasVerticalScrollIntent: shouldRestorePageResumeOnAttach
+            ? false
+            : userHasVerticalScrollIntentRef.current,
           onUserVerticalScrollIntentChange: (value) => {
             userHasVerticalScrollIntentRef.current = value;
             terminalControllerRef.current?.setOutputPaused(value);
@@ -563,6 +571,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
+        if (shouldRestorePageResumeOnAttach) {
+          scrollCtrl.restorePageResume({ wasFollowing: true });
+          clearNewFramesWhileAway();
+          pageResumePendingRef.current = false;
+        }
 
         registerPtyDebugSnapshotProvider(() => {
           const rectOf = (el: Element | null) => {

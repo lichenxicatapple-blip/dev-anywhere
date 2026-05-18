@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../../helpers";
+import {
+  expectPtyAtBottom,
+  ptyTerminal,
+  readPtyScrollMetrics,
+} from "../../pty-scroll-helpers";
 
 async function dropClientSocket(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => {
@@ -230,6 +235,45 @@ test.describe("WebSocket reconnect chaos", () => {
       (el) => (el as HTMLElement).scrollTop,
     );
     expect(scrollTopAfterReconnectOutput).toBeLessThanOrEqual(scrollTopBeforeReconnect + 8);
+  });
+
+  test("restores PTY bottom when page resume fires before reconnect reattaches terminal", async ({
+    page,
+  }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty(
+        "claude-pty",
+        Array.from(
+          { length: 120 },
+          (_, i) => `resume reconnect line ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expectPtyAtBottom(page);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    await ptyTerminal(page).evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollTop = 0;
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect
+      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
+      .toBeGreaterThan(100);
+
+    await holdNextConnectionAndDropSocket(page);
+    await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
+    await page.waitForTimeout(100);
+    await releaseHeldConnections(page);
+
+    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle", {
+      timeout: 5_000,
+    });
+    await expectPtyAtBottom(page);
   });
 
   test("does not queue request-response session creation while disconnected", async ({ page }) => {
