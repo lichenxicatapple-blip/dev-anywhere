@@ -26,6 +26,11 @@ const pngBytes = [
 
 test.setTimeout(120_000);
 
+type ImagePasteDispatchResult = {
+  defaultPrevented: boolean;
+  canceled: boolean;
+};
+
 async function run(command: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<void> {
   await execFileAsync(command, args, {
     cwd: repoRoot,
@@ -177,8 +182,8 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
   await expect(row).toHaveCount(0, { timeout: 15_000 });
 }
 
-async function dispatchImagePaste(target: Locator): Promise<void> {
-  await target.evaluate((node, bytes) => {
+async function dispatchImagePaste(target: Locator): Promise<ImagePasteDispatchResult> {
+  return target.evaluate((node, bytes) => {
     const file = new File([new Uint8Array(bytes)], "shot.png", { type: "image/png" });
     const data = new DataTransfer();
     data.items.add(file);
@@ -187,8 +192,65 @@ async function dispatchImagePaste(target: Locator): Promise<void> {
       cancelable: true,
       clipboardData: data,
     });
-    node.dispatchEvent(event);
+    const canceled = !node.dispatchEvent(event);
+    return {
+      defaultPrevented: event.defaultPrevented,
+      canceled,
+    };
   }, pngBytes);
+}
+
+function activePtyEntry(page: Page, sessionId: string): Locator {
+  return page.locator(
+    `[data-slot="pty-keepalive-entry"][data-session-id="${sessionId}"][data-active="true"]`,
+  );
+}
+
+async function expectActivePtyReady(page: Page, sessionId: string): Promise<Locator> {
+  const entry = activePtyEntry(page, sessionId);
+  await expect(entry).toBeVisible({ timeout: 20_000 });
+  await expect(entry.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
+  await expect(entry.locator('[data-slot="pty-host"] .xterm')).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(
+      async () =>
+        entry.locator('[data-slot="pty-host"]').evaluate((host) => {
+          const screen = host.querySelector<HTMLElement>(".xterm-screen");
+          const textarea = host.querySelector<HTMLTextAreaElement>(
+            'textarea[aria-label="Terminal input"]',
+          );
+          if (!screen || !textarea) return false;
+          return screen.clientWidth > 0 && screen.clientHeight > 0;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBeTruthy();
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const runtime = (
+            window as typeof window & {
+              __devAnywhereRelayRuntime?: {
+                wsManagerRef?: { isConnected?: () => boolean } | null;
+                relayClientRef?: { getBoundProxyId?: () => string | null } | null;
+              };
+            }
+          ).__devAnywhereRelayRuntime;
+          return {
+            connected: Boolean(runtime?.wsManagerRef?.isConnected?.()),
+            boundProxyId: runtime?.relayClientRef?.getBoundProxyId?.() ?? null,
+          };
+        }),
+      { timeout: 20_000 },
+    )
+    .toEqual(
+      expect.objectContaining({
+        connected: true,
+        boundProxyId: expect.any(String),
+      }),
+    );
+  return entry;
 }
 
 function proxyDataRoot(): string {
@@ -264,6 +326,7 @@ async function previewJsonImagePath(page: Page, imagePath: string): Promise<void
 }
 
 test.describe("real clipboard image chain", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(!enabled, "set DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 to run real relay/proxy");
 
   test.beforeAll(async () => {
@@ -299,7 +362,7 @@ test.describe("real clipboard image chain", () => {
       const input = page.getByLabel("输入聊天消息");
       await input.fill("inspect ");
       const jsonBefore = snapshotUploadRoot();
-      await dispatchImagePaste(input);
+      expect(await dispatchImagePaste(input)).toMatchObject({ defaultPrevented: true });
 
       jsonUpload = await waitForNewUploadedFile(jsonBefore, "paste-", ".png");
       expectUploadedBytes(jsonUpload, pngBytes);
@@ -309,9 +372,11 @@ test.describe("real clipboard image chain", () => {
 
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
-      await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible({ timeout: 20_000 });
+      const ptyEntry = await expectActivePtyReady(page, ptySessionId);
+      const ptyTerminal = ptyEntry.locator('[data-slot="pty-terminal"]');
+      await ptyTerminal.click();
       const ptyBefore = snapshotUploadRoot();
-      await dispatchImagePaste(page.locator('[data-slot="pty-terminal"]'));
+      expect(await dispatchImagePaste(ptyTerminal)).toMatchObject({ defaultPrevented: true });
 
       ptyUpload = await waitForNewUploadedFile(ptyBefore, "paste-", ".png");
       expectUploadedBytes(ptyUpload, pngBytes);
