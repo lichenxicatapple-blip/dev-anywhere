@@ -420,7 +420,9 @@ test.describe("mobile UX contract", () => {
     expect(bubbleBefore).toBe(inputBefore);
 
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    await expect(page.getByText("聊天字号")).toBeVisible();
+    await expect(page.getByText("字号")).toBeVisible();
+    await expect(page.getByText("聊天字号")).toHaveCount(0);
+    await expect(page.getByText("终端字号")).toHaveCount(0);
     const largerFont = page.locator('[data-slot="chat-menu-font-larger"]');
     await expect(largerFont).toBeVisible();
     await largerFont.click();
