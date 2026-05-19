@@ -15,6 +15,11 @@ import { PcmStreamPlayer } from "@/voice/pcm-stream-player";
 import { decideSpeechPolicy } from "@/voice/speech-policy";
 import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
 import { routeVoiceText, type VoiceCommand } from "@/voice/voice-command-router";
+import {
+  createVoicePilotSessionMachine,
+  type VoicePilotEvent,
+  type VoicePilotSessionMachine,
+} from "@/voice/voice-pilot-session-machine";
 import { VoiceTurnBuffer } from "@/voice/voice-turn-buffer";
 import {
   DEFAULT_VOICE_PILOT_STATE,
@@ -160,6 +165,20 @@ export function VoicePilotController({
   const spokenApprovalRequestIdRef = useRef<string | null>(null);
   // 当前轮的语音 partial 气泡 id; 提交/取消/cleanup 时清空
   const voicePartialIdRef = useRef<string | null>(null);
+  const sessionMachineRef = useRef<VoicePilotSessionMachine | null>(null);
+
+  function ensureSessionMachine(): VoicePilotSessionMachine {
+    if (!sessionMachineRef.current) {
+      sessionMachineRef.current = createVoicePilotSessionMachine();
+    }
+    return sessionMachineRef.current;
+  }
+
+  function sendMachineEvent(event: VoicePilotEvent): void {
+    const machine = ensureSessionMachine();
+    machine.send(event);
+    useVoicePilotStore.getState().setPhase(sessionId, machine.getPhase());
+  }
 
   useEffect(() => {
     pilotRef.current = pilot;
@@ -248,6 +267,7 @@ export function VoicePilotController({
     playerRef.current = null;
     pendingSpeechRef.current = [];
     discardVoicePartialBubble();
+    sessionMachineRef.current = null;
   }, [discardVoicePartialBubble, stopCapture]);
 
   const sendSpeechNow = useCallback(
@@ -273,12 +293,12 @@ export function VoicePilotController({
   }, [sendSpeechNow]);
 
   const speak = useCallback(
-    (text: string) => {
+    (text: string, messageId = "") => {
       const trimmed = text.trim();
       if (!trimmed) return;
       stopCapture();
       useVoicePilotStore.getState().setLastSpokenText(sessionId, trimmed);
-      useVoicePilotStore.getState().setPhase(sessionId, "speaking");
+      sendMachineEvent({ type: "assistantTextReady", text: trimmed, messageId });
       const socket = ttsRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
         pendingSpeechRef.current.push(trimmed);
@@ -317,7 +337,7 @@ export function VoicePilotController({
         source: "client",
         version: "1",
       });
-      useVoicePilotStore.getState().setPhase(sessionId, "waiting");
+      sendMachineEvent({ type: "userTextRecognized", text });
     },
     [sessionId],
   );
@@ -337,19 +357,19 @@ export function VoicePilotController({
       }
       if (command.type === "pause") {
         stopCapture();
-        store.setPhase(sessionId, "paused");
+        sendMachineEvent({ type: "pauseRequested" });
         return true;
       }
       if (command.type === "cancel" || command.type === "redo") {
         turnBufferRef.current?.cancel();
-        store.setPhase(sessionId, "listening");
+        sendMachineEvent({ type: "cancelTurnRequested" });
         void beginListening().catch((err: unknown) => {
           store.setError(sessionId, err instanceof Error ? err.message : String(err));
         });
         return true;
       }
       if (command.type === "resume") {
-        store.setPhase(sessionId, "listening");
+        sendMachineEvent({ type: "resumeRequested" });
         void beginListening().catch((err: unknown) => {
           store.setError(sessionId, err instanceof Error ? err.message : String(err));
         });
@@ -374,7 +394,11 @@ export function VoicePilotController({
                 payload: { toolId: approval.requestId },
               },
         );
-        store.setPhase(sessionId, "waiting");
+        sendMachineEvent({
+          type: "approvalResolved",
+          action: command.type === "approve_once" ? "approve" : "deny",
+          requestId: approval.requestId,
+        });
         return true;
       }
       return true;
@@ -386,24 +410,24 @@ export function VoicePilotController({
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      stopCapture();
-      useVoicePilotStore.getState().setPhase(sessionId, "submitting");
-      await playEarcon("user-end");
-      if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
       const approval = firstPendingApproval(approvalsRef.current);
       const route = routeVoiceText(trimmed, {
         phase: useVoicePilotStore.getState().bySessionId[sessionId]?.phase ?? "listening",
         approvalPromptActive: Boolean(approval),
       });
+      stopCapture();
+      await playEarcon("user-end");
+      if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
       if (route.kind === "command") {
         handleCommand(route.command);
         return;
       }
+      sendMachineEvent({ type: "turnIdleElapsed" });
       if (approval) {
-        // 审批分支: partial 气泡是用户的语音回应, 不进消息历史
         discardVoicePartialBubble();
+        sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
         useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
-        speak("请说批准这次或拒绝这次。");
+        speak("请说批准这次或拒绝这次。", approval.requestId);
         return;
       }
       sendRecognizedInput(route.text);
@@ -433,14 +457,21 @@ export function VoicePilotController({
     async (message: ChatMessage) => {
       const policy = decideSpeechPolicy(message.text);
       if (policy.mode === "direct") {
-        speak(message.text);
+        speak(message.text, message.id);
         return;
       }
 
       const relay = relayClientRef;
-      useVoicePilotStore.getState().setPhase(sessionId, "summarizing");
+      sendMachineEvent({
+        type: "summaryRequested",
+        text: message.text,
+        messageId: message.id,
+        reason: policy.reason,
+      });
       if (!relay) {
-        speak(fallbackSpeechSummary(policy.reason));
+        const fallbackText = fallbackSpeechSummary(policy.reason);
+        sendMachineEvent({ type: "summaryFailed", fallbackText, messageId: message.id });
+        speak(fallbackText, message.id);
         return;
       }
       try {
@@ -451,13 +482,17 @@ export function VoicePilotController({
           policy.reason,
         );
         if (result.success && result.summary?.trim()) {
-          speak(`下面是摘要：${result.summary.trim()}`);
+          const summaryText = `下面是摘要：${result.summary.trim()}`;
+          sendMachineEvent({ type: "summaryReady", text: summaryText, messageId: message.id });
+          speak(summaryText, message.id);
           return;
         }
       } catch {
         // Fall through to deterministic fallback.
       }
-      speak(fallbackSpeechSummary(policy.reason));
+      const fallbackText = fallbackSpeechSummary(policy.reason);
+      sendMachineEvent({ type: "summaryFailed", fallbackText, messageId: message.id });
+      speak(fallbackText, message.id);
     },
     [sessionId, speak],
   );
@@ -470,6 +505,7 @@ export function VoicePilotController({
     }
 
     let cancelled = false;
+    sendMachineEvent({ type: "enableRequested" });
 
     async function start() {
       const relay = relayClientRef;
@@ -484,8 +520,10 @@ export function VoicePilotController({
           useVoicePilotStore.getState().setError(sessionId, "请先在设置里配置 Voice Pilot。");
           return;
         }
+        sendMachineEvent({ type: "configReady" });
         await wakeLock.enable();
         if (cancelled) return;
+        sendMachineEvent({ type: "micPermissionGranted" });
 
         turnBufferRef.current = new VoiceTurnBuffer({
           idleTimeoutMs: turnIdleMs,
@@ -525,13 +563,15 @@ export function VoicePilotController({
           if (msg.type === "finished") {
             void (async () => {
               useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
+              sendMachineEvent({ type: "ttsFinished" });
               await playEarcon("assistant-end");
               if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
               const approval = firstPendingApproval(approvalsRef.current);
               if (approval) {
+                sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
                 useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
               } else {
-                useVoicePilotStore.getState().setPhase(sessionId, "listening");
+                sendMachineEvent({ type: "assistantEndCueDone" });
               }
               await beginListening();
             })().catch((err: unknown) => {
@@ -544,8 +584,12 @@ export function VoicePilotController({
             useVoicePilotStore.getState().setError(sessionId, msg.error ?? "语音播报失败");
           }
         });
-        tts.addEventListener("open", flushPendingSpeech);
+        tts.addEventListener("open", () => {
+          sendMachineEvent({ type: "ttsReady" });
+          flushPendingSpeech();
+        });
         runWhenOpen(asr, () => {
+          sendMachineEvent({ type: "asrReady" });
           void beginListening().catch((err: unknown) => {
             useVoicePilotStore
               .getState()
@@ -593,10 +637,15 @@ export function VoicePilotController({
       }
       return;
     }
-    useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
     if (spokenApprovalRequestIdRef.current !== approval.requestId) {
       spokenApprovalRequestIdRef.current = approval.requestId;
-      speak(`${describeToolApprovalForSpeech(approval)} 请说批准这次或拒绝这次。`);
+      sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
+      useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
+      speak(
+        `${describeToolApprovalForSpeech(approval)} 请说批准这次或拒绝这次。`,
+        approval.requestId,
+      );
+    } else {
       useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
     }
   }, [enabled, pendingApprovals, pilot.approvalRequestId, sessionId, speak]);

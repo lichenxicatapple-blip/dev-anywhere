@@ -580,4 +580,35 @@ describe("VoicePilotController", () => {
     expect(remaining).toHaveLength(0);
     expect(sendEnvelope).not.toHaveBeenCalled();
   });
+
+  it("mirrors machine phase through a full listening → waiting → speaking → listening turn", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
+    );
+
+    asrSocket().emitJson({ type: "final", text: "请检查项目状态" });
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
+    );
+
+    useChatStore.getState().appendAssistantText("s1", "好的。");
+    useChatStore.getState().markTurnComplete("s1");
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
+    );
+
+    ttsSocket().emitJson({ type: "finished" });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
+    );
+  });
 });
