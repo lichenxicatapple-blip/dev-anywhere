@@ -116,6 +116,15 @@ function createTonePcm(
   return new Uint8Array(samples.buffer);
 }
 
+function renderTurnBufferText(
+  snapshot: { draft: string; partial: string } | null | undefined,
+): string {
+  if (!snapshot) return "";
+  const { draft, partial } = snapshot;
+  if (draft && partial) return `${draft}\n${partial}`;
+  return draft || partial;
+}
+
 function defaultVoiceTurnIdleMs(): number {
   if (typeof window === "undefined") return VOICE_TURN_IDLE_MS;
   const override = window.__devAnywhereVoicePilotTurnIdleMs;
@@ -149,6 +158,8 @@ export function VoicePilotController({
   const turnBufferRef = useRef<VoiceTurnBuffer | null>(null);
   const processedAssistantMessageIdRef = useRef<string | null>(null);
   const spokenApprovalRequestIdRef = useRef<string | null>(null);
+  // 当前轮的语音 partial 气泡 id; 提交/取消/cleanup 时清空
+  const voicePartialIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     pilotRef.current = pilot;
@@ -163,6 +174,32 @@ export function VoicePilotController({
     captureRef.current = null;
     useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
   }, [sessionId]);
+
+  const discardVoicePartialBubble = useCallback(() => {
+    const id = voicePartialIdRef.current;
+    voicePartialIdRef.current = null;
+    if (!id) return;
+    useChatStore.getState().removeMessage(sessionId, id);
+  }, [sessionId]);
+
+  const upsertVoicePartialBubble = useCallback(() => {
+    const text = renderTurnBufferText(turnBufferRef.current?.getSnapshot());
+    if (!text) {
+      discardVoicePartialBubble();
+      return;
+    }
+    if (!voicePartialIdRef.current) {
+      voicePartialIdRef.current = `${sessionId}-voice-user-${Date.now()}`;
+    }
+    useChatStore.getState().upsertUserMessage(sessionId, {
+      id: voicePartialIdRef.current,
+      role: "user",
+      text,
+      isPartial: true,
+      timestamp: Date.now(),
+      toolCalls: [],
+    });
+  }, [discardVoicePartialBubble, sessionId]);
 
   const startCapture = useCallback(async () => {
     if (captureRef.current) return;
@@ -210,9 +247,8 @@ export function VoicePilotController({
     turnBufferRef.current = null;
     playerRef.current = null;
     pendingSpeechRef.current = [];
-    useVoicePilotStore.getState().setDraft(sessionId, "");
-    useVoicePilotStore.getState().setPartial(sessionId, "");
-  }, [sessionId, stopCapture]);
+    discardVoicePartialBubble();
+  }, [discardVoicePartialBubble, stopCapture]);
 
   const sendSpeechNow = useCallback(
     (socket: WebSocket, text: string) => {
@@ -261,8 +297,9 @@ export function VoicePilotController({
         return;
       }
       const now = Date.now();
-      const messageId = `${sessionId}-voice-user-${now}`;
-      useChatStore.getState().addUserMessage(sessionId, {
+      const messageId = voicePartialIdRef.current ?? `${sessionId}-voice-user-${now}`;
+      voicePartialIdRef.current = null;
+      useChatStore.getState().upsertUserMessage(sessionId, {
         id: messageId,
         role: "user",
         text,
@@ -288,6 +325,8 @@ export function VoicePilotController({
   const handleCommand = useCallback(
     (command: VoiceCommand): boolean => {
       const store = useVoicePilotStore.getState();
+      // 命令文本不进消息历史: 任何命令路径先丢弃当前轮的 partial 气泡
+      discardVoicePartialBubble();
       if (command.type === "repeat") {
         speak(pilotRef.current.lastSpokenText || "还没有可以复述的内容。");
         return true;
@@ -303,8 +342,6 @@ export function VoicePilotController({
       }
       if (command.type === "cancel" || command.type === "redo") {
         turnBufferRef.current?.cancel();
-        store.setDraft(sessionId, "");
-        store.setPartial(sessionId, "");
         store.setPhase(sessionId, "listening");
         void beginListening().catch((err: unknown) => {
           store.setError(sessionId, err instanceof Error ? err.message : String(err));
@@ -342,7 +379,7 @@ export function VoicePilotController({
       }
       return true;
     },
-    [beginListening, sessionId, speak, stopCapture],
+    [beginListening, discardVoicePartialBubble, sessionId, speak, stopCapture],
   );
 
   const handleCompletedVoiceTurn = useCallback(
@@ -362,31 +399,34 @@ export function VoicePilotController({
         handleCommand(route.command);
         return;
       }
-      useVoicePilotStore.getState().setDraft(sessionId, "");
-      useVoicePilotStore.getState().setPartial(sessionId, "");
       if (approval) {
+        // 审批分支: partial 气泡是用户的语音回应, 不进消息历史
+        discardVoicePartialBubble();
         useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
         speak("请说批准这次或拒绝这次。");
-        useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
         return;
       }
       sendRecognizedInput(route.text);
     },
-    [handleCommand, playEarcon, sendRecognizedInput, sessionId, speak, stopCapture],
+    [
+      discardVoicePartialBubble,
+      handleCommand,
+      playEarcon,
+      sendRecognizedInput,
+      sessionId,
+      speak,
+      stopCapture,
+    ],
   );
 
   const handleFinalAsrText = useCallback(
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      const store = useVoicePilotStore.getState();
-      store.setPhase(sessionId, "drafting");
       turnBufferRef.current?.appendFinal(trimmed);
-      const snapshot = turnBufferRef.current?.getSnapshot();
-      store.setDraft(sessionId, snapshot?.draft ?? trimmed);
-      store.setPartial(sessionId, "");
+      upsertVoicePartialBubble();
     },
-    [sessionId],
+    [upsertVoicePartialBubble],
   );
 
   const speakAssistantMessage = useCallback(
@@ -466,7 +506,7 @@ export function VoicePilotController({
           if (!msg) return;
           if (msg.type === "partial") {
             turnBufferRef.current?.appendPartial(msg.text);
-            useVoicePilotStore.getState().setPartial(sessionId, msg.text);
+            upsertVoicePartialBubble();
           }
           if (msg.type === "final") void handleFinalAsrText(msg.text);
           if (msg.type === "error") {
@@ -540,6 +580,7 @@ export function VoicePilotController({
     playEarcon,
     sessionId,
     turnIdleMs,
+    upsertVoicePartialBubble,
   ]);
 
   useEffect(() => {

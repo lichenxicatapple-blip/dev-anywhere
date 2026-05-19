@@ -50,17 +50,13 @@ describe("voice pilot store", () => {
     expect(state()).toMatchObject({ phase: "idle", approvalRequestId: null });
   });
 
-  it("stores UI snapshot state without owning timers or provider resources", () => {
+  it("tracks the latest activity meter sample", () => {
     useVoicePilotStore.getState().enable("s1");
-    useVoicePilotStore.getState().setPhase("s1", "drafting");
-    useVoicePilotStore.getState().setDraft("s1", "帮我看报错");
-    useVoicePilotStore.getState().setPartial("s1", "滚动");
+    useVoicePilotStore.getState().setActivityLevel("s1", 0.42);
 
-    expect(state()).toMatchObject({
-      enabled: true,
-      phase: "drafting",
-      draft: "帮我看报错",
-      partial: "滚动",
-    });
+    expect(state()).toMatchObject({ enabled: true, phase: "listening", activityLevel: 0.42 });
+
+    useVoicePilotStore.getState().setActivityLevel("s1", 5);
+    expect(state().activityLevel).toBe(1);
   });
 });

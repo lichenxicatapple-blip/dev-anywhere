@@ -497,4 +497,87 @@ describe("VoicePilotController", () => {
       }),
     );
   });
+
+  it("upserts a user partial bubble while ASR partial text streams", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={10000} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    asrSocket().emitJson({ type: "partial", text: "你好" });
+    await waitFor(() => {
+      const messages = useChatStore.getState().bySessionId.s1?.messages ?? [];
+      const partial = messages.find((m) => m.isPartial && m.role === "user");
+      expect(partial?.text).toBe("你好");
+    });
+
+    asrSocket().emitJson({ type: "partial", text: "你好世界" });
+    await waitFor(() => {
+      const messages = useChatStore.getState().bySessionId.s1?.messages ?? [];
+      const partial = messages.find((m) => m.isPartial && m.role === "user");
+      expect(partial?.text).toBe("你好世界");
+    });
+    expect(sendEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("commits the partial bubble in place when the turn submits", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    asrSocket().emitJson({ type: "partial", text: "请检查" });
+    await waitFor(() => {
+      const messages = useChatStore.getState().bySessionId.s1?.messages ?? [];
+      expect(messages.some((m) => m.isPartial && m.role === "user")).toBe(true);
+    });
+    const partialBefore = useChatStore
+      .getState()
+      .bySessionId.s1?.messages.find((m) => m.isPartial && m.role === "user");
+    expect(partialBefore).toBeDefined();
+    const partialId = partialBefore!.id;
+
+    asrSocket().emitJson({ type: "final", text: "请检查项目状态" });
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+
+    expect(sendEnvelope.mock.calls[0][0]).toMatchObject({
+      type: "user_input",
+      payload: { text: "请检查项目状态", messageId: partialId },
+    });
+    const commit = useChatStore
+      .getState()
+      .bySessionId.s1?.messages.find((m) => m.id === partialId);
+    expect(commit).toMatchObject({ role: "user", isPartial: false, text: "请检查项目状态" });
+    const partialAfter = useChatStore
+      .getState()
+      .bySessionId.s1?.messages.filter((m) => m.isPartial && m.role === "user") ?? [];
+    expect(partialAfter).toHaveLength(0);
+  });
+
+  it("discards the partial bubble when the recognized turn is a voice command", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    asrSocket().emitJson({ type: "final", text: "暂停" });
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("paused"),
+    );
+    const remaining = useChatStore
+      .getState()
+      .bySessionId.s1?.messages.filter((m) => m.role === "user") ?? [];
+    expect(remaining).toHaveLength(0);
+    expect(sendEnvelope).not.toHaveBeenCalled();
+  });
 });

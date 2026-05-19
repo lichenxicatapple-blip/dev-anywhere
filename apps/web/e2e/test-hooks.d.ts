@@ -27,8 +27,6 @@ interface CCTestHooks {
     snapshot: (sessionId: string) => {
       enabled: boolean;
       phase: string;
-      draft: string;
-      partial: string;
       error: string | null;
       activityLevel: number;
     };

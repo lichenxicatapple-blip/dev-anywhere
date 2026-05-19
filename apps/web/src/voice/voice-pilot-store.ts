@@ -5,7 +5,6 @@ export type VoicePilotPhase =
   | "idle"
   | "starting"
   | "listening"
-  | "drafting"
   | "submitting"
   | "waiting"
   | "summarizing"
@@ -21,8 +20,6 @@ export interface VoicePilotState {
   lastSpokenText: string;
   approvalRequestId: string | null;
   activityLevel: number;
-  draft: string;
-  partial: string;
 }
 
 interface VoicePilotStoreState {
@@ -35,8 +32,6 @@ interface VoicePilotStoreState {
   setLastSpokenText: (sessionId: string, text: string) => void;
   setApproval: (sessionId: string, requestId: string | null) => void;
   setActivityLevel: (sessionId: string, level: number) => void;
-  setDraft: (sessionId: string, draft: string) => void;
-  setPartial: (sessionId: string, partial: string) => void;
   resetAll: () => void;
 }
 
@@ -47,8 +42,6 @@ export const DEFAULT_VOICE_PILOT_STATE: VoicePilotState = {
   lastSpokenText: "",
   approvalRequestId: null,
   activityLevel: 0,
-  draft: "",
-  partial: "",
 };
 
 function clampActivityLevel(level: number): number {
@@ -94,8 +87,6 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
             error: null,
             approvalRequestId: null,
             activityLevel: 0,
-            draft: "",
-            partial: "",
           })),
         ),
 
@@ -149,22 +140,6 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
           ensureSession(state, sessionId, (current) => ({
             ...current,
             activityLevel: clampActivityLevel(level),
-          })),
-        ),
-
-      setDraft: (sessionId, draft) =>
-        set((state) =>
-          ensureSession(state, sessionId, (current) => ({
-            ...current,
-            draft,
-          })),
-        ),
-
-      setPartial: (sessionId, partial) =>
-        set((state) =>
-          ensureSession(state, sessionId, (current) => ({
-            ...current,
-            partial,
           })),
         ),
 

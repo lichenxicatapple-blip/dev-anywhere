@@ -1,5 +1,5 @@
 import { Square } from "lucide-react";
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,6 @@ const PHASE_LABELS: Record<VoicePilotPhase, string> = {
   idle: "未开启",
   starting: "正在启动",
   listening: "正在聆听",
-  drafting: "等待补充",
   submitting: "正在发送",
   waiting: "等待回复",
   summarizing: "正在摘要",
@@ -27,7 +26,6 @@ const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
   idle: "离线",
   starting: "启动",
   listening: "聆听",
-  drafting: "收音",
   submitting: "发送",
   waiting: "等待",
   summarizing: "摘要",
@@ -41,7 +39,6 @@ const PHASE_TONE: Record<VoicePilotPhase, string> = {
   idle: "quiet",
   starting: "active",
   listening: "live",
-  drafting: "live",
   submitting: "active",
   waiting: "active",
   summarizing: "active",
@@ -51,10 +48,9 @@ const PHASE_TONE: Record<VoicePilotPhase, string> = {
   error: "error",
 };
 
-const WAVE_WEIGHTS = [
-  0.04, -0.34, 0.48, -0.18, 0.76, -0.52, 0.92, -0.36, 0.58, -0.62, 0.24, -0.2, 0.08,
-];
 const WAVE_VIEWBOX = { width: 120, height: 28 };
+const WAVE_HISTORY_LEN = 32;
+const WAVE_FRAME_MS = 60;
 
 function activityForPhase(phase: VoicePilotPhase, level: number): number {
   if (phase === "paused" || phase === "idle" || phase === "error") return 0.08;
@@ -63,23 +59,30 @@ function activityForPhase(phase: VoicePilotPhase, level: number): number {
   if (phase === "summarizing" || phase === "submitting" || phase === "starting") {
     return Math.max(0.42, level);
   }
-  if (phase === "speaking" || phase === "listening" || phase === "drafting") {
+  if (phase === "speaking" || phase === "listening") {
     return Math.max(0.18, level);
   }
   return level;
 }
 
-function buildWavePath(activity: number): string {
+function buildWavePath(history: number[]): string {
   const width = WAVE_VIEWBOX.width;
   const height = WAVE_VIEWBOX.height;
   const centerY = height / 2;
-  const amplitude = 4 + activity * 14;
-  const points = WAVE_WEIGHTS.map((weight, index) => {
-    const x = (index / (WAVE_WEIGHTS.length - 1)) * width;
-    const y = centerY - weight * amplitude;
-    return { x, y };
-  });
-
+  const len = history.length;
+  if (len === 0) {
+    return `M 0 ${centerY.toFixed(1)} H ${width.toFixed(1)}`;
+  }
+  // 基于实时音量历史绘制对称波形: 上下镜像, 振幅与每帧音量正相关
+  const points: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < len; i += 1) {
+    const value = Math.max(0, Math.min(1, history[i] ?? 0));
+    const x = (i / Math.max(1, len - 1)) * width;
+    const sign = i % 2 === 0 ? 1 : -1;
+    // 0.5 是基础静态高度防止纯静音时是平线
+    const y = centerY - sign * (value * (height / 2 - 1) + 0.5);
+    points.push({ x, y });
+  }
   let path = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
   for (let i = 1; i < points.length - 1; i += 1) {
     const current = points[i];
@@ -96,21 +99,47 @@ function buildWavePath(activity: number): string {
 export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   const pilot = useVoicePilotStore((s) => s.bySessionId[sessionId] ?? DEFAULT_VOICE_PILOT_STATE);
   const disable = useVoicePilotStore((s) => s.disable);
+  const enabled = pilot.enabled;
+  const phase = pilot.phase;
+  const level = pilot.activityLevel;
 
-  if (!pilot.enabled) return null;
+  // 当前帧音量(派生): 受 phase 调制后的目标振幅; 用于实时显示和填入历史
+  const currentActivity = activityForPhase(phase, level);
+  // 用 ref + tick 节流维护最近 N 帧, 避免每个 PCM chunk 都重渲染
+  const phaseRef = useRef(phase);
+  const levelRef = useRef(level);
+  phaseRef.current = phase;
+  levelRef.current = level;
+  const [history, setHistory] = useState<number[]>(() =>
+    new Array(WAVE_HISTORY_LEN).fill(currentActivity),
+  );
 
-  const activity = activityForPhase(pilot.phase, pilot.activityLevel);
-  const tone = PHASE_TONE[pilot.phase];
-  const active = pilot.phase !== "paused" && pilot.phase !== "error";
-  const wavePath = buildWavePath(activity);
-  const waveOpacity = 0.34 + activity * 0.5;
-  const waveOpacityLow = 0.3 + activity * 0.42;
-  const waveOpacityHigh = 0.46 + activity * 0.5;
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => {
+      const value = activityForPhase(phaseRef.current, levelRef.current);
+      setHistory((prev) => {
+        const next = prev.length >= WAVE_HISTORY_LEN ? prev.slice(1) : prev.slice();
+        next.push(value);
+        return next;
+      });
+    }, WAVE_FRAME_MS);
+    return () => clearInterval(timer);
+  }, [enabled]);
+
+  if (!enabled) return null;
+
+  const tone = PHASE_TONE[phase];
+  const active = phase !== "paused" && phase !== "error";
+  const wavePath = buildWavePath(history);
+  const waveOpacity = 0.34 + currentActivity * 0.5;
+  const waveOpacityLow = 0.3 + currentActivity * 0.42;
+  const waveOpacityHigh = 0.46 + currentActivity * 0.5;
 
   return (
     <div
       data-slot="voice-pilot-status"
-      data-phase={pilot.phase}
+      data-phase={phase}
       data-tone={tone}
       role="status"
       aria-live="polite"
@@ -126,11 +155,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
             data-slot="voice-pilot-live-chip"
             className="dev-voice-pilot-chip rounded-[3px] border px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-normal"
           >
-            {PHASE_CHIPS[pilot.phase]}
+            {PHASE_CHIPS[phase]}
           </span>
         </div>
         <div className="mt-1 min-w-0 truncate text-xs text-muted-foreground">
-          {pilot.error ?? PHASE_LABELS[pilot.phase]}
+          {pilot.error ?? PHASE_LABELS[phase]}
         </div>
       </div>
       <div className="flex shrink-0 items-start">
@@ -153,11 +182,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
       </div>
       <div
         data-slot="voice-pilot-waveform"
-        data-activity-level={Math.round(activity * 100)}
+        data-activity-level={Math.round(currentActivity * 100)}
         className="dev-voice-waveform col-span-2"
         style={
           {
-            "--voice-level": activity,
+            "--voice-level": currentActivity,
             "--voice-opacity": waveOpacity.toFixed(3),
             "--voice-opacity-low": waveOpacityLow.toFixed(3),
             "--voice-opacity-high": waveOpacityHigh.toFixed(3),

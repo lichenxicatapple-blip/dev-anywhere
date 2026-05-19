@@ -26,19 +26,19 @@ describe("VoicePilotSessionMachine", () => {
     ]);
   });
 
-  it("moves from listening to drafting when ASR final text arrives", () => {
+  it("buffers ASR final text without leaving listening", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");
 
     const result = machine.send({ type: "asrFinal", text: "帮我看报错" });
 
-    expect(result.phase).toBe("drafting");
+    expect(result.phase).toBe("listening");
     expect(result.effects).toEqual([{ type: "appendFinalToTurnBuffer", text: "帮我看报错" }]);
   });
 
   it("submits after turn idle and user-end cue", () => {
     const machine = createVoicePilotSessionMachine();
-    machine.hydrateReadyForTest("drafting");
+    machine.hydrateReadyForTest("listening");
 
     expect(machine.send({ type: "turnIdleElapsed" })).toEqual({
       phase: "submitting",
@@ -46,14 +46,14 @@ describe("VoicePilotSessionMachine", () => {
     });
 
     expect(machine.send({ type: "userEndCueDone", text: "嗯。" })).toEqual({
-      phase: "waitingForAgent",
+      phase: "waiting",
       effects: [{ type: "submitText", text: "嗯。" }],
     });
   });
 
   it("stops capture while speaking and resumes listening after playback", () => {
     const machine = createVoicePilotSessionMachine();
-    machine.hydrateReadyForTest("waitingForAgent");
+    machine.hydrateReadyForTest("waiting");
 
     expect(
       machine.send({ type: "assistantTextReady", text: "我来处理。", messageId: "m1" }),
@@ -73,6 +73,157 @@ describe("VoicePilotSessionMachine", () => {
     expect(machine.send({ type: "assistantEndCueDone" })).toEqual({
       phase: "listening",
       effects: [{ type: "startCapture" }],
+    });
+  });
+
+  it("hydrates into summarizing phase for tests", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("summarizing");
+    expect(machine.getPhase()).toBe("summarizing");
+  });
+
+  it("pauses on pauseRequested from listening", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("listening");
+
+    expect(machine.send({ type: "pauseRequested" })).toEqual({
+      phase: "paused",
+      effects: [{ type: "stopCapture" }],
+    });
+  });
+
+  it("resumes from paused on resumeRequested", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("paused");
+
+    expect(machine.send({ type: "resumeRequested" })).toEqual({
+      phase: "listening",
+      effects: [{ type: "startCapture" }],
+    });
+  });
+
+  it("cancels the in-flight turn on cancelTurnRequested while listening", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("listening");
+
+    expect(machine.send({ type: "cancelTurnRequested" })).toEqual({
+      phase: "listening",
+      effects: [{ type: "cancelTurnBuffer" }],
+    });
+  });
+
+  it("enters approval phase when approvalArrived fires", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("listening");
+
+    expect(machine.send({ type: "approvalArrived", requestId: "toolu_1" })).toEqual({
+      phase: "approval",
+      effects: [
+        { type: "stopCapture" },
+        { type: "speakStatic", text: "请说批准这次或拒绝这次。" },
+      ],
+    });
+  });
+
+  it("returns to waiting on approvalResolved approve", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("approval");
+
+    expect(
+      machine.send({ type: "approvalResolved", action: "approve", requestId: "toolu_1" }),
+    ).toEqual({
+      phase: "waiting",
+      effects: [{ type: "approveTool", requestId: "toolu_1" }],
+    });
+  });
+
+  it("returns to waiting on approvalResolved deny", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("approval");
+
+    expect(
+      machine.send({ type: "approvalResolved", action: "deny", requestId: "toolu_1" }),
+    ).toEqual({
+      phase: "waiting",
+      effects: [{ type: "denyTool", requestId: "toolu_1" }],
+    });
+  });
+
+  it("enters summarizing on summaryRequested from waiting", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("waiting");
+
+    expect(
+      machine.send({
+        type: "summaryRequested",
+        text: "原始长文本",
+        messageId: "m-1",
+        reason: "code",
+      }),
+    ).toEqual({
+      phase: "summarizing",
+      effects: [
+        { type: "stopCapture" },
+        { type: "requestSummary", text: "原始长文本", messageId: "m-1", reason: "code" },
+      ],
+    });
+  });
+
+  it("speaks the summary text after summaryReady", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("summarizing");
+
+    expect(machine.send({ type: "summaryReady", text: "短摘要", messageId: "m-1" })).toEqual({
+      phase: "speaking",
+      effects: [{ type: "speakText", text: "短摘要", messageId: "m-1" }],
+    });
+  });
+
+  it("speaks the fallback text on summaryFailed", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("summarizing");
+
+    expect(
+      machine.send({ type: "summaryFailed", fallbackText: "回退文本", messageId: "m-1" }),
+    ).toEqual({
+      phase: "speaking",
+      effects: [{ type: "speakText", text: "回退文本", messageId: "m-1" }],
+    });
+  });
+
+  it("submits user text directly via userTextRecognized", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("submitting");
+
+    expect(machine.send({ type: "userTextRecognized", text: "请检查项目状态" })).toEqual({
+      phase: "waiting",
+      effects: [{ type: "submitText", text: "请检查项目状态" }],
+    });
+  });
+
+  it("allows assistantTextReady from non-waiting phases for ad-hoc speak", () => {
+    const fromListening = createVoicePilotSessionMachine();
+    fromListening.hydrateReadyForTest("listening");
+    expect(
+      fromListening.send({ type: "assistantTextReady", text: "状态聆听中。", messageId: "" }),
+    ).toEqual({
+      phase: "speaking",
+      effects: [
+        { type: "stopCapture" },
+        { type: "speakText", text: "状态聆听中。", messageId: "" },
+      ],
+    });
+
+    const fromApproval = createVoicePilotSessionMachine();
+    fromApproval.hydrateReadyForTest("approval");
+    expect(
+      fromApproval.send({ type: "assistantTextReady", text: "审批提示。", messageId: "" }),
+    ).toEqual({
+      phase: "speaking",
+      effects: [
+        { type: "stopCapture" },
+        { type: "speakText", text: "审批提示。", messageId: "" },
+      ],
     });
   });
 });

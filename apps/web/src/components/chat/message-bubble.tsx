@@ -14,27 +14,36 @@ export const MessageBubble = memo(function MessageBubble({
   const role = message.role;
   const contentStyle = contentFontSize ? { fontSize: contentFontSize } : undefined;
 
-  if (role === "user") {
-    return (
-      <article data-slot="message-bubble" data-role="user" className="dev-chat-rail-inset py-2">
-        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-end">
-          <div
-            className="min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2"
-            style={contentStyle}
-          >
-            <MarkdownView text={message.text} tone="on-primary" />
-          </div>
-        </div>
-      </article>
-    );
-  }
-
   const streamingCursor = message.isPartial ? (
     <span
       className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
       aria-label="streaming"
     />
   ) : null;
+
+  if (role === "user") {
+    const userBodyClass = message.isPartial
+      ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary-foreground/40 bg-primary/60 text-primary-foreground/90 px-4 py-2"
+      : "min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2";
+    return (
+      <article
+        data-slot="message-bubble"
+        data-role="user"
+        data-partial={message.isPartial ? "true" : undefined}
+        className="dev-chat-rail-inset py-2"
+      >
+        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-end">
+          <div className={userBodyClass} style={contentStyle}>
+            <MarkdownView
+              text={message.text}
+              tone="on-primary"
+              trailingInline={streamingCursor}
+            />
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   return (
     <article data-slot="message-bubble" data-role={role} className="dev-chat-rail-inset py-2">

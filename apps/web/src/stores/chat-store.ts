@@ -61,6 +61,8 @@ interface ChatStoreState {
 
   appendAssistantText: (sessionId: string, text: string) => void;
   addUserMessage: (sessionId: string, message: ChatMessage) => void;
+  upsertUserMessage: (sessionId: string, message: ChatMessage) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
   markTurnComplete: (sessionId: string) => void;
   addToolCall: (sessionId: string, messageId: string, toolCall: ToolCallInfo) => void;
   updateToolResult: (
@@ -190,6 +192,28 @@ export const useChatStore = create<ChatStoreState>()(
               ...slice,
               messages: [...slice.messages, message],
             };
+          }),
+        ),
+
+      upsertUserMessage: (sessionId, message) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const index = slice.messages.findIndex((m) => m.id === message.id);
+            if (index === -1) {
+              return { ...slice, messages: [...slice.messages, message] };
+            }
+            const next = slice.messages.slice();
+            next[index] = message;
+            return { ...slice, messages: next };
+          }),
+        ),
+
+      removeMessage: (sessionId, messageId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const next = slice.messages.filter((m) => m.id !== messageId);
+            if (next.length === slice.messages.length) return slice;
+            return { ...slice, messages: next };
           }),
         ),
 

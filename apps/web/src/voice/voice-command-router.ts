@@ -16,7 +16,7 @@ export type VoiceRouteResult =
   | { kind: "agentText"; text: string };
 
 export interface VoiceRouteContext {
-  phase: VoicePilotPhase | "drafting" | "disabled" | "starting" | "submitting" | "waitingForAgent";
+  phase: VoicePilotPhase | "disabled" | "waitingForAgent";
   approvalPromptActive?: boolean;
 }
 

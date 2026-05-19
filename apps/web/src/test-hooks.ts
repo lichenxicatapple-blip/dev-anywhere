@@ -28,8 +28,6 @@ interface CCTestHooks {
     snapshot: (sessionId: string) => {
       enabled: boolean;
       phase: string;
-      draft: string;
-      partial: string;
       error: string | null;
       activityLevel: number;
     };
@@ -82,8 +80,6 @@ export function installTestHooks(): void {
         return {
           enabled: state.enabled,
           phase: state.phase,
-          draft: state.draft,
-          partial: state.partial,
           error: state.error,
           activityLevel: state.activityLevel,
         };

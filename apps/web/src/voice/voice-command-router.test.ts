@@ -14,11 +14,11 @@ describe("routeVoiceText", () => {
       kind: "command",
       command: { type: "repeat" },
     });
-    expect(routeVoiceText("取消", { phase: "drafting" })).toEqual({
+    expect(routeVoiceText("取消", { phase: "listening" })).toEqual({
       kind: "command",
       command: { type: "cancel" },
     });
-    expect(routeVoiceText("重说", { phase: "drafting" })).toEqual({
+    expect(routeVoiceText("重说", { phase: "listening" })).toEqual({
       kind: "command",
       command: { type: "redo" },
     });

@@ -74,18 +74,22 @@ describe("MessageBubble", () => {
     expect(cursor.previousSibling?.textContent).toContain("合理的");
   });
 
-  it("does not render cursor for user messages even if isPartial true", () => {
-    render(
+  it("marks user partial messages with streaming cursor and unconfirmed style", () => {
+    const { container } = render(
       <MessageBubble
         message={makeMessage({
           id: "u2",
           role: "user",
-          text: "x",
+          text: "正在识别中",
           isPartial: true,
         })}
       />,
     );
-    expect(screen.queryByLabelText("streaming")).toBeNull();
+    expect(screen.getByLabelText("streaming")).not.toBeNull();
+    const bubble = container.querySelector('[data-slot="message-bubble"]');
+    expect(bubble?.getAttribute("data-partial")).toBe("true");
+    const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
+    expect(body?.className).toContain("border-dashed");
   });
 
   it("applies JSON content font size to the bubble body", () => {

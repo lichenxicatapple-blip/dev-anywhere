@@ -1,16 +1,5 @@
 import { createFSM } from "@dev-anywhere/shared";
-
-export type VoicePilotMachinePhase =
-  | "disabled"
-  | "starting"
-  | "listening"
-  | "drafting"
-  | "submitting"
-  | "waitingForAgent"
-  | "speaking"
-  | "approval"
-  | "paused"
-  | "error";
+import type { VoicePilotPhase } from "./voice-pilot-store";
 
 export type VoicePilotEffect =
   | { type: "loadConfig" }
@@ -20,9 +9,14 @@ export type VoicePilotEffect =
   | { type: "startCapture" }
   | { type: "stopCapture" }
   | { type: "appendFinalToTurnBuffer"; text: string }
+  | { type: "cancelTurnBuffer" }
   | { type: "playCue"; cue: "listening-start" | "user-end" | "assistant-end" }
   | { type: "submitText"; text: string }
   | { type: "speakText"; text: string; messageId: string }
+  | { type: "speakStatic"; text: string }
+  | { type: "requestSummary"; text: string; messageId: string; reason: string }
+  | { type: "approveTool"; requestId: string }
+  | { type: "denyTool"; requestId: string }
   | { type: "cleanup" }
   | { type: "setError"; error: string };
 
@@ -37,14 +31,23 @@ export type VoicePilotEvent =
   | { type: "asrFinal"; text: string }
   | { type: "turnIdleElapsed" }
   | { type: "userEndCueDone"; text: string }
+  | { type: "userTextRecognized"; text: string }
   | { type: "agentSubmitFailed"; error: string }
   | { type: "assistantTextReady"; text: string; messageId: string }
+  | { type: "summaryRequested"; text: string; messageId: string; reason: string }
+  | { type: "summaryReady"; text: string; messageId: string }
+  | { type: "summaryFailed"; fallbackText: string; messageId: string }
   | { type: "ttsFinished" }
   | { type: "assistantEndCueDone" }
-  | { type: "providerError"; error: string };
+  | { type: "providerError"; error: string }
+  | { type: "pauseRequested" }
+  | { type: "resumeRequested" }
+  | { type: "cancelTurnRequested" }
+  | { type: "approvalArrived"; requestId: string }
+  | { type: "approvalResolved"; action: "approve" | "deny"; requestId: string };
 
 export interface VoicePilotTransitionResult {
-  phase: VoicePilotMachinePhase;
+  phase: VoicePilotPhase;
   effects: VoicePilotEffect[];
 }
 
@@ -55,28 +58,28 @@ interface Readiness {
   tts: boolean;
 }
 
-const VOICE_PILOT_TRANSITIONS: Record<VoicePilotMachinePhase, readonly VoicePilotMachinePhase[]> = {
-  disabled: ["starting"],
-  starting: ["listening", "error", "disabled"],
-  listening: ["drafting", "speaking", "approval", "paused", "error", "disabled"],
-  drafting: ["submitting", "paused", "error", "disabled"],
-  submitting: ["waitingForAgent", "error", "disabled"],
-  waitingForAgent: ["speaking", "approval", "error", "disabled"],
-  speaking: ["listening", "error", "disabled"],
-  approval: ["waitingForAgent", "speaking", "error", "disabled"],
-  paused: ["listening", "error", "disabled"],
-  error: ["disabled"],
+const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[]> = {
+  idle: ["starting"],
+  starting: ["listening", "error", "idle"],
+  listening: ["submitting", "speaking", "approval", "paused", "error", "idle"],
+  submitting: ["waiting", "speaking", "error", "idle"],
+  waiting: ["speaking", "summarizing", "approval", "error", "idle"],
+  summarizing: ["speaking", "error", "idle"],
+  speaking: ["listening", "error", "idle"],
+  approval: ["waiting", "speaking", "error", "idle"],
+  paused: ["listening", "error", "idle"],
+  error: ["idle"],
 };
 
 export interface VoicePilotSessionMachine {
   send(event: VoicePilotEvent): VoicePilotTransitionResult;
-  getPhase(): VoicePilotMachinePhase;
-  hydrateReadyForTest(phase: VoicePilotMachinePhase): void;
+  getPhase(): VoicePilotPhase;
+  hydrateReadyForTest(phase: VoicePilotPhase): void;
 }
 
 export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
-  let fsm = createFSM<VoicePilotMachinePhase>({
-    initial: "disabled",
+  let fsm = createFSM<VoicePilotPhase>({
+    initial: "idle",
     transitions: VOICE_PILOT_TRANSITIONS,
   });
   let readiness: Readiness = { config: false, mic: false, asr: false, tts: false };
@@ -85,7 +88,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
     return { phase: fsm.current(), effects };
   }
 
-  function transitionTo(phase: VoicePilotMachinePhase): void {
+  function transitionTo(phase: VoicePilotPhase): void {
     if (fsm.is(phase)) return;
     fsm.transitionTo(phase);
   }
@@ -101,7 +104,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
     getPhase: () => fsm.current(),
 
     hydrateReadyForTest(nextPhase) {
-      fsm = createFSM<VoicePilotMachinePhase>({
+      fsm = createFSM<VoicePilotPhase>({
         initial: nextPhase,
         transitions: VOICE_PILOT_TRANSITIONS,
       });
@@ -110,7 +113,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
     send(event): VoicePilotTransitionResult {
       if (event.type === "disableRequested") {
-        transitionTo("disabled");
+        transitionTo("idle");
         readiness = { config: false, mic: false, asr: false, tts: false };
         return result([{ type: "stopCapture" }, { type: "releaseWakeLock" }, { type: "cleanup" }]);
       }
@@ -120,7 +123,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         return result([{ type: "stopCapture" }, { type: "setError", error: event.error }]);
       }
 
-      if (event.type === "enableRequested" && fsm.is("disabled")) {
+      if (event.type === "enableRequested" && fsm.is("idle")) {
         transitionTo("starting");
         readiness = { config: false, mic: false, asr: false, tts: false };
         return result([
@@ -142,18 +145,17 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         return maybeEnterListening();
       }
 
-      if (event.type === "asrFinal" && fsm.isIn(["listening", "drafting"])) {
-        transitionTo("drafting");
+      if (event.type === "asrFinal" && fsm.is("listening")) {
         return result([{ type: "appendFinalToTurnBuffer", text: event.text }]);
       }
 
-      if (event.type === "turnIdleElapsed" && fsm.is("drafting")) {
+      if (event.type === "turnIdleElapsed" && fsm.is("listening")) {
         transitionTo("submitting");
         return result([{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }]);
       }
 
       if (event.type === "userEndCueDone" && fsm.is("submitting")) {
-        transitionTo("waitingForAgent");
+        transitionTo("waiting");
         return result([{ type: "submitText", text: event.text }]);
       }
 
@@ -162,7 +164,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         return result([{ type: "setError", error: event.error }]);
       }
 
-      if (event.type === "assistantTextReady" && fsm.is("waitingForAgent")) {
+      if (event.type === "assistantTextReady" && fsm.is("waiting")) {
         transitionTo("speaking");
         return result([
           { type: "stopCapture" },
@@ -177,6 +179,78 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       if (event.type === "assistantEndCueDone" && fsm.is("speaking")) {
         transitionTo("listening");
         return result([{ type: "startCapture" }]);
+      }
+
+      if (event.type === "pauseRequested" && fsm.is("listening")) {
+        transitionTo("paused");
+        return result([{ type: "stopCapture" }]);
+      }
+
+      if (event.type === "resumeRequested" && fsm.is("paused")) {
+        transitionTo("listening");
+        return result([{ type: "startCapture" }]);
+      }
+
+      if (event.type === "cancelTurnRequested" && fsm.is("listening")) {
+        return result([{ type: "cancelTurnBuffer" }]);
+      }
+
+      if (event.type === "approvalArrived" && fsm.isIn(["listening", "waiting"])) {
+        transitionTo("approval");
+        return result([
+          { type: "stopCapture" },
+          { type: "speakStatic", text: "请说批准这次或拒绝这次。" },
+        ]);
+      }
+
+      if (event.type === "approvalResolved" && fsm.is("approval")) {
+        transitionTo("waiting");
+        return result([
+          event.action === "approve"
+            ? { type: "approveTool", requestId: event.requestId }
+            : { type: "denyTool", requestId: event.requestId },
+        ]);
+      }
+
+      if (event.type === "summaryRequested" && fsm.is("waiting")) {
+        transitionTo("summarizing");
+        return result([
+          { type: "stopCapture" },
+          {
+            type: "requestSummary",
+            text: event.text,
+            messageId: event.messageId,
+            reason: event.reason,
+          },
+        ]);
+      }
+
+      if (event.type === "summaryReady" && fsm.is("summarizing")) {
+        transitionTo("speaking");
+        return result([{ type: "speakText", text: event.text, messageId: event.messageId }]);
+      }
+
+      if (event.type === "summaryFailed" && fsm.is("summarizing")) {
+        transitionTo("speaking");
+        return result([
+          { type: "speakText", text: event.fallbackText, messageId: event.messageId },
+        ]);
+      }
+
+      if (event.type === "userTextRecognized" && fsm.is("submitting")) {
+        transitionTo("waiting");
+        return result([{ type: "submitText", text: event.text }]);
+      }
+
+      if (
+        event.type === "assistantTextReady" &&
+        fsm.isIn(["listening", "submitting", "approval", "summarizing"])
+      ) {
+        transitionTo("speaking");
+        return result([
+          { type: "stopCapture" },
+          { type: "speakText", text: event.text, messageId: event.messageId },
+        ]);
       }
 
       return result();
