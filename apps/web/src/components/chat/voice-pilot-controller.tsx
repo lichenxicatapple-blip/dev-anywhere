@@ -80,6 +80,34 @@ function runWhenOpen(socket: WebSocket, callback: () => void): void {
   socket.addEventListener("open", callback, { once: true });
 }
 
+function waitForSocketOpen(socket: WebSocket, timeoutMs = 3000): Promise<void> {
+  if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (socket.readyState !== WebSocket.CONNECTING) {
+    return Promise.reject(new Error("语音识别连接不可用"));
+  }
+  return new Promise((resolve, reject) => {
+    let timeoutId: number | null = null;
+    const cleanup = () => {
+      socket.removeEventListener("open", handleOpen);
+      socket.removeEventListener("error", handleUnavailable);
+      socket.removeEventListener("close", handleUnavailable);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+    const handleOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const handleUnavailable = () => {
+      cleanup();
+      reject(new Error("语音识别连接不可用"));
+    };
+    timeoutId = window.setTimeout(handleUnavailable, timeoutMs);
+    socket.addEventListener("open", handleOpen, { once: true });
+    socket.addEventListener("error", handleUnavailable, { once: true });
+    socket.addEventListener("close", handleUnavailable, { once: true });
+  });
+}
+
 function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalRequest | null {
   return approvals.find((approval) => approval.status === "pending") ?? null;
 }
@@ -399,9 +427,11 @@ export function VoicePilotController({
   const beginListening = useCallback(async () => {
     if (captureRef.current) return;
     const socket = asrRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket) {
       throw new Error("语音识别连接不可用");
     }
+    await waitForSocketOpen(socket);
+    if (!voicePilotEnabled() || asrRef.current !== socket) return;
     socket.send(JSON.stringify({ type: "start", sessionId, sampleRate: ASR_SAMPLE_RATE }));
     await startCapture();
   }, [sessionId, startCapture]);

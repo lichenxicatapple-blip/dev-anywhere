@@ -409,6 +409,38 @@ describe("VoicePilotController", () => {
     });
   });
 
+  it("waits for the ASR socket before resuming capture after early speech playback", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    ttsSocket().open();
+
+    useChatStore.getState().appendAssistantText("s1", "启动期间的新回复。");
+    useChatStore.getState().markTurnComplete("s1");
+    await waitFor(() => {
+      const sent = ttsSocket().sent.map((item) =>
+        typeof item === "string" ? JSON.parse(item) : null,
+      );
+      expect(sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "speak", text: "启动期间的新回复。" }),
+        ]),
+      );
+    });
+
+    ttsSocket().emitJson({ type: "finished" });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).not.toBe("error");
+    expect(useVoicePilotStore.getState().bySessionId.s1?.error).toBeNull();
+    expect(createPcmCapture).not.toHaveBeenCalled();
+
+    asrSocket().open();
+
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
+  });
+
   it("queues assistant speech until the TTS socket is open", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);

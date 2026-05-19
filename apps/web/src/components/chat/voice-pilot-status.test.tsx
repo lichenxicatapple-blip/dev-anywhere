@@ -29,8 +29,8 @@ describe("VoicePilotStatus", () => {
     );
 
     expect(screen.getByText("Voice Pilot")).not.toBeNull();
-    expect(screen.getByText("正在播报")).not.toBeNull();
     expect(screen.getByText("播报")).not.toBeNull();
+    expect(screen.queryByText("正在播报")).toBeNull();
     expect(
       container
         .querySelector('[data-slot="voice-pilot-waveform"]')
@@ -56,5 +56,20 @@ describe("VoicePilotStatus", () => {
       enabled: false,
       phase: "idle",
     });
+  });
+
+  it("shows concrete error text instead of repeating the error chip", () => {
+    useVoicePilotStore.getState().enable("s1");
+    useVoicePilotStore.getState().setError("s1", "语音识别连接不可用");
+
+    render(
+      <TooltipProvider>
+        <VoicePilotStatus sessionId="s1" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("异常")).not.toBeNull();
+    expect(screen.getByText("语音识别连接不可用")).not.toBeNull();
+    expect(screen.queryByText("需要处理")).toBeNull();
   });
 });

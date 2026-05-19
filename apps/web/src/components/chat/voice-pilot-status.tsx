@@ -9,19 +9,6 @@ import {
   type VoicePilotPhase,
 } from "@/voice/voice-pilot-store";
 
-const PHASE_LABELS: Record<VoicePilotPhase, string> = {
-  idle: "未开启",
-  starting: "正在启动",
-  listening: "正在聆听",
-  submitting: "正在发送",
-  waiting: "等待回复",
-  summarizing: "正在摘要",
-  speaking: "正在播报",
-  approval: "等待语音审批",
-  paused: "已暂停",
-  error: "需要处理",
-};
-
 const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
   idle: "离线",
   starting: "启动",
@@ -135,6 +122,7 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   const waveOpacity = 0.34 + currentActivity * 0.5;
   const waveOpacityLow = 0.3 + currentActivity * 0.42;
   const waveOpacityHigh = 0.46 + currentActivity * 0.5;
+  const detailText = pilot.error?.trim() || null;
 
   return (
     <div
@@ -158,9 +146,9 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
             {PHASE_CHIPS[phase]}
           </span>
         </div>
-        <div className="mt-1 min-w-0 truncate text-xs text-muted-foreground">
-          {pilot.error ?? PHASE_LABELS[phase]}
-        </div>
+        {detailText ? (
+          <div className="mt-1 min-w-0 truncate text-xs text-muted-foreground">{detailText}</div>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-start">
         <Tooltip>
