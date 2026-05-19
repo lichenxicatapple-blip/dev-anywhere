@@ -12,6 +12,13 @@ import { handleProxyConnection } from "./handlers/proxy.js";
 import { handleClientConnection } from "./handlers/client.js";
 import { setupHeartbeat } from "./heartbeat.js";
 import { createRelayChaos, type RelayChaosOptions } from "./chaos.js";
+import { createVoiceConfigStore } from "./voice/config-store.js";
+import { handleVoiceAsrConnection, type VoiceAsrClientFactory } from "./voice/asr-ws.js";
+import { handleVoiceTtsConnection, type VoiceTtsClientFactory } from "./voice/tts-ws.js";
+import { createBailianVoiceProvider } from "./voice/bailian-provider.js";
+import type { VoiceCapabilitiesProvider } from "./voice/capabilities.js";
+import type { VoiceConfigTester } from "./voice/config-test.js";
+import { createVoiceProviderRegistry, type VoiceProviderRegistry } from "./voice/provider.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -28,6 +35,17 @@ export interface RelayServerOptions {
   allowedOrigins?: readonly string[];
   chaos?: RelayChaosOptions;
   fontAssetDir?: string;
+  voiceDefaults?: {
+    region?: "cn" | "intl";
+    asrModel?: string;
+    ttsModel?: string;
+    ttsVoice?: string;
+  };
+  voiceAsrClientFactory?: VoiceAsrClientFactory;
+  voiceTtsClientFactory?: VoiceTtsClientFactory;
+  voiceCapabilitiesProvider?: VoiceCapabilitiesProvider;
+  voiceConfigTester?: VoiceConfigTester;
+  voiceProviderRegistry?: VoiceProviderRegistry;
 }
 
 export interface RelayServer {
@@ -64,6 +82,20 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
 
   const registry = new RelayRegistry();
+  const voiceConfigStore = createVoiceConfigStore({
+    dataDir,
+    defaults: options.voiceDefaults,
+  });
+  const voiceProviders =
+    options.voiceProviderRegistry ??
+    createVoiceProviderRegistry([
+      createBailianVoiceProvider({
+        asrClientFactory: options.voiceAsrClientFactory,
+        ttsClientFactory: options.voiceTtsClientFactory,
+        capabilitiesProvider: options.voiceCapabilitiesProvider,
+        configTester: options.voiceConfigTester,
+      }),
+    ]);
   const relayChaos = chaos?.enabled ? createRelayChaos(chaos, logger) : undefined;
   if (chaos?.enabled) {
     logger.warn(
@@ -117,6 +149,8 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
 
   const proxyWss = new WebSocketServer({ noServer: true });
   const clientWss = new WebSocketServer({ noServer: true });
+  const voiceAsrWss = new WebSocketServer({ noServer: true });
+  const voiceTtsWss = new WebSocketServer({ noServer: true });
 
   httpServer.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -152,22 +186,32 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       return;
     }
 
-    if (pathname === "/client") {
+    if (pathname === "/client" || pathname === "/voice/asr" || pathname === "/voice/tts") {
       if (clientTokenRequired) {
         const token = url.searchParams.get("token");
         if (token !== clientToken) {
           logger.warn(
-            { ip: request.socket.remoteAddress },
-            "rejected /client upgrade: invalid token",
+            { ip: request.socket.remoteAddress, pathname },
+            "rejected client-side upgrade: invalid token",
           );
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           socket.destroy();
           return;
         }
       }
-      clientWss.handleUpgrade(request, socket, head, (ws) => {
-        clientWss.emit("connection", ws, request);
-      });
+      if (pathname === "/client") {
+        clientWss.handleUpgrade(request, socket, head, (ws) => {
+          clientWss.emit("connection", ws, request);
+        });
+      } else if (pathname === "/voice/asr") {
+        voiceAsrWss.handleUpgrade(request, socket, head, (ws) => {
+          voiceAsrWss.emit("connection", ws, request);
+        });
+      } else {
+        voiceTtsWss.handleUpgrade(request, socket, head, (ws) => {
+          voiceTtsWss.emit("connection", ws, request);
+        });
+      }
       return;
     }
 
@@ -179,15 +223,27 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   clientWss.on("connection", (ws) => {
-    handleClientConnection(ws, registry, logger, relayChaos);
+    handleClientConnection(ws, registry, logger, relayChaos, voiceConfigStore, voiceProviders);
+  });
+
+  voiceAsrWss.on("connection", (ws) => {
+    handleVoiceAsrConnection(ws, voiceConfigStore, logger, voiceProviders);
+  });
+
+  voiceTtsWss.on("connection", (ws) => {
+    handleVoiceTtsConnection(ws, voiceConfigStore, logger, voiceProviders);
   });
 
   const proxyHeartbeat = setupHeartbeat(proxyWss, heartbeatInterval);
   const clientHeartbeat = setupHeartbeat(clientWss, heartbeatInterval);
+  const voiceAsrHeartbeat = setupHeartbeat(voiceAsrWss, heartbeatInterval);
+  const voiceTtsHeartbeat = setupHeartbeat(voiceTtsWss, heartbeatInterval);
 
   async function close(): Promise<void> {
     clearInterval(proxyHeartbeat);
     clearInterval(clientHeartbeat);
+    clearInterval(voiceAsrHeartbeat);
+    clearInterval(voiceTtsHeartbeat);
 
     for (const ws of proxyWss.clients) {
       ws.terminate();
@@ -195,20 +251,39 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     for (const ws of clientWss.clients) {
       ws.terminate();
     }
+    for (const ws of voiceAsrWss.clients) {
+      ws.terminate();
+    }
+    for (const ws of voiceTtsWss.clients) {
+      ws.terminate();
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      proxyWss.close((err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      clientWss.close((err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        proxyWss.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+      new Promise<void>((resolve, reject) => {
+        clientWss.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+      new Promise<void>((resolve, reject) => {
+        voiceAsrWss.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+      new Promise<void>((resolve, reject) => {
+        voiceTtsWss.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+    ]);
 
     await new Promise<void>((resolve, reject) => {
       httpServer.close((err) => {

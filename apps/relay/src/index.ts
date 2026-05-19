@@ -50,6 +50,7 @@ const relay = createRelayServer({
   clientToken: env.clientToken,
   allowedOrigins: env.allowedOrigins,
   chaos: env.chaos,
+  voiceDefaults: env.voiceDefaults,
 });
 
 relay.httpServer.listen(env.port, () => {

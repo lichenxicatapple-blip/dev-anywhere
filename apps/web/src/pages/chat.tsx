@@ -13,6 +13,8 @@ import { FileDownloadProvider } from "@/components/chat/file-download-link";
 import { ImagePreviewProvider } from "@/components/chat/image-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
+import { VoicePilotController } from "@/components/chat/voice-pilot-controller";
+import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
@@ -140,6 +142,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           data-keyboard-layout-inset={layoutKbInset}
         >
           <ChatHeader sessionId={id} mode={mode} />
+          {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
           <StatusLine state={statusState} />
           <div className="flex-1 min-h-0 relative">
             {mode === "pty" && statusState === "waiting_approval" && (
@@ -178,8 +181,12 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           {mode === "json" && presentation === "ok" && (
             <>
               <QuotePreviewBar sessionId={id} />
-              <div className="px-4 py-2" data-slot="input-bar-region">
+              <div
+                className="dev-render-scroll dev-chat-rail-inset overflow-x-hidden overflow-y-auto py-2"
+                data-slot="input-bar-region"
+              >
                 <div className="dev-message-rail mx-auto w-full">
+                  <VoicePilotStatus sessionId={id} />
                   <InputBar sessionId={id} />
                 </div>
               </div>

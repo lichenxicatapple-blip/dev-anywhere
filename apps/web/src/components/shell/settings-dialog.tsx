@@ -4,6 +4,7 @@ import { ArrowLeft, AudioLines, ChevronRight, Monitor, Server } from "lucide-rea
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
+import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
 import {
   Dialog,
   DialogContent,
@@ -135,9 +136,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <ArrowLeft className="size-4" aria-hidden="true" />
               </Button>
               <div className="space-y-2">
-                <DialogTitle>{view === "version" ? "版本" : "语音识别及合成"}</DialogTitle>
+                <DialogTitle>{view === "version" ? "版本" : "设置 Voice Pilot"}</DialogTitle>
                 <DialogDescription className={view === "voice" ? "sr-only" : undefined}>
-                  {view === "version" ? "当前 Web 与 Relay 的版本信息" : "语音识别及合成"}
+                  {view === "version"
+                    ? "当前 Web 与 Relay 的版本信息"
+                    : "以语音交互的形式驱动这次会话。"}
                 </DialogDescription>
               </div>
             </div>
@@ -166,19 +169,17 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             />
           </div>
         ) : view === "voice" ? (
-          <div className="min-h-24" aria-hidden="true" />
+          <VoiceSettingsPanel />
         ) : (
           <div className="space-y-2">
             <SettingsMenuItem
               icon={<AudioLines className="size-4" aria-hidden="true" />}
-              label="语音识别及合成"
-              detail="语音输入与朗读设置"
+              label="Voice Pilot"
               onClick={() => setView("voice")}
             />
             <SettingsMenuItem
               icon={<Server className="size-4" aria-hidden="true" />}
               label="版本"
-              detail="查看 Web 和 Relay 版本"
               onClick={() => setView("version")}
             />
           </div>
@@ -196,7 +197,7 @@ function SettingsMenuItem({
 }: {
   icon: ReactNode;
   label: string;
-  detail: string;
+  detail?: string;
   onClick: () => void;
 }) {
   return (
@@ -211,7 +212,7 @@ function SettingsMenuItem({
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-foreground">{label}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+        {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
       </div>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </button>

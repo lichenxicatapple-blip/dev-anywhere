@@ -4,7 +4,7 @@
 export function ThinkingIndicator() {
   return (
     <div
-      className="px-4 py-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
+      className="dev-chat-rail-inset py-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
       data-slot="thinking-indicator"
       role="status"
       aria-label="Claude 正在思考"

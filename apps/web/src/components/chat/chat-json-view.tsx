@@ -429,7 +429,10 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
         {traceEnabled ? <JsonScrollTraceButton /> : null}
       </div>
       {pendingApproval && (
-        <div className="px-4 py-2" aria-live="polite">
+        <div
+          className="dev-render-scroll dev-chat-rail-inset overflow-x-hidden overflow-y-auto py-2"
+          aria-live="polite"
+        >
           <ToolApprovalCard approval={pendingApproval} sessionId={sessionId} container="inline" />
         </div>
       )}

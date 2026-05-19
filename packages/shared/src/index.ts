@@ -51,6 +51,25 @@ export type {
   SyncRequestPayload,
   SyncResponsePayload,
 } from "./schemas/system.js";
+export {
+  VoiceConfigUpdateSchema,
+  VoiceCapabilitiesSchema,
+  VoiceOptionSchema,
+  VoiceProviderConfigSchema,
+  VoiceSummaryReasonSchema,
+  createBundledBailianVoiceCapabilities,
+  voiceOptionGenderValues,
+  voiceOptionSourceValues,
+  voiceProviderValues,
+  voiceRegionValues,
+} from "./schemas/voice.js";
+export type {
+  VoiceCapabilities,
+  VoiceConfigUpdate,
+  VoiceOption,
+  VoiceProviderConfig,
+  VoiceSummaryReason,
+} from "./schemas/voice.js";
 
 // types
 export * from "./types/index.js";

@@ -12,6 +12,7 @@ describe("loadRelayRuntimeEnv", () => {
     expect(env.proxyToken).toBeUndefined();
     expect(env.clientToken).toBeUndefined();
     expect(env.chaos.enabled).toBe(false);
+    expect(env.voiceDefaults).toEqual({});
   });
 
   it("honors empty DATA_DIR as 'persistence disabled'", () => {
@@ -43,5 +44,21 @@ describe("loadRelayRuntimeEnv", () => {
     });
     expect(env.chaos.enabled).toBe(true);
     expect(env.chaos.delayMs).toBe(50);
+  });
+
+  it("reads optional Bailian voice defaults", () => {
+    const env = loadRelayRuntimeEnv({
+      BAILIAN_REGION: "intl",
+      BAILIAN_ASR_MODEL: "qwen3-asr-flash-realtime-2026-02-10",
+      BAILIAN_TTS_MODEL: "cosyvoice-v3-flash",
+      BAILIAN_TTS_VOICE: "longanyang",
+    });
+
+    expect(env.voiceDefaults).toEqual({
+      region: "intl",
+      asrModel: "qwen3-asr-flash-realtime-2026-02-10",
+      ttsModel: "cosyvoice-v3-flash",
+      ttsVoice: "longanyang",
+    });
   });
 });

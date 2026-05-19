@@ -33,6 +33,7 @@ export async function resetLocalState(page: Page): Promise<void> {
 }
 
 export type FakeRelayMessage = Record<string, unknown>;
+export type FakeVoiceSocketPayload = string | ArrayBufferLike | Blob | ArrayBufferView;
 
 declare global {
   interface Window {
@@ -43,12 +44,21 @@ declare global {
         emitPty(sessionId: string, data: string): void;
         close(): void;
       } | null;
+      events: string[];
       holdConnections(): void;
       releaseConnections(): void;
       setImagePreviewDelay(ms: number): void;
       setImagePreviewDataBase64(value: string): void;
       setProxyOnline(online: boolean): void;
+      voice: {
+        asrSent: FakeVoiceSocketPayload[];
+        ttsSent: string[];
+        activeAsrSocketCount(): number;
+        emitAsrFinal(text: string): number;
+        emitTtsFinished(): void;
+      };
     };
+    __devAnywhereFakeRelayInstalled?: boolean;
   }
 }
 
@@ -56,6 +66,12 @@ declare global {
 // relay/proxy 的真实控制消息，让测试像用户一样点 UI，同时避免依赖本机真实 CLI。
 export async function installFakeRelay(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    if (window.__devAnywhereFakeRelayInstalled) return;
+    Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
+      configurable: true,
+      value: true,
+    });
+
     const now = Date.now();
     let createCount = 0;
     const sessionStorageKey = "__dev_anywhere_e2e_sessions";
@@ -100,22 +116,35 @@ export async function installFakeRelay(page: Page): Promise<void> {
         provider: "codex",
         lastActive: now - 120_000,
       },
-      ...["json-sess", "test-sess", "hist-sess", "f-sess", "fo-sess", "d51-sess"].map(
-        (sessionId, index) => ({
-          sessionId,
-          name: sessionId,
-          cwd: `/home/dev/projects/${sessionId}`,
-          state: "idle" as const,
-          mode: "json" as const,
-          provider: "claude" as const,
-          lastActive: now - (index + 3) * 60_000,
-        }),
-      ),
+      ...[
+        "json-sess",
+        "test-sess",
+        "hist-sess",
+        "f-sess",
+        "fo-sess",
+        "d51-sess",
+        "voice-input-sess",
+        "voice-mic-sess",
+        "voice-second-turn-sess",
+      ].map((sessionId, index) => ({
+        sessionId,
+        name: sessionId,
+        cwd: `/home/dev/projects/${sessionId}`,
+        state: "idle" as const,
+        mode: "json" as const,
+        provider: "claude" as const,
+        lastActive: now - (index + 3) * 60_000,
+      })),
     ];
     const persistedSessions = localStorage.getItem(sessionStorageKey);
     const sessions: FakeSession[] = persistedSessions
       ? (JSON.parse(persistedSessions) as FakeSession[])
       : defaultSessions;
+    for (const session of defaultSessions) {
+      if (!sessions.some((existing) => existing.sessionId === session.sessionId)) {
+        sessions.push(session);
+      }
+    }
     const defaultDirectories = [
       "/home/dev",
       "/home/dev/projects/sample-app",
@@ -127,10 +156,30 @@ export async function installFakeRelay(page: Page): Promise<void> {
       persistedDirectories ? (JSON.parse(persistedDirectories) as string[]) : defaultDirectories,
     );
     const heldSockets = new Set<FakeRelayWebSocket>();
+    const events: string[] = [];
     let holdConnections = false;
     let proxyOnlineState = true;
     let imagePreviewDelayMs = 0;
     const ptyBuffers = new Map<string, string>();
+    const voiceAsrSent: FakeVoiceSocketPayload[] = [];
+    const voiceTtsSent: string[] = [];
+    type FakeVoiceSocketRef = {
+      readyState: number;
+      emitJson(payload: FakeRelayMessage): void;
+    };
+    const voiceAsrSockets = new Set<FakeVoiceSocketRef>();
+    const voiceAsrActiveSockets = new Set<FakeVoiceSocketRef>();
+    let voiceAsrSocket: FakeVoiceSocketRef | null = null;
+    let voiceTtsSocket: { emitJson(payload: FakeRelayMessage): void } | null = null;
+
+    function setVoiceAsrSocket(socket: FakeVoiceSocketRef): void {
+      voiceAsrSocket = socket;
+      voiceAsrSockets.add(socket);
+    }
+
+    function setVoiceTtsSocket(socket: { emitJson(payload: FakeRelayMessage): void }): void {
+      voiceTtsSocket = socket;
+    }
 
     function persistSessions(): void {
       localStorage.setItem(sessionStorageKey, JSON.stringify(sessions));
@@ -257,13 +306,26 @@ export async function installFakeRelay(page: Page): Promise<void> {
       static CLOSED = 3;
 
       readonly url: string;
+      readonly kind: "relay" | "voice-asr" | "voice-tts";
       binaryType: BinaryType = "arraybuffer";
       readyState = FakeRelayWebSocket.CONNECTING;
 
       constructor(url: string) {
         super();
         this.url = url;
-        window.__devAnywhereE2E!.socket = this;
+        const path = new URL(url, window.location.href).pathname;
+        this.kind = path.endsWith("/voice/asr")
+          ? "voice-asr"
+          : path.endsWith("/voice/tts")
+            ? "voice-tts"
+            : "relay";
+        if (this.kind === "voice-asr") {
+          setVoiceAsrSocket(this);
+        } else if (this.kind === "voice-tts") {
+          setVoiceTtsSocket(this);
+        } else {
+          window.__devAnywhereE2E!.socket = this;
+        }
         setTimeout(() => {
           if (this.readyState !== FakeRelayWebSocket.CONNECTING) return;
           if (holdConnections) {
@@ -278,10 +340,41 @@ export async function installFakeRelay(page: Page): Promise<void> {
         if (this.readyState !== FakeRelayWebSocket.CONNECTING) return;
         heldSockets.delete(this);
         this.readyState = FakeRelayWebSocket.OPEN;
+        events.push(`${this.kind}:open`);
         this.dispatchEvent(new Event("open"));
       }
 
-      send(raw: string): void {
+      send(raw: FakeVoiceSocketPayload): void {
+        if (this.kind === "voice-asr") {
+          voiceAsrSent.push(raw);
+          if (typeof raw === "string") {
+            try {
+              const voiceMsg = JSON.parse(raw) as FakeRelayMessage;
+              events.push(`voice-asr:send:${String(voiceMsg.type ?? "unknown")}`);
+              if (voiceMsg.type === "start") {
+                voiceAsrActiveSockets.add(this);
+              }
+            } catch {
+              // Non-control text on the voice ASR socket is still recorded above.
+            }
+          }
+          return;
+        }
+        if (this.kind === "voice-tts") {
+          if (typeof raw !== "string") return;
+          voiceTtsSent.push(raw);
+          try {
+            const voiceMsg = JSON.parse(raw) as FakeRelayMessage;
+            events.push(`voice-tts:send:${String(voiceMsg.type ?? "unknown")}`);
+            if (voiceMsg.type === "speak") {
+              this.emitJson({ type: "started", requestId: voiceMsg.requestId });
+            }
+          } catch {
+            return;
+          }
+          return;
+        }
+        if (typeof raw !== "string") return;
         window.__devAnywhereE2E!.sent.push(raw);
         let msg: FakeRelayMessage;
         try {
@@ -289,6 +382,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
         } catch {
           return;
         }
+        events.push(`relay:send:${String(msg.type ?? "unknown")}`);
 
         switch (msg.type) {
           case "client_register":
@@ -330,6 +424,30 @@ export async function installFakeRelay(page: Page): Promise<void> {
                   command: "/home/dev/.local/bin/codex",
                 },
               },
+            });
+            break;
+          case "voice_config_request":
+            this.emitJson({
+              type: "voice_config_response",
+              requestId: msg.requestId,
+              config: {
+                provider: "aliyun-bailian",
+                configured: true,
+                region: "cn",
+                asrModel: "paraformer-realtime-v2",
+                ttsModel: "cosyvoice-v3-flash",
+                ttsVoice: "longxiaochun",
+              },
+            });
+            break;
+          case "voice_summary_request":
+            this.emitJson({
+              type: "voice_summary_response",
+              requestId: msg.requestId,
+              sessionId: String(msg.sessionId),
+              messageId: String(msg.messageId),
+              success: true,
+              summary: "代码和表格内容已转换成语音摘要，重点是实现路径和风险。",
             });
             break;
           case "dir_list_request":
@@ -551,6 +669,12 @@ export async function installFakeRelay(page: Page): Promise<void> {
 
       close(): void {
         this.readyState = FakeRelayWebSocket.CLOSED;
+        events.push(`${this.kind}:close`);
+        if (this.kind === "voice-asr") {
+          voiceAsrSockets.delete(this);
+          voiceAsrActiveSockets.delete(this);
+          if (voiceAsrSocket === this) voiceAsrSocket = null;
+        }
         this.dispatchEvent(new Event("close"));
       }
 
@@ -690,6 +814,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     window.__devAnywhereE2E = {
       sent: [],
       socket: null,
+      events,
       holdConnections() {
         holdConnections = true;
       },
@@ -714,6 +839,39 @@ export async function installFakeRelay(page: Page): Promise<void> {
           type: online ? "proxy_online" : "proxy_offline",
           proxyId: "proxy-1",
         });
+      },
+      voice: {
+        asrSent: voiceAsrSent,
+        ttsSent: voiceTtsSent,
+        activeAsrSocketCount() {
+          return [...voiceAsrActiveSockets].filter(
+            (socket) => socket.readyState === FakeRelayWebSocket.OPEN,
+          ).length;
+        },
+        emitAsrFinal(text: string) {
+          const activeSockets = [...voiceAsrActiveSockets].filter(
+            (socket) => socket.readyState === FakeRelayWebSocket.OPEN,
+          );
+          const openSockets = [...voiceAsrSockets].filter(
+            (socket) => socket.readyState === FakeRelayWebSocket.OPEN,
+          );
+          const targets =
+            activeSockets.length > 0
+              ? activeSockets
+              : openSockets.length > 0
+                ? openSockets
+                : voiceAsrSocket
+                  ? [voiceAsrSocket]
+                  : [];
+          events.push(`voice-asr:emit-final:${targets.length}:${text}`);
+          for (const socket of targets) {
+            socket.emitJson({ type: "final", text });
+          }
+          return targets.length;
+        },
+        emitTtsFinished() {
+          voiceTtsSocket?.emitJson({ type: "finished" });
+        },
       },
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;

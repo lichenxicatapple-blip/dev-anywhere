@@ -23,6 +23,16 @@ interface CCTestHooks {
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
   };
+  voice: {
+    snapshot: (sessionId: string) => {
+      enabled: boolean;
+      phase: string;
+      draft: string;
+      partial: string;
+      error: string | null;
+      activityLevel: number;
+    };
+  };
   pty: {
     serialize: (sessionId: string) => string;
     metrics: (sessionId: string) => {

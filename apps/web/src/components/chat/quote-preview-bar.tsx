@@ -14,7 +14,10 @@ export function QuotePreviewBar({ sessionId }: QuotePreviewBarProps) {
   if (!quote) return null;
 
   return (
-    <div className="px-4 py-2 bg-muted border-t border-border" data-slot="quote-preview-bar">
+    <div
+      className="dev-render-scroll dev-chat-rail-inset overflow-x-hidden overflow-y-auto py-2 bg-muted border-t border-border"
+      data-slot="quote-preview-bar"
+    >
       <div className="dev-message-rail mx-auto flex w-full items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="text-xs text-muted-foreground mb-1">

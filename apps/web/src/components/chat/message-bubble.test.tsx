@@ -25,6 +25,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={makeMessage({ id: "u1", role: "user", text: "hello" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("user");
+    expect(bubble.className).toContain("dev-chat-rail-inset");
     const row = bubble.querySelector('[data-slot="message-row"]');
     expect(row?.className).toContain("justify-end");
     expect(row?.className).toContain("dev-message-rail");
@@ -34,6 +35,7 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={makeMessage({ id: "a1", role: "assistant", text: "hi" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("assistant");
+    expect(bubble.className).toContain("dev-chat-rail-inset");
     const row = bubble.querySelector('[data-slot="message-row"]');
     expect(row?.className).toContain("justify-start");
     expect(row?.className).toContain("dev-message-rail");

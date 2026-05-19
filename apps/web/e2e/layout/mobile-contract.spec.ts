@@ -395,6 +395,27 @@ test.describe("mobile UX contract", () => {
     await expect(
       page.locator('[data-slot="message-bubble"][data-role="assistant"]', { hasText: "收到。" }),
     ).toHaveCount(1);
+    const inputCard = page.locator('[data-slot="input-card"]');
+    const assistantRow = page
+      .locator('[data-slot="message-bubble"][data-role="assistant"]', { hasText: "收到。" })
+      .locator('[data-slot="message-row"]');
+    const userRow = userBubbles.locator('[data-slot="message-row"]');
+    const [inputBox, assistantRowBox, userRowBox] = await Promise.all([
+      inputCard.boundingBox(),
+      assistantRow.boundingBox(),
+      userRow.boundingBox(),
+    ]);
+    expect(inputBox).not.toBeNull();
+    expect(assistantRowBox).not.toBeNull();
+    expect(userRowBox).not.toBeNull();
+    expect(Math.abs((assistantRowBox?.x ?? 0) - (inputBox?.x ?? 0))).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(
+        (userRowBox?.x ?? 0) +
+          (userRowBox?.width ?? 0) -
+          ((inputBox?.x ?? 0) + (inputBox?.width ?? 0)),
+      ),
+    ).toBeLessThanOrEqual(1);
     await expectNoHorizontalDocumentOverflow(page);
 
     const sent = await sentFakeRelayMessages(page);

@@ -33,9 +33,227 @@ describe("RelayControlSchema", () => {
     expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
     expect(isClientToProxyRelayControlType("session_rename")).toBe(true);
     expect(isClientToProxyRelayControlType("session_list")).toBe(true);
+    expect(isClientToProxyRelayControlType("voice_summary_request")).toBe(true);
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
     expect(isClientToProxyRelayControlType("permission_decision_result")).toBe(false);
+    expect(isClientToProxyRelayControlType("voice_config_request")).toBe(false);
+    expect(isClientToProxyRelayControlType("voice_capabilities_request")).toBe(false);
     expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
+  });
+
+  it("parses relay-local voice config controls without routing them to proxy", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_config_request",
+        requestId: "voice-config-1",
+      }),
+    ).toEqual({
+      type: "voice_config_request",
+      requestId: "voice-config-1",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_config_response",
+        requestId: "voice-config-1",
+        config: {
+          provider: "aliyun-bailian",
+          configured: true,
+          region: "cn",
+          asrModel: "qwen3-asr-flash-realtime",
+          ttsModel: "cosyvoice-v3-flash",
+          ttsVoice: "longanyang",
+        },
+      }),
+    ).toMatchObject({
+      type: "voice_config_response",
+      requestId: "voice-config-1",
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+      },
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_config_update",
+        requestId: "voice-update-1",
+        config: {
+          provider: "aliyun-bailian",
+          apiKey: "sk-secret",
+          region: "intl",
+          asrModel: "qwen3-asr-flash-realtime",
+          ttsModel: "cosyvoice-v3-flash",
+          ttsVoice: "longanyang",
+        },
+      }),
+    ).toMatchObject({
+      type: "voice_config_update",
+      requestId: "voice-update-1",
+      config: {
+        apiKey: "sk-secret",
+      },
+    });
+
+    expect(isClientToProxyRelayControlType("voice_config_request")).toBe(false);
+    expect(isProxyToClientRelayControlType("voice_config_response")).toBe(false);
+  });
+
+  it("parses relay-local voice capability controls without routing them to proxy", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_capabilities_request",
+        requestId: "voice-capabilities-1",
+        region: "cn",
+      }),
+    ).toEqual({
+      type: "voice_capabilities_request",
+      requestId: "voice-capabilities-1",
+      region: "cn",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_capabilities_response",
+        requestId: "voice-capabilities-1",
+        capabilities: {
+          asrModels: [
+            {
+              value: "qwen3-asr-flash-realtime",
+              label: "Qwen3 ASR Flash Realtime",
+              source: "official",
+            },
+          ],
+          ttsModels: [
+            {
+              value: "cosyvoice-v3-flash",
+              label: "CosyVoice V3 Flash",
+              source: "official",
+            },
+          ],
+          ttsVoices: [
+            {
+              value: "longanhuan",
+              label: "龙安欢 · 女 · 欢脱元气 · 20-30",
+              gender: "female",
+              age: "20-30",
+              model: "cosyvoice-v3-flash",
+              source: "official",
+            },
+          ],
+          fetchedAt: 1760000000000,
+        },
+      }),
+    ).toMatchObject({
+      type: "voice_capabilities_response",
+      requestId: "voice-capabilities-1",
+      capabilities: {
+        asrModels: [{ value: "qwen3-asr-flash-realtime" }],
+        ttsVoices: [{ value: "longanhuan", gender: "female" }],
+      },
+    });
+
+    expect(isClientToProxyRelayControlType("voice_capabilities_request")).toBe(false);
+    expect(isProxyToClientRelayControlType("voice_capabilities_response")).toBe(false);
+  });
+
+  it("parses relay-local voice config test controls without routing them to proxy", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_config_test",
+        requestId: "voice-test-1",
+        config: {
+          apiKey: "sk-secret",
+          region: "cn",
+          asrModel: "qwen3-asr-flash-realtime",
+          ttsModel: "cosyvoice-v3-flash",
+          ttsVoice: "longanyang",
+        },
+      }),
+    ).toMatchObject({
+      type: "voice_config_test",
+      requestId: "voice-test-1",
+      config: {
+        apiKey: "sk-secret",
+      },
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_config_test_response",
+        requestId: "voice-test-1",
+        success: true,
+        audioBase64: "AQI=",
+        audioSampleRate: 16000,
+        audioEncoding: "pcm_s16le",
+        transcript: "语音助手测试",
+      }),
+    ).toEqual({
+      type: "voice_config_test_response",
+      requestId: "voice-test-1",
+      success: true,
+      audioBase64: "AQI=",
+      audioSampleRate: 16000,
+      audioEncoding: "pcm_s16le",
+      transcript: "语音助手测试",
+    });
+
+    expect(isClientToProxyRelayControlType("voice_config_test")).toBe(false);
+    expect(isProxyToClientRelayControlType("voice_config_test_response")).toBe(false);
+  });
+
+  it("rejects API keys in voice config responses", () => {
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "voice_config_response",
+        requestId: "voice-config-1",
+        config: {
+          provider: "aliyun-bailian",
+          configured: true,
+          region: "cn",
+          asrModel: "qwen3-asr-flash-realtime",
+          ttsModel: "cosyvoice-v3-flash",
+          ttsVoice: "longanyang",
+          apiKey: "sk-secret",
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("parses voice summary request and response controls", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_summary_request",
+        requestId: "voice-summary-1",
+        sessionId: "sess-1",
+        messageId: "msg-1",
+        text: "```ts\nconst x = 1;\n```",
+        reason: "code",
+      }),
+    ).toMatchObject({
+      type: "voice_summary_request",
+      requestId: "voice-summary-1",
+      sessionId: "sess-1",
+      reason: "code",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "voice_summary_response",
+        requestId: "voice-summary-1",
+        sessionId: "sess-1",
+        messageId: "msg-1",
+        success: true,
+        summary: "下面是摘要：这段代码定义了一个变量。",
+      }),
+    ).toMatchObject({
+      type: "voice_summary_response",
+      requestId: "voice-summary-1",
+      success: true,
+    });
+
+    expect(isClientToProxyRelayControlType("voice_summary_request")).toBe(true);
+    expect(isProxyToClientRelayControlType("voice_summary_response")).toBe(true);
   });
 
   it("parses session rename request and response with requestId correlation", () => {

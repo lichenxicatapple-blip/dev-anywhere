@@ -21,6 +21,12 @@ interface RelayRuntimeEnv {
   allowedOrigins: string[];
   logLevel: string;
   chaos: RelayChaosOptions;
+  voiceDefaults: {
+    region?: "cn" | "intl";
+    asrModel?: string;
+    ttsModel?: string;
+    ttsVoice?: string;
+  };
 }
 
 function parsePort(value: string | undefined, fallback: number, source: string): number {
@@ -45,8 +51,15 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
+function parseVoiceRegion(value: string | undefined): "cn" | "intl" | undefined {
+  if (!value) return undefined;
+  if (value === "cn" || value === "intl") return value;
+  throw new Error(`Invalid BAILIAN_REGION=${JSON.stringify(value)}: expected cn or intl`);
+}
+
 export function loadRelayRuntimeEnv(env: NodeJS.ProcessEnv = process.env): RelayRuntimeEnv {
   const dataDirRaw = env.DATA_DIR ?? DEFAULT_DATA_DIR;
+  const voiceRegion = parseVoiceRegion(env.BAILIAN_REGION);
   return {
     port: parsePort(env.PORT, DEFAULT_PORT, "PORT"),
     dataDir: dataDirRaw.length > 0 ? dataDirRaw : undefined,
@@ -63,5 +76,11 @@ export function loadRelayRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Relay
       .filter((s) => s.length > 0),
     logLevel: env.LOG_LEVEL ?? "info",
     chaos: parseRelayChaosFromEnv(env),
+    voiceDefaults: {
+      ...(voiceRegion ? { region: voiceRegion } : {}),
+      ...(nonEmpty(env.BAILIAN_ASR_MODEL) ? { asrModel: env.BAILIAN_ASR_MODEL } : {}),
+      ...(nonEmpty(env.BAILIAN_TTS_MODEL) ? { ttsModel: env.BAILIAN_TTS_MODEL } : {}),
+      ...(nonEmpty(env.BAILIAN_TTS_VOICE) ? { ttsVoice: env.BAILIAN_TTS_VOICE } : {}),
+    },
   };
 }

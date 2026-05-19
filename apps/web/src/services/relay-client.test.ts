@@ -311,6 +311,253 @@ describe("RelayClient request handling", () => {
     await expect(promise).resolves.toEqual({ provider: "claude", agentCli });
   });
 
+  it("reads the relay-local Voice Pilot config", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestVoiceConfig();
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "voice_config_response",
+      requestId: "other-request",
+      config: {
+        provider: "aliyun-bailian",
+        configured: false,
+        region: "intl",
+        asrModel: "wrong-asr",
+        ttsModel: "wrong-tts",
+        ttsVoice: "wrong-voice",
+      },
+    });
+    ws.emit({
+      type: "voice_config_response",
+      requestId,
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "voice_config_request",
+      requestId,
+    });
+    await expect(promise).resolves.toEqual({
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("updates the relay-local Voice Pilot config without expecting the api key back", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.updateVoiceConfig({
+      apiKey: "sk-secret",
+      region: "cn",
+      asrModel: "qwen3-asr-flash-realtime",
+      ttsModel: "cosyvoice-v3-flash",
+      ttsVoice: "longwan",
+    });
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "voice_config_update_response",
+      requestId,
+      success: true,
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longwan",
+      },
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "voice_config_update",
+      requestId,
+      config: {
+        apiKey: "sk-secret",
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longwan",
+      },
+    });
+    await expect(promise).resolves.toEqual({
+      success: true,
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longwan",
+      },
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("reads dynamic Voice Pilot capabilities from relay", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestVoiceCapabilities({ region: "cn" });
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "voice_capabilities_response",
+      requestId,
+      capabilities: {
+        asrModels: [{ value: "asr-dynamic", label: "Dynamic ASR", source: "official" }],
+        ttsModels: [{ value: "tts-dynamic", label: "Dynamic TTS", source: "official" }],
+        ttsVoices: [
+          {
+            value: "voice-dynamic",
+            label: "动态音色 · 女",
+            gender: "female",
+            model: "tts-dynamic",
+            source: "official",
+          },
+        ],
+        fetchedAt: 1760000000000,
+      },
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "voice_capabilities_request",
+      requestId,
+      region: "cn",
+    });
+    await expect(promise).resolves.toEqual({
+      capabilities: {
+        asrModels: [{ value: "asr-dynamic", label: "Dynamic ASR", source: "official" }],
+        ttsModels: [{ value: "tts-dynamic", label: "Dynamic TTS", source: "official" }],
+        ttsVoices: [
+          {
+            value: "voice-dynamic",
+            label: "动态音色 · 女",
+            gender: "female",
+            model: "tts-dynamic",
+            source: "official",
+          },
+        ],
+        fetchedAt: 1760000000000,
+      },
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("tests the relay-local Voice Pilot config with unsaved form values", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.testVoiceConfig({
+      apiKey: "sk-secret",
+      region: "cn",
+      asrModel: "qwen3-asr-flash-realtime",
+      ttsModel: "cosyvoice-v3-flash",
+      ttsVoice: "longanyang",
+    });
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "voice_config_test_response",
+      requestId,
+      success: true,
+      audioBase64: "AQI=",
+      audioSampleRate: 16000,
+      audioEncoding: "pcm_s16le",
+      transcript: "语音助手测试",
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "voice_config_test",
+      requestId,
+      config: {
+        apiKey: "sk-secret",
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+    });
+    await expect(promise).resolves.toEqual({
+      success: true,
+      audioBase64: "AQI=",
+      audioSampleRate: 16000,
+      audioEncoding: "pcm_s16le",
+      transcript: "语音助手测试",
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("requests Voice Pilot summaries from the selected proxy", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestVoiceSummary("s1", "msg-1", "```ts\nconst x = 1;\n```", "code");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "voice_summary_response",
+      requestId: "other-request",
+      sessionId: "s1",
+      messageId: "msg-1",
+      success: true,
+      summary: "wrong request",
+    });
+    ws.emit({
+      type: "voice_summary_response",
+      requestId,
+      sessionId: "other-session",
+      messageId: "msg-1",
+      success: true,
+      summary: "wrong session",
+    });
+    ws.emit({
+      type: "voice_summary_response",
+      requestId,
+      sessionId: "s1",
+      messageId: "other-message",
+      success: true,
+      summary: "wrong message",
+    });
+    ws.emit({
+      type: "voice_summary_response",
+      requestId,
+      sessionId: "s1",
+      messageId: "msg-1",
+      success: true,
+      summary: "这段代码把 x 设为 1。",
+    });
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "voice_summary_request",
+      requestId,
+      sessionId: "s1",
+      messageId: "msg-1",
+      text: "```ts\nconst x = 1;\n```",
+      reason: "code",
+    });
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      messageId: "msg-1",
+      success: true,
+      summary: "这段代码把 x 设为 1。",
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
   it("waits for matching session history responses", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestSessionHistory();

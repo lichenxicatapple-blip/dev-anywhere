@@ -4,6 +4,7 @@ import {
   ImageIcon,
   Keyboard,
   Lightbulb,
+  Mic,
   Minus,
   MoreVertical,
   Pencil,
@@ -40,6 +41,7 @@ import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
 import { cn } from "@/lib/utils";
+import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -70,6 +72,34 @@ function ChatSessionTitle({ title, isPtyTitle }: { title: string; isPtyTitle: bo
       <span className="truncate">{indicator ? ` ${label}` : label}</span>
     </span>
   );
+}
+
+function microphoneErrorMessage(err: unknown): string {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "没有麦克风权限，请在浏览器里允许访问麦克风。";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "未检测到可用麦克风。";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "麦克风正在被其他应用占用。";
+  }
+  return err instanceof Error ? err.message : "无法访问麦克风。";
+}
+
+async function ensureMicrophoneReady(): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("当前浏览器不支持麦克风访问。");
+  }
+  let stream: MediaStream | null = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    throw new Error(microphoneErrorMessage(err), { cause: err });
+  } finally {
+    stream?.getTracks().forEach((track) => track.stop());
+  }
 }
 
 const menuItemClass = "min-h-9 gap-2.5";
@@ -118,6 +148,11 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const isPty = mode === "pty" || session?.mode === "pty";
   const screenWakeLock = useScreenWakeLockScope(sessionId);
+  const voicePilot = useVoicePilotStore(
+    (s) => s.bySessionId[sessionId] ?? DEFAULT_VOICE_PILOT_STATE,
+  );
+  const enableVoicePilot = useVoicePilotStore((s) => s.enable);
+  const disableVoicePilot = useVoicePilotStore((s) => s.disable);
   const hasLockedName = Boolean(session?.nameLocked && session?.name);
   const title =
     (hasLockedName && session?.name) ||
@@ -148,6 +183,33 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
     void screenWakeLock.toggle().catch((err: unknown) => {
       toast.error(err instanceof Error ? err.message : String(err));
     });
+  }
+
+  async function toggleVoicePilot(nextChecked: boolean | "indeterminate") {
+    if (isPty) {
+      toast.info("Voice Pilot 目前适用于聊天会话。");
+      return;
+    }
+    if (nextChecked !== true) {
+      disableVoicePilot(sessionId);
+      return;
+    }
+    const relay = relayClientRef;
+    if (!relay) {
+      toast.error("请先连接开发机");
+      return;
+    }
+    try {
+      const result = await relay.requestVoiceConfig();
+      if (!result.config?.configured) {
+        toast.info("请先在设置里配置 Voice Pilot。");
+        return;
+      }
+      await ensureMicrophoneReady();
+      enableVoicePilot(sessionId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
   }
 
   // PTY 模式上传文件: 触发隐藏 input → 读字节 → relay.uploadFile → 把返回路径作为
@@ -222,7 +284,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-64"
+          className="w-56"
           style={{ maxWidth: "calc(100vw - 1rem)" }}
           data-slot="chat-overflow-menu"
         >
@@ -252,6 +314,20 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
             </span>
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
+          {!isPty && (
+            <DropdownMenuCheckboxItem
+              checked={voicePilot.enabled}
+              className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
+              data-slot="chat-menu-voice-pilot-item"
+              onCheckedChange={toggleVoicePilot}
+            >
+              <ChatMenuIcon>
+                <Mic aria-hidden="true" />
+              </ChatMenuIcon>
+              <span className="min-w-0 flex-1">Voice Pilot</span>
+            </DropdownMenuCheckboxItem>
+          )}
+          {!isPty && <DropdownMenuSeparator />}
           {isPty ? (
             <>
               {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留
@@ -293,7 +369,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
           <div className="px-2 pb-1" data-slot="chat-menu-font-control">
             <div
-              className="grid min-h-10 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 py-1"
+              className="inline-grid min-h-10 grid-cols-[1.25rem_auto] items-center gap-x-2.5 py-1"
               data-slot="chat-menu-font-row"
             >
               <ChatMenuIcon>

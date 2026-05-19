@@ -28,6 +28,7 @@ import { RelayPermissionHandlers } from "./relay-permission-handlers.js";
 import { RelayResourceHandlers } from "./relay-resource-handlers.js";
 import { RelaySessionCreateHandler } from "./relay-session-create-handler.js";
 import type { RelaySend } from "./relay-router-types.js";
+import { VoiceSummaryHandler, type VoiceSummaryRunner } from "./voice-summary-handler.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -53,6 +54,7 @@ interface RelayRouterDeps {
   getAgentCliSuggestions: () => Partial<Record<ProviderHookContext["provider"], string[]>>;
   setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
   getPreviewRoots?: () => string[];
+  voiceSummaryRunner?: VoiceSummaryRunner;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -62,6 +64,7 @@ export class RelayRouter {
   private readonly permissionHandlers: RelayPermissionHandlers;
   private readonly resourceHandlers: RelayResourceHandlers;
   private readonly sessionCreateHandler: RelaySessionCreateHandler;
+  private readonly voiceSummaryHandler: VoiceSummaryHandler;
 
   constructor(private deps: RelayRouterDeps) {
     this.historyHandlers = new RelayHistoryHandlers({
@@ -105,6 +108,12 @@ export class RelayRouter {
       cleanupHookContext: deps.cleanupHookContext,
       broadcastSessionSync: deps.broadcastSessionSync,
       broadcastSessionList: deps.broadcastSessionList,
+    });
+    this.voiceSummaryHandler = new VoiceSummaryHandler({
+      relaySend: deps.relaySend,
+      sessionManager: deps.sessionManager,
+      getProviderEnv: deps.getProviderEnv,
+      runner: deps.voiceSummaryRunner,
     });
   }
 
@@ -217,6 +226,9 @@ export class RelayRouter {
         return;
       case "session_subscribe":
         this.onSessionSubscribe(msg);
+        return;
+      case "voice_summary_request":
+        void this.voiceSummaryHandler.onVoiceSummaryRequest(msg);
         return;
       case "terminal_resize_request":
         this.onTerminalResizeRequest(msg);

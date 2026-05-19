@@ -10,9 +10,14 @@ import type {
   HistorySession,
   MessageEnvelope,
   RelayControlMessage,
+  VoiceConfigUpdate,
+  VoiceCapabilities,
+  VoiceProviderConfig,
+  VoiceSummaryReason,
 } from "@dev-anywhere/shared";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
 
 export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
@@ -87,6 +92,40 @@ type SessionRenameResult = {
   sessionId: string;
   success: boolean;
   name?: string;
+} & RequestError;
+type VoiceConfigResponse = Extract<RelayControlMessage, { type: "voice_config_response" }>;
+type VoiceConfigResult = {
+  config?: VoiceProviderConfig;
+} & RequestError;
+type VoiceConfigUpdateResponse = Extract<
+  RelayControlMessage,
+  { type: "voice_config_update_response" }
+>;
+type VoiceConfigUpdateResult = {
+  success: boolean;
+  config?: VoiceProviderConfig;
+} & RequestError;
+type VoiceConfigTestResponse = Extract<RelayControlMessage, { type: "voice_config_test_response" }>;
+type VoiceConfigTestResult = {
+  success: boolean;
+  audioBase64?: string;
+  audioSampleRate?: number;
+  audioEncoding?: "pcm_s16le";
+  transcript?: string;
+} & RequestError;
+type VoiceCapabilitiesResponse = Extract<
+  RelayControlMessage,
+  { type: "voice_capabilities_response" }
+>;
+type VoiceCapabilitiesResult = {
+  capabilities?: VoiceCapabilities;
+} & RequestError;
+type VoiceSummaryResponse = Extract<RelayControlMessage, { type: "voice_summary_response" }>;
+type VoiceSummaryResult = {
+  sessionId: string;
+  messageId: string;
+  success: boolean;
+  summary?: string;
 } & RequestError;
 type RequestError = { error?: string; errorCode?: ControlErrorCodeType };
 
@@ -404,6 +443,143 @@ export class RelayClient {
     ).then((resp) => ({
       provider: resp.provider,
       agentCli: resp.agentCli,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestVoiceConfig(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<VoiceConfigResult> {
+    const requestId = nextRequestId("voice-config");
+    return this.waitForMessage(
+      (msg): msg is VoiceConfigResponse =>
+        msg.type === "voice_config_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "voice_config_request", requestId })),
+      "读取语音设置超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      config: resp.config,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  updateVoiceConfig(
+    config: VoiceConfigUpdate,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<VoiceConfigUpdateResult> {
+    const requestId = nextRequestId("voice-config-update");
+    return this.waitForMessage(
+      (msg): msg is VoiceConfigUpdateResponse =>
+        msg.type === "voice_config_update_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "voice_config_update",
+            requestId,
+            config,
+          }),
+        ),
+      "保存语音设置超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      config: resp.config,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  testVoiceConfig(
+    config: VoiceConfigUpdate = {},
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<VoiceConfigTestResult> {
+    const requestId = nextRequestId("voice-config-test");
+    return this.waitForMessage(
+      (msg): msg is VoiceConfigTestResponse =>
+        msg.type === "voice_config_test_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "voice_config_test",
+            requestId,
+            config,
+          }),
+        ),
+      "测试语音配置超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      audioBase64: resp.audioBase64,
+      audioSampleRate: resp.audioSampleRate,
+      audioEncoding: resp.audioEncoding,
+      transcript: resp.transcript,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestVoiceCapabilities(
+    options: { region?: VoiceProviderConfig["region"] } = {},
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<VoiceCapabilitiesResult> {
+    const requestId = nextRequestId("voice-capabilities");
+    return this.waitForMessage(
+      (msg): msg is VoiceCapabilitiesResponse =>
+        msg.type === "voice_capabilities_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "voice_capabilities_request",
+            requestId,
+            ...(options.region ? { region: options.region } : {}),
+          }),
+        ),
+      "读取语音能力列表超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      capabilities: resp.capabilities,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestVoiceSummary(
+    sessionId: string,
+    messageId: string,
+    text: string,
+    reason: VoiceSummaryReason,
+    timeoutMs = VOICE_SUMMARY_REQUEST_TIMEOUT_MS,
+  ): Promise<VoiceSummaryResult> {
+    const requestId = nextRequestId("voice-summary");
+    return this.waitForMessage(
+      (msg): msg is VoiceSummaryResponse =>
+        msg.type === "voice_summary_response" &&
+        msg.requestId === requestId &&
+        msg.sessionId === sessionId &&
+        msg.messageId === messageId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "voice_summary_request",
+            requestId,
+            sessionId,
+            messageId,
+            text,
+            reason,
+          }),
+        ),
+      "生成语音摘要超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      sessionId: resp.sessionId,
+      messageId: resp.messageId,
+      success: resp.success,
+      summary: resp.summary,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

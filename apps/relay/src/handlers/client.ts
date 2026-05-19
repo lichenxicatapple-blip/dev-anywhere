@@ -9,6 +9,9 @@ import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
+import { handleVoiceConfigControl } from "../voice/client-controls.js";
+import type { VoiceConfigStore } from "../voice/config-store.js";
+import type { VoiceProviderRegistry } from "../voice/provider.js";
 
 // JSON 控制消息最大允许长度（1MB）。挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
 const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
@@ -99,6 +102,8 @@ export function handleClientConnection(
   registry: RelayRegistry,
   logger: Logger,
   chaos?: RelayChaos,
+  voiceConfigStore?: VoiceConfigStore,
+  voiceProviders?: VoiceProviderRegistry,
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
@@ -155,6 +160,13 @@ export function handleClientConnection(
         } else {
           clientWs.send(response);
         }
+        return;
+      }
+
+      if (
+        voiceConfigStore &&
+        handleVoiceConfigControl(msg, clientWs, voiceConfigStore, logger, voiceProviders)
+      ) {
         return;
       }
 

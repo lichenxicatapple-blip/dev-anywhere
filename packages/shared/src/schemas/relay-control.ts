@@ -2,6 +2,13 @@ import { z } from "zod";
 import { IdSchema } from "./id.js";
 import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } from "./session.js";
 import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import {
+  VoiceCapabilitiesSchema,
+  VoiceConfigUpdateSchema,
+  VoiceProviderConfigSchema,
+  VoiceSummaryReasonSchema,
+  voiceRegionValues,
+} from "./voice.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
 import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
@@ -133,6 +140,46 @@ const relayControlDefinitions = [
     // 可选 requestId: relay 把 client 发来 raw 的 requestId 字段透传回来,
     // client 侧 waitForMessage 据此把对应 pending request 立即拒掉而不必等到 timeout。
     requestId: IdSchema.optional(),
+  }),
+
+  // Voice Pilot config is relay-local: client reads/updates the relay's stored provider settings.
+  control("voice_config_request", RequestIdShape),
+  control("voice_config_response", {
+    ...RequestIdShape,
+    ...RequestErrorShape,
+    config: VoiceProviderConfigSchema.optional(),
+  }),
+  control("voice_config_update", {
+    ...RequestIdShape,
+    config: VoiceConfigUpdateSchema,
+  }),
+  control("voice_config_update_response", {
+    ...RequestIdShape,
+    ...RequestErrorShape,
+    success: z.boolean(),
+    config: VoiceProviderConfigSchema.optional(),
+  }),
+  control("voice_config_test", {
+    ...RequestIdShape,
+    config: VoiceConfigUpdateSchema.optional(),
+  }),
+  control("voice_config_test_response", {
+    ...RequestIdShape,
+    ...RequestErrorShape,
+    success: z.boolean(),
+    audioBase64: z.string().optional(),
+    audioSampleRate: z.number().int().positive().optional(),
+    audioEncoding: z.literal("pcm_s16le").optional(),
+    transcript: z.string().optional(),
+  }),
+  control("voice_capabilities_request", {
+    ...RequestIdShape,
+    region: z.enum(voiceRegionValues).optional(),
+  }),
+  control("voice_capabilities_response", {
+    ...RequestIdShape,
+    ...RequestErrorShape,
+    capabilities: VoiceCapabilitiesSchema.optional(),
   }),
 
   // 客户端注册协议
@@ -518,6 +565,31 @@ const relayControlDefinitions = [
           input: z.record(z.string(), z.unknown()),
         }),
       ),
+    },
+    "proxy_to_client",
+  ),
+
+  // Voice Pilot speech summaries are produced by proxy-side Claude Code so it can read project context.
+  control(
+    "voice_summary_request",
+    {
+      ...RequestIdShape,
+      sessionId: IdSchema,
+      messageId: IdSchema,
+      text: z.string().min(1),
+      reason: VoiceSummaryReasonSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "voice_summary_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      sessionId: IdSchema,
+      messageId: IdSchema,
+      success: z.boolean(),
+      summary: z.string().min(1).optional(),
     },
     "proxy_to_client",
   ),

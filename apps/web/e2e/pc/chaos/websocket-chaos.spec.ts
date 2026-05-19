@@ -1,16 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../../helpers";
-import {
-  expectPtyAtBottom,
-  ptyTerminal,
-  readPtyScrollMetrics,
-} from "../../pty-scroll-helpers";
-
-async function dropClientSocket(page: import("@playwright/test").Page): Promise<void> {
-  await page.evaluate(() => {
-    window.__devAnywhereE2E?.socket?.close();
-  });
-}
+import { expectPtyAtBottom, ptyTerminal, readPtyScrollMetrics } from "../../pty-scroll-helpers";
 
 async function holdNextConnectionAndDropSocket(
   page: import("@playwright/test").Page,

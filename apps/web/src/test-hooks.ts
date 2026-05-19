@@ -3,6 +3,7 @@
 // production build 时 import.meta.env.DEV 为 false, 整个函数空跑, 不会污染线上
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
+import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
 import { toast } from "@/components/toast";
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
 
@@ -22,6 +23,16 @@ interface CCTestHooks {
   };
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
+  };
+  voice: {
+    snapshot: (sessionId: string) => {
+      enabled: boolean;
+      phase: string;
+      draft: string;
+      partial: string;
+      error: string | null;
+      activityLevel: number;
+    };
   };
   pty: {
     serialize: (sessionId: string) => string;
@@ -64,6 +75,19 @@ export function installTestHooks(): void {
     },
     session: {
       setPtyTitle: (sid, title) => useSessionStore.getState().setPtyTitle(sid, title),
+    },
+    voice: {
+      snapshot: (sid) => {
+        const state = useVoicePilotStore.getState().bySessionId[sid] ?? DEFAULT_VOICE_PILOT_STATE;
+        return {
+          enabled: state.enabled,
+          phase: state.phase,
+          draft: state.draft,
+          partial: state.partial,
+          error: state.error,
+          activityLevel: state.activityLevel,
+        };
+      },
     },
     pty: {
       serialize: (sid) => ptySerializers.get(sid)?.() ?? "",

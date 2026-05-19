@@ -44,9 +44,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
     await sendPtyOutput(emuPage, "x".repeat(90));
 
     await expect
-      .poll(() =>
-        readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft),
-      )
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
       .toBeGreaterThan(100);
   });
 
@@ -75,18 +73,14 @@ test.describe("L4 mobile / PTY input scroll", () => {
       )
       .toBeGreaterThan(400);
     await expect
-      .poll(() =>
-        readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft),
-      )
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
       .toBeGreaterThan(0);
 
     await emuPage.keyboard.press("Enter");
 
     await expect.poll(() => readRawPtyInput(emuPage)).toContain("\n");
     await expect
-      .poll(() =>
-        readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft),
-      )
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
       .toBeLessThanOrEqual(1);
   });
 

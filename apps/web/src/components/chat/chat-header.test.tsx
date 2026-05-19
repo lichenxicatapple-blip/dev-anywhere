@@ -1,22 +1,33 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadFile, toastError, toastLoading, toastSuccess, sendRawSpy } = vi.hoisted(() => ({
+const {
+  requestVoiceConfig,
+  uploadFile,
+  toastError,
+  toastInfo,
+  toastLoading,
+  toastSuccess,
+  sendRawSpy,
+} = vi.hoisted(() => ({
+  requestVoiceConfig: vi.fn(),
   uploadFile: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
   toastLoading: vi.fn(() => "loading-id"),
   toastSuccess: vi.fn(),
   sendRawSpy: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { uploadFile },
+  relayClientRef: { requestVoiceConfig, uploadFile },
   wsManagerRef: null,
 }));
 
 vi.mock("@/components/toast", () => ({
   toast: {
     error: toastError,
+    info: toastInfo,
     loading: toastLoading,
     success: toastSuccess,
     dismiss: vi.fn(),
@@ -46,11 +57,31 @@ vi.mock("@/hooks/use-screen-wake-lock", () => ({
 import { ChatHeader } from "./chat-header";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
+import { useVoicePilotStore } from "@/voice/voice-pilot-store";
 
 describe("ChatHeader PTY upload menu", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => ({
+          getTracks: () => [{ stop: vi.fn() }],
+        })),
+      },
+    });
+    requestVoiceConfig.mockReset();
+    requestVoiceConfig.mockResolvedValue({
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+    });
     uploadFile.mockReset();
     uploadFile.mockResolvedValue({
       sessionId: "s1",
@@ -59,9 +90,11 @@ describe("ChatHeader PTY upload menu", () => {
     });
     toastError.mockReset();
     toastSuccess.mockReset();
+    toastInfo.mockReset();
     toastLoading.mockReset();
     toastLoading.mockReturnValue("loading-id");
     sendRawSpy.mockReset();
+    useVoicePilotStore.getState().resetAll();
     useSessionStore.setState({
       sessions: [
         {
@@ -180,6 +213,7 @@ describe("ChatHeader PTY upload menu", () => {
     }
 
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
+    expect(menu.className).toContain("w-56");
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
@@ -191,6 +225,139 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("终端字号")).toBeNull();
     expect(screen.queryByText("聊天字号")).toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
+  });
+
+  it("lets JSON sessions toggle Voice Pilot from the overflow menu", async () => {
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
+    fireEvent.click(item);
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+        enabled: true,
+        phase: "listening",
+      }),
+    );
+  });
+
+  it("shows a toast and keeps Voice Pilot disabled when voice settings are missing", async () => {
+    requestVoiceConfig.mockResolvedValueOnce({
+      config: {
+        provider: "aliyun-bailian",
+        configured: false,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(toastInfo).toHaveBeenCalledWith("请先在设置里配置 Voice Pilot。"));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+  });
+
+  it("shows a toast and keeps Voice Pilot disabled when no microphone is available", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => {
+          const error = new Error("not found");
+          error.name = "NotFoundError";
+          throw error;
+        }),
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("未检测到可用麦克风。"));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+  });
+
+  it("shows a toast and keeps Voice Pilot disabled when microphone permission is denied", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async () => {
+          const error = new Error("denied");
+          error.name = "NotAllowedError";
+          throw error;
+        }),
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
+    fireEvent.click(item);
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("没有麦克风权限，请在浏览器里允许访问麦克风。"),
+    );
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+  });
+
+  it("can turn off Voice Pilot without rechecking provider config", async () => {
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    useVoicePilotStore.getState().enable("s1");
+    requestVoiceConfig.mockClear();
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
+    fireEvent.click(item);
+
+    await waitFor(() => expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).toBe(false));
+    expect(requestVoiceConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not show Voice Pilot for PTY sessions", async () => {
+    render(<ChatHeader sessionId="s1" mode="pty" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-slot="chat-overflow-menu"]')).not.toBeNull();
+    });
+
+    expect(screen.queryByRole("menuitem", { name: "Voice Pilot" })).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Voice Pilot" })).toBeNull();
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
   });
 
   it("keeps the font-size stepper compact enough for mobile menu width", async () => {
@@ -210,8 +377,10 @@ describe("ChatHeader PTY upload menu", () => {
     const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
     const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
 
-    expect(row?.className).toContain("grid");
-    expect(row?.className).toContain("grid-cols-[1.25rem_minmax(0,1fr)]");
+    expect(menu.className).toContain("w-56");
+    expect(menu.className).not.toContain("w-64");
+    expect(row?.className).toContain("inline-grid");
+    expect(row?.className).toContain("grid-cols-[1.25rem_auto]");
     expect(menu.querySelector('[data-slot="chat-menu-font-label"]')).toBeNull();
     expect(stepper?.className).toContain("inline-flex");
     expect(stepper?.className).toContain("col-start-2");

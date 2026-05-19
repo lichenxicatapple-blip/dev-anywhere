@@ -68,6 +68,7 @@ export default defineConfig({
         navigateFallbackDenylist: [
           /^\/proxy(\/|$|\?)/,
           /^\/client(\/|$|\?)/,
+          /^\/voice(\/|$|\?)/,
           /^\/fonts\//,
           /^\/health/,
           /^\/status/,
@@ -103,6 +104,11 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/proxy": {
+        target: relayTarget.ws,
+        ws: true,
+        changeOrigin: true,
+      },
+      "/voice": {
         target: relayTarget.ws,
         ws: true,
         changeOrigin: true,

@@ -16,7 +16,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (role === "user") {
     return (
-      <article data-slot="message-bubble" data-role="user" className="px-4 py-2">
+      <article data-slot="message-bubble" data-role="user" className="dev-chat-rail-inset py-2">
         <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-end">
           <div
             className="min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2"
@@ -37,7 +37,7 @@ export const MessageBubble = memo(function MessageBubble({
   ) : null;
 
   return (
-    <article data-slot="message-bubble" data-role={role} className="px-4 py-2">
+    <article data-slot="message-bubble" data-role={role} className="dev-chat-rail-inset py-2">
       <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-start">
         <div
           className="w-fit max-w-[88%] min-w-0 rounded-md bg-card text-foreground px-4 py-2"

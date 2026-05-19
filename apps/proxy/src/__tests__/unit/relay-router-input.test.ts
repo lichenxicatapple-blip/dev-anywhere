@@ -9,6 +9,7 @@ import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
+import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import type { Socket } from "node:net";
 import {
   createRelayConnectionFake,
@@ -35,6 +36,7 @@ function createRouter(options: {
   hostedStart?: (options: unknown) => number;
   sessionManager?: SessionManager;
   broadcastSessionList?: () => void;
+  voiceSummaryRunner?: VoiceSummaryRunner;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -95,6 +97,7 @@ function createRouter(options: {
     getProviderEnv: () => ({}),
     getAgentCliSuggestions: () => ({}),
     setAgentCliPath: () => {},
+    voiceSummaryRunner: options.voiceSummaryRunner,
   });
 }
 
@@ -330,6 +333,39 @@ describe("RelayRouter input routing", () => {
       sessionId: "s1",
       success: true,
       name: "Release checklist",
+    });
+  });
+
+  it("routes voice summary requests to the proxy-side summary runner", async () => {
+    const relaySend = vi.fn();
+    const voiceSummaryRunner: VoiceSummaryRunner = vi.fn(async () => "已总结代码变更和下一步。");
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      voiceSummaryRunner,
+    });
+
+    router.handle({
+      type: "voice_summary_request",
+      requestId: "voice-summary-1",
+      sessionId: "s1",
+      messageId: "m1",
+      reason: "code",
+      text: "```ts\nconst ok = true;\n```",
+    });
+
+    await vi.waitFor(() => expect(relaySend).toHaveBeenCalledTimes(1));
+    expect(voiceSummaryRunner).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/tmp", timeoutMs: 12_000 }),
+    );
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "voice_summary_response",
+      requestId: "voice-summary-1",
+      sessionId: "s1",
+      messageId: "m1",
+      success: true,
+      summary: "已总结代码变更和下一步。",
     });
   });
 
