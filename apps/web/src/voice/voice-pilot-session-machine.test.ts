@@ -45,9 +45,9 @@ describe("VoicePilotSessionMachine", () => {
       effects: [{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }],
     });
 
-    expect(machine.send({ type: "userEndCueDone", text: "嗯。" })).toEqual({
+    expect(machine.send({ type: "userEndCueDone", text: "嗯。", messageId: "m-uec" })).toEqual({
       phase: "waiting",
-      effects: [{ type: "submitText", text: "嗯。" }],
+      effects: [{ type: "submitText", text: "嗯。", messageId: "m-uec" }],
     });
   });
 
@@ -88,7 +88,7 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "pauseRequested" })).toEqual({
       phase: "paused",
-      effects: [{ type: "stopCapture" }],
+      effects: [{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }],
     });
   });
 
@@ -98,17 +98,21 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "resumeRequested" })).toEqual({
       phase: "listening",
-      effects: [{ type: "startCapture" }],
+      effects: [{ type: "startCapture" }, { type: "playCue", cue: "user-end" }],
     });
   });
 
-  it("cancels the in-flight turn on cancelTurnRequested while listening", () => {
+  it("cancels the in-flight turn and restarts capture on cancelTurnRequested", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");
 
     expect(machine.send({ type: "cancelTurnRequested" })).toEqual({
       phase: "listening",
-      effects: [{ type: "cancelTurnBuffer" }],
+      effects: [
+        { type: "cancelTurnBuffer" },
+        { type: "playCue", cue: "user-end" },
+        { type: "startCapture" },
+      ],
     });
   });
 
@@ -133,7 +137,10 @@ describe("VoicePilotSessionMachine", () => {
       machine.send({ type: "approvalResolved", action: "approve", requestId: "toolu_1" }),
     ).toEqual({
       phase: "waiting",
-      effects: [{ type: "approveTool", requestId: "toolu_1" }],
+      effects: [
+        { type: "approveTool", requestId: "toolu_1" },
+        { type: "playCue", cue: "user-end" },
+      ],
     });
   });
 
@@ -145,7 +152,10 @@ describe("VoicePilotSessionMachine", () => {
       machine.send({ type: "approvalResolved", action: "deny", requestId: "toolu_1" }),
     ).toEqual({
       phase: "waiting",
-      effects: [{ type: "denyTool", requestId: "toolu_1" }],
+      effects: [
+        { type: "denyTool", requestId: "toolu_1" },
+        { type: "playCue", cue: "user-end" },
+      ],
     });
   });
 
@@ -195,9 +205,11 @@ describe("VoicePilotSessionMachine", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("submitting");
 
-    expect(machine.send({ type: "userTextRecognized", text: "请检查项目状态" })).toEqual({
+    expect(
+      machine.send({ type: "userTextRecognized", text: "请检查项目状态", messageId: "m-utx" }),
+    ).toEqual({
       phase: "waiting",
-      effects: [{ type: "submitText", text: "请检查项目状态" }],
+      effects: [{ type: "submitText", text: "请检查项目状态", messageId: "m-utx" }],
     });
   });
 
@@ -214,16 +226,26 @@ describe("VoicePilotSessionMachine", () => {
       ],
     });
 
+    // approval / paused 内的 speak 不切 phase, 等用户回应或保持暂停
     const fromApproval = createVoicePilotSessionMachine();
     fromApproval.hydrateReadyForTest("approval");
     expect(
       fromApproval.send({ type: "assistantTextReady", text: "审批提示。", messageId: "" }),
     ).toEqual({
-      phase: "speaking",
+      phase: "approval",
       effects: [
         { type: "stopCapture" },
         { type: "speakText", text: "审批提示。", messageId: "" },
       ],
+    });
+
+    const fromPaused = createVoicePilotSessionMachine();
+    fromPaused.hydrateReadyForTest("paused");
+    expect(
+      fromPaused.send({ type: "assistantTextReady", text: "暂停状态播报。", messageId: "" }),
+    ).toEqual({
+      phase: "paused",
+      effects: [{ type: "speakText", text: "暂停状态播报。", messageId: "" }],
     });
   });
 });

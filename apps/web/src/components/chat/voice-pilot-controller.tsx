@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { VoiceSummaryReason } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getRelayClientToken } from "@/lib/relay-client-token";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
@@ -17,6 +18,7 @@ import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
 import { routeVoiceText, type VoiceCommand } from "@/voice/voice-command-router";
 import {
   createVoicePilotSessionMachine,
+  type VoicePilotEffect,
   type VoicePilotEvent,
   type VoicePilotSessionMachine,
 } from "@/voice/voice-pilot-session-machine";
@@ -31,6 +33,7 @@ const ASR_SAMPLE_RATE = 16000;
 const TTS_SAMPLE_RATE = 24000;
 const USER_END_EARCON_MS = 90;
 const ASSISTANT_END_EARCON_MS = 110;
+const LISTENING_START_EARCON_MS = 60;
 const VOICE_TURN_IDLE_MS = 3000;
 
 declare global {
@@ -39,7 +42,7 @@ declare global {
   }
 }
 
-type VoicePilotEarcon = "user-end" | "assistant-end";
+type VoicePilotEarcon = "listening-start" | "user-end" | "assistant-end";
 
 type VoiceSocketMessage =
   | { type: "ready" }
@@ -174,10 +177,103 @@ export function VoicePilotController({
     return sessionMachineRef.current;
   }
 
-  function sendMachineEvent(event: VoicePilotEvent): void {
+  async function dispatchEffects(effects: VoicePilotEffect[]): Promise<void> {
+    for (const effect of effects) {
+      switch (effect.type) {
+        case "stopCapture":
+          stopCapture();
+          break;
+        case "startCapture":
+          await beginListening();
+          break;
+        case "playCue":
+          await playEarcon(effect.cue);
+          break;
+        case "appendFinalToTurnBuffer":
+          turnBufferRef.current?.appendFinal(effect.text);
+          break;
+        case "cancelTurnBuffer":
+          turnBufferRef.current?.cancel();
+          break;
+        case "speakText":
+        case "speakStatic": {
+          const socket = ttsRef.current;
+          if (!socket || socket.readyState !== WebSocket.OPEN) {
+            pendingSpeechRef.current.push(effect.text);
+            break;
+          }
+          sendSpeechNow(socket, effect.text);
+          break;
+        }
+        case "submitText": {
+          const relay = relayClientRef;
+          if (!relay) {
+            useVoicePilotStore.getState().setError(sessionId, "开发机连接不可用");
+            break;
+          }
+          relay.sendEnvelope({
+            type: "user_input",
+            sessionId,
+            payload: { text: effect.text, messageId: effect.messageId },
+            seq: 0,
+            timestamp: Date.now(),
+            source: "client",
+            version: "1",
+          });
+          break;
+        }
+        case "approveTool":
+          relayClientRef?.sendControl({
+            type: "tool_approve",
+            sessionId,
+            payload: { toolId: effect.requestId, whitelistTool: false },
+          });
+          break;
+        case "denyTool":
+          relayClientRef?.sendControl({
+            type: "tool_deny",
+            sessionId,
+            payload: { toolId: effect.requestId },
+          });
+          break;
+        case "requestSummary":
+          void runSummaryRequest(effect.text, effect.messageId, effect.reason);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  async function runSummaryRequest(
+    text: string,
+    messageId: string,
+    reason: VoiceSummaryReason,
+  ): Promise<void> {
+    const relay = relayClientRef;
+    const fallbackText = fallbackSpeechSummary(reason);
+    if (!relay) {
+      await sendMachineEvent({ type: "summaryFailed", fallbackText, messageId });
+      return;
+    }
+    try {
+      const result = await relay.requestVoiceSummary(sessionId, messageId, text, reason);
+      if (result.success && result.summary?.trim()) {
+        const summaryText = `下面是摘要：${result.summary.trim()}`;
+        await sendMachineEvent({ type: "summaryReady", text: summaryText, messageId });
+        return;
+      }
+    } catch {
+      // Fall through to fallback summary.
+    }
+    await sendMachineEvent({ type: "summaryFailed", fallbackText, messageId });
+  }
+
+  function sendMachineEvent(event: VoicePilotEvent): Promise<void> {
     const machine = ensureSessionMachine();
-    machine.send(event);
+    const transition = machine.send(event);
     useVoicePilotStore.getState().setPhase(sessionId, machine.getPhase());
+    return dispatchEffects(transition.effects);
   }
 
   useEffect(() => {
@@ -247,9 +343,14 @@ export function VoicePilotController({
   const playEarcon = useCallback(async (kind: VoicePilotEarcon) => {
     const player = playerRef.current;
     if (!player) return;
-    const durationMs = kind === "user-end" ? USER_END_EARCON_MS : ASSISTANT_END_EARCON_MS;
-    const frequency = kind === "user-end" ? 880 : 660;
-    const gain = kind === "user-end" ? 0.12 : 0.09;
+    const durationMs =
+      kind === "user-end"
+        ? USER_END_EARCON_MS
+        : kind === "assistant-end"
+          ? ASSISTANT_END_EARCON_MS
+          : LISTENING_START_EARCON_MS;
+    const frequency = kind === "user-end" ? 880 : kind === "assistant-end" ? 660 : 1100;
+    const gain = kind === "user-end" ? 0.12 : kind === "assistant-end" ? 0.09 : 0.1;
     const queuedMs = player.enqueue(createTonePcm(TTS_SAMPLE_RATE, frequency, durationMs, gain));
     const waitMs = Number.isFinite(queuedMs) ? queuedMs : durationMs;
     await sleep(Math.max(0, waitMs));
@@ -296,26 +397,14 @@ export function VoicePilotController({
     (text: string, messageId = "") => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      stopCapture();
       useVoicePilotStore.getState().setLastSpokenText(sessionId, trimmed);
-      sendMachineEvent({ type: "assistantTextReady", text: trimmed, messageId });
-      const socket = ttsRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        pendingSpeechRef.current.push(trimmed);
-        return;
-      }
-      sendSpeechNow(socket, trimmed);
+      void sendMachineEvent({ type: "assistantTextReady", text: trimmed, messageId });
     },
-    [sendSpeechNow, sessionId, stopCapture],
+    [sessionId],
   );
 
   const sendRecognizedInput = useCallback(
     (text: string) => {
-      const relay = relayClientRef;
-      if (!relay) {
-        useVoicePilotStore.getState().setError(sessionId, "开发机连接不可用");
-        return;
-      }
       const now = Date.now();
       const messageId = voicePartialIdRef.current ?? `${sessionId}-voice-user-${now}`;
       voicePartialIdRef.current = null;
@@ -328,16 +417,7 @@ export function VoicePilotController({
         toolCalls: [],
       });
       useSessionStore.getState().updateSessionState(sessionId, "working", now);
-      relay.sendEnvelope({
-        type: "user_input",
-        sessionId,
-        payload: { text, messageId },
-        seq: 0,
-        timestamp: now,
-        source: "client",
-        version: "1",
-      });
-      sendMachineEvent({ type: "userTextRecognized", text });
+      void sendMachineEvent({ type: "userTextRecognized", text, messageId });
     },
     [sessionId],
   );
@@ -356,21 +436,17 @@ export function VoicePilotController({
         return true;
       }
       if (command.type === "pause") {
-        stopCapture();
-        sendMachineEvent({ type: "pauseRequested" });
+        void sendMachineEvent({ type: "pauseRequested" });
         return true;
       }
       if (command.type === "cancel" || command.type === "redo") {
-        turnBufferRef.current?.cancel();
-        sendMachineEvent({ type: "cancelTurnRequested" });
-        void beginListening().catch((err: unknown) => {
+        void sendMachineEvent({ type: "cancelTurnRequested" }).catch((err: unknown) => {
           store.setError(sessionId, err instanceof Error ? err.message : String(err));
         });
         return true;
       }
       if (command.type === "resume") {
-        sendMachineEvent({ type: "resumeRequested" });
-        void beginListening().catch((err: unknown) => {
+        void sendMachineEvent({ type: "resumeRequested" }).catch((err: unknown) => {
           store.setError(sessionId, err instanceof Error ? err.message : String(err));
         });
         return true;
@@ -381,20 +457,7 @@ export function VoicePilotController({
       }
       const approval = firstPendingApproval(approvalsRef.current);
       if (approval && (command.type === "approve_once" || command.type === "deny_once")) {
-        relayClientRef?.sendControl(
-          command.type === "approve_once"
-            ? {
-                type: "tool_approve",
-                sessionId,
-                payload: { toolId: approval.requestId, whitelistTool: false },
-              }
-            : {
-                type: "tool_deny",
-                sessionId,
-                payload: { toolId: approval.requestId },
-              },
-        );
-        sendMachineEvent({
+        void sendMachineEvent({
           type: "approvalResolved",
           action: command.type === "approve_once" ? "approve" : "deny",
           requestId: approval.requestId,
@@ -403,7 +466,7 @@ export function VoicePilotController({
       }
       return true;
     },
-    [beginListening, discardVoicePartialBubble, sessionId, speak, stopCapture],
+    [discardVoicePartialBubble, sessionId, speak],
   );
 
   const handleCompletedVoiceTurn = useCallback(
@@ -415,17 +478,17 @@ export function VoicePilotController({
         phase: useVoicePilotStore.getState().bySessionId[sessionId]?.phase ?? "listening",
         approvalPromptActive: Boolean(approval),
       });
-      stopCapture();
-      await playEarcon("user-end");
-      if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
       if (route.kind === "command") {
+        // 命令路径的 cue / cap 状态由 handleCommand 触发的 machine event 管
         handleCommand(route.command);
         return;
       }
-      sendMachineEvent({ type: "turnIdleElapsed" });
+      // 文本路径: turnIdleElapsed effect 触发 stopCapture + playCue user-end
+      await sendMachineEvent({ type: "turnIdleElapsed" });
+      if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
       if (approval) {
         discardVoicePartialBubble();
-        sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
+        await sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
         useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
         speak("请说批准这次或拒绝这次。", approval.requestId);
         return;
@@ -454,47 +517,20 @@ export function VoicePilotController({
   );
 
   const speakAssistantMessage = useCallback(
-    async (message: ChatMessage) => {
+    (message: ChatMessage) => {
       const policy = decideSpeechPolicy(message.text);
       if (policy.mode === "direct") {
         speak(message.text, message.id);
         return;
       }
-
-      const relay = relayClientRef;
-      sendMachineEvent({
+      void sendMachineEvent({
         type: "summaryRequested",
         text: message.text,
         messageId: message.id,
         reason: policy.reason,
       });
-      if (!relay) {
-        const fallbackText = fallbackSpeechSummary(policy.reason);
-        sendMachineEvent({ type: "summaryFailed", fallbackText, messageId: message.id });
-        speak(fallbackText, message.id);
-        return;
-      }
-      try {
-        const result = await relay.requestVoiceSummary(
-          sessionId,
-          message.id,
-          message.text,
-          policy.reason,
-        );
-        if (result.success && result.summary?.trim()) {
-          const summaryText = `下面是摘要：${result.summary.trim()}`;
-          sendMachineEvent({ type: "summaryReady", text: summaryText, messageId: message.id });
-          speak(summaryText, message.id);
-          return;
-        }
-      } catch {
-        // Fall through to deterministic fallback.
-      }
-      const fallbackText = fallbackSpeechSummary(policy.reason);
-      sendMachineEvent({ type: "summaryFailed", fallbackText, messageId: message.id });
-      speak(fallbackText, message.id);
     },
-    [sessionId, speak],
+    [speak],
   );
 
   useEffect(() => {
@@ -505,7 +541,7 @@ export function VoicePilotController({
     }
 
     let cancelled = false;
-    sendMachineEvent({ type: "enableRequested" });
+    void sendMachineEvent({ type: "enableRequested" });
 
     async function start() {
       const relay = relayClientRef;
@@ -520,10 +556,10 @@ export function VoicePilotController({
           useVoicePilotStore.getState().setError(sessionId, "请先在设置里配置 Voice Pilot。");
           return;
         }
-        sendMachineEvent({ type: "configReady" });
+        void sendMachineEvent({ type: "configReady" });
         await wakeLock.enable();
         if (cancelled) return;
-        sendMachineEvent({ type: "micPermissionGranted" });
+        void sendMachineEvent({ type: "micPermissionGranted" });
 
         turnBufferRef.current = new VoiceTurnBuffer({
           idleTimeoutMs: turnIdleMs,
@@ -563,17 +599,15 @@ export function VoicePilotController({
           if (msg.type === "finished") {
             void (async () => {
               useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
-              sendMachineEvent({ type: "ttsFinished" });
-              await playEarcon("assistant-end");
+              await sendMachineEvent({ type: "ttsFinished" });
               if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
               const approval = firstPendingApproval(approvalsRef.current);
               if (approval) {
-                sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
+                await sendMachineEvent({ type: "approvalArrived", requestId: approval.requestId });
                 useVoicePilotStore.getState().setApproval(sessionId, approval.requestId);
               } else {
-                sendMachineEvent({ type: "assistantEndCueDone" });
+                await sendMachineEvent({ type: "assistantEndCueDone" });
               }
-              await beginListening();
             })().catch((err: unknown) => {
               useVoicePilotStore
                 .getState()
@@ -585,12 +619,11 @@ export function VoicePilotController({
           }
         });
         tts.addEventListener("open", () => {
-          sendMachineEvent({ type: "ttsReady" });
+          void sendMachineEvent({ type: "ttsReady" });
           flushPendingSpeech();
         });
         runWhenOpen(asr, () => {
-          sendMachineEvent({ type: "asrReady" });
-          void beginListening().catch((err: unknown) => {
+          void sendMachineEvent({ type: "asrReady" }).catch((err: unknown) => {
             useVoicePilotStore
               .getState()
               .setError(sessionId, err instanceof Error ? err.message : String(err));
