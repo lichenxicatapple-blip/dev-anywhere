@@ -36,6 +36,16 @@ describe("VoicePilotSessionMachine", () => {
     expect(result.effects).toEqual([{ type: "appendFinalToTurnBuffer", text: "帮我看报错" }]);
   });
 
+  it("buffers ASR final text while waiting for an approval command", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("approval");
+
+    const result = machine.send({ type: "asrFinal", text: "批准这次" });
+
+    expect(result.phase).toBe("approval");
+    expect(result.effects).toEqual([{ type: "appendFinalToTurnBuffer", text: "批准这次" }]);
+  });
+
   it("submits after turn idle and user-end cue", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");
@@ -122,10 +132,7 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "approvalArrived", requestId: "toolu_1" })).toEqual({
       phase: "approval",
-      effects: [
-        { type: "stopCapture" },
-        { type: "speakStatic", text: "请说批准这次或拒绝这次。" },
-      ],
+      effects: [{ type: "stopCapture" }, { type: "speakStatic", text: "请说批准这次或拒绝这次。" }],
     });
   });
 
@@ -233,10 +240,7 @@ describe("VoicePilotSessionMachine", () => {
       fromApproval.send({ type: "assistantTextReady", text: "审批提示。", messageId: "" }),
     ).toEqual({
       phase: "approval",
-      effects: [
-        { type: "stopCapture" },
-        { type: "speakText", text: "审批提示。", messageId: "" },
-      ],
+      effects: [{ type: "stopCapture" }, { type: "speakText", text: "审批提示。", messageId: "" }],
     });
 
     const fromPaused = createVoicePilotSessionMachine();

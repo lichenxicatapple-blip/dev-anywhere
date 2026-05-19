@@ -156,7 +156,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         }
       }
 
-      if (event.type === "asrFinal" && fsm.is("listening")) {
+      if (event.type === "asrFinal" && (fsm.is("listening") || fsm.is("approval"))) {
         return result([{ type: "appendFinalToTurnBuffer", text: event.text }]);
       }
 
@@ -167,9 +167,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
       if (event.type === "userEndCueDone" && fsm.is("submitting")) {
         transitionTo("waiting");
-        return result([
-          { type: "submitText", text: event.text, messageId: event.messageId },
-        ]);
+        return result([{ type: "submitText", text: event.text, messageId: event.messageId }]);
       }
 
       if (event.type === "agentSubmitFailed") {
@@ -265,9 +263,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
       if (event.type === "userTextRecognized" && fsm.is("submitting")) {
         transitionTo("waiting");
-        return result([
-          { type: "submitText", text: event.text, messageId: event.messageId },
-        ]);
+        return result([{ type: "submitText", text: event.text, messageId: event.messageId }]);
       }
 
       if (event.type === "assistantTextReady" && fsm.is("approval")) {
@@ -278,9 +274,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       }
 
       if (event.type === "assistantTextReady" && fsm.is("paused")) {
-        return result([
-          { type: "speakText", text: event.text, messageId: event.messageId },
-        ]);
+        return result([{ type: "speakText", text: event.text, messageId: event.messageId }]);
       }
 
       if (

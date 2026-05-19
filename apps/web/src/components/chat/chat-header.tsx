@@ -284,8 +284,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-56"
-          style={{ maxWidth: "calc(100vw - 1rem)" }}
+          className="w-max min-w-44 max-w-[calc(100vw-1rem)]"
           data-slot="chat-overflow-menu"
         >
           <DropdownMenuLabel className={menuLabelClass}>会话</DropdownMenuLabel>
@@ -313,7 +312,6 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               {screenWakeLock.supported ? "屏幕常亮" : "屏幕常亮（浏览器不支持）"}
             </span>
           </DropdownMenuCheckboxItem>
-          <DropdownMenuSeparator />
           {!isPty && (
             <DropdownMenuCheckboxItem
               checked={voicePilot.enabled}
@@ -327,7 +325,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               <span className="min-w-0 flex-1">Voice Pilot</span>
             </DropdownMenuCheckboxItem>
           )}
-          {!isPty && <DropdownMenuSeparator />}
+          <DropdownMenuSeparator />
           {isPty ? (
             <>
               {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留

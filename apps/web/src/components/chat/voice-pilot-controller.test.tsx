@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -202,6 +202,55 @@ describe("VoicePilotController", () => {
     ttsSocket().emitJson({ type: "finished" });
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.activityLevel).toBe(0),
+    );
+  });
+
+  it("stops microphone capture when the ASR provider reports an error", async () => {
+    const stopCapture = vi.fn();
+    createPcmCapture.mockResolvedValueOnce({ stop: stopCapture });
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    asrSocket().emitJson({ type: "error", error: "ASR disconnected" });
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+        phase: "error",
+        error: "ASR disconnected",
+      }),
+    );
+    expect(stopCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores late startup failures after Voice Pilot is disabled", async () => {
+    const rejectWakeLock: Array<(error: Error) => void> = [];
+    wakeEnable.mockReturnValueOnce(
+      new Promise<undefined>((_resolve, reject) => {
+        rejectWakeLock.push(reject);
+      }),
+    );
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(wakeEnable).toHaveBeenCalledTimes(1));
+    act(() => {
+      useVoicePilotStore.getState().disable("s1");
+    });
+    rejectWakeLock[0]?.(new Error("wake lock failed late"));
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+        enabled: false,
+        phase: "idle",
+        error: null,
+      }),
     );
   });
 
@@ -550,13 +599,12 @@ describe("VoicePilotController", () => {
       type: "user_input",
       payload: { text: "请检查项目状态", messageId: partialId },
     });
-    const commit = useChatStore
-      .getState()
-      .bySessionId.s1?.messages.find((m) => m.id === partialId);
+    const commit = useChatStore.getState().bySessionId.s1?.messages.find((m) => m.id === partialId);
     expect(commit).toMatchObject({ role: "user", isPartial: false, text: "请检查项目状态" });
-    const partialAfter = useChatStore
-      .getState()
-      .bySessionId.s1?.messages.filter((m) => m.isPartial && m.role === "user") ?? [];
+    const partialAfter =
+      useChatStore
+        .getState()
+        .bySessionId.s1?.messages.filter((m) => m.isPartial && m.role === "user") ?? [];
     expect(partialAfter).toHaveLength(0);
   });
 
@@ -571,12 +619,9 @@ describe("VoicePilotController", () => {
 
     asrSocket().emitJson({ type: "final", text: "暂停" });
 
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("paused"),
-    );
-    const remaining = useChatStore
-      .getState()
-      .bySessionId.s1?.messages.filter((m) => m.role === "user") ?? [];
+    await waitFor(() => expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("paused"));
+    const remaining =
+      useChatStore.getState().bySessionId.s1?.messages.filter((m) => m.role === "user") ?? [];
     expect(remaining).toHaveLength(0);
     expect(sendEnvelope).not.toHaveBeenCalled();
   });

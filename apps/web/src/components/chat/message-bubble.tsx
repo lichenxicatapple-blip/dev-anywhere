@@ -34,11 +34,7 @@ export const MessageBubble = memo(function MessageBubble({
       >
         <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-end">
           <div className={userBodyClass} style={contentStyle}>
-            <MarkdownView
-              text={message.text}
-              tone="on-primary"
-              trailingInline={streamingCursor}
-            />
+            <MarkdownView text={message.text} tone="on-primary" trailingInline={streamingCursor} />
           </div>
         </div>
       </article>

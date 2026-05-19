@@ -213,7 +213,8 @@ describe("ChatHeader PTY upload menu", () => {
     }
 
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
-    expect(menu.className).toContain("w-56");
+    expect(menu.className).toContain("w-max");
+    expect(menu.className).toContain("min-w-44");
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
@@ -377,7 +378,8 @@ describe("ChatHeader PTY upload menu", () => {
     const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
     const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
 
-    expect(menu.className).toContain("w-56");
+    expect(menu.className).toContain("w-max");
+    expect(menu.className).toContain("min-w-44");
     expect(menu.className).not.toContain("w-64");
     expect(row?.className).toContain("inline-grid");
     expect(row?.className).toContain("grid-cols-[1.25rem_auto]");
