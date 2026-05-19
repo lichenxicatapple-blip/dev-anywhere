@@ -169,6 +169,7 @@ export function VoicePilotController({
   const pendingSpeechRef = useRef<string[]>([]);
   const turnBufferRef = useRef<VoiceTurnBuffer | null>(null);
   const processedAssistantMessageIdRef = useRef<string | null>(null);
+  const assistantHistoryPrimedRef = useRef(false);
   const spokenApprovalRequestIdRef = useRef<string | null>(null);
   // 当前轮的语音 partial 气泡 id; 提交/取消/cleanup 时清空
   const voicePartialIdRef = useRef<string | null>(null);
@@ -709,8 +710,18 @@ export function VoicePilotController({
   }, [enabled, pendingApprovals, pilot.approvalRequestId, sessionId, speak]);
 
   useEffect(() => {
-    if (!enabled) return;
-    const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+    if (!enabled) {
+      assistantHistoryPrimedRef.current = false;
+      return;
+    }
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && !message.isPartial);
+    if (!assistantHistoryPrimedRef.current) {
+      processedAssistantMessageIdRef.current = lastAssistant?.id ?? null;
+      assistantHistoryPrimedRef.current = true;
+      return;
+    }
     if (!lastAssistant || lastAssistant.isPartial) return;
     if (processedAssistantMessageIdRef.current === lastAssistant.id) return;
     processedAssistantMessageIdRef.current = lastAssistant.id;

@@ -195,9 +195,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
       >
         <svg
           aria-hidden="true"
+          data-slot="voice-pilot-waveform-svg"
           className="dev-voice-waveform-svg"
           viewBox={`0 0 ${WAVE_VIEWBOX.width} ${WAVE_VIEWBOX.height}`}
           preserveAspectRatio="none"
+          style={{ width: "calc(100% - 1rem)", height: "calc(100% - 0.7rem)" }}
         >
           <path
             className="dev-voice-waveform-baseline"

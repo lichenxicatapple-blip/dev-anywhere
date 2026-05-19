@@ -371,6 +371,44 @@ describe("VoicePilotController", () => {
     expect(useVoicePilotStore.getState().bySessionId.s1?.lastSpokenText).toBe("可以，我来处理。");
   });
 
+  it("does not speak the last historical assistant message when enabled", async () => {
+    useChatStore.getState().appendAssistantText("s1", "这是打开前的历史回复。");
+    useChatStore.getState().markTurnComplete("s1");
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await Promise.resolve();
+
+    expect(
+      ttsSocket()
+        .sent.filter((item): item is string => typeof item === "string")
+        .map((item) => JSON.parse(item)),
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "speak", text: "这是打开前的历史回复。" }),
+      ]),
+    );
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    useChatStore.getState().appendAssistantText("s1", "这是打开后的新回复。");
+    useChatStore.getState().markTurnComplete("s1");
+
+    await waitFor(() => {
+      const sent = ttsSocket().sent.map((item) =>
+        typeof item === "string" ? JSON.parse(item) : null,
+      );
+      expect(sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "speak", text: "这是打开后的新回复。" }),
+        ]),
+      );
+    });
+  });
+
   it("queues assistant speech until the TTS socket is open", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);

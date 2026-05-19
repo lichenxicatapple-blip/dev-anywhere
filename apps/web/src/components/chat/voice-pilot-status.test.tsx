@@ -37,6 +37,11 @@ describe("VoicePilotStatus", () => {
         ?.getAttribute("data-activity-level"),
     ).toBe("72");
     expect(container.querySelector('[data-slot="voice-pilot-waveform-curve"]')).not.toBeNull();
+    const waveformSvg = container.querySelector(
+      '[data-slot="voice-pilot-waveform-svg"]',
+    ) as SVGElement | null;
+    expect(waveformSvg?.style.width).toBe("calc(100% - 1rem)");
+    expect(waveformSvg?.style.height).toBe("calc(100% - 0.7rem)");
     expect(container.querySelector('[data-slot="voice-pilot-meter-readout"]')).toBeNull();
     expect(container.querySelector(".dev-voice-waveform-scan")).toBeNull();
     expect(
