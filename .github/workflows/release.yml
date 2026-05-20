@@ -81,6 +81,10 @@ jobs:
 
   publish-npm:
     name: Publish npm packages
+    # npmjs.com currently rejects @dev-anywhere/* publishes unless the scope is
+    # explicitly set up for the publishing token. Keep Docker/VPS releases green
+    # by enabling npm publishing only when the repository variable is set.
+    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

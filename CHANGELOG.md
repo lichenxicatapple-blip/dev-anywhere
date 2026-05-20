@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.1] - 2026-05-20
+
+### 修复
+
+- 移动端 PTY 长按复制选区在软键盘 visual viewport 动画、选区手柄拖拽和外部点按清理时更稳定，避免发布门禁中出现首跑失败、retry 才通过的 flaky。
+- Release workflow 将 npm 包发布改为显式启用，避免 npm scope 尚未开通或 token 权限不足时阻断 Docker 镜像与 VPS 发布。
+
 ## [0.4.0] - 2026-05-20
 
 ### 新增
