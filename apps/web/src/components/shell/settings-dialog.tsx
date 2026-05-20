@@ -190,7 +190,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <SettingsToggleItem
               icon={<Activity className="size-4" aria-hidden="true" />}
               label="延迟监控"
-              detail="在右上角显示 Web、Relay、开发机链路 RTT"
+              detail="在右上角显示当前连接延迟"
               checked={latencyMonitorEnabled}
               onCheckedChange={setLatencyMonitorEnabled}
             />

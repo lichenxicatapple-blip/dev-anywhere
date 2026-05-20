@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Check, ChevronDown, Copy, RefreshCw } from "lucide-react";
+import { Activity, ChevronDown, RefreshCw } from "lucide-react";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import type { LatencyProbeResult } from "@/services/relay-client";
 import { useAppStore } from "@/stores/app-store";
@@ -23,9 +23,9 @@ const ACTIVE_SAMPLE_INTERVAL_MS = 3_000;
 const HIDDEN_SAMPLE_INTERVAL_MS = 10_000;
 
 const LINK_LABELS: Record<LinkKey, string> = {
-  webRelay: "Web ↔ Relay",
-  relayProxy: "Relay ↔ 开发机",
-  webProxy: "Web ↔ 开发机",
+  webRelay: "浏览器 ↔ 中转服务",
+  relayProxy: "中转服务 ↔ 开发机",
+  webProxy: "浏览器 ↔ 开发机",
 };
 
 const initialMeasurements: Measurements = {
@@ -115,7 +115,6 @@ export function LatencyMonitor() {
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const [measurements, setMeasurements] = useState<Measurements>(initialMeasurements);
-  const [copied, setCopied] = useState(false);
   const measuringRef = useRef(false);
 
   const worstState = useMemo(
@@ -203,26 +202,6 @@ export function LatencyMonitor() {
   const compactProxy =
     measurements.webProxy.rttMs !== undefined ? measurements.webProxy : measurements.relayProxy;
 
-  const diagnostic = {
-    ts: new Date().toISOString(),
-    selectedProxyId,
-    connected,
-    proxyOnline,
-    measurements,
-  };
-
-  const copyDiagnostic = (): void => {
-    setCopied(false);
-    if (!navigator.clipboard) return;
-    void navigator.clipboard
-      .writeText(JSON.stringify(diagnostic, null, 2))
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1400);
-      })
-      .catch(() => setCopied(false));
-  };
-
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -233,24 +212,22 @@ export function LatencyMonitor() {
             toneClasses(tone),
           )}
           data-slot="latency-monitor-trigger"
-          aria-label={`延迟监控，Relay ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
+          aria-label={`延迟监控，中转服务 ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
         >
           <Activity className="size-3.5" aria-hidden="true" />
           <span className="font-medium text-foreground">延迟</span>
           <span className="hidden text-muted-foreground sm:inline">
-            Relay {formatMs(measurements.webRelay.rttMs)}
+            中转 {formatMs(measurements.webRelay.rttMs)}
           </span>
-          <span className="text-muted-foreground">Proxy {formatMs(compactProxy.rttMs)}</span>
+          <span className="text-muted-foreground">开发机 {formatMs(compactProxy.rttMs)}</span>
           <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[320px] p-3" data-slot="latency-monitor-popover">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-medium text-foreground">链路延迟</div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              低成本 RTT 探测，和 PTY 回显 trace 分开。
-            </div>
+            <div className="text-sm font-medium text-foreground">连接延迟</div>
+            <div className="mt-1 text-xs text-muted-foreground">数值越低，操作响应通常越快。</div>
           </div>
           <Button
             type="button"
@@ -267,18 +244,6 @@ export function LatencyMonitor() {
           {(Object.keys(LINK_LABELS) as LinkKey[]).map((key) => (
             <LatencyRow key={key} label={LINK_LABELS[key]} measurement={measurements[key]} />
           ))}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
-          <div className="text-xs text-muted-foreground">PTY 输入 trace 仍需手动开启。</div>
-          <Button type="button" variant="outline" size="xs" onClick={copyDiagnostic}>
-            {copied ? (
-              <Check className="size-3" aria-hidden="true" />
-            ) : (
-              <Copy className="size-3" aria-hidden="true" />
-            )}
-            {copied ? "已复制" : "复制"}
-          </Button>
         </div>
       </PopoverContent>
     </Popover>
