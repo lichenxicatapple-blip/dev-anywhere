@@ -25,9 +25,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 
-const require = createRequire(import.meta.url);
-// 直接用 pnpm store 里 proxy/relay 都依赖的那份 ws, 不再 hoist 一份到根 node_modules.
-const WebSocket = require("/Users/catli/MyApps/dev-anywhere/node_modules/.pnpm/ws@8.20.0/node_modules/ws");
+const require = createRequire(new URL("../apps/relay/package.json", import.meta.url));
+const WebSocket = require("ws");
 
 const CDP_PORT = Number(process.env.EMU_CDP_PORT ?? 9222);
 const TAB_FILTER = process.env.EMU_TAB_FILTER ?? "localhost:5173";

@@ -7,11 +7,16 @@ cd "$ROOT"
 echo "=== Check release scripts ==="
 bash -n scripts/install-relay.sh
 bash -n scripts/lib/install-relay-render.sh
+bash -n scripts/check-prerequisite.sh
 bash scripts/install-relay-render.test.sh
 bash scripts/web-nginx-config.test.sh
 bash -n scripts/dev-restart.sh
 bash -n scripts/dev-health.sh
 bash -n scripts/dev-relay-restart.sh
+bash -n scripts/dev-chaos.sh
+node --check scripts/emu-debug.mjs
+node --check scripts/check-source-comment-refs.mjs
+node --check scripts/lib/resolve-dev-profile.mjs
 bash scripts/release-options.test.sh
 if ! grep -F 'REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"' scripts/install-relay.sh >/dev/null; then
   echo "Release installer must default to the Aliyun ACR deployment registry" >&2

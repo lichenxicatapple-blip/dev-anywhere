@@ -29,9 +29,10 @@ dev-anywhere codex --model gpt-5.5
 
 ## Deployment
 
-| Script                     | Purpose                                                                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `scripts/install-relay.sh` | Deploy relay + web to a VPS from published Docker images. Uses host nginx for public `80/443` and loopback Docker ports for DEV Anywhere. Supports local `--ssh` mode and direct VPS mode. |
+| Script                          | Purpose                                                                                                                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scripts/install-relay.sh`      | Deploy relay + web to a VPS from published Docker images. Uses host nginx for public `80/443` and loopback Docker ports for DEV Anywhere. Supports local `--ssh` mode and direct VPS mode. |
+| `scripts/check-prerequisite.sh` | Read-only VPS preflight before running `install-relay.sh`: SSH, sudo, Docker, nginx, DNS, and public `80/443` reachability.                                                                |
 
 Production deployment should use `install-relay.sh`. It creates or reuses both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`.
 
@@ -93,5 +94,6 @@ Agent CLI paths can be overridden:
 | `pnpm dev:chaos -- --profile qa --relay local --relay-port 3101 --web-port 5175 --base-url http://localhost:5175 --workdir /tmp/dev-anywhere-chaos-qa` | Run chaos against an explicit local profile and ports.                                                                         |
 | `RELAY_PROXY_TOKEN=... RELAY_CLIENT_TOKEN=... pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts wss://dev-anywhere.example.com`       | Verify a deployed relay's health, registration, proxy listing, proxy selection, and bidirectional routing.                     |
 | `pnpm --filter @dev-anywhere/proxy run sample:stream-json`                                                                                             | Sample Claude stream-json output and refresh schema-drift fixtures. Requires a locally installed and authenticated Claude CLI. |
+| `node scripts/emu-debug.mjs <command>`                                                                                                                 | Android emulator + Chrome CDP helper for mobile debugging: tab list, navigation, screenshot, console, PTY metrics, and trace.  |
 
 `pnpm dev:chaos` is intended for contributors working on reconnect, session lifecycle, PTY recovery, or JSON-mode behavior. By default it writes temporary chaos workspaces under `${TMPDIR:-/tmp}/dev-anywhere-chaos`; pass `--workdir` to isolate a run. Relay chaos tuning is also parameterized through flags such as `--relay-chaos-types`, `--relay-chaos-delay-ms`, `--relay-chaos-duplicate`, and `--relay-chaos-reorder`.
