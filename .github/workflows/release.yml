@@ -81,13 +81,15 @@ jobs:
 
   publish-npm:
     name: Publish npm packages
-    # npmjs.com currently rejects @dev-anywhere/* publishes unless the scope is
-    # explicitly set up for the publishing token. Keep Docker/VPS releases green
-    # by enabling npm publishing only when the repository variable is set.
-    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read release version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -103,12 +105,44 @@ jobs:
 
       - run: pnpm -r build
 
+      - name: Verify npm auth
+        run: |
+          npm whoami
+          npm owner ls @dev-anywhere/proxy
+          npm owner ls @dev-anywhere/relay
+
       - name: Publish @dev-anywhere/proxy
-        run: pnpm --filter @dev-anywhere/proxy publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if npm view "@dev-anywhere/proxy@$VERSION" version >/dev/null 2>&1; then
+            echo "@dev-anywhere/proxy@$VERSION is already published"
+          else
+            pnpm --filter @dev-anywhere/proxy publish --no-git-checks --access public
+          fi
 
       - name: Publish @dev-anywhere/relay
-        run: pnpm --filter @dev-anywhere/relay publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if npm view "@dev-anywhere/relay@$VERSION" version >/dev/null 2>&1; then
+            echo "@dev-anywhere/relay@$VERSION is already published"
+          else
+            pnpm --filter @dev-anywhere/relay publish --no-git-checks --access public
+          fi
+
+      - name: Verify npm packages are published
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          for pkg in @dev-anywhere/proxy @dev-anywhere/relay; do
+            for attempt in $(seq 1 12); do
+              published="$(npm view "$pkg@$VERSION" version 2>/dev/null || true)"
+              if [ "$published" = "$VERSION" ]; then
+                echo "$pkg@$VERSION is available on npm"
+                break
+              fi
+              if [ "$attempt" = "12" ]; then
+                echo "ERROR: $pkg@$VERSION is not available on npm" >&2
+                exit 1
+              fi
+              sleep 5
+            done
+          done
