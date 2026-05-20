@@ -59,14 +59,6 @@ function formatMs(value: number | undefined): string {
   return `${Math.max(0, Math.round(value))}ms`;
 }
 
-function formatAge(updatedAt: number | undefined): string {
-  if (!updatedAt) return "尚未采样";
-  const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
-  if (seconds < 2) return "刚刚";
-  if (seconds < 60) return `${seconds}s 前`;
-  return `${Math.floor(seconds / 60)}m 前`;
-}
-
 function stateRank(state: LinkState): number {
   switch (state) {
     case "bad":
@@ -106,7 +98,7 @@ function statusLabel(measurement: LinkMeasurement): string {
   if (measurement.state === "measuring") return "检测中";
   if (measurement.state === "unavailable") return measurement.error ?? "不可用";
   if (measurement.rttMs !== undefined) return formatMs(measurement.rttMs);
-  return "--";
+  return "等待检测";
 }
 
 export function LatencyMonitor() {
@@ -253,13 +245,8 @@ export function LatencyMonitor() {
 function LatencyRow({ label, measurement }: { label: string; measurement: LinkMeasurement }) {
   const tone = stateTone(measurement.state);
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-card/60 px-3 py-2">
-      <div className="min-w-0">
-        <div className="truncate text-xs font-medium text-foreground">{label}</div>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">
-          {formatAge(measurement.updatedAt)}
-        </div>
-      </div>
+    <div className="flex min-h-10 items-center justify-between gap-3 rounded-md border border-border/70 bg-card/60 px-3 py-2">
+      <div className="min-w-0 truncate text-xs font-medium text-foreground">{label}</div>
       <div className="flex items-center gap-2">
         <span
           className={cn(
