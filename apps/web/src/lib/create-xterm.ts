@@ -18,6 +18,9 @@ interface CreateXtermResult {
   // webgl 模式下返回当前活动的 addon ref;DOM renderer 时为 null。
   // 暴露给 pty-render-state-probe 走形状探测拿 _renderer._model.cells 做 diff。
   getWebglAddon: () => WebglAddon | null;
+  // 重置 WebGL 最终 paint 层: 清 texture atlas 并全量 refresh。
+  // 这条路径专门覆盖 model/buffer 一致但屏幕像素错乱的运行时坏状态。
+  resetWebglPaint: () => boolean;
   dispose: () => void;
 }
 
@@ -73,6 +76,18 @@ export async function createXtermTerminal(
   let webglDisposed = false;
   let activeRenderer: PtyRendererKind = "dom";
 
+  function resetWebglPaint(): boolean {
+    if (webglDisposed || !webglAddon || terminal.rows <= 0) return false;
+    try {
+      webglAddon.clearTextureAtlas();
+      terminal.refresh(0, terminal.rows - 1);
+      return true;
+    } catch (err) {
+      console.warn("WebGL paint reset failed", err);
+      return false;
+    }
+  }
+
   // Sarasa Fixed SC 是 cn-font-split 切片字体, 按 unicode-range 懒加载 — shard 直到首次出现
   // 对应字符才会被 fetch。await document.fonts.ready 在 xterm 创建时只能等"已声明的字体",
   // 此时 shard 都还没被请求, fonts.ready 立刻 resolve, WebGL atlas 用 fallback glyph 把那
@@ -80,10 +95,21 @@ export async function createXtermTerminal(
   // atlas 不刷不会重画。重进会话才"正常"是因为 shard 已在浏览器缓存里, atlas 第一次构建就对。
   // 监听 document.fonts.loadingdone, 每批字体落定后 clear atlas, 让下一帧用真字体重绘。
   const onFontsLoadingDone = (): void => {
-    if (webglDisposed) return;
-    webglAddon?.clearTextureAtlas();
+    resetWebglPaint();
+  };
+  const onVisibilityChange = (): void => {
+    if (document.visibilityState === "visible") resetWebglPaint();
+  };
+  const onPageShow = (): void => {
+    resetWebglPaint();
+  };
+  const onWindowFocus = (): void => {
+    resetWebglPaint();
   };
   document.fonts.addEventListener("loadingdone", onFontsLoadingDone);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("focus", onWindowFocus);
 
   function loadWebgl(): void {
     if (webglDisposed) return;
@@ -117,9 +143,13 @@ export async function createXtermTerminal(
     serializeAddon,
     renderer: activeRenderer,
     getWebglAddon: () => webglAddon,
+    resetWebglPaint,
     dispose: () => {
       webglDisposed = true;
       document.fonts.removeEventListener("loadingdone", onFontsLoadingDone);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("focus", onWindowFocus);
       webglAddon?.dispose();
       terminal.dispose();
     },

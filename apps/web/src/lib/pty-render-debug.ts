@@ -28,6 +28,9 @@ interface ActiveTerminalHandle {
   // 诊断工具:出现错位时按一下,屏幕修复 -> 坐实 diff-only model desync 假设。
   // 返回 true 表示成功执行,false 表示 webgl addon / probe 失败。
   clearRenderModel?: () => boolean;
+  // 清 WebGL texture atlas + 全量 refresh。用于 model/buffer 一致但最终像素错乱
+  // 的场景:如果这个能无刷新恢复,坐实 atlas/GPU paint 层坏状态。
+  resetWebglPaint?: () => boolean;
   // 取 drag-select autoscroll 模块当前状态。返回 null 表示该 session 没有 attach
   // (DOM renderer / pre-mount 等)。
   getDragSelectSnapshot?: () => DragSelectDebugSnapshot | null;
@@ -46,6 +49,8 @@ interface PtyDebugApi {
   // 诊断流程:复现 -> dumpRenderDiff() 看 mismatch -> clearRenderModel() 看是否
   // 修复 -> dumpRenderDiff() 再看一次确认 mismatch 归零。
   clearRenderModel(): number;
+  // 清所有已注册终端的 WebGL texture atlas 并 refresh。用于线上复现时无刷新恢复。
+  resetWebglPaint(): number;
   // 拖右边缘时容器滚了但选区没扩 → 拿这个分流:
   //   dispatchCount=0 → autoscroll 模块没派发, 排查 pointer / dragging 状态
   //   dispatchCount>0 + tag=host → .xterm-screen 没找到, 派发不到 SelectionService
@@ -159,6 +164,22 @@ const debugApi: PtyDebugApi = {
     console.info(`[ptyDebug] cleared model on ${count} terminal(s)`);
     return count;
   },
+  resetWebglPaint() {
+    let count = 0;
+    for (const [id, handle] of activeTerminals) {
+      if (!handle.resetWebglPaint) {
+        console.info(`[ptyDebug] terminal ${id} has no webgl paint reset probe`);
+        continue;
+      }
+      try {
+        if (handle.resetWebglPaint()) count++;
+      } catch (err) {
+        console.warn(`[ptyDebug] resetWebglPaint ${id} threw`, err);
+      }
+    }
+    console.info(`[ptyDebug] reset webgl paint on ${count} terminal(s)`);
+    return count;
+  },
   dumpDragSelectState() {
     const out: Array<{ id: string; snapshot: DragSelectDebugSnapshot }> = [];
     for (const [id, handle] of activeTerminals) {
@@ -186,7 +207,7 @@ export function installPtyRenderDebug(): PtyDebugApi {
   if (typeof window !== "undefined" && !window.__devAnywherePtyRenderDebug) {
     window.__devAnywherePtyRenderDebug = debugApi;
     console.info(
-      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.dumpRenderDiff() / .clearRenderModel() / .dumpDragSelectState() / .setRenderer('dom')",
+      "[ptyDebug] installed. Try __devAnywherePtyRenderDebug.dumpRenderDiff() / .clearRenderModel() / .resetWebglPaint() / .dumpDragSelectState() / .setRenderer('dom')",
     );
   }
   return debugApi;

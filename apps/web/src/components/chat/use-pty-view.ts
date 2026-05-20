@@ -491,6 +491,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     let getWebglAddon: (() => Parameters<typeof probeWebglRenderModel>[0] | null) | null = null;
+    let resetWebglPaint: (() => boolean) | null = null;
 
     const termCtrl = attachPtyTerminalController({
       host,
@@ -508,6 +509,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         });
         // 暴露给后续 onTerminalReady 注册 dumpRenderDiff——靠形状探测拿 model.cells。
         getWebglAddon = () => result.getWebglAddon();
+        resetWebglPaint = () => result.resetWebglPaint();
         return result;
       },
       attachRawInput: (term, rawSessionId, rawOptions) =>
@@ -549,6 +551,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             xterm.refresh(0, xterm.rows - 1);
             return true;
           },
+          resetWebglPaint: () => resetWebglPaint?.() ?? false,
           getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
         });
 
@@ -701,6 +704,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       unregisterPtyTerminalWindowAccessor();
       termCtrl.dispose();
       terminalRef.current = null;
+      resetWebglPaint = null;
+      getWebglAddon = null;
       scrollControllerRef.current = null;
       terminalControllerRef.current = null;
     };
