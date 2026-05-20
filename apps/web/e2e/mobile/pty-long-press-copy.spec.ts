@@ -122,6 +122,31 @@ async function expectSelectionOverlayAttachedEventually(page: Page): Promise<voi
     .toBeNull();
 }
 
+async function waitForVisualViewportStable(page: Page): Promise<void> {
+  let stableSamples = 0;
+  let previous: { height: number; offsetTop: number } | null = null;
+  const deadline = Date.now() + 2_000;
+
+  while (Date.now() < deadline) {
+    const current = await page.evaluate(() => ({
+      height: window.visualViewport?.height ?? window.innerHeight,
+      offsetTop: window.visualViewport?.offsetTop ?? 0,
+    }));
+    if (
+      previous &&
+      Math.abs(current.height - previous.height) < 0.5 &&
+      Math.abs(current.offsetTop - previous.offsetTop) < 0.5
+    ) {
+      stableSamples += 1;
+      if (stableSamples >= 3) return;
+    } else {
+      stableSamples = 0;
+    }
+    previous = current;
+    await page.waitForTimeout(80);
+  }
+}
+
 function getOverlayCenter(geometry: SelectionOverlayGeometry): {
   toolbarX: number;
   toolbarY: number;
@@ -148,6 +173,7 @@ function formatOverlaySamples(samples: SelectionOverlayGeometry[]): string {
 }
 
 async function expectSelectionOverlayStable(page: Page): Promise<void> {
+  await waitForVisualViewportStable(page);
   await expectSelectionOverlayAttachedEventually(page);
   const samples: SelectionOverlayGeometry[] = [];
   for (let index = 0; index < 8; index += 1) {

@@ -161,45 +161,23 @@ export function usePtySelectionController(
     [],
   );
 
-  const keepToolbarPositionInViewport = useCallback(
-    (position: { left: number; top: number }): { left: number; top: number } => {
-      const visualViewport = window.visualViewport;
-      return computePtySelectionToolbarPosition({
-        clientX: position.left,
-        clientY: position.top + 48,
-        viewportWidth: visualViewport?.width ?? window.innerWidth,
-        viewportHeight: visualViewport?.height ?? window.innerHeight,
-        viewportOffsetLeft: visualViewport?.offsetLeft ?? 0,
-        viewportOffsetTop: visualViewport?.offsetTop ?? 0,
-      });
-    },
-    [],
-  );
-
-  const refreshSelectionHandles = useCallback(
-    (mode: "track-selection" | "preserve-toolbar" = "track-selection"): void => {
-      const anchor = selectionAnchorRef.current;
-      const focusPoint = selectionFocusRef.current;
-      if (!anchor || !focusPoint) {
-        setPtySelectionHandles(null);
-        return;
-      }
-      const handles = getSelectionHandles(anchor, focusPoint);
-      setPtySelectionHandles(handles);
-      if (!handles) {
-        setPtySelectionToolbar(null);
-        return;
-      }
-      setPtySelectionToolbar((current) =>
-        current
-          ? mode === "track-selection"
-            ? getToolbarPositionForSelectionHandles(handles)
-            : keepToolbarPositionInViewport(current)
-          : current,
-      );
-    },
-    [getSelectionHandles, getToolbarPositionForSelectionHandles, keepToolbarPositionInViewport],
-  );
+  const refreshSelectionHandles = useCallback((): void => {
+    const anchor = selectionAnchorRef.current;
+    const focusPoint = selectionFocusRef.current;
+    if (!anchor || !focusPoint) {
+      setPtySelectionHandles(null);
+      return;
+    }
+    const handles = getSelectionHandles(anchor, focusPoint);
+    setPtySelectionHandles(handles);
+    if (!handles) {
+      setPtySelectionToolbar(null);
+      return;
+    }
+    setPtySelectionToolbar((current) =>
+      current ? getToolbarPositionForSelectionHandles(handles) : current,
+    );
+  }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
 
   const clearPtySelection = useCallback((): void => {
     stopPtySelectionGestureRef.current?.();
@@ -325,7 +303,7 @@ export function usePtySelectionController(
     setPtySelectionToolbar(handles ? getToolbarPositionForSelectionHandles(handles) : null);
   }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ptySelectionToolbar && !ptySelectionHandles) return;
     const clearUnlessSelectionControl = (event: Event): void => {
       const target = event.target;
@@ -349,12 +327,12 @@ export function usePtySelectionController(
   useLayoutEffect(() => {
     if (!hasPtySelectionHandles) return;
     scrollControllerRef.current?.relayout();
-    refreshSelectionHandles("preserve-toolbar");
+    refreshSelectionHandles();
   }, [hasPtySelectionHandles, keyboardOffset, refreshSelectionHandles, scrollControllerRef]);
 
   useEffect(() => {
     if (!hasPtySelectionHandles) return;
-    refreshSelectionHandles("track-selection");
+    refreshSelectionHandles();
   }, [
     hasPtySelectionHandles,
     refreshSelectionHandles,
@@ -366,16 +344,25 @@ export function usePtySelectionController(
     if (!hasPtySelectionHandles) return;
     const visualViewport = window.visualViewport;
     let raf = 0;
+    let settleTimer = 0;
     const scheduleRefresh = (): void => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => refreshSelectionHandles("preserve-toolbar"));
+      window.clearTimeout(settleTimer);
+      raf = requestAnimationFrame(() => {
+        refreshSelectionHandles();
+        settleTimer = window.setTimeout(() => {
+          raf = requestAnimationFrame(() => refreshSelectionHandles());
+        }, 160);
+      });
     };
 
+    scheduleRefresh();
     window.addEventListener("resize", scheduleRefresh);
     visualViewport?.addEventListener("resize", scheduleRefresh);
     visualViewport?.addEventListener("scroll", scheduleRefresh);
     return () => {
       cancelAnimationFrame(raf);
+      window.clearTimeout(settleTimer);
       window.removeEventListener("resize", scheduleRefresh);
       visualViewport?.removeEventListener("resize", scheduleRefresh);
       visualViewport?.removeEventListener("scroll", scheduleRefresh);
