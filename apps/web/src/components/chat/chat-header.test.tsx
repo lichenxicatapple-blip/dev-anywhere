@@ -389,7 +389,7 @@ describe("ChatHeader PTY upload menu", () => {
     expect(stepper?.className).toContain("inline-flex");
     expect(stepper?.className).toContain("col-start-2");
     expect(stepper?.className).not.toContain("border");
-    expect(larger?.className).toContain("size-6");
+    expect(larger?.className).toContain("size-5");
   });
 
   it("keeps the page interactive while the overflow menu is open so mobile outside taps can dismiss it", async () => {

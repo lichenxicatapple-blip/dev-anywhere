@@ -374,13 +374,13 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 <Type aria-hidden="true" />
               </ChatMenuIcon>
               <div
-                className="col-start-2 inline-flex w-fit shrink-0 items-center gap-0.5"
+                className="col-start-2 inline-flex w-fit shrink-0 items-center gap-0"
                 data-slot="chat-menu-font-stepper"
               >
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-6 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-5 rounded-[5px] bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize <= minFontSize}
                   aria-label="字号变小"
                   data-slot="chat-menu-font-smaller"
@@ -392,7 +392,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                   <Minus aria-hidden="true" />
                 </Button>
                 <span
-                  className="flex h-6 min-w-7 items-center justify-center text-sm tabular-nums text-foreground"
+                  className="flex h-5 min-w-7 items-center justify-center text-xs tabular-nums text-foreground"
                   data-slot="chat-menu-font-size"
                 >
                   {fontSize}px
@@ -400,7 +400,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-6 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-5 rounded-[5px] bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize >= MAX_CHAT_FONT_SIZE}
                   aria-label="字号变大"
                   data-slot="chat-menu-font-larger"
