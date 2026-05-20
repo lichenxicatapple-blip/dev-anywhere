@@ -74,4 +74,26 @@ describe("ScreenWakeLockManager", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(manager.getSnapshot("voice-pilot:s1").active).toBe(false);
   });
+
+  it("releases a wake lock request that resolves after its scope was disabled", async () => {
+    let resolveRequest!: (sentinel: FakeSentinel) => void;
+    const request = vi.fn(
+      () =>
+        new Promise<FakeSentinel>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const manager = new ScreenWakeLockManager({ request, document: new FakeDocument() });
+
+    const enablePromise = manager.enable("chat:s1").catch(() => undefined);
+    expect(manager.getSnapshot("chat:s1").pending).toBe(true);
+
+    await manager.disable("chat:s1");
+    const sentinel = new FakeSentinel();
+    resolveRequest(sentinel);
+    await enablePromise;
+
+    expect(sentinel.release).toHaveBeenCalledTimes(1);
+    expect(manager.getSnapshot("chat:s1").active).toBe(false);
+  });
 });

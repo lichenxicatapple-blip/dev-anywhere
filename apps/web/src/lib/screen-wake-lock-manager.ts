@@ -145,7 +145,11 @@ export class ScreenWakeLockManager {
     if (this.requestInFlight) return this.requestInFlight;
 
     this.requestInFlight = this.requestWakeLock()
-      .then((sentinel) => {
+      .then(async (sentinel) => {
+        if (this.activeScopes.size === 0 || this.documentRef?.visibilityState === "hidden") {
+          if (!sentinel.released) await sentinel.release();
+          return;
+        }
         this.sentinel = sentinel;
         sentinel.addEventListener(
           "release",
