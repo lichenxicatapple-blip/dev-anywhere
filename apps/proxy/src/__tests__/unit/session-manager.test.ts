@@ -52,6 +52,29 @@ describe("SessionManager", () => {
       expect(info.name).toBe("my-session");
     });
 
+    it("stores a locked title when session_create receives an explicit user title", () => {
+      const info = manager.createSession(
+        "json",
+        "/tmp/test",
+        ALIVE_PID,
+        "Release checklist",
+        undefined,
+        "claude",
+        undefined,
+        true,
+      );
+      expect(info).toMatchObject({
+        name: "Release checklist",
+        nameLocked: true,
+      });
+      const manager2 = new SessionManager({ persistPath });
+      expect(manager2.getSession(info.id)).toMatchObject({
+        name: "Release checklist",
+        nameLocked: true,
+      });
+      manager2.stopReaper();
+    });
+
     it("stores provider in SessionInfo", () => {
       const info = manager.createSession(
         "pty",

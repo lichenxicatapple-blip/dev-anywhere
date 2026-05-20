@@ -90,6 +90,36 @@ describe("VoiceSummaryHandler", () => {
     });
   });
 
+  it("rejects approval summaries that evaluate risk", async () => {
+    const relaySend = vi.fn();
+    const runner: VoiceSummaryRunner = vi.fn(async () => "要读取项目文件，风险较低。");
+    const handler = new VoiceSummaryHandler({
+      relaySend,
+      getProviderEnv: () => ({}),
+      sessionManager: {
+        getSession: () => ({ id: "s1", mode: "json", cwd: "/repo", provider: "claude" }),
+      } as unknown as SessionManager,
+      runner,
+    });
+
+    await handler.onVoiceSummaryRequest({
+      type: "voice_summary_request",
+      requestId: "req-approval",
+      sessionId: "s1",
+      messageId: "approval-1",
+      reason: "approval",
+      text: '{"tool":"Read","input":{"file_path":"src/app.ts"}}',
+    });
+
+    const msg = parseSent(relaySend.mock.calls[0][0]);
+    expect(msg).toMatchObject({
+      type: "voice_summary_response",
+      requestId: "req-approval",
+      success: false,
+      errorCode: ControlErrorCode.UNKNOWN,
+    });
+  });
+
   it("builds the Claude command with read-only tools and no session persistence", () => {
     const command = buildClaudeSpeechSummaryCommand({
       env: { CLAUDE_BIN: "/custom/claude" },
@@ -101,12 +131,13 @@ describe("VoiceSummaryHandler", () => {
       "-p",
       "--output-format",
       "text",
+      "--input-format",
+      "text",
       "--no-session-persistence",
       "--permission-mode",
       "plan",
       "--tools",
       "Read,Grep,Glob,LS",
-      "Summarize for speech",
     ]);
   });
 });

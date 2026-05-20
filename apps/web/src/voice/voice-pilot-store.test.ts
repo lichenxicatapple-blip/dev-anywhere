@@ -10,12 +10,12 @@ describe("voice pilot store", () => {
     useVoicePilotStore.getState().resetAll();
   });
 
-  it("enables a session in listening state and disables it back to idle", () => {
+  it("enables a session in starting state and disables it back to idle", () => {
     useVoicePilotStore.getState().enable("s1");
 
     expect(state()).toMatchObject({
       enabled: true,
-      phase: "listening",
+      phase: "starting",
       lastSpokenText: "",
       error: null,
     });
@@ -43,7 +43,7 @@ describe("voice pilot store", () => {
     useVoicePilotStore.getState().enable("s1");
     useVoicePilotStore.getState().setApproval("s1", "toolu_1");
 
-    expect(state()).toMatchObject({ phase: "approval", approvalRequestId: "toolu_1" });
+    expect(state()).toMatchObject({ phase: "starting", approvalRequestId: "toolu_1" });
 
     useVoicePilotStore.getState().disable("s1");
 
@@ -54,7 +54,7 @@ describe("voice pilot store", () => {
     useVoicePilotStore.getState().enable("s1");
     useVoicePilotStore.getState().setActivityLevel("s1", 0.42);
 
-    expect(state()).toMatchObject({ enabled: true, phase: "listening", activityLevel: 0.42 });
+    expect(state()).toMatchObject({ enabled: true, phase: "starting", activityLevel: 0.42 });
 
     useVoicePilotStore.getState().setActivityLevel("s1", 5);
     expect(state().activityLevel).toBe(1);

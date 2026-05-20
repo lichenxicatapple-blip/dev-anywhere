@@ -25,14 +25,6 @@ vi.mock("@/components/toast", () => ({
   toast: { error: toastError, loading: toastLoading, dismiss: toastDismiss },
 }));
 
-vi.mock("./input-menu", () => ({
-  InputMenu: () => (
-    <button type="button" aria-label="更多">
-      更多
-    </button>
-  ),
-}));
-
 import { InputBar } from "./input-bar";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";

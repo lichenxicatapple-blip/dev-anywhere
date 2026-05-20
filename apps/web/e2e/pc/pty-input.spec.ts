@@ -126,12 +126,15 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await expect.poll(() => readRawPtyInput(page)).toBe("，.");
   });
 
-  test("uses Codex's Ctrl+C draft-clear path for the mobile clear button", async ({ page }) => {
+  test("guards Codex mobile clear button from sending duplicate Ctrl+C on double tap", async ({
+    page,
+  }) => {
     await setupPtyChat(page, {
       sessionId: "pty-input-codex-clear",
       provider: "codex",
       withVisualViewportMock: true,
     });
+    await expectPtyTerminalMounted(page);
 
     const touchEditingSurface = await page.evaluate(
       () => window.matchMedia("(pointer: coarse), (hover: none)").matches,
@@ -140,8 +143,14 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
 
     await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
     await expect(page.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
-    await page.locator('[data-slot="pty-mobile-key-clear"]').click();
+    const clearButton = page.locator('[data-slot="pty-mobile-key-clear"]');
+    await clearButton.click();
+    await clearButton.click();
 
-    await expect.poll(() => readRawPtyInput(page)).toContain("\x03");
+    await expect.poll(() => readRawPtyInput(page)).toBe("\x03");
+
+    await page.locator('[data-slot="pty-mobile-key-ctrl-c"]').click();
+
+    await expect.poll(() => readRawPtyInput(page)).toBe("\x03\x03");
   });
 });

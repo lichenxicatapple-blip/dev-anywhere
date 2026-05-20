@@ -233,4 +233,21 @@ describe("MessageBubble", () => {
     expect(link?.getAttribute("href")).toBe("https://status.claude.com");
     expect(link?.querySelector(".lucide-external-link")).not.toBeNull();
   });
+
+  it("does not render dotted API symbols as file download actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-dotted-symbol",
+            role: "assistant",
+            text: "schema + json.loads",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+    expect(container.textContent).toContain("json.loads");
+  });
 });

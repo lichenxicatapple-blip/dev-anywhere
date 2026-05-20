@@ -55,6 +55,7 @@ vi.mock("@/components/toast", () => ({
 }));
 
 import { useFileStore } from "@/stores/file-store";
+import { useSessionStore } from "@/stores/session-store";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CreateSessionDialog } from "./create-session-dialog";
 
@@ -102,6 +103,14 @@ describe("CreateSessionDialog", () => {
       homePath: "",
       agentCli: null,
     });
+    useSessionStore.setState({
+      sessions: [],
+      sessionListLoaded: false,
+      historySessions: [],
+      ptyTitles: {},
+      ptyStateBySessionId: {},
+      agentStatusBySessionId: {},
+    });
   });
 
   it("requests proxy_info when opened without a cached homePath", async () => {
@@ -127,6 +136,19 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/home/dev");
     });
+  });
+
+  it("describes chat mode as bubble-style and Voice Pilot capable", () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByText } = renderDialog();
+
+    getByText("气泡式对话，支持 Voice Pilot");
   });
 
   it("unblocks the create button when session creation times out", async () => {
@@ -303,6 +325,44 @@ describe("CreateSessionDialog", () => {
       option.getAttribute("value"),
     );
     expect(options).toEqual(["/usr/local/bin/claude", "/home/dev/.local/bin/claude"]);
+  });
+
+  it("persists a user supplied title through session_create and locks it like rename", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "new-sess-1",
+      mode: "json",
+      provider: "claude",
+      name: "Release checklist",
+      nameLocked: true,
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByLabelText, getByRole } = renderDialog();
+
+    fireEvent.change(getByLabelText("名称（可选）"), {
+      target: { value: "  Release checklist  " },
+    });
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Release checklist" }),
+        expect.any(Number),
+      );
+    });
+    expect(useSessionStore.getState().sessions).toContainEqual(
+      expect.objectContaining({
+        sessionId: "new-sess-1",
+        name: "Release checklist",
+        nameLocked: true,
+      }),
+    );
   });
 
   // 用户在 createSession 还没回应前关闭弹窗（按 Esc / 切到其他界面）。dialog 受控关闭后

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -19,6 +19,7 @@ interface PtyMobileControlsProps {
 // 数字参考浏览器原生 keyboard repeat 体感。
 const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
+const CODEX_CLEAR_GUARD_MS = 1200;
 
 function clearAgentInputSequence(provider: SessionProvider | undefined): string {
   return provider === "codex" ? "\x03" : "\x1b\x1b";
@@ -80,13 +81,12 @@ export function PtyMobileControls({ provider, onInput, onPaste }: PtyMobileContr
           ^S
         </SinglePressKey>
 
-        <SinglePressKey
+        <ClearInputKey
+          provider={provider}
           label="清空输入区"
           slot="pty-mobile-key-clear"
-          onPress={() => onInput(clearAgentInputSequence(provider))}
-        >
-          清空
-        </SinglePressKey>
+          onInput={onInput}
+        />
         <SinglePressKey
           label="发送 Ctrl+C 中断"
           slot="pty-mobile-key-ctrl-c"
@@ -155,8 +155,10 @@ export function PtyMobileControls({ provider, onInput, onPaste }: PtyMobileContr
 const KEY_BUTTON_OUTER_CLASS =
   "inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white";
 
-const KEY_PILL_CLASS =
-  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#3A3A3A] bg-[#1A1A1A] px-1 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
+const KEY_PILL_BASE_CLASS =
+  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
+const KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} border-[#3A3A3A] bg-[#1A1A1A]`;
+const GUARDED_KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} border-[#5A452E] bg-[#2B231B] text-[#D6A76B]`;
 const ARROW_KEY_PILL_CLASS =
   "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#465A72] bg-[#202A34] px-1 text-xs font-mono text-[#DDEBFF] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
 
@@ -178,6 +180,65 @@ function SinglePressKey({ label, slot, onPress, children }: SinglePressKeyProps)
       onClick={onPress}
     >
       <span className={KEY_PILL_CLASS}>{children}</span>
+    </button>
+  );
+}
+
+interface ClearInputKeyProps {
+  provider?: SessionProvider;
+  label: string;
+  slot: string;
+  onInput: (data: string) => void;
+}
+
+function ClearInputKey({ provider, label, slot, onInput }: ClearInputKeyProps) {
+  const guardTimerRef = useRef<number | null>(null);
+  const guardedRef = useRef(false);
+  const [guarded, setGuarded] = useState(false);
+
+  const clearGuard = (): void => {
+    if (guardTimerRef.current !== null) {
+      window.clearTimeout(guardTimerRef.current);
+      guardTimerRef.current = null;
+    }
+    guardedRef.current = false;
+    setGuarded(false);
+  };
+
+  useEffect(
+    () => () => {
+      if (guardTimerRef.current !== null) window.clearTimeout(guardTimerRef.current);
+    },
+    [],
+  );
+
+  const startCodexGuard = (): void => {
+    guardedRef.current = true;
+    setGuarded(true);
+    if (guardTimerRef.current !== null) window.clearTimeout(guardTimerRef.current);
+    guardTimerRef.current = window.setTimeout(clearGuard, CODEX_CLEAR_GUARD_MS);
+  };
+
+  const handlePress = (): void => {
+    if (provider === "codex" && guardedRef.current) return;
+    onInput(clearAgentInputSequence(provider));
+    if (provider === "codex") startCodexGuard();
+  };
+
+  return (
+    <button
+      type="button"
+      className={KEY_BUTTON_OUTER_CLASS}
+      aria-label={label}
+      aria-disabled={guarded ? "true" : undefined}
+      data-slot={slot}
+      data-guarded={guarded ? "true" : undefined}
+      onPointerDown={(event) => event.preventDefault()}
+      onClick={handlePress}
+    >
+      <span className={guarded ? GUARDED_KEY_PILL_CLASS : KEY_PILL_CLASS}>
+        {guarded ? "已清" : "清空"}
+      </span>
     </button>
   );
 }

@@ -243,7 +243,7 @@ describe("ChatHeader PTY upload menu", () => {
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
         enabled: true,
-        phase: "listening",
+        phase: "starting",
       }),
     );
   });

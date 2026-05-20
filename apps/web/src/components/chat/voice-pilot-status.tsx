@@ -39,17 +39,30 @@ const WAVE_VIEWBOX = { width: 120, height: 28 };
 const WAVE_HISTORY_LEN = 32;
 const WAVE_FRAME_MS = 60;
 
+function audioDrivenActivity(level: number, floor: number): number {
+  if (level <= 0) return floor;
+  if (level >= 0.34) return Math.min(1, level);
+  return Math.max(floor, Math.min(1, level * 2.4));
+}
+
 function activityForPhase(phase: VoicePilotPhase, level: number): number {
   if (phase === "paused" || phase === "idle" || phase === "error") return 0.08;
   if (phase === "waiting") return 0.18;
-  if (phase === "approval") return Math.max(0.34, level);
+  if (phase === "approval") return audioDrivenActivity(level, 0.16);
   if (phase === "summarizing" || phase === "submitting" || phase === "starting") {
     return Math.max(0.42, level);
   }
-  if (phase === "speaking" || phase === "listening") {
-    return Math.max(0.18, level);
+  if (phase === "speaking") {
+    return audioDrivenActivity(level, 0.16);
+  }
+  if (phase === "listening") {
+    return Math.max(0.12, level);
   }
   return level;
+}
+
+function shouldPulseWave(phase: VoicePilotPhase): boolean {
+  return phase !== "idle" && phase !== "paused" && phase !== "error";
 }
 
 function buildWavePath(history: number[]): string {
@@ -95,6 +108,7 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   // 用 ref + tick 节流维护最近 N 帧, 避免每个 PCM chunk 都重渲染
   const phaseRef = useRef(phase);
   const levelRef = useRef(level);
+  const frameRef = useRef(0);
   phaseRef.current = phase;
   levelRef.current = level;
   const [history, setHistory] = useState<number[]>(() =>
@@ -104,7 +118,13 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (!enabled) return;
     const timer = setInterval(() => {
-      const value = activityForPhase(phaseRef.current, levelRef.current);
+      frameRef.current += 1;
+      const phase = phaseRef.current;
+      const base = activityForPhase(phase, levelRef.current);
+      const pulse = shouldPulseWave(phase)
+        ? Math.sin(frameRef.current * 0.62) * 0.045 + Math.sin(frameRef.current * 0.19) * 0.025
+        : 0;
+      const value = Math.max(0.04, Math.min(1, base + pulse));
       setHistory((prev) => {
         const next = prev.length >= WAVE_HISTORY_LEN ? prev.slice(1) : prev.slice();
         next.push(value);

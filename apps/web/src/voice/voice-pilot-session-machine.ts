@@ -15,7 +15,7 @@ export type VoicePilotEffect =
   | { type: "speakText"; text: string; messageId: string }
   | { type: "speakStatic"; text: string }
   | { type: "requestSummary"; text: string; messageId: string; reason: VoiceSummaryReason }
-  | { type: "approveTool"; requestId: string }
+  | { type: "approveTool"; requestId: string; whitelistTool: boolean }
   | { type: "denyTool"; requestId: string }
   | { type: "cleanup" }
   | { type: "setError"; error: string };
@@ -39,12 +39,15 @@ export type VoicePilotEvent =
   | { type: "summaryFailed"; fallbackText: string; messageId: string }
   | { type: "ttsFinished" }
   | { type: "assistantEndCueDone" }
+  | { type: "agentBecameBusy" }
+  | { type: "agentBecameIdle" }
   | { type: "providerError"; error: string }
   | { type: "pauseRequested" }
   | { type: "resumeRequested" }
   | { type: "cancelTurnRequested" }
   | { type: "approvalArrived"; requestId: string }
-  | { type: "approvalResolved"; action: "approve" | "deny"; requestId: string };
+  | { type: "approvalCleared"; requestId: string }
+  | { type: "approvalResolved"; action: "approve" | "approve_always" | "deny"; requestId: string };
 
 export interface VoicePilotTransitionResult {
   phase: VoicePilotPhase;
@@ -61,15 +64,34 @@ interface Readiness {
 const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[]> = {
   idle: ["starting"],
   starting: ["listening", "speaking", "summarizing", "error", "idle"],
-  listening: ["submitting", "speaking", "summarizing", "approval", "paused", "error", "idle"],
-  submitting: ["waiting", "speaking", "error", "idle"],
-  waiting: ["speaking", "summarizing", "approval", "error", "idle"],
-  summarizing: ["speaking", "error", "idle"],
-  speaking: ["listening", "error", "idle"],
+  listening: [
+    "submitting",
+    "waiting",
+    "speaking",
+    "summarizing",
+    "approval",
+    "paused",
+    "error",
+    "idle",
+  ],
+  submitting: ["waiting", "speaking", "approval", "error", "idle"],
+  waiting: ["listening", "speaking", "summarizing", "approval", "error", "idle"],
+  summarizing: ["speaking", "approval", "error", "idle"],
+  speaking: ["waiting", "listening", "approval", "error", "idle"],
   approval: ["waiting", "speaking", "error", "idle"],
   paused: ["listening", "error", "idle"],
   error: ["idle"],
 };
+
+// Runtime invariants:
+// - `listening` is only allowed when config/runtime are ready, no approval is pending,
+//   no speech is queued, and the agent is idle. The controller owns those external facts.
+// - `approval` is only allowed while a pending tool approval exists; card clicks and
+//   voice commands both leave it through explicit events rather than mutating store state.
+// - `speaking` means the browser is still waiting for the active TTS request to finish
+//   and play its local completion cue.
+// - `waiting` is the neutral busy state: the agent may be thinking, a turn may have just
+//   been submitted, or speech just ended before listening is permitted again.
 
 export interface VoicePilotSessionMachine {
   send(event: VoicePilotEvent): VoicePilotTransitionResult;
@@ -188,8 +210,8 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       }
 
       if (event.type === "assistantEndCueDone" && fsm.is("speaking")) {
-        transitionTo("listening");
-        return result([{ type: "startCapture" }]);
+        transitionTo("waiting");
+        return result([]);
       }
 
       if (event.type === "assistantEndCueDone" && fsm.is("approval")) {
@@ -200,6 +222,16 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         return result([]);
       }
 
+      if (event.type === "agentBecameBusy" && fsm.is("listening")) {
+        transitionTo("waiting");
+        return result([{ type: "stopCapture" }, { type: "cancelTurnBuffer" }]);
+      }
+
+      if (event.type === "agentBecameIdle" && fsm.is("waiting")) {
+        transitionTo("listening");
+        return result([{ type: "startCapture" }]);
+      }
+
       if (event.type === "pauseRequested" && fsm.is("listening")) {
         transitionTo("paused");
         return result([{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }]);
@@ -207,7 +239,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
       if (event.type === "resumeRequested" && fsm.is("paused")) {
         transitionTo("listening");
-        return result([{ type: "startCapture" }, { type: "playCue", cue: "user-end" }]);
+        return result([{ type: "playCue", cue: "listening-start" }, { type: "startCapture" }]);
       }
 
       if (event.type === "cancelTurnRequested" && fsm.is("listening")) {
@@ -218,20 +250,27 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         ]);
       }
 
-      if (event.type === "approvalArrived" && fsm.isIn(["listening", "waiting"])) {
+      if (
+        event.type === "approvalArrived" &&
+        fsm.isIn(["listening", "submitting", "waiting", "speaking", "summarizing"])
+      ) {
         transitionTo("approval");
-        return result([
-          { type: "stopCapture" },
-          { type: "speakStatic", text: "请说批准这次或拒绝这次。" },
-        ]);
+        return result([{ type: "stopCapture" }, { type: "cancelTurnBuffer" }]);
+      }
+
+      if (event.type === "approvalCleared" && fsm.is("approval")) {
+        transitionTo("waiting");
+        return result([{ type: "stopCapture" }, { type: "cancelTurnBuffer" }]);
       }
 
       if (event.type === "approvalResolved" && fsm.is("approval")) {
         transitionTo("waiting");
         return result([
           event.action === "approve"
-            ? { type: "approveTool", requestId: event.requestId }
-            : { type: "denyTool", requestId: event.requestId },
+            ? { type: "approveTool", requestId: event.requestId, whitelistTool: false }
+            : event.action === "approve_always"
+              ? { type: "approveTool", requestId: event.requestId, whitelistTool: true }
+              : { type: "denyTool", requestId: event.requestId },
           { type: "playCue", cue: "user-end" },
         ]);
       }

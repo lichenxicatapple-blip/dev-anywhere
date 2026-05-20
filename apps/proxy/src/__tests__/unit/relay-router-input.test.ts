@@ -292,6 +292,89 @@ describe("RelayRouter input routing", () => {
     });
   });
 
+  it("returns a session_create_response when hosted PTY startup fails", () => {
+    const relaySend = vi.fn();
+    const router = createRouter({
+      mode: "pty",
+      relaySend,
+      hostedStart: vi.fn(() => {
+        throw new Error("spawn EBADF");
+      }),
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-fail-1",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "pty",
+    });
+
+    expect(relaySend).toHaveBeenCalledTimes(1);
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-fail-1",
+      errorCode: ControlErrorCode.PROCESS_START_FAILED,
+      error: "spawn EBADF",
+    });
+  });
+
+  it("persists a requested session_create title as a locked display name", () => {
+    const relaySend = vi.fn();
+    const hostedStart = vi.fn((_options: unknown) => 1234);
+    const createSession = vi.fn(() => ({
+      id: "created-session",
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      state: SessionState.IDLE,
+      cwd: "/tmp",
+      pid: 1234,
+      createdAt: 1,
+      updatedAt: 1,
+      name: "Release checklist",
+      nameLocked: true,
+    }));
+    const router = createRouter({
+      mode: "pty",
+      relaySend,
+      hostedStart,
+      sessionManager: {
+        createSession,
+        setClaudeSessionId: vi.fn(),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-1",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "pty",
+      name: "  Release checklist  ",
+    });
+
+    expect(createSession).toHaveBeenCalledWith(
+      "pty",
+      "/tmp",
+      1234,
+      "Release checklist",
+      expect.any(String),
+      "codex",
+      "proxy-hosted",
+      true,
+    );
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-1",
+      sessionId: "created-session",
+      name: "Release checklist",
+      nameLocked: true,
+    });
+  });
+
   it("renames a session through relay and broadcasts the updated session list", () => {
     const relay = createRelayConnectionFake();
     const renameSession = vi.fn(() => ({ success: true, name: "Release checklist" }));

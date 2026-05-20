@@ -4,6 +4,7 @@ import {
   SessionState,
   type AgentStatusPayload,
 } from "@dev-anywhere/shared";
+import { createScopedApprovalRequestIdFactory } from "../common/approval-request-id.js";
 import { getSeqCounterFor } from "../common/seq-counter.js";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
@@ -24,6 +25,8 @@ interface HookEventRouterDeps {
 import { toolInputFromPayload, toolNameFromPayload } from "./hook-payload-helpers.js";
 
 export class HookEventRouter {
+  private readonly nextFallbackRequestId = createScopedApprovalRequestIdFactory();
+
   constructor(private readonly deps: HookEventRouterDeps) {}
 
   handle(event: AuthenticatedHookEvent): void {
@@ -94,7 +97,7 @@ export class HookEventRouter {
   }
 
   private forwardPermissionRequest(event: AuthenticatedHookEvent): void {
-    const requestId = event.requestId ?? `${event.sessionId}:${Date.now()}`;
+    const requestId = event.requestId ?? this.nextFallbackRequestId(event.sessionId);
     const toolName = toolNameFromPayload(event.payload);
     const input = toolInputFromPayload(event.payload);
 

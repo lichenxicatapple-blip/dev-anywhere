@@ -9,6 +9,7 @@ const FALLBACKS: Record<VoiceSummaryReason, string> = {
   long_list: "这条回复包含较长列表，我先概括结构，请查看屏幕确认每一项。",
   long_text: "这条回复内容较长，我先概括重点，请查看屏幕确认完整细节。",
   mixed: "这条回复包含不适合直接朗读的内容，我先概括重点，请查看屏幕确认细节。",
+  approval: "有一个工具操作正在等待审批，请查看屏幕确认细节。",
 };
 
 export function fallbackSpeechSummary(reason: VoiceSummaryReason): string {

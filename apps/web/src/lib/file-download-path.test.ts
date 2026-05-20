@@ -61,12 +61,20 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
-  it("recognizes bare relative paths and top-level filenames without explicit prefix", () => {
+  it("recognizes paths and well-known top-level project filenames", () => {
     expect(extractFileDownloadPaths("see README.md")).toEqual(["README.md"]);
     expect(extractFileDownloadPaths("edit package.json next")).toEqual(["package.json"]);
     expect(extractFileDownloadPaths("docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([
       "docs/superpowers/specs/2026-05-10-spec.md",
     ]);
+  });
+
+  it("rejects bare dotted identifiers that look like API symbols", () => {
+    expect(extractFileDownloadPaths("schema + json.loads")).toEqual([]);
+    expect(extractFileDownloadPaths("schema.json without a path signal")).toEqual([]);
+    expect(isFileDownloadPath("json.loads")).toBe(false);
+    expect(isFileDownloadPath("foo.bar")).toBe(false);
+    expect(isFileDownloadPath("docs/foo.bar")).toBe(true);
   });
 
   it("rejects version-number-shaped tokens that incidentally match path syntax", () => {
@@ -80,6 +88,7 @@ describe("file-download-path extraction", () => {
     expect(isFileDownloadPath("/a.log")).toBe(true);
     expect(isFileDownloadPath("./a.log")).toBe(true);
     expect(isFileDownloadPath("../a.log")).toBe(true);
+    expect(isFileDownloadPath("~/a.log")).toBe(true);
     expect(isFileDownloadPath(".dev-anywhere/x.log")).toBe(true);
   });
 

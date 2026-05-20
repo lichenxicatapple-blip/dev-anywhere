@@ -9,6 +9,7 @@ export type VoiceCommand =
   | { type: "status" }
   | { type: "exit" }
   | { type: "approve_once" }
+  | { type: "approve_always" }
   | { type: "deny_once" };
 
 export type VoiceRouteResult =
@@ -33,18 +34,31 @@ const EXACT_COMMANDS = new Map<string, VoiceCommand>([
 ]);
 
 const APPROVAL_COMMANDS = new Map<string, VoiceCommand>([
-  ["批准这次", { type: "approve_once" }],
-  ["拒绝这次", { type: "deny_once" }],
+  ["允许", { type: "approve_once" }],
+  ["始终允许", { type: "approve_always" }],
+  ["拒绝", { type: "deny_once" }],
 ]);
 
 function normalizeCommandText(text: string): string {
   return text.trim().replace(/[。！？!?，,\s]+$/u, "");
 }
 
+function approvalCommandText(text: string): string {
+  const normalized = normalizeCommandText(text);
+  const parts = normalized
+    .split(/[。！？!?，,；;\s]+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.at(-1) ?? normalized;
+}
+
 export function routeVoiceText(text: string, context: VoiceRouteContext): VoiceRouteResult {
   const raw = text.trim();
   const normalized = normalizeCommandText(raw);
-  const approvalCommand = APPROVAL_COMMANDS.get(normalized);
+  const approvalCommand =
+    context.approvalPromptActive === true
+      ? APPROVAL_COMMANDS.get(approvalCommandText(raw))
+      : undefined;
   if (approvalCommand) {
     return { kind: "command", command: approvalCommand };
   }

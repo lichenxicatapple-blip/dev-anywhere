@@ -1,7 +1,7 @@
 // ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + JSON QuotePreviewBar/InputBar
 // statusState 按优先级聚合 connection/terminated/approval/working/idle，StatusLine 放 Header 正下方
 // PTY 模式由 xterm 自己承载逐键输入，不再保留下方聊天式命令输入框。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { clearLastChatRoute, consumeRestoredTarget } from "@/lib/route-restore";
 import { toast } from "@/components/toast";
@@ -13,6 +13,8 @@ import { FileDownloadProvider } from "@/components/chat/file-download-link";
 import { ImagePreviewProvider } from "@/components/chat/image-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
+import { PtyApprovalHint } from "@/components/chat/pty-approval-hint";
+import { usePtyAutoEnterApproval } from "@/components/chat/use-pty-auto-enter-approval";
 import { VoicePilotController } from "@/components/chat/voice-pilot-controller";
 import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
@@ -52,6 +54,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   );
   const routeSessionEnded = isRouteSessionEnded(session, sessionListLoaded);
   const presentation = resolveChatPresentation({ connected, proxyOnline, routeSessionEnded });
+  const [ptyAutoYesEnabled, setPtyAutoYesEnabled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   // keyboardOffset 表示键盘是否打开/大概高度；layoutKbInset 才是当前 layout viewport 仍被
@@ -131,6 +134,18 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     ptyState,
     hasPendingApproval: mode === "json" && pendingApprovals.some((a) => a.status === "pending"),
   });
+  const ptyWaitingApproval =
+    mode === "pty" && presentation === "ok" && statusState === "waiting_approval";
+
+  useEffect(() => {
+    setPtyAutoYesEnabled(false);
+  }, [id]);
+
+  usePtyAutoEnterApproval({
+    sessionId: id,
+    enabled: ptyAutoYesEnabled,
+    waiting: ptyWaitingApproval,
+  });
 
   return (
     <ImagePreviewProvider sessionId={id}>
@@ -145,16 +160,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
           <StatusLine state={statusState} />
           <div className="flex-1 min-h-0 relative">
-            {mode === "pty" && statusState === "waiting_approval" && (
-              <div
-                role="status"
-                aria-live="polite"
-                data-slot="pty-approval-hint"
-                className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-2 px-3 py-1.5 text-xs bg-[var(--color-status-warning)]/10 text-[var(--color-status-warning)] border-b border-[var(--color-status-warning)]/30"
-              >
-                <span aria-hidden="true">⏸</span>
-                <span>等待审批</span>
-              </div>
+            {ptyWaitingApproval && (
+              <PtyApprovalHint
+                autoYesEnabled={ptyAutoYesEnabled}
+                onAutoYesChange={setPtyAutoYesEnabled}
+              />
             )}
             {presentation === "session-ended" ? (
               // wasAutoRestored 时副作用马上跳走, 这里渲染空白避免一帧 TerminatedSessionPanel 闪烁

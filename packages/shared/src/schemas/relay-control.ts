@@ -458,6 +458,7 @@ const relayControlDefinitions = [
     {
       ...RequestIdShape,
       cwd: z.string(),
+      name: z.string().optional(),
       provider: z.enum(providerValues),
       mode: z.enum(sessionModeValues).optional(),
       resumeSessionId: z.string().optional(),
@@ -474,6 +475,8 @@ const relayControlDefinitions = [
       ...RequestIdShape,
       // 失败路径只送 errorCode/error, sessionId 此时无语义。成功路径才有 id。
       sessionId: IdSchema.optional(),
+      name: z.string().optional(),
+      nameLocked: z.boolean().optional(),
       mode: z.enum(sessionModeValues).optional(),
       provider: z.enum(providerValues).optional(),
       ptyOwner: z.enum(ptyOwnerValues).optional(),

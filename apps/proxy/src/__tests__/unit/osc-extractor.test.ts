@@ -153,6 +153,24 @@ describe("extractOscSignals", () => {
     });
   });
 
+  it("returns approval_wait for Claude Code native edit confirmation text", () => {
+    const text = [
+      "Do you want to make this edit to voice-pilot-status.tsx?",
+      "> 1. Yes",
+      "  2. Yes, allow all edits during this session (shift+tab)",
+      "  3. No",
+      "Esc to cancel · Tab to amend",
+    ].join("\n");
+
+    const result = extractTextSignals(text, "claude");
+
+    expect(result).toEqual({
+      state: "approval_wait",
+      tool: "Edit",
+      title: "Claude permission: Edit",
+    });
+  });
+
   it("detects Claude hook confirmation across PTY chunks", () => {
     let tail = "";
     tail = appendPtySemanticTextTail(

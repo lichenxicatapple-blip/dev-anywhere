@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PtyMobileControls } from "./pty-mobile-controls";
 
 describe("PtyMobileControls", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it("exposes a mobile paste action without removing enter", () => {
@@ -31,14 +32,26 @@ describe("PtyMobileControls", () => {
     expect(onInput).toHaveBeenCalledWith("\x1b\x1b");
   });
 
-  it("clears Codex's whole agent input area through its Ctrl+C draft clear path", () => {
+  it("clears Codex's whole agent input area through a guarded Ctrl+C draft clear path", () => {
+    vi.useFakeTimers();
     const onInput = vi.fn();
     const onPaste = vi.fn();
 
     render(<PtyMobileControls provider="codex" onInput={onInput} onPaste={onPaste} />);
 
-    fireEvent.click(document.querySelector('[data-slot="pty-mobile-key-clear"]')!);
+    const clearButton = document.querySelector('[data-slot="pty-mobile-key-clear"]')!;
+    fireEvent.click(clearButton);
+    fireEvent.click(clearButton);
 
+    expect(onInput).toHaveBeenCalledTimes(1);
     expect(onInput).toHaveBeenCalledWith("\x03");
+    expect(clearButton.getAttribute("data-guarded")).toBe("true");
+
+    act(() => {
+      vi.advanceTimersByTime(1200);
+    });
+    fireEvent.click(clearButton);
+
+    expect(onInput).toHaveBeenCalledTimes(2);
   });
 });

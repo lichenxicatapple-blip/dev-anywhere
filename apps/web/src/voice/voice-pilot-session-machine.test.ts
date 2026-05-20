@@ -61,7 +61,7 @@ describe("VoicePilotSessionMachine", () => {
     });
   });
 
-  it("stops capture while speaking and resumes listening after playback", () => {
+  it("stops capture while speaking and waits for agent idle before listening", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("waiting");
 
@@ -81,6 +81,11 @@ describe("VoicePilotSessionMachine", () => {
     });
 
     expect(machine.send({ type: "assistantEndCueDone" })).toEqual({
+      phase: "waiting",
+      effects: [],
+    });
+
+    expect(machine.send({ type: "agentBecameIdle" })).toEqual({
       phase: "listening",
       effects: [{ type: "startCapture" }],
     });
@@ -108,7 +113,7 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "resumeRequested" })).toEqual({
       phase: "listening",
-      effects: [{ type: "startCapture" }, { type: "playCue", cue: "user-end" }],
+      effects: [{ type: "playCue", cue: "listening-start" }, { type: "startCapture" }],
     });
   });
 
@@ -126,13 +131,43 @@ describe("VoicePilotSessionMachine", () => {
     });
   });
 
+  it("moves from listening to waiting and cancels buffered speech when the agent becomes busy", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("listening");
+
+    expect(machine.send({ type: "agentBecameBusy" })).toEqual({
+      phase: "waiting",
+      effects: [{ type: "stopCapture" }, { type: "cancelTurnBuffer" }],
+    });
+  });
+
   it("enters approval phase when approvalArrived fires", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");
 
     expect(machine.send({ type: "approvalArrived", requestId: "toolu_1" })).toEqual({
       phase: "approval",
-      effects: [{ type: "stopCapture" }, { type: "speakStatic", text: "请说批准这次或拒绝这次。" }],
+      effects: [{ type: "stopCapture" }, { type: "cancelTurnBuffer" }],
+    });
+  });
+
+  it("enters approval phase when approval arrives while a turn is submitting", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("submitting");
+
+    expect(machine.send({ type: "approvalArrived", requestId: "toolu_1" })).toEqual({
+      phase: "approval",
+      effects: [{ type: "stopCapture" }, { type: "cancelTurnBuffer" }],
+    });
+  });
+
+  it("returns to waiting when an external approval resolution clears the pending request", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("approval");
+
+    expect(machine.send({ type: "approvalCleared", requestId: "toolu_1" })).toEqual({
+      phase: "waiting",
+      effects: [{ type: "stopCapture" }, { type: "cancelTurnBuffer" }],
     });
   });
 
@@ -145,7 +180,22 @@ describe("VoicePilotSessionMachine", () => {
     ).toEqual({
       phase: "waiting",
       effects: [
-        { type: "approveTool", requestId: "toolu_1" },
+        { type: "approveTool", requestId: "toolu_1", whitelistTool: false },
+        { type: "playCue", cue: "user-end" },
+      ],
+    });
+  });
+
+  it("returns to waiting on approvalResolved approve_always", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("approval");
+
+    expect(
+      machine.send({ type: "approvalResolved", action: "approve_always", requestId: "toolu_1" }),
+    ).toEqual({
+      phase: "waiting",
+      effects: [
+        { type: "approveTool", requestId: "toolu_1", whitelistTool: true },
         { type: "playCue", cue: "user-end" },
       ],
     });

@@ -80,6 +80,7 @@ describe("RelayControlSchema round-trip stability", () => {
       type: "session_create",
       requestId: "req-1",
       cwd: "/home/u/proj",
+      name: "Release checklist",
       provider: "claude",
       mode: "json",
       resumeSessionId: "sess-prev",
@@ -88,6 +89,7 @@ describe("RelayControlSchema round-trip stability", () => {
     const a = RelayControlSchema.parse(original);
     const b = roundTrip(RelayControlSchema, original);
     expect(b).toEqual(a);
+    expect(b).toMatchObject({ name: "Release checklist" });
   });
 
   it("session_create_response minimum success shape", () => {
@@ -96,12 +98,15 @@ describe("RelayControlSchema round-trip stability", () => {
       requestId: "req-1",
       success: true,
       sessionId: "sess-new",
+      name: "Release checklist",
+      nameLocked: true,
       mode: "json",
       provider: "claude",
     };
     const a = RelayControlSchema.parse(original);
     const b = roundTrip(RelayControlSchema, original);
     expect(b).toEqual(a);
+    expect(b).toMatchObject({ name: "Release checklist", nameLocked: true });
   });
 
   it("proxy_list_response with mixed online states preserved", () => {

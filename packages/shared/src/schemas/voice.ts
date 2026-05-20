@@ -217,5 +217,6 @@ export const VoiceSummaryReasonSchema = z.enum([
   "long_list",
   "long_text",
   "mixed",
+  "approval",
 ]);
 export type VoiceSummaryReason = z.infer<typeof VoiceSummaryReasonSchema>;

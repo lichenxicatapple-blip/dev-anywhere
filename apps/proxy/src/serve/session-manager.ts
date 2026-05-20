@@ -142,6 +142,7 @@ export class SessionManager {
     id?: string,
     provider: ProviderId = "claude",
     ptyOwner?: "local-terminal" | "proxy-hosted",
+    nameLocked?: boolean,
   ): SessionInfo {
     const now = Date.now();
     const pendingPtyMetadata =
@@ -150,6 +151,7 @@ export class SessionManager {
       pendingPtyMetadata?.nameLocked && pendingPtyMetadata.name !== undefined
         ? pendingPtyMetadata.name
         : name;
+    const resolvedNameLocked = pendingPtyMetadata?.nameLocked ?? (nameLocked ? true : undefined);
     const info: SessionInfo = {
       id: id ?? nanoid(),
       mode,
@@ -161,9 +163,7 @@ export class SessionManager {
       cwd,
       pid,
       ...(resolvedName !== undefined ? { name: resolvedName } : {}),
-      ...(pendingPtyMetadata?.nameLocked !== undefined
-        ? { nameLocked: pendingPtyMetadata.nameLocked }
-        : {}),
+      ...(resolvedNameLocked !== undefined ? { nameLocked: resolvedNameLocked } : {}),
       ...(pendingPtyMetadata?.claudeSessionId !== undefined
         ? { claudeSessionId: pendingPtyMetadata.claudeSessionId }
         : {}),

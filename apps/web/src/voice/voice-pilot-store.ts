@@ -73,7 +73,7 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
           ensureSession(state, sessionId, (current) => ({
             ...current,
             enabled: true,
-            phase: "listening",
+            phase: "starting",
             error: null,
           })),
         ),
@@ -114,7 +114,7 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
           ensureSession(state, sessionId, (current) => ({
             ...current,
             error: null,
-            phase: current.enabled ? "listening" : "idle",
+            phase: current.enabled && current.phase === "error" ? "starting" : current.phase,
           })),
         ),
 
@@ -131,7 +131,6 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
           ensureSession(state, sessionId, (current) => ({
             ...current,
             approvalRequestId: requestId,
-            phase: requestId ? "approval" : current.enabled ? "listening" : "idle",
           })),
         ),
 

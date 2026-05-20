@@ -15,8 +15,12 @@ describe("parseVoiceCommand", () => {
   });
 
   it("requires explicit approval and denial phrases", () => {
-    expect(parseVoiceCommand("批准这次")).toEqual({ type: "approve_once" });
-    expect(parseVoiceCommand("拒绝这次")).toEqual({ type: "deny_once" });
+    expect(parseVoiceCommand("允许")).toEqual({ type: "approve_once" });
+    expect(parseVoiceCommand("始终允许")).toEqual({ type: "approve_always" });
+    expect(parseVoiceCommand("批准")).toBeNull();
+    expect(parseVoiceCommand("拒绝")).toEqual({ type: "deny_once" });
+    expect(parseVoiceCommand("批准这次")).toBeNull();
+    expect(parseVoiceCommand("拒绝这次")).toBeNull();
     expect(parseVoiceCommand("好")).toBeNull();
     expect(parseVoiceCommand("嗯")).toBeNull();
     expect(parseVoiceCommand("可以")).toBeNull();

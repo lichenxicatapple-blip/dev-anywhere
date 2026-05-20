@@ -31,4 +31,9 @@ describe("inline path link detection", () => {
       { kind: "file", path: "package.json", start: 20, end: 32 },
     ]);
   });
+
+  it("does not turn dotted code identifiers into download actions", () => {
+    expect(findInlinePathLinks("schema + json.loads")).toEqual([]);
+    expect(findInlinePathLinks("call os.path.join, then inspect pathlib.Path")).toEqual([]);
+  });
 });

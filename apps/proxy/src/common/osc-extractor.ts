@@ -81,6 +81,23 @@ function extractClaudeTextSignal(text: string): PtyStateEvent | null {
       title: `Hook confirmation: ${toolMatch[1]}`,
     };
   }
+
+  const nativePermissionMatch = text.match(
+    /\bDo you want to (?<action>make this edit to|create|update|delete|run|execute)\b[^\n?]*\?/i,
+  );
+  if (
+    nativePermissionMatch?.groups?.action &&
+    /\b1\.\s*Yes\b/i.test(text) &&
+    /\b3\.\s*No\b/i.test(text)
+  ) {
+    const action = nativePermissionMatch.groups.action.toLowerCase();
+    const tool = action === "run" || action === "execute" ? "Bash" : "Edit";
+    return {
+      state: "approval_wait",
+      tool,
+      title: `Claude permission: ${tool}`,
+    };
+  }
   return null;
 }
 

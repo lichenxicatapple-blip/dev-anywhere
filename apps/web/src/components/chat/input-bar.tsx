@@ -27,7 +27,6 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { cleanupDeletedMention, computeSendDisabled, detectPickerMode } from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
-import { InputMenu } from "./input-menu";
 import { SendButton } from "./send-button";
 import type { PickerHandle } from "./picker-handle";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
@@ -439,7 +438,6 @@ export function InputBar({ sessionId }: InputBarProps) {
                 fileInputRef.current?.click();
               }}
             />
-            <InputMenu />
             <SendButton
               sessionId={sessionId}
               isWorking={isWorking}

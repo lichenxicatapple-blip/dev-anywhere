@@ -34,7 +34,6 @@ interface ClaudeSpeechSummaryCommand {
 
 export function buildClaudeSpeechSummaryCommand({
   env,
-  prompt,
 }: BuildClaudeSpeechSummaryCommandOptions): ClaudeSpeechSummaryCommand {
   return {
     command: env.CLAUDE_BIN || "claude",
@@ -42,12 +41,13 @@ export function buildClaudeSpeechSummaryCommand({
       "-p",
       "--output-format",
       "text",
+      "--input-format",
+      "text",
       "--no-session-persistence",
       "--permission-mode",
       "plan",
       "--tools",
       "Read,Grep,Glob,LS",
-      prompt,
     ],
   };
 }
@@ -58,7 +58,7 @@ export const runClaudeSpeechSummary: VoiceSummaryRunner = ({ cwd, prompt, env, t
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -70,6 +70,10 @@ export const runClaudeSpeechSummary: VoiceSummaryRunner = ({ cwd, prompt, env, t
       reject(new Error("Claude speech summary timed out"));
     }, timeoutMs);
 
+    child.stdin.on("error", () => {
+      // The close handler will surface the provider failure with stderr if stdin closes early.
+    });
+    child.stdin.end(prompt);
     child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
     child.on("error", (err) => {
@@ -131,6 +135,7 @@ export class VoiceSummaryHandler {
           env: this.deps.getProviderEnv(),
           timeoutMs: SUMMARY_TIMEOUT_MS,
         }),
+        msg.reason,
       );
       if (!summary) {
         this.sendFailure(msg, "Voice summary is empty", ControlErrorCode.UNKNOWN);
@@ -196,6 +201,16 @@ function cacheKeyForSummary(
     .digest("hex");
 }
 
-function sanitizeSummary(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, 1_000);
+function sanitizeSummary(value: string, reason: VoiceSummaryReason): string {
+  const summary = value.replace(/\s+/g, " ").trim().slice(0, 1_000);
+  if (reason === "approval" && containsApprovalRiskEvaluation(summary)) {
+    return "";
+  }
+  return summary;
+}
+
+function containsApprovalRiskEvaluation(summary: string): boolean {
+  return /(?:风险|危险|高危|中危|低危|谨慎|小心|破坏性|不可逆|安全风险|不安全|建议(?:允许|拒绝|批准))/u.test(
+    summary,
+  );
 }

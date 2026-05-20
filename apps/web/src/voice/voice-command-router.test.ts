@@ -37,6 +37,82 @@ describe("routeVoiceText", () => {
       kind: "agentText",
       text: "可以",
     });
+    expect(routeVoiceText("允许", { phase: "listening" })).toEqual({
+      kind: "agentText",
+      text: "允许",
+    });
+    expect(routeVoiceText("批准", { phase: "listening" })).toEqual({
+      kind: "agentText",
+      text: "批准",
+    });
+  });
+
+  it("routes short approval commands only while an approval prompt is active", () => {
+    expect(routeVoiceText("允许。", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "command",
+      command: { type: "approve_once" },
+    });
+    expect(routeVoiceText("始终允许。", { phase: "approval", approvalPromptActive: true })).toEqual(
+      {
+        kind: "command",
+        command: { type: "approve_always" },
+      },
+    );
+    expect(routeVoiceText("批准。", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "agentText",
+      text: "批准。",
+    });
+    expect(routeVoiceText("拒绝", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "command",
+      command: { type: "deny_once" },
+    });
+    expect(routeVoiceText("批准这次", { phase: "approval" })).toEqual({
+      kind: "agentText",
+      text: "批准这次",
+    });
+    expect(routeVoiceText("批准这次", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "agentText",
+      text: "批准这次",
+    });
+    expect(routeVoiceText("始终允许", { phase: "listening" })).toEqual({
+      kind: "agentText",
+      text: "始终允许",
+    });
+  });
+
+  it("uses the final short clause for active approval prompts", () => {
+    expect(routeVoiceText("嗯。允许。", { phase: "approval", approvalPromptActive: true })).toEqual(
+      {
+        kind: "command",
+        command: { type: "approve_once" },
+      },
+    );
+    expect(
+      routeVoiceText("好的，始终允许。", { phase: "approval", approvalPromptActive: true }),
+    ).toEqual({
+      kind: "command",
+      command: { type: "approve_always" },
+    });
+    expect(
+      routeVoiceText("好的，拒绝。", { phase: "approval", approvalPromptActive: true }),
+    ).toEqual({
+      kind: "command",
+      command: { type: "deny_once" },
+    });
+    expect(routeVoiceText("嗯。批准。", { phase: "listening" })).toEqual({
+      kind: "agentText",
+      text: "嗯。批准。",
+    });
+    expect(routeVoiceText("我批准。", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "agentText",
+      text: "我批准。",
+    });
+    expect(routeVoiceText("批准这个。", { phase: "approval", approvalPromptActive: true })).toEqual(
+      {
+        kind: "agentText",
+        text: "批准这个。",
+      },
+    );
   });
 
   it("only treats 继续 as resume while paused", () => {

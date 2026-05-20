@@ -225,6 +225,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       const ctrl = await relay.createSession(
         {
           cwd: targetCwd,
+          name: submittedName || undefined,
           mode,
           provider,
           permissionMode,
@@ -242,9 +243,11 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         return;
       }
 
+      const resolvedName = ctrl.name?.trim() || undefined;
       const newSession: SessionInfo = {
         sessionId: ctrl.sessionId,
-        name: submittedName || undefined,
+        name: resolvedName,
+        ...(ctrl.nameLocked !== undefined ? { nameLocked: ctrl.nameLocked } : {}),
         state: "idle",
         mode: ctrl.mode ?? submittedMode,
         provider: ctrl.provider ?? submittedProvider,
@@ -443,7 +446,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             )}
           >
             <span className="text-sm font-medium">聊天模式</span>
-            <span className="text-xs text-muted-foreground">按消息发送和显示</span>
+            <span className="text-xs text-muted-foreground">气泡式对话，支持 Voice Pilot</span>
           </button>
         </div>
       </section>

@@ -33,7 +33,15 @@ export class VoiceTurnBuffer {
   }
 
   appendPartial(text: string): void {
-    this.partialText = text.trim();
+    const trimmed = text.trim();
+    this.partialText = trimmed;
+    if (trimmed) {
+      this.restartIdleTimer();
+      return;
+    }
+    if (this.finalSegments.length === 0) {
+      this.clearIdleTimer();
+    }
   }
 
   appendFinal(text: string): void {
@@ -83,7 +91,9 @@ export class VoiceTurnBuffer {
 
   private emitIfReady(): void {
     this.clearIdleTimer();
-    const text = this.finalSegments.join("\n").trim();
+    const segments = [...this.finalSegments];
+    if (this.partialText) segments.push(this.partialText);
+    const text = segments.join("\n").trim();
     this.finalSegments = [];
     this.partialText = "";
     if (!text) return;

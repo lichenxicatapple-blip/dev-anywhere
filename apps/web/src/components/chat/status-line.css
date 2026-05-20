@@ -29,6 +29,64 @@
   animation: dev-status-breathe 2s ease-in-out infinite;
 }
 
+.dev-pty-approval-hint {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 20;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-status-warning) 70%, transparent);
+  color: color-mix(in srgb, var(--background) 86%, black);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.dev-pty-approval-hint .dev-status-line-sweep {
+  opacity: 0.85;
+}
+
+.dev-pty-approval-hint-label {
+  position: relative;
+  z-index: 1;
+}
+
+.dev-pty-approval-auto-yes {
+  pointer-events: auto;
+  position: absolute;
+  inset-inline-end: 10px;
+  z-index: 1;
+  min-height: 20px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--background) 78%, transparent);
+  background: color-mix(in srgb, var(--background) 84%, var(--color-status-warning));
+  padding: 0 9px;
+  color: var(--color-status-warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.dev-pty-approval-auto-yes:hover {
+  border-color: color-mix(in srgb, var(--background) 64%, transparent);
+  background: color-mix(in srgb, var(--background) 76%, var(--color-status-warning));
+}
+
+.dev-pty-approval-auto-yes[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--background) 55%, transparent);
+  background: color-mix(in srgb, var(--color-status-warning) 84%, var(--background));
+  color: color-mix(in srgb, var(--background) 90%, black);
+}
+
 .dev-status-line-terminated {
   background-color: var(--muted-foreground);
 }

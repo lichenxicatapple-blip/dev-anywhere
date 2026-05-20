@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createScopedApprovalRequestIdFactory } from "../common/approval-request-id.js";
 import { serviceLogger } from "../common/logger.js";
 import { HookRegistry, type HookProviderId } from "./hook-registry.js";
 import { PermissionBroker } from "./permission-broker.js";
@@ -42,6 +43,7 @@ export class HookServer {
   private server: Server | null = null;
   private readonly host: string;
   private readonly maxBodyBytes: number;
+  private readonly nextFallbackRequestId = createScopedApprovalRequestIdFactory();
 
   constructor(private readonly options: HookServerOptions) {
     this.host = options.host ?? "127.0.0.1";
@@ -163,7 +165,7 @@ export class HookServer {
     const requestId =
       event.requestId ??
       (typeof event.payload.tool_use_id === "string" ? event.payload.tool_use_id : undefined) ??
-      `${event.sessionId}:${Date.now()}`;
+      this.nextFallbackRequestId(event.sessionId);
     const toolName = toolNameFromPayload(event.payload);
     const input = asRecord(event.payload.input ?? event.payload.tool_input);
 

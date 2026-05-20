@@ -69,6 +69,34 @@ describe("createRelayApprovalStrategy", () => {
     expect(result.behavior).toBe("allow");
     expect(result.message).toContain("whitelist");
   });
+
+  it("auto-approves later same-tool requests after the session whitelist is updated", async () => {
+    const wl = new ToolWhitelist();
+    const forwardToRelay = vi
+      .fn()
+      .mockResolvedValueOnce({ behavior: "allow" as const, message: "approved remotely" })
+      .mockResolvedValueOnce({ behavior: "deny" as const, message: "needs approval" });
+    const strategy = createRelayApprovalStrategy(wl, forwardToRelay);
+
+    const firstBash = await strategy("Bash", { command: "ls" });
+    expect(firstBash).toEqual({ behavior: "allow", message: "approved remotely" });
+    expect(forwardToRelay).toHaveBeenCalledTimes(1);
+    expect(forwardToRelay).toHaveBeenLastCalledWith("Bash", { command: "ls" });
+
+    wl.add("Bash");
+
+    const secondBash = await strategy("Bash", { command: "pwd" });
+    expect(secondBash).toEqual({
+      behavior: "allow",
+      message: "Auto-approved by session whitelist",
+    });
+    expect(forwardToRelay).toHaveBeenCalledTimes(1);
+
+    const write = await strategy("Write", { file_path: "/tmp/a" });
+    expect(write).toEqual({ behavior: "deny", message: "needs approval" });
+    expect(forwardToRelay).toHaveBeenCalledTimes(2);
+    expect(forwardToRelay).toHaveBeenLastCalledWith("Write", { file_path: "/tmp/a" });
+  });
 });
 
 describe("JsonSession claudeSessionId capture", () => {

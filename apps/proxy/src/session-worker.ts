@@ -8,6 +8,7 @@ import {
   type StreamJsonEvent,
   type ClaudePermissionMode,
 } from "./worker/json-session.js";
+import { createApprovalRequestIdFactory } from "./common/approval-request-id.js";
 import { SeqCounter } from "./common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
 import { takeoverServeSocket } from "./worker/serve-socket-takeover.js";
@@ -56,6 +57,7 @@ const workerHook: ProviderHookContext | undefined =
 let serveSocket: Socket | null = null;
 const seqCounter = new SeqCounter(sessionId);
 const whitelist = new ToolWhitelist();
+const nextApprovalRequestId = createApprovalRequestIdFactory(sessionId);
 
 const pendingApprovals = new Map<
   string,
@@ -78,7 +80,7 @@ const forwardToRelay = async (
   input: Record<string, unknown>,
 ): Promise<{ behavior: "allow" | "deny"; message?: string }> => {
   return new Promise((resolve) => {
-    const requestId = `${sessionId}-${Date.now()}`;
+    const requestId = nextApprovalRequestId();
     pendingApprovals.set(requestId, { resolve, toolName, input });
     sendToServe({
       type: "worker_approval_request",

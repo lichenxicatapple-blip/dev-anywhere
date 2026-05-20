@@ -59,6 +59,11 @@ function validateSessionCwd(cwd: unknown): SessionCwdValidationError | null {
   }
 }
 
+function normalizeSessionName(name: string | undefined): string | undefined {
+  const trimmed = name?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export class RelaySessionCreateHandler {
   // 跟踪每个 pendingId 当前挂起的 retry timer。SIGTERM 抵达时 destroy() 会 clear
   // 这些 timer 并执行 cleanupPendingJsonSession，否则 worker 子进程在窗口期内可能成为孤儿
@@ -120,7 +125,9 @@ export class RelaySessionCreateHandler {
     // streamDelta 不在 session_create 协议字段里：当前没有客户端发起 delta 模式，
     // 默认关闭即可。后续若要恢复增量推送，需先在 RelayControlSchema 加字段。
     const streamDelta = false;
-    const name = tildify(sessionCwd);
+    const requestedName = normalizeSessionName(msg.name);
+    const name = requestedName ?? tildify(sessionCwd);
+    const nameLocked = requestedName !== undefined;
     const pendingId = nanoid();
     const hook = this.deps.createHookContext(pendingId, provider);
     const workerPid = this.deps.workerRegistry.spawn(pendingId, {
@@ -150,6 +157,8 @@ export class RelaySessionCreateHandler {
             name,
             pendingId,
             provider,
+            undefined,
+            nameLocked,
           );
           if (resumeSessionId) {
             this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
@@ -159,6 +168,10 @@ export class RelaySessionCreateHandler {
               type: "session_create_response",
               requestId,
               sessionId: session.id,
+              name: session.name,
+              nameLocked: session.nameLocked,
+              mode: "json",
+              provider,
             }),
           );
           if (resumeSessionId) {
@@ -224,7 +237,9 @@ export class RelaySessionCreateHandler {
 
     const resumeSessionId = msg.resumeSessionId;
     const pendingId = nanoid();
-    const name = tildify(cwd);
+    const requestedName = normalizeSessionName(msg.name);
+    const name = requestedName ?? tildify(cwd);
+    const nameLocked = requestedName !== undefined;
     const hook = this.deps.createHookContext(pendingId, provider);
     try {
       const pid = this.deps.hostedPtyRegistry.start({
@@ -243,6 +258,7 @@ export class RelaySessionCreateHandler {
         pendingId,
         provider,
         "proxy-hosted",
+        nameLocked,
       );
       if (resumeSessionId && provider === "claude") {
         this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
@@ -252,6 +268,8 @@ export class RelaySessionCreateHandler {
           type: "session_create_response",
           requestId: msg.requestId,
           sessionId: session.id,
+          name: session.name,
+          nameLocked: session.nameLocked,
           mode: "pty",
           provider,
           ptyOwner: "proxy-hosted",
