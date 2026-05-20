@@ -367,10 +367,10 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
           <div className="px-2 pb-1" data-slot="chat-menu-font-control">
             <div
-              className="inline-grid min-h-9 grid-cols-[1rem_auto] items-center gap-x-1 py-1"
+              className="inline-grid min-h-9 grid-cols-[1.25rem_auto] items-center gap-x-2.5 py-1"
               data-slot="chat-menu-font-row"
             >
-              <ChatMenuIcon className="size-4">
+              <ChatMenuIcon>
                 <Type aria-hidden="true" />
               </ChatMenuIcon>
               <div
