@@ -4,7 +4,7 @@
 #   pnpm proxy -- claude
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 LOG_DIR="$HOME/.dev-anywhere/logs"
@@ -19,7 +19,7 @@ DEV_PROFILE=""
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-restart.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>]
+  scripts/dev/restart.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>]
 
 Defaults:
   --profile  auto-resolved from config (whichever profile points at the local relay URL)

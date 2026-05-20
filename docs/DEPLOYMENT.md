@@ -51,13 +51,13 @@ The default image registry is the public Aliyun ACR mirror used by this project.
 From your laptop:
 
 ```bash
-IMAGE_TAG=latest ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=latest ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 Or run directly on the VPS:
 
 ```bash
-sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
+sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
 The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/etc/nginx/conf.d/dev-anywhere.conf`, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
@@ -156,14 +156,14 @@ Only direct image file paths are supported. The proxy does not expose directory 
 Upgrade to a new published image tag:
 
 ```bash
-sudo env IMAGE_TAG=latest ./scripts/install-relay.sh dev-anywhere.example.com
+sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
 If another local service already uses the default loopback ports, override them:
 
 ```bash
 sudo env DEV_ANYWHERE_RELAY_PORT=13100 DEV_ANYWHERE_WEB_PORT=18080 IMAGE_TAG=latest \
-  ./scripts/install-relay.sh dev-anywhere.example.com
+  ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
 Check service health:

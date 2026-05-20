@@ -45,6 +45,7 @@ export function mergeVoiceConfigForTest(
     ...(update?.asrModel ? { asrModel: update.asrModel } : {}),
     ...(update?.ttsModel ? { ttsModel: update.ttsModel } : {}),
     ...(update?.ttsVoice ? { ttsVoice: update.ttsVoice } : {}),
+    ...(update?.turnIdleSeconds ? { turnIdleSeconds: update.turnIdleSeconds } : {}),
   };
 }
 

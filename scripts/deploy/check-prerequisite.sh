@@ -10,11 +10,11 @@
 #   6. 域名 DNS A 记录是否解析到当前 VPS IP
 #
 # 用法:
-#   bash scripts/check-prerequisite.sh <ssh-host> <domain>
+#   bash scripts/deploy/check-prerequisite.sh <ssh-host> <domain>
 #   例:
-#     bash scripts/check-prerequisite.sh root@1.2.3.4 dev-anywhere.example.com
-#     bash scripts/check-prerequisite.sh ubuntu@1.2.3.4 dev-anywhere.example.com
-#     bash scripts/check-prerequisite.sh my-aws-host dev-anywhere.example.com  # 用 ssh config 里的 User
+#     bash scripts/deploy/check-prerequisite.sh root@1.2.3.4 dev-anywhere.example.com
+#     bash scripts/deploy/check-prerequisite.sh ubuntu@1.2.3.4 dev-anywhere.example.com
+#     bash scripts/deploy/check-prerequisite.sh my-aws-host dev-anywhere.example.com  # 用 ssh config 里的 User
 set -euo pipefail
 
 SSH_HOST="${1:?Usage: check-prerequisite.sh <ssh-host> <domain>}"

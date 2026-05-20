@@ -91,4 +91,19 @@ describe("ToolApprovalCard", () => {
       }),
     );
   });
+
+  it("shows approval queue position when multiple tool approvals are pending", () => {
+    render(
+      <ToolApprovalCard
+        approval={makeApproval()}
+        sessionId="s1"
+        container="inline"
+        queuePosition={2}
+        queueSize={3}
+      />,
+    );
+
+    expect(screen.getByText("2/3")).not.toBeNull();
+    expect(screen.getByLabelText("第 2 个审批，共 3 个")).not.toBeNull();
+  });
 });

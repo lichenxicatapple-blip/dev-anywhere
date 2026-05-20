@@ -41,9 +41,17 @@ interface ToolApprovalCardProps {
   approval: ToolApprovalRequest;
   sessionId: string;
   container: "inline" | "floating";
+  queuePosition?: number;
+  queueSize?: number;
 }
 
-export function ToolApprovalCard({ approval, sessionId, container }: ToolApprovalCardProps) {
+export function ToolApprovalCard({
+  approval,
+  sessionId,
+  container,
+  queuePosition,
+  queueSize,
+}: ToolApprovalCardProps) {
   const [acted, setActed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const transportReady = useAppStore((state) => state.connected && state.proxyOnline);
@@ -52,6 +60,8 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
   const summary = summarizeToolInput(approval.toolName, approval.input);
   const isResolved = approval.status !== "pending";
   const Icon = toolIcon(approval.toolName);
+  const queueLabel =
+    queueSize && queueSize > 1 && queuePosition ? `${queuePosition}/${queueSize}` : null;
 
   function renderContainer(content: ReactNode) {
     if (container === "floating") return content;
@@ -134,6 +144,14 @@ export function ToolApprovalCard({ approval, sessionId, container }: ToolApprova
       >
         <Icon className="size-4 shrink-0 text-[var(--color-status-warning)]" aria-hidden="true" />
         <span className="shrink-0 font-semibold text-sm">{approval.toolName}</span>
+        {queueLabel && (
+          <span
+            className="shrink-0 rounded border border-[var(--color-status-warning)]/40 bg-[var(--color-status-warning)]/10 px-1.5 py-0.5 text-[10px] leading-none text-[var(--color-status-warning)]"
+            aria-label={`第 ${queuePosition} 个审批，共 ${queueSize} 个`}
+          >
+            {queueLabel}
+          </span>
+        )}
         <span
           data-slot="tool-approval-summary"
           className="min-w-0 text-xs text-muted-foreground flex-1 truncate font-mono"

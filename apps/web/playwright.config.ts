@@ -58,7 +58,7 @@ export default defineConfig({
       use: {},
     },
     // L4 device-mobile-android: 真 Android emu via CDP, e2e/mobile/.
-    // 前置: scripts/test-mobile.sh 起 vite + adb forward + chrome 9222.
+    // 前置: scripts/test/mobile.sh 起 vite + adb forward + chrome 9222.
     {
       name: "device-mobile-android",
       testDir: "./e2e/mobile",

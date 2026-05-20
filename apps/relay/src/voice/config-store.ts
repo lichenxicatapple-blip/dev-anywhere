@@ -14,6 +14,7 @@ export interface StoredVoiceConfig {
   asrModel: string;
   ttsModel: string;
   ttsVoice: string;
+  turnIdleSeconds: number;
 }
 
 interface VoiceConfigStoreOptions {
@@ -33,6 +34,7 @@ const DEFAULT_STORED_CONFIG: StoredVoiceConfig = {
   asrModel: "qwen3-asr-flash-realtime",
   ttsModel: "cosyvoice-v3-flash",
   ttsVoice: "longanyang",
+  turnIdleSeconds: 3,
 };
 
 function redacted(config: StoredVoiceConfig): VoiceProviderConfig {
@@ -43,6 +45,7 @@ function redacted(config: StoredVoiceConfig): VoiceProviderConfig {
     asrModel: config.asrModel,
     ttsModel: config.ttsModel,
     ttsVoice: config.ttsVoice,
+    turnIdleSeconds: config.turnIdleSeconds,
   });
 }
 
@@ -73,6 +76,11 @@ function parseStoredConfig(raw: unknown, fallback: StoredVoiceConfig): StoredVoi
       : {}),
     ...(typeof candidate.ttsVoice === "string" && candidate.ttsVoice.length > 0
       ? { ttsVoice: candidate.ttsVoice }
+      : {}),
+    ...(typeof candidate.turnIdleSeconds === "number" &&
+    Number.isSafeInteger(candidate.turnIdleSeconds) &&
+    candidate.turnIdleSeconds > 0
+      ? { turnIdleSeconds: candidate.turnIdleSeconds }
       : {}),
   };
 }
@@ -117,6 +125,7 @@ export function createVoiceConfigStore(options: VoiceConfigStoreOptions = {}): V
         ...(parsed.asrModel ? { asrModel: parsed.asrModel } : {}),
         ...(parsed.ttsModel ? { ttsModel: parsed.ttsModel } : {}),
         ...(parsed.ttsVoice ? { ttsVoice: parsed.ttsVoice } : {}),
+        ...(parsed.turnIdleSeconds ? { turnIdleSeconds: parsed.turnIdleSeconds } : {}),
       };
       save(next);
       return redacted(next);

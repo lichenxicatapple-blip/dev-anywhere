@@ -17,6 +17,7 @@ describe("VoiceProviderConfigSchema", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 5,
       }),
     ).toEqual({
       provider: "aliyun-bailian",
@@ -25,7 +26,21 @@ describe("VoiceProviderConfigSchema", () => {
       asrModel: "qwen3-asr-flash-realtime",
       ttsModel: "cosyvoice-v3-flash",
       ttsVoice: "longanyang",
+      turnIdleSeconds: 5,
     });
+  });
+
+  it("defaults the voice turn idle timeout for older config responses", () => {
+    expect(
+      VoiceProviderConfigSchema.parse({
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      }).turnIdleSeconds,
+    ).toBe(3);
   });
 
   it("rejects API keys in config responses", () => {
@@ -53,11 +68,13 @@ describe("VoiceConfigUpdateSchema", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 5,
       }),
     ).toMatchObject({
       provider: "aliyun-bailian",
       apiKey: "sk-secret",
       region: "intl",
+      turnIdleSeconds: 5,
     });
   });
 
@@ -65,6 +82,12 @@ describe("VoiceConfigUpdateSchema", () => {
     expect(() => VoiceConfigUpdateSchema.parse({ apiKey: "" })).toThrow();
     expect(() => VoiceConfigUpdateSchema.parse({ asrModel: "" })).toThrow();
     expect(() => VoiceConfigUpdateSchema.parse({ ttsVoice: "" })).toThrow();
+  });
+
+  it("rejects invalid voice turn idle timeout updates", () => {
+    expect(() => VoiceConfigUpdateSchema.parse({ turnIdleSeconds: 0 })).toThrow();
+    expect(() => VoiceConfigUpdateSchema.parse({ turnIdleSeconds: 1.5 })).toThrow();
+    expect(() => VoiceConfigUpdateSchema.parse({ turnIdleSeconds: "3" })).toThrow();
   });
 });
 

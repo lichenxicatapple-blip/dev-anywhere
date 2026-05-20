@@ -338,7 +338,8 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, lastMsg?.text]);
 
-  const pendingApproval = pendingApprovals.find((a) => a.status === "pending");
+  const pendingApprovalQueue = pendingApprovals.filter((a) => a.status === "pending");
+  const hasPendingApprovals = pendingApprovalQueue.length > 0;
 
   // Thinking spinner 只在 "请求已发、还没 streaming" 的 gap 段显示:
   // streaming 中 message-bubble 末尾的光标已经是"正在生成"的信号, 叠加会冗余
@@ -348,7 +349,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
     message.id.startsWith(`history-${sessionId}-`),
   );
 
-  if (messages.length === 0 && !pendingApproval) {
+  if (messages.length === 0 && !hasPendingApprovals) {
     return (
       <div className="h-full">
         <EmptyState variant="no-messages" />
@@ -428,12 +429,26 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
         />
         {traceEnabled ? <JsonScrollTraceButton /> : null}
       </div>
-      {pendingApproval && (
+      {hasPendingApprovals && (
         <div
-          className="dev-render-scroll dev-chat-rail-inset overflow-x-hidden overflow-y-auto py-2"
+          className="dev-render-scroll dev-chat-rail-inset flex flex-col gap-2 overflow-x-hidden overflow-y-auto py-2"
           aria-live="polite"
         >
-          <ToolApprovalCard approval={pendingApproval} sessionId={sessionId} container="inline" />
+          {pendingApprovalQueue.length > 1 && (
+            <div className="dev-message-rail mx-auto w-full min-w-0 px-1 text-xs text-muted-foreground">
+              {pendingApprovalQueue.length} 个工具审批待处理
+            </div>
+          )}
+          {pendingApprovalQueue.map((approval, index) => (
+            <ToolApprovalCard
+              key={approval.requestId}
+              approval={approval}
+              sessionId={sessionId}
+              container="inline"
+              queuePosition={index + 1}
+              queueSize={pendingApprovalQueue.length}
+            />
+          ))}
         </div>
       )}
     </div>

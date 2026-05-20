@@ -326,6 +326,7 @@ describe("RelayClient request handling", () => {
         asrModel: "wrong-asr",
         ttsModel: "wrong-tts",
         ttsVoice: "wrong-voice",
+        turnIdleSeconds: 4,
       },
     });
     ws.emit({
@@ -338,6 +339,7 @@ describe("RelayClient request handling", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 5,
       },
     });
 
@@ -353,6 +355,7 @@ describe("RelayClient request handling", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 5,
       },
       error: undefined,
       errorCode: undefined,
@@ -367,6 +370,7 @@ describe("RelayClient request handling", () => {
       asrModel: "qwen3-asr-flash-realtime",
       ttsModel: "cosyvoice-v3-flash",
       ttsVoice: "longwan",
+      turnIdleSeconds: 5,
     });
     const requestId = sentRequestId(ws);
 
@@ -381,6 +385,7 @@ describe("RelayClient request handling", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longwan",
+        turnIdleSeconds: 5,
       },
     });
 
@@ -393,6 +398,7 @@ describe("RelayClient request handling", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longwan",
+        turnIdleSeconds: 5,
       },
     });
     await expect(promise).resolves.toEqual({
@@ -404,6 +410,7 @@ describe("RelayClient request handling", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longwan",
+        turnIdleSeconds: 5,
       },
       error: undefined,
       errorCode: undefined,

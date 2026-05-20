@@ -7,25 +7,25 @@
 //   3. 已在 Chrome 里 `chrome://inspect` 见到 tab 即说明 devtools 通了
 //
 // 用法 (从仓库根跑):
-//   node scripts/emu-debug.mjs forward            # 起 adb forward 9222 -> chrome
-//   node scripts/emu-debug.mjs nav <url>          # 用 intent 在模拟器 Chrome 打 URL
-//   node scripts/emu-debug.mjs tabs               # 列出当前 Chrome tabs
-//   node scripts/emu-debug.mjs screenshot [path]  # 截屏到本机 (默认 /tmp/emu-<ts>.png)
-//   node scripts/emu-debug.mjs eval "<js>"        # 在选中 tab 里跑 JS, 结果 JSON.stringify
-//   node scripts/emu-debug.mjs metrics            # 读 PTY 容器/spacer/host/buffer 关键尺寸
-//   node scripts/emu-debug.mjs trace [n]          # 读 window.__ptyScrollTrace 最后 n 条 (默认 30)
-//   node scripts/emu-debug.mjs console [ms]       # 订阅 console 消息 ms 毫秒 (默认 5000)
-//   node scripts/emu-debug.mjs scroll <px>        # 把 PTY 容器 scrollTop 设到 px (用于复现)
-//   node scripts/emu-debug.mjs tap <x> <y>        # adb tap, 用绝对坐标
-//   node scripts/emu-debug.mjs reload             # tab reload
+//   node scripts/tools/emu-debug.mjs forward            # 起 adb forward 9222 -> chrome
+//   node scripts/tools/emu-debug.mjs nav <url>          # 用 intent 在模拟器 Chrome 打 URL
+//   node scripts/tools/emu-debug.mjs tabs               # 列出当前 Chrome tabs
+//   node scripts/tools/emu-debug.mjs screenshot [path]  # 截屏到本机 (默认 /tmp/emu-<ts>.png)
+//   node scripts/tools/emu-debug.mjs eval "<js>"        # 在选中 tab 里跑 JS, 结果 JSON.stringify
+//   node scripts/tools/emu-debug.mjs metrics            # 读 PTY 容器/spacer/host/buffer 关键尺寸
+//   node scripts/tools/emu-debug.mjs trace [n]          # 读 window.__ptyScrollTrace 最后 n 条 (默认 30)
+//   node scripts/tools/emu-debug.mjs console [ms]       # 订阅 console 消息 ms 毫秒 (默认 5000)
+//   node scripts/tools/emu-debug.mjs scroll <px>        # 把 PTY 容器 scrollTop 设到 px (用于复现)
+//   node scripts/tools/emu-debug.mjs tap <x> <y>        # adb tap, 用绝对坐标
+//   node scripts/tools/emu-debug.mjs reload             # tab reload
 //
 // 选 tab: 默认挑 url 含 "localhost:5173" 的第一个; 可用 EMU_TAB_FILTER 环境变量改 substring.
-// 例: EMU_TAB_FILTER=chat node scripts/emu-debug.mjs metrics
+// 例: EMU_TAB_FILTER=chat node scripts/tools/emu-debug.mjs metrics
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
 
-const require = createRequire(new URL("../apps/relay/package.json", import.meta.url));
+const require = createRequire(new URL("../../apps/relay/package.json", import.meta.url));
 const WebSocket = require("ws");
 
 const CDP_PORT = Number(process.env.EMU_CDP_PORT ?? 9222);

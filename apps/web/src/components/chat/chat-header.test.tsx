@@ -80,6 +80,7 @@ describe("ChatHeader PTY upload menu", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 3,
       },
     });
     uploadFile.mockReset();
@@ -257,6 +258,7 @@ describe("ChatHeader PTY upload menu", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 3,
       },
     });
     useSessionStore.setState({

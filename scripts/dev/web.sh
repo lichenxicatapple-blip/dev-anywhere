@@ -3,7 +3,7 @@
 # This does not start, stop, or restart any local proxy daemon.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOST="127.0.0.1"
 PORT=""
 RELAY_NAME=""
@@ -12,8 +12,8 @@ TARGET=""
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-web.sh --relay <name> --port <port>
-  scripts/dev-web.sh --target <relay-url> --port <port>
+  scripts/dev/web.sh --relay <name> --port <port>
+  scripts/dev/web.sh --target <relay-url> --port <port>
 
 Examples:
   pnpm dev:web -- --relay local --port 5173

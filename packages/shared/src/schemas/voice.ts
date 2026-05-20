@@ -13,6 +13,7 @@ export const VoiceProviderConfigSchema = z
     asrModel: z.string().min(1),
     ttsModel: z.string().min(1),
     ttsVoice: z.string().min(1),
+    turnIdleSeconds: z.number().int().positive().safe().default(3),
   })
   .strict();
 export type VoiceProviderConfig = z.infer<typeof VoiceProviderConfigSchema>;
@@ -26,6 +27,7 @@ export const VoiceConfigUpdateSchema = z
     asrModel: z.string().min(1).optional(),
     ttsModel: z.string().min(1).optional(),
     ttsVoice: z.string().min(1).optional(),
+    turnIdleSeconds: z.number().int().positive().safe().optional(),
   })
   .strict();
 export type VoiceConfigUpdate = z.infer<typeof VoiceConfigUpdateSchema>;

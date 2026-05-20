@@ -1,5 +1,5 @@
 // L4 mobile spec 的 Playwright fixture: 通过 CDP 挂到 Android emu 的 Chrome 上.
-// 入口前置: scripts/test-mobile.sh 已建 adb forward tcp:9222 -> chrome_devtools_remote.
+// 入口前置: scripts/test/mobile.sh 已建 adb forward tcp:9222 -> chrome_devtools_remote.
 import { chromium, type Browser, type Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 
@@ -32,7 +32,7 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
     async ({}, use) => {
       const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
       await use(browser);
-      // The Android Chrome instance is owned by scripts/test-mobile.sh. Closing the
+      // The Android Chrome instance is owned by scripts/test/mobile.sh. Closing the
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
       // dead endpoint. Let the worker process drop the websocket; the script
@@ -49,7 +49,7 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
   //    fake relay 的 init script 重复叠加.
   //
-  // 跨 spec file 隔离: scripts/test-mobile.sh 每个 spec file 调用前 force-stop
+  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前 force-stop
   // chrome, 让该 spec file 拿到全新 chrome process. 同 spec file 内多个 test 共享
   // 这一个 page, 通过 spec 内的 setupPtyChat / installFakeRelay+reload 各自 reset.
   emuPage: [

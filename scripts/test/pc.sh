@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tier 3 - Playwright 真桌面 Chromium, e2e/pc/ 下全 spec.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 source "$ROOT/scripts/lib/smoke-common.sh"
 

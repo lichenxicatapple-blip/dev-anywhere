@@ -71,6 +71,56 @@ describe("chat-dispatcher permission flow", () => {
     expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0].status).toBe("pending");
   });
 
+  it("replaces stale local approvals with the pending queue replayed after refresh", () => {
+    const sendControl = vi.fn();
+    const handle = createChatMessageHandler({ sendControl });
+
+    handle(envelope({ payload: { toolId: "req-1", toolName: "Bash", parameters: {} } }));
+    handle(envelope({ payload: { toolId: "req-2", toolName: "Read", parameters: {} } }));
+    handle(envelope({ payload: { toolId: "req-3", toolName: "Write", parameters: {} } }));
+    handle({
+      type: "permission_decision_result",
+      sessionId: "s1",
+      requestId: "req-1",
+      outcome: "allow",
+      delivered: true,
+    } as RelayControlMessage);
+
+    handle({
+      type: "pending_approvals_push",
+      sessionId: "s1",
+      approvals: [
+        { requestId: "req-2", toolName: "Read", input: { file_path: "/tmp/a" } },
+        { requestId: "req-3", toolName: "Write", input: { file_path: "/tmp/b" } },
+      ],
+    } as RelayControlMessage);
+
+    expect(useChatStore.getState().bySessionId.s1.pendingApprovals).toEqual([
+      {
+        requestId: "req-2",
+        toolName: "Read",
+        input: { file_path: "/tmp/a" },
+        status: "pending",
+      },
+      {
+        requestId: "req-3",
+        toolName: "Write",
+        input: { file_path: "/tmp/b" },
+        status: "pending",
+      },
+    ]);
+    expect(sendControl).toHaveBeenCalledWith({
+      type: "permission_request_delivered",
+      sessionId: "s1",
+      requestId: "req-2",
+    });
+    expect(sendControl).toHaveBeenCalledWith({
+      type: "permission_request_delivered",
+      sessionId: "s1",
+      requestId: "req-3",
+    });
+  });
+
   it("uses turn_result.result as JSON fallback when no assistant message arrived", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
 

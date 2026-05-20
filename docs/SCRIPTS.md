@@ -27,12 +27,27 @@ dev-anywhere claude -c
 dev-anywhere codex --model gpt-5.5
 ```
 
+## Repository Script Layout
+
+The root `scripts/` directory is grouped by workflow instead of keeping all
+entrypoints flat:
+
+| Directory          | Purpose                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| `scripts/dev/`     | Local relay/web/proxy loops, health checks, and chaos runs.  |
+| `scripts/test/`    | Test tier entrypoints for unit, layout, PC, and mobile E2E.  |
+| `scripts/release/` | Release gates, smoke tests, and version/tag publishing flow. |
+| `scripts/deploy/`  | VPS deploy installer and deploy-specific checks.             |
+| `scripts/quality/` | Source hygiene and aggregate quality checks.                 |
+| `scripts/tools/`   | Ad hoc diagnostics such as Android emulator CDP helpers.     |
+| `scripts/lib/`     | Shared shell/Node helpers sourced by the workflow scripts.   |
+
 ## Deployment
 
-| Script                          | Purpose                                                                                                                                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `scripts/install-relay.sh`      | Deploy relay + web to a VPS from published Docker images. Uses host nginx for public `80/443` and loopback Docker ports for DEV Anywhere. Supports local `--ssh` mode and direct VPS mode. |
-| `scripts/check-prerequisite.sh` | Read-only VPS preflight before running `install-relay.sh`: SSH, sudo, Docker, nginx, DNS, and public `80/443` reachability.                                                                |
+| Script                                 | Purpose                                                                                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `scripts/deploy/install-relay.sh`      | Deploy relay + web to a VPS from published Docker images. Uses host nginx for public `80/443` and loopback Docker ports for DEV Anywhere. Supports local `--ssh` mode and direct VPS mode. |
+| `scripts/deploy/check-prerequisite.sh` | Read-only VPS preflight before running `install-relay.sh`: SSH, sudo, Docker, nginx, DNS, and public `80/443` reachability.                                                                |
 
 Production deployment should use `install-relay.sh`. It creates or reuses both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`.
 
@@ -82,7 +97,7 @@ Agent CLI paths can be overridden:
 | `pnpm test:layout`                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
 | `pnpm test:pc`                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
 | `pnpm test:mobile`                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
-| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test-pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                           |
+| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test/pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                           |
 
 测试分层和 fixture 选型的完整说明见 [docs/TESTING.md](./TESTING.md)。
 
@@ -94,6 +109,6 @@ Agent CLI paths can be overridden:
 | `pnpm dev:chaos -- --profile qa --relay local --relay-port 3101 --web-port 5175 --base-url http://localhost:5175 --workdir /tmp/dev-anywhere-chaos-qa` | Run chaos against an explicit local profile and ports.                                                                         |
 | `RELAY_PROXY_TOKEN=... RELAY_CLIENT_TOKEN=... pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts wss://dev-anywhere.example.com`       | Verify a deployed relay's health, registration, proxy listing, proxy selection, and bidirectional routing.                     |
 | `pnpm --filter @dev-anywhere/proxy run sample:stream-json`                                                                                             | Sample Claude stream-json output and refresh schema-drift fixtures. Requires a locally installed and authenticated Claude CLI. |
-| `node scripts/emu-debug.mjs <command>`                                                                                                                 | Android emulator + Chrome CDP helper for mobile debugging: tab list, navigation, screenshot, console, PTY metrics, and trace.  |
+| `node scripts/tools/emu-debug.mjs <command>`                                                                                                           | Android emulator + Chrome CDP helper for mobile debugging: tab list, navigation, screenshot, console, PTY metrics, and trace.  |
 
 `pnpm dev:chaos` is intended for contributors working on reconnect, session lifecycle, PTY recovery, or JSON-mode behavior. By default it writes temporary chaos workspaces under `${TMPDIR:-/tmp}/dev-anywhere-chaos`; pass `--workdir` to isolate a run. Relay chaos tuning is also parameterized through flags such as `--relay-chaos-types`, `--relay-chaos-delay-ms`, `--relay-chaos-duplicate`, and `--relay-chaos-reorder`.

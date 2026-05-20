@@ -28,6 +28,7 @@ const DEFAULT_CONFIG: VoiceProviderConfig = {
   asrModel: "qwen3-asr-flash-realtime",
   ttsModel: "cosyvoice-v3-flash",
   ttsVoice: "longanyang",
+  turnIdleSeconds: 3,
 };
 
 const selectClassName =
@@ -56,6 +57,9 @@ function voicesForModel(voices: VoiceOption[], model: string): VoiceOption[] {
 
 export function VoiceSettingsPanel() {
   const [config, setConfig] = useState<VoiceProviderConfig>(DEFAULT_CONFIG);
+  const [turnIdleSecondsInput, setTurnIdleSecondsInput] = useState(
+    String(DEFAULT_CONFIG.turnIdleSeconds),
+  );
   const [capabilities, setCapabilities] = useState<VoiceCapabilities>(() =>
     createBundledBailianVoiceCapabilities(),
   );
@@ -85,6 +89,7 @@ export function VoiceSettingsPanel() {
           return;
         }
         setConfig(result.config);
+        setTurnIdleSecondsInput(String(result.config.turnIdleSeconds));
         setApiKey("");
         setClearApiKey(false);
         setConfigLoaded(true);
@@ -162,7 +167,13 @@ export function VoiceSettingsPanel() {
       : selectedTtsVoice
         ? null
         : "请选择可用音色";
-  const actionDisabled = busy || Boolean(voiceCompatibilityMessage);
+  const parsedTurnIdleSeconds = useMemo(
+    () => parsePositiveInteger(turnIdleSecondsInput),
+    [turnIdleSecondsInput],
+  );
+  const turnIdleSecondsMessage = parsedTurnIdleSeconds ? null : "请输入正整数秒数";
+  const validationMessage = voiceCompatibilityMessage ?? turnIdleSecondsMessage;
+  const actionDisabled = busy || Boolean(validationMessage);
 
   function buildVoiceConfigUpdate(): VoiceConfigUpdate {
     return {
@@ -172,13 +183,14 @@ export function VoiceSettingsPanel() {
       asrModel: config.asrModel.trim(),
       ttsModel: config.ttsModel.trim(),
       ttsVoice: config.ttsVoice.trim(),
+      turnIdleSeconds: parsedTurnIdleSeconds ?? DEFAULT_CONFIG.turnIdleSeconds,
     };
   }
 
   async function handleSave() {
     if (busy) return;
-    if (voiceCompatibilityMessage) {
-      setState({ kind: "error", message: voiceCompatibilityMessage });
+    if (validationMessage) {
+      setState({ kind: "error", message: validationMessage });
       return;
     }
     const relay = relayClientRef;
@@ -201,6 +213,7 @@ export function VoiceSettingsPanel() {
         return;
       }
       setConfig(result.config);
+      setTurnIdleSecondsInput(String(result.config.turnIdleSeconds));
       setApiKey("");
       setClearApiKey(false);
       setState({ kind: "saved" });
@@ -227,8 +240,8 @@ export function VoiceSettingsPanel() {
 
   async function handleTest() {
     if (busy) return;
-    if (voiceCompatibilityMessage) {
-      setState({ kind: "error", message: voiceCompatibilityMessage });
+    if (validationMessage) {
+      setState({ kind: "error", message: validationMessage });
       return;
     }
     const relay = relayClientRef;
@@ -485,6 +498,22 @@ export function VoiceSettingsPanel() {
         ) : null}
       </label>
 
+      <label className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm">结束停顿时间（秒）</span>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={turnIdleSecondsInput}
+          onChange={(event) => setTurnIdleSecondsInput(event.target.value)}
+          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
+        />
+        {turnIdleSecondsMessage ? (
+          <span className="text-xs text-muted-foreground">{turnIdleSecondsMessage}</span>
+        ) : null}
+      </label>
+
       <div className="flex items-center justify-end gap-3">
         {statusText ? (
           <div
@@ -536,6 +565,14 @@ function createAudioContext(sampleRate: number): AudioContext {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^[1-9]\d*$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed;
 }
 
 function voiceOptionLabel(option: VoiceOption): string {

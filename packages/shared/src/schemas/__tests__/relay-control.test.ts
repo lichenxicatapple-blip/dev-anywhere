@@ -63,6 +63,7 @@ describe("RelayControlSchema", () => {
           asrModel: "qwen3-asr-flash-realtime",
           ttsModel: "cosyvoice-v3-flash",
           ttsVoice: "longanyang",
+          turnIdleSeconds: 5,
         },
       }),
     ).toMatchObject({
@@ -85,6 +86,7 @@ describe("RelayControlSchema", () => {
           asrModel: "qwen3-asr-flash-realtime",
           ttsModel: "cosyvoice-v3-flash",
           ttsVoice: "longanyang",
+          turnIdleSeconds: 5,
         },
       }),
     ).toMatchObject({
@@ -214,6 +216,7 @@ describe("RelayControlSchema", () => {
           asrModel: "qwen3-asr-flash-realtime",
           ttsModel: "cosyvoice-v3-flash",
           ttsVoice: "longanyang",
+          turnIdleSeconds: 5,
           apiKey: "sk-secret",
         },
       }),

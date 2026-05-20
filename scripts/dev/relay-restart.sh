@@ -3,7 +3,7 @@
 # can verify reconnect behavior without resetting provider/session state.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 RELAY_PORT="3100"
@@ -13,7 +13,7 @@ LOG_RETENTION="50"
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-relay-restart.sh [--relay-port <port>]
+  scripts/dev/relay-restart.sh [--relay-port <port>]
 
 Defaults:
   --relay-port 3100

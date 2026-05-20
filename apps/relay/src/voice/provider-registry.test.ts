@@ -26,6 +26,7 @@ function config(overrides: Partial<StoredVoiceConfig> = {}): StoredVoiceConfig {
     asrModel: "qwen3-asr-flash-realtime",
     ttsModel: "cosyvoice-v3-plus",
     ttsVoice: "longanhuan",
+    turnIdleSeconds: 3,
     ...overrides,
   };
 }

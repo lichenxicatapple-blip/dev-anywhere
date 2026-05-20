@@ -2,7 +2,7 @@
 # Local chaos runner: inject relay/proxy/web failures and verify reconnect recovery.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 source "$ROOT/scripts/lib/smoke-common.sh"
@@ -29,7 +29,7 @@ CHAOS_WORKDIR="${TMPDIR:-/tmp}/dev-anywhere-chaos"
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-chaos.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>] [--base-url <url>] [--workdir <path>]
+  scripts/dev/chaos.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>] [--base-url <url>] [--workdir <path>]
                        [--relay-chaos-types <csv>] [--relay-chaos-delay-ms <ms>]
                        [--relay-chaos-duplicate 0|1] [--relay-chaos-duplicate-delay-ms <ms>]
                        [--relay-chaos-reorder 0|1] [--relay-chaos-reorder-delay-ms <ms>]
@@ -319,37 +319,37 @@ web_http_ok() {
 run_real_ui_smoke() {
   local label="$1"
   echo "+ UI smoke: $label"
-  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
 }
 
 run_relay_down_ui_smoke() {
   echo "+ UI smoke: relay down state"
   DEV_ANYWHERE_EXPECT_RELAY_DOWN=1 WEB_BASE_URL="$WEB_BASE_URL" \
-    bash scripts/test-pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
+    bash scripts/test/pc.sh e2e/pc/chaos/integration/real-chaos.spec.ts
 }
 
 run_render_chaos_smoke() {
   echo "+ UI smoke: PTY render-time stale snapshot and duplicate frame handling"
-  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/pty-render-chaos.spec.ts
 }
 
 run_protocol_chaos_smoke() {
   echo "+ UI smoke: requestId snapshot and approval recovery chaos"
-  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/protocol-chaos.spec.ts
 }
 
 run_websocket_reconnect_chaos_smoke() {
   echo "+ UI smoke: client WebSocket reconnect state recovery"
-  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+  WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/websocket-chaos.spec.ts
 }
 
 run_real_provider_approval_smoke() {
   echo "+ UI smoke: real Claude/Codex hosted PTY approval"
   DEV_ANYWHERE_REAL_PROVIDER_CWD="$HOSTED_PTY_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/real-provider-approval.spec.ts
 }
 
@@ -359,7 +359,7 @@ run_hosted_pty_exit_chaos_smoke() {
   DEV_ANYWHERE_HOSTED_PTY_CHAOS=1 \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_CWD="$HOSTED_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_HOSTED_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/integration/hosted-pty-chaos.spec.ts
 }
 
@@ -370,7 +370,7 @@ run_local_runtime_pty_chaos_smoke() {
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD="$LOCAL_PTY_CHAOS_CWD" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN="$LOCAL_PTY_CHAOS_BIN" \
     DEV_ANYWHERE_LOCAL_PTY_CHAOS_PROVIDER="$provider" \
-    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/integration/real-local-pty-chaos.spec.ts
 }
 
@@ -378,7 +378,7 @@ run_json_worker_chaos_smoke() {
   echo "+ UI smoke: real Claude JSON worker approval and relay restart"
   DEV_ANYWHERE_JSON_WORKER_CHAOS=1 \
     DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD="$JSON_WORKER_CHAOS_CWD" \
-    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test-pc.sh \
+    WEB_BASE_URL="$WEB_BASE_URL" bash scripts/test/pc.sh \
     e2e/pc/chaos/integration/real-json-worker-chaos.spec.ts
 }
 

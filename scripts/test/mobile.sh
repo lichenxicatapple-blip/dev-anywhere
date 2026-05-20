@@ -2,7 +2,7 @@
 # Tier 4 - 真 Android 模拟器 + Chrome CDP. 缺 emu 自动跳过 + 退 0 (PR 闸不卡).
 # 强制要求 emu: 设 TEST_MOBILE_REQUIRE_EMULATOR=1.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 source "$ROOT/scripts/lib/e2e-tiers.sh"
 source "$ROOT/scripts/lib/smoke-common.sh"

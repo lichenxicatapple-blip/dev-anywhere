@@ -78,7 +78,7 @@ Production deploys must use published images. Do not deploy from local-only imag
 The installer defaults to Aliyun ACR:
 
 ```bash
-IMAGE_TAG=X.Y.Z ./scripts/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+IMAGE_TAG=X.Y.Z ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
 To deploy from GHCR explicitly, pass `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip`.
@@ -92,7 +92,7 @@ curl -fsS https://dev-anywhere.example.com/health
 Direct VPS mode is also supported:
 
 ```bash
-sudo ./scripts/install-relay.sh dev-anywhere.example.com
+sudo ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
 The installer prints two credentials:

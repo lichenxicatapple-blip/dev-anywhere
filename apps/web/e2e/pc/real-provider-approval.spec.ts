@@ -408,7 +408,7 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
 }
 
 async function restartRelayOnly(): Promise<void> {
-  await execFileAsync("bash", ["scripts/dev-relay-restart.sh", "--relay-port", relayPort], {
+  await execFileAsync("bash", ["scripts/dev/relay-restart.sh", "--relay-port", relayPort], {
     cwd: repoRoot,
     timeout: 30_000,
     env: process.env,

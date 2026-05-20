@@ -836,6 +836,75 @@ describe("VoicePilotController", () => {
     });
   });
 
+  it("announces multiple pending approvals one at a time with queue context", async () => {
+    requestVoiceSummary
+      .mockResolvedValueOnce({
+        sessionId: "s1",
+        messageId: "toolu_1",
+        success: true,
+        summary: "需要搜索近年操作系统论文。",
+      })
+      .mockResolvedValueOnce({
+        sessionId: "s1",
+        messageId: "toolu_2",
+        success: true,
+        summary: "需要读取项目配置文件。",
+      });
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useChatStore.getState().addApprovalRequest("s1", {
+        requestId: "toolu_1",
+        toolName: "WebSearch",
+        input: { query: "recent operating systems papers" },
+        status: "pending",
+      });
+      useChatStore.getState().addApprovalRequest("s1", {
+        requestId: "toolu_2",
+        toolName: "Read",
+        input: { file_path: "/tmp/package.json" },
+        status: "pending",
+      });
+    });
+
+    await waitFor(() => {
+      const speaks = ttsSocket()
+        .sent.map((item) => (typeof item === "string" ? JSON.parse(item) : null))
+        .filter((item) => item?.type === "speak");
+      expect(speaks[0]?.text).toBe(
+        "有 2 个工具审批待处理。第 1 个，共 2 个。需要审批：需要搜索近年操作系统论文。请说允许、始终允许或拒绝。",
+      );
+    });
+
+    act(() => {
+      useChatStore.getState().updateApprovalStatus("s1", "toolu_1", "approved");
+    });
+    await waitFor(() =>
+      expect(requestVoiceSummary).toHaveBeenCalledWith(
+        "s1",
+        "toolu_2",
+        expect.stringContaining("/tmp/package.json"),
+        "approval",
+      ),
+    );
+
+    ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
+
+    await waitFor(() => {
+      const speaks = ttsSocket()
+        .sent.map((item) => (typeof item === "string" ? JSON.parse(item) : null))
+        .filter((item) => item?.type === "speak");
+      expect(speaks.map((item) => item.text)).toContain(
+        "需要审批：需要读取项目配置文件。请说允许、始终允许或拒绝。",
+      );
+    });
+  });
+
   it("enters approval immediately even while the spoken approval summary is still pending", async () => {
     requestVoiceSummary.mockReturnValueOnce(new Promise(() => undefined));
     useVoicePilotStore.getState().enable("s1");

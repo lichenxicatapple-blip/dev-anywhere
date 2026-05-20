@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONF="$ROOT/apps/web/nginx.conf"
 DOCKERFILE="$ROOT/apps/web/Dockerfile"
 

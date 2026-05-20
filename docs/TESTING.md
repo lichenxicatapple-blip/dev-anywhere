@@ -51,7 +51,7 @@ e2e/pc/chaos/
 
 **mock chaos**: 浏览器层 fakeRelay 模拟协议级故障 (重连 / 乱序 / stale snapshot / dedupe). 自给自足, 任何 vite 在线即可跑.
 
-**integration chaos**: 真 relay/proxy daemon + 真 chaos provider 二进制注入 (provider 自杀 / 进程重启 / relay duplicate-delay-reorder). 由 `scripts/dev-chaos.sh` 编排环境后驱动 spec 跑. 当前架构 (vite proxy target 启动时静态读 env) 决定它们没法 fixture 化 — 详见 `apps/web/e2e/fixtures/cdp.ts` 注释.
+**integration chaos**: 真 relay/proxy daemon + 真 chaos provider 二进制注入 (provider 自杀 / 进程重启 / relay duplicate-delay-reorder). 由 `scripts/dev/chaos.sh` 编排环境后驱动 spec 跑. 当前架构 (vite proxy target 启动时静态读 env) 决定它们没法 fixture 化 — 详见 `apps/web/e2e/fixtures/cdp.ts` 注释.
 
 ## fixture 选型
 
@@ -151,12 +151,12 @@ pnpm release:smoke                        # L2 + L3 + L4 + dev:chaos 串起来
 pnpm release:check                        # 构建产物校验 + 安装包冒烟
 
 # 单 spec 快速跑:
-WEB_BASE_URL=http://127.0.0.1:5173 bash scripts/test-pc.sh e2e/pc/pty-input.spec.ts
-bash scripts/test-mobile.sh e2e/mobile/pty-cursor-visible.spec.ts
+WEB_BASE_URL=http://127.0.0.1:5173 bash scripts/test/pc.sh e2e/pc/pty-input.spec.ts
+bash scripts/test/mobile.sh e2e/mobile/pty-cursor-visible.spec.ts
 ```
 
 ## L4 mobile 工程注意
 
-Android Chrome over CDP 三条平台限制 (cdp.ts 注释里有详): newContext 不支持 / page.close 不真删 tab / addInitScript 不能 unregister. `scripts/test-mobile.sh` 通过 per-spec-file force-stop chrome + CDP `/json/close` 真删 stale tab 来规避. 同 spec file 内多 test 共享 page (worker scope), spec 自己用 `setupPtyChat` / `installFakeRelay+reload` reset state.
+Android Chrome over CDP 三条平台限制 (cdp.ts 注释里有详): newContext 不支持 / page.close 不真删 tab / addInitScript 不能 unregister. `scripts/test/mobile.sh` 通过 per-spec-file force-stop chrome + CDP `/json/close` 真删 stale tab 来规避. 同 spec file 内多 test 共享 page (worker scope), spec 自己用 `setupPtyChat` / `installFakeRelay+reload` reset state.
 
 如果在 emu 上看到 `Target page, context or browser has been closed`, 一般是 chrome session 累积了几十个 stale tab, 手动 `adb shell am force-stop com.android.chrome` 后再跑 (test-mobile.sh 会自动 reset).

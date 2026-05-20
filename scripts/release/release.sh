@@ -9,15 +9,15 @@
 # 不替你写——发布说明是创意工作, 自动生成不靠谱。
 #
 # 用法:
-#   bash scripts/release.sh 0.2.2
-#   bash scripts/release.sh --emergency 0.2.2
+#   bash scripts/release/release.sh 0.2.2
+#   bash scripts/release/release.sh --emergency 0.2.2
 #
 # 紧急发布模式只跳过 release:smoke, 仍保留 release:check 的构建与打包完整性门禁。
-# 也可以用 RELEASE_EMERGENCY=1 bash scripts/release.sh 0.2.2。
+# 也可以用 RELEASE_EMERGENCY=1 bash scripts/release/release.sh 0.2.2。
 # 幂等: 失败重跑会检测 commit / tag 是否已存在并跳过, 不会创建重复 commit。
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 EMERGENCY="${RELEASE_EMERGENCY:-0}"
@@ -49,9 +49,9 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [[ -z "$TARGET_VERSION" ]]; then
-  echo "usage: bash scripts/release.sh <version>" >&2
-  echo "       bash scripts/release.sh --emergency <version>" >&2
-  echo "  example: bash scripts/release.sh 0.2.2" >&2
+  echo "usage: bash scripts/release/release.sh <version>" >&2
+  echo "       bash scripts/release/release.sh --emergency <version>" >&2
+  echo "  example: bash scripts/release/release.sh 0.2.2" >&2
   echo "  emergency: skips release:smoke only; release:check still runs" >&2
   exit 2
 fi

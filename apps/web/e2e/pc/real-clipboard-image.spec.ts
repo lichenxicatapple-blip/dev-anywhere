@@ -40,7 +40,7 @@ async function run(command: string, args: string[], env: NodeJS.ProcessEnv = {})
 }
 
 async function restartRelay(): Promise<void> {
-  await run("bash", ["scripts/dev-relay-restart.sh", "--relay-port", relayPort]);
+  await run("bash", ["scripts/dev/relay-restart.sh", "--relay-port", relayPort]);
 }
 
 async function ensureProxyInitialized(): Promise<void> {

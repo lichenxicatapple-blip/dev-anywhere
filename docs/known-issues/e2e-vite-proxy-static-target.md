@@ -22,7 +22,7 @@ E2E fixture (`apps/web/e2e/fixtures/local-runtime.ts`) 起的 isolated relay+pro
 
 - E2E fixture 只用作 protocol-level 验证 (ClientWs 走 relay-control 协议).
 - 需要 web UI 端到端的 spec 用 `installFakeRelay` 浏览器层 mock 协议 (browser-level fakeRelay, 见 `apps/web/e2e/helpers.ts`).
-- integration chaos 由 `scripts/dev-chaos.sh` 在外部编排真后端 + 真 chaos provider 二进制注入, spec 通过 vite default proxy 连标准端口.
+- integration chaos 由 `scripts/dev/chaos.sh` 在外部编排真后端 + 真 chaos provider 二进制注入, spec 通过 vite default proxy 连标准端口.
 
 ## 触发条件
 

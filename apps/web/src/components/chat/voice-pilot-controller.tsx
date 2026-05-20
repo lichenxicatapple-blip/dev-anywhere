@@ -131,6 +131,22 @@ function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalReq
   return approvals.find((approval) => approval.status === "pending") ?? null;
 }
 
+function pendingApprovalQueue(approvals: ToolApprovalRequest[]): ToolApprovalRequest[] {
+  return approvals.filter((approval) => approval.status === "pending");
+}
+
+function approvalQueueContext(
+  approvals: ToolApprovalRequest[],
+  requestId: string,
+): { position: number; total: number } {
+  const queue = pendingApprovalQueue(approvals);
+  const index = queue.findIndex((approval) => approval.requestId === requestId);
+  return {
+    position: index >= 0 ? index + 1 : 1,
+    total: Math.max(1, queue.length),
+  };
+}
+
 function pcmActivityLevel(chunk: Uint8Array): number {
   if (chunk.byteLength < 2) return 0;
   const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
@@ -191,9 +207,13 @@ function approvalSummarySource(approval: ToolApprovalRequest): string {
   ].join("\n");
 }
 
-function approvalPromptText(summary: string): string {
+function approvalPromptText(summary: string, queue?: { position: number; total: number }): string {
   const trimmed = summary.trim().replace(/[。.!?！？\s]+$/u, "");
-  return `需要审批：${trimmed || "有一个工具操作正在等待审批"}。请说允许、始终允许或拒绝。`;
+  const body = `需要审批：${trimmed || "有一个工具操作正在等待审批"}`;
+  if (queue && queue.total > 1) {
+    return `有 ${queue.total} 个工具审批待处理。第 ${queue.position} 个，共 ${queue.total} 个。${body}。请说允许、始终允许或拒绝。`;
+  }
+  return `${body}。请说允许、始终允许或拒绝。`;
 }
 
 function speechTextFingerprint(text: string): string {
@@ -211,6 +231,14 @@ function defaultVoiceTurnIdleMs(): number {
     return override;
   }
   return VOICE_TURN_IDLE_MS;
+}
+
+function voiceTurnIdleMsFromSeconds(seconds: unknown, fallbackMs: number): number {
+  if (typeof seconds !== "number" || !Number.isSafeInteger(seconds) || seconds <= 0) {
+    return fallbackMs;
+  }
+  const ms = seconds * 1000;
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : fallbackMs;
 }
 
 export function VoicePilotController({
@@ -249,6 +277,7 @@ export function VoicePilotController({
   const speechQueueRef = useRef<SpeechQueueItem[]>([]);
   const activeSpeechRef = useRef<SpeechQueueItem | null>(null);
   const turnBufferRef = useRef<VoiceTurnBuffer | null>(null);
+  const configuredTurnIdleMsRef = useRef(turnIdleMs);
   const spokenAssistantTextByIdRef = useRef<Map<string, string>>(new Map());
   const assistantHistoryPrimedRef = useRef(false);
   const spokenApprovalRequestIdRef = useRef<string | null>(null);
@@ -426,7 +455,13 @@ export function VoicePilotController({
         if (!voicePilotEnabled()) return;
         const currentApproval = firstPendingApproval(approvalsRef.current);
         if (currentApproval?.requestId !== approval.requestId) return;
-        enqueueApprovalText(approval, approvalPromptText(summary));
+        enqueueApprovalText(
+          approval,
+          approvalPromptText(
+            summary,
+            approvalQueueContext(approvalsRef.current, approval.requestId),
+          ),
+        );
       } catch (err) {
         scheduledApprovalRequestIdsRef.current.delete(approval.requestId);
         useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "审批播报失败"));
@@ -517,6 +552,10 @@ export function VoicePilotController({
         await sendMachineEvent({ type: "providerError", error: "请先在设置里配置 Voice Pilot。" });
         return;
       }
+      configuredTurnIdleMsRef.current = voiceTurnIdleMsFromSeconds(
+        result.config.turnIdleSeconds,
+        turnIdleMs,
+      );
       await sendMachineEvent({ type: "configReady" });
       if (!voicePilotEnabled()) return;
       ensureVoiceRuntime();
@@ -911,7 +950,7 @@ export function VoicePilotController({
     if (turnBufferRef.current || asrRef.current || ttsRef.current || playerRef.current) return;
 
     turnBufferRef.current = new VoiceTurnBuffer({
-      idleTimeoutMs: turnIdleMs,
+      idleTimeoutMs: configuredTurnIdleMsRef.current,
       onTurnReady: (text) => {
         void handleCompletedVoiceTurn(text);
       },

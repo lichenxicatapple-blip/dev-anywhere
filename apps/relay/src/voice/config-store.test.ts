@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVoiceConfigStore } from "./config-store.js";
@@ -25,6 +25,7 @@ describe("createVoiceConfigStore", () => {
       asrModel: "qwen3-asr-flash-realtime",
       ttsModel: "cosyvoice-v3-flash",
       ttsVoice: "longanyang",
+      turnIdleSeconds: 3,
     });
   });
 
@@ -38,6 +39,7 @@ describe("createVoiceConfigStore", () => {
       asrModel: "qwen3-asr-flash-realtime-2026-02-10",
       ttsModel: "cosyvoice-v3-flash",
       ttsVoice: "longanyang",
+      turnIdleSeconds: 5,
     });
 
     expect(config).toEqual({
@@ -47,6 +49,7 @@ describe("createVoiceConfigStore", () => {
       asrModel: "qwen3-asr-flash-realtime-2026-02-10",
       ttsModel: "cosyvoice-v3-flash",
       ttsVoice: "longanyang",
+      turnIdleSeconds: 5,
     });
     expect(store.read()).not.toHaveProperty("apiKey");
     expect(readFileSync(join(dataDir, "voice-config.json"), "utf8")).toContain("sk-secret");
@@ -62,6 +65,22 @@ describe("createVoiceConfigStore", () => {
       ttsVoice: "longxiaochun_v2",
     });
     expect(readFileSync(join(dataDir, "voice-config.json"), "utf8")).toContain("sk-secret");
+  });
+
+  it("defaults old config files without voice turn idle timeout", () => {
+    const store = createVoiceConfigStore({ dataDir });
+    store.update({ apiKey: "sk-secret" });
+    const raw = JSON.parse(readFileSync(join(dataDir, "voice-config.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    delete raw.turnIdleSeconds;
+    const file = join(dataDir, "voice-config.json");
+    // Simulate a pre-setting persisted config; the store should migrate it at read time.
+    writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
+
+    expect(store.read().turnIdleSeconds).toBe(3);
+    expect(store.readSecret().turnIdleSeconds).toBe(3);
   });
 
   it("clears the existing API key when requested", () => {

@@ -3,7 +3,7 @@
 # Read-only diagnostics. Run `pnpm dev:restart` first when services need a restart.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 RELAY_PORT="3100"
@@ -17,7 +17,7 @@ PROXY_LOG_DIR=""
 usage() {
   cat >&2 <<'EOF'
 usage:
-  scripts/dev-health.sh [--profile <name>] [--relay-port <port>] [--web-port <port>]
+  scripts/dev/health.sh [--profile <name>] [--relay-port <port>] [--web-port <port>]
 
 Defaults:
   --profile  auto-resolved from config (whichever profile points at the local relay URL)

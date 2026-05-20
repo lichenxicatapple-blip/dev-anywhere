@@ -2,7 +2,7 @@
 # Tier 2 - Playwright viewport, 布局/响应式断点回归. e2e/layout/ 下全 spec.
 # 触屏 / IME / 字体 / canvas 渲染由 L4 (test-mobile.sh, Android emu) 负责.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 source "$ROOT/scripts/lib/smoke-common.sh"
 

@@ -95,6 +95,7 @@ describe("voice config relay controls", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 3,
       },
     });
   });
@@ -114,6 +115,7 @@ describe("voice config relay controls", () => {
           asrModel: "qwen3-asr-flash-realtime-2026-02-10",
           ttsModel: "cosyvoice-v3-flash",
           ttsVoice: "longanyang",
+          turnIdleSeconds: 5,
         },
       }),
     );
@@ -142,6 +144,7 @@ describe("voice config relay controls", () => {
       configured: true,
       region: "intl",
       asrModel: "qwen3-asr-flash-realtime-2026-02-10",
+      turnIdleSeconds: 5,
     });
     expect(JSON.stringify(readResponse)).not.toContain("sk-secret");
   });
@@ -236,6 +239,7 @@ describe("voice config relay controls", () => {
           asrModel: "qwen3-asr-flash-realtime",
           ttsModel: "cosyvoice-v3-plus",
           ttsVoice: "longanhuan",
+          turnIdleSeconds: 7,
         },
       }),
     );
@@ -254,6 +258,7 @@ describe("voice config relay controls", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-plus",
         ttsVoice: "longanhuan",
+        turnIdleSeconds: 7,
       },
     ]);
 

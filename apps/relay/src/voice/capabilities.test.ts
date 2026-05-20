@@ -17,6 +17,7 @@ describe("Bailian voice capabilities provider", () => {
       asrModel: "ignored-asr",
       ttsModel: "ignored-tts",
       ttsVoice: "ignored-voice",
+      turnIdleSeconds: 3,
     });
 
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -94,6 +95,7 @@ describe("Bailian voice capabilities provider", () => {
       asrModel: "ignored-asr",
       ttsModel: "ignored-tts",
       ttsVoice: "ignored-voice",
+      turnIdleSeconds: 3,
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -131,6 +133,7 @@ describe("Bailian voice capabilities provider", () => {
       asrModel: "ignored-asr",
       ttsModel: "ignored-tts",
       ttsVoice: "ignored-voice",
+      turnIdleSeconds: 3,
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);

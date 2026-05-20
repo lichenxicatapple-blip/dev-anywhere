@@ -91,6 +91,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanhuan-live",
+        turnIdleSeconds: 3,
       },
     });
     updateVoiceConfig.mockReset();
@@ -105,6 +106,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanlang-live",
+        turnIdleSeconds: 6,
       },
     });
     vi.stubGlobal(
@@ -148,6 +150,9 @@ describe("SettingsDialog", () => {
     fireEvent.change(screen.getByLabelText("语音音色"), {
       target: { value: "longanlang-live" },
     });
+    fireEvent.change(screen.getByLabelText("结束停顿时间（秒）"), {
+      target: { value: "6" },
+    });
     const saveButton = screen.getByRole("button", { name: "保存" });
     expect(saveButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(saveButton);
@@ -159,6 +164,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanlang-live",
+        turnIdleSeconds: 6,
       });
     });
     expect(await screen.findByText("已保存")).not.toBeNull();
@@ -236,6 +242,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanlang-live",
+        turnIdleSeconds: 3,
       });
     });
     expect(playerEnqueue).toHaveBeenCalledWith(new Uint8Array([1, 2]));
@@ -258,6 +265,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanhuan-live",
+        turnIdleSeconds: 3,
       },
     });
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
@@ -278,6 +286,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash-live",
         ttsVoice: "longanhuan-live",
+        turnIdleSeconds: 3,
       });
     });
   });
@@ -308,6 +317,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime-live",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanhuan",
+        turnIdleSeconds: 3,
       },
     });
     requestVoiceCapabilities.mockResolvedValueOnce({
@@ -365,6 +375,7 @@ describe("SettingsDialog", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
+        turnIdleSeconds: 3,
       },
     });
     requestVoiceCapabilities.mockRejectedValueOnce(new Error("读取语音能力列表超时"));

@@ -44,6 +44,7 @@ function baseConfig(overrides: Partial<StoredVoiceConfig> = {}): StoredVoiceConf
     asrModel: "qwen3-asr-flash-realtime",
     ttsModel: "cosyvoice-v3-flash",
     ttsVoice: "longanyang",
+    turnIdleSeconds: 3,
     ...overrides,
   };
 }
@@ -64,6 +65,7 @@ describe("Voice config tester", () => {
       asrModel: "qwen3-asr-flash-realtime",
       ttsModel: "cosyvoice-v3-plus",
       ttsVoice: "longanhuan",
+      turnIdleSeconds: 3,
     });
   });
 

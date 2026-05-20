@@ -4,11 +4,11 @@
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./install-relay.sh --ssh user@vps-host dev-anywhere.example.com
+#        ./scripts/deploy/install-relay.sh --ssh user@vps-host dev-anywhere.example.com
 #      Requires ssh-key access to the remote host and sudo for that user.
 #
 #   2) Run directly on the VPS:
-#        sudo ./install-relay.sh dev-anywhere.example.com
+#        sudo ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 #
 # Arguments:
 #   domain — public DNS name with an A record pointing at the VPS.
@@ -40,7 +40,7 @@ set -euo pipefail
 
 if ! declare -F render_dev_anywhere_compose >/dev/null 2>&1; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-  RENDER_LIB="$SCRIPT_DIR/lib/install-relay-render.sh"
+  RENDER_LIB="$SCRIPT_DIR/../lib/install-relay-render.sh"
   if [ -f "$RENDER_LIB" ]; then
     # shellcheck source=scripts/lib/install-relay-render.sh
     source "$RENDER_LIB"
@@ -60,7 +60,7 @@ if [ "${1:-}" = "--ssh" ]; then
     exit 1
   fi
   SELF_DIR="$(cd "$(dirname "$SELF_PATH")" && pwd)"
-  RENDER_LIB="$SELF_DIR/lib/install-relay-render.sh"
+  RENDER_LIB="$SELF_DIR/../lib/install-relay-render.sh"
   if [ ! -f "$RENDER_LIB" ]; then
     echo "error: missing $RENDER_LIB" >&2
     exit 1
@@ -287,7 +287,7 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."
   echo
   echo "To upgrade later:"
-  echo "  sudo env IMAGE_TAG=$IMAGE_TAG ./scripts/install-relay.sh $DOMAIN"
+  echo "  sudo env IMAGE_TAG=$IMAGE_TAG ./scripts/deploy/install-relay.sh $DOMAIN"
 else
   echo "error: health check failed; run 'docker compose logs' in $INSTALL_DIR to investigate" >&2
   exit 1

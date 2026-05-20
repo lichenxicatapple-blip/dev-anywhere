@@ -53,6 +53,7 @@ function createHarness() {
     asrModel: "qwen3-asr-flash-realtime",
     ttsModel: "cosyvoice-v3-flash",
     ttsVoice: "longanhuan",
+    turnIdleSeconds: 3,
     apiKey: "sk-test",
   };
   const store = {
