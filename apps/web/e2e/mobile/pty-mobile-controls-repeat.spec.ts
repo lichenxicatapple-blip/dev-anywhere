@@ -19,15 +19,39 @@ test.describe("L4 mobile / PTY soft controls long-press repeat", () => {
     // 直接派 PointerEvent (emu Chrome 上 Playwright mouse.down/up 不一定能触发 React
     // onPointerDown 的 hold 流程, dispatchEvent 显式派事件最可靠).
     await left.evaluate((el) =>
-      el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })),
+      el.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerId: 1,
+          pointerType: "touch",
+          isPrimary: true,
+          buttons: 1,
+        }),
+      ),
     );
-    // hold 600ms 让 hold 阈值过 + repeat 多次 (300ms 阈值 + 50ms 间隔 = ~6 次).
-    await emuPage.waitForTimeout(600);
-    await left.evaluate((el) => el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
-
-    // raw input 应包含至少 3 次 ESC[D (1 首发 + hold 后多次 repeat).
-    const raw = await readRawPtyInput(emuPage);
-    const occurrences = raw.split("[D").length - 1;
-    expect(occurrences).toBeGreaterThanOrEqual(3);
+    try {
+      // raw input 应包含至少 3 次 ESC[D (1 首发 + hold 后多次 repeat). 这里按住期间
+      // 轮询, 不用固定 sleep 卡边界, 避免 Android emu 在负载下 timer 稍慢时首跑 flaky。
+      await expect
+        .poll(
+          async () => {
+            const raw = await readRawPtyInput(emuPage);
+            return raw.split("[D").length - 1;
+          },
+          { timeout: 1_500 },
+        )
+        .toBeGreaterThanOrEqual(3);
+    } finally {
+      await left.evaluate((el) =>
+        el.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            pointerId: 1,
+            pointerType: "touch",
+            isPrimary: true,
+          }),
+        ),
+      );
+    }
   });
 });

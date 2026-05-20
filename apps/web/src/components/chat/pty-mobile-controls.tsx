@@ -274,6 +274,7 @@ function RepeatableKey({ label, slot, icon: Icon, onPress }: RepeatableKeyProps)
     onPress();
     initialTimerRef.current = window.setTimeout(() => {
       initialTimerRef.current = null;
+      onPress();
       intervalTimerRef.current = window.setInterval(onPress, REPEAT_INTERVAL_MS);
     }, REPEAT_INITIAL_DELAY_MS);
   };

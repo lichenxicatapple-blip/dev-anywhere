@@ -54,4 +54,40 @@ describe("PtyMobileControls", () => {
 
     expect(onInput).toHaveBeenCalledTimes(2);
   });
+
+  it("repeats arrow input immediately after the long-press threshold", () => {
+    vi.useFakeTimers();
+    const onInput = vi.fn();
+    const onPaste = vi.fn();
+
+    render(<PtyMobileControls onInput={onInput} onPaste={onPaste} />);
+
+    const leftButton = document.querySelector('[data-slot="pty-mobile-key-left"]')!;
+    fireEvent.pointerDown(leftButton);
+
+    expect(onInput).toHaveBeenCalledTimes(1);
+    expect(onInput).toHaveBeenLastCalledWith("\x1b[D");
+
+    act(() => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(onInput).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(onInput).toHaveBeenCalledTimes(2);
+    expect(onInput).toHaveBeenLastCalledWith("\x1b[D");
+
+    act(() => {
+      vi.advanceTimersByTime(50);
+    });
+    expect(onInput).toHaveBeenCalledTimes(3);
+
+    fireEvent.pointerUp(leftButton);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(onInput).toHaveBeenCalledTimes(3);
+  });
 });

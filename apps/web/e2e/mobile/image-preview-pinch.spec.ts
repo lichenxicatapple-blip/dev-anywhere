@@ -4,8 +4,74 @@
 // 这里只钉 pinch 一个交互, 不重复测库的 reset 行为。
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { installFakeRelay } from "../helpers";
+import type { Page } from "@playwright/test";
 
 const PATH = ".dev-anywhere/clipboard/test-sess/pinch.png";
+
+const IDENTITY_TRANSFORM = /^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/;
+
+async function openPreview(page: Page): Promise<void> {
+  const input = page.getByLabel("输入聊天消息");
+  await expect(input).toBeVisible({ timeout: 30_000 });
+  await input.click();
+  await input.fill(`inspect @${PATH}`);
+  await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+  await page.locator('[data-slot="inline-image-preview-link"]', { hasText: PATH }).click();
+
+  await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
+  await expect(page.locator('[data-slot="image-preview-stage"]')).toBeVisible();
+  await expect(page.locator('[data-slot="image-preview-img"]')).toHaveAttribute(
+    "data-loaded",
+    "true",
+    { timeout: 15_000 },
+  );
+  await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
+}
+
+async function dispatchBoundedPinch(page: Page): Promise<void> {
+  const stage = page.locator('[data-slot="image-preview-stage"]');
+  const stageBox = await stage.boundingBox();
+  expect(stageBox).not.toBeNull();
+
+  const margin = 28;
+  const cx = stageBox!.x + stageBox!.width / 2;
+  const cy = stageBox!.y + stageBox!.height / 2;
+  const maxOffset = Math.floor(
+    Math.max(36, Math.min(150, stageBox!.width / 2 - margin, stageBox!.height / 2 - margin)),
+  );
+  expect(maxOffset).toBeGreaterThan(28);
+
+  // Keep both fingers inside the preview stage. The previous ±200px gesture can
+  // leave a 360/390px mobile viewport after dialog padding, and Android Chrome's
+  // native touch path may drop that first-run gesture instead of delivering a
+  // deterministic pinch sequence.
+  const offsets = [24, 36, 52, 72, 96, 122, maxOffset].filter(
+    (offset, index, values) => offset <= maxOffset && values.indexOf(offset) === index,
+  );
+  const touchPoints = (offset: number) => [
+    { x: cx - offset, y: cy, id: 1, radiusX: 4, radiusY: 4, force: 1 },
+    { x: cx + offset, y: cy, id: 2, radiusX: 4, radiusY: 4, force: 1 },
+  ];
+
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: touchPoints(offsets[0] ?? 24),
+    });
+    for (const offset of offsets.slice(1)) {
+      await page.waitForTimeout(45);
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: touchPoints(offset),
+      });
+    }
+    await page.waitForTimeout(45);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
 
 test.describe("L4 mobile / image preview pinch zoom", () => {
   test.setTimeout(60_000);
@@ -15,47 +81,17 @@ test.describe("L4 mobile / image preview pinch zoom", () => {
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
     await emuPage.reload();
 
-    const input = emuPage.getByLabel("输入聊天消息");
-    await expect(input).toBeVisible({ timeout: 30_000 });
-    await input.click();
-    await input.fill(`inspect @${PATH}`);
-    await emuPage.locator('[data-slot="send-button"][data-variant="send"]').click();
-    await emuPage.locator('[data-slot="inline-image-preview-link"]', { hasText: PATH }).click();
-
-    await expect(emuPage.locator('[data-slot="image-preview-img"]')).toHaveAttribute(
-      "data-loaded",
-      "true",
-      { timeout: 15_000 },
-    );
-
-    const stage = emuPage.locator('[data-slot="image-preview-stage"]');
-    const stageBox = await stage.boundingBox();
-    expect(stageBox).not.toBeNull();
-    const cx = stageBox!.x + stageBox!.width / 2;
-    const cy = stageBox!.y + stageBox!.height / 2;
-
-    // CDP Input.dispatchTouchEvent 在真 Android Chrome 上走 native touch driver;
-    // 两指从中心 ±20 滑开到 ±200 (6 步), lib 的 onTouchPanning 在 touches.length===2
-    // 时进入 pinch 分支, 算两指距离变化转 scale。
-    const cdp = await emuPage.context().newCDPSession(emuPage);
-    const points = (offset: number) => [
-      { x: cx - offset, y: cy, id: 1 },
-      { x: cx + offset, y: cy, id: 2 },
-    ];
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(20) });
-    for (const offset of [40, 80, 120, 160, 200]) {
-      await cdp.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: points(offset),
-      });
-    }
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await openPreview(emuPage);
+    await dispatchBoundedPinch(emuPage);
 
     const transform = emuPage.locator(
       '[data-slot="image-preview-stage"] .react-transform-component',
     );
     await expect
-      .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-      .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
+      .poll(() => transform.evaluate((el) => getComputedStyle(el).transform), {
+        message: "pinch should zoom the image preview out of identity transform",
+        timeout: 10_000,
+      })
+      .not.toMatch(IDENTITY_TRANSFORM);
   });
 });
