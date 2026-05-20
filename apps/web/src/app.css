@@ -450,9 +450,19 @@ code.hljs,
   padding-inline: 0.875rem;
 }
 
+.dev-chat-input-rail-inset {
+  padding-inline-start: 0.875rem;
+  padding-inline-end: calc(0.875rem + 11px);
+}
+
 @media (min-width: 640px) {
   .dev-chat-rail-inset {
     padding-inline: 1rem;
+  }
+
+  .dev-chat-input-rail-inset {
+    padding-inline-start: 1rem;
+    padding-inline-end: calc(1rem + 11px);
   }
 }
 
