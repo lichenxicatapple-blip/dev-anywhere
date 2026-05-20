@@ -783,4 +783,64 @@ describe("RelayClient request handling", () => {
     await expect(first).resolves.toMatchObject({ sessionId: "first-session" });
     await expect(second).resolves.toMatchObject({ sessionId: "second-session" });
   });
+
+  it("measures Web to Relay latency by requestId", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.measureWebRelayLatency();
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "latency_web_relay_ping",
+      requestId,
+    });
+
+    ws.emit({ type: "latency_web_relay_pong", requestId });
+
+    await expect(promise).resolves.toMatchObject({
+      success: true,
+      rttMs: expect.any(Number),
+    });
+  });
+
+  it("measures Relay to proxy latency from relay response payload", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.measureRelayProxyLatency();
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "latency_relay_proxy_request",
+      requestId,
+    });
+
+    ws.emit({
+      type: "latency_relay_proxy_response",
+      requestId,
+      success: true,
+      rttMs: 24.5,
+    });
+
+    await expect(promise).resolves.toEqual({
+      success: true,
+      rttMs: 24.5,
+      error: undefined,
+    });
+  });
+
+  it("measures Web to proxy latency by requestId", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.measureWebProxyLatency();
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "latency_web_proxy_ping",
+      requestId,
+    });
+
+    ws.emit({ type: "latency_web_proxy_pong", requestId });
+
+    await expect(promise).resolves.toMatchObject({
+      success: true,
+      rttMs: expect.any(Number),
+    });
+  });
 });

@@ -18,6 +18,7 @@ import type {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
+const LATENCY_PROBE_TIMEOUT_MS = 3_000;
 
 export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
@@ -127,6 +128,11 @@ type VoiceSummaryResult = {
   success: boolean;
   summary?: string;
 } & RequestError;
+export type LatencyProbeResult = {
+  success: boolean;
+  rttMs?: number;
+  error?: string;
+};
 type RequestError = { error?: string; errorCode?: ControlErrorCodeType };
 
 let requestSeq = 0;
@@ -582,6 +588,54 @@ export class RelayClient {
       summary: resp.summary,
       error: resp.error,
       errorCode: resp.errorCode,
+    }));
+  }
+
+  measureWebRelayLatency(timeoutMs = LATENCY_PROBE_TIMEOUT_MS): Promise<LatencyProbeResult> {
+    const requestId = nextRequestId("latency-web-relay");
+    const startedAt = performance.now();
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "latency_web_relay_pong" }> =>
+        msg.type === "latency_web_relay_pong" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "latency_web_relay_ping", requestId })),
+      "Web 到 Relay 测速超时",
+      timeoutMs,
+      requestId,
+    ).then(() => ({
+      success: true,
+      rttMs: performance.now() - startedAt,
+    }));
+  }
+
+  measureRelayProxyLatency(timeoutMs = LATENCY_PROBE_TIMEOUT_MS): Promise<LatencyProbeResult> {
+    const requestId = nextRequestId("latency-relay-proxy");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "latency_relay_proxy_response" }> =>
+        msg.type === "latency_relay_proxy_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "latency_relay_proxy_request", requestId })),
+      "Relay 到开发机测速超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      rttMs: resp.rttMs,
+      error: resp.error,
+    }));
+  }
+
+  measureWebProxyLatency(timeoutMs = LATENCY_PROBE_TIMEOUT_MS): Promise<LatencyProbeResult> {
+    const requestId = nextRequestId("latency-web-proxy");
+    const startedAt = performance.now();
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "latency_web_proxy_pong" }> =>
+        msg.type === "latency_web_proxy_pong" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "latency_web_proxy_ping", requestId })),
+      "Web 到开发机测速超时",
+      timeoutMs,
+      requestId,
+    ).then(() => ({
+      success: true,
+      rttMs: performance.now() - startedAt,
     }));
   }
 

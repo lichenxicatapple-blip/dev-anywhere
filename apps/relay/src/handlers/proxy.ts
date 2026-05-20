@@ -8,6 +8,7 @@ import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
+import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 
 // binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
 const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
@@ -177,6 +178,25 @@ export function handleProxyConnection(
         registry.addSessionToProxy(proxyWs.proxyId, s.id);
       }
       logger.info({ proxyId: proxyWs.proxyId, count: sessions.length }, "Session sync received");
+      return;
+    }
+
+    if (result.kind === "control" && result.message.type === "latency_relay_proxy_pong") {
+      if (!proxyWs.proxyId) {
+        rejectNotRegistered(proxyWs);
+        return;
+      }
+      const completed = completeRelayProxyLatencyProbe({
+        proxyId: proxyWs.proxyId,
+        requestId: result.message.requestId,
+        logger,
+      });
+      if (!completed) {
+        logger.debug(
+          { proxyId: proxyWs.proxyId, requestId: result.message.requestId },
+          "Unmatched relay-proxy latency pong ignored",
+        );
+      }
       return;
     }
 

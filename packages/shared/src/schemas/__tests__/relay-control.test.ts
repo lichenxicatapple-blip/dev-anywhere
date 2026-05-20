@@ -816,4 +816,25 @@ describe("RelayControlSchema", () => {
     expect(ClientToProxyRelayControlTypes.has("terminal_resize_request")).toBe(true);
     expect(ProxyToClientRelayControlTypes.has("terminal_resize_request")).toBe(false);
   });
+
+  it("parses latency probe controls and keeps relay-local probes out of forwarding sets", () => {
+    expect(
+      RelayControlSchema.parse({ type: "latency_web_relay_ping", requestId: "latency-1" }),
+    ).toEqual({ type: "latency_web_relay_ping", requestId: "latency-1" });
+    expect(
+      RelayControlSchema.parse({
+        type: "latency_relay_proxy_response",
+        requestId: "latency-2",
+        success: true,
+        rttMs: 42,
+      }),
+    ).toMatchObject({ type: "latency_relay_proxy_response", success: true, rttMs: 42 });
+
+    expect(isClientToProxyRelayControlType("latency_web_proxy_ping")).toBe(true);
+    expect(isProxyToClientRelayControlType("latency_web_proxy_pong")).toBe(true);
+    expect(isClientToProxyRelayControlType("latency_relay_proxy_request")).toBe(false);
+    expect(isClientToProxyRelayControlType("latency_relay_proxy_ping")).toBe(false);
+    expect(isProxyToClientRelayControlType("latency_relay_proxy_response")).toBe(false);
+    expect(isProxyToClientRelayControlType("latency_relay_proxy_pong")).toBe(false);
+  });
 });

@@ -161,6 +161,12 @@ export class RelayRouter {
       case "remote_input_raw":
         this.inputHandlers.onRemoteInputRaw(msg);
         return;
+      case "latency_web_proxy_ping":
+        this.onWebProxyLatencyPing(msg);
+        return;
+      case "latency_relay_proxy_ping":
+        this.onRelayProxyLatencyPing(msg);
+        return;
       case "clipboard_image_upload":
         this.inputHandlers.onClipboardImageUpload(msg);
         return;
@@ -260,6 +266,26 @@ export class RelayRouter {
     }
     this.deps.relaySend(serializeControl({ type: "agent_status_response", requestId, statuses }));
     serviceLogger.info({ count: statuses.length }, "Agent status snapshot sent");
+  }
+
+  private onWebProxyLatencyPing(msg: ControlMessage<"latency_web_proxy_ping">): void {
+    this.deps.relaySend(
+      serializeControl({
+        type: "latency_web_proxy_pong",
+        requestId: msg.requestId,
+        proxyNow: Date.now(),
+      }),
+    );
+  }
+
+  private onRelayProxyLatencyPing(msg: ControlMessage<"latency_relay_proxy_ping">): void {
+    this.deps.relaySend(
+      serializeControl({
+        type: "latency_relay_proxy_pong",
+        requestId: msg.requestId,
+        proxyNow: Date.now(),
+      }),
+    );
   }
 
   private onSessionTerminate(msg: ControlMessage<"session_terminate">): void {

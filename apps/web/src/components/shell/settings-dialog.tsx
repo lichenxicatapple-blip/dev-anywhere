@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowLeft, AudioLines, ChevronRight, Monitor, Server } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  AudioLines,
+  Check,
+  ChevronRight,
+  Monitor,
+  Server,
+} from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
@@ -52,6 +60,8 @@ function healthUrl(relayUrl: string): string {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const relayUrl = useAppStore((s) => s.relayUrl);
+  const latencyMonitorEnabled = useAppStore((s) => s.latencyMonitorEnabled);
+  const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
 
@@ -177,6 +187,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               label="Voice Pilot"
               onClick={() => setView("voice")}
             />
+            <SettingsToggleItem
+              icon={<Activity className="size-4" aria-hidden="true" />}
+              label="延迟监控"
+              detail="在右上角显示 Web、Relay、开发机链路 RTT"
+              checked={latencyMonitorEnabled}
+              onCheckedChange={setLatencyMonitorEnabled}
+            />
             <SettingsMenuItem
               icon={<Server className="size-4" aria-hidden="true" />}
               label="版本"
@@ -186,6 +203,56 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsToggleItem({
+  icon,
+  label,
+  detail,
+  checked,
+  onCheckedChange,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      onClick={() => onCheckedChange(!checked)}
+      aria-pressed={checked}
+      data-slot="settings-toggle-item"
+    >
+      <div
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors",
+          checked
+            ? "border-primary/45 bg-primary/15 text-primary"
+            : "border-border text-muted-foreground",
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+      </div>
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded border transition-colors",
+          checked
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground/45 bg-transparent",
+        )}
+        aria-hidden="true"
+      >
+        {checked ? <Check className="size-3.5" /> : null}
+      </span>
+    </button>
   );
 }
 

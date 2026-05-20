@@ -4,6 +4,7 @@ import { Monitor, Settings } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { SettingsDialog } from "./settings-dialog";
 import { MobileBrandHero } from "@/components/brand/mobile-brand-hero";
+import { LatencyMonitor } from "@/components/diagnostics/latency-monitor";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
@@ -157,6 +158,7 @@ export function AppShell() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <LatencyMonitor />
       <Toaster />
     </div>
   );

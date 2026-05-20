@@ -3,6 +3,7 @@ import {
   ControlErrorCode,
   isClientToProxyRelayControlType,
   RelayErrorCode,
+  serializeControl,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import { nanoid } from "nanoid";
@@ -12,6 +13,7 @@ import type { RelayChaos } from "../chaos.js";
 import { handleVoiceConfigControl } from "../voice/client-controls.js";
 import type { VoiceConfigStore } from "../voice/config-store.js";
 import type { VoiceProviderRegistry } from "../voice/provider.js";
+import { startRelayProxyLatencyProbe } from "../latency-probes.js";
 
 // JSON 控制消息最大允许长度（1MB）。挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
 const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
@@ -96,6 +98,28 @@ function rejectProxySelect(ws: ClientSocket, requestId: string | undefined, prox
   );
 }
 
+function sendRelayProxyProbeFailure(
+  ws: ClientSocket,
+  requestId: string,
+  error: string,
+  chaos?: RelayChaos,
+): void {
+  const response = serializeControl({
+    type: "latency_relay_proxy_response",
+    requestId,
+    success: false,
+    error,
+  });
+  if (chaos) {
+    chaos.send(ws, response, {
+      direction: "proxy_to_client",
+      type: "latency_relay_proxy_response",
+    });
+    return;
+  }
+  ws.send(response);
+}
+
 // 处理远程客户端 WebSocket 连接生命周期
 export function handleClientConnection(
   ws: WebSocket,
@@ -160,6 +184,50 @@ export function handleClientConnection(
         } else {
           clientWs.send(response);
         }
+        return;
+      }
+
+      if (msg.type === "latency_web_relay_ping") {
+        const response = serializeControl({
+          type: "latency_web_relay_pong",
+          requestId: msg.requestId,
+          relayNow: Date.now(),
+        });
+        if (chaos) {
+          chaos.send(clientWs, response, {
+            direction: "proxy_to_client",
+            type: "latency_web_relay_pong",
+          });
+        } else {
+          clientWs.send(response);
+        }
+        return;
+      }
+
+      if (msg.type === "latency_relay_proxy_request") {
+        const targetProxyId = clientWs.boundProxyId;
+        if (!targetProxyId) {
+          sendRelayProxyProbeFailure(clientWs, msg.requestId, "当前未连接开发机", chaos);
+          return;
+        }
+        const proxyWs = registry.getProxy(targetProxyId);
+        if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
+          sendRelayProxyProbeFailure(
+            clientWs,
+            msg.requestId,
+            `开发机 ${targetProxyId} 不在线`,
+            chaos,
+          );
+          return;
+        }
+        startRelayProxyLatencyProbe({
+          requestId: msg.requestId,
+          proxyId: targetProxyId,
+          proxyWs,
+          clientWs,
+          logger,
+          chaos,
+        });
         return;
       }
 

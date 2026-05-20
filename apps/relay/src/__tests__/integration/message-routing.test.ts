@@ -104,6 +104,45 @@ describe("Message routing integration", () => {
     expect(received.payload.whitelistTool).toBe(true);
   });
 
+  it("answers Web to Relay latency probes directly", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    client.send(JSON.stringify({ type: "latency_web_relay_ping", requestId: "latency-1" }));
+
+    const received = JSON.parse(await msgPromise);
+    expect(received).toMatchObject({
+      type: "latency_web_relay_pong",
+      requestId: "latency-1",
+    });
+    expect(typeof received.relayNow).toBe("number");
+  });
+
+  it("measures Relay to proxy latency through an internal ping/pong", async () => {
+    const { proxy, client } = await setupBoundPair();
+
+    const proxyPingPromise = waitForMessage(proxy);
+    client.send(JSON.stringify({ type: "latency_relay_proxy_request", requestId: "latency-2" }));
+
+    const proxyPing = JSON.parse(await proxyPingPromise);
+    expect(proxyPing).toMatchObject({
+      type: "latency_relay_proxy_ping",
+      requestId: "latency-2",
+    });
+
+    const clientResponsePromise = waitForMessage(client);
+    proxy.send(JSON.stringify({ type: "latency_relay_proxy_pong", requestId: "latency-2" }));
+
+    const received = JSON.parse(await clientResponsePromise);
+    expect(received).toMatchObject({
+      type: "latency_relay_proxy_response",
+      requestId: "latency-2",
+      success: true,
+    });
+    expect(typeof received.rttMs).toBe("number");
+  });
+
   // 跨租户隔离: 客户端 control msg 携带 proxyId 字段时, relay 必须忽略它, 只用 boundProxyId 路由。
   // dir_list_request 的 schema 显式带 proxyId (历史上设计为可指定 proxy), 是这个漏洞的载体——
   // 绑到 p1 的客户端通过 dir_list_request{proxyId:"p2"} 即可读取 p2 的本地目录。

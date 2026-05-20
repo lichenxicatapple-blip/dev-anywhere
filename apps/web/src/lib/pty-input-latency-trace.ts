@@ -302,10 +302,20 @@ function firstDelta(pending: PendingPtyInput[], now: number): number | null {
 function classifyPtyInput(data: string): PtyInputKind {
   if (data === "\r" || data === "\n") return "enter";
   if (data.startsWith("\x1b")) return "escape";
-  if (/[\x00-\x08\x0b-\x1f\x7f]/.test(data)) return "control";
+  if (hasControlCharacter(data)) return "control";
   if (data.length > 16) return "paste";
   if (/[\r\n]/.test(data)) return "mixed";
   return "printable";
+}
+
+function hasControlCharacter(data: string): boolean {
+  for (let i = 0; i < data.length; i += 1) {
+    const code = data.charCodeAt(i);
+    if ((code >= 0 && code <= 8) || (code >= 11 && code <= 31) || code === 127) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function canMatchEcho(input: PendingPtyInput): boolean {

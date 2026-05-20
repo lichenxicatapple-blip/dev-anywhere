@@ -1,0 +1,318 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Check, ChevronDown, Copy, RefreshCw } from "lucide-react";
+import { relayClientRef } from "@/hooks/use-relay-setup";
+import type { LatencyProbeResult } from "@/services/relay-client";
+import { useAppStore } from "@/stores/app-store";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+
+type LinkKey = "webRelay" | "relayProxy" | "webProxy";
+type LinkState = "idle" | "measuring" | "ok" | "warn" | "bad" | "unavailable";
+
+interface LinkMeasurement {
+  state: LinkState;
+  rttMs?: number;
+  error?: string;
+  updatedAt?: number;
+}
+
+type Measurements = Record<LinkKey, LinkMeasurement>;
+
+const ACTIVE_SAMPLE_INTERVAL_MS = 3_000;
+const HIDDEN_SAMPLE_INTERVAL_MS = 10_000;
+
+const LINK_LABELS: Record<LinkKey, string> = {
+  webRelay: "Web ↔ Relay",
+  relayProxy: "Relay ↔ 开发机",
+  webProxy: "Web ↔ 开发机",
+};
+
+const initialMeasurements: Measurements = {
+  webRelay: { state: "idle" },
+  relayProxy: { state: "idle" },
+  webProxy: { state: "idle" },
+};
+
+function classify(result: LatencyProbeResult): LinkMeasurement {
+  if (!result.success || result.rttMs === undefined) {
+    return {
+      state: "unavailable",
+      error: result.error ?? "不可用",
+      updatedAt: Date.now(),
+    };
+  }
+  const rttMs = result.rttMs;
+  return {
+    state: rttMs <= 120 ? "ok" : rttMs <= 300 ? "warn" : "bad",
+    rttMs,
+    updatedAt: Date.now(),
+  };
+}
+
+function unavailable(error: string): LinkMeasurement {
+  return { state: "unavailable", error, updatedAt: Date.now() };
+}
+
+function formatMs(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "--";
+  return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function formatAge(updatedAt: number | undefined): string {
+  if (!updatedAt) return "尚未采样";
+  const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
+  if (seconds < 2) return "刚刚";
+  if (seconds < 60) return `${seconds}s 前`;
+  return `${Math.floor(seconds / 60)}m 前`;
+}
+
+function stateRank(state: LinkState): number {
+  switch (state) {
+    case "bad":
+      return 4;
+    case "unavailable":
+      return 3;
+    case "warn":
+      return 2;
+    case "measuring":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function stateTone(state: LinkState): "ok" | "warn" | "bad" | "neutral" {
+  if (state === "bad" || state === "unavailable") return "bad";
+  if (state === "warn") return "warn";
+  if (state === "ok") return "ok";
+  return "neutral";
+}
+
+function toneClasses(tone: ReturnType<typeof stateTone>): string {
+  switch (tone) {
+    case "ok":
+      return "border-emerald-500/35 bg-emerald-500/10 text-emerald-300";
+    case "warn":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+    case "bad":
+      return "border-destructive/55 bg-destructive/10 text-destructive";
+    default:
+      return "border-border bg-card/90 text-muted-foreground";
+  }
+}
+
+function statusLabel(measurement: LinkMeasurement): string {
+  if (measurement.state === "measuring") return "检测中";
+  if (measurement.state === "unavailable") return measurement.error ?? "不可用";
+  if (measurement.rttMs !== undefined) return formatMs(measurement.rttMs);
+  return "--";
+}
+
+export function LatencyMonitor() {
+  const enabled = useAppStore((s) => s.latencyMonitorEnabled);
+  const connected = useAppStore((s) => s.connected);
+  const proxyOnline = useAppStore((s) => s.proxyOnline);
+  const selectedProxyId = useAppStore((s) => s.selectedProxyId);
+  const [measurements, setMeasurements] = useState<Measurements>(initialMeasurements);
+  const [copied, setCopied] = useState(false);
+  const measuringRef = useRef(false);
+
+  const worstState = useMemo(
+    () =>
+      (
+        Object.values(measurements).sort((a, b) => stateRank(b.state) - stateRank(a.state))[0] ?? {
+          state: "idle",
+        }
+      ).state,
+    [measurements],
+  );
+  const tone = stateTone(worstState);
+
+  async function sample(): Promise<void> {
+    if (measuringRef.current) return;
+    const relay = relayClientRef;
+    if (!relay || !connected) {
+      const offline = unavailable("Relay 未连接");
+      setMeasurements({ webRelay: offline, relayProxy: offline, webProxy: offline });
+      return;
+    }
+
+    measuringRef.current = true;
+    setMeasurements((prev) => ({
+      webRelay: { ...prev.webRelay, state: "measuring" },
+      relayProxy: proxyOnline
+        ? { ...prev.relayProxy, state: "measuring" }
+        : unavailable("未连接开发机"),
+      webProxy: proxyOnline
+        ? { ...prev.webProxy, state: "measuring" }
+        : unavailable("未连接开发机"),
+    }));
+
+    const [webRelay, relayProxy, webProxy] = await Promise.allSettled([
+      relay.measureWebRelayLatency(),
+      proxyOnline ? relay.measureRelayProxyLatency() : Promise.resolve({ success: false }),
+      proxyOnline ? relay.measureWebProxyLatency() : Promise.resolve({ success: false }),
+    ]);
+
+    setMeasurements({
+      webRelay:
+        webRelay.status === "fulfilled"
+          ? classify(webRelay.value)
+          : unavailable(webRelay.reason instanceof Error ? webRelay.reason.message : "测速失败"),
+      relayProxy:
+        relayProxy.status === "fulfilled"
+          ? classify(relayProxy.value)
+          : unavailable(
+              relayProxy.reason instanceof Error ? relayProxy.reason.message : "测速失败",
+            ),
+      webProxy:
+        webProxy.status === "fulfilled"
+          ? classify(webProxy.value)
+          : unavailable(webProxy.reason instanceof Error ? webProxy.reason.message : "测速失败"),
+    });
+    measuringRef.current = false;
+  }
+
+  useEffect(() => {
+    if (!enabled) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async (): Promise<void> => {
+      await sample();
+      if (disposed) return;
+      timer = setTimeout(
+        tick,
+        document.hidden ? HIDDEN_SAMPLE_INTERVAL_MS : ACTIVE_SAMPLE_INTERVAL_MS,
+      );
+    };
+
+    void tick();
+    return () => {
+      disposed = true;
+      measuringRef.current = false;
+      if (timer) clearTimeout(timer);
+    };
+    // selectedProxyId is intentionally included to resample immediately after proxy switches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, connected, proxyOnline, selectedProxyId]);
+
+  if (!enabled) return null;
+
+  const compactProxy =
+    measurements.webProxy.rttMs !== undefined ? measurements.webProxy : measurements.relayProxy;
+
+  const diagnostic = {
+    ts: new Date().toISOString(),
+    selectedProxyId,
+    connected,
+    proxyOnline,
+    measurements,
+  };
+
+  const copyDiagnostic = (): void => {
+    setCopied(false);
+    if (!navigator.clipboard) return;
+    void navigator.clipboard
+      .writeText(JSON.stringify(diagnostic, null, 2))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1400);
+      })
+      .catch(() => setCopied(false));
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "fixed right-[calc(env(safe-area-inset-right)+0.75rem)] top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs shadow-lg backdrop-blur transition-colors md:right-4 md:top-4",
+            toneClasses(tone),
+          )}
+          data-slot="latency-monitor-trigger"
+          aria-label={`延迟监控，Relay ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
+        >
+          <Activity className="size-3.5" aria-hidden="true" />
+          <span className="font-medium text-foreground">延迟</span>
+          <span className="hidden text-muted-foreground sm:inline">
+            Relay {formatMs(measurements.webRelay.rttMs)}
+          </span>
+          <span className="text-muted-foreground">Proxy {formatMs(compactProxy.rttMs)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[320px] p-3" data-slot="latency-monitor-popover">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">链路延迟</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              低成本 RTT 探测，和 PTY 回显 trace 分开。
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="立即测速"
+            onClick={() => void sample()}
+          >
+            <RefreshCw className="size-3" aria-hidden="true" />
+          </Button>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {(Object.keys(LINK_LABELS) as LinkKey[]).map((key) => (
+            <LatencyRow key={key} label={LINK_LABELS[key]} measurement={measurements[key]} />
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+          <div className="text-xs text-muted-foreground">PTY 输入 trace 仍需手动开启。</div>
+          <Button type="button" variant="outline" size="xs" onClick={copyDiagnostic}>
+            {copied ? (
+              <Check className="size-3" aria-hidden="true" />
+            ) : (
+              <Copy className="size-3" aria-hidden="true" />
+            )}
+            {copied ? "已复制" : "复制"}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function LatencyRow({ label, measurement }: { label: string; measurement: LinkMeasurement }) {
+  const tone = stateTone(measurement.state);
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-card/60 px-3 py-2">
+      <div className="min-w-0">
+        <div className="truncate text-xs font-medium text-foreground">{label}</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
+          {formatAge(measurement.updatedAt)}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "size-1.5 rounded-full",
+            tone === "ok"
+              ? "bg-emerald-400"
+              : tone === "warn"
+                ? "bg-amber-400"
+                : tone === "bad"
+                  ? "bg-destructive"
+                  : "bg-muted-foreground/60",
+          )}
+          aria-hidden="true"
+        />
+        <span className="min-w-[4rem] text-right font-mono text-xs text-foreground">
+          {statusLabel(measurement)}
+        </span>
+      </div>
+    </div>
+  );
+}

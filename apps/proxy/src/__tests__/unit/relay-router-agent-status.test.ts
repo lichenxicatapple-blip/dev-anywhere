@@ -100,4 +100,29 @@ describe("RelayRouter agent_status_request", () => {
       expect(msg.statuses).toEqual([]);
     }
   });
+
+  it("answers synthetic latency probes without touching session state", () => {
+    const registry = new AgentStatusRegistry();
+    const sent: string[] = [];
+    const router = createRouter({
+      registry,
+      relaySend: (data) => sent.push(data),
+      activeSessions: new Set(),
+    });
+
+    router.handle({ type: "latency_web_proxy_ping", requestId: "latency-web-proxy-1" });
+    router.handle({ type: "latency_relay_proxy_ping", requestId: "latency-relay-proxy-1" });
+
+    expect(sent).toHaveLength(2);
+    const webProxy = RelayControlSchema.parse(JSON.parse(sent[0]));
+    const relayProxy = RelayControlSchema.parse(JSON.parse(sent[1]));
+    expect(webProxy).toMatchObject({
+      type: "latency_web_proxy_pong",
+      requestId: "latency-web-proxy-1",
+    });
+    expect(relayProxy).toMatchObject({
+      type: "latency_relay_proxy_pong",
+      requestId: "latency-relay-proxy-1",
+    });
+  });
 });

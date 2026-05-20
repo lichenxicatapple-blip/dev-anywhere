@@ -72,6 +72,7 @@ const SessionHistoryMessageSchema = z.object({
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;
 const RequestIdShape = { requestId: IdSchema.optional() };
+const RequiredRequestIdShape = { requestId: IdSchema };
 const ControlErrorCodeSchema = z.enum(
   Object.values(ControlErrorCode) as [ControlErrorCode, ...ControlErrorCode[]],
 );
@@ -181,6 +182,35 @@ const relayControlDefinitions = [
     ...RequestErrorShape,
     capabilities: VoiceCapabilitiesSchema.optional(),
   }),
+
+  // Lightweight latency probes. These measure synthetic round-trip latency for the transport
+  // segments and intentionally stay separate from PTY input echo tracing.
+  control("latency_web_relay_ping", RequiredRequestIdShape),
+  control("latency_web_relay_pong", {
+    ...RequiredRequestIdShape,
+    relayNow: z.number().optional(),
+  }),
+  control("latency_relay_proxy_request", RequiredRequestIdShape),
+  control("latency_relay_proxy_response", {
+    ...RequiredRequestIdShape,
+    success: z.boolean(),
+    rttMs: z.number().nonnegative().optional(),
+    error: z.string().optional(),
+  }),
+  control("latency_relay_proxy_ping", {
+    ...RequiredRequestIdShape,
+    relayNow: z.number().optional(),
+  }),
+  control("latency_relay_proxy_pong", {
+    ...RequiredRequestIdShape,
+    proxyNow: z.number().optional(),
+  }),
+  control("latency_web_proxy_ping", RequiredRequestIdShape, "client_to_proxy"),
+  control(
+    "latency_web_proxy_pong",
+    { ...RequiredRequestIdShape, proxyNow: z.number().optional() },
+    "proxy_to_client",
+  ),
 
   // 客户端注册协议
   control("client_register", {

@@ -45,6 +45,7 @@ interface AppStoreState {
   ptyFontSize: number;
   chatContentFontSize: number;
   sidebarCollapsed: boolean;
+  latencyMonitorEnabled: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
 
@@ -64,6 +65,7 @@ interface AppStoreState {
   resetChatContentFontSize: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
+  setLatencyMonitorEnabled: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -107,6 +109,10 @@ function loadSidebarCollapsed(): boolean {
   return readStorageValue("local", STORAGE_KEYS.sidebarCollapsed) === "1";
 }
 
+function loadLatencyMonitorEnabled(): boolean {
+  return readStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled) === "1";
+}
+
 export const useAppStore = create<AppStoreState>()(
   devtools(
     (set, get) => ({
@@ -124,6 +130,7 @@ export const useAppStore = create<AppStoreState>()(
       ptyFontSize: loadPtyFontSize(),
       chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
+      latencyMonitorEnabled: loadLatencyMonitorEnabled(),
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -173,6 +180,10 @@ export const useAppStore = create<AppStoreState>()(
         const next = !get().sidebarCollapsed;
         writeStorageValue("local", STORAGE_KEYS.sidebarCollapsed, next ? "1" : "0");
         set({ sidebarCollapsed: next });
+      },
+      setLatencyMonitorEnabled: (enabled) => {
+        writeStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled, enabled ? "1" : "0");
+        set({ latencyMonitorEnabled: enabled });
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =
