@@ -1,4 +1,5 @@
 import { createPtyFrameWriteBuffer } from "./pty-frame-write-buffer";
+import { markPtyOutputReceived, markPtyOutputWritten } from "./pty-input-latency-trace";
 import { createPtyRecoveryController, type PtyRenderTarget } from "./pty-recovery";
 
 type RelayMessage = Record<string, unknown>;
@@ -65,7 +66,19 @@ export function attachPtySessionTransport(
   } = options;
 
   const recovery = createPtyRecoveryController();
-  const frameWriter = createPtyFrameWriteBuffer(target, {
+  const tracedTarget: PtyRenderTarget = {
+    reset: () => target.reset(),
+    resize: (cols, rows) => target.resize(cols, rows),
+    write: (data, callback) => {
+      target.write(data, () => {
+        if (data instanceof Uint8Array) {
+          markPtyOutputWritten(sessionId, data.byteLength);
+        }
+        callback?.();
+      });
+    },
+  };
+  const frameWriter = createPtyFrameWriteBuffer(tracedTarget, {
     onFramePending,
     onFrameWritten,
     schedule: scheduleFrameFlush,
@@ -147,6 +160,7 @@ export function attachPtySessionTransport(
 
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
     if (disposed) return;
+    markPtyOutputReceived(sessionId, data, outputSeq);
     const result = recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
     if (result.hasGap) {
       armGapRecoveryTimer();

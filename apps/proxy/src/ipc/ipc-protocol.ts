@@ -84,6 +84,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("pty_input"),
     sessionId: z.string(),
     data: z.string(),
+    traceId: z.string().optional(),
   }),
 
   // serve → terminal：Web 端移除本地终端会话时，只断开远程视图，不杀本地 CLI。

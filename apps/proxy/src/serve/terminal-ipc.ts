@@ -258,7 +258,11 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
         case "pty_input": {
           if (!sessionManager.getSession(msg.sessionId)) break;
           const targetSocket = terminalSockets.get(msg.sessionId);
-          if (hostedPtyRegistry.write(msg.sessionId, msg.data)) {
+          if (
+            msg.traceId
+              ? hostedPtyRegistry.write(msg.sessionId, msg.data, msg.traceId)
+              : hostedPtyRegistry.write(msg.sessionId, msg.data)
+          ) {
             break;
           }
           if (targetSocket?.writable) {
@@ -267,6 +271,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
                 type: "pty_input",
                 sessionId: msg.sessionId,
                 data: msg.data,
+                traceId: msg.traceId,
               }),
             );
           }

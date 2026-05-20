@@ -171,11 +171,15 @@ export class HostedPtyRegistry {
     return this.sessions.has(sessionId);
   }
 
-  write(sessionId: string, data: string): boolean {
+  write(sessionId: string, data: string, traceId?: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
     this.releaseTextApprovalOnInput(sessionId, hosted, data);
     hosted.child.write(data);
+    serviceLogger.debug(
+      { sessionId, traceId, bytes: data.length },
+      "Raw PTY input written to hosted PTY",
+    );
     return true;
   }
 

@@ -330,7 +330,11 @@ const relayControlDefinitions = [
   ),
 
   // 客户端发送到 PTY 的原始字节（ANSI 序列），不追加换行
-  control("remote_input_raw", { sessionId: IdSchema, data: z.string() }, "client_to_proxy"),
+  control(
+    "remote_input_raw",
+    { sessionId: IdSchema, data: z.string(), traceId: IdSchema.optional() },
+    "client_to_proxy",
+  ),
   control(
     "clipboard_image_upload",
     {

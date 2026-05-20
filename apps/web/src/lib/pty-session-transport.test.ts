@@ -57,6 +57,8 @@ function lastRequestId(sent: string[]): string {
 describe("attachPtySessionTransport", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    window.localStorage.removeItem("dev_anywhere_pty_input_latency_trace");
+    window.__devAnywherePtyInputLatencyTrace = [];
   });
 
   afterEach(() => {
@@ -112,6 +114,36 @@ describe("attachPtySessionTransport", () => {
     ]);
     expect(onFrameWritten).toHaveBeenCalledTimes(1);
     expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("records output receive/write/paint when PTY input latency trace is enabled", () => {
+    window.localStorage.setItem("dev_anywhere_pty_input_latency_trace", "1");
+    const harness = createHarness();
+    const target = createTarget();
+    attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "snapshot",
+      outputSeq: 0,
+    });
+
+    harness.emitBinary(new Uint8Array([65]), 1);
+    vi.advanceTimersByTime(16);
+    vi.advanceTimersByTime(16);
+
+    const events = (window.__devAnywherePtyInputLatencyTrace ?? []).map((entry) => entry.event);
+    expect(events).toContain("output:received");
+    expect(events).toContain("output:xterm-write");
   });
 
   it("restarts snapshot window on terminal resize and ignores stale snapshots", () => {

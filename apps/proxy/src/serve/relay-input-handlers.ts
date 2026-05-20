@@ -81,23 +81,31 @@ export class RelayInputHandlers {
   }
 
   onRemoteInputRaw(msg: ControlMessage<"remote_input_raw">): void {
-    const { sessionId, data } = msg;
+    const { sessionId, data, traceId } = msg;
     if (!sessionId || data === undefined) return;
 
     const ts = this.deps.terminalSockets.get(sessionId);
-    if (!ts?.writable && this.deps.hostedPtyRegistry.write(sessionId, data)) {
+    const hostedInputForwarded =
+      !ts?.writable &&
+      (traceId
+        ? this.deps.hostedPtyRegistry.write(sessionId, data, traceId)
+        : this.deps.hostedPtyRegistry.write(sessionId, data));
+    if (hostedInputForwarded) {
       serviceLogger.info(
-        { sessionId, bytes: data.length },
+        { sessionId, traceId, bytes: data.length },
         "Raw PTY input forwarded to hosted PTY",
       );
       return;
     }
     if (!ts?.writable) {
-      serviceLogger.warn({ sessionId }, "Raw PTY input dropped: terminal socket unavailable");
+      serviceLogger.warn(
+        { sessionId, traceId },
+        "Raw PTY input dropped: terminal socket unavailable",
+      );
       return;
     }
-    ts.write(serializeRawPtyInput(sessionId, data));
-    serviceLogger.info({ sessionId, bytes: data.length }, "Raw PTY input forwarded");
+    ts.write(serializeRawPtyInput(sessionId, data, traceId));
+    serviceLogger.info({ sessionId, traceId, bytes: data.length }, "Raw PTY input forwarded");
   }
 
   onClipboardImageUpload(msg: ControlMessage<"clipboard_image_upload">): void {

@@ -493,6 +493,24 @@ describe("RelayRouter input routing", () => {
     }
   });
 
+  it("preserves remote_input_raw traceId through PTY IPC", () => {
+    const terminalWrite = vi.fn();
+    const router = createRouter({ mode: "pty", terminalWrite });
+
+    router.handle({
+      type: "remote_input_raw",
+      sessionId: "s1",
+      data: "a",
+      traceId: "trace-1",
+    });
+
+    const ipc = parseIpc(terminalWrite.mock.calls[0][0] as string);
+    expect(ipc.type).toBe("pty_input");
+    if (ipc.type === "pty_input") {
+      expect(ipc.traceId).toBe("trace-1");
+    }
+  });
+
   it("forwards repeated Ctrl+C to PTY without debounce", () => {
     const terminalWrite = vi.fn();
     const router = createRouter({ mode: "pty", terminalWrite });
