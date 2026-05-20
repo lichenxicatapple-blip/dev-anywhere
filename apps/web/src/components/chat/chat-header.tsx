@@ -367,20 +367,20 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
           <DropdownMenuLabel className={menuLabelClass}>字号</DropdownMenuLabel>
           <div className="px-2 pb-1" data-slot="chat-menu-font-control">
             <div
-              className="inline-grid min-h-10 grid-cols-[1.25rem_auto] items-center gap-x-2.5 py-1"
+              className="inline-grid min-h-9 grid-cols-[1rem_auto] items-center gap-x-1 py-1"
               data-slot="chat-menu-font-row"
             >
-              <ChatMenuIcon>
+              <ChatMenuIcon className="size-4">
                 <Type aria-hidden="true" />
               </ChatMenuIcon>
               <div
-                className="col-start-2 inline-flex w-fit shrink-0 items-center gap-1"
+                className="col-start-2 inline-flex w-fit shrink-0 items-center gap-0.5"
                 data-slot="chat-menu-font-stepper"
               >
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-8 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-6 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize <= minFontSize}
                   aria-label="字号变小"
                   data-slot="chat-menu-font-smaller"
@@ -392,7 +392,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                   <Minus aria-hidden="true" />
                 </Button>
                 <span
-                  className="flex h-8 min-w-10 items-center justify-center text-sm tabular-nums text-foreground"
+                  className="flex h-6 min-w-7 items-center justify-center text-sm tabular-nums text-foreground"
                   data-slot="chat-menu-font-size"
                 >
                   {fontSize}px
@@ -400,7 +400,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="size-8 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="size-6 rounded-md bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   disabled={fontSize >= MAX_CHAT_FONT_SIZE}
                   aria-label="字号变大"
                   data-slot="chat-menu-font-larger"

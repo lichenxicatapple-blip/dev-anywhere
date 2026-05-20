@@ -192,7 +192,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             <>
               <QuotePreviewBar sessionId={id} />
               <div
-                className="dev-render-scroll dev-chat-rail-inset overflow-x-hidden overflow-y-auto py-2"
+                className="dev-chat-rail-inset relative z-20 overflow-visible py-2"
                 data-slot="input-bar-region"
               >
                 <div className="dev-message-rail mx-auto w-full">

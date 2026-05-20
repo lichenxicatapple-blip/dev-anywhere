@@ -22,6 +22,12 @@ interface PtyFocusState {
   handleBlurCapture: () => void;
 }
 
+function requestVirtualKeyboard(): void {
+  const keyboard = (navigator as Navigator & { virtualKeyboard?: { show?: () => void } })
+    .virtualKeyboard;
+  keyboard?.show?.();
+}
+
 export function usePtyFocusState(options: UsePtyFocusStateOptions): PtyFocusState {
   const { containerEl, xtermHostRef, terminalRef } = options;
   const [ptyInputFocused, setPtyInputFocused] = useState(false);
@@ -36,7 +42,9 @@ export function usePtyFocusState(options: UsePtyFocusStateOptions): PtyFocusStat
   const syncPtyInputFocus = useCallback((): void => {
     const host = xtermHostRef.current;
     const active = document.activeElement;
-    setPtyInputFocused(Boolean(host && active instanceof HTMLElement && host.contains(active)));
+    const focused = Boolean(host && active instanceof HTMLElement && host.contains(active));
+    setPtyInputFocused(focused);
+    if (focused) requestVirtualKeyboard();
   }, [xtermHostRef]);
 
   const suppressPtyFocus = useCallback(

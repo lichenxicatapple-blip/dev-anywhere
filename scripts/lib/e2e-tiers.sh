@@ -45,6 +45,7 @@ e2e_mobile_prepare_soft_keyboard() {
   # anyway so mobile keyboard-layout tests exercise the same viewport path as phones.
   if [[ "${ANDROID_SERIAL:-}" == emulator-* ]]; then
     adb shell settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
+    adb shell settings put system show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
   fi
 }
 

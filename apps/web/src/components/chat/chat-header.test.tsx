@@ -384,12 +384,12 @@ describe("ChatHeader PTY upload menu", () => {
     expect(menu.className).toContain("min-w-44");
     expect(menu.className).not.toContain("w-64");
     expect(row?.className).toContain("inline-grid");
-    expect(row?.className).toContain("grid-cols-[1.25rem_auto]");
+    expect(row?.className).toContain("grid-cols-[1rem_auto]");
     expect(menu.querySelector('[data-slot="chat-menu-font-label"]')).toBeNull();
     expect(stepper?.className).toContain("inline-flex");
     expect(stepper?.className).toContain("col-start-2");
     expect(stepper?.className).not.toContain("border");
-    expect(larger?.className).toContain("size-8");
+    expect(larger?.className).toContain("size-6");
   });
 
   it("keeps the page interactive while the overflow menu is open so mobile outside taps can dismiss it", async () => {

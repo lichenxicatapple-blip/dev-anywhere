@@ -207,6 +207,13 @@ async function waitForVoiceUserInput(
   );
 }
 
+async function emitRecognizedSpeech(page: Page, text: string): Promise<number> {
+  return page.evaluate((utterance) => {
+    window.__devVoiceRuntimeE2E?.emitMicSamples([0.9, -0.9, 0.55, -0.55]);
+    return window.__devAnywhereE2E?.voice.emitAsrFinal(utterance) ?? 0;
+  }, text);
+}
+
 test.describe("L4 mobile / Voice Pilot", () => {
   test.setTimeout(90_000);
 
@@ -226,9 +233,7 @@ test.describe("L4 mobile / Voice Pilot", () => {
       )
       .toBe("listening");
 
-    const delivered = await emuPage.evaluate(
-      () => window.__devAnywhereE2E?.voice.emitAsrFinal("请检查项目状态") ?? 0,
-    );
+    const delivered = await emitRecognizedSpeech(emuPage, "请检查项目状态");
     expect(delivered).toBeGreaterThan(0);
 
     await expect
@@ -290,18 +295,10 @@ test.describe("L4 mobile / Voice Pilot", () => {
   }) => {
     await openJsonVoicePilot(emuPage, "voice-second-turn-sess");
 
-    const firstDelivered = await emuPage.evaluate(
-      () => window.__devAnywhereE2E?.voice.emitAsrFinal("第一轮请求") ?? 0,
-    );
+    const firstDelivered = await emitRecognizedSpeech(emuPage, "第一轮请求");
     expect(firstDelivered).toBeGreaterThan(0);
     await waitForVoiceUserInput(emuPage, "voice-second-turn-sess", 1);
 
-    await emuPage.evaluate(() => {
-      const hooks = window.__ccTest;
-      if (!hooks) throw new Error("__ccTest 未安装");
-      hooks.chat.appendAssistantText("voice-second-turn-sess", "收到，继续说。");
-      hooks.chat.markTurnComplete("voice-second-turn-sess");
-    });
     await expect
       .poll(() =>
         emuPage.evaluate(() =>
@@ -369,9 +366,7 @@ test.describe("L4 mobile / Voice Pilot", () => {
       )
       .toBe(true);
 
-    const secondDelivered = await emuPage.evaluate(
-      () => window.__devAnywhereE2E?.voice.emitAsrFinal("第二轮请求") ?? 0,
-    );
+    const secondDelivered = await emitRecognizedSpeech(emuPage, "第二轮请求");
     expect(secondDelivered).toBeGreaterThan(0);
     await waitForVoiceUserInput(emuPage, "voice-second-turn-sess", 2);
   });

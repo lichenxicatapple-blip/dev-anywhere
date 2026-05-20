@@ -201,7 +201,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     placement === "inline"
       ? "relative w-full bg-popover border border-border rounded-md overflow-hidden"
       : mode === "insert"
-        ? "absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-md shadow-lg z-10 overflow-hidden"
+        ? "absolute bottom-full left-0 right-0 z-50 mb-2 bg-popover border border-border rounded-md shadow-lg overflow-hidden"
         : "absolute left-0 right-0 top-full z-50 mt-2 bg-popover border border-border rounded-md shadow-lg overflow-hidden";
   const listClass =
     placement === "inline"

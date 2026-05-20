@@ -661,6 +661,13 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 isPartial: false,
               }),
             );
+            this.emitJson(
+              envelope("session_status", String(msg.sessionId), {
+                sessionId: String(msg.sessionId),
+                state: "idle",
+                lastActive: Date.now(),
+              }),
+            );
             break;
           default:
             break;
