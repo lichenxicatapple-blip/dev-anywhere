@@ -729,6 +729,60 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
   });
 
+  it("keeps following when raw-input layout drift arrives before the scheduled follow fires", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "112px";
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    let scrollHeight = 89860;
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal, emitRender } = createTerminal({ 4484: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 4487;
+    terminal.buffer.active.cursorX = 10;
+    terminal.buffer.active.cursorY = 49;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(89513);
+
+    container.dispatchEvent(new Event("scroll"));
+    expect(controller.getDebugProbe().pendingProgrammaticScrollTop).toBeNull();
+    onUserVerticalScrollIntentChange.mockClear();
+
+    controller.traceRawInputFollowScheduled();
+    scrollHeight = 89624;
+    container.scrollTop = 89276;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
+
+    scrollHeight = 89860;
+    emitRender();
+
+    expect(container.scrollTop).toBe(89513);
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
+  });
+
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();

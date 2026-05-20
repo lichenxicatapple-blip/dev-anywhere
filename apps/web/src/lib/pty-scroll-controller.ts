@@ -378,6 +378,7 @@ export function attachPtyScrollController(
   };
 
   const traceRawInputFollowScheduled = (source: string = "rawInput"): void => {
+    lastRawInputFollowAt = performance.now();
     trace(`rawInputFollow:scheduled[${source}]`);
   };
 
