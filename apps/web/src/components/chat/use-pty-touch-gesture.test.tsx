@@ -304,6 +304,46 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
+  it("keeps the touch long press alive when Chrome emits pointercancel after touchstart", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressMove = vi.fn();
+    const onLongPressEnd = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressMove={onLongPressMove}
+        onLongPressEnd={onLongPressEnd}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchPointer("pointerdown", xterm, {
+      pointerId: 7,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    dispatchTouch("touchstart", xterm, { clientX: 100, clientY: 100 });
+    dispatchPointer("pointercancel", xterm, {
+      pointerId: 7,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    vi.advanceTimersByTime(650);
+    dispatchTouch("touchmove", xterm, { clientX: 130, clientY: 160 });
+    dispatchTouch("touchend", xterm, { clientX: 130, clientY: 160 });
+    vi.runOnlyPendingTimers();
+
+    expect(onLongPressMove).toHaveBeenCalledWith({ clientX: 130, clientY: 160 });
+    expect(onLongPressEnd).toHaveBeenCalledWith({ clientX: 130, clientY: 160 });
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
   it("cancels long press selection when the touch becomes a scroll gesture", () => {
     vi.useFakeTimers();
     const focus = vi.fn();

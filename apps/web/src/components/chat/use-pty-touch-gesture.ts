@@ -15,6 +15,7 @@ interface TouchGestureState {
   moved: boolean;
   longPressed: boolean;
   longPressDelivered: boolean;
+  touchEventStream: boolean;
   longPressTimer: number | null;
 }
 
@@ -86,7 +87,7 @@ export function usePtyTouchGesture({
   );
 
   const startGesture = useCallback(
-    (pointerId: number, clientX: number, clientY: number): void => {
+    (pointerId: number, clientX: number, clientY: number, touchEventStream = false): void => {
       const gesture: TouchGestureState = {
         pointerId,
         startX: clientX,
@@ -96,6 +97,7 @@ export function usePtyTouchGesture({
         moved: false,
         longPressed: false,
         longPressDelivered: false,
+        touchEventStream,
         longPressTimer: null,
       };
       gesture.longPressTimer = window.setTimeout(() => {
@@ -201,6 +203,17 @@ export function usePtyTouchGesture({
 
   const onPointerCancelCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
+      const gesture = touchPointerRef.current;
+      if (
+        event.pointerType === "touch" &&
+        gesture &&
+        matchesGesturePointer(gesture, event.pointerId) &&
+        gesture.touchEventStream &&
+        !gesture.longPressed
+      ) {
+        event.stopPropagation();
+        return;
+      }
       if (cancelGesture(event.pointerId)) event.stopPropagation();
     },
     [cancelGesture],
@@ -210,10 +223,13 @@ export function usePtyTouchGesture({
     (event: TouchEvent<HTMLDivElement>): void => {
       const target = event.target;
       if (!(target instanceof Element) || !target.closest(".xterm")) return;
-      if (touchPointerRef.current) return;
+      if (touchPointerRef.current) {
+        touchPointerRef.current.touchEventStream = true;
+        return;
+      }
       const touch = event.touches[0] ?? event.changedTouches[0];
       if (!touch) return;
-      startGesture(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY);
+      startGesture(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY, true);
     },
     [startGesture],
   );
