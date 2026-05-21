@@ -52,6 +52,7 @@ interface SelectionScrollControllerHandle {
 }
 
 interface UsePtySelectionControllerOptions {
+  sessionId: string;
   terminalRef: RefObject<Terminal | null>;
   xtermHostRef: RefObject<HTMLDivElement | null>;
   scrollControllerRef: RefObject<SelectionScrollControllerHandle | null>;
@@ -81,10 +82,27 @@ interface UsePtySelectionControllerResult {
   ) => void;
 }
 
+interface PtySelectionTestController {
+  selectRange: (options: {
+    anchorRow: number;
+    focusRow: number;
+    anchorColumn?: number;
+    focusColumn?: number;
+  }) => boolean;
+  clear: () => void;
+}
+
+declare global {
+  interface Window {
+    __ccTestPtySelectionControllers?: Map<string, PtySelectionTestController>;
+  }
+}
+
 export function usePtySelectionController(
   options: UsePtySelectionControllerOptions,
 ): UsePtySelectionControllerResult {
   const {
+    sessionId,
     terminalRef,
     xtermHostRef,
     scrollControllerRef,
@@ -519,6 +537,46 @@ export function usePtySelectionController(
     },
     [applyPtySelectionRange, showToolbarForCurrentSelection],
   );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const controllers = (window.__ccTestPtySelectionControllers ??= new Map());
+    const controller: PtySelectionTestController = {
+      selectRange: ({ anchorRow, focusRow, anchorColumn = 0, focusColumn }) => {
+        const terminal = terminalRef.current;
+        if (!terminal) return false;
+        const focusLine = terminal.buffer.active.getLine(focusRow)?.translateToString(true) ?? "";
+        const focus = {
+          row: focusRow,
+          column: Math.max(0, focusColumn ?? Math.min(focusLine.length - 1, terminal.cols - 1)),
+        };
+        const anchor = { row: anchorRow, column: Math.max(0, anchorColumn) };
+        const selected = selectTerminalRange({ terminal, anchor, focus });
+        if (!selected?.text) return false;
+
+        selectionAnchorRef.current = selected.anchor;
+        selectionFocusRef.current = selected.focus;
+        selectedDownloadPathRef.current = null;
+        selectedPtyTextRef.current = selected.text;
+        setPtySelectionDownloadPath(null);
+        const handles = getSelectionHandles(selected.anchor, selected.focus);
+        setPtySelectionHandles(handles);
+        setPtySelectionToolbar(handles ? getToolbarPositionForSelectionHandles(handles) : null);
+        return true;
+      },
+      clear: clearPtySelection,
+    };
+    controllers.set(sessionId, controller);
+    return () => {
+      if (controllers.get(sessionId) === controller) controllers.delete(sessionId);
+    };
+  }, [
+    clearPtySelection,
+    getSelectionHandles,
+    getToolbarPositionForSelectionHandles,
+    sessionId,
+    terminalRef,
+  ]);
 
   const selectionGesture = usePtySelectionGestureDriver({
     terminalRef,

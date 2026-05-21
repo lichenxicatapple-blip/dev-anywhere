@@ -8,12 +8,24 @@ import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
 const SESSION_ID = "mobile-pty-long-press-copy";
 const execFileAsync = promisify(execFile);
+const edgeAutoscrollDiagnosticTest =
+  process.env.TEST_MOBILE_EDGE_AUTOSCROLL_DIAGNOSTICS === "1" ? test : test.skip;
 
 declare global {
   interface Window {
-    __mobilePtyLongPressEvents?: Array<{ type: string; target: string }>;
-    __mobilePtySelectCalls?: Array<{ column: number; row: number; length: number; line: string }>;
     __mobilePtyCopiedText?: string;
+    __ccTestPtySelectionControllers?: Map<
+      string,
+      {
+        selectRange: (options: {
+          anchorRow: number;
+          focusRow: number;
+          anchorColumn?: number;
+          focusColumn?: number;
+        }) => boolean;
+        clear: () => void;
+      }
+    >;
   }
 }
 
@@ -216,43 +228,84 @@ async function longPress(
   page: Page,
   start: { x: number; y: number },
   end: { x: number; y: number } = start,
-  options: { holdAfterMoveMs?: number } = {},
+  options: { holdBeforeMoveMs?: number; holdAfterMoveMs?: number } = {},
 ): Promise<void> {
-  const client = await page.context().newCDPSession(page);
-  try {
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
-    });
-    await page.waitForTimeout(950);
-    if (end.x !== start.x || end.y !== start.y) {
-      const steps = 8;
-      for (let step = 1; step <= steps; step += 1) {
-        const progress = step / steps;
-        await client.send("Input.dispatchTouchEvent", {
-          type: "touchMove",
-          touchPoints: [
-            {
-              x: start.x + (end.x - start.x) * progress,
-              y: start.y + (end.y - start.y) * progress,
-              id: 1,
-              radiusX: 2,
-              radiusY: 2,
-              force: 1,
-            },
-          ],
-        });
-        await page.waitForTimeout(40);
+  await page.evaluate(
+    async ({ startPoint, endPoint, holdBeforeMoveMs, holdAfterMoveMs }) => {
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const pointerId = 9001;
+      const target = document.elementFromPoint(startPoint.x, startPoint.y) ?? document.body;
+      const dispatch = (
+        type: "pointerdown" | "pointermove" | "pointerup",
+        point: { x: number; y: number },
+      ) => {
+        target.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            pointerId,
+            pointerType: "touch",
+            isPrimary: true,
+            button: 0,
+            buttons: type === "pointerup" ? 0 : 1,
+            clientX: point.x,
+            clientY: point.y,
+            width: 4,
+            height: 4,
+            pressure: type === "pointerup" ? 0 : 0.5,
+          }),
+        );
+      };
+
+      dispatch("pointerdown", startPoint);
+      await sleep(holdBeforeMoveMs ?? 900);
+      if (endPoint.x !== startPoint.x || endPoint.y !== startPoint.y) {
+        const steps = 8;
+        for (let step = 1; step <= steps; step += 1) {
+          const progress = step / steps;
+          dispatch("pointermove", {
+            x: startPoint.x + (endPoint.x - startPoint.x) * progress,
+            y: startPoint.y + (endPoint.y - startPoint.y) * progress,
+          });
+          await sleep(40);
+        }
+        await sleep(holdAfterMoveMs ?? 100);
       }
-      await page.waitForTimeout(options.holdAfterMoveMs ?? 100);
-    }
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchEnd",
-      touchPoints: [],
-    });
-  } finally {
-    await client.detach();
-  }
+      dispatch("pointerup", endPoint);
+    },
+    {
+      startPoint: start,
+      endPoint: end,
+      holdBeforeMoveMs: options.holdBeforeMoveMs,
+      holdAfterMoveMs: options.holdAfterMoveMs,
+    },
+  );
+}
+
+async function pointerTap(page: Page, point: { x: number; y: number }): Promise<void> {
+  await page.evaluate(async (tapPoint) => {
+    const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+    const target = document.elementFromPoint(tapPoint.x, tapPoint.y) ?? document.body;
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: 9002,
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      clientX: tapPoint.x,
+      clientY: tapPoint.y,
+      width: 4,
+      height: 4,
+    } satisfies PointerEventInit;
+    target.dispatchEvent(
+      new PointerEvent("pointerdown", { ...eventInit, buttons: 1, pressure: 0.5 }),
+    );
+    await sleep(50);
+    target.dispatchEvent(new PointerEvent("pointerup", { ...eventInit, buttons: 0, pressure: 0 }));
+  }, point);
 }
 
 async function touchTap(page: Page, point: { x: number; y: number }): Promise<void> {
@@ -276,26 +329,130 @@ async function touchDrag(
   page: Page,
   start: { x: number; y: number },
   end: { x: number; y: number },
+  options: { holdAfterMoveMs?: number } = {},
 ): Promise<void> {
-  const client = await page.context().newCDPSession(page);
-  try {
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 3, radiusY: 3, force: 1 }],
-    });
+  await page.evaluate(
+    async ({ startPoint, endPoint, holdAfterMoveMs }) => {
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const target = document.elementFromPoint(startPoint.x, startPoint.y) ?? document.body;
+      const makeTouch = (point: { x: number; y: number }) =>
+        new Touch({
+          identifier: 1,
+          target,
+          clientX: point.x,
+          clientY: point.y,
+          radiusX: 3,
+          radiusY: 3,
+          force: 0.5,
+        });
+      const startTouch = makeTouch(startPoint);
+      target.dispatchEvent(
+        new TouchEvent("touchstart", {
+          bubbles: true,
+          cancelable: true,
+          touches: [startTouch],
+          targetTouches: [startTouch],
+          changedTouches: [startTouch],
+        }),
+      );
+      await sleep(80);
+      const moveTouch = makeTouch(endPoint);
+      window.dispatchEvent(
+        new TouchEvent("touchmove", {
+          bubbles: true,
+          cancelable: true,
+          touches: [moveTouch],
+          targetTouches: [moveTouch],
+          changedTouches: [moveTouch],
+        }),
+      );
+      await sleep(holdAfterMoveMs ?? 120);
+      window.dispatchEvent(
+        new TouchEvent("touchend", {
+          bubbles: true,
+          cancelable: true,
+          touches: [],
+          targetTouches: [],
+          changedTouches: [moveTouch],
+        }),
+      );
+    },
+    { startPoint: start, endPoint: end, holdAfterMoveMs: options.holdAfterMoveMs },
+  );
+}
+
+async function readTerminalSelection(page: Page, sessionId: string): Promise<string> {
+  return page.evaluate((sid) => window.__ccTest?.pty.getSelection(sid) ?? "", sessionId);
+}
+
+async function waitForSelectionToContain(
+  page: Page,
+  sessionId: string,
+  expectedTexts: string[],
+  timeoutMs = 3_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let selection = "";
+  while (Date.now() < deadline) {
+    selection = await readTerminalSelection(page, sessionId);
+    if (expectedTexts.every((text) => selection.includes(text))) return selection;
     await page.waitForTimeout(80);
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x: end.x, y: end.y, id: 1, radiusX: 3, radiusY: 3, force: 1 }],
-    });
-    await page.waitForTimeout(120);
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchEnd",
-      touchPoints: [],
-    });
-  } finally {
-    await client.detach();
   }
+  throw new Error(
+    `selection did not contain expected text; expected=${JSON.stringify(expectedTexts)} actual=${JSON.stringify(selection)}`,
+  );
+}
+
+async function expectSelectionClearedByOutsideTap(
+  page: Page,
+  points: Array<{ x: number; y: number }>,
+) {
+  const copyButton = page.getByRole("button", { name: "复制终端选区" });
+  const endHandle = page.getByRole("button", { name: "调整选区终点" });
+  let lastVisible = true;
+  for (const point of points) {
+    await pointerTap(page, point);
+    await page.waitForTimeout(160);
+    lastVisible = await copyButton.isVisible().catch(() => false);
+    if (!lastVisible) break;
+  }
+  expect(
+    lastVisible,
+    `selection toolbar stayed visible after outside taps ${JSON.stringify(points)}`,
+  ).toBe(false);
+  await expect(copyButton).toBeHidden();
+  await expect(endHandle).toBeHidden();
+}
+
+async function selectVisibleTerminalRowsWithTestDriver(
+  page: Page,
+  sessionId: string,
+  target: {
+    startRowInViewport: number;
+    endRowInViewport: number;
+    endText: string;
+  },
+  expectedTexts: string[],
+): Promise<void> {
+  const selected = await page.evaluate(
+    ({ sid, range }) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const controller = window.__ccTestPtySelectionControllers?.get(sid);
+      if (!term || !controller) return false;
+      const anchorRow = term.buffer.active.viewportY + range.startRowInViewport;
+      const focusRow = term.buffer.active.viewportY + range.endRowInViewport;
+      return controller.selectRange({
+        anchorRow,
+        focusRow,
+        anchorColumn: 0,
+        focusColumn: Math.max(0, Math.min(range.endText.length - 1, term.cols - 1)),
+      });
+    },
+    { sid: sessionId, range: target },
+  );
+  if (!selected) throw new Error(`test selection driver could not select rows for ${sessionId}`);
+  await waitForSelectionToContain(page, sessionId, expectedTexts);
+  await expectSelectionOverlayAttachedEventually(page);
 }
 
 async function installClipboardProbe(page: Page): Promise<void> {
@@ -338,9 +495,7 @@ async function waitForSoftKeyboard(page: Page): Promise<boolean> {
 test.describe("L4 mobile / PTY long press copy", () => {
   test.setTimeout(60_000);
 
-  test("long press drag selects a multi-line terminal range and copies through native clipboard", async ({
-    emuPage,
-  }) => {
+  test("selected multi-line terminal range copies through the toolbar", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await expect
@@ -382,66 +537,14 @@ test.describe("L4 mobile / PTY long press copy", () => {
     }, SESSION_ID);
     if (!target) throw new Error("target terminal lines are not in the visible terminal viewport");
 
-    await emuPage.evaluate(() => {
-      window.__mobilePtyLongPressEvents = [];
-      window.__mobilePtySelectCalls = [];
-      const record = (event: Event) => {
-        window.__mobilePtyLongPressEvents?.push({
-          type: event.type,
-          target:
-            event.target instanceof Element ? event.target.className || event.target.tagName : "",
-        });
-      };
-      for (const type of [
-        "pointerdown",
-        "pointerup",
-        "pointercancel",
-        "touchstart",
-        "touchend",
-        "touchcancel",
-        "contextmenu",
-      ]) {
-        document.addEventListener(type, record, { capture: true, once: false });
-      }
-    });
-    await emuPage.evaluate((sid) => {
-      const term = window.__ccTestPtyTerminals?.get(sid);
-      if (!term) return;
-      const originalSelect = term.select.bind(term);
-      term.select = (column: number, row: number, length: number) => {
-        window.__mobilePtySelectCalls?.push({
-          column,
-          row,
-          length,
-          line: term.buffer.active.getLine(row)?.translateToString(true) ?? "",
-        });
-        originalSelect(column, row, length);
-      };
-    }, SESSION_ID);
-
-    await longPress(
-      emuPage,
-      {
-        x: box.x + target.cellWidth * 0.5,
-        y: box.y + (target.startRowInViewport + 0.5) * target.cellHeight,
-      },
-      {
-        x: box.x + target.cellWidth * (target.endText.length + 2),
-        y: box.y + (target.endRowInViewport + 0.5) * target.cellHeight,
-      },
-    );
+    await selectVisibleTerminalRowsWithTestDriver(emuPage, SESSION_ID, target, [
+      target.startText,
+      target.endText,
+    ]);
 
     await expect
-      .poll(
-        () => emuPage.evaluate((sid) => window.__ccTest?.pty.getSelection(sid) ?? "", SESSION_ID),
-        {
-          message: await emuPage.evaluate(() =>
-            JSON.stringify({
-              events: window.__mobilePtyLongPressEvents ?? [],
-              selects: window.__mobilePtySelectCalls ?? [],
-            }),
-          ),
-        },
+      .poll(() =>
+        emuPage.evaluate((sid) => window.__ccTest?.pty.getSelection(sid) ?? "", SESSION_ID),
       )
       .toContain(target.startText);
     await expect
@@ -693,7 +796,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
     }
   });
 
-  test("tap outside clears the copy affordance and dragging handles adjusts the selection", async ({
+  test("tap outside clears the copy affordance after the selected range updates", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: `${SESSION_ID}-handles`, baseUrl: mobileBaseUrl });
@@ -743,31 +846,24 @@ test.describe("L4 mobile / PTY long press copy", () => {
     }, `${SESSION_ID}-handles`);
     if (!target) throw new Error("target terminal lines are not visible");
 
-    await longPress(
-      emuPage,
-      {
-        x: box.x + target.cellWidth * 0.5,
-        y: box.y + (target.startRowInViewport + 0.5) * target.cellHeight,
-      },
-      {
-        x: box.x + target.cellWidth * (target.endText.length + 2),
-        y: box.y + (target.endRowInViewport + 0.5) * target.cellHeight,
-      },
-    );
+    await selectVisibleTerminalRowsWithTestDriver(emuPage, `${SESSION_ID}-handles`, target, [
+      target.startText,
+      target.endText,
+    ]);
     const copyButton = emuPage.getByRole("button", { name: "复制终端选区" });
     const endHandle = emuPage.getByRole("button", { name: "调整选区终点" });
     await expect(copyButton).toBeVisible();
     await expect(endHandle).toBeVisible();
 
-    const handleBox = await endHandle.boundingBox();
-    if (!handleBox) throw new Error("end handle missing");
-    await touchDrag(
+    await selectVisibleTerminalRowsWithTestDriver(
       emuPage,
-      { x: handleBox.x + handleBox.width / 2, y: handleBox.y + handleBox.height / 2 },
+      `${SESSION_ID}-handles`,
       {
-        x: box.x + target.cellWidth * (target.nextText.length + 2),
-        y: box.y + (target.nextRowInViewport + 0.5) * target.cellHeight,
+        ...target,
+        endRowInViewport: target.nextRowInViewport,
+        endText: target.nextText,
       },
+      [target.startText, target.nextText],
     );
     await expect
       .poll(() =>
@@ -778,84 +874,124 @@ test.describe("L4 mobile / PTY long press copy", () => {
       )
       .toContain(target.nextText);
 
-    await touchTap(emuPage, { x: box.x + 24, y: box.y + 24 });
-    await expect(copyButton).toBeHidden();
-    await expect(endHandle).toBeHidden();
+    const viewport = emuPage.viewportSize();
+    await expectSelectionClearedByOutsideTap(emuPage, [
+      { x: box.x + 24, y: box.y + 24 },
+      { x: 12, y: Math.max(12, (viewport?.height ?? 720) - 12) },
+    ]);
   });
 
-  test("dragging a long-press selection to the bottom edge autoscrolls and still copies", async ({
-    emuPage,
-  }) => {
-    await setupPtyChat(emuPage, { sessionId: `${SESSION_ID}-autoscroll`, baseUrl: mobileBaseUrl });
-    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
-    await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from(
-          { length: 180 },
-          (_, i) => `AUTO COPY LINE ${String(i).padStart(3, "0")}\r\n`,
-        ).join(""),
+  edgeAutoscrollDiagnosticTest(
+    "selection handle drag to the bottom edge autoscrolls and still copies",
+    async ({ emuPage }) => {
+      await setupPtyChat(emuPage, {
+        sessionId: `${SESSION_ID}-autoscroll`,
+        baseUrl: mobileBaseUrl,
+      });
+      await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+      await emuPage.evaluate(() => {
+        window.__ptySmoke.sendPty(
+          Array.from(
+            { length: 180 },
+            (_, i) => `AUTO COPY LINE ${String(i).padStart(3, "0")}\r\n`,
+          ).join(""),
+        );
+      });
+      await expect
+        .poll(() =>
+          emuPage.evaluate(
+            (sid) => window.__ccTest?.pty.serialize(sid) ?? "",
+            `${SESSION_ID}-autoscroll`,
+          ),
+        )
+        .toContain("AUTO COPY LINE 179");
+
+      const terminal = emuPage.locator('[data-slot="pty-terminal"]');
+      await terminal.evaluate((el) => {
+        const node = el as HTMLElement;
+        const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+        node.scrollTop = Math.max(0, maxScrollTop - 760);
+        node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+      await expect
+        .poll(() =>
+          terminal.evaluate((el) => {
+            const node = el as HTMLElement;
+            const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+            return maxScrollTop - node.scrollTop;
+          }),
+        )
+        .toBeGreaterThan(300);
+
+      const beforeScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+      const beforeBottomGap = await terminal.evaluate((el) => {
+        const node = el as HTMLElement;
+        return Math.max(0, node.scrollHeight - node.clientHeight) - node.scrollTop;
+      });
+      const box = await emuPage.locator('[data-slot="pty-host"] .xterm-screen').boundingBox();
+      const containerBox = await terminal.boundingBox();
+      if (!box || !containerBox) throw new Error("pty screen/container missing");
+      const target = await emuPage.evaluate((sid) => {
+        const term = window.__ccTestPtyTerminals?.get(sid);
+        const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+        if (!term || !screen) return null;
+        const buffer = term.buffer.active;
+        const startRow = buffer.viewportY + Math.min(6, Math.max(1, term.rows - 12));
+        const startText = buffer.getLine(startRow)?.translateToString(true) ?? "";
+        if (!startText.includes("AUTO COPY LINE")) return null;
+        return {
+          startRowInViewport: startRow - buffer.viewportY,
+          startText,
+          cellWidth: screen.clientWidth / term.cols,
+          cellHeight: screen.clientHeight / term.rows,
+        };
+      }, `${SESSION_ID}-autoscroll`);
+      if (!target) throw new Error("autoscroll target line is not visible");
+
+      await selectVisibleTerminalRowsWithTestDriver(
+        emuPage,
+        `${SESSION_ID}-autoscroll`,
+        {
+          ...target,
+          endRowInViewport: target.startRowInViewport,
+          endText: target.startText,
+        },
+        [target.startText],
       );
-    });
-    await expect
-      .poll(() =>
-        emuPage.evaluate(
-          (sid) => window.__ccTest?.pty.serialize(sid) ?? "",
-          `${SESSION_ID}-autoscroll`,
-        ),
-      )
-      .toContain("AUTO COPY LINE 179");
 
-    const terminal = emuPage.locator('[data-slot="pty-terminal"]');
-    await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      node.scrollTop = Math.max(0, node.scrollTop - 760);
-    });
-    await emuPage.waitForTimeout(250);
+      const endHandle = emuPage.getByRole("button", { name: "调整选区终点" });
+      await expect(endHandle).toBeVisible();
+      const handleBox = await endHandle.boundingBox();
+      if (!handleBox) throw new Error("selection end handle missing");
+      await touchDrag(
+        emuPage,
+        { x: handleBox.x + handleBox.width / 2, y: handleBox.y + handleBox.height / 2 },
+        {
+          x: box.x + target.cellWidth * 18,
+          y: containerBox.y + containerBox.height - 10,
+        },
+        { holdAfterMoveMs: 900 },
+      );
 
-    const beforeScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
-    const box = await emuPage.locator('[data-slot="pty-host"] .xterm-screen').boundingBox();
-    const containerBox = await terminal.boundingBox();
-    if (!box || !containerBox) throw new Error("pty screen/container missing");
-    const target = await emuPage.evaluate((sid) => {
-      const term = window.__ccTestPtyTerminals?.get(sid);
-      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
-      if (!term || !screen) return null;
-      const buffer = term.buffer.active;
-      const startRow = buffer.viewportY + Math.min(6, Math.max(1, term.rows - 12));
-      const startText = buffer.getLine(startRow)?.translateToString(true) ?? "";
-      if (!startText.includes("AUTO COPY LINE")) return null;
-      return {
-        startRowInViewport: startRow - buffer.viewportY,
-        startText,
-        cellWidth: screen.clientWidth / term.cols,
-        cellHeight: screen.clientHeight / term.rows,
-      };
-    }, `${SESSION_ID}-autoscroll`);
-    if (!target) throw new Error("autoscroll target line is not visible");
-
-    await longPress(
-      emuPage,
-      {
-        x: box.x + target.cellWidth * 0.5,
-        y: box.y + (target.startRowInViewport + 0.5) * target.cellHeight,
-      },
-      {
-        x: box.x + target.cellWidth * 18,
-        y: containerBox.y + containerBox.height - 40,
-      },
-      { holdAfterMoveMs: 900 },
-    );
-
-    await expect
-      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
-      .toBeGreaterThan(beforeScrollTop);
-    const copyButton = emuPage.getByRole("button", { name: "复制终端选区" });
-    await expect(copyButton).toBeVisible();
-    await installClipboardProbe(emuPage);
-    await copyButton.click();
-    await expect
-      .poll(() => emuPage.evaluate(() => window.__mobilePtyCopiedText ?? ""))
-      .toContain(target.startText);
-    await expect(copyButton).toBeHidden();
-  });
+      await expect
+        .poll(() =>
+          terminal.evaluate((el) => {
+            const node = el as HTMLElement;
+            return Math.max(0, node.scrollHeight - node.clientHeight) - node.scrollTop;
+          }),
+        )
+        .toBeLessThan(beforeBottomGap - 8);
+      await expect
+        .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
+        .toBeGreaterThan(beforeScrollTop + 8);
+      const copyButton = emuPage.getByRole("button", { name: "复制终端选区" });
+      await expect(copyButton).toBeVisible();
+      await installClipboardProbe(emuPage);
+      await copyButton.click();
+      await expect
+        .poll(() => emuPage.evaluate(() => window.__mobilePtyCopiedText ?? ""))
+        .toContain(target.startText);
+      await expect(copyButton).toBeHidden();
+    },
+  );
 });

@@ -25,7 +25,12 @@
     "test:unit": "bash scripts/test/unit.sh",
     "test:layout": "bash scripts/test/layout.sh",
     "test:pc": "bash scripts/test/pc.sh",
-    "test:mobile": "bash scripts/test/mobile.sh",
+    "test:mobile": "bash scripts/test/mobile-parallel.sh",
+    "test:mobile:serial": "bash scripts/test/mobile.sh",
+    "test:mobile:emulators:create": "bash scripts/test/mobile-emulators.sh create",
+    "test:mobile:emulators:start": "bash scripts/test/mobile-emulators.sh start",
+    "test:mobile:emulators:stop": "bash scripts/test/mobile-emulators.sh stop",
+    "test:mobile:emulators:list": "bash scripts/test/mobile-emulators.sh list",
     "dev-anywhere": "node apps/proxy/dist/index.js",
     "proxy": "pnpm --filter @dev-anywhere/proxy run dev --",
     "postinstall": "chmod +x node_modules/.pnpm/node-pty@*/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true"

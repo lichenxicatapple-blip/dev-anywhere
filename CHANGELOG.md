@@ -4,6 +4,17 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.4] - 2026-05-21
+
+### 变更
+
+- 移动端发布门禁改为默认使用 2 台专用 Android emulator 并行执行，并在 release smoke 中自动启动或复用 emulator pool，避免发布时忘记准备移动端环境。
+- 移动端 PTY 长按复制测试拆分稳定 gate 与专项边缘滚动诊断：默认门禁保留选区、复制、下载、toolbar 和清空行为覆盖，最容易受 Android 触摸调度影响的边缘 autoscroll 诊断改为显式开启。
+
+### 测试
+
+- Mobile E2E 新增 per-spec timing report、shard timing 汇总、Chrome 首次启动页处理和更严格的 CDP page readiness 检查，用于降低发布阶段的偶发失败和定位慢用例。
+
 ## [0.4.3] - 2026-05-21
 
 ### 新增

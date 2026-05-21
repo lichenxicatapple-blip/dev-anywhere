@@ -375,6 +375,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   );
 
   const selection = usePtySelectionController({
+    sessionId,
     terminalRef,
     xtermHostRef,
     scrollControllerRef,

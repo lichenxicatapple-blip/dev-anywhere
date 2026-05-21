@@ -40,6 +40,17 @@ e2e_mobile_setup_adb_reverse() {
   adb reverse "tcp:$r" "tcp:$r" >/dev/null
 }
 
+e2e_mobile_remove_forward_port() {
+  local host_port="$1"
+
+  if [[ -n "${ANDROID_SERIAL:-}" ]]; then
+    adb -s "$ANDROID_SERIAL" forward --remove "tcp:$host_port" >/dev/null 2>&1 || true
+    return
+  fi
+
+  adb forward --remove "tcp:$host_port" >/dev/null 2>&1 || true
+}
+
 e2e_mobile_prepare_soft_keyboard() {
   # Android emulators often expose a hardware keyboard to Chrome. Make the IME visible
   # anyway so mobile keyboard-layout tests exercise the same viewport path as phones.
@@ -47,6 +58,64 @@ e2e_mobile_prepare_soft_keyboard() {
     adb shell settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
     adb shell settings put system show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
   fi
+}
+
+e2e_mobile_tap_ui_node() {
+  local coords
+
+  adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || return 1
+  coords="$(
+    adb exec-out cat /sdcard/window.xml 2>/dev/null | python3 -c \
+      "import re, sys, xml.etree.ElementTree as ET
+wanted = set(sys.argv[1:])
+try:
+    root = ET.fromstring(sys.stdin.read())
+except Exception:
+    sys.exit(1)
+for node in root.iter('node'):
+    text = node.attrib.get('text', '')
+    resource_id = node.attrib.get('resource-id', '')
+    if text not in wanted and resource_id not in wanted:
+        continue
+    match = re.fullmatch(r'\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]', node.attrib.get('bounds', ''))
+    if not match:
+        continue
+    x1, y1, x2, y2 = map(int, match.groups())
+    print((x1 + x2) // 2, (y1 + y2) // 2)
+    sys.exit(0)
+sys.exit(1)" "$@"
+  )" || return 1
+
+  [[ -n "$coords" ]] || return 1
+  adb shell input tap $coords >/dev/null 2>&1
+}
+
+e2e_mobile_accept_chrome_first_run() {
+  local _attempt
+
+  for _attempt in $(seq 1 5); do
+    if ! adb shell dumpsys activity activities 2>/dev/null | grep -q 'org.chromium.chrome.browser.firstrun.FirstRunActivity'; then
+      return 0
+    fi
+
+    if e2e_mobile_tap_ui_node \
+      'com.android.chrome:id/signin_fre_dismiss_button' \
+      'com.android.chrome:id/terms_accept' \
+      'com.android.chrome:id/negative_button' \
+      'Use without an account' \
+      'Accept & continue' \
+      'No thanks' \
+      'Got it' \
+      'Continue' \
+      'Skip'; then
+      sleep 1
+      continue
+    fi
+
+    sleep 1
+  done
+
+  ! adb shell dumpsys activity activities 2>/dev/null | grep -q 'org.chromium.chrome.browser.firstrun.FirstRunActivity'
 }
 
 e2e_mobile_teardown_adb_reverse() {

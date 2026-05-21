@@ -84,20 +84,24 @@ Agent CLI paths can be overridden:
 
 ## Verification
 
-| Command                                                                               | Purpose                                                                                                              |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `pnpm format:check`                                                                   | Check formatting with Prettier.                                                                                      |
-| `pnpm lint`                                                                           | Run ESLint and source-comment reference checks.                                                                      |
-| `pnpm typecheck`                                                                      | Run TypeScript build-mode checks.                                                                                    |
-| `pnpm test`                                                                           | Run the Vitest suite.                                                                                                |
-| `pnpm knip`                                                                           | Check unused dependencies, exports, and entry points.                                                                |
-| `pnpm release:check`                                                                  | Build release artifacts, inspect npm package contents, and smoke-test the installed command with an isolated `HOME`. |
-| `pnpm release:smoke`                                                                  | Run desktop, mobile, PTY, clipboard, and chaos smoke gates against the explicit `local` profile.                     |
-| `pnpm test:unit`                                                                      | Tier 1 — Vitest across workspaces.                                                                                   |
-| `pnpm test:layout`                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                      |
-| `pnpm test:pc`                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                          |
-| `pnpm test:mobile`                                                                    | Tier 4 — Android emulator + Chrome CDP. Skips with exit 0 if no emu online.                                          |
-| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test/pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                           |
+| Command                                                                               | Purpose                                                                                                                                            |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm format:check`                                                                   | Check formatting with Prettier.                                                                                                                    |
+| `pnpm lint`                                                                           | Run ESLint and source-comment reference checks.                                                                                                    |
+| `pnpm typecheck`                                                                      | Run TypeScript build-mode checks.                                                                                                                  |
+| `pnpm test`                                                                           | Run the Vitest suite.                                                                                                                              |
+| `pnpm knip`                                                                           | Check unused dependencies, exports, and entry points.                                                                                              |
+| `pnpm release:check`                                                                  | Build release artifacts, inspect npm package contents, and smoke-test the installed command with an isolated `HOME`.                               |
+| `pnpm release:smoke`                                                                  | Run desktop, mobile, PTY, clipboard, and chaos smoke gates against the explicit `local` profile; starts/reuses the dedicated mobile emulator pool. |
+| `pnpm test:unit`                                                                      | Tier 1 — Vitest across workspaces.                                                                                                                 |
+| `pnpm test:layout`                                                                    | Tier 2 — Playwright viewport (mobile/desktop layout contracts).                                                                                    |
+| `pnpm test:pc`                                                                        | Tier 3 — Playwright real desktop Chromium (PC interaction).                                                                                        |
+| `pnpm test:mobile`                                                                    | Tier 4 — Android emulator + Chrome CDP. Uses up to 2 emulator shards by default; skips with exit 0 if no emu online.                               |
+| `pnpm test:mobile:serial`                                                             | Tier 4 — run mobile specs on one emulator through `scripts/test/mobile.sh`.                                                                        |
+| `pnpm test:mobile:emulators:start -- 2`                                               | Start or reuse the dedicated DEV Anywhere Android emulator pool. Keep it running to avoid release-test cold starts.                                |
+| `pnpm test:mobile:emulators:list`                                                     | List available AVDs and online Android emulator devices.                                                                                           |
+| `pnpm test:mobile:emulators:stop -- 2`                                                | Stop the dedicated DEV Anywhere Android emulator pool.                                                                                             |
+| `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test/pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                                                         |
 
 测试分层和 fixture 选型的完整说明见 [docs/TESTING.md](./TESTING.md)。
 
@@ -110,5 +114,6 @@ Agent CLI paths can be overridden:
 | `RELAY_PROXY_TOKEN=... RELAY_CLIENT_TOKEN=... pnpm --filter @dev-anywhere/relay exec tsx scripts/verify-relay.ts wss://dev-anywhere.example.com`       | Verify a deployed relay's health, registration, proxy listing, proxy selection, and bidirectional routing.                     |
 | `pnpm --filter @dev-anywhere/proxy run sample:stream-json`                                                                                             | Sample Claude stream-json output and refresh schema-drift fixtures. Requires a locally installed and authenticated Claude CLI. |
 | `node scripts/tools/emu-debug.mjs <command>`                                                                                                           | Android emulator + Chrome CDP helper for mobile debugging: tab list, navigation, screenshot, console, PTY metrics, and trace.  |
+| `TEST_MOBILE_EDGE_AUTOSCROLL_DIAGNOSTICS=1 bash scripts/test/mobile.sh e2e/mobile/pty-long-press-copy.spec.ts`                                         | Opt-in Android edge-autoscroll diagnostics for PTY selection handles. Not part of the default release gate.                    |
 
 `pnpm dev:chaos` is intended for contributors working on reconnect, session lifecycle, PTY recovery, or JSON-mode behavior. By default it writes temporary chaos workspaces under `${TMPDIR:-/tmp}/dev-anywhere-chaos`; pass `--workdir` to isolate a run. Relay chaos tuning is also parameterized through flags such as `--relay-chaos-types`, `--relay-chaos-delay-ms`, `--relay-chaos-duplicate`, and `--relay-chaos-reorder`.

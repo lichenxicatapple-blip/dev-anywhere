@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+RELEASE_MOBILE_EMULATORS="${RELEASE_MOBILE_EMULATORS:-2}"
+
 pnpm dev:restart -- --profile local --relay local --relay-port 3100 --web-port 5173
 pnpm test:layout
 pnpm test:pc
@@ -20,4 +22,5 @@ DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 \
   WEB_BASE_URL=http://localhost:5173 \
   bash scripts/test/pc.sh e2e/pc/real-clipboard-image.spec.ts
 pnpm dev:chaos -- --profile local --relay local --relay-port 3100 --web-port 5173 --base-url http://localhost:5173
-pnpm test:mobile
+bash scripts/test/mobile-emulators.sh start "$RELEASE_MOBILE_EMULATORS"
+TEST_MOBILE_REQUIRE_EMULATOR=1 pnpm test:mobile
