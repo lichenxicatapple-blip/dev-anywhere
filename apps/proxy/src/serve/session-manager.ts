@@ -4,6 +4,7 @@ import { defineFSM, SessionState } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
 import type { ProviderId } from "../providers/index.js";
+import { upsertSessionHistoryMetadata } from "./session-history-metadata.js";
 
 export interface SessionInfo {
   id: string;
@@ -24,6 +25,7 @@ export interface SessionInfo {
 
 interface SessionManagerOptions {
   persistPath: string;
+  historyMetadataPath?: string;
   reaperIntervalMs?: number;
   onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
 }
@@ -124,11 +126,13 @@ export class SessionManager {
   private pendingPtyReconnectMetadata: Map<string, PersistedSessionRecord> = new Map();
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
+  private readonly historyMetadataPath?: string;
   private readonly reaperIntervalMs: number;
   private readonly onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
 
   constructor(options: SessionManagerOptions) {
     this.persistPath = options.persistPath;
+    this.historyMetadataPath = options.historyMetadataPath;
     this.reaperIntervalMs = options.reaperIntervalMs ?? 60000;
     this.onSessionRemoved = options.onSessionRemoved;
     this.load();
@@ -269,6 +273,7 @@ export class SessionManager {
     }
     session.claudeSessionId = claudeSessionId;
     this.save();
+    this.recordRestoreMetadata(session, claudeSessionId);
   }
 
   setPid(id: string, pid: number): void {
@@ -292,8 +297,23 @@ export class SessionManager {
     session.name = trimmed;
     session.nameLocked = true;
     this.save();
+    if (session.claudeSessionId) {
+      this.recordRestoreMetadata(session, session.claudeSessionId);
+    }
     serviceLogger.info({ sessionId: id }, "Session renamed");
     return { success: true, name: trimmed };
+  }
+
+  private recordRestoreMetadata(session: SessionInfo, nativeSessionId: string): void {
+    upsertSessionHistoryMetadata(this.historyMetadataPath, {
+      nativeSessionId,
+      devAnywhereSessionId: session.id,
+      provider: session.provider,
+      mode: session.mode,
+      cwd: session.cwd,
+      ...(session.name !== undefined ? { title: session.name } : {}),
+      updatedAt: Date.now(),
+    });
   }
 
   startReaper(intervalMs: number = this.reaperIntervalMs): void {

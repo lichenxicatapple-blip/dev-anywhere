@@ -6,6 +6,7 @@ import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
 import { serviceLogger } from "../../common/logger.js";
 import { classifyPathError } from "../path-errors.js";
+import { HISTORY_METADATA_PATH } from "../../common/paths.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
@@ -218,7 +219,7 @@ export function createControlMessageHandlers(
 
     async handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void> {
       try {
-        const sessions = await scanSessionHistory();
+        const sessions = await scanSessionHistory({ metadataPath: HISTORY_METADATA_PATH });
         send(
           serializeControl({
             type: "session_history_response",

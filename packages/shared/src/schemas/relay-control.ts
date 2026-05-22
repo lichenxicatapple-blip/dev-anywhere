@@ -59,6 +59,7 @@ export const HistorySessionSchema = z.object({
   projectDir: z.string(),
   updatedAt: z.number(),
   provider: z.enum(providerValues).optional(),
+  preferredMode: z.enum(sessionModeValues).optional(),
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 

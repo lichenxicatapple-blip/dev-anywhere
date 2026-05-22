@@ -10,6 +10,7 @@ import {
   PID_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
+  HISTORY_METADATA_PATH,
   PROXY_ID_PATH,
   PROFILE_NAME,
   ensureProfileWorkspace,
@@ -111,6 +112,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   let unregisterHookSession: (sessionId: string) => void = () => {};
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
+    historyMetadataPath: HISTORY_METADATA_PATH,
     onSessionRemoved: (id, context) => {
       if (!context?.preserveProviderHooks) {
         unregisterHookSession(id);

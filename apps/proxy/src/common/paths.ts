@@ -26,6 +26,7 @@ interface ProxyProfilePaths {
   desiredRelayPath: string;
   stateDir: string;
   sessionsPath: string;
+  historyMetadataPath: string;
   hookRegistryPath: string;
   dataDir: string;
   proxyIdPath: string;
@@ -111,6 +112,7 @@ export function buildProxyProfilePaths(home: string, profileName: string): Proxy
     desiredRelayPath: `${runDir}/desired-relay`,
     stateDir,
     sessionsPath: `${stateDir}/sessions.json`,
+    historyMetadataPath: `${stateDir}/history-metadata.json`,
     hookRegistryPath: `${stateDir}/hooks.json`,
     dataDir,
     proxyIdPath: isDefaultProfile ? `${appDir}/proxy-id` : `${profileDir}/proxy-id`,
@@ -154,6 +156,7 @@ export const DESIRED_RELAY_PATH = PROFILE_PATHS.desiredRelayPath;
 // 持久化状态
 const STATE_DIR = PROFILE_PATHS.stateDir;
 export const SESSIONS_PATH = PROFILE_PATHS.sessionsPath;
+export const HISTORY_METADATA_PATH = PROFILE_PATHS.historyMetadataPath;
 export const HOOK_REGISTRY_PATH = PROFILE_PATHS.hookRegistryPath;
 
 // 会话数据

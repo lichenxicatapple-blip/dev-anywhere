@@ -25,6 +25,8 @@ interface HistoryListProps {
   now?: number;
 }
 
+type RestoreMode = "pty" | "json";
+
 export function HistoryList({ now }: HistoryListProps) {
   const historySessions = useSessionStore((s) => s.historySessions);
   const [resumingId, setResumingId] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export function HistoryList({ now }: HistoryListProps) {
       }));
   }, [historySessions]);
 
-  async function handleResume(h: HistorySession) {
+  async function handleResume(h: HistorySession, mode: RestoreMode) {
     if (resumingId) return;
     const relay = relayClientRef;
     if (!relay) {
@@ -72,7 +74,7 @@ export function HistoryList({ now }: HistoryListProps) {
     try {
       const ctrl = await relay.createSession({
         cwd: h.projectDir,
-        mode: "pty",
+        mode,
         provider,
         resumeSessionId: h.id,
       });
@@ -83,11 +85,11 @@ export function HistoryList({ now }: HistoryListProps) {
       const newSession: SessionInfo = {
         sessionId: ctrl.sessionId,
         state: "idle",
-        mode: ctrl.mode ?? "pty",
+        mode: ctrl.mode ?? mode,
         provider: ctrl.provider ?? "claude",
       };
       useSessionStore.getState().addSession(newSession);
-      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? "pty"}`);
+      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
     } catch (err) {
       toast.error(`恢复失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -266,7 +268,12 @@ export function HistoryList({ now }: HistoryListProps) {
                                   now={now}
                                   disabled={resumingId !== null}
                                   loading={resumingId === h.id}
-                                  onClick={() => handleResume(h)}
+                                  onClick={() => {
+                                    const mode = directRestoreMode(h);
+                                    if (mode) void handleResume(h, mode);
+                                  }}
+                                  restoreModes={explicitRestoreModes(h)}
+                                  onRestoreMode={(mode) => handleResume(h, mode)}
                                 />
                               ))}
                             </ul>
@@ -287,4 +294,16 @@ export function HistoryList({ now }: HistoryListProps) {
 
 function historyProjectGroupKey(provider: SessionProvider, dir: string): string {
   return `${provider}:${dir}`;
+}
+
+function directRestoreMode(session: HistorySession): RestoreMode | null {
+  if (session.preferredMode) return session.preferredMode;
+  const provider = historySessionProvider(session);
+  return provider === "codex" ? "pty" : null;
+}
+
+function explicitRestoreModes(session: HistorySession): RestoreMode[] | undefined {
+  if (directRestoreMode(session)) return undefined;
+  const provider = historySessionProvider(session);
+  return provider === "claude" ? ["json", "pty"] : undefined;
 }

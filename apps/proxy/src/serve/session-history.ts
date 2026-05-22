@@ -3,6 +3,10 @@ import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline";
+import {
+  applySessionHistoryMetadata,
+  readSessionHistoryMetadata,
+} from "./session-history-metadata.js";
 
 interface SessionHistoryEntry {
   id: string;
@@ -10,6 +14,11 @@ interface SessionHistoryEntry {
   projectDir: string;
   updatedAt: number;
   provider: "claude" | "codex";
+  preferredMode?: "pty" | "json";
+}
+
+interface ScanSessionHistoryOptions {
+  metadataPath?: string;
 }
 
 const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
@@ -41,17 +50,23 @@ const INTERNAL_TITLE_PATTERNS = [
 
 // 扫描 ~/.claude/projects/ 获取 Claude Code 会话历史
 // 实际目录结构: ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
-export async function scanSessionHistory(): Promise<SessionHistoryEntry[]> {
-  const entries = [...(await scanClaudeSessionHistory()), ...(await scanCodexSessionHistory())];
+export async function scanSessionHistory(
+  options: ScanSessionHistoryOptions = {},
+): Promise<SessionHistoryEntry[]> {
+  const entries = applySessionHistoryMetadata(
+    [...(await scanClaudeSessionHistory()), ...(await scanCodexSessionHistory())],
+    readSessionHistoryMetadata(options.metadataPath),
+  );
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
   // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
   const seen = new Set<string>();
-  return entries.filter((e) => {
-    const key = `${e.provider}::${e.projectDir}::${e.title}`;
+  const uniqueEntries = entries.filter((e) => {
+    const key = `${e.provider}::${e.projectDir}::${e.title}::${e.preferredMode ?? "unknown"}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  return uniqueEntries;
 }
 
 async function scanClaudeSessionHistory(): Promise<SessionHistoryEntry[]> {

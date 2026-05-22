@@ -13,6 +13,7 @@ describe("proxy profile paths", () => {
     expect(paths.sockPath).toBe("/home/dev/.dev-anywhere/run/dev-anywhere.sock");
     expect(paths.pidPath).toBe("/home/dev/.dev-anywhere/run/dev-anywhere.pid");
     expect(paths.sessionsPath).toBe("/home/dev/.dev-anywhere/state/sessions.json");
+    expect(paths.historyMetadataPath).toBe("/home/dev/.dev-anywhere/state/history-metadata.json");
     expect(paths.dataDir).toBe("/home/dev/.dev-anywhere/data");
     expect(paths.proxyIdPath).toBe("/home/dev/.dev-anywhere/proxy-id");
     expect(paths.serviceLogPath).toBe("/home/dev/.dev-anywhere/logs/service.log");
@@ -25,6 +26,9 @@ describe("proxy profile paths", () => {
     expect(paths.sockPath).toBe("/home/dev/.dev-anywhere/profiles/local/run/dev-anywhere.sock");
     expect(paths.pidPath).toBe("/home/dev/.dev-anywhere/profiles/local/run/dev-anywhere.pid");
     expect(paths.sessionsPath).toBe("/home/dev/.dev-anywhere/profiles/local/state/sessions.json");
+    expect(paths.historyMetadataPath).toBe(
+      "/home/dev/.dev-anywhere/profiles/local/state/history-metadata.json",
+    );
     expect(paths.dataDir).toBe("/home/dev/.dev-anywhere/profiles/local/data");
     expect(paths.proxyIdPath).toBe("/home/dev/.dev-anywhere/profiles/local/proxy-id");
     expect(paths.serviceLogPath).toBe("/home/dev/.dev-anywhere/profiles/local/logs/service.log");

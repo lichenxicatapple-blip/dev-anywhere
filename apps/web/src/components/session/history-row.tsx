@@ -2,10 +2,12 @@
 // 总在某个 projectDir group 下渲染, 所以本行不再重复展示 projectDir。
 // 标题与时间分两行：历史标题信息量优先，时间作为小号副信息避免挤压标题。
 // 行内不放图标: 每行前导时钟图标信息量为零 (group header 已表达"历史"语义), 纯靠左侧 pl-10 缩进体现层级
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, MessageSquare, TerminalSquare } from "lucide-react";
 import type { HistorySession } from "@dev-anywhere/shared";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
+
+type RestoreMode = "pty" | "json";
 
 interface HistoryRowProps {
   session: HistorySession;
@@ -15,10 +17,73 @@ interface HistoryRowProps {
   disabled?: boolean;
   // 当前正在 resume 的行: 显示 loading 而不是箭头
   loading?: boolean;
-  onClick: () => void;
+  onClick?: () => void;
+  restoreModes?: RestoreMode[];
+  onRestoreMode?: (mode: RestoreMode) => void;
 }
 
-export function HistoryRow({ session, now, disabled, loading, onClick }: HistoryRowProps) {
+export function HistoryRow({
+  session,
+  now,
+  disabled,
+  loading,
+  onClick,
+  restoreModes,
+  onRestoreMode,
+}: HistoryRowProps) {
+  const content = (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="text-sm font-normal truncate min-w-0" title={session.title}>
+        {session.title}
+      </span>
+      <span className="text-xs text-muted-foreground tabular-nums">
+        {formatRelativeTime(session.updatedAt, now)}
+      </span>
+    </span>
+  );
+
+  if (restoreModes && restoreModes.length > 0 && onRestoreMode) {
+    return (
+      <li
+        data-slot="history-row"
+        data-session-id={session.id}
+        data-loading={loading ? "true" : undefined}
+        className={cn(
+          "group w-full flex items-center gap-2 pl-10 pr-4 py-2 min-h-[50px]",
+          "transition-colors hover:bg-accent",
+          disabled && "opacity-50",
+        )}
+      >
+        {content}
+        <span className="flex shrink-0 items-center gap-1">
+          {restoreModes.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              disabled={disabled}
+              onClick={() => onRestoreMode(mode)}
+              aria-label={`${mode === "json" ? "以气泡聊天恢复" : "以终端会话恢复"}：${session.title}`}
+              className={cn(
+                "inline-flex h-7 items-center gap-1 rounded-md border border-border px-2",
+                "text-xs text-muted-foreground outline-none transition-colors",
+                "hover:border-primary/60 hover:bg-primary/10 hover:text-foreground",
+                "focus-visible:ring-2 focus-visible:ring-ring",
+                "disabled:cursor-wait disabled:opacity-60",
+              )}
+            >
+              {mode === "json" ? (
+                <MessageSquare className="size-3.5" aria-hidden="true" />
+              ) : (
+                <TerminalSquare className="size-3.5" aria-hidden="true" />
+              )}
+              <span>{mode === "json" ? "聊天" : "终端"}</span>
+            </button>
+          ))}
+        </span>
+      </li>
+    );
+  }
+
   return (
     <li>
       <button
@@ -36,14 +101,7 @@ export function HistoryRow({ session, now, disabled, loading, onClick }: History
         )}
         aria-label={`恢复会话：${session.title}`}
       >
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-sm font-normal truncate min-w-0" title={session.title}>
-            {session.title}
-          </span>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {formatRelativeTime(session.updatedAt, now)}
-          </span>
-        </span>
+        {content}
         <ArrowUpRight
           className={cn(
             "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-opacity",

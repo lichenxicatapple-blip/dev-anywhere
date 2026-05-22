@@ -87,6 +87,76 @@ describe("scanSessionHistory", () => {
     expect(addFeature.title).toBe("Add new feature");
   });
 
+  it("merges Dev Anywhere restore metadata into native Claude history", async () => {
+    writeSession("-test-myproject", "claude-json-1", [
+      JSON.stringify({ type: "user", message: { role: "user", content: "Continue chat mode" } }),
+    ]);
+    const metadataPath = join(testDir, ".dev-anywhere", "state", "history-metadata.json");
+    mkdirSync(join(testDir, ".dev-anywhere", "state"), { recursive: true });
+    writeFileSync(
+      metadataPath,
+      JSON.stringify([
+        {
+          nativeSessionId: "claude-json-1",
+          devAnywhereSessionId: "dev-json-1",
+          provider: "claude",
+          mode: "json",
+          cwd: "/test/myproject",
+          updatedAt: 123,
+        },
+      ]),
+    );
+
+    const result = await scanSessionHistory({ metadataPath });
+
+    expect(result.find((session) => session.id === "claude-json-1")).toMatchObject({
+      id: "claude-json-1",
+      provider: "claude",
+      preferredMode: "json",
+    });
+  });
+
+  it("keeps metadata-backed history entries when deduplicating repeated native sessions", async () => {
+    writeSession("-test-myproject", "claude-json-old", [
+      JSON.stringify({ type: "user", message: { role: "user", content: "Same title" } }),
+    ]);
+    await new Promise((r) => setTimeout(r, 50));
+    writeSession("-test-myproject", "claude-unknown-new", [
+      JSON.stringify({ type: "user", message: { role: "user", content: "Same title" } }),
+    ]);
+    const metadataPath = join(testDir, ".dev-anywhere", "state", "history-metadata.json");
+    mkdirSync(join(testDir, ".dev-anywhere", "state"), { recursive: true });
+    writeFileSync(
+      metadataPath,
+      JSON.stringify([
+        {
+          nativeSessionId: "claude-json-old",
+          devAnywhereSessionId: "dev-json-old",
+          provider: "claude",
+          mode: "json",
+          cwd: "/test/myproject",
+          title: "Renamed JSON chat",
+          updatedAt: 123,
+        },
+      ]),
+    );
+
+    const result = await scanSessionHistory({ metadataPath });
+
+    expect(result.find((session) => session.id === "claude-json-old")).toMatchObject({
+      id: "claude-json-old",
+      title: "Renamed JSON chat",
+      projectDir: "/test/myproject",
+      preferredMode: "json",
+    });
+    const unknownSession = result.find((session) => session.id === "claude-unknown-new");
+    expect(unknownSession).toMatchObject({
+      id: "claude-unknown-new",
+      title: "Same title",
+    });
+    expect(unknownSession).not.toHaveProperty("preferredMode");
+  });
+
   it("falls back to unnamed title when no user text found", async () => {
     writeSession("-test-proj", "notitle99", [
       JSON.stringify({ type: "file-history-snapshot" }),

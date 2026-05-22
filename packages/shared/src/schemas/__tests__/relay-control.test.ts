@@ -575,12 +575,22 @@ describe("RelayControlSchema", () => {
   it("parses session_history_response with sessions array", () => {
     const result = RelayControlSchema.parse({
       type: "session_history_response",
-      sessions: [{ id: "s1", title: "Fix bug", projectDir: "/project", updatedAt: 1700000000 }],
+      sessions: [
+        {
+          id: "s1",
+          title: "Fix bug",
+          projectDir: "/project",
+          updatedAt: 1700000000,
+          provider: "claude",
+          preferredMode: "json",
+        },
+      ],
     });
     expect(result.type).toBe("session_history_response");
     if (result.type === "session_history_response") {
       expect(result.sessions).toHaveLength(1);
       expect(result.sessions[0].title).toBe("Fix bug");
+      expect(result.sessions[0].preferredMode).toBe("json");
     }
   });
 

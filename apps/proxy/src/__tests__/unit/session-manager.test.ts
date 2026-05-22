@@ -15,11 +15,14 @@ const DEAD_PID = 999999;
 
 describe("SessionManager", () => {
   let persistPath: string;
+  let historyMetadataPath: string;
   let manager: SessionManager;
 
   beforeEach(() => {
-    persistPath = join(makeTmpDir(), "sessions.json");
-    manager = new SessionManager({ persistPath });
+    const dir = makeTmpDir();
+    persistPath = join(dir, "sessions.json");
+    historyMetadataPath = join(dir, "history-metadata.json");
+    manager = new SessionManager({ persistPath, historyMetadataPath });
   });
 
   afterEach(() => {
@@ -350,6 +353,24 @@ describe("SessionManager", () => {
       const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
       manager.setClaudeSessionId(s.id, "claude-abc");
       expect(manager.getSession(s.id)!.claudeSessionId).toBe("claude-abc");
+    });
+
+    it("records restore metadata for JSON sessions when Claude session ID is captured", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "chat session");
+
+      manager.setClaudeSessionId(s.id, "claude-json-abc");
+
+      const data = JSON.parse(readFileSync(historyMetadataPath, "utf-8"));
+      expect(data).toEqual([
+        expect.objectContaining({
+          nativeSessionId: "claude-json-abc",
+          devAnywhereSessionId: s.id,
+          provider: "claude",
+          mode: "json",
+          cwd: "/tmp/test",
+          title: "chat session",
+        }),
+      ]);
     });
   });
 

@@ -241,6 +241,14 @@ function voiceTurnIdleMsFromSeconds(seconds: unknown, fallbackMs: number): numbe
   return Number.isSafeInteger(ms) && ms > 0 ? ms : fallbackMs;
 }
 
+function useEventCallback<T extends (...args: never[]) => unknown>(callback: T): T {
+  const callbackRef = useRef(callback);
+  useEffect(() => {
+    callbackRef.current = callback;
+  });
+  return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
+}
+
 export function VoicePilotController({
   sessionId,
   turnIdleMs = defaultVoiceTurnIdleMs(),
@@ -444,7 +452,7 @@ export function VoicePilotController({
     speakAssistantMessage(lastAssistant);
   }
 
-  function scheduleApprovalSpeech(approval: ToolApprovalRequest): void {
+  const scheduleApprovalSpeech = useEventCallback((approval: ToolApprovalRequest): void => {
     if (!voicePilotEnabled()) return;
     if (scheduledApprovalRequestIdsRef.current.has(approval.requestId)) return;
     scheduledApprovalRequestIdsRef.current.add(approval.requestId);
@@ -467,28 +475,28 @@ export function VoicePilotController({
         useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "审批播报失败"));
       }
     })();
-  }
+  });
 
-  function sendMachineEvent(event: VoicePilotEvent): Promise<void> {
+  const sendMachineEvent = useEventCallback(async (event: VoicePilotEvent): Promise<void> => {
     const machine = ensureSessionMachine();
     const transition = machine.send(event);
     useVoicePilotStore.getState().setPhase(sessionId, machine.getPhase());
     return dispatchEffects(transition.effects);
-  }
+  });
 
-  function voicePilotEnabled(): boolean {
+  const voicePilotEnabled = useEventCallback((): boolean => {
     return Boolean(useVoicePilotStore.getState().bySessionId[sessionId]?.enabled);
-  }
+  });
 
-  function currentPilotPhase(): VoicePilotState["phase"] {
+  const currentPilotPhase = useEventCallback((): VoicePilotState["phase"] => {
     return (
       sessionMachineRef.current?.getPhase() ??
       useVoicePilotStore.getState().bySessionId[sessionId]?.phase ??
       pilotRef.current.phase
     );
-  }
+  });
 
-  function shouldCaptureNow(): boolean {
+  const shouldCaptureNow = useEventCallback((): boolean => {
     const phase = currentPilotPhase();
     if (phase === "approval") {
       return Boolean(firstPendingApproval(approvalsRef.current));
@@ -497,13 +505,13 @@ export function VoicePilotController({
       return !agentBusyRef.current && !firstPendingApproval(approvalsRef.current);
     }
     return false;
-  }
+  });
 
   function hasQueuedOrActiveSpeech(): boolean {
     return Boolean(activeSpeechRef.current) || speechQueueRef.current.length > 0;
   }
 
-  function syncCapturePhaseWithAgentState(): void {
+  const syncCapturePhaseWithAgentState = useEventCallback((): void => {
     if (!voicePilotEnabled() || !sessionMachineRef.current) return;
     const phase = currentPilotPhase();
     const hasApproval = Boolean(firstPendingApproval(approvalsRef.current));
@@ -519,7 +527,7 @@ export function VoicePilotController({
     ) {
       void sendMachineEvent({ type: "agentBecameIdle" });
     }
-  }
+  });
 
   const acceptsAsrInput = useCallback((): boolean => {
     const phase = currentPilotPhase();
@@ -528,7 +536,7 @@ export function VoicePilotController({
       return !agentBusyRef.current && !firstPendingApproval(approvalsRef.current);
     }
     return false;
-  }, [sessionId]);
+  }, [currentPilotPhase]);
 
   function reportProviderError(error: string): void {
     if (!voicePilotEnabled() || !sessionMachineRef.current) return;
@@ -679,7 +687,7 @@ export function VoicePilotController({
     if (!voicePilotEnabled() || asrRef.current !== socket) return;
     socket.send(JSON.stringify({ type: "start", sessionId, sampleRate: ASR_SAMPLE_RATE }));
     await startCapture();
-  }, [sessionId, startCapture]);
+  }, [sessionId, startCapture, voicePilotEnabled]);
 
   useEffect(() => {
     if (!enabled || !asrRef.current) return;
@@ -692,7 +700,16 @@ export function VoicePilotController({
       if (!voicePilotEnabled()) return;
       useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "语音识别连接不可用"));
     });
-  }, [agentBusy, beginListening, enabled, sessionId, stopCapture]);
+  }, [
+    agentBusy,
+    beginListening,
+    enabled,
+    sessionId,
+    shouldCaptureNow,
+    stopCapture,
+    syncCapturePhaseWithAgentState,
+    voicePilotEnabled,
+  ]);
 
   const playEarcon = useCallback(
     async (kind: VoicePilotEarcon) => {
@@ -801,14 +818,14 @@ export function VoicePilotController({
     }
   }
 
-  function enqueueAssistantText(text: string, messageId = ""): void {
+  const enqueueAssistantText = useEventCallback((text: string, messageId = ""): void => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const key = messageId
       ? `assistant:${messageId}:${speechTextFingerprint(trimmed)}`
       : `assistant:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     enqueueSpeechItem({ kind: "assistant", key, text: trimmed, messageId });
-  }
+  });
 
   function enqueueApprovalText(approval: ToolApprovalRequest, text: string): void {
     const trimmed = text.trim();
@@ -826,7 +843,7 @@ export function VoicePilotController({
     (text: string, messageId = "") => {
       enqueueAssistantText(text, messageId);
     },
-    [sessionId],
+    [enqueueAssistantText],
   );
 
   const commitRecognizedInput = useCallback(
@@ -902,7 +919,7 @@ export function VoicePilotController({
       }
       return true;
     },
-    [discardVoicePartialBubble, sessionId, speak],
+    [discardVoicePartialBubble, sendMachineEvent, sessionId, speak],
   );
 
   const handleCompletedVoiceTurn = useCallback(
@@ -936,15 +953,20 @@ export function VoicePilotController({
       discardVoicePartialBubble,
       handleCommand,
       resetVoiceActivityGate,
+      scheduleApprovalSpeech,
+      sendMachineEvent,
       sessionId,
     ],
   );
 
-  const handleFinalAsrText = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    void sendMachineEvent({ type: "asrFinal", text: trimmed });
-  }, []);
+  const handleFinalAsrText = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      void sendMachineEvent({ type: "asrFinal", text: trimmed });
+    },
+    [sendMachineEvent],
+  );
 
   function ensureVoiceRuntime(): void {
     if (turnBufferRef.current || asrRef.current || ttsRef.current || playerRef.current) return;
@@ -1089,7 +1111,7 @@ export function VoicePilotController({
       })();
       return true;
     },
-    [sessionId],
+    [enqueueAssistantText, sessionId],
   );
 
   useEffect(() => {
@@ -1168,8 +1190,11 @@ export function VoicePilotController({
     pendingApprovals,
     pilot.approvalRequestId,
     pilot.phase,
+    scheduleApprovalSpeech,
+    sendMachineEvent,
     sessionId,
     speakAssistantMessage,
+    syncCapturePhaseWithAgentState,
   ]);
 
   return null;
