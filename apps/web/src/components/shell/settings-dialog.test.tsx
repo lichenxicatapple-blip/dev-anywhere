@@ -120,16 +120,20 @@ describe("SettingsDialog", () => {
     );
   });
 
-  it("shows the Voice Pilot settings entry without a subtitle", () => {
+  it("shows the Voice Pilot settings entry with a subtitle", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "设置" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /版本/ })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Voice Pilot" })).not.toBeNull();
+    expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
     const menuItems = screen.getAllByRole("button").filter((button) => {
       return button.getAttribute("data-slot") === "settings-menu-item";
     });
-    expect(menuItems.map((item) => item.textContent)).toEqual(["Voice Pilot", "版本"]);
+    expect(menuItems.map((item) => item.textContent)).toEqual([
+      "Voice Pilot用语音输入、听取回复和处理审批",
+      "版本",
+    ]);
   });
 
   it("loads and saves Bailian Voice Pilot settings without dismissing the dialog", async () => {

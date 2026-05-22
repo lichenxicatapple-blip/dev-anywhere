@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -185,6 +185,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <SettingsMenuItem
               icon={<AudioLines className="size-4" aria-hidden="true" />}
               label="Voice Pilot"
+              detail="用语音输入、听取回复和处理审批"
               onClick={() => setView("voice")}
             />
             <SettingsToggleItem
@@ -267,19 +268,30 @@ function SettingsMenuItem({
   detail?: string;
   onClick: () => void;
 }) {
+  const labelId = useId();
+  const detailId = useId();
+
   return (
     <button
       type="button"
       className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       onClick={onClick}
+      aria-labelledby={labelId}
+      aria-describedby={detail ? detailId : undefined}
       data-slot="settings-menu-item"
     >
       <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-foreground">{label}</div>
-        {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
+        <div id={labelId} className="text-sm font-medium text-foreground">
+          {label}
+        </div>
+        {detail ? (
+          <div id={detailId} className="mt-1 text-xs text-muted-foreground">
+            {detail}
+          </div>
+        ) : null}
       </div>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </button>
