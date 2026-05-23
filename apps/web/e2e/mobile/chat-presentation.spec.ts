@@ -2,7 +2,7 @@
 // auto-restore 落到已死 session 时静默退到 /sessions, 以及 ConnectionLostPanel 在
 // 移动视口下能被 layout 正常承接 (无水平溢出 / 内容可见)。
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
-import { installFakeRelay, selectFakeProxy } from "../helpers";
+import { installFakeRelay } from "../helpers";
 import { expectNoHorizontalDocumentOverflow } from "../mobile-helpers";
 
 test.describe("L4 mobile / chat presentation", () => {
@@ -32,8 +32,12 @@ test.describe("L4 mobile / chat presentation", () => {
   test("ConnectionLostPanel(proxy) 在移动视口下完整可见, 不水平溢出", async ({ emuPage }) => {
     await emuPage.goto(`${mobileBaseUrl}/#/`);
     await installFakeRelay(emuPage);
-    await emuPage.reload();
-    await selectFakeProxy(emuPage);
+    await emuPage.evaluate(() => {
+      localStorage.removeItem("dev-anywhere:last-chat-route");
+      localStorage.setItem("dev_anywhere_proxyId", "proxy-1");
+      sessionStorage.removeItem("dev-anywhere:route-restored");
+      sessionStorage.removeItem("dev-anywhere:restored-target");
+    });
     await emuPage.goto(`${mobileBaseUrl}/#/chat/json-sess?mode=json`);
     await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
       timeout: 30_000,

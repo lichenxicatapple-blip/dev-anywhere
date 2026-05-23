@@ -28,6 +28,10 @@ CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
 RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
+PLAYWRIGHT_FLAKY_ARGS=()
+if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
+  PLAYWRIGHT_FLAKY_ARGS+=(--fail-on-flaky-tests)
+fi
 
 mkdir -p "$ARTIFACT_DIR"
 trap 'e2e_mobile_remove_forward_port "$CDP_PORT"; e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
@@ -228,7 +232,7 @@ for spec in "${SPECS[@]}"; do
   if WEB_BASE_URL="$BASE_URL" \
     MOBILE_VITE_BASE_URL="$BASE_URL" \
     MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
-    ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec"; then
+    ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"; then
     SPEC_STATUS="passed"
   else
     SPEC_RC="$?"

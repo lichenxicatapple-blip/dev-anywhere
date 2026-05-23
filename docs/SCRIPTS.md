@@ -103,6 +103,8 @@ Agent CLI paths can be overridden:
 | `pnpm test:mobile:emulators:stop -- 2`                                                | Stop the dedicated DEV Anywhere Android emulator pool.                                                                                             |
 | `WEB_BASE_URL=http://127.0.0.1:5175 bash scripts/test/pc.sh e2e/pc/pty-input.spec.ts` | Run selected Playwright specs against an explicit Web URL.                                                                                         |
 
+The Playwright tier wrappers (`test:layout`, `test:pc`, `test:mobile`) fail when Playwright marks a test as flaky after retry. Set `PLAYWRIGHT_FAIL_ON_FLAKY_TESTS=0` only for local diagnosis when you explicitly want to inspect retry behavior.
+
 测试分层和 fixture 选型的完整说明见 [docs/TESTING.md](./TESTING.md)。
 
 ## Advanced Diagnostics
