@@ -372,6 +372,73 @@ describe("SessionManager", () => {
         }),
       ]);
     });
+
+    it("stores resumed history session separately from the active Claude session", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "chat session");
+
+      manager.setHistorySessionId(s.id, "claude-resume-abc");
+      manager.setClaudeSessionId(s.id, "claude-active-def");
+
+      expect(manager.getSession(s.id)).toMatchObject({
+        historySessionId: "claude-resume-abc",
+        claudeSessionId: "claude-active-def",
+      });
+      const data = JSON.parse(readFileSync(persistPath, "utf-8"));
+      expect(data[0]).toMatchObject({
+        historySessionId: "claude-resume-abc",
+        claudeSessionId: "claude-active-def",
+      });
+    });
+
+    it("infers missing resumed history session from metadata for pre-fix active sessions", () => {
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "s1",
+            mode: "json",
+            provider: "claude",
+            createdAt: 1,
+            updatedAt: 1,
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            name: "chat session",
+            claudeSessionId: "claude-active-def",
+          },
+        ]),
+      );
+      writeFileSync(
+        historyMetadataPath,
+        JSON.stringify([
+          {
+            nativeSessionId: "claude-active-def",
+            devAnywhereSessionId: "s1",
+            provider: "claude",
+            mode: "json",
+            cwd: "/tmp/test",
+            title: "chat session",
+            updatedAt: 200,
+          },
+          {
+            nativeSessionId: "claude-resume-abc",
+            devAnywhereSessionId: "s1",
+            provider: "claude",
+            mode: "json",
+            cwd: "/tmp/test",
+            title: "chat session",
+            updatedAt: 100,
+          },
+        ]),
+      );
+
+      const manager2 = new SessionManager({ persistPath, historyMetadataPath });
+
+      expect(manager2.getSession("s1")).toMatchObject({
+        historySessionId: "claude-resume-abc",
+        claudeSessionId: "claude-active-def",
+      });
+      manager2.stopReaper();
+    });
   });
 
   describe("setPid", () => {

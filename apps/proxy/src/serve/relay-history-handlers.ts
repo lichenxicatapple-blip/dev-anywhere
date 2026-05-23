@@ -4,6 +4,7 @@ import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
 import { readSessionMessagesPage } from "./session-history.js";
 import type { SessionManager } from "./session-manager.js";
+import type { SessionInfo } from "./session-manager.js";
 
 interface RelayHistoryHandlersDeps {
   relaySend: RelaySend;
@@ -19,8 +20,8 @@ export class RelayHistoryHandlers {
     if (!sid) return;
 
     const session = this.deps.sessionManager.getSession(sid);
-    if (session?.claudeSessionId) {
-      readSessionMessagesPage(session.claudeSessionId, { before, limit })
+    if (session?.claudeSessionId || session?.historySessionId) {
+      readSessionHistoryPageForSession(session, { before, limit })
         .then((page) => {
           this.deps.relaySend(
             serializeControl({
@@ -83,4 +84,103 @@ export class RelayHistoryHandlers {
     );
     serviceLogger.info({ sessionId: sid, count: approvals.length }, "Pending approvals pushed");
   }
+}
+
+interface HistoryPageOptions {
+  limit?: number;
+  before?: string;
+}
+
+interface SessionHistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: number;
+  cursor?: string;
+}
+
+interface SessionHistoryPage {
+  messages: SessionHistoryMessage[];
+  hasMore: boolean;
+  nextBefore?: string;
+}
+
+const RESUME_CURSOR_PREFIX = "resume:";
+const ACTIVE_CURSOR_PREFIX = "active:";
+
+function addCursorPrefix(
+  prefix: typeof RESUME_CURSOR_PREFIX | typeof ACTIVE_CURSOR_PREFIX,
+  messages: SessionHistoryMessage[],
+): SessionHistoryMessage[] {
+  return messages.map((message) =>
+    message.cursor ? { ...message, cursor: `${prefix}${message.cursor}` } : message,
+  );
+}
+
+function stripCursorPrefix(
+  prefix: typeof RESUME_CURSOR_PREFIX | typeof ACTIVE_CURSOR_PREFIX,
+  cursor: string,
+): string {
+  return cursor.startsWith(prefix) ? cursor.slice(prefix.length) : cursor;
+}
+
+async function readSessionHistoryPageForSession(
+  session: SessionInfo,
+  options: HistoryPageOptions,
+): Promise<SessionHistoryPage> {
+  const historySessionId = session.historySessionId;
+  const activeSessionId = session.claudeSessionId;
+  const hasSeparateHistory =
+    historySessionId !== undefined &&
+    activeSessionId !== undefined &&
+    historySessionId !== activeSessionId;
+
+  if (!hasSeparateHistory) {
+    const sourceId = activeSessionId ?? historySessionId;
+    if (!sourceId) return { messages: [], hasMore: false };
+    return readSessionMessagesPage(sourceId, options);
+  }
+
+  if (options.before?.startsWith(ACTIVE_CURSOR_PREFIX)) {
+    const page = await readSessionMessagesPage(activeSessionId, {
+      ...options,
+      before: stripCursorPrefix(ACTIVE_CURSOR_PREFIX, options.before),
+    });
+    return {
+      ...page,
+      messages: addCursorPrefix(ACTIVE_CURSOR_PREFIX, page.messages),
+      ...(page.nextBefore !== undefined
+        ? { nextBefore: `${ACTIVE_CURSOR_PREFIX}${page.nextBefore}` }
+        : {}),
+    };
+  }
+
+  if (options.before?.startsWith(RESUME_CURSOR_PREFIX)) {
+    const page = await readSessionMessagesPage(historySessionId, {
+      ...options,
+      before: stripCursorPrefix(RESUME_CURSOR_PREFIX, options.before),
+    });
+    return {
+      ...page,
+      messages: addCursorPrefix(RESUME_CURSOR_PREFIX, page.messages),
+      ...(page.nextBefore !== undefined
+        ? { nextBefore: `${RESUME_CURSOR_PREFIX}${page.nextBefore}` }
+        : {}),
+    };
+  }
+
+  const [historyPage, activePage] = await Promise.all([
+    readSessionMessagesPage(historySessionId, options),
+    readSessionMessagesPage(activeSessionId, options),
+  ]);
+
+  return {
+    messages: [
+      ...addCursorPrefix(RESUME_CURSOR_PREFIX, historyPage.messages),
+      ...addCursorPrefix(ACTIVE_CURSOR_PREFIX, activePage.messages),
+    ],
+    hasMore: historyPage.hasMore,
+    ...(historyPage.nextBefore !== undefined
+      ? { nextBefore: `${RESUME_CURSOR_PREFIX}${historyPage.nextBefore}` }
+      : {}),
+  };
 }

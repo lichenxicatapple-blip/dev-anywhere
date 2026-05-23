@@ -4,7 +4,10 @@ import { defineFSM, SessionState } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
 import type { ProviderId } from "../providers/index.js";
-import { upsertSessionHistoryMetadata } from "./session-history-metadata.js";
+import {
+  readSessionHistoryMetadata,
+  upsertSessionHistoryMetadata,
+} from "./session-history-metadata.js";
 
 export interface SessionInfo {
   id: string;
@@ -20,6 +23,9 @@ export interface SessionInfo {
   // Claude CLI 自己生成的 session ID，和上面 id 字段无关
   // 用途：定位 ~/.claude/projects/<encoded-cwd>/<claudeSessionId>.jsonl 历史文件 / 支持 --resume
   claudeSessionId?: string;
+  // JSON 会话通过 --resume 启动时，Claude 可能立刻生成新的 session_id。
+  // 旧会话仍是初始历史的来源，不能被新 session_id 覆盖。
+  historySessionId?: string;
   pid: number;
 }
 
@@ -171,6 +177,9 @@ export class SessionManager {
       ...(pendingPtyMetadata?.claudeSessionId !== undefined
         ? { claudeSessionId: pendingPtyMetadata.claudeSessionId }
         : {}),
+      ...(pendingPtyMetadata?.historySessionId !== undefined
+        ? { historySessionId: pendingPtyMetadata.historySessionId }
+        : {}),
     };
     this.sessions.set(info.id, info);
     this.pendingPtyReconnectMetadata.delete(info.id);
@@ -274,6 +283,16 @@ export class SessionManager {
     session.claudeSessionId = claudeSessionId;
     this.save();
     this.recordRestoreMetadata(session, claudeSessionId);
+  }
+
+  setHistorySessionId(id: string, historySessionId: string): void {
+    const session = this.sessions.get(id);
+    if (!session) {
+      throw new Error(`Session not found: ${id}`);
+    }
+    session.historySessionId = historySessionId;
+    this.save();
+    this.recordRestoreMetadata(session, historySessionId);
   }
 
   setPid(id: string, pid: number): void {
@@ -383,6 +402,7 @@ export class SessionManager {
       ...(s.name !== undefined ? { name: s.name } : {}),
       ...(s.nameLocked !== undefined ? { nameLocked: s.nameLocked } : {}),
       ...(s.claudeSessionId !== undefined ? { claudeSessionId: s.claudeSessionId } : {}),
+      ...(s.historySessionId !== undefined ? { historySessionId: s.historySessionId } : {}),
     };
   }
 
@@ -411,6 +431,7 @@ export class SessionManager {
       );
       return;
     }
+    const historyMetadata = readSessionHistoryMetadata(this.historyMetadataPath);
     for (const item of parsed) {
       // state 字段不该落盘（见 save 注释）。遇到说明 schema 不匹配（旧版本数据 / 手改文件 / save bug）；
       // 跳过该条而不是 throw，否则一条坏数据让所有 session 都加载不了，serve 起不来。
@@ -433,10 +454,24 @@ export class SessionManager {
         );
         continue;
       }
+      const inferredHistorySessionId =
+        info.mode === "json" && info.historySessionId === undefined && info.claudeSessionId
+          ? historyMetadata.find(
+              (record) =>
+                record.devAnywhereSessionId === info.id &&
+                record.provider === info.provider &&
+                record.mode === "json" &&
+                record.nativeSessionId !== info.claudeSessionId,
+            )?.nativeSessionId
+          : undefined;
+      const hydratedInfo =
+        inferredHistorySessionId !== undefined
+          ? { ...info, historySessionId: inferredHistorySessionId }
+          : info;
       if (info.mode === "pty") {
         if (info.pid && this.isProcessAlive(info.pid)) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
-          this.pendingPtyReconnectMetadata.set(info.id, this.toPersistedRecord(info));
+          this.pendingPtyReconnectMetadata.set(info.id, this.toPersistedRecord(hydratedInfo));
           serviceLogger.info(
             { sessionId: info.id, pid: info.pid },
             "PTY session skipped on load, terminal alive",
@@ -454,7 +489,7 @@ export class SessionManager {
       // JSON 会话：检查 worker 进程是否存活，无 PID 或进程已死则清理
       if (info.pid && this.isProcessAlive(info.pid)) {
         // 加载回内存时 state 重置为 IDLE，等后续观察通道信号刷新
-        this.sessions.set(info.id, { ...info, state: SessionState.IDLE });
+        this.sessions.set(info.id, { ...hydratedInfo, state: SessionState.IDLE });
       } else {
         this.onSessionRemoved?.(info.id);
         serviceLogger.info(

@@ -161,7 +161,7 @@ export class RelaySessionCreateHandler {
             nameLocked,
           );
           if (resumeSessionId) {
-            this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
+            this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
           }
           this.deps.relaySend(
             serializeControl({
