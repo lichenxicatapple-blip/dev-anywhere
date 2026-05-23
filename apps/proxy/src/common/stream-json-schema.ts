@@ -69,7 +69,7 @@ const UserEventSchema = z
     type: z.literal("user"),
     message: z
       .object({
-        content: z.array(z.unknown()),
+        content: z.union([z.array(z.unknown()), z.string()]),
       })
       .passthrough(),
   })
@@ -80,6 +80,17 @@ const ResultEventSchema = z
     type: z.literal("result"),
     subtype: z.string(),
     is_error: z.boolean().optional(),
+  })
+  .passthrough();
+
+// Claude slash commands can emit status / local_command system events instead of a normal
+// assistant/result turn. The proxy handles the compact lifecycle from these events.
+const SystemEventSchema = z
+  .object({
+    type: z.literal("system"),
+    subtype: z.string().optional(),
+    status: z.string().optional(),
+    content: z.unknown().optional(),
   })
   .passthrough();
 
@@ -180,12 +191,15 @@ export const StreamJsonEventSchema = z.discriminatedUnion("type", [
   AssistantEventSchema,
   UserEventSchema,
   ResultEventSchema,
+  SystemEventSchema,
   StreamEventSchema,
   ControlRequestEventSchema,
   ControlResponseEventSchema,
 ]);
 
+export type StreamJsonEvent = z.infer<typeof StreamJsonEventSchema>;
+
 // schema discriminatedUnion 未覆盖但 proxy 明确静默忽略的 event type。
 // forwardEvent 遇到这些 type 不发 warn，测试也按这份名单判断"safeParse 失败是否在意"。
 // 新增一种忽略 type 时只改这里一处。
-export const IGNORED_EVENT_TYPES: ReadonlySet<string> = new Set(["system", "rate_limit_event"]);
+export const IGNORED_EVENT_TYPES: ReadonlySet<string> = new Set(["rate_limit_event"]);

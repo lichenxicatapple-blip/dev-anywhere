@@ -1,13 +1,14 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
-import { buildMessage, serializeControl } from "@dev-anywhere/shared";
+import { buildMessage, serializeControl, SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   ContentBlockDeltaSchema,
   IGNORED_EVENT_TYPES,
   KnownContentBlockSchema,
   StreamJsonEventSchema,
+  type StreamJsonEvent,
 } from "../common/stream-json-schema.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
@@ -18,6 +19,11 @@ import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
 import type { ProviderHookContext } from "../providers/index.js";
 import type { PermissionBroker, PermissionDecision } from "./permission-broker.js";
+
+interface CompactCommandOutcome {
+  success: boolean;
+  message: string;
+}
 
 interface WorkerRegistryDeps {
   sessionManager: SessionManager;
@@ -38,6 +44,38 @@ interface SpawnOptions {
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
   streamDelta?: boolean;
   hook?: ProviderHookContext;
+}
+
+const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
+
+function normalizeLocalCommandText(content: string): string {
+  return content
+    .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(/<\/?local-command-(?:stdout|stderr)>/g, "")
+    .trim();
+}
+
+function parseCompactCommandOutcome(content: string): CompactCommandOutcome | null {
+  const normalized = normalizeLocalCommandText(content);
+  if (!normalized) return null;
+
+  if (content.includes("<local-command-stderr>")) {
+    let detail = normalized
+      .replace(/^Error:\s*/i, "")
+      .replace(/^Error during compaction:\s*/i, "")
+      .trim();
+    if (/No messages to compact/i.test(detail)) {
+      return { success: true, message: "没有可压缩的上下文。" };
+    }
+    if (!detail) detail = "请稍后重试。";
+    return { success: false, message: `上下文压缩失败：${detail}` };
+  }
+
+  if (content.includes("<local-command-stdout>") || /\bCompacted\b/i.test(normalized)) {
+    return { success: true, message: "上下文压缩完成。" };
+  }
+
+  return null;
 }
 
 // 管理 session → worker socket 的映射，封装全部 worker IO：
@@ -289,8 +327,9 @@ export class WorkerRegistry {
   //   assistant.content[].thinking  → thinking envelope（streamDelta 下跳过）
   //   assistant.content[].tool_use  → assistant_tool_use envelope
   //   user.content[].tool_result    → tool_result envelope
+  //   system/local_command          → /compact 成功/失败结果 + 会话状态回 IDLE
   //   result                        → turn_result control + 会话状态回 IDLE
-  //   system/rate_limit_event/其他  → 静默忽略
+  //   rate_limit_event/其他         → 静默忽略
   // schema 未识别的 event/block 以 warn 暴露，作为 Claude CLI 协议变化的 runtime canary。
   private forwardEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
@@ -310,6 +349,15 @@ export class WorkerRegistry {
     const ev = parsed.data;
     this.deps.touchSessionActivity?.(sessionId);
     const isStreamDeltaSession = this.streamDeltaSessions.has(sessionId);
+
+    if (ev.type === "system") {
+      if (this.handleCompactSystemEvent(sessionId, seq, ev)) return;
+      serviceLogger.debug(
+        { sessionId, subtype: ev.subtype, status: ev.status },
+        "Dropped ignored stream-json system event",
+      );
+      return;
+    }
 
     if (ev.type === "stream_event") {
       const delta = ContentBlockDeltaSchema.safeParse(ev.event);
@@ -332,6 +380,7 @@ export class WorkerRegistry {
     }
 
     if (ev.type === "assistant") {
+      let forwardedContent = false;
       for (const raw of ev.message.content) {
         const blockParse = KnownContentBlockSchema.safeParse(raw);
         if (!blockParse.success) {
@@ -349,6 +398,7 @@ export class WorkerRegistry {
         if (block.type === "text") {
           // streamDelta 下增量已经发过了，aggregated 全文跳过避免重复
           if (!isStreamDeltaSession && block.text) {
+            forwardedContent = true;
             relay.sendEnvelope(
               buildMessage(
                 "assistant_message",
@@ -363,11 +413,13 @@ export class WorkerRegistry {
           // Opus extended thinking 明文被 Anthropic 服务端 redact 时 block.thinking 为空字符串，
           // 不转发；session WORKING 状态已经覆盖"Claude 在思考"信号，redacted envelope 无新信息
           if (!isStreamDeltaSession && block.thinking) {
+            forwardedContent = true;
             relay.sendEnvelope(
               buildMessage("thinking", sessionId, seq, { text: block.thinking }, "proxy"),
             );
           }
         } else if (block.type === "tool_use") {
+          forwardedContent = true;
           relay.sendEnvelope(
             buildMessage(
               "assistant_tool_use",
@@ -379,10 +431,17 @@ export class WorkerRegistry {
           );
         }
       }
+      if (forwardedContent && this.isCompactingSession(sessionId)) {
+        this.sendCompactTurnResult(sessionId, true);
+      }
       return;
     }
 
     if (ev.type === "user") {
+      if (typeof ev.message.content === "string") {
+        this.handleCompactLocalCommandOutput(sessionId, seq, ev.message.content);
+        return;
+      }
       for (const raw of ev.message.content) {
         const blockParse = KnownContentBlockSchema.safeParse(raw);
         if (!blockParse.success) continue;
@@ -414,6 +473,59 @@ export class WorkerRegistry {
       );
       this.deps.jsonObserver.onTurnResult(sessionId);
     }
+  }
+
+  private handleCompactSystemEvent(
+    sessionId: string,
+    seq: number,
+    ev: Extract<StreamJsonEvent, { type: "system" }>,
+  ): boolean {
+    if (!this.isCompactingSession(sessionId)) return false;
+    if (ev.subtype === "status" && ev.status === "compacting") return true;
+    if (ev.subtype !== "local_command" || typeof ev.content !== "string") return false;
+    return this.handleCompactLocalCommandOutput(sessionId, seq, ev.content);
+  }
+
+  private handleCompactLocalCommandOutput(
+    sessionId: string,
+    seq: number,
+    content: string,
+  ): boolean {
+    if (!this.isCompactingSession(sessionId)) return false;
+    const outcome = parseCompactCommandOutcome(content);
+    if (!outcome) return false;
+    this.deps.relayConnection.sendEnvelope(
+      buildMessage(
+        "assistant_message",
+        sessionId,
+        seq,
+        { text: outcome.message, isPartial: true },
+        "proxy",
+      ),
+    );
+    this.sendCompactTurnResult(sessionId, outcome.success, outcome.message);
+    serviceLogger[outcome.success ? "info" : "warn"](
+      { sessionId, success: outcome.success },
+      "Compact command completed",
+    );
+    return true;
+  }
+
+  private sendCompactTurnResult(sessionId: string, success: boolean, result?: string): void {
+    this.deps.relayConnection.sendRaw(
+      serializeControl({
+        type: "turn_result",
+        sessionId,
+        success,
+        isError: !success,
+        ...(result ? { result } : {}),
+      }),
+    );
+    this.deps.jsonObserver.onTurnResult(sessionId);
+  }
+
+  private isCompactingSession(sessionId: string): boolean {
+    return this.deps.sessionManager.getSession(sessionId)?.state === SessionState.COMPACTING;
   }
 
   private forwardApprovalRequest(
