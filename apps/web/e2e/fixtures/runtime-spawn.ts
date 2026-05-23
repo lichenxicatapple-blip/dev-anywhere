@@ -3,7 +3,16 @@
 //
 // 端口动态拿, HOME 隔离到 /tmp/da-e2e-XXXX 短路径 (绕开 macOS sun_path 104 字节上限).
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
@@ -215,10 +224,25 @@ export async function spawnLocalRuntime(options: SpawnOptions = {}): Promise<Loc
 
 export async function dumpLastFailureLog(profileHome: string): Promise<void> {
   try {
-    const log = readFileSync(
-      join(profileHome, ".dev-anywhere/profiles/e2e/logs/service.log"),
-      "utf-8",
-    );
+    const logDir = join(profileHome, ".dev-anywhere/profiles/e2e/logs");
+    const latestPath = join(logDir, "service.log");
+    if (existsSync(latestPath)) {
+      const log = readFileSync(latestPath, "utf-8");
+      writeFileSync("/tmp/da-e2e-last-failure.log", log);
+      return;
+    }
+
+    const candidates = readdirSync(logDir)
+      .filter((entry) => entry.startsWith("service-") && entry.endsWith(".log"))
+      .map((entry) => {
+        const path = join(logDir, entry);
+        return { path, mtimeMs: statSync(path).mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const fallback = candidates[0];
+    if (!fallback) return;
+
+    const log = readFileSync(fallback.path, "utf-8");
     writeFileSync("/tmp/da-e2e-last-failure.log", log);
   } catch {}
 }
