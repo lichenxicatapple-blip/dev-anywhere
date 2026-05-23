@@ -280,3 +280,48 @@ describe("InputBar attach file picker", () => {
     );
   });
 });
+
+describe("InputBar compact command", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    sendEnvelope.mockReset();
+    useChatStore.setState({
+      bySessionId: {
+        s1: { ...EMPTY_SLICE, inputDraft: "/compact" },
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+  });
+
+  it("sends /compact without creating a visible user bubble", () => {
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+
+    fireEvent.click(getByLabelText("发送"));
+
+    expect(sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "user_input",
+        sessionId: "s1",
+        payload: expect.objectContaining({ text: "/compact" }),
+      }),
+    );
+    expect(useChatStore.getState().bySessionId.s1?.messages).toEqual([]);
+    expect(useSessionStore.getState().sessions.find((s) => s.sessionId === "s1")?.state).toBe(
+      "compacting",
+    );
+  });
+});

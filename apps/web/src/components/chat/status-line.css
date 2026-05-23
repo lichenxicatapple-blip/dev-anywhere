@@ -24,6 +24,10 @@
   background-color: var(--color-status-working);
 }
 
+.dev-status-line-compacting {
+  background-color: var(--color-status-working);
+}
+
 .dev-status-line-waiting_approval {
   background-color: var(--color-status-warning);
   animation: dev-status-breathe 2s ease-in-out infinite;
@@ -123,6 +127,16 @@
     transparent 100%
   );
   animation: dev-status-sweep 1.5s linear infinite;
+}
+
+.dev-status-line-sweep-compacting {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  animation: dev-status-sweep 2s linear infinite;
 }
 
 .dev-status-line-sweep-waiting {

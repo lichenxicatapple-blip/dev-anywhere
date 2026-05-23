@@ -158,6 +158,51 @@ describe("RelayRouter input routing", () => {
     });
   });
 
+  it("does not echo native /compact as a visible JSON user message", () => {
+    const workerSend = vi.fn(() => true);
+    const relay = createRelayConnectionFake();
+    const jsonObserver = { onTurnStart: vi.fn() };
+    const handlers = new RelayInputHandlers({
+      sessionManager: {
+        getSession: (sessionId: string) =>
+          sessionId === "s1"
+            ? {
+                id: "s1",
+                mode: "json",
+                provider: "claude",
+                state: SessionState.IDLE,
+                cwd: "/tmp",
+                pid: 1,
+              }
+            : undefined,
+      } as never,
+      workerRegistry: createWorkerRegistryFake({ send: workerSend }),
+      terminalSockets: new Map(),
+      hostedPtyRegistry: {
+        write: vi.fn(() => false),
+      } as never,
+      jsonObserver: jsonObserver as never,
+      relayConnection: relay.relayConnection,
+    });
+
+    handlers.onUserInput({
+      type: "user_input",
+      sessionId: "s1",
+      seq: 7,
+      timestamp: 1234,
+      source: "client",
+      version: "1",
+      payload: { text: "/compact", messageId: "s1-user-client-1" },
+    });
+
+    expect(workerSend).toHaveBeenCalledWith("s1", {
+      type: "worker_input",
+      content: "/compact",
+    });
+    expect(jsonObserver.onTurnStart).toHaveBeenCalledWith("s1", { compacting: true });
+    expect(relay.sendEnvelope).not.toHaveBeenCalled();
+  });
+
   it("keeps JSON sessions on batch user_input", () => {
     const workerSend = vi.fn(() => true);
     const jsonTurnStart = vi.fn();
@@ -185,6 +230,32 @@ describe("RelayRouter input routing", () => {
       content: "hello",
     });
     expect(terminalWrite).not.toHaveBeenCalled();
+  });
+
+  it("marks JSON /compact user_input as compacting instead of ordinary working", () => {
+    const workerSend = vi.fn(() => true);
+    const jsonTurnStart = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      workerSend,
+      jsonTurnStart,
+    });
+
+    router.handle({
+      type: "user_input",
+      sessionId: "s1",
+      seq: 1,
+      timestamp: 1700000000000,
+      source: "client",
+      version: "1.0",
+      payload: { text: " /compact " },
+    });
+
+    expect(jsonTurnStart).toHaveBeenCalledWith("s1", { compacting: true });
+    expect(workerSend).toHaveBeenCalledWith("s1", {
+      type: "worker_input",
+      content: " /compact ",
+    });
   });
 
   it("rejects session_create immediately when cwd does not exist", () => {

@@ -21,6 +21,13 @@ describe("JsonObserver", () => {
     expect(emitAgentStatus).toHaveBeenCalledWith("s1", "thinking");
   });
 
+  it("onTurnStart compact command → COMPACTING without normal thinking status", () => {
+    const { observer, spy, emitAgentStatus } = setup();
+    observer.onTurnStart("s1", { compacting: true });
+    expect(spy).toHaveBeenCalledWith("s1", SessionState.COMPACTING);
+    expect(emitAgentStatus).not.toHaveBeenCalled();
+  });
+
   it("onTurnResult → IDLE", () => {
     const { observer, spy, emitAgentStatus } = setup();
     observer.onTurnResult("s1");

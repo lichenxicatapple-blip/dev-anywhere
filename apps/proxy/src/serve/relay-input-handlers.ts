@@ -2,6 +2,7 @@ import type { Socket } from "node:net";
 import {
   ControlErrorCode,
   MessageEnvelopeSchema,
+  isCompactCommandText,
   serializeControl,
   type ControlMessage,
   type Envelope,
@@ -44,6 +45,7 @@ export class RelayInputHandlers {
     const text = msg.payload.text;
 
     if (session.mode === "json") {
+      const isCompactCommand = isCompactCommandText(text);
       // 必须先 send 成功再 onTurnStart：onTurnStart 把 session 推到 WORKING，但 send 失败时
       // 没有 onTurnResult / onChannelBroken 回到 IDLE，session 会卡 WORKING 直到 60s reaper。
       const sent = this.deps.workerRegistry.send(sessionId, {
@@ -54,7 +56,15 @@ export class RelayInputHandlers {
         serviceLogger.warn({ sessionId }, "Remote input dropped: JSON worker socket not available");
         return;
       }
-      this.deps.jsonObserver.onTurnStart(sessionId);
+      if (isCompactCommand) {
+        this.deps.jsonObserver.onTurnStart(sessionId, { compacting: true });
+      } else {
+        this.deps.jsonObserver.onTurnStart(sessionId);
+      }
+      if (isCompactCommand) {
+        serviceLogger.info({ sessionId }, "Remote compact command forwarded to JSON worker");
+        return;
+      }
       const messageId =
         msg.payload.messageId && msg.payload.messageId.length > 0
           ? msg.payload.messageId

@@ -2,6 +2,7 @@
 export const SessionState = {
   IDLE: "idle",
   WORKING: "working",
+  COMPACTING: "compacting",
   WAITING_APPROVAL: "waiting_approval",
   ERROR: "error",
   TERMINATED: "terminated",

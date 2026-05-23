@@ -37,6 +37,11 @@ const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; lab
     text: "text-[var(--color-status-working)]",
     label: "工作中",
   },
+  compacting: {
+    dot: "bg-[var(--color-status-working)] animate-pulse",
+    text: "text-[var(--color-status-working)]",
+    label: "压缩中",
+  },
   waiting_approval: {
     dot: "bg-[var(--color-status-warning)]",
     text: "text-[var(--color-status-warning)]",

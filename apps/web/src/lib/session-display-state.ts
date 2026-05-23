@@ -1,6 +1,12 @@
 import type { AgentStatusPayload, PtyStatePayload, SessionInfo } from "@dev-anywhere/shared";
 
-type SessionDisplayState = "idle" | "working" | "waiting_approval" | "terminated" | "disconnected";
+type SessionDisplayState =
+  | "idle"
+  | "working"
+  | "compacting"
+  | "waiting_approval"
+  | "terminated"
+  | "disconnected";
 
 export function resolveSessionDisplayState(options: {
   connected?: boolean;
@@ -16,6 +22,7 @@ export function resolveSessionDisplayState(options: {
   if (options.hasPendingApproval || options.session?.state === "waiting_approval") {
     return "waiting_approval";
   }
+  if (options.session?.state === "compacting") return "compacting";
   if (options.session?.state === "working") return "working";
   if (options.session?.state === "idle") return "idle";
   if (options.agentStatus?.phase === "waiting_permission") return "waiting_approval";

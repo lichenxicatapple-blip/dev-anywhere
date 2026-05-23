@@ -13,7 +13,11 @@ export class JsonObserver {
   constructor(private deps: JsonObserverDeps) {}
 
   // 用户消息注入 worker（relay-router 收到 user_input）→ 进入 WORKING
-  onTurnStart(sessionId: string): void {
+  onTurnStart(sessionId: string, options: { compacting?: boolean } = {}): void {
+    if (options.compacting) {
+      this.deps.changeSessionState(sessionId, SessionState.COMPACTING);
+      return;
+    }
     this.deps.changeSessionState(sessionId, SessionState.WORKING);
     this.deps.emitAgentStatus?.(sessionId, "thinking");
   }

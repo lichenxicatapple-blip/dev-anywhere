@@ -77,6 +77,9 @@ export * from "./types/index.js";
 // builders
 export { buildMessage, serializeControl } from "./builders/index.js";
 
+// slash command helpers
+export { isCompactCommandText } from "./slash-commands.js";
+
 // relay control
 export {
   ProxyInfoSchema,

@@ -90,6 +90,13 @@ describe("session display state", () => {
       expected: "working",
     },
     {
+      name: "session compacting has its own display state",
+      input: {
+        session: { ...ptySession, mode: "json", state: "compacting" },
+      },
+      expected: "compacting",
+    },
+    {
       name: "idle when no higher-priority signal exists",
       input: {
         session: ptySession,

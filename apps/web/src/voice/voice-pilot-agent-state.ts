@@ -9,6 +9,7 @@ export function isVoicePilotAgentBusy({
 }): boolean {
   return (
     sessionState === "working" ||
+    sessionState === "compacting" ||
     agentPhase === "thinking" ||
     agentPhase === "tool_use" ||
     agentPhase === "outputting" ||

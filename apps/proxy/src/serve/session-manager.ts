@@ -56,6 +56,7 @@ const PTY_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
     // 终态兜底；现阶段 terminated 走 terminateSession 直接删 map 不经 updateState，本边未被触发
     SessionState.TERMINATED,
   ],
+  [SessionState.COMPACTING]: [SessionState.TERMINATED],
   [SessionState.WORKING]: [
     // 5s 静默且 currentPtyState === "working" → idle timer 推 turn_complete
     SessionState.IDLE,
@@ -83,6 +84,8 @@ const JSON_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
   [SessionState.IDLE]: [
     // 用户在 relay/web 端发消息 → onTurnStart，turn 开始
     SessionState.WORKING,
+    // 原生 /compact 命令由 Claude CLI 处理，不是普通 assistant turn。
+    SessionState.COMPACTING,
     // 空闲期观察通道失联（worker socket 死但 pid 仍在等）→ onChannelBroken
     SessionState.ERROR,
     // 终态兜底；同 PTY，当前不经 updateState
@@ -94,6 +97,14 @@ const JSON_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
     // claude 发 control_request → onApprovalRequested，阻塞等审批
     SessionState.WAITING_APPROVAL,
     // turn 进行中通道失联 → onChannelBroken
+    SessionState.ERROR,
+    // 终态兜底
+    SessionState.TERMINATED,
+  ],
+  [SessionState.COMPACTING]: [
+    // stream-json result event → /compact 结束回 IDLE
+    SessionState.IDLE,
+    // 压缩期间通道失联 → onChannelBroken
     SessionState.ERROR,
     // 终态兜底
     SessionState.TERMINATED,

@@ -207,6 +207,20 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
     });
 
+    it("JSON session transitions idle -> compacting -> idle for native /compact", () => {
+      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      expect(manager.updateState(s.id, SessionState.COMPACTING)).toBe(true);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.COMPACTING);
+      expect(manager.updateState(s.id, SessionState.IDLE)).toBe(true);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
+    });
+
+    it("PTY session rejects compacting because native /compact is JSON-only", () => {
+      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      expect(manager.updateState(s.id, SessionState.COMPACTING)).toBe(false);
+      expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
+    });
+
     it("PTY session rejects transition into error and returns false (no ERROR state for PTY)", () => {
       const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
       expect(manager.updateState(s.id, SessionState.ERROR)).toBe(false);

@@ -13,7 +13,7 @@ import {
 } from "react";
 import { ImageIcon, Paperclip, Upload } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
-import type { CommandEntry } from "@dev-anywhere/shared";
+import { isCompactCommandText, type CommandEntry } from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -62,10 +62,11 @@ export function InputBar({ sessionId }: InputBarProps) {
 
   const value = slice.inputDraft;
   const isWorking = sessionState === "working";
+  const isBusy = isWorking || sessionState === "compacting";
   const pendingApprovals = slice.pendingApprovals;
 
   const pickerMode = detectPickerMode(value);
-  const sendDisabled = computeSendDisabled(isWorking, pendingApprovals);
+  const sendDisabled = computeSendDisabled(isBusy, pendingApprovals);
   const canSend = !sendDisabled && value.trim() !== "";
 
   // 已插入的原子片段 (slash 命令 / @<路径>), 用于 backspace 整体删除
@@ -113,17 +114,20 @@ export function InputBar({ sessionId }: InputBarProps) {
     if (!relay) return;
     const now = Date.now();
     const messageId = `${sessionId}-user-${now}`;
-    // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
-    addUserMessage(sessionId, {
-      id: messageId,
-      role: "user",
-      text: trimmed,
-      isPartial: false,
-      timestamp: now,
-      toolCalls: [],
-    });
-    // 乐观翻 session.state="working"：proxy 20~50ms 内会回 session_status 覆写（包括万一没被接受的降级态）
-    updateSessionState(sessionId, "working", now);
+    const isCompactCommand = isCompactCommandText(trimmed);
+    if (!isCompactCommand) {
+      // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
+      addUserMessage(sessionId, {
+        id: messageId,
+        role: "user",
+        text: trimmed,
+        isPartial: false,
+        timestamp: now,
+        toolCalls: [],
+      });
+    }
+    // 乐观翻 session.state：proxy 20~50ms 内会回 session_status 覆写（包括万一没被接受的降级态）
+    updateSessionState(sessionId, isCompactCommand ? "compacting" : "working", now);
     relay.sendEnvelope({
       type: "user_input",
       sessionId,

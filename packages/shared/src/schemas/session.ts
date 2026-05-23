@@ -6,6 +6,7 @@ import { IdSchema } from "./id.js";
 export const sessionStateValues = [
   "idle",
   "working",
+  "compacting",
   "waiting_approval",
   "error",
   "terminated",

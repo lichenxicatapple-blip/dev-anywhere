@@ -55,7 +55,14 @@ describe("SessionListPayloadSchema", () => {
   });
 
   it("accepts all valid session states", () => {
-    const states = ["idle", "working", "waiting_approval", "error", "terminated"] as const;
+    const states = [
+      "idle",
+      "working",
+      "compacting",
+      "waiting_approval",
+      "error",
+      "terminated",
+    ] as const;
     for (const state of states) {
       const result = SessionListPayloadSchema.parse({
         sessions: [{ sessionId: "s1", state, provider: "claude" }],
