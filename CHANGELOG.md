@@ -4,6 +4,14 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.6] - 2026-05-23
+
+### 测试
+
+- Release 使用的 Playwright layout、PC、mobile 门禁默认启用 flaky 检测；只要用例 retry 后才通过，发布流程也会失败，避免靠运气发版。
+- 移动端连接丢失面板测试隔离上一个 auto-restore 用例的路由状态，减少 Android Chrome 共享页面带来的假超时。
+- 移动端 PTY 光标可见性测试改为验证真实光标锚点，而不是依赖 Android Chrome 中 xterm helper textarea 的元素高度，避免半行级布局抖动造成误报。
+
 ## [0.4.5] - 2026-05-23
 
 ### 修复
