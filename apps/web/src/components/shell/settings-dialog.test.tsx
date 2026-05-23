@@ -36,6 +36,11 @@ vi.mock("@/voice/pcm-stream-player", () => ({
 
 import { SettingsDialog } from "./settings-dialog";
 
+function chooseVoiceSetting(label: string, optionName: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
 describe("SettingsDialog", () => {
   afterEach(() => {
     cleanup();
@@ -151,9 +156,7 @@ describe("SettingsDialog", () => {
     fireEvent.change(screen.getByLabelText("阿里云百炼 API Key"), {
       target: { value: "sk-test" },
     });
-    fireEvent.change(screen.getByLabelText("语音音色"), {
-      target: { value: "longanlang-live" },
-    });
+    chooseVoiceSetting("语音音色", "龙安朗 · 男 · 动态清爽 · 年龄 20-25");
     fireEvent.change(screen.getByLabelText("结束停顿时间（秒）"), {
       target: { value: "6" },
     });
@@ -232,9 +235,7 @@ describe("SettingsDialog", () => {
     fireEvent.change(screen.getByLabelText("阿里云百炼 API Key"), {
       target: { value: "sk-test" },
     });
-    fireEvent.change(screen.getByLabelText("语音音色"), {
-      target: { value: "longanlang-live" },
-    });
+    chooseVoiceSetting("语音音色", "龙安朗 · 男 · 动态清爽 · 年龄 20-25");
     const testButton = screen.getByRole("button", { name: "测试" });
     expect(testButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(testButton);
@@ -302,10 +303,13 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
 
-    expect(screen.getByLabelText("语音识别模型").tagName).toBe("SELECT");
-    expect(screen.getByLabelText("语音合成模型").tagName).toBe("SELECT");
-    expect(screen.getByLabelText("语音音色").tagName).toBe("SELECT");
+    expect(document.querySelector("select")).toBeNull();
+    expect(screen.getByRole("button", { name: "语音识别模型" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "语音合成模型" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "语音音色" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "语音合成模型" }));
     expect(screen.getByRole("option", { name: "CosyVoice V3 Flash · 动态" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "语音音色" }));
     expect(
       screen.getByRole("option", { name: "龙安欢 · 女 · 动态元气 · 年龄 20-30" }),
     ).not.toBeNull();
@@ -363,6 +367,7 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
 
+    fireEvent.click(screen.getByRole("button", { name: "语音合成模型" }));
     const unsupportedModel = screen.getByRole("option", {
       name: "CosyVoice V3.5 Plus · 自定义音色 · 暂无音色",
     });
@@ -390,16 +395,15 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
 
-    expect((screen.getByLabelText("语音识别模型") as HTMLSelectElement).value).toBe(
-      "qwen3-asr-flash-realtime",
-    );
-    expect((screen.getByLabelText("语音合成模型") as HTMLSelectElement).value).toBe(
-      "cosyvoice-v3-flash",
-    );
-    expect((screen.getByLabelText("语音音色") as HTMLSelectElement).value).toBe("longanyang");
+    expect(screen.getByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
+    expect(screen.getByText("CosyVoice V3 Flash")).not.toBeNull();
+    expect(screen.getByText("龙安洋")).not.toBeNull();
     expect(screen.queryByText("读取语音能力列表超时")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "语音识别模型" }));
     expect(screen.getByRole("option", { name: "Qwen3 ASR Flash Realtime" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "语音合成模型" }));
     expect(screen.getByRole("option", { name: "CosyVoice V3 Flash · 系统音色" })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "语音音色" }));
     expect(
       screen.getByRole("option", { name: "龙安洋 · 男 · 阳光大男孩 · 年龄 20-30" }),
     ).not.toBeNull();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   VoiceCapabilities,
   VoiceConfigUpdate,
@@ -6,7 +6,7 @@ import type {
   VoiceProviderConfig,
 } from "@dev-anywhere/shared";
 import { createBundledBailianVoiceCapabilities } from "@dev-anywhere/shared";
-import { ChevronDown, Play, Save as SaveIcon } from "lucide-react";
+import { Check, ChevronDown, KeyRound, Play, Save as SaveIcon, Trash2 } from "lucide-react";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { Button } from "@/components/ui/button";
 import { PcmStreamPlayer } from "@/voice/pcm-stream-player";
@@ -31,28 +31,149 @@ const DEFAULT_CONFIG: VoiceProviderConfig = {
   turnIdleSeconds: 3,
 };
 
-const selectClassName =
-  "min-h-11 min-w-0 appearance-none rounded-md border border-border bg-input px-3 pr-12 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm";
+const inputClassName =
+  "min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none transition-colors placeholder:text-muted-foreground/65 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm";
 const MIN_TEST_PLAYBACK_MS = 800;
 const MIN_SAVE_PENDING_MS = 300;
 const SAVE_SUCCESS_HOLD_MS = 1600;
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext;
 
-function SelectShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative min-w-0">
-      {children}
-      <ChevronDown
-        aria-hidden="true"
-        className="pointer-events-none absolute right-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-      />
-    </div>
-  );
+interface ChoiceOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
 }
 
 function voicesForModel(voices: VoiceOption[], model: string): VoiceOption[] {
   return voices.filter((voice) => !voice.model || voice.model === model);
+}
+
+function FieldBlock({
+  label,
+  children,
+  help,
+}: {
+  label: string;
+  children: ReactNode;
+  help?: string | null;
+}) {
+  return (
+    <div className="block min-w-0 rounded-lg border border-border/75 bg-card/55 p-3.5 transition-colors focus-within:border-primary/45 focus-within:bg-card/75 sm:p-3">
+      <span className="block text-[13px] font-medium leading-none text-muted-foreground">
+        {label}
+      </span>
+      <div className="mt-2 min-w-0">{children}</div>
+      {help ? (
+        <span className="mt-2 block text-xs leading-relaxed text-muted-foreground">{help}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function ChoiceField({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder = "请选择",
+  help,
+}: {
+  label: string;
+  value: string;
+  options: ChoiceOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  help?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const labelId = useId();
+  const selected = options.find((option) => option.value === value);
+  const selectedLabel = selected?.label ?? (value ? value : placeholder);
+  const enabledOptions = options.filter((option) => !option.disabled);
+
+  return (
+    <div
+      className="min-w-0 rounded-lg border border-border/75 bg-card/55 p-3.5 sm:p-3"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <div id={labelId} className="text-[13px] font-medium leading-none text-muted-foreground">
+        {label}
+      </div>
+      <button
+        type="button"
+        aria-labelledby={labelId}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={enabledOptions.length === 0}
+        className="mt-2 flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-input px-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 md:min-h-9"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ChoiceLabel label={selectedLabel} muted={!selected && !value} />
+        <ChevronDown
+          className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          aria-labelledby={labelId}
+          className="mt-2 max-h-64 overflow-y-auto rounded-md border border-border/80 bg-popover p-1 shadow-sm"
+        >
+          {options.map((option) => {
+            const active = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-label={option.label}
+                aria-selected={active}
+                disabled={option.disabled}
+                className="flex w-full min-w-0 items-center gap-2 rounded-sm px-2.5 py-2.5 text-left text-sm outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+                onClick={() => {
+                  if (option.disabled) return;
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center text-primary">
+                  {active ? <Check className="size-4" aria-hidden="true" /> : null}
+                </span>
+                <ChoiceLabel label={option.label} />
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {help ? (
+        <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{help}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChoiceLabel({ label, muted = false }: { label: string; muted?: boolean }) {
+  const parts = splitOptionLabel(label);
+  return (
+    <span className="min-w-0 flex-1">
+      <span
+        className={`block truncate text-base leading-6 md:text-sm ${muted ? "text-muted-foreground" : "text-foreground"}`}
+      >
+        {parts.title}
+      </span>
+      {parts.detail ? (
+        <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground">
+          {parts.detail}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 export function VoiceSettingsPanel() {
@@ -174,6 +295,25 @@ export function VoiceSettingsPanel() {
   const turnIdleSecondsMessage = parsedTurnIdleSeconds ? null : "请输入正整数秒数";
   const validationMessage = voiceCompatibilityMessage ?? turnIdleSecondsMessage;
   const actionDisabled = busy || Boolean(validationMessage);
+  const regionOptions: ChoiceOption[] = useMemo(
+    () => [
+      { value: "cn", label: "中国大陆" },
+      { value: "intl", label: "国际" },
+    ],
+    [],
+  );
+  const asrOptions = useMemo(
+    () => voiceOptionsWithCurrent(capabilities.asrModels, config.asrModel),
+    [capabilities.asrModels, config.asrModel],
+  );
+  const ttsModelOptions = useMemo(
+    () => ttsModelChoices(capabilities.ttsModels, capabilities.ttsVoices, config.ttsModel),
+    [capabilities.ttsModels, capabilities.ttsVoices, config.ttsModel],
+  );
+  const ttsVoiceOptions = useMemo(
+    () => voiceOptionsWithCurrent(compatibleTtsVoices, selectedTtsVoice),
+    [compatibleTtsVoices, selectedTtsVoice],
+  );
 
   function buildVoiceConfigUpdate(): VoiceConfigUpdate {
     return {
@@ -310,64 +450,13 @@ export function VoiceSettingsPanel() {
     return Math.max(MIN_TEST_PLAYBACK_MS, durationMs);
   }
 
-  function renderOptions(options: VoiceOption[], currentValue: string) {
-    const hasCurrent = options.some((option) => option.value === currentValue);
-    return (
-      <>
-        {!hasCurrent && currentValue ? <option value={currentValue}>{currentValue}</option> : null}
-        {options.map((option) => (
-          <option key={`${option.source}:${option.value}`} value={option.value}>
-            {voiceOptionLabel(option)}
-          </option>
-        ))}
-      </>
-    );
-  }
-
   function firstVoiceForModel(model: string): string {
     return voicesForModel(capabilities.ttsVoices, model)[0]?.value ?? "";
   }
 
-  function renderTtsModelOptions(currentValue: string) {
-    const hasCurrent = capabilities.ttsModels.some((option) => option.value === currentValue);
-    return (
-      <>
-        {!hasCurrent && currentValue ? (
-          <option value={currentValue} disabled>
-            {currentValue} · 暂无音色
-          </option>
-        ) : null}
-        {capabilities.ttsModels.map((option) => {
-          const disabled = voicesForModel(capabilities.ttsVoices, option.value).length === 0;
-          return (
-            <option
-              key={`${option.source}:${option.value}`}
-              value={option.value}
-              disabled={disabled}
-            >
-              {voiceOptionLabel(option)}
-              {disabled ? " · 暂无音色" : ""}
-            </option>
-          );
-        })}
-      </>
-    );
-  }
-
-  function renderTtsVoiceOptions(options: VoiceOption[]) {
-    return options.map((option) => (
-      <option
-        key={`${option.source}:${option.model ?? "any"}:${option.value}`}
-        value={option.value}
-      >
-        {voiceOptionLabel(option)}
-      </option>
-    ));
-  }
-
   return (
     <form
-      className="flex min-w-0 flex-col gap-4"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-slot="voice-settings-panel"
       autoComplete="off"
       onSubmit={(event) => {
@@ -375,152 +464,137 @@ export function VoiceSettingsPanel() {
         void handleSave();
       }}
     >
-      <p className="text-sm text-muted-foreground">
-        连接语音服务后，即可以语音交互的形式驱动会话。
-      </p>
+      <div
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 pb-24 sm:px-6 sm:py-5"
+        data-slot="voice-settings-scroll"
+      >
+        <div className="grid gap-2 rounded-lg border border-border/75 bg-card/55 p-3.5 sm:p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium leading-none text-muted-foreground">
+                服务商
+              </div>
+              <div className="mt-2 truncate text-base font-medium text-foreground md:text-sm">
+                阿里云百炼
+              </div>
+            </div>
+            <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+              Bailian
+            </span>
+          </div>
+        </div>
 
-      <div className="rounded-md border border-border bg-card/70 p-3">
-        <div className="text-xs text-muted-foreground">服务商</div>
-        <div className="mt-1 text-sm font-medium text-foreground">阿里云百炼</div>
+        <FieldBlock
+          label="阿里云百炼 API Key"
+          help={clearApiKey ? "保存后会清空已保存的 key" : null}
+        >
+          <div className="flex min-w-0 gap-2">
+            <div className="relative min-w-0 flex-1">
+              <KeyRound
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <input
+                aria-label="阿里云百炼 API Key"
+                type="password"
+                name="dev-anywhere-bailian-api-key"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  setClearApiKey(false);
+                }}
+                placeholder={
+                  clearApiKey
+                    ? "保存后清空"
+                    : config.configured
+                      ? "••••••••••••••••"
+                      : "输入 API Key"
+                }
+                className={`${inputClassName} w-full pl-9`}
+              />
+            </div>
+            {config.configured && (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 shrink-0 px-3 md:h-9 md:min-h-0"
+                onClick={() => {
+                  setApiKey("");
+                  setClearApiKey(true);
+                }}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                清空
+              </Button>
+            )}
+          </div>
+        </FieldBlock>
+
+        <ChoiceField
+          label="地域"
+          value={config.region}
+          options={regionOptions}
+          onChange={(value) =>
+            setConfig((current) => ({
+              ...current,
+              region: value === "intl" ? "intl" : "cn",
+            }))
+          }
+        />
+
+        <ChoiceField
+          label="语音识别模型"
+          value={config.asrModel}
+          options={asrOptions}
+          onChange={(value) => setConfig((current) => ({ ...current, asrModel: value }))}
+        />
+
+        <ChoiceField
+          label="语音合成模型"
+          value={config.ttsModel}
+          options={ttsModelOptions}
+          onChange={(ttsModel) =>
+            setConfig((current) => ({
+              ...current,
+              ttsModel,
+              ttsVoice: firstVoiceForModel(ttsModel),
+            }))
+          }
+        />
+
+        <ChoiceField
+          label="语音音色"
+          value={selectedTtsVoice}
+          options={ttsVoiceOptions}
+          placeholder={compatibleTtsVoices.length === 0 ? "暂无可用音色" : "请选择音色"}
+          onChange={(value) => setConfig((current) => ({ ...current, ttsVoice: value }))}
+          help={voiceCompatibilityMessage}
+        />
+
+        <FieldBlock label="结束停顿时间（秒）" help={turnIdleSecondsMessage}>
+          <input
+            aria-label="结束停顿时间（秒）"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={turnIdleSecondsInput}
+            onChange={(event) => setTurnIdleSecondsInput(event.target.value)}
+            className={`${inputClassName} w-full`}
+          />
+        </FieldBlock>
       </div>
 
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">阿里云百炼 API Key</span>
-        <div className="flex min-w-0 gap-2">
-          <input
-            type="password"
-            name="dev-anywhere-bailian-api-key"
-            autoComplete="off"
-            value={apiKey}
-            onChange={(event) => {
-              setApiKey(event.target.value);
-              setClearApiKey(false);
-            }}
-            placeholder={
-              clearApiKey ? "保存后清空" : config.configured ? "••••••••••••••••" : "输入 API Key"
-            }
-            className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
-          />
-          {config.configured && (
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11 shrink-0 md:h-9 md:min-h-0"
-              onClick={() => {
-                setApiKey("");
-                setClearApiKey(true);
-              }}
-            >
-              清空
-            </Button>
-          )}
-        </div>
-        {clearApiKey && (
-          <span className="text-xs text-muted-foreground">保存后会清空已保存的 key</span>
-        )}
-      </label>
-
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">地域</span>
-        <SelectShell>
-          <select
-            value={config.region}
-            onChange={(event) =>
-              setConfig((current) => ({
-                ...current,
-                region: event.target.value === "intl" ? "intl" : "cn",
-              }))
-            }
-            className={`${selectClassName} w-full`}
-          >
-            <option value="cn">中国大陆</option>
-            <option value="intl">国际</option>
-          </select>
-        </SelectShell>
-      </label>
-
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">语音识别模型</span>
-        <SelectShell>
-          <select
-            value={config.asrModel}
-            onChange={(event) =>
-              setConfig((current) => ({ ...current, asrModel: event.target.value }))
-            }
-            className={`${selectClassName} w-full font-mono`}
-          >
-            {renderOptions(capabilities.asrModels, config.asrModel)}
-          </select>
-        </SelectShell>
-      </label>
-
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">语音合成模型</span>
-        <SelectShell>
-          <select
-            value={config.ttsModel}
-            onChange={(event) => {
-              const ttsModel = event.target.value;
-              setConfig((current) => ({
-                ...current,
-                ttsModel,
-                ttsVoice: firstVoiceForModel(ttsModel),
-              }));
-            }}
-            className={`${selectClassName} w-full font-mono`}
-          >
-            {renderTtsModelOptions(config.ttsModel)}
-          </select>
-        </SelectShell>
-      </label>
-
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">语音音色</span>
-        <SelectShell>
-          <select
-            value={selectedTtsVoice}
-            onChange={(event) =>
-              setConfig((current) => ({ ...current, ttsVoice: event.target.value }))
-            }
-            disabled={compatibleTtsVoices.length === 0}
-            className={`${selectClassName} w-full font-mono`}
-          >
-            {!selectedTtsVoice ? (
-              <option value="" disabled>
-                {compatibleTtsVoices.length === 0 ? "暂无可用音色" : "请选择音色"}
-              </option>
-            ) : null}
-            {renderTtsVoiceOptions(compatibleTtsVoices)}
-          </select>
-        </SelectShell>
-        {voiceCompatibilityMessage ? (
-          <span className="text-xs text-muted-foreground">{voiceCompatibilityMessage}</span>
-        ) : null}
-      </label>
-
-      <label className="flex min-w-0 flex-col gap-1">
-        <span className="text-sm">结束停顿时间（秒）</span>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          inputMode="numeric"
-          value={turnIdleSecondsInput}
-          onChange={(event) => setTurnIdleSecondsInput(event.target.value)}
-          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
-        />
-        {turnIdleSecondsMessage ? (
-          <span className="text-xs text-muted-foreground">{turnIdleSecondsMessage}</span>
-        ) : null}
-      </label>
-
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex items-center justify-end gap-2 border-t border-border/70 bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
         {statusText ? (
           <div
             role={state.kind === "error" ? "alert" : "status"}
             aria-live="polite"
             className={
-              state.kind === "error" ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+              state.kind === "error"
+                ? "min-w-0 flex-1 text-sm text-destructive"
+                : "min-w-0 flex-1 text-sm text-muted-foreground"
             }
           >
             {statusText}
@@ -573,6 +647,48 @@ function parsePositiveInteger(value: string): number | null {
   const parsed = Number(trimmed);
   if (!Number.isSafeInteger(parsed)) return null;
   return parsed;
+}
+
+function voiceOptionsWithCurrent(options: VoiceOption[], currentValue: string): ChoiceOption[] {
+  const mapped = options.map((option) => ({
+    value: option.value,
+    label: voiceOptionLabel(option),
+  }));
+  if (!currentValue || mapped.some((option) => option.value === currentValue)) return mapped;
+  return [{ value: currentValue, label: currentValue }, ...mapped];
+}
+
+function ttsModelChoices(
+  models: VoiceOption[],
+  voices: VoiceOption[],
+  currentValue: string,
+): ChoiceOption[] {
+  const mapped = models.map((option) => {
+    const disabled = voicesForModel(voices, option.value).length === 0;
+    return {
+      value: option.value,
+      label: `${voiceOptionLabel(option)}${disabled ? " · 暂无音色" : ""}`,
+      disabled,
+    };
+  });
+  if (!currentValue || mapped.some((option) => option.value === currentValue)) return mapped;
+  return [
+    {
+      value: currentValue,
+      label: `${currentValue} · 暂无音色`,
+      disabled: true,
+    },
+    ...mapped,
+  ];
+}
+
+function splitOptionLabel(label: string): { title: string; detail: string | null } {
+  const parts = label
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return { title: label, detail: null };
+  return { title: parts[0], detail: parts.slice(1).join(" · ") };
 }
 
 function voiceOptionLabel(option: VoiceOption): string {

@@ -110,6 +110,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     return () => ctrl.abort();
   }, [loadRelayHealth, open, view]);
 
+  useEffect(() => {
+    if (!open || view !== "voice") return;
+    const frame = window.requestAnimationFrame(() => {
+      const voiceDialog = document.querySelector<HTMLElement>(
+        '[data-slot="settings-dialog"][data-view="voice"]',
+      );
+      voiceDialog
+        ?.querySelector<HTMLButtonElement>('[data-slot="voice-settings-back"]')
+        ?.focus({ preventScroll: true });
+      const scroller = voiceDialog?.querySelector<HTMLElement>(
+        '[data-slot="voice-settings-scroll"]',
+      );
+      if (scroller) scroller.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, view]);
+
   const relayVersion =
     relayHealth.kind === "ready"
       ? relayHealth.version
@@ -128,29 +145,42 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-[440px]"
+        className={cn(
+          "sm:max-w-[440px]",
+          view === "voice" &&
+            "grid max-h-[min(760px,calc(100dvh-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-[480px]",
+          view === "voice" &&
+            "max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:h-[calc(100dvh-0.75rem)] max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-x-0 max-sm:border-b-0",
+        )}
         data-slot="settings-dialog"
+        data-view={view}
         showCloseButton={view === "menu"}
       >
-        <DialogHeader>
+        <DialogHeader
+          className={cn(
+            view === "voice" &&
+              "border-b border-border/70 px-4 py-4 text-left sm:px-6 sm:pb-4 sm:pt-5",
+          )}
+        >
           {view !== "menu" ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="-ml-2 size-9"
+                className="-ml-2 mt-0.5 size-9"
                 aria-label="返回设置"
+                data-slot="voice-settings-back"
                 onClick={() => setView("menu")}
               >
                 <ArrowLeft className="size-4" aria-hidden="true" />
               </Button>
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-1.5 pt-0.5">
                 <DialogTitle>{view === "version" ? "版本" : "设置 Voice Pilot"}</DialogTitle>
-                <DialogDescription className={view === "voice" ? "sr-only" : undefined}>
+                <DialogDescription className={cn(view === "voice" && "max-w-[28rem] leading-5")}>
                   {view === "version"
                     ? "当前 Web 与 Relay 的版本信息"
-                    : "以语音交互的形式驱动这次会话。"}
+                    : "连接语音服务后，即可以语音交互的形式驱动会话。"}
                 </DialogDescription>
               </div>
             </div>
