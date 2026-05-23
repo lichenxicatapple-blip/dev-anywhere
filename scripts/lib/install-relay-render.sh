@@ -88,7 +88,7 @@ server {
 
     client_max_body_size 20m;
 
-    location ~ ^/(proxy|client)$ {
+    location ~ ^/(proxy|client|voice/asr|voice/tts)$ {
         proxy_pass http://127.0.0.1:$relay_port;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
