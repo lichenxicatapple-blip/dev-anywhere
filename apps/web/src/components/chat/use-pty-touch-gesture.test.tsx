@@ -24,13 +24,13 @@ function dispatchPointer(
 function dispatchTouch(
   type: string,
   target: HTMLElement,
-  props: { clientX: number; clientY: number },
+  props: { clientX: number; clientY: number; omitChangedTouches?: boolean },
 ): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
   const touch = { clientX: props.clientX, clientY: props.clientY };
   Object.defineProperties(event, {
     touches: { value: type === "touchend" || type === "touchcancel" ? [] : [touch] },
-    changedTouches: { value: [touch] },
+    changedTouches: { value: props.omitChangedTouches ? [] : [touch] },
   });
   target.dispatchEvent(event);
   return event;
@@ -41,6 +41,7 @@ function Harness({
   suppress,
   onLongPressCandidateStart,
   onTap,
+  isTapCandidate,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
@@ -49,6 +50,7 @@ function Harness({
   suppress: () => void;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
+  isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
@@ -59,6 +61,7 @@ function Harness({
     suppressPtyFocus: suppress,
     onLongPressCandidateStart,
     onTap,
+    isTapCandidate,
     onLongPressStart,
     onLongPressMove,
     onLongPressEnd,
@@ -118,7 +121,7 @@ describe("usePtyTouchGesture", () => {
       pointerId: 1,
       pointerType: "touch",
       clientX: 100,
-      clientY: 112,
+      clientY: 120,
     });
 
     expect(suppress).not.toHaveBeenCalled();
@@ -127,7 +130,7 @@ describe("usePtyTouchGesture", () => {
       pointerId: 1,
       pointerType: "touch",
       clientX: 100,
-      clientY: 112,
+      clientY: 120,
     });
 
     expect(suppress).toHaveBeenCalledTimes(1);
@@ -291,6 +294,103 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
+  it("activates a touch link tap with small finger drift", () => {
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const { getByTestId } = render(<Harness focus={focus} suppress={suppress} onTap={onTap} />);
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    dispatchTouch("touchmove", xterm, { clientX: 124, clientY: 158 });
+    const end = dispatchTouch("touchend", xterm, { clientX: 124, clientY: 158 });
+
+    expect(onTap).toHaveBeenCalledWith({ clientX: 124, clientY: 158 });
+    expect(end.defaultPrevented).toBe(true);
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a drifting link tap into a long press if touch delivery is delayed", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const onLongPressStart = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onTap={onTap}
+        onLongPressStart={onLongPressStart}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    dispatchTouch("touchmove", xterm, { clientX: 126, clientY: 147 });
+    vi.advanceTimersByTime(650);
+    const end = dispatchTouch("touchend", xterm, { clientX: 126, clientY: 147 });
+
+    expect(onLongPressStart).not.toHaveBeenCalled();
+    expect(onTap).toHaveBeenCalledWith({ clientX: 126, clientY: 147 });
+    expect(end.defaultPrevented).toBe(true);
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("does not let the long press timer preempt a known link tap candidate", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const isTapCandidate = vi.fn(() => true);
+    const onLongPressStart = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onTap={onTap}
+        isTapCandidate={isTapCandidate}
+        onLongPressStart={onLongPressStart}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    vi.advanceTimersByTime(650);
+    dispatchTouch("touchmove", xterm, { clientX: 126, clientY: 147 });
+    const end = dispatchTouch("touchend", xterm, { clientX: 126, clientY: 147 });
+
+    expect(isTapCandidate).toHaveBeenCalledWith({ clientX: 120, clientY: 140 });
+    expect(onLongPressStart).not.toHaveBeenCalled();
+    expect(onTap).toHaveBeenCalledWith({ clientX: 126, clientY: 147 });
+    expect(end.defaultPrevented).toBe(true);
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("uses the last touch point for link taps when touchend has no changedTouches", () => {
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const { getByTestId } = render(<Harness focus={focus} suppress={suppress} onTap={onTap} />);
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    dispatchTouch("touchmove", xterm, { clientX: 124, clientY: 158 });
+    const end = dispatchTouch("touchend", xterm, {
+      clientX: 0,
+      clientY: 0,
+      omitChangedTouches: true,
+    });
+
+    expect(onTap).toHaveBeenCalledWith({ clientX: 124, clientY: 158 });
+    expect(end.defaultPrevented).toBe(true);
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
   it("finishes a long press when Chrome starts with pointer events but ends with touch events", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
@@ -384,7 +484,7 @@ describe("usePtyTouchGesture", () => {
       pointerId: 1,
       pointerType: "touch",
       clientX: 100,
-      clientY: 112,
+      clientY: 120,
     });
     vi.advanceTimersByTime(650);
 
@@ -406,10 +506,11 @@ describe("usePtyTouchGesture", () => {
 
     dispatchTouch("touchstart", xterm, { clientX: 100, clientY: 100 });
     dispatchTouch("touchmove", xterm, { clientX: 100, clientY: 112 });
-    dispatchTouch("touchend", xterm, { clientX: 100, clientY: 112 });
+    dispatchTouch("touchmove", xterm, { clientX: 100, clientY: 120 });
+    dispatchTouch("touchend", xterm, { clientX: 100, clientY: 120 });
 
     expect(touchstart).toHaveBeenCalledTimes(1);
-    expect(touchmove).toHaveBeenCalledTimes(1);
+    expect(touchmove).toHaveBeenCalledTimes(2);
     expect(touchend).toHaveBeenCalledTimes(1);
     expect(suppress).toHaveBeenCalledTimes(1);
     expect(focus).not.toHaveBeenCalled();

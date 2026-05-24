@@ -571,6 +571,64 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
+  it("keeps sub-threshold touch movement pending without rewriting terminal scroll", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    const move = touchEvent("touchmove", 310);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(true);
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
+    expect(controller.getDebugProbe().touchScrollGestureMode).toBe("pending");
+  });
+
+  it("lets vertical touch review own scrollTop only after gesture lock", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    const move = touchEvent("touchmove", 320);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(true);
+    expect(container.scrollTop).toBe(1580);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(79);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
+    expect(controller.getDebugProbe().touchScrollGestureMode).toBe("vertical");
+  });
+
   it("keeps bottom tap inert when keyboard padding moves the bottom before touchend", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
@@ -1774,6 +1832,33 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollLeft).toBe(500);
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+  });
+
+  it("clears stale horizontal intent when terminal content no longer overflows", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    container.scrollLeft = 500;
+    container.dispatchEvent(new Event("scroll"));
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+
+    defineScrollWidth(container, 800);
+    emitRender();
+
+    expect(container.scrollLeft).toBe(0);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(false);
+    expect(controller.getDebugProbe().lastSeenScrollLeft).toBe(0);
   });
 
   it("does not adjust horizontal scroll when the cursor is already in view", () => {

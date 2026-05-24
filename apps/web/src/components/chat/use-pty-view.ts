@@ -27,7 +27,7 @@ import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
-import { activateXtermLinkAtPoint } from "@/lib/xterm-touch-link-activation";
+import { activateXtermLinkAtPoint, hasXtermLinkAtPoint } from "@/lib/xterm-touch-link-activation";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { toast } from "@/components/toast";
@@ -381,6 +381,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return activateXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
   }, []);
 
+  const isPtyTapCandidate = useCallback(
+    (point: { clientX: number; clientY: number }): boolean => {
+      const term = terminalRef.current;
+      if (!term) return false;
+      return hasXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
+    },
+    [],
+  );
+
   const selection = usePtySelectionController({
     sessionId,
     terminalRef,
@@ -392,6 +401,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     ptyFontSize,
     suppressPtyFocus,
     onTap: handlePtyTap,
+    isTapCandidate: isPtyTapCandidate,
     onDownloadPath: downloadPtyPath,
   });
   ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;

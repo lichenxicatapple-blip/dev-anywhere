@@ -65,6 +65,7 @@ export interface PtyDebugSnapshot {
   lastSeenScrollTop: number;
   lastSeenScrollLeft: number;
   touchScrollActive: boolean;
+  touchScrollGestureMode: "pending" | "vertical" | "horizontal" | null;
   syncing: { internal: boolean; external: boolean };
   pending: {
     programmaticScrollTop: number | null;

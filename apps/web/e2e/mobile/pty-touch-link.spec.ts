@@ -4,6 +4,13 @@ import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
 const SESSION_ID = "mobile-touch-link";
 
+declare global {
+  interface Window {
+    __ccTestPtyTouchGestureEvents?: unknown[];
+    __ccTestPtyTouchLinkActivations?: unknown[];
+  }
+}
+
 test.describe("L4 mobile / PTY touch link activation", () => {
   test.setTimeout(60_000);
 
@@ -70,16 +77,94 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       .not.toBeNull()
       .then(() => findPtyLinkTapPoint(page, options));
     if (!point) throw new Error(`PTY link is not tappable: ${options.needle}`);
+    await page.evaluate(() => {
+      window.__ccTestPtyTouchGestureEvents = [];
+      window.__ccTestPtyTouchLinkActivations = [];
+    });
     const client = await page.context().newCDPSession(page);
     try {
       await client.send("Input.dispatchTouchEvent", {
         type: "touchStart",
         touchPoints: [{ x: point.x, y: point.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
       });
-      await page.waitForTimeout(60);
+      await page.waitForTimeout(40);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          { x: point.x + 6, y: point.y + 7, id: 1, radiusX: 2, radiusY: 2, force: 1 },
+        ],
+      });
+      await page.waitForTimeout(40);
       await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     } finally {
       await client.detach();
+    }
+  }
+
+  async function readTouchDiagnostics(page: import("@playwright/test").Page): Promise<unknown> {
+    return page.evaluate(() => ({
+      sent: window.__ptySmoke?.sent ?? [],
+      gesture: window.__ccTestPtyTouchGestureEvents ?? [],
+      links: window.__ccTestPtyTouchLinkActivations ?? [],
+      debug: window.__devAnywherePtyDebug?.() ?? null,
+    }));
+  }
+
+  async function expectFileDownloadRequest(
+    page: import("@playwright/test").Page,
+    expectedPath: string,
+  ): Promise<void> {
+    try {
+      await expect
+        .poll(() =>
+          page.evaluate(
+            (path) =>
+              (window.__ptySmoke?.sent ?? []).some((raw) => {
+                try {
+                  const msg = JSON.parse(raw) as { type?: string; path?: string };
+                  return msg.type === "file_download_request" && msg.path === path;
+                } catch {
+                  return false;
+                }
+              }),
+            expectedPath,
+          ),
+        )
+        .toBe(true);
+    } catch (err) {
+      throw new Error(
+        `file_download_request not sent for ${expectedPath}\n${JSON.stringify(
+          await readTouchDiagnostics(page),
+          null,
+          2,
+        )}\n${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  async function expectImagePreviewRequest(page: import("@playwright/test").Page): Promise<void> {
+    try {
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            (window.__ptySmoke?.sent ?? []).some((raw) => {
+              try {
+                return (JSON.parse(raw) as { type?: string }).type === "image_preview_request";
+              } catch {
+                return false;
+              }
+            }),
+          ),
+        )
+        .toBe(true);
+    } catch (err) {
+      throw new Error(
+        `image_preview_request not sent\n${JSON.stringify(
+          await readTouchDiagnostics(page),
+          null,
+          2,
+        )}\n${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -94,20 +179,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: "./scripts/test.sh",
     });
 
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() =>
-          (window.__ptySmoke?.sent ?? []).some((raw) => {
-            try {
-              const msg = JSON.parse(raw) as { type?: string; path?: string };
-              return msg.type === "file_download_request" && msg.path === "./scripts/test.sh";
-            } catch {
-              return false;
-            }
-          }),
-        ),
-      )
-      .toBe(true);
+    await expectFileDownloadRequest(emuPage, "./scripts/test.sh");
   });
 
   test("tap on an xterm-wrapped PTY document path triggers file_download", async ({ emuPage }) => {
@@ -139,22 +211,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: path,
     });
 
-    await expect
-      .poll(() =>
-        emuPage.evaluate(
-          (expectedPath) =>
-            (window.__ptySmoke?.sent ?? []).some((raw) => {
-              try {
-                const msg = JSON.parse(raw) as { type?: string; path?: string };
-                return msg.type === "file_download_request" && msg.path === expectedPath;
-              } catch {
-                return false;
-              }
-            }),
-          path,
-        ),
-      )
-      .toBe(true);
+    await expectFileDownloadRequest(emuPage, path);
   });
 
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({
@@ -175,18 +232,6 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     });
 
     // 预览 dialog 应弹起, 由 image_preview_request 驱动.
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() =>
-          (window.__ptySmoke?.sent ?? []).some((raw) => {
-            try {
-              return (JSON.parse(raw) as { type?: string }).type === "image_preview_request";
-            } catch {
-              return false;
-            }
-          }),
-        ),
-      )
-      .toBe(true);
+    await expectImagePreviewRequest(emuPage);
   });
 });

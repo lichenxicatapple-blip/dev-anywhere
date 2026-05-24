@@ -29,6 +29,7 @@ export interface PtyScrollDebugProbe {
   lastSeenScrollTop: number;
   lastSeenScrollLeft: number;
   touchScrollActive: boolean;
+  touchScrollGestureMode: "pending" | "vertical" | "horizontal" | null;
   syncingInternal: boolean;
   syncingExternal: boolean;
   atBottomThreshold: number;
@@ -174,6 +175,7 @@ export function buildPtyScrollDebugSnapshot(
     lastSeenScrollTop: probe.lastSeenScrollTop,
     lastSeenScrollLeft: probe.lastSeenScrollLeft,
     touchScrollActive: probe.touchScrollActive,
+    touchScrollGestureMode: probe.touchScrollGestureMode,
     syncing: { internal: probe.syncingInternal, external: probe.syncingExternal },
     pending: {
       programmaticScrollTop: probe.pendingProgrammaticScrollTop,

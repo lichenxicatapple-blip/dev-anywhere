@@ -80,6 +80,7 @@ const probe = (overrides: Partial<PtyScrollDebugProbe> = {}): PtyScrollDebugProb
   lastSeenScrollTop: 0,
   lastSeenScrollLeft: 0,
   touchScrollActive: false,
+  touchScrollGestureMode: null,
   syncingInternal: false,
   syncingExternal: false,
   atBottomThreshold: 8,
@@ -169,6 +170,7 @@ describe("buildPtyScrollDebugSnapshot", () => {
           prevCursorBufferRow: 19,
           lastSeenScrollTop: 390,
           lastSeenScrollLeft: 12,
+          touchScrollGestureMode: "vertical",
         }),
       refs,
     );
@@ -194,6 +196,7 @@ describe("buildPtyScrollDebugSnapshot", () => {
     expect(snap.prevCursorBufferRow).toBe(19);
     expect(snap.lastSeenScrollTop).toBe(390);
     expect(snap.lastSeenScrollLeft).toBe(12);
+    expect(snap.touchScrollGestureMode).toBe("vertical");
   });
 
   it("matches positionHostAt's verticalOffset for small-buffer hosts", () => {

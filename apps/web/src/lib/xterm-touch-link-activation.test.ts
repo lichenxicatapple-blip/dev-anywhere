@@ -1,6 +1,6 @@
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
 import { describe, expect, it, vi } from "vitest";
-import { activateXtermLinkAtPoint } from "./xterm-touch-link-activation";
+import { activateXtermLinkAtPoint, hasXtermLinkAtPoint } from "./xterm-touch-link-activation";
 
 function defineSize(el: HTMLElement, sizes: { width: number; height: number }): void {
   Object.defineProperty(el, "clientWidth", { configurable: true, value: sizes.width });
@@ -93,6 +93,30 @@ describe("activateXtermLinkAtPoint", () => {
         clientY: 20 + 20 * 4.5,
       }),
     ).toBe(false);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("can probe a link candidate without activating it", () => {
+    const { terminal } = createTerminal();
+    const activate = vi.fn();
+    const provider: ILinkProvider = {
+      provideLinks: (_line, callback) => {
+        callback([
+          {
+            text: "./docs/result.md",
+            range: { start: { x: 7, y: 105 }, end: { x: 24, y: 105 } },
+            activate,
+          },
+        ]);
+      },
+    };
+
+    expect(
+      hasXtermLinkAtPoint(terminal, [provider], {
+        clientX: 10 + 10 * 6.5,
+        clientY: 20 + 20 * 4.5,
+      }),
+    ).toBe(true);
     expect(activate).not.toHaveBeenCalled();
   });
 });
