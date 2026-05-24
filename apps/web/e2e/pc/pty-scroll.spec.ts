@@ -225,7 +225,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await sendPtyOutput(page, "frame-before-native-scroll\r\n");
     await terminal.evaluate((el) => {
       const touchmove = new Event("touchmove", { bubbles: true }) as TouchEvent;
-      Object.defineProperty(touchmove, "touches", { value: [{ clientY: 460 }] });
+      Object.defineProperty(touchmove, "touches", { value: [{ clientY: 580 }] });
       el.dispatchEvent(touchmove);
       const node = el as HTMLElement;
       const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
@@ -242,6 +242,8 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect(backToBottomNewIndicator(page)).toBeVisible();
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
-      .toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
+      .toBeLessThanOrEqual(scrollTopBeforeNewFrame + 80);
+    const scrollAfterNewFrame = await readPtyScrollMetrics(page);
+    expect(scrollAfterNewFrame.scrollTop).toBeLessThan(scrollAfterNewFrame.maxScrollTop - 30);
   });
 });

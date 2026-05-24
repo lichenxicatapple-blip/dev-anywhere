@@ -1442,7 +1442,10 @@ export function attachPtyScrollController(
       clientY: currentY,
       reviewThresholdPx: 8,
     });
-    if (result.notifyTouchReviewStart) trace("touchmove:review");
+    if (result.notifyTouchReviewStart) {
+      onTouchBoundaryPrevent?.();
+      trace("touchmove:review");
+    }
   };
 
   const finishTouchGesture = (type: "touch-end" | "touch-cancel"): void => {

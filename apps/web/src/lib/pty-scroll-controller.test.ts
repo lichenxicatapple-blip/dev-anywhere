@@ -1483,6 +1483,35 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
+  it("suppresses PTY input focus when touch movement starts reviewing history", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "live prompt" });
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const onTouchBoundaryPrevent = vi.fn();
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+      onTouchBoundaryPrevent,
+    });
+    expect(container.scrollTop).toBe(1600);
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    const move = touchEvent("touchmove", 360);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(true);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
+    expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
+  });
+
   it("snaps to cursor-aware bottom when a touchmove would cross into the native bottom gap", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
