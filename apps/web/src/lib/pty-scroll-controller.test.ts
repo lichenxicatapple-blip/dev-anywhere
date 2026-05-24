@@ -180,6 +180,91 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("140px");
   });
 
+  it("keeps short-host positioning in one coordinate system during native scroll", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "8px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 3414);
+    defineScrollWidth(container, 360);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 600, clientWidth: 336 });
+    const { terminal } = createTerminal({ 166: "prompt" });
+    terminal.rows = 30;
+    terminal.cols = 42;
+    terminal.buffer.active.length = 169;
+    terminal.buffer.active.viewportY = 130;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 27;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    // host = 30 * 20 = 600, visible = 634 - 8 - 8 = 618, so short-host
+    // positioning has an 18px bottom-pin offset. Native scroll must not fall back
+    // to raw row alignment (130 * 20 = 2600), or the terminal visibly jumps.
+    expect(host.style.top).toBe("2618px");
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.scrollTop = 2604;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(terminal.scrollToLine).not.toHaveBeenCalledWith(129);
+    expect(host.style.top).toBe("2618px");
+  });
+
+  it("keeps short-host positioning stable when term scroll follows to bottom", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "8px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 16,
+    });
+    defineScrollWidth(container, 360);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 600, clientWidth: 336 });
+    const { terminal, emitScroll } = createTerminal({ 166: "prompt" });
+    terminal.rows = 30;
+    terminal.cols = 42;
+    terminal.buffer.active.length = 143;
+    terminal.buffer.active.viewportY = 113;
+    terminal.buffer.active.cursorX = 0;
+    terminal.buffer.active.cursorY = 29;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(host.style.top).toBe("2278px");
+
+    terminal.buffer.active.length = 144;
+    terminal.buffer.active.viewportY = 114;
+    emitScroll();
+
+    expect(container.scrollTop).toBe(2280);
+    expect(host.style.top).toBe("2298px");
+  });
+
   // Vertical intent integration. The set/clear state table lives in
   // pty-vertical-intent-fsm.test.ts; this block only proves controller events and xterm/DOM
   // side effects are wired to that FSM correctly.

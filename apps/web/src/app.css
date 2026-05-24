@@ -24,6 +24,7 @@
   --radius: 0.375rem;
 
   --color-status-working: #4fc1ff;
+  --color-status-compacting: #c586c0;
   --color-status-success: #00d4aa;
   --color-status-warning: #e8ab5a;
   --color-status-error: #f44747;

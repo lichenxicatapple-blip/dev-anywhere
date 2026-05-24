@@ -1,7 +1,8 @@
-/* Chat panel 顶部 4px 状态色带，颜色+流动/呼吸承载 5 态会话状态
+/* Chat panel 顶部 4px 状态色带，颜色+流动/呼吸承载 6 态会话状态
    方案 B "注意力梯度":
      idle              — 绿色 + 慢速低强度 sweep (待命)
      working           — 蓝色 + 中速 sweep (干活)
+     compacting        — 紫色 + 慢速 sweep + 低强度呼吸 (维护)
      waiting_approval  — 橙色 + 快速 sweep + 呼吸叠加 (召唤)
      disconnected     — 红色 + 呼吸 (异常搏动)
      terminated        — 灰色静态 (已结束)
@@ -25,7 +26,8 @@
 }
 
 .dev-status-line-compacting {
-  background-color: var(--color-status-working);
+  background-color: var(--color-status-compacting);
+  animation: dev-status-compacting-breathe 2.4s ease-in-out infinite;
 }
 
 .dev-status-line-waiting_approval {
@@ -162,6 +164,16 @@
   0%,
   100% {
     opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes dev-status-compacting-breathe {
+  0%,
+  100% {
+    opacity: 0.68;
   }
   50% {
     opacity: 1;

@@ -410,7 +410,18 @@ export function attachPtyScrollController(
 
   const positionHostAt = (ydisp: number, cellH: number, visibleContentHeight?: number): void => {
     if (cellH <= 0) return;
-    const top = computeHostTop({ ydisp, rows: term.rows, cellH, visibleContentHeight });
+    const resolvedVisibleContentHeight =
+      visibleContentHeight ??
+      (() => {
+        const { paddingTop, paddingBottom } = getVerticalInsets();
+        return Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+      })();
+    const top = computeHostTop({
+      ydisp,
+      rows: term.rows,
+      cellH,
+      visibleContentHeight: resolvedVisibleContentHeight,
+    });
     const prevTopPx = host.style.top;
     const nextTopPx = `${top}px`;
     setStyle(host, "position", "absolute");

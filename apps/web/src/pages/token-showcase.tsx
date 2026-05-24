@@ -22,6 +22,7 @@ const accentColors = [
 
 const statusColors = [
   { name: "working", cssVar: "--color-status-working" },
+  { name: "compacting", cssVar: "--color-status-compacting" },
   { name: "success", cssVar: "--color-status-success" },
   { name: "warning", cssVar: "--color-status-warning" },
   { name: "error", cssVar: "--color-status-error" },
@@ -138,7 +139,7 @@ export function TokenShowcase() {
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mt-6">
             Status Colors
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {statusColors.map((c) => (
               <div key={c.name}>
                 <div
