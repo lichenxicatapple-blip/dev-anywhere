@@ -4,6 +4,21 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.21] - 2026-05-25
+
+### 修复
+
+- 修复移动端 PTY 横向触摸滑动在锁定横向手势后又被覆盖成纵向 review 的问题；有横向溢出的会话现在可以通过手指横滑移动 `scrollLeft`。
+- 修复移动端 PTY 中文档路径被项目符号缩进、手动换行和终端自动折行共同拆成多段后无法点击下载的问题。
+- 移动端 PTY 纵向触摸滚动改回由浏览器原生 `pan-y` 处理，减少滑动不跟手、轻扫被 JS 每帧改写 `scrollTop` 造成的跳变。
+- PTY 文件路径触摸下载增加短时间去重，避免同一次 tap 被 touch 激活和 xterm 兼容点击重复触发下载。
+
+### 测试
+
+- 新增 Android emulator E2E，覆盖 PTY 在移动端存在横向溢出时，真实 CDP touch-drag 必须触发 `horizontal-pan` 并改变横向滚动位置。
+- 新增 Android emulator E2E，覆盖缩进硬换行的 Markdown 文档路径在移动端 tap 后必须发出完整 `file_download_request`。
+- 更新 PTY 触摸滚动单测，验证纵向滑动不再阻止浏览器原生滚动。
+
 ## [0.4.20] - 2026-05-24
 
 ### 修复
