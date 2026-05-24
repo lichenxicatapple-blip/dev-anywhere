@@ -21,7 +21,7 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
           .locator('[data-slot="pty-terminal"]')
           .evaluate((el) => getComputedStyle(el).touchAction),
       )
-      .toBe("pan-x pan-y");
+      .toBe("none");
     const touchEditingSurface = await page.evaluate(
       () => window.matchMedia("(pointer: coarse), (hover: none)").matches,
     );
