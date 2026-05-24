@@ -1,7 +1,7 @@
 import { readdir, stat, access, open } from "node:fs/promises";
 import { createReadStream } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { isAbsolute, join, resolve, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import {
   applySessionHistoryMetadata,
@@ -47,6 +47,9 @@ const INTERNAL_TITLE_PATTERNS = [
   /^codex agent history\b/i,
   /^conversation summary\b/i,
 ];
+const TEMP_HISTORY_ROOTS = [tmpdir(), "/tmp", "/private/tmp", "/var/tmp"]
+  .map(normalizeAbsolutePath)
+  .filter((path): path is string => path !== null);
 
 // 扫描 ~/.claude/projects/ 获取 Claude Code 会话历史
 // 实际目录结构: ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
@@ -56,7 +59,7 @@ export async function scanSessionHistory(
   const entries = applySessionHistoryMetadata(
     [...(await scanClaudeSessionHistory()), ...(await scanCodexSessionHistory())],
     readSessionHistoryMetadata(options.metadataPath),
-  );
+  ).filter((entry) => !isTemporaryProjectDir(entry.projectDir));
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
   // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
   const seen = new Set<string>();
@@ -67,6 +70,26 @@ export async function scanSessionHistory(
     return true;
   });
   return uniqueEntries;
+}
+
+function normalizeAbsolutePath(path: string): string | null {
+  const trimmed = path.trim();
+  if (!trimmed || !isAbsolute(trimmed)) return null;
+  let resolved = resolve(trimmed);
+  while (resolved.length > 1 && resolved.endsWith(sep)) {
+    resolved = resolved.slice(0, -1);
+  }
+  return resolved === sep ? null : resolved;
+}
+
+function isPathInsideOrEqual(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}${sep}`);
+}
+
+function isTemporaryProjectDir(projectDir: string): boolean {
+  const normalized = normalizeAbsolutePath(projectDir);
+  if (!normalized) return false;
+  return TEMP_HISTORY_ROOTS.some((root) => isPathInsideOrEqual(normalized, root));
 }
 
 async function scanClaudeSessionHistory(): Promise<SessionHistoryEntry[]> {

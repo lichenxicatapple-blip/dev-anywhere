@@ -269,6 +269,38 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("Check the DAG");
   });
 
+  it("filters restorable history entries whose cwd is under temporary directories", async () => {
+    writeSession("-Users-dev-project", "visible", [
+      JSON.stringify({ type: "progress", cwd: "/Users/dev/project", sessionId: "visible" }),
+      JSON.stringify({ type: "user", message: "Keep real project" }),
+    ]);
+    writeSession("-tmp-dev-anywhere", "system-tmp", [
+      JSON.stringify({
+        type: "progress",
+        cwd: join(tmpdir(), "dev-anywhere-history-filter"),
+        sessionId: "system-tmp",
+      }),
+      JSON.stringify({ type: "user", message: "Hide system temp project" }),
+    ]);
+    writeSession("-tmp-dev-anywhere-2", "slash-tmp", [
+      JSON.stringify({
+        type: "progress",
+        cwd: "/tmp/dev-anywhere-history-filter",
+        sessionId: "slash-tmp",
+      }),
+      JSON.stringify({ type: "user", message: "Hide slash temp project" }),
+    ]);
+
+    const result = await scanSessionHistory();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "visible",
+      projectDir: "/Users/dev/project",
+      title: "Keep real project",
+    });
+  });
+
   it("skips isMeta user messages for title extraction", async () => {
     writeSession("-test-proj", "meta1", [
       JSON.stringify({
