@@ -67,7 +67,9 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtySessionSubscribeCount(page, 2);
   });
 
-  test("restores page-resume scroll only when hidden while following bottom", async ({ page }) => {
+  test("restores page-resume scroll to bottom after browser restores stale positions", async ({
+    page,
+  }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
@@ -90,15 +92,11 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     await scrollPtyToTop(page);
     await expect(backToBottom(page)).toBeVisible();
-    const reviewingMetrics = await readPtyScrollMetrics(page);
 
     await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
-    await page.waitForTimeout(100);
 
-    const afterReviewResume = await readPtyScrollMetrics(page);
-    expect(afterReviewResume.scrollTop).toBeLessThanOrEqual(reviewingMetrics.scrollTop + 8);
-    expect(afterReviewResume.bottomGap).toBeGreaterThan(100);
+    await expectPtyAtBottom(page);
   });
 
   // longHost 模式 (rows*cellH > visible content height) 下, isAtBottom = cursorInViewport。
