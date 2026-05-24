@@ -354,9 +354,6 @@ export function usePtyTouchGesture({
       const moved = updateGestureMove(event.pointerId, event.clientX, event.clientY);
       const gesture = touchPointerRef.current;
       if (!gesture) return;
-      if (!gesture.longPressed && gestureDistance(gesture) <= LINK_TAP_MOVE_THRESHOLD_PX) {
-        if (event.cancelable) event.preventDefault();
-      }
       if (!moved) return;
       event.stopPropagation();
       if (gesture.longPressed) event.preventDefault();
@@ -418,9 +415,6 @@ export function usePtyTouchGesture({
       const moved = updateGestureMove(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY);
       const gesture = touchPointerRef.current;
       if (!gesture) return;
-      if (!gesture.longPressed && gestureDistance(gesture) <= LINK_TAP_MOVE_THRESHOLD_PX) {
-        if (event.cancelable) event.preventDefault();
-      }
       if (moved) {
         if (gesture.longPressed) {
           event.stopPropagation();

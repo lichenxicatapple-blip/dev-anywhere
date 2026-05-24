@@ -214,6 +214,35 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     await expectFileDownloadRequest(emuPage, path);
   });
 
+  test("tap on an indented hard-wrapped PTY document path triggers file_download", async ({
+    emuPage,
+  }) => {
+    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    const path =
+      "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-24-v1-open-source-research.md";
+    await emitLineAndAwait(
+      emuPage,
+      [
+        "• 两个文档路径：",
+        "  - /Users/catli/MyApps/AIMovieFactory/docs/",
+        "    superpowers/specs/2026-05-24-v1-open-source-",
+        "    research.md",
+        "",
+      ].join("\r\n"),
+      "research.md",
+    );
+
+    await tapPtyLink(emuPage, {
+      sid: SESSION_ID,
+      kind: "file-download",
+      needle: path,
+    });
+
+    await expectFileDownloadRequest(emuPage, path);
+  });
+
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({
     emuPage,
   }) => {

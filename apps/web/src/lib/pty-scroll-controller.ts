@@ -1491,7 +1491,6 @@ export function attachPtyScrollController(
       } else if (movement.absDy < TOUCH_GESTURE_SLOP_PX) {
         lastTouchClientX = currentX;
         lastTouchClientY = currentY;
-        if (event.cancelable) event.preventDefault();
         trace("touchmove:pending", {
           details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${TOUCH_GESTURE_SLOP_PX}`,
         });
@@ -1558,20 +1557,10 @@ export function attachPtyScrollController(
     preventTouchMovePastCursorAwareBottom(event, currentX, currentY);
     const expectation = getTouchScrollExpectation(currentY);
     if (expectation) {
-      if (event.cancelable) event.preventDefault();
-      const nextScrollTop = expectation.expectedScrollTop;
-      touchGestureMaxScrollTop = Math.max(touchGestureMaxScrollTop ?? nextScrollTop, nextScrollTop);
-      if (Math.abs(container.scrollTop - nextScrollTop) > 0.5) {
-        container.scrollTop = nextScrollTop;
-        pendingProgrammaticScrollTop = null;
-        pendingFollowCursorScrollTop = null;
-        lastSeenScrollTop = nextScrollTop;
-        syncContainerScroll({ deferHostUntilRender: true });
-      }
-      trace("touchmove:controlled-scroll", {
+      trace("touchmove:vertical-native", {
         details: [
           `scrollTop=${Math.round(container.scrollTop)}`,
-          `expected=${Math.round(nextScrollTop)}`,
+          `expected=${Math.round(expectation.expectedScrollTop)}`,
           `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
           `base=${Math.round(expectation.gestureBaseScrollTop)}`,
           `startY=${Math.round(expectation.touchStartY)}`,

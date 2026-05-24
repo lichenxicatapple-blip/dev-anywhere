@@ -523,7 +523,7 @@ describe("attachPtyScrollController", () => {
   it("rejects catastrophic native touch scroll jumps while preserving the intended small review scroll", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -544,6 +544,8 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(1540);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(77);
+    expect(host.style.top).toBe("1600px");
+    emitRender();
     expect(host.style.top).toBe("1540px");
     expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
   });
@@ -593,14 +595,14 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 310);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(false);
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("pending");
   });
 
-  it("lets vertical touch review own scrollTop only after gesture lock", () => {
+  it("lets native vertical touch scroll own scrollTop after gesture lock", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -622,7 +624,11 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 320);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(false);
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    container.scrollTop = 1580;
+    container.dispatchEvent(new Event("scroll"));
     expect(container.scrollTop).toBe(1580);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(79);
     expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
@@ -853,7 +859,7 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(touchEvent("touchstart", 330));
     const move = touchEvent("touchmove", 321);
     container.dispatchEvent(move);
-    expect(move.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(false);
     expect(container.scrollTop).toBe(100486);
 
     container.scrollTop = 100000;
@@ -1598,7 +1604,7 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 360);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(false);
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
     expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
   });

@@ -74,6 +74,39 @@ describe("xterm file download links", () => {
     expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
   });
 
+  it("dedupes duplicate immediate activations for the same path", () => {
+    const onDownload = vi.fn();
+    const providerRef: {
+      current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
+    } = {};
+    const term = {
+      buffer: {
+        active: {
+          getLine: () => ({ translateToString: () => "artifact @./build/out.tar.gz done" }),
+        },
+      },
+      cols: 80,
+      registerLinkProvider: vi.fn((provider) => {
+        providerRef.current = provider;
+        return { dispose: vi.fn() };
+      }),
+    };
+    registerFileDownloadLinkProvider(term as never, onDownload);
+
+    providerRef.current?.provideLinks(1, (links) => {
+      const arr = links as
+        | Array<{ text: string; activate: (event: MouseEvent, text: string) => void }>
+        | undefined;
+      const link = arr?.[0];
+      expect(link?.text).toBe("./build/out.tar.gz");
+      link?.activate({ pointerType: "touch" } as unknown as MouseEvent, link.text);
+      link?.activate({ pointerType: "touch" } as unknown as MouseEvent, link.text);
+    });
+
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
+  });
+
   it("joins xterm-wrapped physical rows before detecting download paths", () => {
     const onDownload = vi.fn();
     const providerRef: {
@@ -147,6 +180,88 @@ describe("xterm file download links", () => {
     expect(onDownload).toHaveBeenCalledWith(
       "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
     );
+  });
+
+  it("joins indented hard-wrapped path continuations before detecting download paths", () => {
+    const onDownload = vi.fn();
+    const providerRef: {
+      current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
+    } = {};
+    const lines = [
+      {
+        isWrapped: false,
+        text: "  - /Users/catli/MyApps/AIMovieFactory/doc",
+      },
+      {
+        isWrapped: true,
+        text: "s/",
+      },
+      {
+        isWrapped: false,
+        text: "    superpowers/specs/2026-05-13-v1-founda",
+      },
+      {
+        isWrapped: true,
+        text: "tion-",
+      },
+      {
+        isWrapped: false,
+        text: "    design.md",
+      },
+    ];
+    const term = {
+      buffer: {
+        active: {
+          getLine: (index: number) => {
+            const line = lines[index];
+            if (!line) return undefined;
+            return {
+              isWrapped: line.isWrapped,
+              translateToString: () => line.text,
+            };
+          },
+        },
+      },
+      cols: 42,
+      registerLinkProvider: vi.fn((provider) => {
+        providerRef.current = provider;
+        return { dispose: vi.fn() };
+      }),
+    };
+    registerFileDownloadLinkProvider(term as never, onDownload);
+
+    const expectedPath =
+      "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md";
+
+    providerRef.current?.provideLinks(1, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+          }>
+        | undefined;
+      expect(arr?.[0]?.text).toBe(expectedPath);
+      expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
+      expect(arr?.[0]?.range.end).toEqual({ x: 42, y: 1 });
+    });
+
+    providerRef.current?.provideLinks(5, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+            activate: (event: MouseEvent, text: string) => void;
+          }>
+        | undefined;
+      expect(arr).toHaveLength(1);
+      const link = arr?.[0];
+      expect(link?.text).toBe(expectedPath);
+      expect(link?.range.start).toEqual({ x: 1, y: 5 });
+      expect(link?.range.end).toEqual({ x: 13, y: 5 });
+      link?.activate({ metaKey: true } as MouseEvent, link.text);
+    });
+
+    expect(onDownload).toHaveBeenCalledWith(expectedPath);
   });
 
   it("ignores plain clicks without a modifier (anti-misclick)", () => {

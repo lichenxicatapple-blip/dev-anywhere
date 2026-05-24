@@ -21,7 +21,25 @@ type FileDownloadBufferPathMatch = {
   endColumn: number;
 };
 
+type BufferTextPart = {
+  lineNumber: number;
+  sourceText: string;
+  sourceStartIndex: number;
+  text: string;
+};
+
+type BufferTextBlock = {
+  startLineNumber: number;
+  endLineNumber: number;
+  parts: BufferTextPart[];
+};
+
 const MAX_WRAPPED_FILE_PATH_LINES = 16;
+const MAX_SEMANTIC_FILE_PATH_BLOCKS = 8;
+const DUPLICATE_ACTIVATION_WINDOW_MS = 750;
+const SEMANTIC_PATH_START_RE =
+  /(?:^|[\s([{@])@?(?:\/|\.\/|\.\.\/|~\/|\.dev-anywhere\/)[A-Za-z0-9_./~%+,:=#-]*$/;
+const SEMANTIC_PATH_CONTINUATION_RE = /^[A-Za-z0-9_./~%+,:=#-]+$/;
 
 export function findFileDownloadPathMatches(line: string): FileDownloadPathMatch[] {
   return findFileDownloadPathSpans(line).map((span) => ({
@@ -54,42 +72,45 @@ export function findFileDownloadPathMatchesInWrappedBuffer(
   terminal: Pick<Terminal, "buffer">,
   bufferLineNumber: number,
 ): FileDownloadBufferPathMatch[] {
-  const block = getWrappedLineBlock(terminal, bufferLineNumber);
-  if (!block) return [];
+  const blocks: BufferTextBlock[] = [
+    getWrappedLineBlock(terminal, bufferLineNumber),
+    ...getSemanticPathBlocksAroundLine(terminal, bufferLineNumber),
+  ].filter((block): block is BufferTextBlock => block !== null);
 
-  const logicalLine = block.parts.join("");
-  return findFileDownloadPathSpans(logicalLine)
-    .map((span) => {
-      const start = stringIndexToTerminalPosition(
-        block.parts,
-        block.startLineNumber,
-        span.startIndex,
-      );
-      const end = stringEndIndexToTerminalPosition(
-        block.parts,
-        block.startLineNumber,
-        span.endIndex,
-      );
-      if (!start || !end) return null;
-      return {
-        path: span.path,
-        startLineNumber: start.lineNumber,
-        startColumn: start.column,
-        endLineNumber: end.lineNumber,
-        endColumn: end.column,
-      };
-    })
-    .filter((match): match is FileDownloadBufferPathMatch => match !== null)
-    .filter(
-      (match) =>
-        bufferLineNumber >= match.startLineNumber && bufferLineNumber <= match.endLineNumber,
-    );
+  const seen = new Set<string>();
+  return blocks.flatMap((block) => {
+    const logicalLine = block.parts.map((part) => part.text).join("");
+    return findFileDownloadPathSpans(logicalLine)
+      .map((span) => {
+        const start = stringIndexToTerminalPosition(block.parts, span.startIndex);
+        const end = stringEndIndexToTerminalPosition(block.parts, span.endIndex);
+        if (!start || !end) return null;
+        return {
+          path: span.path,
+          startLineNumber: start.lineNumber,
+          startColumn: start.column,
+          endLineNumber: end.lineNumber,
+          endColumn: end.column,
+        };
+      })
+      .filter((match): match is FileDownloadBufferPathMatch => match !== null)
+      .filter(
+        (match) =>
+          bufferLineNumber >= match.startLineNumber && bufferLineNumber <= match.endLineNumber,
+      )
+      .filter((match) => {
+        const key = `${match.path}:${match.startLineNumber}:${match.startColumn}:${match.endLineNumber}:${match.endColumn}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  });
 }
 
 function getWrappedLineBlock(
   terminal: Pick<Terminal, "buffer">,
   bufferLineNumber: number,
-): { startLineNumber: number; parts: string[] } | null {
+): BufferTextBlock | null {
   const active = terminal.buffer.active;
   let startLineNumber = bufferLineNumber;
   let endLineNumber = bufferLineNumber;
@@ -104,52 +125,155 @@ function getWrappedLineBlock(
     endLineNumber += 1;
   }
 
-  const parts: string[] = [];
+  return getWrappedLineBlockFromStart(terminal, startLineNumber, endLineNumber);
+}
+
+function getWrappedLineBlockFromStart(
+  terminal: Pick<Terminal, "buffer">,
+  startLineNumber: number,
+  knownEndLineNumber?: number,
+): BufferTextBlock | null {
+  const active = terminal.buffer.active;
+  let endLineNumber = knownEndLineNumber ?? startLineNumber;
+  if (knownEndLineNumber === undefined) {
+    for (let guard = 0; guard < MAX_WRAPPED_FILE_PATH_LINES; guard += 1) {
+      const nextLine = active.getLine(endLineNumber);
+      if (!nextLine?.isWrapped) break;
+      endLineNumber += 1;
+    }
+  }
+
+  const parts: BufferTextPart[] = [];
   for (let lineNumber = startLineNumber; lineNumber <= endLineNumber; lineNumber += 1) {
     const line = active.getLine(lineNumber - 1);
     if (!line) return null;
-    parts.push(line.translateToString(true));
+    const sourceText = line.translateToString(true);
+    parts.push({
+      lineNumber,
+      sourceText,
+      sourceStartIndex: 0,
+      text: sourceText,
+    });
   }
-  return { startLineNumber, parts };
+  return { startLineNumber, endLineNumber, parts };
+}
+
+function getSemanticPathBlocksAroundLine(
+  terminal: Pick<Terminal, "buffer">,
+  bufferLineNumber: number,
+): BufferTextBlock[] {
+  const active = terminal.buffer.active;
+  const blocks: BufferTextBlock[] = [];
+  const firstCandidate = Math.max(1, bufferLineNumber - MAX_WRAPPED_FILE_PATH_LINES);
+
+  for (let lineNumber = firstCandidate; lineNumber <= bufferLineNumber; lineNumber += 1) {
+    const line = active.getLine(lineNumber - 1);
+    if (!line || line.isWrapped) continue;
+    const block = getSemanticPathBlockFromStart(terminal, lineNumber);
+    if (
+      block &&
+      bufferLineNumber >= block.startLineNumber &&
+      bufferLineNumber <= block.endLineNumber
+    ) {
+      blocks.push(block);
+    }
+  }
+  return blocks;
+}
+
+function getSemanticPathBlockFromStart(
+  terminal: Pick<Terminal, "buffer">,
+  startLineNumber: number,
+): BufferTextBlock | null {
+  const firstBlock = getWrappedLineBlockFromStart(terminal, startLineNumber);
+  if (!firstBlock) return null;
+  const firstText = firstBlock.parts.map((part) => part.text).join("");
+  if (!SEMANTIC_PATH_START_RE.test(firstText)) return null;
+
+  const parts = [...firstBlock.parts];
+  let endLineNumber = firstBlock.endLineNumber;
+  let hasContinuation = false;
+
+  for (let guard = 0; guard < MAX_SEMANTIC_FILE_PATH_BLOCKS; guard += 1) {
+    const nextStartLineNumber = endLineNumber + 1;
+    const nextBlock = getWrappedLineBlockFromStart(terminal, nextStartLineNumber);
+    if (!nextBlock) break;
+    const firstPart = nextBlock.parts[0];
+    if (!firstPart) break;
+    const sourceStartIndex = countLeadingWhitespace(firstPart.sourceText);
+    const text = firstPart.sourceText.slice(sourceStartIndex);
+    if (!isSemanticPathContinuation(sourceStartIndex, text)) break;
+
+    parts.push({
+      ...firstPart,
+      sourceStartIndex,
+      text,
+    });
+    for (const wrappedPart of nextBlock.parts.slice(1)) {
+      parts.push(wrappedPart);
+    }
+    hasContinuation = true;
+    endLineNumber = nextBlock.endLineNumber;
+  }
+
+  if (!hasContinuation) return null;
+  return { startLineNumber, endLineNumber, parts };
+}
+
+function countLeadingWhitespace(value: string): number {
+  const match = value.match(/^\s*/);
+  return match?.[0].length ?? 0;
+}
+
+function isSemanticPathContinuation(sourceStartIndex: number, text: string): boolean {
+  if (sourceStartIndex < 2) return false;
+  if (!text || text.startsWith("-") || text.startsWith("•") || text.startsWith("›")) return false;
+  if (text.includes("://")) return false;
+  return SEMANTIC_PATH_CONTINUATION_RE.test(text);
 }
 
 function stringIndexToTerminalPosition(
-  parts: string[],
-  startLineNumber: number,
+  parts: BufferTextPart[],
   index: number,
 ): { lineNumber: number; column: number } | null {
   let offset = index;
   for (let i = 0; i < parts.length; i += 1) {
-    const part = parts[i] ?? "";
-    if (offset < part.length) {
+    const part = parts[i];
+    if (!part) continue;
+    if (offset < part.text.length) {
       return {
-        lineNumber: startLineNumber + i,
-        column: stringToTerminalColumn(part, offset),
+        lineNumber: part.lineNumber,
+        column: stringToTerminalColumn(part.sourceText, part.sourceStartIndex + offset),
       };
     }
-    if (offset === part.length && i < parts.length - 1) {
-      return { lineNumber: startLineNumber + i + 1, column: 1 };
+    if (offset === part.text.length && i < parts.length - 1) {
+      const next = parts[i + 1];
+      if (!next) return null;
+      return {
+        lineNumber: next.lineNumber,
+        column: stringToTerminalColumn(next.sourceText, next.sourceStartIndex),
+      };
     }
-    offset -= part.length;
+    offset -= part.text.length;
   }
   return null;
 }
 
 function stringEndIndexToTerminalPosition(
-  parts: string[],
-  startLineNumber: number,
+  parts: BufferTextPart[],
   exclusiveEndIndex: number,
 ): { lineNumber: number; column: number } | null {
   let offset = exclusiveEndIndex - 1;
   for (let i = 0; i < parts.length; i += 1) {
-    const part = parts[i] ?? "";
-    if (offset < part.length) {
+    const part = parts[i];
+    if (!part) continue;
+    if (offset < part.text.length) {
       return {
-        lineNumber: startLineNumber + i,
-        column: stringCellWidth(part.slice(0, offset + 1)),
+        lineNumber: part.lineNumber,
+        column: stringCellWidth(part.sourceText.slice(0, part.sourceStartIndex + offset + 1)),
       };
     }
-    offset -= part.length;
+    offset -= part.text.length;
   }
   return null;
 }
@@ -233,6 +357,21 @@ export function registerFileDownloadLinkProvider(
   terminal: Pick<Terminal, "buffer" | "cols" | "registerLinkProvider">,
   onDownload: (path: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
+  let lastActivation: { path: string; at: number } | null = null;
+
+  const activateDownload = (path: string, event: MouseEvent): void => {
+    if (!shouldActivateDownload(event)) return;
+    const now = performance.now();
+    if (
+      lastActivation?.path === path &&
+      now - lastActivation.at < DUPLICATE_ACTIVATION_WINDOW_MS
+    ) {
+      return;
+    }
+    lastActivation = { path, at: now };
+    onDownload(path);
+  };
+
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
       const matches = findFileDownloadPathMatchesInWrappedBuffer(terminal, bufferLineNumber);
@@ -253,8 +392,7 @@ export function registerFileDownloadLinkProvider(
           // 桌面仍要求 cmd/ctrl + click 防误触；触屏设备上用户没有修饰键,
           // 点击已高亮的文件路径就是下载意图。
           activate: (event) => {
-            if (!shouldActivateDownload(event)) return;
-            onDownload(match.path);
+            activateDownload(match.path, event);
           },
         });
         return acc;
