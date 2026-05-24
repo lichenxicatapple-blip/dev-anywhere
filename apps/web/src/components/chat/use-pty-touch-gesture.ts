@@ -13,6 +13,7 @@ interface TouchGestureState {
   lastX: number;
   lastY: number;
   moved: boolean;
+  longPressArmed: boolean;
   longPressed: boolean;
   longPressDelivered: boolean;
   touchEventStream: boolean;
@@ -88,9 +89,21 @@ export function usePtyTouchGesture({
     gesture.longPressTimer = null;
   }, []);
 
-  const markLongPress = useCallback(
+  const startLongPress = useCallback(
     (gesture: TouchGestureState): void => {
       if (gesture.longPressed || gesture.moved) return;
+      gesture.longPressed = true;
+      gesture.longPressArmed = false;
+      clearLongPressTimer(gesture);
+      suppressPtyFocus();
+      onLongPressStart?.({ clientX: gesture.startX, clientY: gesture.startY });
+    },
+    [clearLongPressTimer, onLongPressStart, suppressPtyFocus],
+  );
+
+  const markLongPress = useCallback(
+    (gesture: TouchGestureState): void => {
+      if (gesture.longPressed || gesture.longPressArmed || gesture.moved) return;
       if (gestureDistance(gesture) > LONG_PRESS_MOVE_CANCEL_PX) {
         clearLongPressTimer(gesture);
         recordTouchGestureDebug("longpress:cancel-drift", {
@@ -100,19 +113,17 @@ export function usePtyTouchGesture({
         return;
       }
       if (isTapCandidate?.({ clientX: gesture.startX, clientY: gesture.startY })) {
+        gesture.longPressArmed = true;
         clearLongPressTimer(gesture);
-        recordTouchGestureDebug("longpress:cancel-link", {
+        recordTouchGestureDebug("longpress:arm-link", {
           clientX: gesture.startX,
           clientY: gesture.startY,
         });
         return;
       }
-      gesture.longPressed = true;
-      clearLongPressTimer(gesture);
-      suppressPtyFocus();
-      onLongPressStart?.({ clientX: gesture.startX, clientY: gesture.startY });
+      startLongPress(gesture);
     },
-    [clearLongPressTimer, isTapCandidate, onLongPressStart, suppressPtyFocus],
+    [clearLongPressTimer, isTapCandidate, startLongPress],
   );
 
   const deliverLongPress = useCallback(
@@ -134,6 +145,7 @@ export function usePtyTouchGesture({
         lastX: clientX,
         lastY: clientY,
         moved: false,
+        longPressArmed: false,
         longPressed: false,
         longPressDelivered: false,
         touchEventStream,
@@ -157,6 +169,16 @@ export function usePtyTouchGesture({
       gesture.lastX = clientX;
       gesture.lastY = clientY;
       const distance = gestureDistance(gesture);
+      if (gesture.longPressArmed && distance > LONG_PRESS_MOVE_CANCEL_PX) {
+        gesture.longPressArmed = false;
+        recordTouchGestureDebug("longpress:cancel-armed-drift", {
+          pointerId,
+          clientX,
+          clientY,
+          distance,
+          threshold: LONG_PRESS_MOVE_CANCEL_PX,
+        });
+      }
       if (gesture.longPressed) {
         recordTouchGestureDebug("move", {
           pointerId,
@@ -202,6 +224,24 @@ export function usePtyTouchGesture({
       clearLongPressTimer(gesture);
       const distance = gestureDistance(gesture);
       let result: GestureFinishKind;
+      if (gesture.longPressArmed) {
+        if (distance <= LONG_PRESS_MOVE_CANCEL_PX) {
+          startLongPress(gesture);
+          deliverLongPress(gesture);
+          result = "longpress";
+          recordTouchGestureDebug("finish", {
+            pointerId,
+            result,
+            point,
+            moved: gesture.moved,
+            distance,
+            longPressed: true,
+            longPressArmed: true,
+          });
+          return result;
+        }
+        gesture.longPressArmed = false;
+      }
       if (gesture.longPressed) {
         deliverLongPress(gesture);
         result = "longpress";
@@ -210,6 +250,7 @@ export function usePtyTouchGesture({
           result,
           point,
           moved: gesture.moved,
+          longPressArmed: gesture.longPressArmed,
           distance,
           longPressed: true,
         });
@@ -266,7 +307,7 @@ export function usePtyTouchGesture({
       });
       return result;
     },
-    [clearLongPressTimer, deliverLongPress, onTap, suppressPtyFocus, terminalRef],
+    [clearLongPressTimer, deliverLongPress, onTap, startLongPress, suppressPtyFocus, terminalRef],
   );
 
   const cancelGesture = useCallback(
@@ -279,6 +320,9 @@ export function usePtyTouchGesture({
         deliverLongPress(gesture);
         recordTouchGestureDebug("cancel", { pointerId, result: "longpress" });
         return "longpress";
+      }
+      if (gesture.longPressArmed) {
+        recordTouchGestureDebug("cancel", { pointerId, result: "armed" });
       }
       suppressPtyFocus();
       recordTouchGestureDebug("cancel", {
@@ -399,7 +443,7 @@ export function usePtyTouchGesture({
       const result = finishGesture(TOUCH_EVENT_POINTER_ID, point);
       if (result === "longpress" || result === "link") {
         event.stopPropagation();
-        if (result === "link" && event.cancelable) event.preventDefault();
+        if (event.cancelable) event.preventDefault();
       }
     },
     [finishGesture],

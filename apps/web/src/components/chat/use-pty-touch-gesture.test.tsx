@@ -370,6 +370,40 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
+  it("still treats a stationary link candidate as a long press on release", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const isTapCandidate = vi.fn(() => true);
+    const onLongPressStart = vi.fn();
+    const onLongPressEnd = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onTap={onTap}
+        isTapCandidate={isTapCandidate}
+        onLongPressStart={onLongPressStart}
+        onLongPressEnd={onLongPressEnd}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    vi.advanceTimersByTime(650);
+    const end = dispatchTouch("touchend", xterm, { clientX: 120, clientY: 140 });
+    vi.runOnlyPendingTimers();
+
+    expect(isTapCandidate).toHaveBeenCalledWith({ clientX: 120, clientY: 140 });
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onLongPressStart).toHaveBeenCalledWith({ clientX: 120, clientY: 140 });
+    expect(onLongPressEnd).toHaveBeenCalledWith({ clientX: 120, clientY: 140 });
+    expect(end.defaultPrevented).toBe(true);
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
   it("uses the last touch point for link taps when touchend has no changedTouches", () => {
     const focus = vi.fn();
     const suppress = vi.fn();
