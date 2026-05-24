@@ -270,6 +270,8 @@ describe("scanSessionHistory", () => {
   });
 
   it("filters restorable history entries whose cwd is under temporary directories", async () => {
+    const privateTmpDir = tmpdir().startsWith("/private/") ? tmpdir() : join("/private", tmpdir());
+
     writeSession("-Users-dev-project", "visible", [
       JSON.stringify({ type: "progress", cwd: "/Users/dev/project", sessionId: "visible" }),
       JSON.stringify({ type: "user", message: "Keep real project" }),
@@ -289,6 +291,14 @@ describe("scanSessionHistory", () => {
         sessionId: "slash-tmp",
       }),
       JSON.stringify({ type: "user", message: "Hide slash temp project" }),
+    ]);
+    writeSession("-private-var-folders-dev-anywhere", "private-var-tmp", [
+      JSON.stringify({
+        type: "progress",
+        cwd: join(privateTmpDir, "dev-anywhere-history-filter"),
+        sessionId: "private-var-tmp",
+      }),
+      JSON.stringify({ type: "user", message: "Hide macOS private var temp project" }),
     ]);
 
     const result = await scanSessionHistory();

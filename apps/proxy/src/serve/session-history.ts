@@ -47,7 +47,7 @@ const INTERNAL_TITLE_PATTERNS = [
   /^codex agent history\b/i,
   /^conversation summary\b/i,
 ];
-const TEMP_HISTORY_ROOTS = [tmpdir(), "/tmp", "/private/tmp", "/var/tmp"]
+const TEMP_HISTORY_ROOTS = expandPathAliases([tmpdir(), "/tmp", "/private/tmp", "/var/tmp"])
   .map(normalizeAbsolutePath)
   .filter((path): path is string => path !== null);
 
@@ -80,6 +80,16 @@ function normalizeAbsolutePath(path: string): string | null {
     resolved = resolved.slice(0, -1);
   }
   return resolved === sep ? null : resolved;
+}
+
+function expandPathAliases(paths: string[]): string[] {
+  const aliases = new Set<string>();
+  for (const path of paths) {
+    aliases.add(path);
+    if (path.startsWith("/var/")) aliases.add(`/private${path}`);
+    if (path.startsWith("/private/var/")) aliases.add(path.slice("/private".length));
+  }
+  return [...aliases];
 }
 
 function isPathInsideOrEqual(path: string, root: string): boolean {
