@@ -82,7 +82,6 @@ type TouchScrollGestureMode = "pending" | "vertical" | "horizontal";
 const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
-const TOUCH_SCROLL_DRIFT_MIN_THRESHOLD_PX = 24;
 const TOUCH_GESTURE_SLOP_PX = 16;
 const TOUCH_HORIZONTAL_LOCK_RATIO = 1.15;
 
@@ -792,7 +791,7 @@ export function attachPtyScrollController(
     container.scrollTop = anchor.bottomScrollTop;
     lastSeenScrollTop = anchor.bottomScrollTop;
     touchGestureMaxScrollTop = Math.max(touchMaxScrollTop, anchor.bottomScrollTop);
-    syncContainerScroll();
+    syncContainerScroll({ deferHostUntilRender: true });
     return true;
   };
 
@@ -909,43 +908,6 @@ export function attachPtyScrollController(
         `touchStart=${Math.round(touchStartScrollTop)}`,
         `startY=${Math.round(touchStartY)}`,
         `currentY=${Math.round(currentY)}`,
-      ].join(" "),
-    });
-    container.scrollTop = expectedScrollTop;
-    lastSeenScrollTop = expectedScrollTop;
-    touchGestureMaxScrollTop = Math.max(
-      touchGestureMaxScrollTop ?? expectedScrollTop,
-      expectedScrollTop,
-    );
-    syncContainerScroll();
-    return true;
-  };
-
-  const restoreTouchScrollDrift = (effectiveScrollTop: number): boolean => {
-    const expectation = getTouchScrollExpectation();
-    if (!expectation) return false;
-    const hasTouchMovement = Math.abs(expectation.currentY - expectation.touchStartY) > 0.5;
-    if (!hasTouchMovement) return false;
-    const { expectedScrollTop } = expectation;
-    const { cellH } = getDims();
-    const driftThreshold = Math.max(
-      TOUCH_SCROLL_DRIFT_MIN_THRESHOLD_PX,
-      atBottomThreshold * 2,
-      cellH > 0 ? cellH * 1.25 : 0,
-    );
-    const drift = effectiveScrollTop - expectedScrollTop;
-    if (Math.abs(drift) <= driftThreshold) return false;
-
-    trace("container-scroll:restore-touch-drift", {
-      details: [
-        `scrollTop=${Math.round(effectiveScrollTop)}`,
-        `expected=${Math.round(expectedScrollTop)}`,
-        `diff=${Math.round(drift)}`,
-        `threshold=${Math.round(driftThreshold)}`,
-        `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
-        `base=${Math.round(expectation.gestureBaseScrollTop)}`,
-        `startY=${Math.round(expectation.touchStartY)}`,
-        `currentY=${Math.round(expectation.currentY)}`,
       ].join(" "),
     });
     container.scrollTop = expectedScrollTop;
@@ -1150,9 +1112,6 @@ export function attachPtyScrollController(
       return;
     }
     pendingProgrammaticScrollTop = null;
-    if (restoreTouchScrollDrift(effectiveScrollTop)) {
-      return;
-    }
     if (restoreStationaryTouchLayoutShift(effectiveScrollTop)) {
       return;
     }

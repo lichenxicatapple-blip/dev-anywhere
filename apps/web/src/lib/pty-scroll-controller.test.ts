@@ -635,6 +635,48 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("vertical");
   });
 
+  it("does not pull native vertical touch scroll back to a finger-derived expected position", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 30700);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 1530: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 1533;
+    terminal.buffer.active.viewportY = 1476;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    container.scrollTop = 29568;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+    });
+
+    container.dispatchEvent(touchEvent("touchstart", 195));
+    container.dispatchEvent(touchEvent("touchmove", 398));
+    // Chrome may report a native scroll position that lags the idealized
+    // finger-distance formula. The controller must not fight that native scroll.
+    container.scrollTop = 29503;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBe(29503);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(1475);
+  });
+
   it("pans horizontally after horizontal touch lock without taking vertical review", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
