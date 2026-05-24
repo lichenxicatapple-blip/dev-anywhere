@@ -34,6 +34,14 @@ describe("computePtyGeometry", () => {
     expect(computePtyGeometry(1200, 600, 10, 20)).toEqual({ cols: 120, rows: 30 });
   });
 
+  it("rounds up rows when the viewport would otherwise leave nearly a full blank row", () => {
+    expect(computePtyGeometry(336, 618, 8, 20)).toEqual({ cols: 42, rows: 31 });
+  });
+
+  it("keeps rows floored when the leftover space is small", () => {
+    expect(computePtyGeometry(336, 612, 8, 20)).toEqual({ cols: 42, rows: 30 });
+  });
+
   it("returns null when dimensions are not measurable", () => {
     expect(computePtyGeometry(1200, 600, 0, 20)).toBeNull();
   });

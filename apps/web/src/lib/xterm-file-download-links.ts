@@ -202,8 +202,35 @@ function isFullWidthCodePoint(codePoint: number): boolean {
   );
 }
 
+function getLineRangeForPathMatch(
+  match: FileDownloadBufferPathMatch,
+  bufferLineNumber: number,
+  cols: number,
+): ILink["range"] | null {
+  if (bufferLineNumber < match.startLineNumber || bufferLineNumber > match.endLineNumber) {
+    return null;
+  }
+  const startColumn = bufferLineNumber === match.startLineNumber ? match.startColumn : 1;
+  const endColumn = bufferLineNumber === match.endLineNumber ? match.endColumn : cols;
+  if (endColumn < startColumn) return null;
+  return {
+    start: { x: startColumn, y: bufferLineNumber },
+    end: { x: endColumn, y: bufferLineNumber },
+  };
+}
+
+function shouldActivateDownload(event: MouseEvent): boolean {
+  if (event.metaKey || event.ctrlKey) return true;
+  const pointerType =
+    "pointerType" in event
+      ? String((event as MouseEvent & { pointerType?: unknown }).pointerType)
+      : "";
+  if (pointerType === "touch" || pointerType === "pen") return true;
+  return window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+}
+
 export function registerFileDownloadLinkProvider(
-  terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
+  terminal: Pick<Terminal, "buffer" | "cols" | "registerLinkProvider">,
   onDownload: (path: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
@@ -213,23 +240,25 @@ export function registerFileDownloadLinkProvider(
         callback(undefined);
         return;
       }
-      const links: ILink[] = matches.map((match) => ({
-        text: match.path,
-        range: {
-          start: { x: match.startColumn, y: match.startLineNumber },
-          end: { x: match.endColumn, y: match.endLineNumber },
-        },
-        decorations: {
-          underline: true,
-          pointerCursor: true,
-        },
-        // cmd/ctrl + click 防误触。触屏 plain tap 同样不直接下载；移动端下载走
-        // 长按选区工具条，平板外接键盘仍可用 cmd/ctrl + click。
-        activate: (event) => {
-          if (!event.metaKey && !event.ctrlKey) return;
-          onDownload(match.path);
-        },
-      }));
+      const links = matches.reduce<ILink[]>((acc, match) => {
+        const range = getLineRangeForPathMatch(match, bufferLineNumber, terminal.cols);
+        if (!range) return acc;
+        acc.push({
+          text: match.path,
+          range,
+          decorations: {
+            underline: true,
+            pointerCursor: true,
+          },
+          // 桌面仍要求 cmd/ctrl + click 防误触；触屏设备上用户没有修饰键,
+          // 点击已高亮的文件路径就是下载意图。
+          activate: (event) => {
+            if (!shouldActivateDownload(event)) return;
+            onDownload(match.path);
+          },
+        });
+        return acc;
+      }, []);
       callback(links.length > 0 ? links : undefined);
     },
   };

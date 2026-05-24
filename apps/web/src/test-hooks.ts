@@ -108,25 +108,23 @@ export function installTestHooks(): void {
         if (!provider || !term) return { triggered: false };
         const buffer = term.buffer.active;
         for (let i = 0; i < buffer.length; i += 1) {
-          const line = buffer.getLine(i)?.translateToString(true) ?? "";
-          if (!line.includes(needle)) continue;
-          let triggered = false;
+          let activated = false;
           let text: string | undefined;
           // bufferLineNumber 是 1-based, getLine(i) 是 0-based, 因此传 i+1。
           provider.provideLinks(i + 1, (links) => {
-            const link = links?.[0];
+            const link = links?.find((candidate) => candidate.text === needle);
             if (!link) return;
             text = link.text;
-            // 构造仅含修饰键的合成 MouseEvent: link provider 内部只读 metaKey / ctrlKey,
-            // 其它字段 (clientX/Y / button) 与命中判定无关, 因此用 partial cast 即可。
+            // 构造仅含修饰键的合成 MouseEvent: link provider 内部只读 metaKey / ctrlKey
+            // 和触屏媒体查询; 其它字段 (clientX/Y / button) 与命中判定无关。
             const event = {
               metaKey: modifier === "meta",
               ctrlKey: modifier === "ctrl",
             } as unknown as MouseEvent;
             link.activate(event, link.text);
-            triggered = true;
+            activated = true;
           });
-          return { triggered, text, lineNumber: i + 1 };
+          if (activated) return { triggered: true, text, lineNumber: i + 1 };
         }
         return { triggered: false };
       },

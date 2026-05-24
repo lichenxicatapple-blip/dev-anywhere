@@ -25,9 +25,12 @@ export function computePtyGeometry(
   if (containerWidth <= 0 || containerHeight <= 0 || cellWidth <= 0 || cellHeight <= 0) {
     return null;
   }
+  const fullRows = Math.floor(containerHeight / cellHeight);
+  const rowRemainder = containerHeight - fullRows * cellHeight;
+  const rows = fullRows + (rowRemainder >= cellHeight * 0.75 ? 1 : 0);
   return {
     cols: Math.max(options.minCols ?? 20, Math.floor(containerWidth / cellWidth)),
-    rows: Math.max(options.minRows ?? 8, Math.floor(containerHeight / cellHeight)),
+    rows: Math.max(options.minRows ?? 8, rows),
   };
 }
 

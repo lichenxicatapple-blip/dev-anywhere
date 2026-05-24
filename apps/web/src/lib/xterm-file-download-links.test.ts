@@ -26,7 +26,7 @@ describe("xterm file download links", () => {
 
   function provideAndActivate(
     onDownload: (path: string) => void,
-    event: { metaKey?: boolean; ctrlKey?: boolean } = {},
+    event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } = {},
     line = "artifact @./build/out.tar.gz done",
   ): { text?: string } {
     const providerRef: {
@@ -38,6 +38,7 @@ describe("xterm file download links", () => {
           getLine: () => ({ translateToString: () => line }),
         },
       },
+      cols: 80,
       registerLinkProvider: vi.fn((provider) => {
         providerRef.current = provider;
         return { dispose: vi.fn() };
@@ -105,12 +106,25 @@ describe("xterm file download links", () => {
           },
         },
       },
+      cols: 42,
       registerLinkProvider: vi.fn((provider) => {
         providerRef.current = provider;
         return { dispose: vi.fn() };
       }),
     };
     registerFileDownloadLinkProvider(term as never, onDownload);
+
+    providerRef.current?.provideLinks(1, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+          }>
+        | undefined;
+      expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
+      expect(arr?.[0]?.range.end).toEqual({ x: 42, y: 1 });
+      expect(arr?.[0]?.text).toContain("foundation-design.md");
+    });
 
     providerRef.current?.provideLinks(3, (links) => {
       const arr = links as
@@ -125,7 +139,7 @@ describe("xterm file download links", () => {
       expect(link?.text).toBe(
         "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
       );
-      expect(link?.range.start).toEqual({ x: 5, y: 1 });
+      expect(link?.range.start).toEqual({ x: 1, y: 3 });
       expect(link?.range.end).toEqual({ x: 20, y: 3 });
       link?.activate({ metaKey: true } as MouseEvent, link.text);
     });
@@ -159,8 +173,7 @@ describe("xterm file download links", () => {
     expect(onDownload).not.toHaveBeenCalled();
   });
 
-  // 触屏设备 (pointer: coarse) 容易误触 PTY 输出里的路径；普通 tap 不应直接下载。
-  // 移动端下载走长按选区工具条，外接键盘仍保留 cmd/ctrl + click。
+  // 触屏设备没有 cmd/ctrl 修饰键；tap 已高亮的文件路径就是下载意图。
   describe("touch surface (mobile / tablet without keyboard)", () => {
     function withTouchSurface<T>(fn: () => T): T {
       const spy = vi.spyOn(window, "matchMedia").mockImplementation(
@@ -183,12 +196,18 @@ describe("xterm file download links", () => {
       }
     }
 
-    it("does not trigger download on plain tap", () => {
+    it("triggers download on plain tap", () => {
       withTouchSurface(() => {
         const onDownload = vi.fn();
         provideAndActivate(onDownload, {});
-        expect(onDownload).not.toHaveBeenCalled();
+        expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
       });
+    });
+
+    it("triggers download on touch pointer events even without media-query support", () => {
+      const onDownload = vi.fn();
+      provideAndActivate(onDownload, { pointerType: "touch" });
+      expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
     });
 
     it("still triggers on cmd+click when tablet has keyboard attached", () => {

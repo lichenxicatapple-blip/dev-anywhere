@@ -37,8 +37,32 @@ async function touchTap(page: Page, locator: Locator): Promise<void> {
   }
 }
 
+async function readPtyScreenBottomGap(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    if (!container || !screen) return Number.POSITIVE_INFINITY;
+    const containerRect = container.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const paddingBottom = Number.parseFloat(getComputedStyle(container).paddingBottom) || 0;
+    return containerRect.bottom - paddingBottom - screenRect.bottom;
+  });
+}
+
 test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
   test.setTimeout(60_000);
+
+  test("PTY screen covers the mobile scroll viewport without a full-row bottom blank", async ({
+    emuPage,
+  }) => {
+    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await sendPtyLines(emuPage, { count: 120 });
+    await expectPtyAtBottom(emuPage);
+
+    await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
+  });
 
   test("scroll up shows back-to-bottom; tap returns to bottom", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
