@@ -80,6 +80,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       node.scrollTop = 0;
       node.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
     await expect
       .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
       .toBeGreaterThan(100);

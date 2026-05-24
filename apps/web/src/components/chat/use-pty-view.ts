@@ -135,6 +135,7 @@ interface UsePtyViewResult {
 interface ScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
+  preparePageResumeRestore: (opts: { wasFollowing: boolean }) => void;
   restorePageResume: (opts: { wasFollowing: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -266,14 +267,17 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, []);
 
   const rememberHiddenPtyState = useCallback((): void => {
+    if (!pageResumePendingRef.current) {
+      pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
+    }
     pageResumePendingRef.current = true;
-    pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
     cancelPendingResumeFrame();
   }, [cancelPendingResumeFrame]);
 
   const scheduleResumeRestore = useCallback((): void => {
     if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
     const wasFollowing = pageResumeWasFollowingRef.current;
+    scrollControllerRef.current?.preparePageResumeRestore({ wasFollowing });
     cancelPendingResumeFrame();
     pageResumeFrameRef.current = requestAnimationFrame(() => {
       pageResumeFrameRef.current = requestAnimationFrame(() => {

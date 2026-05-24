@@ -1035,6 +1035,43 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps following intent while browser replays stale touch scroll during page resume", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+
+    expect(container.scrollTop).toBe(1600);
+    onUserVerticalScrollIntentChange.mockClear();
+    terminal.scrollToLine.mockClear();
+
+    controller.preparePageResumeRestore({ wasFollowing: true });
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.scrollTop = 100;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(touchEvent("touchmove", 260));
+    container.dispatchEvent(touchEvent("touchend", 260));
+
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+
+    controller.restorePageResume({ wasFollowing: true });
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+  });
+
   it("preserves review position on page resume when the page was hidden while reviewing", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();

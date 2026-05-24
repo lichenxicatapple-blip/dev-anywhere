@@ -55,6 +55,7 @@ interface PtyScrollController {
   // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。调用方必须传入
   // "页面隐藏前" 的语义状态,而不是恢复后的当前几何状态: 如果隐藏前在 follow,
   // 则旧 scrollTop 是浏览器恢复噪音,需要强制回到底; 如果隐藏前在 review,保持用户位置。
+  preparePageResumeRestore: (opts: { wasFollowing: boolean }) => void;
   restorePageResume: (opts: { wasFollowing: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -159,6 +160,9 @@ export function attachPtyScrollController(
   // 仅看 atBottom + 时间窗会把刚 set 的 intent 立刻清掉。改成跟 onContainerScroll 拿到的
   // delta 比对: 只有 scrollTop 真的增大且抵达 atBottom 时才认为用户主动收起回看意图。
   let lastSeenScrollTop = 0;
+  // 页面从后台 / keepalive 隐藏层恢复时,浏览器可能先回放旧 scrollTop 或 touch scroll。
+  // 如果隐藏前语义上在 following,这些恢复噪音不能抢先把 intent 改成 reviewing。
+  let pageResumeRestorePendingFromFollowing = false;
   // 进入页面时按"几何贴底"一次定锚 (终端心智), 之后只在"光标行真的变了"时让
   // followCursorY 接管把光标拉回视野。无变动的 onRender 帧 (focus 切换 / theme 重绘 /
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
@@ -492,14 +496,33 @@ export function attachPtyScrollController(
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
   };
 
+  const preparePageResumeRestore = ({ wasFollowing }: { wasFollowing: boolean }): void => {
+    if (!wasFollowing) {
+      trace("page-resume:prepare-preserve-review");
+      return;
+    }
+    pageResumeRestorePendingFromFollowing = true;
+    trace("page-resume:prepare-follow");
+    if (userHasVerticalScrollIntent()) {
+      dispatchVerticalIntent({
+        type: "scroll-to-bottom",
+        force: true,
+        reason: "pageResumePrepare",
+      });
+    }
+  };
+
   const restorePageResume = ({ wasFollowing }: { wasFollowing: boolean }): void => {
     if (!wasFollowing) {
+      pageResumeRestorePendingFromFollowing = false;
       trace("page-resume:preserve-review");
       notifyScroll();
       return;
     }
+    preparePageResumeRestore({ wasFollowing: true });
     updateSpacer();
     scrollToBottom("pageResume", { force: true });
+    pageResumeRestorePendingFromFollowing = false;
   };
 
   const scrollToRatio = (ratio: number): void => {
@@ -933,6 +956,20 @@ export function attachPtyScrollController(
     if (restoreRecentRawInputLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
       return;
     }
+    if (pageResumeRestorePendingFromFollowing) {
+      trace("container-scroll:page-resume-pending", {
+        details: `scrollTop=${effectiveScrollTop} bottom=${getCurrentAnchor().bottomScrollTop}`,
+      });
+      dispatchVerticalIntent({
+        type: "container-scroll",
+        source: "programmatic-bottom",
+        scrollTop: effectiveScrollTop,
+        atCursorAwareBottom: atBottom,
+        verticalDelta,
+      });
+      syncContainerScroll({ deferHostUntilRender: verticalIntent.touchActive });
+      return;
+    }
     // 用户主动向下滚抵达 atBottom 时释放 intent, 让 output 重新跟随。阈值 atBottomThreshold
     // (默认 8px) 屏蔽浏览器 subpixel rounding / 浮点 jitter。atBottom alone 不是 clear 条件;
     // FSM 同时检查方向、来源以及 touchActive。
@@ -1156,6 +1193,10 @@ export function attachPtyScrollController(
   };
 
   const onTouchStart = (event: TouchEvent): void => {
+    if (pageResumeRestorePendingFromFollowing) {
+      trace("touchstart:page-resume-pending");
+      return;
+    }
     const touch = event.touches?.[0] ?? null;
     const startX = touch?.clientX ?? null;
     const startY = touch?.clientY ?? null;
@@ -1173,6 +1214,10 @@ export function attachPtyScrollController(
   };
 
   const onTouchMove = (event: TouchEvent): void => {
+    if (pageResumeRestorePendingFromFollowing) {
+      trace("touchmove:page-resume-pending");
+      return;
+    }
     const touch = event.touches?.[0] ?? null;
     const currentX = touch?.clientX ?? null;
     const currentY = touch?.clientY ?? null;
@@ -1227,11 +1272,19 @@ export function attachPtyScrollController(
   };
 
   const onTouchEnd = (): void => {
+    if (pageResumeRestorePendingFromFollowing) {
+      trace("touchend:page-resume-pending");
+      return;
+    }
     finishTouchGesture("touch-end");
     trace("touchend");
   };
 
   const onTouchCancel = (): void => {
+    if (pageResumeRestorePendingFromFollowing) {
+      trace("touchcancel:page-resume-pending");
+      return;
+    }
     // iOS momentum scroll 被 visualViewport 重排打断 / 系统手势接管时 fire。
     // touchend 永远不会再来, 必须按 touchend 同等清理 intent / state。
     finishTouchGesture("touch-cancel");
@@ -1360,6 +1413,7 @@ export function attachPtyScrollController(
     },
     relayout,
     scrollToBottom,
+    preparePageResumeRestore,
     restorePageResume,
     scrollToRatio,
     scrollToXRatio,
