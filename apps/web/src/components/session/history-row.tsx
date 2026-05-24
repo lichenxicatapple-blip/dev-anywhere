@@ -31,14 +31,20 @@ export function HistoryRow({
   restoreModes,
   onRestoreMode,
 }: HistoryRowProps) {
+  const title = (
+    <span className="text-sm font-normal truncate min-w-0" title={session.title}>
+      {session.title}
+    </span>
+  );
+  const timestamp = (
+    <span className="text-xs text-muted-foreground tabular-nums">
+      {formatRelativeTime(session.updatedAt, now)}
+    </span>
+  );
   const content = (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="text-sm font-normal truncate min-w-0" title={session.title}>
-        {session.title}
-      </span>
-      <span className="text-xs text-muted-foreground tabular-nums">
-        {formatRelativeTime(session.updatedAt, now)}
-      </span>
+      {title}
+      {timestamp}
     </span>
   );
 
@@ -49,13 +55,13 @@ export function HistoryRow({
         data-session-id={session.id}
         data-loading={loading ? "true" : undefined}
         className={cn(
-          "group w-full flex items-center gap-2 pl-10 pr-4 py-2 min-h-[50px]",
+          "group w-full flex flex-col items-stretch gap-1.5 pl-10 pr-4 py-2.5 min-h-[66px]",
           "transition-colors hover:bg-accent",
           disabled && "opacity-50",
         )}
       >
-        {content}
-        <span className="flex shrink-0 items-center gap-1">
+        {title}
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
           {restoreModes.map((mode) => (
             <button
               key={mode}
@@ -79,6 +85,7 @@ export function HistoryRow({
               <span>{mode === "json" ? "聊天" : "终端"}</span>
             </button>
           ))}
+          {timestamp}
         </span>
       </li>
     );
