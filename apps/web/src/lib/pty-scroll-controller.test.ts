@@ -460,7 +460,7 @@ describe("attachPtyScrollController", () => {
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
   });
 
-  it("keeps touch review intent through output that renders before native scroll moves", () => {
+  it("keeps touch review intent through output after a vertical gesture starts", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
     const onUserVerticalScrollIntentChange = vi.fn();
@@ -480,7 +480,8 @@ describe("attachPtyScrollController", () => {
       onUserVerticalScrollIntentChange,
     });
 
-    container.dispatchEvent(new Event("touchstart"));
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 280));
     emitRender();
 
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
@@ -517,7 +518,7 @@ describe("attachPtyScrollController", () => {
     expect(onTouchReviewStart).toHaveBeenCalledTimes(2);
   });
 
-  it("does not preserve review intent after a bottom tap without scroll movement", () => {
+  it("does not create review intent after a bottom tap without scroll movement", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -537,13 +538,10 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(touchEvent("touchstart", 300));
     container.dispatchEvent(touchEvent("touchend", 300));
 
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
-      true,
-      false,
-    ]);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
-  it("clears transient bottom touch intent when keyboard padding moves the bottom before touchend", () => {
+  it("keeps bottom tap inert when keyboard padding moves the bottom before touchend", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -566,10 +564,7 @@ describe("attachPtyScrollController", () => {
     controller.scrollToBottom("rawInput");
 
     expect(container.scrollTop).toBe(1680);
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
-      true,
-      false,
-    ]);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
   it("restores bottom when keyboard layout shifts scrollTop during a stationary bottom touch", () => {
@@ -608,10 +603,7 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(touchEvent("touchend", 300));
 
     expect(container.scrollTop).toBe(1600);
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
-      true,
-      false,
-    ]);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
   it("restores bottom when a stationary bottom touch scroll jump happens before visualViewport resize", () => {
@@ -699,7 +691,7 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(20686);
     expect(host.style.top).toBe("20240px");
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
   it("keeps following after a keyboard-height bottom touch restores to the new semantic bottom", () => {
@@ -755,7 +747,7 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(20686);
     expect(host.style.top).toBe("20240px");
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([false]);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
   it("keeps following when long-line input temporarily shrinks the scroll range", () => {
@@ -1028,7 +1020,7 @@ describe("attachPtyScrollController", () => {
     terminal.scrollToLine.mockClear();
     onUserVerticalScrollIntentChange.mockClear();
 
-    controller.restorePageResume({ wasFollowing: true });
+    controller.restorePageResume();
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
@@ -1055,7 +1047,7 @@ describe("attachPtyScrollController", () => {
     onUserVerticalScrollIntentChange.mockClear();
     terminal.scrollToLine.mockClear();
 
-    controller.preparePageResumeRestore({ wasFollowing: true });
+    controller.preparePageResumeRestore();
     container.dispatchEvent(touchEvent("touchstart", 320));
     container.scrollTop = 100;
     container.dispatchEvent(new Event("scroll"));
@@ -1065,14 +1057,14 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
 
-    controller.restorePageResume({ wasFollowing: true });
+    controller.restorePageResume();
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
   });
 
-  it("preserves review position on page resume when the page was hidden while reviewing", () => {
+  it("returns to the bottom on page resume even when the page was hidden while reviewing", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -1092,12 +1084,12 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 100;
     terminal.scrollToLine.mockClear();
 
-    controller.restorePageResume({ wasFollowing: false });
+    controller.restorePageResume();
 
-    expect(container.scrollTop).toBe(100);
-    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     const intentCalls = onUserVerticalScrollIntentChange.mock.calls.map((c) => c[0]);
-    expect(intentCalls).not.toContain(false);
+    expect(intentCalls).toContain(false);
   });
 
   it("owns at-bottom state and exposes scrollToBottom", () => {
@@ -1323,7 +1315,7 @@ describe("attachPtyScrollController", () => {
     expect(terminal.buffer.active.viewportY).toBe(238);
 
     container.dispatchEvent(touchEvent("touchend", 280));
-    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
 
     hasNewFrame = true;
     emitRender();

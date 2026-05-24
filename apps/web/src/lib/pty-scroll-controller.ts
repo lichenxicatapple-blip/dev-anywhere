@@ -52,11 +52,10 @@ interface PtyScrollController {
   // 默认被动 caller (rawInput / pendingFrame / relayout / termScroll) 在 intent=true
   // 时整段 no-op。把 invariant 收到 controller 内部, 新加 caller 默认就对。
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。调用方必须传入
-  // "页面隐藏前" 的语义状态,而不是恢复后的当前几何状态: 如果隐藏前在 follow,
-  // 则旧 scrollTop 是浏览器恢复噪音,需要强制回到底; 如果隐藏前在 review,保持用户位置。
-  preparePageResumeRestore: (opts: { wasFollowing: boolean }) => void;
-  restorePageResume: (opts: { wasFollowing: boolean }) => void;
+  // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。生命周期恢复统一
+  // 以实时终端为准回到底部；前台主动回看仍由 scrollToBottom 的 passive guard 保护。
+  preparePageResumeRestore: () => void;
+  restorePageResume: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string) => void;
@@ -496,11 +495,7 @@ export function attachPtyScrollController(
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
   };
 
-  const preparePageResumeRestore = ({ wasFollowing }: { wasFollowing: boolean }): void => {
-    if (!wasFollowing) {
-      trace("page-resume:prepare-preserve-review");
-      return;
-    }
+  const preparePageResumeRestore = (): void => {
     pageResumeRestorePendingFromFollowing = true;
     trace("page-resume:prepare-follow");
     if (userHasVerticalScrollIntent()) {
@@ -512,14 +507,8 @@ export function attachPtyScrollController(
     }
   };
 
-  const restorePageResume = ({ wasFollowing }: { wasFollowing: boolean }): void => {
-    if (!wasFollowing) {
-      pageResumeRestorePendingFromFollowing = false;
-      trace("page-resume:preserve-review");
-      notifyScroll();
-      return;
-    }
-    preparePageResumeRestore({ wasFollowing: true });
+  const restorePageResume = (): void => {
+    preparePageResumeRestore();
     updateSpacer();
     scrollToBottom("pageResume", { force: true });
     pageResumeRestorePendingFromFollowing = false;

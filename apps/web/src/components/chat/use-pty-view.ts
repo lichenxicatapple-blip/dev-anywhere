@@ -135,8 +135,8 @@ interface UsePtyViewResult {
 interface ScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  preparePageResumeRestore: (opts: { wasFollowing: boolean }) => void;
-  restorePageResume: (opts: { wasFollowing: boolean }) => void;
+  preparePageResumeRestore: () => void;
+  restorePageResume: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string) => void;
@@ -175,7 +175,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
-  const pageResumeWasFollowingRef = useRef(true);
   const pageResumeFrameRef = useRef<number | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
@@ -267,25 +266,21 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, []);
 
   const rememberHiddenPtyState = useCallback((): void => {
-    if (!pageResumePendingRef.current) {
-      pageResumeWasFollowingRef.current = !userHasVerticalScrollIntentRef.current;
-    }
     pageResumePendingRef.current = true;
     cancelPendingResumeFrame();
   }, [cancelPendingResumeFrame]);
 
   const scheduleResumeRestore = useCallback((): void => {
     if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
-    const wasFollowing = pageResumeWasFollowingRef.current;
-    scrollControllerRef.current?.preparePageResumeRestore({ wasFollowing });
+    scrollControllerRef.current?.preparePageResumeRestore();
     cancelPendingResumeFrame();
     pageResumeFrameRef.current = requestAnimationFrame(() => {
       pageResumeFrameRef.current = requestAnimationFrame(() => {
         pageResumeFrameRef.current = null;
         const scroll = scrollControllerRef.current;
         if (!scroll) return;
-        scroll.restorePageResume({ wasFollowing });
-        if (wasFollowing) clearNewFramesWhileAway();
+        scroll.restorePageResume();
+        clearNewFramesWhileAway();
         pageResumePendingRef.current = false;
       });
     });
@@ -560,8 +555,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
         });
 
-        const shouldRestorePageResumeOnAttach =
-          pageResumePendingRef.current && pageResumeWasFollowingRef.current;
+        const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
           userHasVerticalScrollIntentRef.current = false;
         }
@@ -593,7 +587,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
         if (shouldRestorePageResumeOnAttach) {
-          scrollCtrl.restorePageResume({ wasFollowing: true });
+          scrollCtrl.restorePageResume();
           clearNewFramesWhileAway();
           pageResumePendingRef.current = false;
         }

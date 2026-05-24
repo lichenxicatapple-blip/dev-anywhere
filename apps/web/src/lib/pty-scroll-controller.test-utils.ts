@@ -40,7 +40,8 @@ export function createPtyScrollDom() {
 }
 
 export function markUserVerticalScrollIntent(container: HTMLElement): void {
-  container.dispatchEvent(new Event("touchstart"));
+  container.dispatchEvent(touchEvent("touchstart", 300));
+  container.dispatchEvent(touchEvent("touchmove", 280));
 }
 
 export function touchEvent(type: string, clientY: number): TouchEvent {

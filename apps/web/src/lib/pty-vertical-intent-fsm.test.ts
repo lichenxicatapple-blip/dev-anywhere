@@ -31,6 +31,19 @@ function touchReviewingState(
   });
 }
 
+function touchFollowingState(
+  overrides: Partial<PtyVerticalIntentState> = {},
+): PtyVerticalIntentState {
+  return {
+    ...createInitialPtyVerticalIntentState({ scrollTop: 100 }),
+    touchActive: true,
+    touchStartY: 300,
+    touchStartScrollTop: 100,
+    lastTransitionId: "touch.start",
+    ...overrides,
+  };
+}
+
 describe("pty vertical intent FSM", () => {
   it("preserves restored review intent on attach even if geometry says bottom", () => {
     const state = createInitialPtyVerticalIntentState();
@@ -67,12 +80,7 @@ describe("pty vertical intent FSM", () => {
   });
 
   it("clears review intent on explicit forced scroll to bottom", () => {
-    const reviewing = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
-      type: "touch-start",
-      clientY: 300,
-      scrollTop: 100,
-    }).state;
-
+    const reviewing = reviewingState();
     const result = reducePtyVerticalIntent(reviewing, {
       type: "scroll-to-bottom",
       force: true,
@@ -83,7 +91,7 @@ describe("pty vertical intent FSM", () => {
     expect(result.outputPausedChanged).toBe(true);
   });
 
-  it("clears transient touch review when a bottom touch ends without scrolling", () => {
+  it("keeps following when a bottom touch ends without scrolling", () => {
     const touchingAtBottom = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
       type: "touch-start",
       clientY: 300,
@@ -97,10 +105,10 @@ describe("pty vertical intent FSM", () => {
     });
 
     expect(result.state.mode).toBe("following");
-    expect(result.trace?.action).toBe("clear");
+    expect(result.trace?.action).toBe("keep");
   });
 
-  it("clears touch review when viewport resize changes the raw bottom scrollTop", () => {
+  it("keeps following when viewport resize changes the raw bottom scrollTop before touch review", () => {
     const touchingAtBottom = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
       type: "touch-start",
       clientY: 300,
@@ -115,8 +123,8 @@ describe("pty vertical intent FSM", () => {
     });
 
     expect(result.state.mode).toBe("following");
-    expect(result.trace?.id).toBe("touch.end.bottom-down");
-    expect(result.trace?.action).toBe("clear");
+    expect(result.trace?.id).toBe("touch.end.not-bottom");
+    expect(result.trace?.action).toBe("keep");
   });
 
   const cases: Array<{
@@ -322,18 +330,18 @@ describe("pty vertical intent FSM", () => {
       id: "touch.start",
       initial: createInitialPtyVerticalIntentState(),
       event: { type: "touch-start", clientY: 300, scrollTop: 100 },
-      expectedMode: "reviewing",
-      expectedSource: "touch",
-      expectedTraceAction: "set",
+      expectedMode: "following",
+      expectedSource: "none",
+      expectedTraceAction: "keep",
       expectedTouchActive: true,
       expectedTouchReviewNotified: false,
     },
     {
       id: "touch.move.below-threshold",
-      initial: touchReviewingState(),
+      initial: touchFollowingState(),
       event: { type: "touch-move", clientY: 295, reviewThresholdPx: 8 },
-      expectedMode: "reviewing",
-      expectedSource: "touch",
+      expectedMode: "following",
+      expectedSource: "none",
       expectedTraceAction: "keep",
       expectedNotifyTouchReviewStart: false,
       expectedTouchActive: true,
@@ -341,11 +349,11 @@ describe("pty vertical intent FSM", () => {
     },
     {
       id: "touch.move.review",
-      initial: touchReviewingState(),
+      initial: touchFollowingState(),
       event: { type: "touch-move", clientY: 280, reviewThresholdPx: 8 },
       expectedMode: "reviewing",
       expectedSource: "touch",
-      expectedTraceAction: "keep",
+      expectedTraceAction: "set",
       expectedNotifyTouchReviewStart: true,
       expectedTouchActive: true,
       expectedTouchReviewNotified: true,

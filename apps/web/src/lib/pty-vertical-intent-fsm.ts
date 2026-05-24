@@ -347,11 +347,13 @@ export function reducePtyVerticalIntent(
       return finish(
         state,
         {
-          ...withReview(state, "touch", event.scrollTop, "touch.start"),
+          ...state,
           touchActive: true,
           touchStartY: event.clientY,
           touchStartScrollTop: event.scrollTop,
           touchReviewNotified: false,
+          lastScrollTop: event.scrollTop,
+          lastTransitionId: "touch.start",
         },
         `clientY=${event.clientY ?? "null"}`,
       );
@@ -365,9 +367,8 @@ export function reducePtyVerticalIntent(
         return finish(
           state,
           {
-            ...state,
+            ...withReview(state, "touch", state.lastScrollTop, "touch.move.review"),
             touchReviewNotified: true,
-            lastTransitionId: "touch.move.review",
           },
           `movement=${movement} threshold=${event.reviewThresholdPx}`,
           true,
