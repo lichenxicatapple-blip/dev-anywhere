@@ -114,8 +114,11 @@ export function computeScrollAnchor(input: ScrollAnchorInput): ScrollAnchorOutpu
   const viewportTop = input.containerScrollTop + input.paddingTop;
   const viewportBottom =
     input.containerScrollTop + input.containerClientHeight - input.paddingBottom;
+  const cursorViewportTolerance = Math.max(1, input.atBottomThreshold);
   const cursorInViewport =
-    input.cellH > 0 && cursorPx >= viewportTop && cursorPx + input.cellH <= viewportBottom;
+    input.cellH > 0 &&
+    cursorPx >= viewportTop - cursorViewportTolerance &&
+    cursorPx + input.cellH <= viewportBottom + cursorViewportTolerance;
 
   const maxScrollTop = Math.max(0, input.containerScrollHeight - input.containerClientHeight);
   const hostHeight = input.rows * input.cellH;

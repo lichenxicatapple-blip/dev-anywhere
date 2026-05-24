@@ -25,17 +25,74 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       .toContain(needle);
   }
 
+  async function findPtyLinkTapPoint(
+    page: import("@playwright/test").Page,
+    options: { sid: string; kind: "file-download" | "image-preview"; needle: string },
+  ): Promise<{ x: number; y: number } | null> {
+    return page.evaluate(({ sid, kind, needle }) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const provider = window.__ccTestPtyLinkProviders?.get(`${sid}/${kind}`);
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!term || !provider || !screen) return null;
+
+      const buffer = term.buffer.active;
+      const firstVisibleLine = buffer.viewportY + 1;
+      const lastVisibleLine = buffer.viewportY + term.rows;
+      const rect = screen.getBoundingClientRect();
+      const cellWidth = screen.clientWidth / term.cols;
+      const cellHeight = screen.clientHeight / term.rows;
+
+      for (let lineNumber = firstVisibleLine; lineNumber <= lastVisibleLine; lineNumber += 1) {
+        let point: { x: number; y: number } | null = null;
+        provider.provideLinks(lineNumber, (links) => {
+          const link = links?.find((candidate) => candidate.text === needle);
+          if (!link) return;
+          const startColumn = lineNumber === link.range.start.y ? link.range.start.x : 1;
+          const endColumn = lineNumber === link.range.end.y ? link.range.end.x : term.cols;
+          const column = Math.max(startColumn, Math.min(endColumn, startColumn + 2));
+          point = {
+            x: rect.left + (column - 0.5) * cellWidth,
+            y: rect.top + (lineNumber - buffer.viewportY - 0.5) * cellHeight,
+          };
+        });
+        if (point) return point;
+      }
+      return null;
+    }, options);
+  }
+
+  async function tapPtyLink(
+    page: import("@playwright/test").Page,
+    options: { sid: string; kind: "file-download" | "image-preview"; needle: string },
+  ): Promise<void> {
+    const point = await expect
+      .poll(() => findPtyLinkTapPoint(page, options), { timeout: 10_000 })
+      .not.toBeNull()
+      .then(() => findPtyLinkTapPoint(page, options));
+    if (!point) throw new Error(`PTY link is not tappable: ${options.needle}`);
+    const client = await page.context().newCDPSession(page);
+    try {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: point.x, y: point.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+      });
+      await page.waitForTimeout(60);
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } finally {
+      await client.detach();
+    }
+  }
+
   test("tap on a PTY file path triggers file_download", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emitLineAndAwait(emuPage, "see ./scripts/test.sh for details\r\n", "./scripts/test.sh");
 
-    const result = await emuPage.evaluate(
-      ({ sid, needle }) => window.__ccTest?.pty.activateLink(sid, "file-download", needle, "none"),
-      { sid: SESSION_ID, needle: "./scripts/test.sh" },
-    );
-    expect(result?.triggered).toBe(true);
-    expect(result?.text).toBe("./scripts/test.sh");
+    await tapPtyLink(emuPage, {
+      sid: SESSION_ID,
+      kind: "file-download",
+      needle: "./scripts/test.sh",
+    });
 
     await expect
       .poll(() =>
@@ -76,12 +133,11 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }, SESSION_ID);
     expect(metrics?.cols ?? 0).toBeLessThan(path.length);
 
-    const result = await emuPage.evaluate(
-      ({ sid, needle }) => window.__ccTest?.pty.activateLink(sid, "file-download", needle, "none"),
-      { sid: SESSION_ID, needle: path },
-    );
-    expect(result?.triggered).toBe(true);
-    expect(result?.text).toBe(path);
+    await tapPtyLink(emuPage, {
+      sid: SESSION_ID,
+      kind: "file-download",
+      needle: path,
+    });
 
     await expect
       .poll(() =>
@@ -112,11 +168,11 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       "./tmp/preview.png",
     );
 
-    const result = await emuPage.evaluate(
-      ({ sid, needle }) => window.__ccTest?.pty.activateLink(sid, "image-preview", needle, "none"),
-      { sid: SESSION_ID, needle: "./tmp/preview.png" },
-    );
-    expect(result?.triggered).toBe(true);
+    await tapPtyLink(emuPage, {
+      sid: SESSION_ID,
+      kind: "image-preview",
+      needle: "./tmp/preview.png",
+    });
 
     // 预览 dialog 应弹起, 由 image_preview_request 驱动.
     await expect

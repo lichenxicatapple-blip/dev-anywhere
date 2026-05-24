@@ -74,6 +74,16 @@ function isFullWidthCodePoint(codePoint: number): boolean {
   );
 }
 
+function shouldActivatePreview(event: MouseEvent): boolean {
+  if (event.metaKey || event.ctrlKey) return true;
+  const pointerType =
+    "pointerType" in event
+      ? String((event as MouseEvent & { pointerType?: unknown }).pointerType)
+      : "";
+  if (pointerType === "touch" || pointerType === "pen") return true;
+  return window.matchMedia?.("(pointer: coarse), (hover: none)")?.matches ?? false;
+}
+
 export function registerImagePreviewLinkProvider(
   terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
   onPreview: (path: string) => void,
@@ -99,8 +109,7 @@ export function registerImagePreviewLinkProvider(
         // 平板 / 手机触屏 (pointer: coarse) 没修饰键, tap 即触发; 平板接外置键盘
         // 走修饰键路径也照样 work.
         activate: (event) => {
-          const isTouchSurface = window.matchMedia("(pointer: coarse), (hover: none)").matches;
-          if (!isTouchSurface && !event.metaKey && !event.ctrlKey) return;
+          if (!shouldActivatePreview(event)) return;
           onPreview(match.path);
         },
       }));

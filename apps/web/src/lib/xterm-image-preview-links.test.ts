@@ -39,7 +39,9 @@ describe("xterm image preview links", () => {
 
   function provideAndActivate(
     onPreview: (path: string) => void,
-    event: { metaKey?: boolean; ctrlKey?: boolean } & Partial<Pick<MouseEvent, "type">> = {},
+    event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } & Partial<
+      Pick<MouseEvent, "type">
+    > = {},
   ): { text?: string } {
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
@@ -121,6 +123,12 @@ describe("xterm image preview links", () => {
         provideAndActivate(onPreview, {});
         expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
       });
+    });
+
+    it("triggers preview on touch pointer events even without media-query support", () => {
+      const onPreview = vi.fn();
+      provideAndActivate(onPreview, { pointerType: "touch" });
+      expect(onPreview).toHaveBeenCalledWith("/tmp/shot.png");
     });
 
     it("still triggers on cmd+click when tablet has keyboard attached", () => {

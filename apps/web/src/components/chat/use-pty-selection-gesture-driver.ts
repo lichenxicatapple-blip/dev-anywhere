@@ -32,6 +32,7 @@ interface UsePtySelectionGestureDriverOptions {
   containerEl: HTMLDivElement | null;
   suppressPtyFocus: () => void;
   isSelectionActive: () => boolean;
+  onTap?: (point: PtySelectionClientPoint) => boolean;
   onLongPressCandidateStart: (point: PtySelectionClientPoint) => void;
   onLongPressStart: (point: PtySelectionClientPoint) => void;
   onLongPressMove: (point: PtySelectionClientPoint) => void;
@@ -60,6 +61,7 @@ export function usePtySelectionGestureDriver({
   containerEl,
   suppressPtyFocus,
   isSelectionActive,
+  onTap,
   onLongPressCandidateStart,
   onLongPressStart,
   onLongPressMove,
@@ -177,6 +179,7 @@ export function usePtySelectionGestureDriver({
   const pointerHandlers = usePtyTouchGesture({
     terminalRef,
     suppressPtyFocus,
+    onTap,
     onLongPressCandidateStart,
     onLongPressStart: handleLongPressStart,
     onLongPressMove: handleLongPressMove,

@@ -162,6 +162,19 @@ export async function expectPtyAtBottom(
     .toBeLessThanOrEqual(thresholdPx);
 }
 
+export async function expectPtyCursorAwareBottom(
+  page: Page,
+  thresholdPx = PTY_BOTTOM_THRESHOLD_PX,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      const snapshot = await readPtyDebugSnapshot(page);
+      if (!snapshot?.anchor.atBottom) return Number.POSITIVE_INFINITY;
+      return Math.abs(snapshot.anchor.scrollTopDeltaToBottom);
+    })
+    .toBeLessThanOrEqual(thresholdPx);
+}
+
 export async function expectBackToBottomClearance(
   page: Page,
   options: { touchEditingSurface: boolean },

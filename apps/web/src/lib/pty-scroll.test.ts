@@ -269,6 +269,25 @@ describe("PTY scroll geometry", () => {
       expect(a.isAtBottom).toBe(false);
     });
 
+    it("long host: tolerates fractional cell height at cursor-aware bottom", () => {
+      const a = computeScrollAnchor({
+        rows: 54,
+        cellH: 20.185185185185187,
+        bufferLength: 262,
+        cursorBufferRow: 261,
+        visibleContentHeight: 697,
+        paddingTop: 8,
+        paddingBottom: 32,
+        containerScrollTop: 4590.85693359375,
+        containerScrollHeight: 5329,
+        containerClientHeight: 737,
+        atBottomThreshold: 8,
+      });
+      expect(a.bottomScrollTop).toBeCloseTo(4592, 0);
+      expect(a.cursorInViewport).toBe(true);
+      expect(a.isAtBottom).toBe(true);
+    });
+
     it("long host: bottomScrollTop centers cursor in visible area, clamped", () => {
       // cursorPx = 168, visibleContentHeight = 729, cellH = 20
       // target = 168 - 8 - (729-20)/2 = 160 - 354.5 = -194.5

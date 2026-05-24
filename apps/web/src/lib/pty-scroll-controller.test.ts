@@ -284,6 +284,7 @@ describe("attachPtyScrollController", () => {
 
     container.scrollTop = 100;
     markUserVerticalScrollIntent(container);
+    container.scrollTop = 100;
     terminal.buffer.active.viewportY = 7;
     emitScroll();
 
@@ -313,6 +314,7 @@ describe("attachPtyScrollController", () => {
     terminal.scrollToLine.mockClear();
     container.scrollTop = 100;
     markUserVerticalScrollIntent(container);
+    container.scrollTop = 100;
     terminal.buffer.active.viewportY = 80;
     emitScroll();
 
@@ -481,7 +483,7 @@ describe("attachPtyScrollController", () => {
     });
 
     container.dispatchEvent(touchEvent("touchstart", 300));
-    container.dispatchEvent(touchEvent("touchmove", 280));
+    container.dispatchEvent(touchEvent("touchmove", 320));
     emitRender();
 
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
@@ -505,14 +507,14 @@ describe("attachPtyScrollController", () => {
     });
 
     container.dispatchEvent(touchEvent("touchstart", 300));
-    container.dispatchEvent(touchEvent("touchmove", 295));
+    container.dispatchEvent(touchEvent("touchmove", 305));
     expect(onTouchReviewStart).not.toHaveBeenCalled();
 
-    container.dispatchEvent(touchEvent("touchmove", 280));
-    container.dispatchEvent(touchEvent("touchmove", 250));
+    container.dispatchEvent(touchEvent("touchmove", 320));
+    container.dispatchEvent(touchEvent("touchmove", 350));
     expect(onTouchReviewStart).toHaveBeenCalledTimes(1);
 
-    container.dispatchEvent(touchEvent("touchend", 250));
+    container.dispatchEvent(touchEvent("touchend", 350));
     container.dispatchEvent(touchEvent("touchstart", 250));
     container.dispatchEvent(touchEvent("touchmove", 270));
     expect(onTouchReviewStart).toHaveBeenCalledTimes(2);
@@ -720,6 +722,56 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(20686);
     expect(host.style.top).toBe("20240px");
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
+  });
+
+  it("restores a bottom tap when mobile native scroll jumps to the host top", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 40,
+    });
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1080, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 5051: "live prompt" });
+    terminal.rows = 54;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 5054;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 51;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(100486);
+    expect(host.style.top).toBe("100000px");
+
+    container.dispatchEvent(touchEvent("touchstart", 330));
+    const move = touchEvent("touchmove", 321);
+    container.dispatchEvent(move);
+    expect(move.defaultPrevented).toBe(true);
+    expect(container.scrollTop).toBe(100486);
+
+    container.scrollTop = 100000;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(touchEvent("touchend", 321));
+
+    expect(container.scrollTop).toBe(100486);
+    expect(terminal.buffer.active.viewportY).toBe(5000);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
 
   it("keeps following after a keyboard-height bottom touch restores to the new semantic bottom", () => {
@@ -1428,7 +1480,7 @@ describe("attachPtyScrollController", () => {
     expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
 
     container.dispatchEvent(touchEvent("touchend", 280));
-    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
   it("snaps to cursor-aware bottom when a touchmove would cross into the native bottom gap", () => {

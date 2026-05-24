@@ -22,7 +22,7 @@ interface TouchGestureState {
 const TAP_MOVE_THRESHOLD_PX = 8;
 const LONG_PRESS_DELAY_MS = 425;
 const TOUCH_EVENT_POINTER_ID = -1;
-type GestureFinishKind = "tap" | "scroll" | "longpress";
+type GestureFinishKind = "tap" | "link" | "scroll" | "longpress";
 
 interface PtyTouchGestureHandlers {
   onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void;
@@ -44,6 +44,7 @@ interface UsePtyTouchGestureOptions {
   terminalRef: RefObject<Terminal | null>;
   suppressPtyFocus: () => void;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
+  onTap?: (point: { clientX: number; clientY: number }) => boolean;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
@@ -53,6 +54,7 @@ export function usePtyTouchGesture({
   terminalRef,
   suppressPtyFocus,
   onLongPressCandidateStart,
+  onTap,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
@@ -149,10 +151,14 @@ export function usePtyTouchGesture({
         suppressPtyFocus();
         return "scroll";
       }
+      if (point && onTap?.(point)) {
+        suppressPtyFocus();
+        return "link";
+      }
       terminalRef.current?.focus();
       return "tap";
     },
-    [clearLongPressTimer, deliverLongPress, suppressPtyFocus, terminalRef],
+    [clearLongPressTimer, deliverLongPress, onTap, suppressPtyFocus, terminalRef],
   );
 
   const cancelGesture = useCallback(
@@ -194,8 +200,13 @@ export function usePtyTouchGesture({
 
   const onPointerUpCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
-      if (finishGesture(event.pointerId, { clientX: event.clientX, clientY: event.clientY })) {
+      const result = finishGesture(event.pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+      if (result) {
         event.stopPropagation();
+        if (result === "link" && event.cancelable) event.preventDefault();
       }
     },
     [finishGesture],
@@ -252,7 +263,11 @@ export function usePtyTouchGesture({
     (event: TouchEvent<HTMLDivElement>): void => {
       const touch = event.changedTouches[0];
       const point = touch ? { clientX: touch.clientX, clientY: touch.clientY } : undefined;
-      if (finishGesture(TOUCH_EVENT_POINTER_ID, point) === "longpress") event.stopPropagation();
+      const result = finishGesture(TOUCH_EVENT_POINTER_ID, point);
+      if (result === "longpress" || result === "link") {
+        event.stopPropagation();
+        if (result === "link" && event.cancelable) event.preventDefault();
+      }
     },
     [finishGesture],
   );

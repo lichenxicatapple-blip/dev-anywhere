@@ -14,7 +14,7 @@ import type {
   RefObject,
   TouchEvent as ReactTouchEvent,
 } from "react";
-import type { Terminal } from "@xterm/xterm";
+import type { ILinkProvider, Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import {
@@ -27,6 +27,7 @@ import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
+import { activateXtermLinkAtPoint } from "@/lib/xterm-touch-link-activation";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { toast } from "@/components/toast";
@@ -161,6 +162,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
+  const ptyTouchLinkProvidersRef = useRef<ILinkProvider[]>([]);
   const terminalControllerRef = useRef<TerminalControllerHandle | null>(null);
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
   const activeRef = useRef(active);
@@ -373,6 +375,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [sessionId],
   );
 
+  const handlePtyTap = useCallback((point: { clientX: number; clientY: number }): boolean => {
+    const term = terminalRef.current;
+    if (!term) return false;
+    return activateXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
+  }, []);
+
   const selection = usePtySelectionController({
     sessionId,
     terminalRef,
@@ -383,6 +391,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
+    onTap: handlePtyTap,
     onDownloadPath: downloadPtyPath,
   });
   ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;
@@ -531,6 +540,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         );
         fileDownloadLinkDispose = fileDownloadLinkRegistration.dispose;
         registerPtyLinkProvider(sessionId, "file-download", fileDownloadLinkRegistration.provider);
+        ptyTouchLinkProvidersRef.current = [
+          imageLinkRegistration.provider,
+          fileDownloadLinkRegistration.provider,
+        ];
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
@@ -697,6 +710,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       fileDownloadLinkDispose?.();
       registerPtyLinkProvider(sessionId, "image-preview", null);
       registerPtyLinkProvider(sessionId, "file-download", null);
+      ptyTouchLinkProvidersRef.current = [];
       ptyDebugDeregister?.();
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);

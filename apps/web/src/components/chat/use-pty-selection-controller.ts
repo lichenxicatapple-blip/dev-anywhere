@@ -61,6 +61,7 @@ interface UsePtySelectionControllerOptions {
   keyboardOffset: number;
   ptyFontSize: number;
   suppressPtyFocus: () => void;
+  onTap?: (point: { clientX: number; clientY: number }) => boolean;
   onDownloadPath: (path: string) => void;
 }
 
@@ -111,6 +112,7 @@ export function usePtySelectionController(
     keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
+    onTap,
     onDownloadPath,
   } = options;
 
@@ -583,6 +585,7 @@ export function usePtySelectionController(
     containerEl,
     suppressPtyFocus,
     isSelectionActive,
+    onTap,
     onLongPressCandidateStart: capturePtyLongPressCandidate,
     onLongPressStart: handlePtyLongPressStart,
     onLongPressMove: handlePtyLongPressMove,

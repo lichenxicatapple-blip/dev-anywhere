@@ -25,7 +25,7 @@ function dispatchTouch(
   type: string,
   target: HTMLElement,
   props: { clientX: number; clientY: number },
-): void {
+): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
   const touch = { clientX: props.clientX, clientY: props.clientY };
   Object.defineProperties(event, {
@@ -33,12 +33,14 @@ function dispatchTouch(
     changedTouches: { value: [touch] },
   });
   target.dispatchEvent(event);
+  return event;
 }
 
 function Harness({
   focus,
   suppress,
   onLongPressCandidateStart,
+  onTap,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
@@ -46,6 +48,7 @@ function Harness({
   focus: () => void;
   suppress: () => void;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
+  onTap?: (point: { clientX: number; clientY: number }) => boolean;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
@@ -55,6 +58,7 @@ function Harness({
     terminalRef,
     suppressPtyFocus: suppress,
     onLongPressCandidateStart,
+    onTap,
     onLongPressStart,
     onLongPressMove,
     onLongPressEnd,
@@ -267,6 +271,22 @@ describe("usePtyTouchGesture", () => {
     vi.runOnlyPendingTimers();
 
     expect(onLongPressEnd).toHaveBeenCalledWith({ clientX: 100, clientY: 100 });
+    expect(suppress).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("activates a touch link tap without focusing the terminal", () => {
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onTap = vi.fn(() => true);
+    const { getByTestId } = render(<Harness focus={focus} suppress={suppress} onTap={onTap} />);
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 120, clientY: 140 });
+    const end = dispatchTouch("touchend", xterm, { clientX: 120, clientY: 140 });
+
+    expect(onTap).toHaveBeenCalledWith({ clientX: 120, clientY: 140 });
+    expect(end.defaultPrevented).toBe(true);
     expect(suppress).toHaveBeenCalledTimes(1);
     expect(focus).not.toHaveBeenCalled();
   });

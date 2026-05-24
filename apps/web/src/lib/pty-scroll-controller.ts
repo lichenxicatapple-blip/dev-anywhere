@@ -81,6 +81,7 @@ type PendingFrameResult = "none" | "followed" | "marked";
 const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
+const TOUCH_SCROLL_DRIFT_MIN_THRESHOLD_PX = 24;
 
 export function attachPtyScrollController(
   options: PtyScrollControllerOptions,
@@ -852,6 +853,43 @@ export function attachPtyScrollController(
     return true;
   };
 
+  const restoreTouchScrollDrift = (effectiveScrollTop: number): boolean => {
+    const expectation = getTouchScrollExpectation();
+    if (!expectation) return false;
+    const hasTouchMovement = Math.abs(expectation.currentY - expectation.touchStartY) > 0.5;
+    if (!hasTouchMovement) return false;
+    const { expectedScrollTop } = expectation;
+    const { cellH } = getDims();
+    const driftThreshold = Math.max(
+      TOUCH_SCROLL_DRIFT_MIN_THRESHOLD_PX,
+      atBottomThreshold * 2,
+      cellH > 0 ? cellH * 1.25 : 0,
+    );
+    const drift = effectiveScrollTop - expectedScrollTop;
+    if (Math.abs(drift) <= driftThreshold) return false;
+
+    trace("container-scroll:restore-touch-drift", {
+      details: [
+        `scrollTop=${Math.round(effectiveScrollTop)}`,
+        `expected=${Math.round(expectedScrollTop)}`,
+        `diff=${Math.round(drift)}`,
+        `threshold=${Math.round(driftThreshold)}`,
+        `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
+        `base=${Math.round(expectation.gestureBaseScrollTop)}`,
+        `startY=${Math.round(expectation.touchStartY)}`,
+        `currentY=${Math.round(expectation.currentY)}`,
+      ].join(" "),
+    });
+    container.scrollTop = expectedScrollTop;
+    lastSeenScrollTop = expectedScrollTop;
+    touchGestureMaxScrollTop = Math.max(
+      touchGestureMaxScrollTop ?? expectedScrollTop,
+      expectedScrollTop,
+    );
+    syncContainerScroll({ deferHostUntilRender: true });
+    return true;
+  };
+
   const restoreRecentRawInputLayoutDrift = (
     effectiveScrollTop: number,
     atBottom: boolean,
@@ -1043,6 +1081,9 @@ export function attachPtyScrollController(
       return;
     }
     pendingProgrammaticScrollTop = null;
+    if (restoreTouchScrollDrift(effectiveScrollTop)) {
+      return;
+    }
     if (restoreStationaryTouchLayoutShift(effectiveScrollTop)) {
       return;
     }
@@ -1351,6 +1392,51 @@ export function attachPtyScrollController(
       }
     }
     preventTouchMovePastCursorAwareBottom(event, currentX, currentY);
+    const expectation = getTouchScrollExpectation(currentY);
+    if (expectation) {
+      const startX = touchStartClientX;
+      const isHorizontalGesture =
+        startX !== null &&
+        currentX !== null &&
+        Math.abs(currentX - startX) > Math.abs(currentY - expectation.touchStartY);
+      if (!isHorizontalGesture) {
+        if (event.cancelable) event.preventDefault();
+        const nextScrollTop = expectation.expectedScrollTop;
+        touchGestureMaxScrollTop = Math.max(
+          touchGestureMaxScrollTop ?? nextScrollTop,
+          nextScrollTop,
+        );
+        if (Math.abs(container.scrollTop - nextScrollTop) > 0.5) {
+          container.scrollTop = nextScrollTop;
+          pendingProgrammaticScrollTop = null;
+          pendingFollowCursorScrollTop = null;
+          lastSeenScrollTop = nextScrollTop;
+          syncContainerScroll({ deferHostUntilRender: true });
+        }
+        trace("touchmove:controlled-scroll", {
+          details: [
+            `scrollTop=${Math.round(container.scrollTop)}`,
+            `expected=${Math.round(nextScrollTop)}`,
+            `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
+            `base=${Math.round(expectation.gestureBaseScrollTop)}`,
+            `startY=${Math.round(expectation.touchStartY)}`,
+            `currentY=${Math.round(expectation.currentY)}`,
+            `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
+          ].join(" "),
+        });
+      }
+    }
+    const keepFollowingAtBottomBoundary =
+      expectation &&
+      touchStartedAtCursorAwareBottom &&
+      expectation.expectedScrollTop >= expectation.cursorAwareMaxScrollTop - atBottomThreshold &&
+      currentY !== null &&
+      currentY <= expectation.touchStartY;
+    if (keepFollowingAtBottomBoundary) {
+      trace("touchmove:bottom-boundary-follow");
+      return;
+    }
+
     const result = dispatchVerticalIntent({
       type: "touch-move",
       clientY: currentY,
