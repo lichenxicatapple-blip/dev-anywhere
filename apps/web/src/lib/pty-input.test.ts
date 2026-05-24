@@ -46,6 +46,12 @@ describe("attachXtermRawInput", () => {
           }),
         );
       },
+      emitCompositionStart: () => {
+        textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      },
+      emitCompositionEnd: () => {
+        textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      },
     };
   }
 
@@ -111,6 +117,45 @@ describe("attachXtermRawInput", () => {
     const blockedEnter = emitKey(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true }));
     expect(blockedEnter).toBe(false);
     expect(sendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears xterm helper textarea after forwarding raw input so IME commits cannot reuse stale text", () => {
+    vi.useFakeTimers();
+    const { terminal, textarea, emitData } = createTerminal();
+
+    textarea.value = "previous input";
+    attachXtermRawInput(terminal, "sess-1");
+    emitData("新内容");
+
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "新内容");
+    expect(textarea.value).toBe("previous input");
+
+    vi.runAllTimers();
+
+    expect(textarea.value).toBe("");
+  });
+
+  it("clears stale helper textarea at composition start but preserves active IME composition text", () => {
+    vi.useFakeTimers();
+    const { terminal, textarea, emitCompositionStart, emitCompositionEnd, emitData } =
+      createTerminal();
+
+    textarea.value = "上一轮输入";
+    attachXtermRawInput(terminal, "sess-1");
+    emitCompositionStart();
+    expect(textarea.value).toBe("");
+
+    textarea.value = "候选";
+    emitData("候选");
+
+    vi.runOnlyPendingTimers();
+    expect(textarea.value).toBe("候选");
+
+    emitCompositionEnd();
+    emitData("完成");
+    vi.runOnlyPendingTimers();
+
+    expect(textarea.value).toBe("");
   });
 
   it("maps Shift+Enter to LF instead of xterm's default Enter submit", () => {

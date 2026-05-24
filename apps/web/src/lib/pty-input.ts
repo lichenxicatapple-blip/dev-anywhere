@@ -63,11 +63,26 @@ export function attachXtermRawInput(
 ): Disposable {
   let pendingPunctuation: PendingPunctuationInput | undefined;
   let nativeEchoSuppression: NativeEchoSuppression | undefined;
+  let isComposing = false;
+  let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearHelperTextareaSoon = (): void => {
+    const textarea = term.textarea;
+    if (!textarea || clearTextareaTimer) return;
+    clearTextareaTimer = setTimeout(() => {
+      clearTextareaTimer = undefined;
+      if (!isComposing) textarea.value = "";
+    }, 0);
+  };
 
   const sendRawInput = (data: string): void => {
-    if (options.isInputEnabled && !options.isInputEnabled()) return;
+    if (options.isInputEnabled && !options.isInputEnabled()) {
+      clearHelperTextareaSoon();
+      return;
+    }
     sendRemoteInputRaw(sessionId, data);
     options.onRawInput?.(data);
+    clearHelperTextareaSoon();
   };
 
   const sendXtermInput = (data: string): void => {
@@ -163,6 +178,20 @@ export function attachXtermRawInput(
     if (pendingPunctuation && data) resolvePendingPunctuationInput(data);
   };
 
+  const onCompositionStart = (): void => {
+    isComposing = true;
+    if (clearTextareaTimer) {
+      clearTimeout(clearTextareaTimer);
+      clearTextareaTimer = undefined;
+    }
+    const textarea = term.textarea;
+    if (textarea) textarea.value = "";
+  };
+
+  const onCompositionEnd = (): void => {
+    isComposing = false;
+  };
+
   const dataDisposable = term.onData((data) => {
     if (pendingPunctuation) {
       pendingPunctuation.bufferedXtermData.push(data);
@@ -177,6 +206,8 @@ export function attachXtermRawInput(
     sendXtermInput(data);
   });
   term.textarea?.addEventListener("input", onNativeInput);
+  term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
+  term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.attachCustomKeyEventHandler?.((event) => {
     if (shouldRouteKeyThroughNativeInput(event)) {
       beginPendingPunctuationInput(event.key);
@@ -200,9 +231,15 @@ export function attachXtermRawInput(
     dispose: () => {
       dataDisposable.dispose();
       term.textarea?.removeEventListener("input", onNativeInput);
+      term.textarea?.removeEventListener("compositionstart", onCompositionStart, true);
+      term.textarea?.removeEventListener("compositionend", onCompositionEnd);
       if (pendingPunctuation) {
         clearTimeout(pendingPunctuation.timer);
         pendingPunctuation = undefined;
+      }
+      if (clearTextareaTimer) {
+        clearTimeout(clearTextareaTimer);
+        clearTextareaTimer = undefined;
       }
       clearNativeEchoSuppression();
     },
