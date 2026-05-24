@@ -4,6 +4,19 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.22] - 2026-05-25
+
+### 修复
+
+- 修复移动端 PTY 上滑回看时仍由 `restore-touch-drift` 按手指位移公式强行改写 `scrollTop`，导致浏览器原生滚动和 JS 纠偏互相抢控制权、出现剧烈抖动的问题。
+- PTY 触摸滚动期间只保留静止布局跳变和灾难性跳到页顶这两类异常修正，正常纵向滚动完全交给浏览器原生 `pan-y`。
+- 触摸期间异常修正会延后 host 定位到 xterm render 后提交，减少中间帧 host 与 viewport 错位。
+
+### 测试
+
+- 新增 PTY scroll controller 单测，复现 Android trace 中 native scroll 位置滞后于手指位移公式时不应被拉回 expected scrollTop 的场景。
+- 重新验证 Android emulator 下 PTY 底部滚动、横向滑动和触摸文件链接下载回归。
+
 ## [0.4.21] - 2026-05-25
 
 ### 修复
