@@ -29,6 +29,7 @@ export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
   "touch.start",
   "touch.move.below-threshold",
   "touch.move.review",
+  "touch.move.reviewing",
   "touch.end.not-bottom",
   "touch.end.bottom-down",
   "touch.cancel.not-bottom",
@@ -372,6 +373,13 @@ export function reducePtyVerticalIntent(
           },
           `movement=${movement} threshold=${event.reviewThresholdPx}`,
           true,
+        );
+      }
+      if (movement >= event.reviewThresholdPx) {
+        return finish(
+          state,
+          { ...state, lastTransitionId: "touch.move.reviewing" },
+          `movement=${movement} threshold=${event.reviewThresholdPx}`,
         );
       }
       return finish(

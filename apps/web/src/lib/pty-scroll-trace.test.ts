@@ -71,6 +71,40 @@ describe("pty scroll trace", () => {
     expect(window.__devAnywherePtyScrollTrace?.[0]?.event).toBe("event-5");
   });
 
+  it("keeps touch diagnostics in the copied report even when term-scroll floods the tail", () => {
+    appendPtyScrollTrace({
+      t: 1,
+      event: "touchstart",
+      scrollTop: 1600,
+      scrollHeight: 2200,
+      clientHeight: 600,
+      viewportY: 80,
+      bufferLength: 100,
+      hostTop: "1600px",
+      focus: "BODY",
+      details: "startScroll=1600 bottom=1600",
+    });
+    for (let i = 0; i < 220; i += 1) {
+      appendPtyScrollTrace({
+        t: 2 + i,
+        event: "term-scroll",
+        scrollTop: 0,
+        scrollHeight: 2200 + i,
+        clientHeight: 600,
+        viewportY: 0,
+        bufferLength: 100 + i,
+        hostTop: "0px",
+        focus: "BODY",
+      });
+    }
+
+    const report = formatPtyScrollTraceReport();
+
+    expect(report).toContain("included=160");
+    expect(report).toContain("touchstart");
+    expect(report).toContain("startScroll=1600 bottom=1600");
+  });
+
   it("folds steady-state cycles where unique events repeat in the same order", () => {
     // 真实稳态: 每帧 render → pending-frame:follow → scroll-to-bottom:start[pendingFrame] → end →
     // followCursor:skip → relayout:start → scroll-to-bottom:start[relayout] → end 8 条 unique events 轮流

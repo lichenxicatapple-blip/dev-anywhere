@@ -17,9 +17,10 @@ function cell(chars: string): IBufferCell {
   } as unknown as IBufferCell;
 }
 
-function line(cells: string[]): IBufferLine {
+function line(cells: string[], options: { isWrapped?: boolean } = {}): IBufferLine {
   return {
     length: cells.length,
+    isWrapped: options.isWrapped ?? false,
     getCell: (index: number) => cell(cells[index] ?? ""),
     translateToString: (_trimRight?: boolean, start = 0, end = cells.length) =>
       cells.slice(start, end).join("").replace(/\s+$/, ""),
@@ -313,6 +314,39 @@ describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
     expect(selected?.text).toBe("@./build/out.tar.gz");
     expect(selected?.downloadPath).toBe("./build/out.tar.gz");
     expect(select).toHaveBeenCalledWith(4, 32, 19);
+  });
+
+  it("selects a file download link split across xterm-wrapped rows", () => {
+    const select = vi.fn();
+    const first = "  - /Users/catli/MyApps/";
+    const second = "AIMovieFactory/docs/superpowers/specs/";
+    const third = "2026-05-24-v1-open-source-research.md";
+    const path = `${first.slice(4)}${second}${third}`;
+    const terminal = {
+      rows: 10,
+      cols: 48,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) => {
+            if (row === 32) return line(first.split(""));
+            if (row === 33) return line(second.split(""), { isWrapped: true });
+            if (row === 34) return line(third.split(""), { isWrapped: true });
+            return undefined;
+          },
+        },
+      },
+      select,
+    } as unknown as Terminal;
+
+    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+      terminal,
+      point: { row: 34, column: 12 },
+    });
+
+    expect(selected?.downloadPath).toBe(path);
+    expect(selected?.text).toBe(`${path.slice(0, first.length - 4)}\n${second}\n${third}`);
+    expect(select).toHaveBeenCalledWith(4, 32, 129);
   });
 
   it("returns null when the buffer point is outside a file download link", () => {

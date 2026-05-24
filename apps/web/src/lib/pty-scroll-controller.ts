@@ -80,6 +80,7 @@ type PendingFrameResult = "none" | "followed" | "marked";
 
 const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
+const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
 
 export function attachPtyScrollController(
   options: PtyScrollControllerOptions,
@@ -761,6 +762,96 @@ export function attachPtyScrollController(
     return true;
   };
 
+  const getTouchScrollExpectation = (currentYOverride?: number | null) => {
+    if (!verticalIntent.touchActive) return false;
+    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
+    const touchStartY = verticalIntent.touchStartY;
+    const currentY = currentYOverride ?? lastTouchClientY;
+    if (touchStartScrollTop === null || touchStartY === null || currentY === null) return false;
+
+    const anchor = getCurrentAnchor();
+    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const cursorAwareMaxScrollTop = Math.min(domMaxScrollTop, anchor.bottomScrollTop);
+    const gestureBaseScrollTop = touchStartedAtCursorAwareBottom
+      ? anchor.bottomScrollTop
+      : touchStartScrollTop;
+    const expectedScrollTop = Math.max(
+      0,
+      Math.min(cursorAwareMaxScrollTop, gestureBaseScrollTop + (touchStartY - currentY)),
+    );
+    return {
+      touchStartScrollTop,
+      touchStartY,
+      currentY,
+      gestureBaseScrollTop,
+      expectedScrollTop,
+      cursorAwareMaxScrollTop,
+      touchDeltaY: currentY - touchStartY,
+    };
+  };
+
+  const describeTouchScrollExpectation = (
+    expectation: ReturnType<typeof getTouchScrollExpectation>,
+    rawScrollTop: number,
+    effectiveScrollTop: number,
+    previousScrollTop: number,
+    verticalDelta: number,
+  ): string | null => {
+    if (!expectation) return null;
+    return [
+      `raw=${Math.round(rawScrollTop)}`,
+      `effective=${Math.round(effectiveScrollTop)}`,
+      `prev=${Math.round(previousScrollTop)}`,
+      `delta=${Math.round(verticalDelta)}`,
+      `expected=${Math.round(expectation.expectedScrollTop)}`,
+      `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
+      `base=${Math.round(expectation.gestureBaseScrollTop)}`,
+      `startY=${Math.round(expectation.touchStartY)}`,
+      `currentY=${Math.round(expectation.currentY)}`,
+      `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
+      `max=${Math.round(expectation.cursorAwareMaxScrollTop)}`,
+    ].join(" ");
+  };
+
+  const restoreImpossibleTouchScrollJump = (effectiveScrollTop: number): boolean => {
+    const expectation = getTouchScrollExpectation();
+    if (!expectation) return false;
+    const { touchStartScrollTop, touchStartY, currentY, gestureBaseScrollTop, expectedScrollTop } =
+      expectation;
+    const hasTouchMovement = Math.abs(currentY - touchStartY) > 0.5;
+    const jumpedToDomTop =
+      effectiveScrollTop <= atBottomThreshold && gestureBaseScrollTop > container.clientHeight;
+    if (!hasTouchMovement && !jumpedToDomTop) return false;
+
+    const impossibleJumpThreshold = Math.max(
+      TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX,
+      container.clientHeight * 1.25,
+    );
+    if (Math.abs(effectiveScrollTop - expectedScrollTop) <= impossibleJumpThreshold) {
+      return false;
+    }
+
+    trace("container-scroll:restore-touch-impossible-jump", {
+      details: [
+        `scrollTop=${Math.round(effectiveScrollTop)}`,
+        `expected=${Math.round(expectedScrollTop)}`,
+        `diff=${Math.round(effectiveScrollTop - expectedScrollTop)}`,
+        `threshold=${Math.round(impossibleJumpThreshold)}`,
+        `touchStart=${Math.round(touchStartScrollTop)}`,
+        `startY=${Math.round(touchStartY)}`,
+        `currentY=${Math.round(currentY)}`,
+      ].join(" "),
+    });
+    container.scrollTop = expectedScrollTop;
+    lastSeenScrollTop = expectedScrollTop;
+    touchGestureMaxScrollTop = Math.max(
+      touchGestureMaxScrollTop ?? expectedScrollTop,
+      expectedScrollTop,
+    );
+    syncContainerScroll();
+    return true;
+  };
+
   const restoreRecentRawInputLayoutDrift = (
     effectiveScrollTop: number,
     atBottom: boolean,
@@ -885,11 +976,24 @@ export function attachPtyScrollController(
     // 纵向 delta: 区分用户主动向下滚 vs 向上滚, 用于 intent 释放方向判定。每条
     // scroll 事件都更新 lastSeen, 程序化与用户路径共用。
     const rawScrollTop = container.scrollTop;
+    const previousSeenScrollTop = lastSeenScrollTop;
     const verticalDelta = rawScrollTop - lastSeenScrollTop;
     if (verticalIntent.touchActive) {
       touchGestureMaxScrollTop = Math.max(touchGestureMaxScrollTop ?? rawScrollTop, rawScrollTop);
     }
     const effectiveScrollTop = clampCursorAwareBottomOverscroll(rawScrollTop);
+    if (verticalIntent.touchActive) {
+      trace("container-scroll:touch-active", {
+        details:
+          describeTouchScrollExpectation(
+            getTouchScrollExpectation(),
+            rawScrollTop,
+            effectiveScrollTop,
+            previousSeenScrollTop,
+            verticalDelta,
+          ) ?? `raw=${Math.round(rawScrollTop)} effective=${Math.round(effectiveScrollTop)}`,
+      });
+    }
     lastSeenScrollTop = effectiveScrollTop;
     if (syncing.external) {
       dispatchVerticalIntent({
@@ -940,6 +1044,9 @@ export function attachPtyScrollController(
     }
     pendingProgrammaticScrollTop = null;
     if (restoreStationaryTouchLayoutShift(effectiveScrollTop)) {
+      return;
+    }
+    if (restoreImpossibleTouchScrollJump(effectiveScrollTop)) {
       return;
     }
     if (restoreRecentRawInputLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
@@ -1190,7 +1297,8 @@ export function attachPtyScrollController(
     const startX = touch?.clientX ?? null;
     const startY = touch?.clientY ?? null;
     touchGestureMaxScrollTop = container.scrollTop;
-    touchStartedAtCursorAwareBottom = getCurrentAnchor().isAtBottom;
+    const anchor = getCurrentAnchor();
+    touchStartedAtCursorAwareBottom = anchor.isAtBottom;
     touchStartClientX = startX;
     lastTouchClientX = startX;
     lastTouchClientY = startY;
@@ -1199,7 +1307,15 @@ export function attachPtyScrollController(
       clientY: startY,
       scrollTop: container.scrollTop,
     });
-    trace("touchstart");
+    trace("touchstart", {
+      details: [
+        `startX=${startX ?? "null"}`,
+        `startY=${startY ?? "null"}`,
+        `startScroll=${Math.round(container.scrollTop)}`,
+        `bottom=${Math.round(anchor.bottomScrollTop)}`,
+        `atBottom=${anchor.isAtBottom ? 1 : 0}`,
+      ].join(" "),
+    });
   };
 
   const onTouchMove = (event: TouchEvent): void => {
@@ -1210,7 +1326,18 @@ export function attachPtyScrollController(
     const touch = event.touches?.[0] ?? null;
     const currentX = touch?.clientX ?? null;
     const currentY = touch?.clientY ?? null;
-    trace("touchmove");
+    trace("touchmove", {
+      details:
+        currentY === null
+          ? "currentY=null"
+          : (describeTouchScrollExpectation(
+              getTouchScrollExpectation(currentY),
+              container.scrollTop,
+              container.scrollTop,
+              lastSeenScrollTop,
+              container.scrollTop - lastSeenScrollTop,
+            ) ?? `currentY=${Math.round(currentY)}`),
+    });
     if (
       touchStartClientX !== null &&
       verticalIntent.touchStartY !== null &&

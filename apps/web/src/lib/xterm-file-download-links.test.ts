@@ -73,6 +73,68 @@ describe("xterm file download links", () => {
     expect(onDownload).toHaveBeenCalledWith("./build/out.tar.gz");
   });
 
+  it("joins xterm-wrapped physical rows before detecting download paths", () => {
+    const onDownload = vi.fn();
+    const providerRef: {
+      current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
+    } = {};
+    const lines = [
+      {
+        isWrapped: false,
+        text: "  - /Users/catli/MyApps/AIMovieFactory/",
+      },
+      {
+        isWrapped: true,
+        text: "docs/superpowers/specs/2026-05-13-v1-",
+      },
+      {
+        isWrapped: true,
+        text: "foundation-design.md",
+      },
+    ];
+    const term = {
+      buffer: {
+        active: {
+          getLine: (index: number) => {
+            const line = lines[index];
+            if (!line) return undefined;
+            return {
+              isWrapped: line.isWrapped,
+              translateToString: () => line.text,
+            };
+          },
+        },
+      },
+      registerLinkProvider: vi.fn((provider) => {
+        providerRef.current = provider;
+        return { dispose: vi.fn() };
+      }),
+    };
+    registerFileDownloadLinkProvider(term as never, onDownload);
+
+    providerRef.current?.provideLinks(3, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+            activate: (event: MouseEvent, text: string) => void;
+          }>
+        | undefined;
+      expect(arr).toHaveLength(1);
+      const link = arr?.[0];
+      expect(link?.text).toBe(
+        "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
+      );
+      expect(link?.range.start).toEqual({ x: 5, y: 1 });
+      expect(link?.range.end).toEqual({ x: 20, y: 3 });
+      link?.activate({ metaKey: true } as MouseEvent, link.text);
+    });
+
+    expect(onDownload).toHaveBeenCalledWith(
+      "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
+    );
+  });
+
   it("ignores plain clicks without a modifier (anti-misclick)", () => {
     const onDownload = vi.fn();
     provideAndActivate(onDownload, {});

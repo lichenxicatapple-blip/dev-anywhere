@@ -518,6 +518,34 @@ describe("attachPtyScrollController", () => {
     expect(onTouchReviewStart).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects catastrophic native touch scroll jumps while preserving the intended small review scroll", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 360));
+    container.scrollTop = 0;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBe(1540);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(77);
+    expect(host.style.top).toBe("1540px");
+    expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("does not create review intent after a bottom tap without scroll movement", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();

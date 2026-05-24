@@ -7,9 +7,33 @@ type FileDownloadPathMatch = {
   endColumn: number;
 };
 
+type FileDownloadPathSpan = {
+  path: string;
+  startIndex: number;
+  endIndex: number;
+};
+
+type FileDownloadBufferPathMatch = {
+  path: string;
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+};
+
+const MAX_WRAPPED_FILE_PATH_LINES = 16;
+
 export function findFileDownloadPathMatches(line: string): FileDownloadPathMatch[] {
+  return findFileDownloadPathSpans(line).map((span) => ({
+    path: span.path,
+    startColumn: stringToTerminalColumn(line, span.startIndex),
+    endColumn: stringCellWidth(line.slice(0, span.endIndex)),
+  }));
+}
+
+function findFileDownloadPathSpans(line: string): FileDownloadPathSpan[] {
   const paths = extractFileDownloadPaths(line);
-  const matches: FileDownloadPathMatch[] = [];
+  const matches: FileDownloadPathSpan[] = [];
   let searchFrom = 0;
   for (const path of paths) {
     const rawIndex = line.indexOf(path, searchFrom);
@@ -18,12 +42,116 @@ export function findFileDownloadPathMatches(line: string): FileDownloadPathMatch
     const endIndex = rawIndex + path.length;
     matches.push({
       path,
-      startColumn: stringToTerminalColumn(line, atIndex),
-      endColumn: stringToTerminalColumn(line, endIndex) - 1,
+      startIndex: atIndex,
+      endIndex,
     });
     searchFrom = rawIndex + path.length;
   }
   return matches;
+}
+
+export function findFileDownloadPathMatchesInWrappedBuffer(
+  terminal: Pick<Terminal, "buffer">,
+  bufferLineNumber: number,
+): FileDownloadBufferPathMatch[] {
+  const block = getWrappedLineBlock(terminal, bufferLineNumber);
+  if (!block) return [];
+
+  const logicalLine = block.parts.join("");
+  return findFileDownloadPathSpans(logicalLine)
+    .map((span) => {
+      const start = stringIndexToTerminalPosition(
+        block.parts,
+        block.startLineNumber,
+        span.startIndex,
+      );
+      const end = stringEndIndexToTerminalPosition(
+        block.parts,
+        block.startLineNumber,
+        span.endIndex,
+      );
+      if (!start || !end) return null;
+      return {
+        path: span.path,
+        startLineNumber: start.lineNumber,
+        startColumn: start.column,
+        endLineNumber: end.lineNumber,
+        endColumn: end.column,
+      };
+    })
+    .filter((match): match is FileDownloadBufferPathMatch => match !== null)
+    .filter(
+      (match) =>
+        bufferLineNumber >= match.startLineNumber && bufferLineNumber <= match.endLineNumber,
+    );
+}
+
+function getWrappedLineBlock(
+  terminal: Pick<Terminal, "buffer">,
+  bufferLineNumber: number,
+): { startLineNumber: number; parts: string[] } | null {
+  const active = terminal.buffer.active;
+  let startLineNumber = bufferLineNumber;
+  let endLineNumber = bufferLineNumber;
+  for (let guard = 0; guard < MAX_WRAPPED_FILE_PATH_LINES; guard += 1) {
+    const line = active.getLine(startLineNumber - 1);
+    if (!line?.isWrapped || startLineNumber <= 1) break;
+    startLineNumber -= 1;
+  }
+  for (let guard = 0; guard < MAX_WRAPPED_FILE_PATH_LINES; guard += 1) {
+    const nextLine = active.getLine(endLineNumber);
+    if (!nextLine?.isWrapped) break;
+    endLineNumber += 1;
+  }
+
+  const parts: string[] = [];
+  for (let lineNumber = startLineNumber; lineNumber <= endLineNumber; lineNumber += 1) {
+    const line = active.getLine(lineNumber - 1);
+    if (!line) return null;
+    parts.push(line.translateToString(true));
+  }
+  return { startLineNumber, parts };
+}
+
+function stringIndexToTerminalPosition(
+  parts: string[],
+  startLineNumber: number,
+  index: number,
+): { lineNumber: number; column: number } | null {
+  let offset = index;
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? "";
+    if (offset < part.length) {
+      return {
+        lineNumber: startLineNumber + i,
+        column: stringToTerminalColumn(part, offset),
+      };
+    }
+    if (offset === part.length && i < parts.length - 1) {
+      return { lineNumber: startLineNumber + i + 1, column: 1 };
+    }
+    offset -= part.length;
+  }
+  return null;
+}
+
+function stringEndIndexToTerminalPosition(
+  parts: string[],
+  startLineNumber: number,
+  exclusiveEndIndex: number,
+): { lineNumber: number; column: number } | null {
+  let offset = exclusiveEndIndex - 1;
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i] ?? "";
+    if (offset < part.length) {
+      return {
+        lineNumber: startLineNumber + i,
+        column: stringCellWidth(part.slice(0, offset + 1)),
+      };
+    }
+    offset -= part.length;
+  }
+  return null;
 }
 
 function stringToTerminalColumn(line: string, endIndex: number): number {
@@ -80,16 +208,16 @@ export function registerFileDownloadLinkProvider(
 ): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
-      const line = terminal.buffer.active.getLine(bufferLineNumber - 1)?.translateToString(true);
-      if (!line) {
+      const matches = findFileDownloadPathMatchesInWrappedBuffer(terminal, bufferLineNumber);
+      if (matches.length === 0) {
         callback(undefined);
         return;
       }
-      const links: ILink[] = findFileDownloadPathMatches(line).map((match) => ({
+      const links: ILink[] = matches.map((match) => ({
         text: match.path,
         range: {
-          start: { x: match.startColumn, y: bufferLineNumber },
-          end: { x: match.endColumn, y: bufferLineNumber },
+          start: { x: match.startColumn, y: match.startLineNumber },
+          end: { x: match.endColumn, y: match.endLineNumber },
         },
         decorations: {
           underline: true,

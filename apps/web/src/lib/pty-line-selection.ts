@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { measureXtermCellSize } from "./pty-xterm-metrics";
-import { findFileDownloadPathMatches } from "./xterm-file-download-links";
+import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
 
 export interface TerminalSelectionPoint {
   row: number;
@@ -393,20 +393,28 @@ export function selectTerminalFileDownloadLinkAtBufferPoint({
   terminal,
   point,
 }: SelectTerminalFileDownloadLinkAtBufferPointOptions): TerminalFileDownloadSelectionResult | null {
-  const line = terminal.buffer.active.getLine(point.row);
-  if (!line) return null;
-
-  const text = line.translateToString(true);
+  const lineNumber = point.row + 1;
   const column = point.column + 1;
-  const match = findFileDownloadPathMatches(text).find(
-    (candidate) => column >= candidate.startColumn && column <= candidate.endColumn,
+  const match = findFileDownloadPathMatchesInWrappedBuffer(terminal, lineNumber).find(
+    (candidate) => {
+      if (lineNumber < candidate.startLineNumber || lineNumber > candidate.endLineNumber) {
+        return false;
+      }
+      if (lineNumber === candidate.startLineNumber && column < candidate.startColumn) {
+        return false;
+      }
+      if (lineNumber === candidate.endLineNumber && column > candidate.endColumn) {
+        return false;
+      }
+      return true;
+    },
   );
   if (!match) return null;
 
   const selected = selectTerminalRange({
     terminal,
-    anchor: { row: point.row, column: match.startColumn - 1 },
-    focus: { row: point.row, column: match.endColumn - 1 },
+    anchor: { row: match.startLineNumber - 1, column: match.startColumn - 1 },
+    focus: { row: match.endLineNumber - 1, column: match.endColumn - 1 },
   });
   return selected ? { ...selected, downloadPath: match.path } : null;
 }

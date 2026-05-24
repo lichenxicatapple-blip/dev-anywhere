@@ -103,6 +103,8 @@ const store = createScrollTraceStore<PtyScrollTraceEntry>({
       entry.event.startsWith("horizontal-intent:") ||
       entry.event.startsWith("touch") ||
       entry.event.startsWith("vv:") ||
+      entry.event.startsWith("container-scroll:touch") ||
+      entry.event.startsWith("container-scroll:restore-touch") ||
       (entry.event.startsWith("followCursor") && entry.event.includes(":hit")) ||
       entry.event === "container-scroll" ||
       entry.event === "term-scroll" ||
@@ -127,9 +129,41 @@ export function appendPtyScrollTrace(entry: PtyScrollTraceEntry): void {
   });
 }
 
+const REPORT_ROW_LIMIT = 160;
+const REPORT_IMPORTANT_ROW_LIMIT = 40;
+
+function isImportantPtyScrollTraceEntry(entry: PtyScrollTraceEntry): boolean {
+  return (
+    entry.event.startsWith("touch") ||
+    entry.event.startsWith("vv:") ||
+    entry.event.startsWith("intent:") ||
+    entry.event.startsWith("container-scroll:touch") ||
+    entry.event.startsWith("container-scroll:restore-touch") ||
+    entry.event.startsWith("page-resume")
+  );
+}
+
+function selectPtyScrollTraceReportRows(trace: PtyScrollTraceEntry[]): PtyScrollTraceEntry[] {
+  const tail = trace.slice(-REPORT_ROW_LIMIT);
+  const important = trace.filter(isImportantPtyScrollTraceEntry).slice(-REPORT_IMPORTANT_ROW_LIMIT);
+  const selected = new Set<PtyScrollTraceEntry>([...important, ...tail]);
+  const rows = [...selected].sort((a, b) => a.t - b.t);
+
+  while (rows.length > REPORT_ROW_LIMIT) {
+    const removableIndex = rows.findIndex((entry) => !isImportantPtyScrollTraceEntry(entry));
+    if (removableIndex < 0) {
+      rows.shift();
+      continue;
+    }
+    rows.splice(removableIndex, 1);
+  }
+
+  return rows;
+}
+
 export function formatPtyScrollTraceReport(): string {
   const trace = store.getAll();
-  const rows = trace.slice(-160);
+  const rows = selectPtyScrollTraceReportRows(trace);
   const debugSnapshot =
     (
       window as typeof window & {

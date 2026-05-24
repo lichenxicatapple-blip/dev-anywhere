@@ -359,6 +359,17 @@ describe("pty vertical intent FSM", () => {
       expectedTouchReviewNotified: true,
     },
     {
+      id: "touch.move.reviewing",
+      initial: touchReviewingState({ touchReviewNotified: true }),
+      event: { type: "touch-move", clientY: 250, reviewThresholdPx: 8 },
+      expectedMode: "reviewing",
+      expectedSource: "touch",
+      expectedTraceAction: "keep",
+      expectedNotifyTouchReviewStart: false,
+      expectedTouchActive: true,
+      expectedTouchReviewNotified: true,
+    },
+    {
       id: "touch.end.not-bottom",
       initial: touchReviewingState(),
       event: { type: "touch-end", scrollTop: 90, atCursorAwareBottom: false },
