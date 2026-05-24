@@ -153,6 +153,7 @@ export function attachPtyScrollController(
   let touchStartScrollLeft: number | null = null;
   let lastTouchClientX: number | null = null;
   let lastTouchClientY: number | null = null;
+  let lastTouchGestureAt: number | null = null;
   let touchScrollGestureMode: TouchScrollGestureMode | null = null;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
@@ -175,6 +176,8 @@ export function attachPtyScrollController(
   let prevCursorBufferRow: number | null = null;
   let lastVisualViewportChangeAt: number | null = null;
   let lastRawInputFollowAt: number | null = null;
+  let pendingTouchScrollNotifyFrame: number | null = null;
+  let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
 
@@ -275,6 +278,38 @@ export function attachPtyScrollController(
   const notifyScroll = (): void => {
     notifyAtBottom();
     notifyScrollState();
+  };
+
+  const cancelPendingTouchScrollNotify = (): void => {
+    if (pendingTouchScrollNotifyFrame === null) return;
+    pendingTouchScrollNotifyCancel?.(pendingTouchScrollNotifyFrame);
+    pendingTouchScrollNotifyFrame = null;
+    pendingTouchScrollNotifyCancel = null;
+  };
+
+  const scheduleTouchScrollNotify = (): void => {
+    if (pendingTouchScrollNotifyFrame !== null) return;
+    const fire = (): void => {
+      pendingTouchScrollNotifyFrame = null;
+      pendingTouchScrollNotifyCancel = null;
+      notifyScroll();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      pendingTouchScrollNotifyFrame = window.requestAnimationFrame(fire);
+      pendingTouchScrollNotifyCancel =
+        typeof window.cancelAnimationFrame === "function"
+          ? (handle) => window.cancelAnimationFrame(handle)
+          : null;
+      return;
+    }
+    pendingTouchScrollNotifyFrame = window.setTimeout(fire, 16);
+    pendingTouchScrollNotifyCancel = (handle) => window.clearTimeout(handle);
+  };
+
+  const flushPendingTouchScrollNotify = (): void => {
+    if (pendingTouchScrollNotifyFrame === null) return;
+    cancelPendingTouchScrollNotify();
+    notifyScroll();
   };
 
   // focus 字段加细 — 之前只录 aria-label 或 tagName, 用户 trace 里看到 "BUTTON"
@@ -717,7 +752,20 @@ export function attachPtyScrollController(
     return "marked";
   };
 
+  const getYdispForScrollTop = (scrollTop: number, cellH: number): number => {
+    const buffer = term.buffer.active;
+    return computeScrollTarget(scrollTop, {
+      bufferLength: buffer.length,
+      rows: term.rows,
+      cols: term.cols,
+      viewportY: buffer.viewportY,
+      cellH,
+      cellW: 1,
+    }).ydisp;
+  };
+
   const syncContainerScroll = (opts: { deferHostUntilRender?: boolean } = {}): void => {
+    cancelPendingTouchScrollNotify();
     trace("container-sync:start");
     const { cellH } = getDims();
     if (cellH === 0) {
@@ -726,18 +774,28 @@ export function attachPtyScrollController(
       return;
     }
     pendingContainerSyncRetry = false;
-    const buffer = term.buffer.active;
-    const { ydisp } = computeScrollTarget(container.scrollTop, {
-      bufferLength: buffer.length,
-      rows: term.rows,
-      cols: term.cols,
-      viewportY: buffer.viewportY,
-      cellH,
-      cellW: 1,
-    });
+    const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
     syncViewportAndHostAt(ydisp, cellH, opts);
     notifyScroll();
     trace("container-sync:end", { ydisp });
+  };
+
+  const isRecentTouchNativeScroll = (): boolean =>
+    verticalIntent.touchActive ||
+    (lastTouchGestureAt !== null && performance.now() - lastTouchGestureAt <= 500);
+
+  const skipSameRowTouchScrollSync = (effectiveScrollTop: number): boolean => {
+    if (!isRecentTouchNativeScroll()) return false;
+    const { cellH } = getDims();
+    if (cellH === 0) return false;
+    const ydisp = getYdispForScrollTop(effectiveScrollTop, cellH);
+    if (ydisp !== term.buffer.active.viewportY) return false;
+    scheduleTouchScrollNotify();
+    trace("container-sync:skip[same-row-touch]", {
+      ydisp,
+      details: `scrollTop=${Math.round(effectiveScrollTop)} viewportY=${term.buffer.active.viewportY}`,
+    });
+    return true;
   };
 
   const clampCursorAwareBottomOverscroll = (rawScrollTop: number): number => {
@@ -1145,6 +1203,9 @@ export function attachPtyScrollController(
       atCursorAwareBottom: atBottom,
       verticalDelta,
     });
+    if (skipSameRowTouchScrollSync(effectiveScrollTop)) {
+      return;
+    }
     syncContainerScroll({ deferHostUntilRender: verticalIntent.touchActive });
   };
 
@@ -1370,6 +1431,7 @@ export function attachPtyScrollController(
       return;
     }
     const touch = event.touches?.[0] ?? null;
+    lastTouchGestureAt = performance.now();
     const startX = touch?.clientX ?? null;
     const startY = touch?.clientY ?? null;
     clearHorizontalIntentIfUnscrollable("touchstart");
@@ -1403,6 +1465,7 @@ export function attachPtyScrollController(
       return;
     }
     const touch = event.touches?.[0] ?? null;
+    lastTouchGestureAt = performance.now();
     const currentX = touch?.clientX ?? null;
     const currentY = touch?.clientY ?? null;
     const movement = getTouchMovement(currentX, currentY);
@@ -1577,6 +1640,8 @@ export function attachPtyScrollController(
       atCursorAwareBottom: atCursorAwareBottomForIntent,
       releaseOnSemanticBottom,
     });
+    lastTouchGestureAt = performance.now();
+    flushPendingTouchScrollNotify();
     notifyAtBottom();
   };
 
@@ -1719,6 +1784,7 @@ export function attachPtyScrollController(
       dispScroll.dispose();
       dispRender.dispose();
       dispWriteParsed?.dispose();
+      cancelPendingTouchScrollNotify();
       ro.disconnect();
     },
     relayout,

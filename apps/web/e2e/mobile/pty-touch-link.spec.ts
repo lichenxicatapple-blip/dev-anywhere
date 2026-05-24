@@ -1,4 +1,4 @@
-// 移动端 PTY 链接没有 cmd/ctrl 修饰键，tap 已高亮的路径就是明确操作。
+// 移动端 PTY 图片路径可 tap 预览；文件路径下载必须走长按选区 toolbar，避免误触即下载。
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
@@ -110,36 +110,31 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }));
   }
 
-  async function expectFileDownloadRequest(
+  async function expectNoFileDownloadRequest(
     page: import("@playwright/test").Page,
     expectedPath: string,
   ): Promise<void> {
-    try {
-      await expect
-        .poll(() =>
-          page.evaluate(
-            (path) =>
-              (window.__ptySmoke?.sent ?? []).some((raw) => {
-                try {
-                  const msg = JSON.parse(raw) as { type?: string; path?: string };
-                  return msg.type === "file_download_request" && msg.path === path;
-                } catch {
-                  return false;
-                }
-              }),
-            expectedPath,
-          ),
-        )
-        .toBe(true);
-    } catch (err) {
-      throw new Error(
-        `file_download_request not sent for ${expectedPath}\n${JSON.stringify(
-          await readTouchDiagnostics(page),
-          null,
-          2,
-        )}\n${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    await page.waitForTimeout(500);
+    const matched = await page.evaluate(
+      (path) =>
+        (window.__ptySmoke?.sent ?? []).some((raw) => {
+          try {
+            const msg = JSON.parse(raw) as { type?: string; path?: string };
+            return msg.type === "file_download_request" && msg.path === path;
+          } catch {
+            return false;
+          }
+        }),
+      expectedPath,
+    );
+    expect(
+      matched,
+      `plain touch tap should not download ${expectedPath}\n${JSON.stringify(
+        await readTouchDiagnostics(page),
+        null,
+        2,
+      )}`,
+    ).toBe(false);
   }
 
   async function expectImagePreviewRequest(page: import("@playwright/test").Page): Promise<void> {
@@ -168,7 +163,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }
   }
 
-  test("tap on a PTY file path triggers file_download", async ({ emuPage }) => {
+  test("tap on a PTY file path does not trigger file_download", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emitLineAndAwait(emuPage, "see ./scripts/test.sh for details\r\n", "./scripts/test.sh");
@@ -179,10 +174,12 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: "./scripts/test.sh",
     });
 
-    await expectFileDownloadRequest(emuPage, "./scripts/test.sh");
+    await expectNoFileDownloadRequest(emuPage, "./scripts/test.sh");
   });
 
-  test("tap on an xterm-wrapped PTY document path triggers file_download", async ({ emuPage }) => {
+  test("tap on an xterm-wrapped PTY document path does not trigger file_download", async ({
+    emuPage,
+  }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
@@ -211,10 +208,10 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: path,
     });
 
-    await expectFileDownloadRequest(emuPage, path);
+    await expectNoFileDownloadRequest(emuPage, path);
   });
 
-  test("tap on an indented hard-wrapped PTY document path triggers file_download", async ({
+  test("tap on an indented hard-wrapped PTY document path does not trigger file_download", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -240,7 +237,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: path,
     });
 
-    await expectFileDownloadRequest(emuPage, path);
+    await expectNoFileDownloadRequest(emuPage, path);
   });
 
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({

@@ -326,35 +326,21 @@ function isFullWidthCodePoint(codePoint: number): boolean {
   );
 }
 
-function getLineRangeForPathMatch(
+function getRangeForPathMatch(
   match: FileDownloadBufferPathMatch,
-  bufferLineNumber: number,
-  cols: number,
-): ILink["range"] | null {
-  if (bufferLineNumber < match.startLineNumber || bufferLineNumber > match.endLineNumber) {
-    return null;
-  }
-  const startColumn = bufferLineNumber === match.startLineNumber ? match.startColumn : 1;
-  const endColumn = bufferLineNumber === match.endLineNumber ? match.endColumn : cols;
-  if (endColumn < startColumn) return null;
+): ILink["range"] {
   return {
-    start: { x: startColumn, y: bufferLineNumber },
-    end: { x: endColumn, y: bufferLineNumber },
+    start: { x: match.startColumn, y: match.startLineNumber },
+    end: { x: match.endColumn, y: match.endLineNumber },
   };
 }
 
 function shouldActivateDownload(event: MouseEvent): boolean {
-  if (event.metaKey || event.ctrlKey) return true;
-  const pointerType =
-    "pointerType" in event
-      ? String((event as MouseEvent & { pointerType?: unknown }).pointerType)
-      : "";
-  if (pointerType === "touch" || pointerType === "pen") return true;
-  return window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
+  return event.metaKey || event.ctrlKey;
 }
 
 export function registerFileDownloadLinkProvider(
-  terminal: Pick<Terminal, "buffer" | "cols" | "registerLinkProvider">,
+  terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
   onDownload: (path: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   let lastActivation: { path: string; at: number } | null = null;
@@ -380,8 +366,7 @@ export function registerFileDownloadLinkProvider(
         return;
       }
       const links = matches.reduce<ILink[]>((acc, match) => {
-        const range = getLineRangeForPathMatch(match, bufferLineNumber, terminal.cols);
-        if (!range) return acc;
+        const range = getRangeForPathMatch(match);
         acc.push({
           text: match.path,
           range,
@@ -389,8 +374,8 @@ export function registerFileDownloadLinkProvider(
             underline: true,
             pointerCursor: true,
           },
-          // 桌面仍要求 cmd/ctrl + click 防误触；触屏设备上用户没有修饰键,
-          // 点击已高亮的文件路径就是下载意图。
+          // 桌面仍要求 cmd/ctrl + click 防误触。移动端下载走长按选区 toolbar,
+          // tap 文件路径只用于命中/选区候选, 不直接拉取文件。
           activate: (event) => {
             activateDownload(match.path, event);
           },
