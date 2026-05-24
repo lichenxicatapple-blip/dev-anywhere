@@ -1,5 +1,6 @@
 // 真 Android Chrome: 长 PTY 输入期间, 水平/纵向滚动都可能被浏览器输入法布局改写。
 // 这些 case 保护输入区始终可见, 且 Enter 提交后能立刻回到行首。
+import type { Page } from "@playwright/test";
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
 import {
@@ -14,8 +15,83 @@ import {
 
 const SESSION_ID = "mobile-pty-horizontal-scroll";
 
+async function touchDrag(
+  page: Page,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): Promise<void> {
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+    });
+    for (let step = 1; step <= 4; step += 1) {
+      const progress = step / 4;
+      await page.waitForTimeout(40);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          {
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress,
+            id: 1,
+            radiusX: 2,
+            radiusY: 2,
+            force: 1,
+          },
+        ],
+      });
+    }
+    await page.waitForTimeout(60);
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await client.detach();
+  }
+}
+
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
+
+  test("touch-drag pans horizontally when the PTY overflows the mobile viewport", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-touch-pan`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      query: "&ptyScrollTrace=1",
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await resizePty(emuPage, 80, 24);
+    await expect
+      .poll(() =>
+        readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.maxScrollLeft),
+      )
+      .toBeGreaterThan(100);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    await touchDrag(
+      emuPage,
+      { x: box.x + box.width - 24, y: box.y + box.height * 0.55 },
+      { x: box.x + 24, y: box.y + box.height * 0.55 },
+    );
+
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
+      .toBeGreaterThan(80);
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() =>
+          (window.__devAnywherePtyScrollTrace ?? []).some(
+            (entry) => entry.event === "touchmove:horizontal-pan",
+          ),
+        ),
+      )
+      .toBe(true);
+  });
 
   test("keeps following the cursor after Chrome nudges scrollLeft while typing", async ({
     emuPage,

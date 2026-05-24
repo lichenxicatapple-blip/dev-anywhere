@@ -1488,9 +1488,7 @@ export function attachPtyScrollController(
         trace("touchmove:horizontal-lock", {
           details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`,
         });
-      }
-
-      if (touchScrollGestureMode === "pending" && movement.absDy < TOUCH_GESTURE_SLOP_PX) {
+      } else if (movement.absDy < TOUCH_GESTURE_SLOP_PX) {
         lastTouchClientX = currentX;
         lastTouchClientY = currentY;
         if (event.cancelable) event.preventDefault();
@@ -1503,12 +1501,12 @@ export function attachPtyScrollController(
           reviewThresholdPx: TOUCH_GESTURE_SLOP_PX,
         });
         return;
+      } else {
+        touchScrollGestureMode = "vertical";
+        trace("touchmove:vertical-lock", {
+          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${TOUCH_GESTURE_SLOP_PX}`,
+        });
       }
-
-      touchScrollGestureMode = "vertical";
-      trace("touchmove:vertical-lock", {
-        details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${TOUCH_GESTURE_SLOP_PX}`,
-      });
     }
 
     if (touchScrollGestureMode === "horizontal") {
