@@ -879,6 +879,47 @@ describe("attachPtyScrollController", () => {
     queued[0]?.(performance.now());
   });
 
+  it("does not restore to bottom after a real pre-threshold bottom pull", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 101080);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 5049: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 5052;
+    terminal.buffer.active.viewportY = 5000;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBe(100446);
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 446));
+    container.scrollTop = 100437.7109375;
+    container.dispatchEvent(touchEvent("touchmove", 458));
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBeCloseTo(100437.7109375);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
   it("keeps reviewing after a slow bottom-start pull even while the cursor stays visible", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";

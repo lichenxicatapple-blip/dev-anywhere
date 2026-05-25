@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.28] - 2026-05-25
+
+### 修复
+
+- 修复移动端 PTY 刚刷新进入会话后，从底部轻慢上滑起步时，`restore-touch-layout-bottom` 把真实手势的几像素原生滚动反复拉回 semantic bottom，造成方向翻转和明显轻微抖动的问题。
+- 保留底部触摸期间异常跳到 host 顶部的恢复保护，只在滚动距离明显超过真实手指位移时才恢复到底部。
+
+### 测试
+
+- 新增 PTY scroll controller 回归，复现用户 trace 中 `touchDeltaY=12`、`scrollTopDeltaToBottom=-8px` 时不应恢复到底部的场景。
+- 重新验证 Android emulator 下 PTY 底部触摸滚动与横向滑动回归。
+
 ## [0.4.27] - 2026-05-25
 
 ### 修复

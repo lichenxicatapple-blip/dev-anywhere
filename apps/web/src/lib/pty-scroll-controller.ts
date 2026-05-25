@@ -79,6 +79,8 @@ const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
 const TOUCH_GESTURE_SLOP_PX = 16;
+const TOUCH_STATIONARY_RESTORE_SLOP_PX = 2;
+const TOUCH_STATIONARY_RESTORE_NATIVE_SCROLL_SLOP_PX = 64;
 const TOUCH_HORIZONTAL_GESTURE_SLOP_PX = 6;
 const TOUCH_HORIZONTAL_LOCK_RATIO = 1;
 const TOUCH_VERTICAL_LOCK_RATIO = 1.25;
@@ -819,6 +821,16 @@ export function attachPtyScrollController(
     const touchStartScrollTop = verticalIntent.touchStartScrollTop;
     if (!verticalIntent.touchActive || verticalIntent.touchReviewNotified) return false;
     if (touchStartScrollTop === null) return false;
+
+    const touchStartY = verticalIntent.touchStartY;
+    const touchMovedDuringGesture =
+      touchStartY !== null &&
+      lastTouchClientY !== null &&
+      Math.abs(lastTouchClientY - touchStartY) > TOUCH_STATIONARY_RESTORE_SLOP_PX;
+    if (touchMovedDuringGesture) {
+      const nativeScrollDistance = Math.abs(touchStartScrollTop - effectiveScrollTop);
+      if (nativeScrollDistance <= TOUCH_STATIONARY_RESTORE_NATIVE_SCROLL_SLOP_PX) return false;
+    }
 
     const { cellH } = getDims();
     const { paddingTop, paddingBottom } = getVerticalInsets();
