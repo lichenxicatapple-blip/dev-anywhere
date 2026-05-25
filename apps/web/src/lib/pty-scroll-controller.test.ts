@@ -740,6 +740,58 @@ describe("attachPtyScrollController", () => {
     );
   });
 
+  it("follows the finger immediately for same-viewport bottom touch starts", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 43900);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 2190: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 2193;
+    terminal.buffer.active.viewportY = 2141;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    container.scrollTop = 43266;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 312));
+    container.scrollTop = 43262.5703125;
+    container.dispatchEvent(touchEvent("touchmove", 362));
+
+    expect(container.scrollTop).toBe(43216);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(host.style.top).toBe("42820px");
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+    queued[0]?.(performance.now());
+  });
+
   it("syncs xterm when native touch scroll crosses to a different row", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(

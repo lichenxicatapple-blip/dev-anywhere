@@ -798,6 +798,46 @@ export function attachPtyScrollController(
     return true;
   };
 
+  const followSameViewportTouchScrollToFinger = (
+    expectation: ReturnType<typeof getTouchScrollExpectation>,
+  ): boolean => {
+    if (!expectation || !touchStartedAtCursorAwareBottom) return false;
+    const { cellH } = getDims();
+    if (cellH <= 0) return false;
+
+    const currentScrollTop = container.scrollTop;
+    const targetScrollTop = expectation.expectedScrollTop;
+    const currentYdisp = getYdispForScrollTop(currentScrollTop, cellH);
+    const targetYdisp = getYdispForScrollTop(targetScrollTop, cellH);
+    if (
+      currentYdisp !== term.buffer.active.viewportY ||
+      targetYdisp !== term.buffer.active.viewportY
+    ) {
+      return false;
+    }
+
+    const movingAwayFromBottom =
+      targetScrollTop < expectation.gestureBaseScrollTop - atBottomThreshold;
+    const nativeLagPx = currentScrollTop - targetScrollTop;
+    if (!movingAwayFromBottom || nativeLagPx <= atBottomThreshold) return false;
+
+    container.scrollTop = targetScrollTop;
+    lastSeenScrollTop = targetScrollTop;
+    touchGestureMaxScrollTop = Math.max(
+      touchGestureMaxScrollTop ?? targetScrollTop,
+      targetScrollTop,
+    );
+    scheduleTouchScrollNotify();
+    trace("touchmove:same-row-follow-finger", {
+      details: [
+        `scrollTop=${Math.round(currentScrollTop)}->${Math.round(targetScrollTop)}`,
+        `lag=${Math.round(nativeLagPx)}`,
+        `viewportY=${term.buffer.active.viewportY}`,
+      ].join(" "),
+    });
+    return true;
+  };
+
   const clampCursorAwareBottomOverscroll = (rawScrollTop: number): number => {
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const anchor = getCurrentAnchor();
@@ -1590,6 +1630,7 @@ export function attachPtyScrollController(
           `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
         ].join(" "),
       });
+      followSameViewportTouchScrollToFinger(expectation);
     }
     const keepFollowingAtBottomBoundary =
       expectation &&
