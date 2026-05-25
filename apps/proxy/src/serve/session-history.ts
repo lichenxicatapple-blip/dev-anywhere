@@ -47,6 +47,8 @@ const INTERNAL_TITLE_PATTERNS = [
   /^codex agent history\b/i,
   /^conversation summary\b/i,
 ];
+const CLAUDE_CONTINUATION_SUMMARY_PATTERN =
+  /^This session is being continued from a previous conversation that ran out of context\.\s+The summary below covers the earlier portion of the conversation\.\s+Summary:/i;
 const TEMP_HISTORY_ROOTS = expandPathAliases([tmpdir(), "/tmp", "/private/tmp", "/var/tmp"])
   .map(normalizeAbsolutePath)
   .filter((path): path is string => path !== null);
@@ -395,10 +397,15 @@ function isXmlishNoise(text: string): boolean {
   return XMLISH_NOISE_PREFIXES.some((prefix) => tag === prefix || tag.startsWith(`${prefix}_`));
 }
 
+function isClaudeContinuationSummary(text: string): boolean {
+  return CLAUDE_CONTINUATION_SUMMARY_PATTERN.test(text.trimStart());
+}
+
 export function normalizeHistoryTitle(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const text = collapseWhitespace(raw);
   if (text.length < 2) return null;
+  if (isClaudeContinuationSummary(text)) return null;
   if (text.startsWith("<") || isXmlishNoise(text)) return null;
   if (INTERNAL_TITLE_PATTERNS.some((pattern) => pattern.test(text))) return null;
 
@@ -446,6 +453,7 @@ function extractLocalCommandHistoryMarker(text: string): ConversationPayload | n
 }
 
 function extractConversationString(text: string): ConversationPayload | null {
+  if (isClaudeContinuationSummary(text)) return null;
   if (isCommandEnvelope(text)) {
     const command = extractSlashCommand(text);
     return command ? { text: command } : null;
@@ -516,8 +524,7 @@ function extractConversationPayload(msg: unknown): ConversationPayload | null {
           (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
         )
         .map((b: { text: string }) => b.text);
-      const normalized = normalizeConversationText(texts.join("\n"));
-      return normalized ? { text: normalized } : null;
+      return extractConversationString(texts.join("\n"));
     }
   }
 
@@ -527,8 +534,7 @@ function extractConversationPayload(msg: unknown): ConversationPayload | null {
         (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
       )
       .map((b: { text: string }) => b.text);
-    const normalized = normalizeConversationText(texts.join("\n"));
-    return normalized ? { text: normalized } : null;
+    return extractConversationString(texts.join("\n"));
   }
 
   return null;

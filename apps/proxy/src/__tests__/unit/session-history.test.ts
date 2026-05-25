@@ -528,6 +528,11 @@ describe("normalizeHistoryTitle", () => {
     expect(normalizeHistoryTitle("<environment_context>noise</environment_context>")).toBeNull();
     expect(normalizeHistoryTitle("<developer_context>noise</developer_context>")).toBeNull();
     expect(normalizeHistoryTitle("The following is the Codex agent history so far...")).toBeNull();
+    expect(
+      normalizeHistoryTitle(
+        "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent:\n   Internal summary",
+      ),
+    ).toBeNull();
     expect(normalizeHistoryTitle("/compact")).toBeNull();
     expect(normalizeHistoryTitle("/gsd-progress 2")).toBe("/gsd-progress 2");
   });
@@ -629,6 +634,42 @@ describe("readSessionMessages", () => {
       ["user", "before compact"],
       ["system", "上下文已压缩"],
       ["assistant", "after compact"],
+    ]);
+  });
+
+  it("skips Claude continuation summaries when restoring visible conversation history", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    const continuationSummary =
+      "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent:\n   A long internal summary with code fences.\n\n```python\nprint('hidden')\n```";
+    writeFileSync(
+      join(projectDir, "session-summary.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          message: { role: "user", content: "real prompt before summary" },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: { role: "user", content: continuationSummary },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: "real answer after summary" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const messages = await readSessionMessages("session-summary");
+    expect(messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "real prompt before summary"],
+      ["assistant", "real answer after summary"],
+    ]);
+
+    const page = await readSessionMessagesPage("session-summary", { limit: 10 });
+    expect(page.messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "real prompt before summary"],
+      ["assistant", "real answer after summary"],
     ]);
   });
 
