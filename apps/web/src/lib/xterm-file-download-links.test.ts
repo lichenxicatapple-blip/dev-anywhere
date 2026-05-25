@@ -154,11 +154,9 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
-      expect(arr).toHaveLength(3);
+      expect(arr).toHaveLength(1);
       expect(arr?.map((link) => link.range)).toEqual([
         { start: { x: 5, y: 1 }, end: { x: 39, y: 1 } },
-        { start: { x: 1, y: 2 }, end: { x: 37, y: 2 } },
-        { start: { x: 1, y: 3 }, end: { x: 20, y: 3 } },
       ]);
       expect(arr?.every((link) => link.text.includes("foundation-design.md"))).toBe(true);
     });
@@ -171,8 +169,8 @@ describe("xterm file download links", () => {
             activate: (event: MouseEvent, text: string) => void;
           }>
         | undefined;
-      expect(arr).toHaveLength(3);
-      const link = arr?.find((candidate) => candidate.range.start.y === 3);
+      expect(arr).toHaveLength(1);
+      const link = arr?.[0];
       expect(link?.text).toBe(
         "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
       );
@@ -184,6 +182,92 @@ describe("xterm file download links", () => {
     expect(onDownload).toHaveBeenCalledWith(
       "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
     );
+  });
+
+  it("shows every wrapped path segment when hovering any single segment", () => {
+    const onDownload = vi.fn();
+    const providerRef: {
+      current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
+    } = {};
+    const element = document.createElement("div");
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    element.append(screen);
+    document.body.append(element);
+    Object.defineProperty(element, "getBoundingClientRect", {
+      value: () => ({ left: 10, top: 20, width: 336, height: 60, right: 346, bottom: 80 }),
+    });
+    Object.defineProperty(screen, "getBoundingClientRect", {
+      value: () => ({ left: 18, top: 24, width: 336, height: 60, right: 354, bottom: 84 }),
+    });
+    Object.defineProperties(screen, {
+      clientWidth: { value: 336 },
+      clientHeight: { value: 60 },
+    });
+    const lines = [
+      {
+        isWrapped: false,
+        text: "  - /Users/catli/MyApps/AIMovieFactory/",
+      },
+      {
+        isWrapped: true,
+        text: "docs/superpowers/specs/2026-05-13-v1-",
+      },
+      {
+        isWrapped: true,
+        text: "foundation-design.md",
+      },
+    ];
+    const term = {
+      element,
+      buffer: {
+        active: {
+          viewportY: 0,
+          getLine: (index: number) => {
+            const line = lines[index];
+            if (!line) return undefined;
+            return {
+              isWrapped: line.isWrapped,
+              translateToString: () => line.text,
+            };
+          },
+        },
+      },
+      cols: 42,
+      rows: 3,
+      registerLinkProvider: vi.fn((provider) => {
+        providerRef.current = provider;
+        return { dispose: vi.fn() };
+      }),
+    };
+    registerFileDownloadLinkProvider(term as never, onDownload);
+
+    providerRef.current?.provideLinks(3, (links) => {
+      const arr = links as
+        | Array<{
+            decorations?: { underline: boolean; pointerCursor: boolean };
+            hover?: (event: MouseEvent, text: string) => void;
+            leave?: (event: MouseEvent, text: string) => void;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+            text: string;
+          }>
+        | undefined;
+      expect(arr).toHaveLength(1);
+      expect(arr?.every((link) => link.decorations?.underline === false)).toBe(true);
+      const thirdLineLink = arr?.find((link) => link.range.start.y === 3);
+      thirdLineLink?.hover?.({} as MouseEvent, thirdLineLink.text);
+      const spans = element.querySelectorAll('[data-slot="pty-file-link-hover-segment"]');
+      expect(spans).toHaveLength(3);
+      expect(Array.from(spans).map((span) => span.getAttribute("data-range"))).toEqual([
+        "1:5-39",
+        "2:1-37",
+        "3:1-20",
+      ]);
+      thirdLineLink?.leave?.({} as MouseEvent, thirdLineLink.text);
+      expect(element.querySelectorAll('[data-slot="pty-file-link-hover-segment"]')).toHaveLength(0);
+    });
+
+    element.remove();
   });
 
   it("joins indented hard-wrapped path continuations before detecting download paths", () => {
@@ -244,14 +328,10 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
-      expect(arr).toHaveLength(5);
+      expect(arr).toHaveLength(1);
       expect(arr?.every((link) => link.text === expectedPath)).toBe(true);
       expect(arr?.map((link) => link.range)).toEqual([
         { start: { x: 5, y: 1 }, end: { x: 42, y: 1 } },
-        { start: { x: 1, y: 2 }, end: { x: 2, y: 2 } },
-        { start: { x: 5, y: 3 }, end: { x: 42, y: 3 } },
-        { start: { x: 1, y: 4 }, end: { x: 5, y: 4 } },
-        { start: { x: 5, y: 5 }, end: { x: 13, y: 5 } },
       ]);
     });
 
@@ -263,8 +343,8 @@ describe("xterm file download links", () => {
             activate: (event: MouseEvent, text: string) => void;
           }>
         | undefined;
-      expect(arr).toHaveLength(5);
-      const link = arr?.find((candidate) => candidate.range.start.y === 5);
+      expect(arr).toHaveLength(1);
+      const link = arr?.[0];
       expect(link?.text).toBe(expectedPath);
       expect(link?.range.start).toEqual({ x: 5, y: 5 });
       expect(link?.range.end).toEqual({ x: 13, y: 5 });

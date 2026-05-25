@@ -210,4 +210,51 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     const sent = await sentFakeRelayMessages(page);
     expect(sent.some((m: FakeRelayMessage) => m.type === "image_preview_request")).toBe(false);
   });
+
+  test("hover on any wrapped file path segment underlines every real segment", async ({ page }) => {
+    await gotoPty(page);
+    const cols = await page.evaluate(() => window.__ccTest?.pty.metrics("claude-pty")?.cols ?? 80);
+    const repeated = Array.from(
+      { length: Math.ceil((cols * 3) / 24) },
+      () => "docs/superpowers/specs",
+    ).join("/");
+    const path = `/Users/catli/MyApps/AIMovieFactory/${repeated}/2026-05-25-v1-hover-overlay.md`;
+    await emitPtyLine(page, `  - ${path}\r\n`);
+    await waitForBufferContains(page, "hover-overlay.md");
+
+    const result = await page.evaluate((expectedPath) => {
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      const provider = window.__ccTestPtyLinkProviders?.get("claude-pty/file-download");
+      const element = term?.element;
+      if (!term || !provider || !element) return null;
+
+      for (let lineNumber = 1; lineNumber <= term.buffer.active.length; lineNumber += 1) {
+        let matched = false;
+        provider.provideLinks(lineNumber, (links) => {
+          const link = links?.find((candidate) => candidate.text === expectedPath);
+          if (!link) return;
+          matched = true;
+          link.hover?.(new MouseEvent("mousemove"), link.text);
+        });
+        if (!matched) continue;
+        const segments = Array.from(
+          element.querySelectorAll<HTMLElement>('[data-slot="pty-file-link-hover-segment"]'),
+        ).map((segment) => ({
+          range: segment.dataset.range,
+          width: Number.parseFloat(segment.style.width),
+        }));
+        return {
+          lineNumber,
+          segments,
+          rows: new Set(segments.map((segment) => segment.range?.split(":")[0])).size,
+        };
+      }
+      return null;
+    }, path);
+
+    expect(result).not.toBeNull();
+    expect(result?.segments.length ?? 0).toBeGreaterThan(1);
+    expect(result?.rows ?? 0).toBeGreaterThan(1);
+    expect(result?.segments.every((segment) => segment.width > 0)).toBe(true);
+  });
 });

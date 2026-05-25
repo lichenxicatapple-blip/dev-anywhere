@@ -4,6 +4,19 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.30] - 2026-05-25
+
+### 修复
+
+- 修复 PTY 跨行文档路径 hover 时，下划线只能覆盖当前行的问题；现在 hover 任意一段都会高亮完整路径的每个真实字符分段。
+- 文件路径 link provider 只向 xterm 返回当前行的命中范围，避免跨行 range 被 xterm 原生 underline 拉满空白单元格；完整路径高亮改由 PTY 自绘 overlay 负责。
+
+### 测试
+
+- 新增 xterm 文件路径 link provider 回归，覆盖 hover 第三行时三行真实路径分段都会出现自绘下划线。
+- 新增 PC 端 PTY wrapped path hover 回归，确保每个 overlay 分段宽度为正且跨越多行。
+- 重新验证 PTY 文件/图片链接、移动端触摸文件链接、软键盘输入、回到底部、长按复制和文件链接下载回归。
+
 ## [0.4.29] - 2026-05-25
 
 ### 修复
