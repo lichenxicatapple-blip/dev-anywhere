@@ -154,10 +154,13 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
-      expect(arr).toHaveLength(1);
-      expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
-      expect(arr?.[0]?.range.end).toEqual({ x: 39, y: 1 });
-      expect(arr?.[0]?.text).toContain("foundation-design.md");
+      expect(arr).toHaveLength(3);
+      expect(arr?.map((link) => link.range)).toEqual([
+        { start: { x: 5, y: 1 }, end: { x: 39, y: 1 } },
+        { start: { x: 1, y: 2 }, end: { x: 37, y: 2 } },
+        { start: { x: 1, y: 3 }, end: { x: 20, y: 3 } },
+      ]);
+      expect(arr?.every((link) => link.text.includes("foundation-design.md"))).toBe(true);
     });
 
     providerRef.current?.provideLinks(3, (links) => {
@@ -168,8 +171,8 @@ describe("xterm file download links", () => {
             activate: (event: MouseEvent, text: string) => void;
           }>
         | undefined;
-      expect(arr).toHaveLength(1);
-      const link = arr?.[0];
+      expect(arr).toHaveLength(3);
+      const link = arr?.find((candidate) => candidate.range.start.y === 3);
       expect(link?.text).toBe(
         "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
       );
@@ -241,10 +244,15 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
-      expect(arr).toHaveLength(1);
-      expect(arr?.[0]?.text).toBe(expectedPath);
-      expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
-      expect(arr?.[0]?.range.end).toEqual({ x: 42, y: 1 });
+      expect(arr).toHaveLength(5);
+      expect(arr?.every((link) => link.text === expectedPath)).toBe(true);
+      expect(arr?.map((link) => link.range)).toEqual([
+        { start: { x: 5, y: 1 }, end: { x: 42, y: 1 } },
+        { start: { x: 1, y: 2 }, end: { x: 2, y: 2 } },
+        { start: { x: 5, y: 3 }, end: { x: 42, y: 3 } },
+        { start: { x: 1, y: 4 }, end: { x: 5, y: 4 } },
+        { start: { x: 5, y: 5 }, end: { x: 13, y: 5 } },
+      ]);
     });
 
     providerRef.current?.provideLinks(5, (links) => {
@@ -255,8 +263,8 @@ describe("xterm file download links", () => {
             activate: (event: MouseEvent, text: string) => void;
           }>
         | undefined;
-      expect(arr).toHaveLength(1);
-      const link = arr?.[0];
+      expect(arr).toHaveLength(5);
+      const link = arr?.find((candidate) => candidate.range.start.y === 5);
       expect(link?.text).toBe(expectedPath);
       expect(link?.range.start).toEqual({ x: 5, y: 5 });
       expect(link?.range.end).toEqual({ x: 13, y: 5 });

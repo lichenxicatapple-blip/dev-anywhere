@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.29] - 2026-05-25
+
+### 修复
+
+- 修复移动端 PTY 在软键盘弹出后，visualViewport/rows/clientHeight 重排把旧 `scrollTop` 当成用户回看，导致内容跳到历史顶部的问题。
+- 修复 PTY 跨行文档路径链接下划线从覆盖空白变成只显示首行一段的问题；同一个完整路径现在会返回多段单行 link range，每段只覆盖该行实际路径字符。
+
+### 测试
+
+- 新增 PTY scroll controller 回归，复现软键盘 relayout 后浏览器回放旧底部 scrollTop 时仍应保持 following 并回到新 bottom。
+- 更新 xterm 文件路径 link provider 回归，确保折行和手动续行的同一完整路径会一次返回全部行内 link 段，避免下划线残缺。
+
 ## [0.4.28] - 2026-05-25
 
 ### 修复

@@ -361,21 +361,19 @@ function isFullWidthCodePoint(codePoint: number): boolean {
   );
 }
 
-function getRangeForPathMatch(
-  match: FileDownloadBufferPathMatch,
-  bufferLineNumber: number,
-): ILink["range"] {
-  const segment = match.segments.find((part) => part.lineNumber === bufferLineNumber);
-  if (segment) {
-    return {
+function getRangesForPathMatch(match: FileDownloadBufferPathMatch): ILink["range"][] {
+  if (match.segments.length > 0) {
+    return match.segments.map((segment) => ({
       start: { x: segment.startColumn, y: segment.lineNumber },
       end: { x: segment.endColumn, y: segment.lineNumber },
-    };
+    }));
   }
-  return {
-    start: { x: match.startColumn, y: match.startLineNumber },
-    end: { x: match.endColumn, y: match.endLineNumber },
-  };
+  return [
+    {
+      start: { x: match.startColumn, y: match.startLineNumber },
+      end: { x: match.endColumn, y: match.endLineNumber },
+    },
+  ];
 }
 
 function shouldActivateDownload(event: MouseEvent): boolean {
@@ -409,20 +407,21 @@ export function registerFileDownloadLinkProvider(
         return;
       }
       const links = matches.reduce<ILink[]>((acc, match) => {
-        const range = getRangeForPathMatch(match, bufferLineNumber);
-        acc.push({
-          text: match.path,
-          range,
-          decorations: {
-            underline: true,
-            pointerCursor: true,
-          },
-          // 桌面仍要求 cmd/ctrl + click 防误触。移动端下载走长按选区 toolbar,
-          // tap 文件路径只用于命中/选区候选, 不直接拉取文件。
-          activate: (event) => {
-            activateDownload(match.path, event);
-          },
-        });
+        for (const range of getRangesForPathMatch(match)) {
+          acc.push({
+            text: match.path,
+            range,
+            decorations: {
+              underline: true,
+              pointerCursor: true,
+            },
+            // 桌面仍要求 cmd/ctrl + click 防误触。移动端下载走长按选区 toolbar,
+            // tap 文件路径只用于命中/选区候选, 不直接拉取文件。
+            activate: (event) => {
+              activateDownload(match.path, event);
+            },
+          });
+        }
         return acc;
       }, []);
       callback(links.length > 0 ? links : undefined);

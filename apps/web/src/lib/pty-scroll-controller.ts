@@ -76,6 +76,7 @@ type PendingFrameResult = "none" | "followed" | "marked";
 type TouchScrollGestureMode = "pending" | "vertical" | "horizontal";
 
 const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
+const RECENT_VISUAL_VIEWPORT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
 const TOUCH_GESTURE_SLOP_PX = 16;
@@ -1015,6 +1016,34 @@ export function attachPtyScrollController(
     return true;
   };
 
+  const restoreRecentVisualViewportLayoutDrift = (
+    effectiveScrollTop: number,
+    atBottom: boolean,
+    verticalDelta: number,
+  ): boolean => {
+    if (atBottom) return false;
+    if (verticalIntent.touchActive) return false;
+    if (!canPassiveFollow(verticalIntent)) return false;
+    const recentVisualViewportChange =
+      lastVisualViewportChangeAt !== null &&
+      performance.now() - lastVisualViewportChangeAt <= RECENT_VISUAL_VIEWPORT_LAYOUT_DRIFT_MS;
+    if (!recentVisualViewportChange) return false;
+
+    const anchor = getCurrentAnchor();
+    trace("container-scroll:restore-vv-layout-bottom", {
+      details: `scrollTop=${effectiveScrollTop} bottom=${anchor.bottomScrollTop}`,
+    });
+    dispatchVerticalIntent({
+      type: "container-scroll",
+      source: "programmatic-bottom",
+      scrollTop: effectiveScrollTop,
+      atCursorAwareBottom: atBottom,
+      verticalDelta,
+    });
+    scrollToBottom("visualViewportLayoutDrift");
+    return true;
+  };
+
   const onContainerScroll = (): void => {
     trace("container-scroll");
     clearHorizontalIntentIfUnscrollable("onContainerScroll");
@@ -1139,6 +1168,9 @@ export function attachPtyScrollController(
       return;
     }
     if (restoreRecentRawInputLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
+      return;
+    }
+    if (restoreRecentVisualViewportLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
       return;
     }
     if (pageResumeRestorePendingFromFollowing) {
