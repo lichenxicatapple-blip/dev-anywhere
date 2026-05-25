@@ -677,7 +677,7 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(1475);
   });
 
-  it("batches same-row native touch scroll without resyncing xterm", () => {
+  it("pins same-row native touch scroll to the finger without resyncing xterm", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -728,6 +728,7 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 50890;
     container.dispatchEvent(new Event("scroll"));
 
+    expect(container.scrollTop).toBe(50893);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(host.style.top).toBe("50500px");
     expect(onScrollStateChange).not.toHaveBeenCalled();
@@ -736,7 +737,7 @@ describe("attachPtyScrollController", () => {
     queued[0]?.(performance.now());
 
     expect(onScrollStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ scrollTop: 50890, scrollWidth: 2184 }),
+      expect.objectContaining({ scrollTop: 50893, scrollWidth: 2184 }),
     );
   });
 
@@ -787,6 +788,63 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(43216);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(host.style.top).toBe("42820px");
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+
+    queued[0]?.(performance.now());
+  });
+
+  it("corrects same-viewport native overshoot while the finger is stationary", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 64940);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 3242: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 3245;
+    terminal.buffer.active.viewportY = 3193;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    container.scrollTop = 64306;
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 384));
+    container.scrollTop = 64258.28515625;
+    container.dispatchEvent(touchEvent("touchmove", 425));
+
+    expect(container.scrollTop).toBe(64265);
+
+    container.scrollTop = 64251.4296875;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBe(64265);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(host.style.top).toBe("63860px");
     expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
 
     queued[0]?.(performance.now());

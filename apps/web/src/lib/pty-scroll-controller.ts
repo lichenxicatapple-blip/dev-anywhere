@@ -84,6 +84,7 @@ const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
 const TOUCH_GESTURE_SLOP_PX = 16;
 const TOUCH_HORIZONTAL_LOCK_RATIO = 1.15;
+const TOUCH_SAME_ROW_FINGER_TOLERANCE_PX = 1;
 
 export function attachPtyScrollController(
   options: PtyScrollControllerOptions,
@@ -800,8 +801,16 @@ export function attachPtyScrollController(
 
   const followSameViewportTouchScrollToFinger = (
     expectation: ReturnType<typeof getTouchScrollExpectation>,
+    opts: { event?: TouchEvent; traceEvent: string },
   ): boolean => {
-    if (!expectation || !touchStartedAtCursorAwareBottom) return false;
+    if (
+      !expectation ||
+      !verticalIntent.touchActive ||
+      touchScrollGestureMode !== "vertical" ||
+      !touchStartedAtCursorAwareBottom
+    ) {
+      return false;
+    }
     const { cellH } = getDims();
     if (cellH <= 0) return false;
 
@@ -818,9 +827,15 @@ export function attachPtyScrollController(
 
     const movingAwayFromBottom =
       targetScrollTop < expectation.gestureBaseScrollTop - atBottomThreshold;
-    const nativeLagPx = currentScrollTop - targetScrollTop;
-    if (!movingAwayFromBottom || nativeLagPx <= atBottomThreshold) return false;
+    const nativeDeltaPx = currentScrollTop - targetScrollTop;
+    if (
+      !movingAwayFromBottom ||
+      Math.abs(nativeDeltaPx) <= TOUCH_SAME_ROW_FINGER_TOLERANCE_PX
+    ) {
+      return false;
+    }
 
+    if (opts.event?.cancelable) opts.event.preventDefault();
     container.scrollTop = targetScrollTop;
     lastSeenScrollTop = targetScrollTop;
     touchGestureMaxScrollTop = Math.max(
@@ -828,10 +843,10 @@ export function attachPtyScrollController(
       targetScrollTop,
     );
     scheduleTouchScrollNotify();
-    trace("touchmove:same-row-follow-finger", {
+    trace(opts.traceEvent, {
       details: [
         `scrollTop=${Math.round(currentScrollTop)}->${Math.round(targetScrollTop)}`,
-        `lag=${Math.round(nativeLagPx)}`,
+        `delta=${Math.round(nativeDeltaPx)}`,
         `viewportY=${term.buffer.active.viewportY}`,
       ].join(" "),
     });
@@ -1150,16 +1165,24 @@ export function attachPtyScrollController(
     }
     const effectiveScrollTop = clampCursorAwareBottomOverscroll(rawScrollTop);
     if (verticalIntent.touchActive) {
+      const expectation = getTouchScrollExpectation();
       trace("container-scroll:touch-active", {
         details:
           describeTouchScrollExpectation(
-            getTouchScrollExpectation(),
+            expectation,
             rawScrollTop,
             effectiveScrollTop,
             previousSeenScrollTop,
             verticalDelta,
           ) ?? `raw=${Math.round(rawScrollTop)} effective=${Math.round(effectiveScrollTop)}`,
       });
+      if (
+        followSameViewportTouchScrollToFinger(expectation, {
+          traceEvent: "container-scroll:same-row-follow-finger",
+        })
+      ) {
+        return;
+      }
     }
     lastSeenScrollTop = effectiveScrollTop;
     if (syncing.external) {
@@ -1630,7 +1653,10 @@ export function attachPtyScrollController(
           `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
         ].join(" "),
       });
-      followSameViewportTouchScrollToFinger(expectation);
+      followSameViewportTouchScrollToFinger(expectation, {
+        event,
+        traceEvent: "touchmove:same-row-follow-finger",
+      });
     }
     const keepFollowingAtBottomBoundary =
       expectation &&
