@@ -8,6 +8,7 @@ import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared"
 import { useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import type { RelayClient } from "@/services/relay-client";
+import { showCompactEndToast } from "@/lib/compact-toast";
 import { registerDispatcher } from "./dispatcher-registry";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
@@ -115,7 +116,13 @@ function handleSessionHistoryMessages(
 
 function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result" }>) {
   const store = useChatStore.getState();
+  const wasCompacting =
+    useSessionStore.getState().sessions.find((session) => session.sessionId === msg.sessionId)
+      ?.state === "compacting";
   const resultText = typeof msg.result === "string" ? msg.result : "";
+  if (wasCompacting) {
+    showCompactEndToast(msg.sessionId, msg.success && !msg.isError, resultText);
+  }
   if (resultText.trim()) {
     const slice = store.bySessionId[msg.sessionId];
     const last = slice?.messages[slice.messages.length - 1];

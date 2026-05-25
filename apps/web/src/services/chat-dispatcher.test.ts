@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { toastSuccess, toastError } = vi.hoisted(() => ({
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("@/components/toast", () => ({
+  toast: {
+    loading: vi.fn(),
+    success: toastSuccess,
+    error: toastError,
+  },
+}));
+
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: null,
   wsManagerRef: null,
@@ -7,6 +20,7 @@ vi.mock("@/hooks/use-relay-setup", () => ({
 
 import { createChatMessageHandler } from "./chat-dispatcher";
 import { useChatStore } from "@/stores/chat-store";
+import { useSessionStore } from "@/stores/session-store";
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
 
 function envelope(overrides: Partial<MessageEnvelope>): MessageEnvelope {
@@ -29,6 +43,9 @@ function envelope(overrides: Partial<MessageEnvelope>): MessageEnvelope {
 describe("chat-dispatcher permission flow", () => {
   beforeEach(() => {
     useChatStore.getState().clearAllSessions();
+    useSessionStore.setState({ sessions: [] });
+    toastSuccess.mockReset();
+    toastError.mockReset();
   });
 
   it("acks delivered permission requests and waits for proxy decision result", () => {
@@ -193,6 +210,44 @@ describe("chat-dispatcher permission flow", () => {
       text: "OK",
       isPartial: false,
     });
+  });
+
+  it("shows a completion toast for compact turn_result while the session is compacting", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "compacting" }],
+    });
+
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: true,
+      isError: false,
+      result: "上下文压缩完成。",
+    } as RelayControlMessage);
+
+    expect(toastSuccess).toHaveBeenCalledWith("上下文压缩完成", { id: "compact-s1" });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("shows an error toast when compact turn_result fails", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "compacting" }],
+    });
+
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: false,
+      isError: true,
+      result: "上下文压缩失败：No messages to compact",
+    } as RelayControlMessage);
+
+    expect(toastError).toHaveBeenCalledWith("上下文压缩失败：No messages to compact", {
+      id: "compact-s1",
+    });
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it("renders accepted user_input envelopes idempotently across clients", () => {

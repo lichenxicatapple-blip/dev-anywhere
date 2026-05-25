@@ -297,6 +297,8 @@ describe("InputBar compact command", () => {
       },
     );
     sendEnvelope.mockReset();
+    toastLoading.mockReset();
+    toastLoading.mockReturnValue("loading-id");
     useChatStore.setState({
       bySessionId: {
         s1: { ...EMPTY_SLICE, inputDraft: "/compact" },
@@ -323,5 +325,6 @@ describe("InputBar compact command", () => {
     expect(useSessionStore.getState().sessions.find((s) => s.sessionId === "s1")?.state).toBe(
       "compacting",
     );
+    expect(toastLoading).toHaveBeenCalledWith("正在压缩上下文...", { id: "compact-s1" });
   });
 });

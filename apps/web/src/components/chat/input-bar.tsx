@@ -32,6 +32,7 @@ import type { PickerHandle } from "./picker-handle";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 import { getClipboardImageFile, insertTextAtSelection } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
+import { showCompactStartToast } from "@/lib/compact-toast";
 import { toast } from "@/components/toast";
 
 interface InputBarProps {
@@ -128,6 +129,7 @@ export function InputBar({ sessionId }: InputBarProps) {
     }
     // 乐观翻 session.state：proxy 20~50ms 内会回 session_status 覆写（包括万一没被接受的降级态）
     updateSessionState(sessionId, isCompactCommand ? "compacting" : "working", now);
+    if (isCompactCommand) showCompactStartToast(sessionId);
     relay.sendEnvelope({
       type: "user_input",
       sessionId,

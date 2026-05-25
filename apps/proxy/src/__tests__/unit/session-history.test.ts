@@ -585,6 +585,48 @@ describe("readSessionMessages", () => {
     });
   });
 
+  it("filters Claude slash-command and local-command records from restored conversation history", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "session-compact.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          message: { role: "user", content: "before compact" },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content:
+              "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content: "<local-command-stdout>Compacted </local-command-stdout>",
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { role: "assistant", content: "after compact" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const messages = await readSessionMessages("session-compact");
+    expect(messages.map((message) => message.text)).toEqual(["before compact", "after compact"]);
+
+    const page = await readSessionMessagesPage("session-compact", { limit: 10 });
+    expect(page.messages.map((message) => message.text)).toEqual([
+      "before compact",
+      "after compact",
+    ]);
+  });
+
   it("reads Claude conversation history in reverse pages with stable cursors", async () => {
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     mkdirSync(projectDir, { recursive: true });

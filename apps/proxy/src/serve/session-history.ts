@@ -414,6 +414,20 @@ function extractSlashCommand(text: string): string | null {
   return normalizeHistoryTitle(args ? `${nameMatch[1]} ${args}` : nameMatch[1]);
 }
 
+function isCommandEnvelope(text: string): boolean {
+  return /<command-name>[^<]+<\/command-name>/.test(text);
+}
+
+function isLocalCommandEnvelope(text: string): boolean {
+  return /<\/?local-command-(?:stdout|stderr)>/.test(text);
+}
+
+function extractConversationString(text: string): string | null {
+  if (isCommandEnvelope(text)) return extractSlashCommand(text);
+  if (isLocalCommandEnvelope(text)) return null;
+  return normalizeConversationText(text);
+}
+
 function extractMessageText(msg: unknown): string | null {
   if (typeof msg === "string") {
     const cmd = extractSlashCommand(msg);
@@ -461,17 +475,13 @@ function normalizeConversationText(text: string): string | null {
 // 对话正文恢复必须保留换行和 Markdown 结构；不能复用标题归一化逻辑。
 function extractConversationText(msg: unknown): string | null {
   if (typeof msg === "string") {
-    const cmd = extractSlashCommand(msg);
-    if (cmd) return cmd;
-    return normalizeConversationText(msg);
+    return extractConversationString(msg);
   }
 
   if (msg && typeof msg === "object" && "content" in msg) {
     const content = (msg as { content: unknown }).content;
     if (typeof content === "string") {
-      const cmd = extractSlashCommand(content);
-      if (cmd) return cmd;
-      return normalizeConversationText(content);
+      return extractConversationString(content);
     }
     if (Array.isArray(content)) {
       const texts = content

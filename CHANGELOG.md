@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.32] - 2026-05-25
+
+### 修复
+
+- 修复刷新/恢复 JSON 会话历史时，Claude `/compact` 内部命令和本地命令输出被当成聊天气泡展示，出现 `/compact compact`、`Compacted` 这类噪声消息的问题。
+- `/compact` 开始压缩时显示加载 toast，压缩完成或失败时更新为成功/错误 toast，让上下文压缩状态变化更明确。
+
+### 测试
+
+- 新增 Claude JSONL 历史恢复回归，覆盖 slash-command 与 local-command 记录不进入聊天历史。
+- 新增 `/compact` 输入栏和 turn_result dispatcher 回归，覆盖压缩开始、完成、失败的 toast 行为。
+
 ## [0.4.31] - 2026-05-25
 
 ### 修复
