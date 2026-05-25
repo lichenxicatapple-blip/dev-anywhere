@@ -98,6 +98,40 @@ describe("attachPtyResizeController", () => {
     expect(onResize).not.toHaveBeenCalled();
   });
 
+  it("preserves current rows while allowing column changes when requested", () => {
+    const container = document.createElement("div") as HTMLDivElement;
+    defineSize(container, { clientWidth: 1000, clientHeight: 220 });
+    const term = createTerminal();
+    const onResize = vi.fn();
+
+    attachPtyResizeController({
+      container,
+      term,
+      onResize,
+      preserveRows: () => true,
+    });
+
+    expect(term.resize).toHaveBeenCalledWith(100, 20);
+    expect(onResize).toHaveBeenCalledWith(100, 20);
+  });
+
+  it("does not resize to a shorter soft-keyboard height when rows are preserved", () => {
+    const container = document.createElement("div") as HTMLDivElement;
+    defineSize(container, { clientWidth: 800, clientHeight: 220 });
+    const term = createTerminal();
+    const onResize = vi.fn();
+
+    attachPtyResizeController({
+      container,
+      term,
+      onResize,
+      preserveRows: () => true,
+    });
+
+    expect(term.resize).not.toHaveBeenCalled();
+    expect(onResize).not.toHaveBeenCalled();
+  });
+
   it("disconnects resize observation", () => {
     const container = document.createElement("div") as HTMLDivElement;
     defineSize(container, { clientWidth: 1200, clientHeight: 600 });

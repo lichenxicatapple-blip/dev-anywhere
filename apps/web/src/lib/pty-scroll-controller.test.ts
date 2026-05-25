@@ -1164,7 +1164,7 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
-  it("restores bottom when keyboard layout shifts scrollTop during a stationary bottom touch", () => {
+  it("does not restore bottom for a non-catastrophic keyboard layout shift during a stationary bottom touch", () => {
     const visualViewport = new EventTarget();
     Object.assign(visualViewport, {
       height: 390,
@@ -1199,50 +1199,8 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     container.dispatchEvent(touchEvent("touchend", 300));
 
-    expect(container.scrollTop).toBe(1600);
-    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
-  });
-
-  it("restores bottom when a stationary bottom touch scroll jump happens before visualViewport resize", () => {
-    const visualViewport = new EventTarget();
-    Object.assign(visualViewport, {
-      height: 390,
-      width: 360,
-      offsetTop: 0,
-      pageTop: 0,
-      scale: 1,
-    });
-    Object.defineProperty(window, "visualViewport", {
-      configurable: true,
-      value: visualViewport,
-    });
-    const { container, spacer, host } = createDom();
-    const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
-    attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      onUserVerticalScrollIntentChange,
-    });
-    expect(container.scrollTop).toBe(1600);
-
-    container.dispatchEvent(touchEvent("touchstart", 300));
-    container.scrollTop = 1200;
-    container.dispatchEvent(new Event("scroll"));
-    window.visualViewport?.dispatchEvent(new Event("resize"));
-    container.dispatchEvent(touchEvent("touchend", 300));
-
-    expect(container.scrollTop).toBe(1600);
-    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([
-      true,
-      false,
-    ]);
+    expect(container.scrollTop).toBe(1200);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
   });
 
   it("restores cursor-aware bottom when a stationary long-host touch jumps to host top", () => {
@@ -1341,7 +1299,34 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
 
-  it("keeps following after a keyboard-height bottom touch restores to the new semantic bottom", () => {
+  it("does not restore tiny host-top-adjacent deltas at cursor-aware bottom", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "prompt" });
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBe(1600);
+    expect(host.style.top).toBe("1600px");
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 309));
+    terminal.scrollToLine.mockClear();
+    container.scrollTop = 1600;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
+  it("keeps following when a stale host-top scroll replay is restored to semantic bottom", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -1395,79 +1380,6 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(20686);
     expect(host.style.top).toBe("20240px");
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
-  });
-
-  it("keeps following when soft-keyboard relayout replays an old bottom scrollTop", () => {
-    const visualViewport = new EventTarget();
-    Object.assign(visualViewport, {
-      height: 704,
-      width: 360,
-      offsetTop: 0,
-      pageTop: 0,
-      scale: 1,
-    });
-    Object.defineProperty(window, "visualViewport", {
-      configurable: true,
-      value: visualViewport,
-    });
-    const { container, spacer, host } = createDom();
-    container.style.paddingTop = "8px";
-    container.style.paddingBottom = "32px";
-    defineSize(container, { clientHeight: 634, clientWidth: 360 });
-    Object.defineProperty(container, "scrollHeight", {
-      configurable: true,
-      get: () =>
-        (parseFloat(spacer.style.height || "0") || 0) +
-        parseFloat(container.style.paddingTop || "0") +
-        parseFloat(container.style.paddingBottom || "0"),
-    });
-    defineScrollWidth(container, 360);
-    const screen = host.querySelector<HTMLElement>(".xterm-screen");
-    if (!screen) throw new Error("missing xterm screen");
-    defineSize(screen, { clientHeight: 620, clientWidth: 336 });
-    const { terminal } = createTerminal({ 1021: "live prompt" });
-    terminal.rows = 31;
-    terminal.cols = 42;
-    terminal.buffer.active.length = 1024;
-    terminal.buffer.active.cursorX = 2;
-    terminal.buffer.active.cursorY = 28;
-    const onUserVerticalScrollIntentChange = vi.fn();
-
-    const controller = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      onUserVerticalScrollIntentChange,
-    });
-    const preKeyboardScrollTop = container.scrollTop;
-    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
-
-    Object.assign(visualViewport, { height: 399.4285583496094 });
-    visualViewport.dispatchEvent(new Event("resize"));
-    container.style.paddingBottom = "112px";
-    defineSize(container, { clientHeight: 347 });
-    terminal.rows = 11;
-    terminal.buffer.active.cursorY = 8;
-    defineSize(screen, { clientHeight: 220 });
-    controller.relayout();
-    const postKeyboardScrollTop = container.scrollTop;
-    expect(postKeyboardScrollTop).toBeGreaterThan(preKeyboardScrollTop);
-    expect(terminal.buffer.active.viewportY).toBe(1013);
-
-    onUserVerticalScrollIntentChange.mockClear();
-    terminal.scrollToLine.mockClear();
-    container.scrollTop = preKeyboardScrollTop;
-    container.dispatchEvent(new Event("scroll"));
-
-    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
-    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
-    expect(container.scrollTop).toBe(postKeyboardScrollTop);
-    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(1013);
   });
 
   it("keeps following when long-line input temporarily shrinks the scroll range", () => {

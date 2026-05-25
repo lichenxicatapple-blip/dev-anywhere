@@ -75,13 +75,18 @@ export interface PtyScrollState {
 type PendingFrameResult = "none" | "followed" | "marked";
 type TouchScrollGestureMode = "pending" | "vertical" | "horizontal";
 
-const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
-const RECENT_VISUAL_VIEWPORT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
+// Input/focus follow can briefly shrink/re-expand the DOM scroll range before the next render
+// settles. Keep this scoped to scheduled follow-to-bottom paths; keyboard visualViewport drift is
+// intentionally not restored here.
+const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
+// Only repair native scroll positions that are physically impossible for the active gesture.
+// Smaller deltas are left to the browser, otherwise slow finger drags become jittery.
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
+// Real Android can report scrollTop near host.style.top during a bottom touch. This guard fixes
+// the catastrophic replay, while ignoring the tiny host-top-adjacent deltas seen on real devices.
+const TOUCH_HOST_TOP_JUMP_MIN_THRESHOLD_PX = 64;
 const TOUCH_GESTURE_SLOP_PX = 16;
-const TOUCH_STATIONARY_RESTORE_SLOP_PX = 2;
-const TOUCH_STATIONARY_RESTORE_NATIVE_SCROLL_SLOP_PX = 64;
 const TOUCH_HORIZONTAL_GESTURE_SLOP_PX = 6;
 const TOUCH_HORIZONTAL_LOCK_RATIO = 1;
 const TOUCH_VERTICAL_LOCK_RATIO = 1.25;
@@ -146,9 +151,6 @@ export function attachPtyScrollController(
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
   // 误把这次改写当成用户滚动 → 状态错乱。
   let pendingFollowCursorScrollLeft: number | null = null;
-  // touch native scroll 可能先把 container 推过 cursor-aware bottom, 再被我们 clamp 回来。
-  // touchend 释放回看意图时不能只看最终 scrollTop, 还要知道这次手势是否确实向下到过底部。
-  let touchGestureMaxScrollTop: number | null = null;
   let touchStartedAtCursorAwareBottom = false;
   let touchStartClientX: number | null = null;
   let touchStartScrollLeft: number | null = null;
@@ -174,7 +176,6 @@ export function attachPtyScrollController(
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
   // UX 跳变。null 表示"还没记录过", 等同于"上一帧没看到光标行"。
   let prevCursorBufferRow: number | null = null;
-  let lastVisualViewportChangeAt: number | null = null;
   let lastRawInputFollowAt: number | null = null;
   let pendingTouchScrollNotifyFrame: number | null = null;
   let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
@@ -818,51 +819,6 @@ export function attachPtyScrollController(
     return decision.scrollTop;
   };
 
-  const restoreStationaryTouchLayoutShift = (effectiveScrollTop: number): boolean => {
-    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
-    if (!verticalIntent.touchActive || verticalIntent.touchReviewNotified) return false;
-    if (touchStartScrollTop === null) return false;
-
-    const touchStartY = verticalIntent.touchStartY;
-    const touchMovedDuringGesture =
-      touchStartY !== null &&
-      lastTouchClientY !== null &&
-      Math.abs(lastTouchClientY - touchStartY) > TOUCH_STATIONARY_RESTORE_SLOP_PX;
-    if (touchMovedDuringGesture) {
-      const nativeScrollDistance = Math.abs(touchStartScrollTop - effectiveScrollTop);
-      if (nativeScrollDistance <= TOUCH_STATIONARY_RESTORE_NATIVE_SCROLL_SLOP_PX) return false;
-    }
-
-    const { cellH } = getDims();
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const longHost = cellH > 0 && term.rows * cellH > visibleContentHeight;
-    const recentVisualViewportChange =
-      lastVisualViewportChangeAt !== null && performance.now() - lastVisualViewportChangeAt <= 500;
-    if (!longHost && !recentVisualViewportChange) return false;
-
-    const anchor = getCurrentAnchor();
-    const touchMaxScrollTop = touchGestureMaxScrollTop ?? touchStartScrollTop;
-    const startedAtCursorAwareBottom =
-      Math.max(touchStartScrollTop, touchMaxScrollTop) >=
-      anchor.bottomScrollTop - atBottomThreshold;
-    const jumpedAwayFromTouchStart = effectiveScrollTop < touchStartScrollTop - atBottomThreshold;
-    const jumpedAwayFromCurrentBottom =
-      effectiveScrollTop < anchor.bottomScrollTop - atBottomThreshold;
-    if (!startedAtCursorAwareBottom || !jumpedAwayFromTouchStart || !jumpedAwayFromCurrentBottom) {
-      return false;
-    }
-
-    trace("container-scroll:restore-touch-layout-bottom", {
-      details: `scrollTop=${effectiveScrollTop} bottom=${anchor.bottomScrollTop} touchStart=${touchStartScrollTop}`,
-    });
-    container.scrollTop = anchor.bottomScrollTop;
-    lastSeenScrollTop = anchor.bottomScrollTop;
-    touchGestureMaxScrollTop = Math.max(touchMaxScrollTop, anchor.bottomScrollTop);
-    syncContainerScroll({ deferHostUntilRender: true });
-    return true;
-  };
-
   const getTouchScrollExpectation = (currentYOverride?: number | null) => {
     if (!verticalIntent.touchActive) return false;
     const touchStartScrollTop = verticalIntent.touchStartScrollTop;
@@ -957,13 +913,23 @@ export function attachPtyScrollController(
     const hasTouchMovement = Math.abs(currentY - touchStartY) > 0.5;
     const jumpedToDomTop =
       effectiveScrollTop <= atBottomThreshold && gestureBaseScrollTop > container.clientHeight;
-    if (!hasTouchMovement && !jumpedToDomTop) return false;
+    const hostTop = parseFloat(host.style.top || "0");
+    const anchor = getCurrentAnchor();
+    const jumpedToHostTop =
+      Number.isFinite(hostTop) &&
+      Math.abs(effectiveScrollTop - hostTop) <= atBottomThreshold &&
+      Math.abs(anchor.bottomScrollTop - hostTop) <= container.clientHeight + atBottomThreshold &&
+      Math.abs(expectedScrollTop - effectiveScrollTop) > TOUCH_HOST_TOP_JUMP_MIN_THRESHOLD_PX;
+    if (!hasTouchMovement && !jumpedToDomTop && !jumpedToHostTop) return false;
 
     const impossibleJumpThreshold = Math.max(
       TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX,
       container.clientHeight * 1.25,
     );
-    if (Math.abs(effectiveScrollTop - expectedScrollTop) <= impossibleJumpThreshold) {
+    if (
+      !jumpedToHostTop &&
+      Math.abs(effectiveScrollTop - expectedScrollTop) <= impossibleJumpThreshold
+    ) {
       return false;
     }
 
@@ -974,16 +940,15 @@ export function attachPtyScrollController(
         `diff=${Math.round(effectiveScrollTop - expectedScrollTop)}`,
         `threshold=${Math.round(impossibleJumpThreshold)}`,
         `touchStart=${Math.round(touchStartScrollTop)}`,
+        jumpedToHostTop ? "hostTop=1" : null,
         `startY=${Math.round(touchStartY)}`,
         `currentY=${Math.round(currentY)}`,
-      ].join(" "),
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
     container.scrollTop = expectedScrollTop;
     lastSeenScrollTop = expectedScrollTop;
-    touchGestureMaxScrollTop = Math.max(
-      touchGestureMaxScrollTop ?? expectedScrollTop,
-      expectedScrollTop,
-    );
     syncContainerScroll({ deferHostUntilRender: true });
     return true;
   };
@@ -1013,34 +978,6 @@ export function attachPtyScrollController(
       verticalDelta,
     });
     scrollToBottom("rawInputLayoutDrift");
-    return true;
-  };
-
-  const restoreRecentVisualViewportLayoutDrift = (
-    effectiveScrollTop: number,
-    atBottom: boolean,
-    verticalDelta: number,
-  ): boolean => {
-    if (atBottom) return false;
-    if (verticalIntent.touchActive) return false;
-    if (!canPassiveFollow(verticalIntent)) return false;
-    const recentVisualViewportChange =
-      lastVisualViewportChangeAt !== null &&
-      performance.now() - lastVisualViewportChangeAt <= RECENT_VISUAL_VIEWPORT_LAYOUT_DRIFT_MS;
-    if (!recentVisualViewportChange) return false;
-
-    const anchor = getCurrentAnchor();
-    trace("container-scroll:restore-vv-layout-bottom", {
-      details: `scrollTop=${effectiveScrollTop} bottom=${anchor.bottomScrollTop}`,
-    });
-    dispatchVerticalIntent({
-      type: "container-scroll",
-      source: "programmatic-bottom",
-      scrollTop: effectiveScrollTop,
-      atCursorAwareBottom: atBottom,
-      verticalDelta,
-    });
-    scrollToBottom("visualViewportLayoutDrift");
     return true;
   };
 
@@ -1095,9 +1032,6 @@ export function attachPtyScrollController(
     const rawScrollTop = container.scrollTop;
     const previousSeenScrollTop = lastSeenScrollTop;
     const verticalDelta = rawScrollTop - lastSeenScrollTop;
-    if (verticalIntent.touchActive) {
-      touchGestureMaxScrollTop = Math.max(touchGestureMaxScrollTop ?? rawScrollTop, rawScrollTop);
-    }
     const effectiveScrollTop = clampCursorAwareBottomOverscroll(rawScrollTop);
     if (verticalIntent.touchActive) {
       const expectation = getTouchScrollExpectation();
@@ -1161,16 +1095,10 @@ export function attachPtyScrollController(
       return;
     }
     pendingProgrammaticScrollTop = null;
-    if (restoreStationaryTouchLayoutShift(effectiveScrollTop)) {
-      return;
-    }
     if (restoreImpossibleTouchScrollJump(effectiveScrollTop)) {
       return;
     }
     if (restoreRecentRawInputLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
-      return;
-    }
-    if (restoreRecentVisualViewportLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
       return;
     }
     if (pageResumeRestorePendingFromFollowing) {
@@ -1429,7 +1357,6 @@ export function attachPtyScrollController(
     const startX = touch?.clientX ?? null;
     const startY = touch?.clientY ?? null;
     clearHorizontalIntentIfUnscrollable("touchstart");
-    touchGestureMaxScrollTop = container.scrollTop;
     const anchor = getCurrentAnchor();
     touchStartedAtCursorAwareBottom = anchor.isAtBottom;
     touchStartClientX = startX;
@@ -1620,7 +1547,6 @@ export function attachPtyScrollController(
       (touchStartedAtCursorAwareBottom &&
         !reviewedDuringTouch &&
         stayedNearTouchStart);
-    touchGestureMaxScrollTop = null;
     touchStartedAtCursorAwareBottom = false;
     touchStartClientX = null;
     touchStartScrollLeft = null;
@@ -1670,8 +1596,6 @@ export function attachPtyScrollController(
   let prevVvHeight: number | null = null;
   let prevVvOffsetTop: number | null = null;
   const onVvResize = (): void => {
-    lastVisualViewportChangeAt = performance.now();
-    restoreStationaryTouchLayoutShift(container.scrollTop);
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;
@@ -1682,8 +1606,6 @@ export function attachPtyScrollController(
     trace("vv:resize", { vvHeightDelta: dh, vvOffsetDelta: dy });
   };
   const onVvScroll = (): void => {
-    lastVisualViewportChangeAt = performance.now();
-    restoreStationaryTouchLayoutShift(container.scrollTop);
     if (!isPtyScrollTraceEnabled()) return;
     const vv = window.visualViewport;
     if (!vv) return;

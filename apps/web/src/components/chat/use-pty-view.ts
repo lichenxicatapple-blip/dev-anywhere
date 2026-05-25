@@ -175,6 +175,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
+  const softKeyboardLayoutActiveRef = useRef(false);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
@@ -230,6 +231,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const { ptyInputFocused, suppressPtyFocus, handleFocusCapture, handleBlurCapture } = focus;
   const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+  softKeyboardLayoutActiveRef.current =
+    touchEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
 
   mobileLayoutDebugRef.current = {
     keyboardOffset,
@@ -695,6 +698,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
               relay.sendControl({ type: "terminal_resize_request", sessionId, cols, rows });
             },
             onRelayout: () => scrollControllerRef.current?.relayout(),
+            preserveRows: () => softKeyboardLayoutActiveRef.current,
           });
           resizeDispose = resizeCtrl.dispose;
         }

@@ -7,6 +7,7 @@ interface PtyResizeControllerOptions {
   term: Terminal;
   onResize: (cols: number, rows: number) => void;
   onRelayout?: () => void;
+  preserveRows?: () => boolean;
   minCols?: number;
   minRows?: number;
 }
@@ -54,7 +55,7 @@ function getAvailableContainerSize(container: HTMLDivElement): {
 export function attachPtyResizeController(
   options: PtyResizeControllerOptions,
 ): PtyResizeController {
-  const { container, term, onResize, onRelayout, minCols, minRows } = options;
+  const { container, term, onResize, onRelayout, preserveRows, minCols, minRows } = options;
   let disposed = false;
   let frame: number | null = null;
 
@@ -70,9 +71,11 @@ export function attachPtyResizeController(
       minCols,
       minRows,
     });
-    if (!next || (next.cols === term.cols && next.rows === term.rows)) return;
-    term.resize(next.cols, next.rows);
-    onResize(next.cols, next.rows);
+    if (!next) return;
+    const rows = preserveRows?.() ? term.rows : next.rows;
+    if (next.cols === term.cols && rows === term.rows) return;
+    term.resize(next.cols, rows);
+    onResize(next.cols, rows);
     requestAnimationFrame(() => {
       if (!disposed) onRelayout?.();
     });

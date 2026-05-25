@@ -87,6 +87,11 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("raises the Android soft keyboard and keeps PTY controls above it", async ({ emuPage }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    const rowsBeforeFocus = await emuPage.evaluate(
+      (sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
+      SESSION_ID,
+    );
+    expect(rowsBeforeFocus).toBeGreaterThan(0);
 
     await touchTerminal(emuPage);
     await expect(
@@ -97,11 +102,12 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
     }
 
-    const metrics = await emuPage.evaluate(() => {
+    const metrics = await emuPage.evaluate((sid) => {
       const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
       const controlsRect = controls?.getBoundingClientRect();
       return {
         controlsBottom: controlsRect ? controlsRect.y + controlsRect.height : null,
+        terminalRows: window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
         keyboardOffset: Number(
           document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
             "0",
@@ -113,9 +119,10 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
         ),
         visualViewportHeight: window.visualViewport?.height ?? window.innerHeight,
       };
-    });
+    }, SESSION_ID);
 
     expect(metrics.keyboardOffset).toBeGreaterThan(0);
+    expect(metrics.terminalRows).toBe(rowsBeforeFocus);
     expect(metrics.controlsBottom).not.toBeNull();
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       metrics.visualViewportHeight + 2,
