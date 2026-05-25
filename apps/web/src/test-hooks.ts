@@ -18,7 +18,7 @@ interface CCTestHooks {
     markTurnComplete: (sessionId: string) => void;
     loadHistory: (
       sessionId: string,
-      messages: Array<{ role: "user" | "assistant"; text: string; timestamp?: number }>,
+      messages: Array<{ role: "user" | "assistant" | "system"; text: string; timestamp?: number }>,
     ) => void;
   };
   session: {

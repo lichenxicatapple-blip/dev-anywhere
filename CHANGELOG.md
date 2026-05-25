@@ -8,13 +8,15 @@
 
 ### 修复
 
-- 修复刷新/恢复 JSON 会话历史时，Claude `/compact` 内部命令和本地命令输出被当成聊天气泡展示，出现 `/compact compact`、`Compacted` 这类噪声消息的问题。
+- 修复刷新/恢复 JSON 会话历史时，Claude `/compact` 内部命令和本地命令输出被当成聊天气泡展示，出现 `/compact compact`、`Compacted` 这类噪声消息的问题；压缩成功会保留一条居中的“上下文已压缩”历史标记。
 - `/compact` 开始压缩时显示加载 toast，压缩完成或失败时更新为成功/错误 toast，让上下文压缩状态变化更明确。
+- 优化手机横屏下的设置弹窗：弹窗内容限制在视口内滚动，关闭按钮不会跑出可视区，横屏下进入设置的按钮也保持 44px 触摸目标。
 
 ### 测试
 
-- 新增 Claude JSONL 历史恢复回归，覆盖 slash-command 与 local-command 记录不进入聊天历史。
+- 新增 Claude JSONL 历史恢复回归，覆盖 slash-command 不进入聊天历史、compact local-command 转成系统历史标记。
 - 新增 `/compact` 输入栏和 turn_result dispatcher 回归，覆盖压缩开始、完成、失败的 toast 行为。
+- 新增手机横屏设置弹窗 Playwright 回归，覆盖设置入口、关闭按钮和弹窗内容区域均保持在可操作范围内。
 
 ## [0.4.31] - 2026-05-25
 

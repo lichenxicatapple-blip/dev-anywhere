@@ -115,6 +115,66 @@ test.describe("mobile UX contract", () => {
     await expectNoHorizontalDocumentOverflow(page);
   });
 
+  test("mobile landscape settings dialog keeps close control inside the viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize(MOBILE_VIEWPORTS.landscape);
+    await selectFakeProxy(page);
+
+    const settings = page.locator('[data-slot="sidebar-settings-trigger"]');
+    await expect(settings).toBeVisible();
+    await expectTouchTarget(settings);
+    await settings.click();
+    const dialog = page.locator('[data-slot="settings-dialog"]');
+    const close = dialog.locator('[data-slot="dialog-close"]');
+    const body = dialog.locator('[data-slot="settings-dialog-body"]');
+
+    await expect(dialog).toBeVisible();
+    await expect(close).toBeVisible();
+    await expectTouchTarget(close);
+    await expectNoHorizontalDocumentOverflow(page);
+
+    const metrics = await page.evaluate(() => {
+      const dialogNode = document.querySelector<HTMLElement>('[data-slot="settings-dialog"]');
+      const closeNode = dialogNode?.querySelector<HTMLElement>('[data-slot="dialog-close"]');
+      const bodyNode = dialogNode?.querySelector<HTMLElement>('[data-slot="settings-dialog-body"]');
+      const dialogRect = dialogNode?.getBoundingClientRect();
+      const closeRect = closeNode?.getBoundingClientRect();
+      const bodyRect = bodyNode?.getBoundingClientRect();
+      return {
+        innerHeight: window.innerHeight,
+        dialog: dialogRect
+          ? { top: dialogRect.top, bottom: dialogRect.bottom, height: dialogRect.height }
+          : null,
+        close: closeRect
+          ? { top: closeRect.top, bottom: closeRect.bottom, height: closeRect.height }
+          : null,
+        body: bodyRect
+          ? { top: bodyRect.top, bottom: bodyRect.bottom, height: bodyRect.height }
+          : null,
+      };
+    });
+
+    expect(metrics.dialog).not.toBeNull();
+    expect(metrics.close).not.toBeNull();
+    expect(metrics.body).not.toBeNull();
+    expect(metrics.dialog?.top ?? -1).toBeGreaterThanOrEqual(-1);
+    expect(metrics.dialog?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      metrics.innerHeight + 1,
+    );
+    expect(metrics.close?.top ?? -1).toBeGreaterThanOrEqual(-1);
+    expect(metrics.close?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      metrics.innerHeight + 1,
+    );
+    expect(metrics.body?.height ?? 0).toBeGreaterThan(80);
+
+    await body.evaluate((node) => {
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect(close).toBeVisible();
+    await expectTouchTarget(close);
+  });
+
   test("direct mobile sessions route without a proxy returns to proxy selection", async ({
     page,
   }) => {

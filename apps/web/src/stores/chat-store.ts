@@ -23,7 +23,7 @@ export interface QuotedMessage {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   isPartial: boolean;
   timestamp: number;
@@ -85,7 +85,7 @@ interface ChatStoreState {
   loadHistory: (
     sessionId: string,
     messages: Array<{
-      role: "user" | "assistant";
+      role: "user" | "assistant" | "system";
       text: string;
       timestamp?: number;
       cursor?: string;
@@ -96,7 +96,7 @@ interface ChatStoreState {
     page: {
       mode: "replace" | "prepend";
       messages: Array<{
-        role: "user" | "assistant";
+        role: "user" | "assistant" | "system";
         text: string;
         timestamp?: number;
         cursor?: string;
@@ -132,7 +132,12 @@ function hashHistoryText(text: string): string {
 
 function historyMessageId(
   sessionId: string,
-  message: { role: "user" | "assistant"; text: string; timestamp?: number; cursor?: string },
+  message: {
+    role: "user" | "assistant" | "system";
+    text: string;
+    timestamp?: number;
+    cursor?: string;
+  },
 ): string {
   if (message.cursor) return `history-${sessionId}-${message.cursor}`;
   return `history-${sessionId}-${message.timestamp ?? "na"}-${message.role}-${hashHistoryText(
@@ -142,7 +147,12 @@ function historyMessageId(
 
 function toHistoryChatMessage(
   sessionId: string,
-  message: { role: "user" | "assistant"; text: string; timestamp?: number; cursor?: string },
+  message: {
+    role: "user" | "assistant" | "system";
+    text: string;
+    timestamp?: number;
+    cursor?: string;
+  },
 ): ChatMessage {
   return {
     id: historyMessageId(sessionId, message),

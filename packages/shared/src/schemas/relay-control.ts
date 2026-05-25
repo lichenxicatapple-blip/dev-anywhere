@@ -64,7 +64,7 @@ export const HistorySessionSchema = z.object({
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
 const SessionHistoryMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
+  role: z.enum(["user", "assistant", "system"]),
   text: z.string(),
   timestamp: z.number().optional(),
   cursor: z.string().optional(),

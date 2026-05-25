@@ -585,7 +585,7 @@ describe("readSessionMessages", () => {
     });
   });
 
-  it("filters Claude slash-command and local-command records from restored conversation history", async () => {
+  it("keeps a compact history marker without restoring Claude slash-command noise", async () => {
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
@@ -618,12 +618,17 @@ describe("readSessionMessages", () => {
     );
 
     const messages = await readSessionMessages("session-compact");
-    expect(messages.map((message) => message.text)).toEqual(["before compact", "after compact"]);
+    expect(messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "before compact"],
+      ["system", "上下文已压缩"],
+      ["assistant", "after compact"],
+    ]);
 
     const page = await readSessionMessagesPage("session-compact", { limit: 10 });
-    expect(page.messages.map((message) => message.text)).toEqual([
-      "before compact",
-      "after compact",
+    expect(page.messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "before compact"],
+      ["system", "上下文已压缩"],
+      ["assistant", "after compact"],
     ]);
   });
 

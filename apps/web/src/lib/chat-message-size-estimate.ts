@@ -13,6 +13,8 @@ export function estimateChatMessageHeight(
   message: ChatMessage | undefined,
   options: ChatMessageSizeEstimateOptions,
 ): number {
+  if (message?.role === "system") return 44;
+
   const fontSize = Math.max(12, options.fontSize || 16);
   const text = message?.text ?? "";
   const bubbleWidth = estimateBubbleWidth(

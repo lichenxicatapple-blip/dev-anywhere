@@ -21,6 +21,23 @@ export const MessageBubble = memo(function MessageBubble({
     />
   ) : null;
 
+  if (role === "system") {
+    return (
+      <article data-slot="message-bubble" data-role="system" className="dev-chat-rail-inset py-2">
+        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full items-center">
+          <div className="h-px flex-1 bg-border" />
+          <div
+            data-slot="message-system-marker"
+            className="mx-3 shrink-0 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground"
+          >
+            {message.text}
+          </div>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+      </article>
+    );
+  }
+
   if (role === "user") {
     const userBodyClass = message.isPartial
       ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary-foreground/40 bg-primary/60 text-primary-foreground/90 px-4 py-2"

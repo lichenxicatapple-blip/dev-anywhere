@@ -146,9 +146,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "sm:max-w-[440px]",
-          view === "voice" &&
-            "grid max-h-[min(760px,calc(100dvh-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-[480px]",
+          "grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-4 sm:max-w-[440px] sm:p-6",
+          view === "voice" && "max-h-[min(760px,calc(100dvh-1rem))] gap-0 p-0 sm:max-w-[480px]",
           view === "voice" &&
             "max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:h-[calc(100dvh-0.75rem)] max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-x-0 max-sm:border-b-0",
         )}
@@ -158,6 +157,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       >
         <DialogHeader
           className={cn(
+            view === "menu" && "pr-12 text-left",
             view === "voice" &&
               "border-b border-border/70 px-4 py-4 text-left sm:px-6 sm:pb-4 sm:pt-5",
           )}
@@ -193,7 +193,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         {view === "version" ? (
-          <div className="space-y-3">
+          <div className="min-h-0 space-y-3 overflow-y-auto pr-1" data-slot="settings-dialog-body">
             <VersionRow
               icon={<Monitor className="size-4" aria-hidden="true" />}
               label="Web"
@@ -211,7 +211,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         ) : view === "voice" ? (
           <VoiceSettingsPanel />
         ) : (
-          <div className="space-y-2">
+          <div className="min-h-0 space-y-2 overflow-y-auto pr-1" data-slot="settings-dialog-body">
             <SettingsMenuItem
               icon={<AudioLines className="size-4" aria-hidden="true" />}
               label="Voice Pilot"

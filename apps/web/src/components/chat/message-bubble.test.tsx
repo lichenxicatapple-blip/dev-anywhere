@@ -43,6 +43,19 @@ describe("MessageBubble", () => {
     expect(row?.firstElementChild?.className).toContain("max-w-[88%]");
   });
 
+  it("renders system history markers as centered dividers instead of chat bubbles", () => {
+    const { container } = render(
+      <MessageBubble message={makeMessage({ id: "s1", role: "system", text: "上下文已压缩" })} />,
+    );
+
+    const bubble = screen.getByRole("article");
+    expect(bubble.getAttribute("data-role")).toBe("system");
+    expect(screen.getByText("上下文已压缩")).not.toBeNull();
+    const marker = container.querySelector('[data-slot="message-system-marker"]');
+    expect(marker?.className).toContain("rounded-full");
+    expect(marker?.className).not.toContain("bg-card");
+  });
+
   it("shows streaming cursor when assistant isPartial=true", () => {
     render(
       <MessageBubble

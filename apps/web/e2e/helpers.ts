@@ -219,7 +219,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     }
 
     type FakeHistoryMessage = {
-      role: "user" | "assistant";
+      role: "user" | "assistant" | "system";
       text: string;
       timestamp: number;
       cursor: string;

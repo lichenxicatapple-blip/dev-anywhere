@@ -169,7 +169,7 @@ async function scanCodexSessionHistory(): Promise<SessionHistoryEntry[]> {
 }
 
 interface SessionMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   timestamp?: number;
   cursor?: string;
@@ -190,6 +190,8 @@ const DEFAULT_HISTORY_PAGE_LIMIT = 50;
 const MAX_HISTORY_PAGE_LIMIT = 200;
 const HISTORY_READ_CHUNK_BYTES = 64 * 1024;
 const HISTORY_CURSOR_PREFIX = "b:";
+const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
+const COMPACT_HISTORY_MARKER = "上下文已压缩";
 
 function normalizeHistoryPageLimit(limit: unknown): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) return DEFAULT_HISTORY_PAGE_LIMIT;
@@ -248,18 +250,18 @@ function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, 
   };
   if (record.type === "user") {
     if (record.isMeta) return null;
-    const text = extractConversationText(record.message);
-    if (!text) return null;
+    const payload = extractConversationPayload(record.message);
+    if (!payload) return null;
     const ts =
       typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
-    return { role: "user", text, timestamp: ts };
+    return { role: payload.role ?? "user", text: payload.text, timestamp: ts };
   }
   if (record.type === "assistant") {
-    const text = extractConversationText(record.message);
-    if (!text) return null;
+    const payload = extractConversationPayload(record.message);
+    if (!payload) return null;
     const ts =
       typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
-    return { role: "assistant", text, timestamp: ts };
+    return { role: payload.role ?? "assistant", text: payload.text, timestamp: ts };
   }
   return null;
 }
@@ -422,10 +424,35 @@ function isLocalCommandEnvelope(text: string): boolean {
   return /<\/?local-command-(?:stdout|stderr)>/.test(text);
 }
 
-function extractConversationString(text: string): string | null {
-  if (isCommandEnvelope(text)) return extractSlashCommand(text);
-  if (isLocalCommandEnvelope(text)) return null;
-  return normalizeConversationText(text);
+function normalizeLocalCommandText(text: string): string {
+  return text
+    .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(/<\/?local-command-(?:stdout|stderr)>/g, "")
+    .trim();
+}
+
+interface ConversationPayload {
+  role?: SessionMessage["role"];
+  text: string;
+}
+
+function extractLocalCommandHistoryMarker(text: string): ConversationPayload | null {
+  const normalized = normalizeLocalCommandText(text);
+  if (!normalized) return null;
+  if (text.includes("<local-command-stdout>") && /\bCompacted\b/i.test(normalized)) {
+    return { role: "system", text: COMPACT_HISTORY_MARKER };
+  }
+  return null;
+}
+
+function extractConversationString(text: string): ConversationPayload | null {
+  if (isCommandEnvelope(text)) {
+    const command = extractSlashCommand(text);
+    return command ? { text: command } : null;
+  }
+  if (isLocalCommandEnvelope(text)) return extractLocalCommandHistoryMarker(text);
+  const normalized = normalizeConversationText(text);
+  return normalized ? { text: normalized } : null;
 }
 
 function extractMessageText(msg: unknown): string | null {
@@ -473,7 +500,7 @@ function normalizeConversationText(text: string): string | null {
 }
 
 // 对话正文恢复必须保留换行和 Markdown 结构；不能复用标题归一化逻辑。
-function extractConversationText(msg: unknown): string | null {
+function extractConversationPayload(msg: unknown): ConversationPayload | null {
   if (typeof msg === "string") {
     return extractConversationString(msg);
   }
@@ -489,7 +516,8 @@ function extractConversationText(msg: unknown): string | null {
           (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
         )
         .map((b: { text: string }) => b.text);
-      return normalizeConversationText(texts.join("\n"));
+      const normalized = normalizeConversationText(texts.join("\n"));
+      return normalized ? { text: normalized } : null;
     }
   }
 
@@ -499,7 +527,8 @@ function extractConversationText(msg: unknown): string | null {
         (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
       )
       .map((b: { text: string }) => b.text);
-    return normalizeConversationText(texts.join("\n"));
+    const normalized = normalizeConversationText(texts.join("\n"));
+    return normalized ? { text: normalized } : null;
   }
 
   return null;

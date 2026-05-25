@@ -92,7 +92,7 @@ interface HistoryPageOptions {
 }
 
 interface SessionHistoryMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   timestamp?: number;
   cursor?: string;
