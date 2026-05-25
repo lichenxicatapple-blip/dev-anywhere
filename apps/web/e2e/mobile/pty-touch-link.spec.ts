@@ -90,9 +90,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       await page.waitForTimeout(40);
       await client.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [
-          { x: point.x + 6, y: point.y + 7, id: 1, radiusX: 2, radiusY: 2, force: 1 },
-        ],
+        touchPoints: [{ x: point.x + 6, y: point.y + 7, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
       });
       await page.waitForTimeout(40);
       await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
@@ -159,6 +157,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
           null,
           2,
         )}\n${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
   }

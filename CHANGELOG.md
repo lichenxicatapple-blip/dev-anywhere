@@ -4,6 +4,19 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.26] - 2026-05-25
+
+### 修复
+
+- 重置移动端 PTY 触摸滚动模型：`touchmove` 不再阻塞浏览器原生滚动，纵向上滑和横向拖动都交给浏览器先拥有位置，controller 只在真实 scroll 事件后同步终端行和必要的底部夹边界。
+- 移除同一 xterm viewport 内按手指 expected 强行改写 `scrollTop` 的策略，避免 JS 与浏览器 compositor 在上滑起步阶段互相抢控制权。
+- 移动端 PTY 横滑现在允许原生 `pan-x`，减少长行终端横向查看时不跟手的问题。
+
+### 测试
+
+- 更新 PTY scroll controller 回归，明确验证 `touchmove` 使用 passive listener、同一 viewport 内不再强行改写原生 scrollTop、横向拖动不再由 JS 写 scrollLeft。
+- 重新验证 Android emulator 下 PTY 横向滑动、底部小幅上滑、回到底部和回看时新输出提示回归。
+
 ## [0.4.25] - 2026-05-25
 
 ### 修复

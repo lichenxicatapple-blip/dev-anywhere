@@ -38,7 +38,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
         className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 pt-2"
         style={{
           paddingBottom: view.containerPaddingBottom,
-          touchAction: "pan-y",
+          touchAction: "pan-x pan-y",
         }}
         onMouseDownCapture={view.handleTerminalContainerMouseDown}
         onPointerDownCapture={view.pointerHandlers.onPointerDownCapture}

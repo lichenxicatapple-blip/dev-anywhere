@@ -66,9 +66,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
 
     await resizePty(emuPage, 80, 24);
     await expect
-      .poll(() =>
-        readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.maxScrollLeft),
-      )
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.maxScrollLeft))
       .toBeGreaterThan(100);
 
     const box = await ptyTerminal(emuPage).boundingBox();
@@ -86,7 +84,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
       .poll(() =>
         emuPage.evaluate(() =>
           (window.__devAnywherePtyScrollTrace ?? []).some(
-            (entry) => entry.event === "touchmove:horizontal-pan",
+            (entry) => entry.event === "touchmove:horizontal-native",
           ),
         ),
       )

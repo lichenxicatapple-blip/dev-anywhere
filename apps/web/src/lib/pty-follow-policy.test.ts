@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  decideCursorAwareClamp,
-  decideScrollToBottomAction,
-  decideTouchMoveBoundary,
-} from "./pty-follow-policy";
+import { decideCursorAwareClamp, decideScrollToBottomAction } from "./pty-follow-policy";
 
 describe("PTY follow policy", () => {
   describe("decideScrollToBottomAction", () => {
@@ -107,88 +103,6 @@ describe("PTY follow policy", () => {
           domMaxScrollTop: 5166,
         }),
       ).toEqual({ action: "keep", scrollTop: 5166 });
-    });
-  });
-
-  describe("decideTouchMoveBoundary", () => {
-    it("prevents finger-up native overscroll at cursor-aware bottom", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientY: 320,
-          currentClientY: 280,
-          scrollTop: 7593,
-          bottomScrollTop: 7593,
-          domMaxScrollTop: 7746,
-          atBottom: true,
-        }),
-      ).toEqual({ action: "prevent", scrollTop: 7593 });
-    });
-
-    it("prevents a finger-up move that would cross into the cursor-aware bottom gap", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientY: 320,
-          currentClientY: 300,
-          scrollTop: 8605,
-          bottomScrollTop: 8613,
-          domMaxScrollTop: 8766,
-          atBottom: false,
-        }),
-      ).toEqual({ action: "prevent", scrollTop: 8613 });
-    });
-
-    it("allows finger-down movement away from cursor-aware bottom", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientY: 280,
-          currentClientY: 320,
-          scrollTop: 7593,
-          bottomScrollTop: 7593,
-          domMaxScrollTop: 7746,
-          atBottom: true,
-        }),
-      ).toEqual({ action: "allow" });
-    });
-
-    it("allows horizontal-dominant movement at cursor-aware bottom", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientX: 260,
-          currentClientX: 160,
-          previousClientY: 320,
-          currentClientY: 314,
-          scrollTop: 7593,
-          bottomScrollTop: 7593,
-          domMaxScrollTop: 7746,
-          atBottom: true,
-        }),
-      ).toEqual({ action: "allow" });
-    });
-
-    it("allows finger-up movement before reaching cursor-aware bottom", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientY: 320,
-          currentClientY: 280,
-          scrollTop: 7300,
-          bottomScrollTop: 7593,
-          domMaxScrollTop: 7746,
-          atBottom: false,
-        }),
-      ).toEqual({ action: "allow" });
-    });
-
-    it("allows movement when the current platform does not expose a cursor-aware bottom gap", () => {
-      expect(
-        decideTouchMoveBoundary({
-          previousClientY: 320,
-          currentClientY: 280,
-          scrollTop: 7746,
-          bottomScrollTop: 7746,
-          domMaxScrollTop: 7746,
-          atBottom: true,
-        }),
-      ).toEqual({ action: "allow" });
     });
   });
 });

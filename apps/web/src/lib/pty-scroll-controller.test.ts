@@ -80,6 +80,36 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("40px");
   });
 
+  it("registers touchmove passively so native touch scroll is not blocked on JS", () => {
+    const { container, spacer, host } = createDom();
+    const addEventListener = container.addEventListener.bind(container);
+    const listenerOptions = new Map<string, AddEventListenerOptions | boolean | undefined>();
+    vi.spyOn(container, "addEventListener").mockImplementation(
+      (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) => {
+        listenerOptions.set(type, options);
+        addEventListener(type, listener, options);
+      },
+    );
+    const { terminal } = createTerminal({ 19: "prompt" });
+
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(listenerOptions.get("touchmove")).toEqual({ passive: true });
+  });
+
   it("positions the host before changing xterm viewport at a row boundary", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -677,7 +707,7 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(1475);
   });
 
-  it("pins same-row native touch scroll to the finger without resyncing xterm", () => {
+  it("observes same-row native touch scroll without resyncing xterm", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -728,7 +758,7 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 50890;
     container.dispatchEvent(new Event("scroll"));
 
-    expect(container.scrollTop).toBe(50893);
+    expect(container.scrollTop).toBe(50890);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(host.style.top).toBe("50500px");
     expect(onScrollStateChange).not.toHaveBeenCalled();
@@ -737,11 +767,11 @@ describe("attachPtyScrollController", () => {
     queued[0]?.(performance.now());
 
     expect(onScrollStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ scrollTop: 50893, scrollWidth: 2184 }),
+      expect.objectContaining({ scrollTop: 50890, scrollWidth: 2184 }),
     );
   });
 
-  it("follows the finger immediately for same-viewport bottom touch starts", () => {
+  it("does not force same-viewport bottom touch starts to a finger-derived scrollTop", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -785,15 +815,14 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 43262.5703125;
     container.dispatchEvent(touchEvent("touchmove", 362));
 
-    expect(container.scrollTop).toBe(43216);
+    expect(container.scrollTop).toBe(43262.5703125);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(host.style.top).toBe("42820px");
-    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
-
-    queued[0]?.(performance.now());
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(0);
   });
 
-  it("corrects same-viewport native overshoot while the finger is stationary", () => {
+  it("leaves same-viewport native scroll alone while touch is active", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
@@ -837,12 +866,12 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 64258.28515625;
     container.dispatchEvent(touchEvent("touchmove", 425));
 
-    expect(container.scrollTop).toBe(64265);
+    expect(container.scrollTop).toBe(64258.28515625);
 
     container.scrollTop = 64251.4296875;
     container.dispatchEvent(new Event("scroll"));
 
-    expect(container.scrollTop).toBe(64265);
+    expect(container.scrollTop).toBe(64251.4296875);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(host.style.top).toBe("63860px");
     expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
@@ -913,7 +942,7 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("50480px");
   });
 
-  it("pans horizontally after horizontal touch lock without taking vertical review", () => {
+  it("lets native horizontal pan own scrollLeft after horizontal touch lock", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
@@ -937,13 +966,19 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 302, 200);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
-    expect(container.scrollLeft).toBe(120);
+    expect(move.defaultPrevented).toBe(false);
+    expect(container.scrollLeft).toBe(0);
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("horizontal");
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+
+    container.scrollLeft = 120;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollLeft).toBe(120);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
   });
 
   it("locks horizontal touch pan on a small mostly-horizontal move", () => {
@@ -969,13 +1004,18 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 302, 310);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
-    expect(container.scrollLeft).toBe(10);
+    expect(move.defaultPrevented).toBe(false);
+    expect(container.scrollLeft).toBe(0);
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("horizontal");
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+
+    container.scrollLeft = 10;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollLeft).toBe(10);
   });
 
   it("keeps ambiguous diagonal touch pending instead of stealing vertical review", () => {
@@ -1877,7 +1917,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollHeight - container.clientHeight).toBe(3100);
   });
 
-  it("prevents touchmove from starting native overscroll at the cursor-aware bottom", () => {
+  it("keeps cursor-aware bottom touchmove passive at the native boundary", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -1914,8 +1954,8 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 280);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
-    expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
+    expect(move.defaultPrevented).toBe(false);
+    expect(onTouchBoundaryPrevent).not.toHaveBeenCalled();
 
     container.dispatchEvent(touchEvent("touchend", 280));
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
@@ -1950,7 +1990,7 @@ describe("attachPtyScrollController", () => {
     expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
   });
 
-  it("snaps to cursor-aware bottom when a touchmove would cross into the native bottom gap", () => {
+  it("snaps to cursor-aware bottom when native scroll crosses into the bottom gap", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -1983,7 +2023,12 @@ describe("attachPtyScrollController", () => {
     const move = touchEvent("touchmove", 300);
     container.dispatchEvent(move);
 
-    expect(move.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(false);
+    expect(container.scrollTop).toBe(8605);
+
+    container.scrollTop = 8640;
+    container.dispatchEvent(new Event("scroll"));
+
     expect(container.scrollTop).toBeCloseTo(8613);
   });
 
