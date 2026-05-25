@@ -946,6 +946,69 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
   });
 
+  it("locks horizontal touch pan on a small mostly-horizontal move", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 400, clientWidth: 360 });
+    defineScrollWidth(container, 1200);
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 300, 320));
+    const move = touchEvent("touchmove", 302, 310);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(true);
+    expect(container.scrollLeft).toBe(10);
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
+    expect(controller.getDebugProbe().touchScrollGestureMode).toBe("horizontal");
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+  });
+
+  it("keeps ambiguous diagonal touch pending instead of stealing vertical review", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 400, clientWidth: 360 });
+    defineScrollWidth(container, 1200);
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 300, 320));
+    const move = touchEvent("touchmove", 318, 304);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(false);
+    expect(container.scrollLeft).toBe(0);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
+    expect(controller.getDebugProbe().touchScrollGestureMode).toBe("pending");
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+  });
+
   it("keeps bottom tap inert when keyboard padding moves the bottom before touchend", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();

@@ -83,7 +83,9 @@ const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
 const TOUCH_GESTURE_SLOP_PX = 16;
-const TOUCH_HORIZONTAL_LOCK_RATIO = 1.15;
+const TOUCH_HORIZONTAL_GESTURE_SLOP_PX = 6;
+const TOUCH_HORIZONTAL_LOCK_RATIO = 1;
+const TOUCH_VERTICAL_LOCK_RATIO = 1.25;
 const TOUCH_SAME_ROW_FINGER_TOLERANCE_PX = 1;
 
 export function attachPtyScrollController(
@@ -1566,24 +1568,36 @@ export function attachPtyScrollController(
     if (touchScrollGestureMode === "pending" && movement) {
       const horizontalDominates =
         horizontallyScrollable &&
-        movement.absDx >= TOUCH_GESTURE_SLOP_PX &&
+        movement.absDx >= TOUCH_HORIZONTAL_GESTURE_SLOP_PX &&
         movement.absDx > movement.absDy * TOUCH_HORIZONTAL_LOCK_RATIO;
+      const verticalDominates =
+        movement.absDy >= TOUCH_GESTURE_SLOP_PX &&
+        (!horizontallyScrollable ||
+          movement.absDy > movement.absDx * TOUCH_VERTICAL_LOCK_RATIO);
       if (horizontalDominates) {
         touchScrollGestureMode = "horizontal";
         trace("touchmove:horizontal-lock", {
           details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`,
         });
-      } else if (movement.absDy < TOUCH_GESTURE_SLOP_PX) {
+      } else if (!verticalDominates) {
         lastTouchClientX = currentX;
         lastTouchClientY = currentY;
         trace("touchmove:pending", {
-          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${TOUCH_GESTURE_SLOP_PX}`,
+          details: [
+            `dx=${Math.round(movement.dx)}`,
+            `dy=${Math.round(movement.dy)}`,
+            `distance=${Math.round(movement.distance)}`,
+            `hThreshold=${TOUCH_HORIZONTAL_GESTURE_SLOP_PX}`,
+            `vThreshold=${TOUCH_GESTURE_SLOP_PX}`,
+          ].join(" "),
         });
-        dispatchVerticalIntent({
-          type: "touch-move",
-          clientY: currentY,
-          reviewThresholdPx: TOUCH_GESTURE_SLOP_PX,
-        });
+        if (movement.absDy < TOUCH_GESTURE_SLOP_PX) {
+          dispatchVerticalIntent({
+            type: "touch-move",
+            clientY: currentY,
+            reviewThresholdPx: TOUCH_GESTURE_SLOP_PX,
+          });
+        }
         return;
       } else {
         touchScrollGestureMode = "vertical";

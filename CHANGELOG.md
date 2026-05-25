@@ -9,10 +9,12 @@
 ### 修复
 
 - 继续修正移动端 PTY 从底部开始上滑时的起步轻微抖动：同一 xterm viewport 内，浏览器原生滚动如果在手指停住时继续过冲，会被钉回当前手指对应的 scrollTop，不再让同一屏内容自行滑出几像素。
+- 提升移动端 PTY 横滑跟手性：更早识别小幅横向拖动，并避免斜向横滑在未判定前被纵向 review 状态抢走。
 
 ### 测试
 
 - 新增 PTY scroll controller 回归，覆盖用户 trace 中同一 viewport 内原生触摸滚动过冲、但不应触发 xterm viewport 切换的场景。
+- 新增 PTY scroll controller 回归，覆盖小幅横向拖动立即锁定为横滑、斜向未决手势不提前切入纵向 review 的场景。
 - 重新验证 Android emulator 下 PTY 底部上滑/回底与横向滑动回归。
 
 ## [0.4.24] - 2026-05-25
