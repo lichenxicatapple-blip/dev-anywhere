@@ -10,10 +10,12 @@
 
 - 修复移动端 PTY 刚刷新进入会话后，从底部轻慢上滑起步时，`restore-touch-layout-bottom` 把真实手势的几像素原生滚动反复拉回 semantic bottom，造成方向翻转和明显轻微抖动的问题。
 - 保留底部触摸期间异常跳到 host 顶部的恢复保护，只在滚动距离明显超过真实手指位移时才恢复到底部。
+- 修复 PTY 中跨行文档路径链接的下划线覆盖行尾空白的问题；跨行路径仍作为完整路径激活，但每一行只标记实际路径字符范围。
 
 ### 测试
 
 - 新增 PTY scroll controller 回归，复现用户 trace 中 `touchDeltaY=12`、`scrollTopDeltaToBottom=-8px` 时不应恢复到底部的场景。
+- 更新 xterm 文件路径 link provider 回归，确保跨行路径 link range 按行拆分，不再覆盖空白 cell。
 - 重新验证 Android emulator 下 PTY 底部触摸滚动与横向滑动回归。
 
 ## [0.4.27] - 2026-05-25

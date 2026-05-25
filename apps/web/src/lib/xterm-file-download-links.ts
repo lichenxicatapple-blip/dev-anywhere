@@ -19,6 +19,13 @@ type FileDownloadBufferPathMatch = {
   startColumn: number;
   endLineNumber: number;
   endColumn: number;
+  segments: FileDownloadPathSegment[];
+};
+
+type FileDownloadPathSegment = {
+  lineNumber: number;
+  startColumn: number;
+  endColumn: number;
 };
 
 type BufferTextPart = {
@@ -91,6 +98,7 @@ export function findFileDownloadPathMatchesInWrappedBuffer(
           startColumn: start.column,
           endLineNumber: end.lineNumber,
           endColumn: end.column,
+          segments: getPathSegmentsForSpan(block.parts, span.startIndex, span.endIndex),
         };
       })
       .filter((match): match is FileDownloadBufferPathMatch => match !== null)
@@ -278,6 +286,33 @@ function stringEndIndexToTerminalPosition(
   return null;
 }
 
+function getPathSegmentsForSpan(
+  parts: BufferTextPart[],
+  startIndex: number,
+  endIndex: number,
+): FileDownloadPathSegment[] {
+  const segments: FileDownloadPathSegment[] = [];
+  let partStartIndex = 0;
+  for (const part of parts) {
+    const partEndIndex = partStartIndex + part.text.length;
+    const overlapStart = Math.max(startIndex, partStartIndex);
+    const overlapEnd = Math.min(endIndex, partEndIndex);
+    if (overlapStart < overlapEnd) {
+      const localStart = overlapStart - partStartIndex;
+      const localEnd = overlapEnd - partStartIndex;
+      segments.push({
+        lineNumber: part.lineNumber,
+        startColumn: stringToTerminalColumn(part.sourceText, part.sourceStartIndex + localStart),
+        endColumn: stringCellWidth(
+          part.sourceText.slice(0, part.sourceStartIndex + localEnd),
+        ),
+      });
+    }
+    partStartIndex = partEndIndex;
+  }
+  return segments;
+}
+
 function stringToTerminalColumn(line: string, endIndex: number): number {
   return stringCellWidth(line.slice(0, endIndex)) + 1;
 }
@@ -328,7 +363,15 @@ function isFullWidthCodePoint(codePoint: number): boolean {
 
 function getRangeForPathMatch(
   match: FileDownloadBufferPathMatch,
+  bufferLineNumber: number,
 ): ILink["range"] {
+  const segment = match.segments.find((part) => part.lineNumber === bufferLineNumber);
+  if (segment) {
+    return {
+      start: { x: segment.startColumn, y: segment.lineNumber },
+      end: { x: segment.endColumn, y: segment.lineNumber },
+    };
+  }
   return {
     start: { x: match.startColumn, y: match.startLineNumber },
     end: { x: match.endColumn, y: match.endLineNumber },
@@ -366,7 +409,7 @@ export function registerFileDownloadLinkProvider(
         return;
       }
       const links = matches.reduce<ILink[]>((acc, match) => {
-        const range = getRangeForPathMatch(match);
+        const range = getRangeForPathMatch(match, bufferLineNumber);
         acc.push({
           text: match.path,
           range,

@@ -154,8 +154,9 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
+      expect(arr).toHaveLength(1);
       expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
-      expect(arr?.[0]?.range.end).toEqual({ x: 20, y: 3 });
+      expect(arr?.[0]?.range.end).toEqual({ x: 39, y: 1 });
       expect(arr?.[0]?.text).toContain("foundation-design.md");
     });
 
@@ -172,7 +173,7 @@ describe("xterm file download links", () => {
       expect(link?.text).toBe(
         "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md",
       );
-      expect(link?.range.start).toEqual({ x: 5, y: 1 });
+      expect(link?.range.start).toEqual({ x: 1, y: 3 });
       expect(link?.range.end).toEqual({ x: 20, y: 3 });
       link?.activate({ metaKey: true } as MouseEvent, link.text);
     });
@@ -240,9 +241,10 @@ describe("xterm file download links", () => {
             range: { start: { x: number; y: number }; end: { x: number; y: number } };
           }>
         | undefined;
+      expect(arr).toHaveLength(1);
       expect(arr?.[0]?.text).toBe(expectedPath);
       expect(arr?.[0]?.range.start).toEqual({ x: 5, y: 1 });
-      expect(arr?.[0]?.range.end).toEqual({ x: 13, y: 5 });
+      expect(arr?.[0]?.range.end).toEqual({ x: 42, y: 1 });
     });
 
     providerRef.current?.provideLinks(5, (links) => {
@@ -256,7 +258,7 @@ describe("xterm file download links", () => {
       expect(arr).toHaveLength(1);
       const link = arr?.[0];
       expect(link?.text).toBe(expectedPath);
-      expect(link?.range.start).toEqual({ x: 5, y: 1 });
+      expect(link?.range.start).toEqual({ x: 5, y: 5 });
       expect(link?.range.end).toEqual({ x: 13, y: 5 });
       link?.activate({ metaKey: true } as MouseEvent, link.text);
     });
