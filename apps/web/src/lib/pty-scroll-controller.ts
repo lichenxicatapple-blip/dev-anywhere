@@ -1568,11 +1568,13 @@ export function attachPtyScrollController(
     const anchor = getCurrentAnchor();
     const stayedNearTouchStart =
       touchStartScrollTop === null || liveScrollTop >= touchStartScrollTop - atBottomThreshold;
-    const releaseOnSemanticBottom = touchStartedAtCursorAwareBottom && anchor.isAtBottom;
+    const reviewedDuringTouch = verticalIntent.touchReviewNotified;
+    const releaseOnSemanticBottom =
+      touchStartedAtCursorAwareBottom && anchor.isAtBottom && !reviewedDuringTouch;
     const atCursorAwareBottomForIntent =
-      anchor.isAtBottom ||
+      (!reviewedDuringTouch && anchor.isAtBottom) ||
       (touchStartedAtCursorAwareBottom &&
-        !verticalIntent.touchReviewNotified &&
+        !reviewedDuringTouch &&
         stayedNearTouchStart);
     touchGestureMaxScrollTop = null;
     touchStartedAtCursorAwareBottom = false;

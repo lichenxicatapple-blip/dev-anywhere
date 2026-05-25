@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.27] - 2026-05-25
+
+### 修复
+
+- 修复移动端 PTY 刚刷新进入会话后，从 cursor-aware bottom 慢慢拉开回看时，touchend 又被光标仍可见误判回 following，导致底部边界轻微回贴/抖动的问题。
+- 禁用 PTY 虚拟滚动容器的浏览器 scroll anchoring，避免浏览器在虚拟 spacer / host 更新时插入额外的滚动补偿。
+
+### 测试
+
+- 新增 PTY scroll controller 回归，复现用户 trace 中 `scrollTopDeltaToBottom=-46px`、`cursorInViewport=true` 但已经进入 touch review 的场景，确保结束手势后仍保持 reviewing。
+- 重新验证 Android emulator 下 PTY 底部触摸滚动与横向滑动回归。
+
 ## [0.4.26] - 2026-05-25
 
 ### 修复

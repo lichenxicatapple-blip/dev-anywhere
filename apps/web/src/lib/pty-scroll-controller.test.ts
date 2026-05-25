@@ -879,6 +879,54 @@ describe("attachPtyScrollController", () => {
     queued[0]?.(performance.now());
   });
 
+  it("keeps reviewing after a slow bottom-start pull even while the cursor stays visible", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 634, clientWidth: 360 });
+    defineScrollHeight(container, 101080);
+    defineScrollWidth(container, 2184);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
+    const { terminal } = createTerminal({ 5049: "live prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
+    terminal.buffer.active.length = 5052;
+    terminal.buffer.active.viewportY = 5000;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 49;
+    const onUserVerticalScrollIntentChange = vi.fn();
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(100446);
+    onUserVerticalScrollIntentChange.mockClear();
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 478));
+    container.scrollTop = 100427.4296875;
+    container.dispatchEvent(touchEvent("touchmove", 545));
+    container.dispatchEvent(new Event("scroll"));
+    container.scrollTop = 100399.140625;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(touchEvent("touchend", 572));
+
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(controller.getDebugProbe().verticalIntentTransitionId).toBe("touch.end.not-bottom");
+    expect(onUserVerticalScrollIntentChange.mock.calls.map((call) => call[0])).toEqual([true]);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
   it("syncs xterm when native touch scroll crosses to a different row", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(

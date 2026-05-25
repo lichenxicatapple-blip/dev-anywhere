@@ -127,6 +127,26 @@ describe("pty vertical intent FSM", () => {
     expect(result.trace?.action).toBe("keep");
   });
 
+  it("keeps touch review when a bottom-start gesture leaves the cursor visible", () => {
+    const reviewing = touchReviewingState({
+      touchReviewNotified: true,
+      touchStartScrollTop: 100446,
+      lastScrollTop: 100427,
+    });
+
+    const result = reducePtyVerticalIntent(reviewing, {
+      type: "touch-end",
+      scrollTop: 100399,
+      atCursorAwareBottom: false,
+      releaseOnSemanticBottom: false,
+    });
+
+    expect(result.state.mode).toBe("reviewing");
+    expect(result.state.source).toBe("touch");
+    expect(result.trace?.id).toBe("touch.end.not-bottom");
+    expect(result.trace?.action).toBe("keep");
+  });
+
   const cases: Array<{
     id: (typeof PTY_VERTICAL_INTENT_TRANSITION_IDS)[number];
     initial: PtyVerticalIntentState;

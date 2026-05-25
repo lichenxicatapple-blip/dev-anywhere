@@ -39,6 +39,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
         style={{
           paddingBottom: view.containerPaddingBottom,
           touchAction: "pan-x pan-y",
+          overflowAnchor: "none",
         }}
         onMouseDownCapture={view.handleTerminalContainerMouseDown}
         onPointerDownCapture={view.pointerHandlers.onPointerDownCapture}
@@ -59,7 +60,11 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
         data-slot="pty-terminal"
         data-drag-over={view.isPtyDragOver ? "true" : undefined}
       >
-        <div ref={spacerRef} style={{ position: "relative" }} data-slot="pty-spacer">
+        <div
+          ref={spacerRef}
+          style={{ position: "relative", overflowAnchor: "none" }}
+          data-slot="pty-spacer"
+        >
           <div
             ref={xtermHostRef}
             style={{
@@ -67,6 +72,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
               left: 0,
               top: 0,
               overflow: "hidden",
+              overflowAnchor: "none",
               boxSizing: "border-box",
             }}
             data-slot="pty-host"
