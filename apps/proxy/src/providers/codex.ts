@@ -43,8 +43,12 @@ export const CODEX_PROVIDER: ProviderAdapter = {
     supportsProjectScopedConfig: true,
     supportsGlobalSetup: true,
   },
-  buildJsonCommand(_options: ProviderJsonOptions, _env: NodeJS.ProcessEnv): ProviderCommand {
-    throw new Error("Codex JSON sessions are not supported yet; use PTY mode.");
+  buildJsonCommand(_options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+    return {
+      command: resolveCodexCommand(env),
+      args: ["app-server", "--listen", "stdio://"],
+      env,
+    };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     const args = withCodexTerminalPermissionArgs(options.args, options.permissionMode);

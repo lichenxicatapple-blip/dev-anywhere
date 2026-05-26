@@ -558,6 +558,15 @@ describe("readSessionMessages", () => {
     }
   });
 
+  function writeCodexConversation(sessionId: string, lines: string[]): void {
+    const sessionDir = join(testDir, ".codex", "sessions", "2026", "05", "26");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, `rollout-2026-05-26T12-00-00-${sessionId}.jsonl`),
+      lines.join("\n") + "\n",
+    );
+  }
+
   it("preserves markdown newlines when restoring conversation messages", async () => {
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     mkdirSync(projectDir, { recursive: true });
@@ -727,6 +736,52 @@ describe("readSessionMessages", () => {
     expect(oldest.messages.map((m) => m.text)).toEqual(["prompt 1"]);
     expect(oldest.hasMore).toBe(false);
     expect(oldest.nextBefore).toBeUndefined();
+  });
+
+  it("reads Codex app-server visible history from event messages", async () => {
+    writeCodexConversation("codex-visible-history", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-visible-history", cwd: "/tmp/project" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "developer",
+          content: [{ type: "input_text", text: "<permissions instructions>noise</permissions>" }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-26T00:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "你好呀" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-26T00:00:02.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "我先加载技能。" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-05-26T00:00:03.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "你好。需要我帮你看代码吗？" },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        payload: { type: "token_count" },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("codex-visible-history", { limit: 10 }, "codex");
+
+    expect(page.messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "你好呀"],
+      ["assistant", "我先加载技能。"],
+      ["assistant", "你好。需要我帮你看代码吗？"],
+    ]);
+    expect(page.messages[0].timestamp).toBe(Date.parse("2026-05-26T00:00:01.000Z"));
+    expect(page.hasMore).toBe(false);
   });
 
   it.each(["../etc/passwd", "..", "foo/bar", "foo\0bar", "foo bar", "", "with.dot"])(

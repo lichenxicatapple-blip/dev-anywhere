@@ -357,6 +357,31 @@ describe("RelayRouter input routing", () => {
       cwd: "/tmp",
       permissionMode: "plan",
     });
+    router.destroy();
+  });
+
+  it("allows Codex JSON session_create and passes provider to the worker", () => {
+    const workerSpawn = vi.fn((_sessionId: string, _options?: unknown) => 1234);
+    const router = createRouter({
+      mode: "json",
+      workerSpawn,
+    });
+
+    router.handle({
+      type: "session_create",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "default",
+    });
+
+    expect(workerSpawn).toHaveBeenCalledTimes(1);
+    expect(workerSpawn.mock.calls[0][1]).toMatchObject({
+      cwd: "/tmp",
+      provider: "codex",
+      permissionMode: "default",
+    });
+    router.destroy();
   });
 
   it("passes permissionMode to hosted PTY start during session_create", () => {
@@ -380,6 +405,42 @@ describe("RelayRouter input routing", () => {
       cwd: "/tmp",
       permissionMode: "bypassPermissions",
     });
+  });
+
+  it("records Codex hosted PTY resume history id during session_create", () => {
+    const setHistorySessionId = vi.fn();
+    const setClaudeSessionId = vi.fn();
+    const createSession = vi.fn(() => ({
+      id: "codex-pty-session",
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      state: SessionState.IDLE,
+      cwd: "/tmp",
+      pid: 1234,
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    const router = createRouter({
+      mode: "pty",
+      sessionManager: {
+        createSession,
+        setClaudeSessionId,
+        setHistorySessionId,
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-codex-pty-resume",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "pty",
+      resumeSessionId: "codex-native-thread",
+    });
+
+    expect(setHistorySessionId).toHaveBeenCalledWith("codex-pty-session", "codex-native-thread");
+    expect(setClaudeSessionId).not.toHaveBeenCalled();
   });
 
   it("returns a session_create_response when hosted PTY startup fails", () => {

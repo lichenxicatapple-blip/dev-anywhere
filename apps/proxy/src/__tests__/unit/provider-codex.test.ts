@@ -103,9 +103,17 @@ describe("Codex provider", () => {
     });
   });
 
-  it("rejects JSON sessions until Codex stream parsing is implemented", () => {
-    expect(() => CODEX_PROVIDER.buildJsonCommand({}, {})).toThrow(
-      "Codex JSON sessions are not supported yet",
-    );
+  it("builds JSON command using Codex app-server over stdio", () => {
+    withExecutable("codex", (codexBin) => {
+      const env = { CODEX_BIN: codexBin, TERM: "xterm" } as NodeJS.ProcessEnv;
+
+      const command = CODEX_PROVIDER.buildJsonCommand({}, env);
+
+      expect(command).toEqual({
+        command: codexBin,
+        args: ["app-server", "--listen", "stdio://"],
+        env,
+      });
+    });
   });
 });

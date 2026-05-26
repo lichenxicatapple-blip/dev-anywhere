@@ -166,7 +166,7 @@ export function HistoryList({ now }: HistoryListProps) {
   }
 
   const hasHistory = historySessions.length > 0;
-  const restoreModes = restoreTarget ? availableRestoreModes(restoreTarget) : [];
+  const restoreModes = restoreTarget ? availableRestoreModes() : [];
 
   return (
     <div data-slot="history-list" className="flex flex-col">
@@ -354,13 +354,12 @@ function normalizeHistoryProjectDir(dir: string): string {
   return trimmed.replace(/\/+$/, "") || "/";
 }
 
-function availableRestoreModes(session: HistorySession): RestoreMode[] {
-  const provider = historySessionProvider(session);
-  return provider === "codex" ? ["pty"] : ["json", "pty"];
+function availableRestoreModes(): RestoreMode[] {
+  return ["json", "pty"];
 }
 
 function defaultRestoreMode(session: HistorySession): RestoreMode {
-  const modes = availableRestoreModes(session);
+  const modes = availableRestoreModes();
   if (session.preferredMode && modes.includes(session.preferredMode)) return session.preferredMode;
   return modes[0] ?? "json";
 }

@@ -28,6 +28,9 @@
   --color-status-success: #00d4aa;
   --color-status-warning: #e8ab5a;
   --color-status-error: #f44747;
+  --dev-chat-rail-inset: 0.875rem;
+  --dev-chat-scrollbar-compensation: 11px;
+  --dev-message-rail-width: 90rem;
 }
 
 @theme inline {
@@ -444,26 +447,29 @@ code.hljs,
 }
 
 .dev-message-rail {
-  max-width: 90rem;
+  max-width: var(--dev-message-rail-width);
 }
 
 .dev-chat-rail-inset {
-  padding-inline: 0.875rem;
+  padding-inline: var(--dev-chat-rail-inset);
 }
 
+.dev-chat-shell-rail-inset,
 .dev-chat-input-rail-inset {
-  padding-inline-start: 0.875rem;
-  padding-inline-end: calc(0.875rem + 11px);
+  padding-inline-start: var(--dev-chat-rail-inset);
+  padding-inline-end: calc(var(--dev-chat-rail-inset) + var(--dev-chat-scrollbar-compensation));
+}
+
+.dev-chat-rail-floating-right {
+  right: max(
+    calc(var(--dev-chat-rail-inset) + var(--dev-chat-scrollbar-compensation)),
+    calc((100% - var(--dev-message-rail-width) + var(--dev-chat-scrollbar-compensation)) / 2)
+  );
 }
 
 @media (min-width: 640px) {
-  .dev-chat-rail-inset {
-    padding-inline: 1rem;
-  }
-
-  .dev-chat-input-rail-inset {
-    padding-inline-start: 1rem;
-    padding-inline-end: calc(1rem + 11px);
+  :root {
+    --dev-chat-rail-inset: 1rem;
   }
 }
 

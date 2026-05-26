@@ -8,17 +8,18 @@ import {
   type StreamJsonEvent,
   type ClaudePermissionMode,
 } from "./worker/json-session.js";
+import { CodexAppServerSession } from "./worker/codex-app-server-session.js";
 import { createApprovalRequestIdFactory } from "./common/approval-request-id.js";
 import { SeqCounter } from "./common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
 import { takeoverServeSocket } from "./worker/serve-socket-takeover.js";
 import type { ProviderHookContext } from "./providers/index.js";
 
-// 参数格式: session-worker.ts <sessionId> <socketPath> [--cwd <dir>] [--resume <id>] [-- claude args...]
+// 参数格式: session-worker.ts <sessionId> <socketPath> [--provider <provider>] [--cwd <dir>] [--resume <id>] [-- provider args...]
 const sessionId = process.argv[2];
 const sockPath = process.argv[3];
 const separatorIdx = process.argv.indexOf("--");
-const claudeArgs = separatorIdx >= 0 ? process.argv.slice(separatorIdx + 1) : [];
+const providerArgs = separatorIdx >= 0 ? process.argv.slice(separatorIdx + 1) : [];
 
 // 解析 -- 之前的可选参数
 const preArgs = process.argv.slice(4, separatorIdx >= 0 ? separatorIdx : undefined);
@@ -37,9 +38,15 @@ const workerHookUrl = getArg("--hook-url");
 const workerHookMarker = getArg("--hook-marker");
 const workerHookToken = process.env.DEV_ANYWHERE_HOOK_TOKEN;
 const workerHookProvider = getArg("--hook-provider") as ProviderHookContext["provider"] | undefined;
+const provider = (getArg("--provider") ?? "claude") as ProviderHookContext["provider"];
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
+  process.exit(1);
+}
+
+if (provider !== "claude" && provider !== "codex") {
+  console.error(`Unsupported JSON worker provider: ${provider}`);
   process.exit(1);
 }
 
@@ -91,40 +98,63 @@ const forwardToRelay = async (
   });
 };
 
-const session = new JsonSession({
-  claudeArgs,
-  cwd: workerCwd,
-  resumeSessionId: workerResume,
-  permissionMode: workerPermissionMode,
-  includePartialMessages: workerStreamDelta,
-  hook: workerHook,
-  approvalStrategy: createPermissionModeApprovalStrategy(
-    workerPermissionMode,
-    createRelayApprovalStrategy(whitelist, forwardToRelay),
-  ),
-  onEvent: (event: StreamJsonEvent) => {
-    // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
-    if (event.type === "system" && typeof event.session_id === "string") {
-      sendToServe({
-        type: "worker_claude_session_id",
-        sessionId: event.session_id,
-      });
-    }
+const approvalStrategy = createPermissionModeApprovalStrategy(
+  workerPermissionMode,
+  createRelayApprovalStrategy(whitelist, forwardToRelay),
+);
 
-    const seq = seqCounter.next();
+function handleProviderEvent(event: StreamJsonEvent): void {
+  // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
+  if (event.type === "system" && typeof event.session_id === "string") {
     sendToServe({
-      type: "worker_event",
-      seq,
-      event: event as Record<string, unknown>,
+      type: "worker_claude_session_id",
+      sessionId: event.session_id,
     });
-  },
-  onExit: (code: number) => {
-    whitelist.clear();
-    sendToServe({ type: "worker_exit", code });
-    cleanup();
-    process.exit(0);
-  },
-});
+  }
+
+  const seq = seqCounter.next();
+  sendToServe({
+    type: "worker_event",
+    seq,
+    event: event as Record<string, unknown>,
+  });
+}
+
+function handleProviderExit(code: number): void {
+  whitelist.clear();
+  sendToServe({ type: "worker_exit", code });
+  cleanup();
+  process.exit(0);
+}
+
+const session =
+  provider === "codex"
+    ? new CodexAppServerSession({
+        cwd: workerCwd,
+        resumeSessionId: workerResume,
+        permissionMode: workerPermissionMode,
+        approvalStrategy,
+        onEvent: handleProviderEvent,
+        onThreadId: (threadId) => {
+          sendToServe({
+            type: "worker_native_session_id",
+            provider: "codex",
+            sessionId: threadId,
+          });
+        },
+        onExit: handleProviderExit,
+      })
+    : new JsonSession({
+        claudeArgs: providerArgs,
+        cwd: workerCwd,
+        resumeSessionId: workerResume,
+        permissionMode: workerPermissionMode,
+        includePartialMessages: workerStreamDelta,
+        hook: workerHook,
+        approvalStrategy,
+        onEvent: handleProviderEvent,
+        onExit: handleProviderExit,
+      });
 
 function handleServeConnection(socket: Socket): void {
   serveSocket = takeoverServeSocket(serveSocket, socket);

@@ -81,7 +81,12 @@ export const MessageBubble = memo(function MessageBubble({
                   aria-hidden="true"
                 />
               )}
-              <span className="min-w-0 whitespace-pre-wrap break-words">{message.text}</span>
+              <span
+                data-slot="activity-text"
+                className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]"
+              >
+                {message.text}
+              </span>
               {activityDetails.length > 0 ? (
                 <button
                   type="button"

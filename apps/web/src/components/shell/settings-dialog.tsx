@@ -147,7 +147,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       <DialogContent
         className={cn(
           "grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-4 sm:max-w-[440px] sm:p-6",
-          view === "voice" && "max-h-[min(760px,calc(100dvh-1rem))] gap-0 p-0 sm:max-w-[480px]",
+          view === "voice" && "max-h-[min(760px,calc(100dvh-1rem))] !gap-0 !p-0 sm:max-w-[480px]",
           view === "voice" &&
             "max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:h-[calc(100dvh-0.75rem)] max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-x-0 max-sm:border-b-0",
         )}
@@ -158,32 +158,39 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogHeader
           className={cn(
             view === "menu" && "pr-12 text-left",
-            view === "voice" &&
-              "border-b border-border/70 px-4 py-4 text-left sm:px-6 sm:pb-4 sm:pt-5",
+            view === "voice" && "gap-0 px-4 pb-0 pt-3.5 text-left sm:px-5 sm:pt-4",
           )}
         >
           {view !== "menu" ? (
-            <div className="flex items-start gap-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="-ml-2 mt-0.5 size-9"
-                aria-label="返回设置"
-                data-slot="voice-settings-back"
-                onClick={() => setView("menu")}
-              >
-                <ArrowLeft className="size-4" aria-hidden="true" />
-              </Button>
-              <div className="min-w-0 space-y-1.5 pt-0.5">
-                <DialogTitle>{view === "version" ? "版本" : "设置 Voice Pilot"}</DialogTitle>
-                <DialogDescription className={cn(view === "voice" && "max-w-[28rem] leading-5")}>
-                  {view === "version"
-                    ? "当前 Web 与 Relay 的版本信息"
-                    : "连接语音服务后，即可以语音交互的形式驱动会话。"}
-                </DialogDescription>
+            <>
+              <div className="flex items-start gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="-ml-2 mt-0.5 size-9"
+                  aria-label="返回设置"
+                  data-slot="voice-settings-back"
+                  onClick={() => setView("menu")}
+                >
+                  <ArrowLeft className="size-4" aria-hidden="true" />
+                </Button>
+                <div className="min-w-0 space-y-1.5 pt-0.5">
+                  <DialogTitle>{view === "version" ? "版本" : "设置 Voice Pilot"}</DialogTitle>
+                  <DialogDescription className={cn(view === "voice" && "max-w-[28rem] leading-5")}>
+                    {view === "version"
+                      ? "当前 Web 与 Relay 的版本信息"
+                      : "连接语音服务后，即可以语音交互的形式驱动会话。"}
+                  </DialogDescription>
+                </div>
               </div>
-            </div>
+              {view === "voice" ? (
+                <div
+                  className="mr-4 mt-3.5 border-t border-border/70"
+                  data-slot="voice-settings-header-divider"
+                />
+              ) : null}
+            </>
           ) : (
             <>
               <DialogTitle>设置</DialogTitle>
@@ -193,7 +200,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         {view === "version" ? (
-          <div className="min-h-0 space-y-3 overflow-y-auto pr-1" data-slot="settings-dialog-body">
+          <div
+            className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
+            data-slot="settings-dialog-body"
+          >
             <VersionRow
               icon={<Monitor className="size-4" aria-hidden="true" />}
               label="Web"
@@ -211,7 +221,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         ) : view === "voice" ? (
           <VoiceSettingsPanel />
         ) : (
-          <div className="min-h-0 space-y-2 overflow-y-auto pr-1" data-slot="settings-dialog-body">
+          <div
+            className="dev-render-scroll min-h-0 space-y-2 overflow-y-auto overscroll-contain pr-1"
+            data-slot="settings-dialog-body"
+          >
             <SettingsMenuItem
               icon={<AudioLines className="size-4" aria-hidden="true" />}
               label="Voice Pilot"

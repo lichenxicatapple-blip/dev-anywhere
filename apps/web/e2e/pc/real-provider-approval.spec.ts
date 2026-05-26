@@ -88,7 +88,11 @@ async function createHostedPtySession(
   return sessionId!;
 }
 
-async function createJsonSession(page: Page, permissionModeLabel?: string): Promise<string> {
+async function createJsonSession(
+  page: Page,
+  provider: Provider = "claude",
+  permissionModeLabel?: string,
+): Promise<string> {
   await page.goto("/#/sessions");
   await selectFirstProxy(page);
 
@@ -100,6 +104,10 @@ async function createJsonSession(page: Page, permissionModeLabel?: string): Prom
   await page
     .getByLabel("交互方式")
     .getByRole("button", { name: /聊天模式/ })
+    .click({ timeout: 15_000 });
+  await page
+    .getByLabel("Agent CLI")
+    .getByRole("button", { name: provider === "claude" ? /Claude Code/ : /Codex/ })
     .click({ timeout: 15_000 });
   if (permissionModeLabel) {
     await choosePermissionMode(page, permissionModeLabel);
@@ -491,7 +499,7 @@ test("real Claude JSON strict mode surfaces a tool approval card", async ({ page
   const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_strict_${Date.now()}.txt`;
 
   try {
-    sessionId = await createJsonSession(page, "严格审批");
+    sessionId = await createJsonSession(page, "claude", "严格审批");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON strict approval smoke.");
 
     await expect(
@@ -514,7 +522,7 @@ test("real Claude JSON bypass mode executes without a tool approval card", async
   const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_bypass_${Date.now()}.txt`;
 
   try {
-    sessionId = await createJsonSession(page, "跳过全部审批");
+    sessionId = await createJsonSession(page, "claude", "跳过全部审批");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON bypass approval smoke.");
 
     await expectJsonFileCreatedWithoutApproval(page, sessionId, filePath);
@@ -534,7 +542,7 @@ test("real Claude JSON acceptEdits mode accepts file edits without approval", as
   const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_accept_edits_${Date.now()}.txt`;
 
   try {
-    sessionId = await createJsonSession(page, "自动接受编辑");
+    sessionId = await createJsonSession(page, "claude", "自动接受编辑");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON acceptEdits approval smoke.");
 
     await expectJsonFileCreatedWithoutApproval(page, sessionId, filePath);
@@ -554,7 +562,7 @@ test("real Claude JSON plan mode denies tool execution without approval", async 
   const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_plan_${Date.now()}.txt`;
 
   try {
-    sessionId = await createJsonSession(page, "只读规划");
+    sessionId = await createJsonSession(page, "claude", "只读规划");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON plan approval smoke.");
 
     await expect(sessionRow(page, sessionId)).toContainText("空闲", {
@@ -581,7 +589,7 @@ test("real Claude JSON auto mode reaches a concrete provider decision", async ({
   const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_auto_${Date.now()}.txt`;
 
   try {
-    sessionId = await createJsonSession(page, "自动判定");
+    sessionId = await createJsonSession(page, "claude", "自动判定");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON auto approval smoke.");
 
     const outcome = await expect
@@ -618,6 +626,26 @@ test("real Claude JSON auto mode reaches a concrete provider decision", async ({
     }
   } catch (error) {
     await tryAttachPageDiagnostics(testInfo, page, "claude-json-auto-failure");
+    throw error;
+  } finally {
+    rmSync(filePath, { force: true });
+    if (sessionId) await terminateSession(page, sessionId);
+  }
+});
+
+test("real Codex JSON bypass mode executes without a tool approval card", async ({
+  page,
+}, testInfo) => {
+  let sessionId: string | null = null;
+  const filePath = `${smokeCwd.replace(/\/$/, "")}/dev_anywhere_real_json_codex_bypass_${Date.now()}.txt`;
+
+  try {
+    sessionId = await createJsonSession(page, "codex", "跳过全部审批");
+    await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere Codex JSON bypass smoke.");
+
+    await expectJsonFileCreatedWithoutApproval(page, sessionId, filePath);
+  } catch (error) {
+    await tryAttachPageDiagnostics(testInfo, page, "codex-json-bypass-failure");
     throw error;
   } finally {
     rmSync(filePath, { force: true });

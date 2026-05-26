@@ -17,12 +17,19 @@ import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../i
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
-import type { ProviderHookContext } from "../providers/index.js";
+import type { ProviderHookContext, ProviderId } from "../providers/index.js";
 import type { PermissionBroker, PermissionDecision } from "./permission-broker.js";
 
 interface CompactCommandOutcome {
   success: boolean;
   message: string;
+}
+
+interface CodexFileChange {
+  path: string;
+  kind: string;
+  diff: string;
+  move_path?: string;
 }
 
 interface WorkerRegistryDeps {
@@ -40,6 +47,7 @@ interface SpawnOptions {
   cwd?: string;
   resumeSessionId?: string;
   permissionMode?: string;
+  provider?: ProviderId;
   // 开启后 worker spawn claude 带 --include-partial-messages，forwardEvent 处理 stream_event delta；
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
   streamDelta?: boolean;
@@ -76,6 +84,46 @@ function parseCompactCommandOutcome(content: string): CompactCommandOutcome | nu
   }
 
   return null;
+}
+
+function codexPatchKind(kind: unknown): { kind: string; movePath?: string } {
+  if (typeof kind === "string") return { kind };
+  if (!kind || typeof kind !== "object") return { kind: "unknown" };
+  const record = kind as Record<string, unknown>;
+  const kindType = typeof record.type === "string" ? record.type : "unknown";
+  const movePath = typeof record.move_path === "string" ? record.move_path : undefined;
+  return { kind: kindType, movePath };
+}
+
+function codexPatchParameters(item: Record<string, unknown>): Record<string, unknown> {
+  const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+  const changes: CodexFileChange[] = rawChanges.flatMap((rawChange) => {
+    if (!rawChange || typeof rawChange !== "object") return [];
+    const change = rawChange as Record<string, unknown>;
+    const path = typeof change.path === "string" ? change.path : "";
+    const diff = typeof change.diff === "string" ? change.diff : "";
+    if (!path && !diff) return [];
+    const { kind, movePath } = codexPatchKind(change.kind);
+    return [
+      {
+        path,
+        kind,
+        diff,
+        ...(movePath ? { move_path: movePath } : {}),
+      },
+    ];
+  });
+  const paths = changes.map((change) => change.path).filter(Boolean);
+  return {
+    file_path: paths[0] ?? "",
+    paths,
+    changes,
+    content: changes
+      .map((change) => change.diff)
+      .filter(Boolean)
+      .join("\n"),
+    status: typeof item.status === "string" ? item.status : undefined,
+  };
 }
 
 // 管理 session → worker socket 的映射，封装全部 worker IO：
@@ -136,6 +184,7 @@ export class WorkerRegistry {
   spawn(sessionId: string, options?: SpawnOptions): number {
     const paths = sessionPaths(sessionId);
     const args: string[] = [sessionId, paths.workerSock];
+    args.push("--provider", options?.provider ?? "claude");
     if (options?.cwd) args.push("--cwd", options.cwd);
     if (options?.resumeSessionId) args.push("--resume", options.resumeSessionId);
     // 远程场景默认 default，每个工具都需审批，覆盖用户全局 claude settings 的 defaultMode
@@ -325,6 +374,18 @@ export class WorkerRegistry {
           "Claude session ID captured",
         );
         break;
+
+      case "worker_native_session_id":
+        if (msg.provider === "claude") {
+          this.deps.sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
+        } else {
+          this.deps.sessionManager.setHistorySessionId(sessionId, msg.sessionId);
+        }
+        serviceLogger.info(
+          { sessionId, provider: msg.provider, nativeSessionId: msg.sessionId },
+          "Native JSON session ID captured",
+        );
+        break;
     }
   }
 
@@ -354,6 +415,10 @@ export class WorkerRegistry {
   // schema 未识别的 event/block 以 warn 暴露，作为 Claude CLI 协议变化的 runtime canary。
   private forwardEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
+    if (event.type === "codex_app_server") {
+      this.forwardCodexAppServerEvent(sessionId, seq, event);
+      return;
+    }
     const parsed = StreamJsonEventSchema.safeParse(event);
     if (!parsed.success) {
       const rawType = typeof event.type === "string" ? event.type : "<missing>";
@@ -490,6 +555,120 @@ export class WorkerRegistry {
           success: ev.subtype === "success",
           isError: ev.is_error ?? false,
           ...(resultText ? { result: resultText } : {}),
+        }),
+      );
+      this.deps.jsonObserver.onTurnResult(sessionId);
+    }
+  }
+
+  private forwardCodexAppServerEvent(
+    sessionId: string,
+    seq: number,
+    event: Record<string, unknown>,
+  ): void {
+    const relay = this.deps.relayConnection;
+    const method = typeof event.method === "string" ? event.method : "";
+    const params =
+      event.params && typeof event.params === "object"
+        ? (event.params as Record<string, unknown>)
+        : {};
+    this.deps.touchSessionActivity?.(sessionId);
+
+    if (method === "item/agentMessage/delta") {
+      const delta = typeof params.delta === "string" ? params.delta : "";
+      if (!delta) return;
+      relay.sendEnvelope(
+        buildMessage(
+          "assistant_message",
+          sessionId,
+          seq,
+          { text: delta, isPartial: true },
+          "proxy",
+        ),
+      );
+      return;
+    }
+
+    const item = params.item && typeof params.item === "object" ? params.item : null;
+    const itemRecord = item as Record<string, unknown> | null;
+
+    if (
+      (method === "item/started" || method === "item/completed") &&
+      itemRecord?.type === "fileChange"
+    ) {
+      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
+      if (!id) return;
+      const status = typeof itemRecord.status === "string" ? itemRecord.status : "";
+      relay.sendEnvelope(
+        buildMessage(
+          "assistant_tool_use",
+          sessionId,
+          seq,
+          { toolName: "Patch", toolId: id, parameters: codexPatchParameters(itemRecord) },
+          "proxy",
+        ),
+      );
+      if (method === "item/completed") {
+        relay.sendEnvelope(
+          buildMessage(
+            "tool_result",
+            sessionId,
+            seq,
+            { toolId: id, result: status || "completed", isError: status === "failed" },
+            "proxy",
+          ),
+        );
+      }
+      return;
+    }
+
+    if (method === "item/started" && itemRecord?.type === "commandExecution") {
+      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
+      if (!id) return;
+      const command = typeof itemRecord.command === "string" ? itemRecord.command : "";
+      const cwd = typeof itemRecord.cwd === "string" ? itemRecord.cwd : "";
+      relay.sendEnvelope(
+        buildMessage(
+          "assistant_tool_use",
+          sessionId,
+          seq,
+          { toolName: "Bash", toolId: id, parameters: { command, cwd } },
+          "proxy",
+        ),
+      );
+      return;
+    }
+
+    if (method === "item/completed" && itemRecord?.type === "commandExecution") {
+      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
+      if (!id) return;
+      const output =
+        typeof itemRecord.aggregatedOutput === "string" ? itemRecord.aggregatedOutput : "";
+      const exitCode = typeof itemRecord.exitCode === "number" ? itemRecord.exitCode : null;
+      relay.sendEnvelope(
+        buildMessage(
+          "tool_result",
+          sessionId,
+          seq,
+          { toolId: id, result: output, isError: exitCode !== null && exitCode !== 0 },
+          "proxy",
+        ),
+      );
+      return;
+    }
+
+    if (method === "turn/completed") {
+      const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
+      const status = (turn as { status?: unknown }).status;
+      const error = (turn as { error?: unknown }).error;
+      const success = status === "completed";
+      relay.sendRaw(
+        serializeControl({
+          type: "turn_result",
+          sessionId,
+          success,
+          isError: !success,
+          ...(error ? { result: String(error) } : {}),
         }),
       );
       this.deps.jsonObserver.onTurnResult(sessionId);

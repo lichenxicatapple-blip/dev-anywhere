@@ -178,6 +178,60 @@ describe("SettingsDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("uses the themed inset scroll area for Voice Pilot settings", async () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+
+    const bodyFrame = document.querySelector<HTMLElement>(
+      '[data-slot="voice-settings-body-frame"]',
+    );
+    const scrollArea = document.querySelector<HTMLElement>('[data-slot="voice-settings-scroll"]');
+    const footer = document.querySelector<HTMLElement>('[data-slot="voice-settings-footer"]');
+    const divider = document.querySelector<HTMLElement>(
+      '[data-slot="voice-settings-header-divider"]',
+    );
+    const footerDivider = document.querySelector<HTMLElement>(
+      '[data-slot="voice-settings-footer-divider"]',
+    );
+    const fields = document.querySelector<HTMLElement>('[data-slot="voice-settings-fields"]');
+
+    expect(bodyFrame).not.toBeNull();
+    expect(scrollArea).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(divider).not.toBeNull();
+    expect(footerDivider).not.toBeNull();
+    expect(fields).not.toBeNull();
+    expect(bodyFrame?.className).toContain("px-4");
+    expect(bodyFrame?.className).toContain("sm:px-5");
+    expect(scrollArea?.className).toContain("dev-render-scroll");
+    expect(footer?.className).toContain("sm:px-5");
+    expect(footer?.className).toContain("pt-0");
+    expect(fields?.className).not.toContain("pb-");
+    expect(divider?.className).toContain("border-t");
+    expect(divider?.className).toContain("mr-4");
+    expect(footerDivider?.className).toContain("border-t");
+    expect(footerDivider?.className).toContain("mr-4");
+  });
+
+  it("keeps detail-free Voice Pilot choices compact", async () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+
+    const choiceTriggers = document.querySelectorAll<HTMLElement>(
+      '[data-slot="voice-settings-choice-trigger"]',
+    );
+    expect(choiceTriggers.length).toBeGreaterThan(0);
+    expect(choiceTriggers[0]?.className).toContain("min-h-11");
+    expect(choiceTriggers[0]?.className).not.toContain("min-h-[60px]");
+    expect(
+      Array.from(choiceTriggers).some((trigger) => trigger.className.includes("min-h-[60px]")),
+    );
+  });
+
   it("keeps save feedback visible long enough to read", async () => {
     const onOpenChange = vi.fn();
     render(<SettingsDialog open onOpenChange={onOpenChange} />);

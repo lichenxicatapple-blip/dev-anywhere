@@ -15,7 +15,8 @@ export type StreamJsonEventType =
   | "result"
   | "control_request"
   | "control_cancel_request"
-  | "stream_event";
+  | "stream_event"
+  | "codex_app_server";
 
 export interface StreamJsonEvent {
   type: StreamJsonEventType;

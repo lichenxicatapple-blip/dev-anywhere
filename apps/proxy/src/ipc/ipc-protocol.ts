@@ -259,6 +259,14 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
+  // worker → serve: provider 原生会话 ID。Codex app-server 用 thread id 作为
+  // historySessionId，Claude 仍保留 worker_claude_session_id 的兼容路径。
+  z.object({
+    type: z.literal("worker_native_session_id"),
+    provider: z.enum(["claude", "codex"]),
+    sessionId: z.string(),
+  }),
+
   // serve → worker: 将指定工具加入会话白名单，后续同名工具自动审批
   z.object({
     type: z.literal("worker_whitelist_add"),

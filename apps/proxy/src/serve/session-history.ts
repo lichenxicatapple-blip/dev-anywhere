@@ -188,6 +188,8 @@ interface SessionMessagesPageOptions {
   before?: string;
 }
 
+type SessionHistoryProvider = "claude" | "codex";
+
 const DEFAULT_HISTORY_PAGE_LIMIT = 50;
 const MAX_HISTORY_PAGE_LIMIT = 200;
 const HISTORY_READ_CHUNK_BYTES = 64 * 1024;
@@ -242,6 +244,34 @@ async function findClaudeSessionFile(claudeSessionId: string): Promise<string | 
   return null;
 }
 
+async function findCodexSessionFile(codexSessionId: string): Promise<string | null> {
+  if (!SAFE_SESSION_ID_PATTERN.test(codexSessionId)) return null;
+
+  const files = await collectJsonlFiles(codexSessionsDir());
+  const filenameMatch = files.find((filePath) => filePath.endsWith(`${codexSessionId}.jsonl`));
+  if (filenameMatch) return filenameMatch;
+
+  for (const filePath of files) {
+    try {
+      const meta = await extractCodexTitleAndCwd(filePath);
+      if (meta.id === codexSessionId) return filePath;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function findSessionFile(
+  sessionId: string,
+  provider?: SessionHistoryProvider,
+): Promise<string | null> {
+  if (provider === "claude") return findClaudeSessionFile(sessionId);
+  if (provider === "codex") return findCodexSessionFile(sessionId);
+  return (await findClaudeSessionFile(sessionId)) ?? (await findCodexSessionFile(sessionId));
+}
+
 function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, "cursor"> | null {
   if (!obj || typeof obj !== "object") return null;
   const record = obj as {
@@ -249,7 +279,27 @@ function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, 
     isMeta?: unknown;
     message?: unknown;
     timestamp?: unknown;
+    payload?: unknown;
   };
+  if (record.type === "event_msg") {
+    const payload =
+      record.payload && typeof record.payload === "object"
+        ? (record.payload as { type?: unknown; message?: unknown })
+        : null;
+    if (!payload || typeof payload.message !== "string") return null;
+    const role =
+      payload.type === "user_message"
+        ? "user"
+        : payload.type === "agent_message"
+          ? "assistant"
+          : null;
+    if (!role) return null;
+    const text = normalizeConversationText(payload.message);
+    if (!text) return null;
+    const ts =
+      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
+    return { role, text, timestamp: ts };
+  }
   if (record.type === "user") {
     if (record.isMeta) return null;
     const payload = extractConversationPayload(record.message);
@@ -343,8 +393,11 @@ async function readSessionMessagesPageFromFile(
 }
 
 // 从 JSONL 文件中提取 user/assistant 对话消息用于恢复时展示历史
-export async function readSessionMessages(claudeSessionId: string): Promise<SessionMessage[]> {
-  const filePath = await findClaudeSessionFile(claudeSessionId);
+export async function readSessionMessages(
+  sessionId: string,
+  provider?: SessionHistoryProvider,
+): Promise<SessionMessage[]> {
+  const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return [];
 
   const messages: SessionMessage[] = [];
@@ -370,10 +423,11 @@ export async function readSessionMessages(claudeSessionId: string): Promise<Sess
 }
 
 export async function readSessionMessagesPage(
-  claudeSessionId: string,
+  sessionId: string,
   options: SessionMessagesPageOptions = {},
+  provider?: SessionHistoryProvider,
 ): Promise<SessionMessagesPage> {
-  const filePath = await findClaudeSessionFile(claudeSessionId);
+  const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return { messages: [], hasMore: false };
   return readSessionMessagesPageFromFile(filePath, options);
 }

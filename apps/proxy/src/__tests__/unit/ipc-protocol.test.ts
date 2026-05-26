@@ -628,6 +628,10 @@ describe("Worker Protocol", () => {
         type: "worker_claude_session_id",
         payload: { type: "worker_claude_session_id", sessionId: "cs-123" },
       },
+      {
+        type: "worker_native_session_id",
+        payload: { type: "worker_native_session_id", provider: "codex", sessionId: "cx-123" },
+      },
       { type: "worker_whitelist_add", payload: { type: "worker_whitelist_add", toolName: "read" } },
     ];
 

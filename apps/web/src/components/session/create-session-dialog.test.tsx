@@ -151,6 +151,39 @@ describe("CreateSessionDialog", () => {
     getByText("气泡式对话，支持 Voice Pilot");
   });
 
+  it("lets the user create a Codex chat session", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "codex-json-1",
+      mode: "json",
+      provider: "codex",
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole } = renderDialog();
+
+    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+    fireEvent.click(getByRole("button", { name: "Codex" }));
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/home/dev",
+          mode: "json",
+          provider: "codex",
+          permissionMode: "default",
+        }),
+        expect.any(Number),
+      );
+    });
+  });
+
   it("unblocks the create button when session creation times out", async () => {
     createSession.mockRejectedValue(new Error("创建超时，请检查开发机连接后重试"));
     useFileStore.setState({
@@ -242,6 +275,25 @@ describe("CreateSessionDialog", () => {
     });
     expect(createSession).not.toHaveBeenCalled();
     expect(toastSuccess).toHaveBeenCalledWith("目录已创建");
+  });
+
+  it("does not open the directory picker from non-input focus in the working directory field", async () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByLabelText, getByText } = renderDialog();
+
+    const cwdInput = getByLabelText("工作目录") as HTMLInputElement;
+    await waitFor(() => {
+      expect(cwdInput.value).toBe("/home/dev");
+    });
+    fireEvent.focusIn(getByText("工作目录"));
+
+    expect(document.querySelector('[data-slot="file-path-picker"]')).toBeNull();
   });
 
   it("disables an unavailable Agent CLI before creating a session", async () => {

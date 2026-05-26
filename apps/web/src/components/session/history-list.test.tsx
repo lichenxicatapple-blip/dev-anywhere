@@ -141,6 +141,41 @@ describe("HistoryList", () => {
     expect(navigateMock).toHaveBeenCalledWith("/chat/restored-session?mode=json");
   });
 
+  it("lets Codex JSON history restore as chat by default", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "codex-json-session",
+      mode: "json",
+      provider: "codex",
+    });
+    const { container } = renderHistoryList([
+      {
+        id: "codex-history-json",
+        title: "Codex JSON 会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "codex",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：Codex JSON 会话" }));
+    expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "终端" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "恢复聊天" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        cwd: "/Users/dev/project",
+        mode: "json",
+        provider: "codex",
+        resumeSessionId: "codex-history-json",
+      });
+    });
+    expect(navigateMock).toHaveBeenCalledWith("/chat/codex-json-session?mode=json");
+  });
+
   it("shows terminal permission choices only after Terminal is selected and restores bypass mode", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",

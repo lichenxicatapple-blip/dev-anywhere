@@ -97,7 +97,7 @@ export class RelaySessionCreateHandler {
     }
     const sessionCwd = typeof cwd === "string" ? cwd.trim() : "";
 
-    const provider = msg.provider;
+    const provider = msg.provider ?? "claude";
     const mode = msg.mode ?? "json";
     const permissionMode = msg.permissionMode;
     if (mode === "pty") {
@@ -105,16 +105,13 @@ export class RelaySessionCreateHandler {
       return;
     }
 
-    if (provider !== "claude") {
+    if (provider !== "claude" && provider !== "codex") {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
           requestId,
           errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
-          error:
-            provider === "codex"
-              ? "Codex chat sessions are not supported yet; start a Codex terminal session instead."
-              : "Unsupported provider for JSON session.",
+          error: "Unsupported provider for JSON session.",
         }),
       );
       serviceLogger.warn({ provider }, "JSON session create rejected for unsupported provider");
@@ -134,6 +131,7 @@ export class RelaySessionCreateHandler {
       cwd: sessionCwd,
       resumeSessionId,
       permissionMode,
+      provider,
       streamDelta,
       hook,
     });
@@ -260,8 +258,12 @@ export class RelaySessionCreateHandler {
         "proxy-hosted",
         nameLocked,
       );
-      if (resumeSessionId && provider === "claude") {
-        this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
+      if (resumeSessionId) {
+        if (provider === "claude") {
+          this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
+        } else {
+          this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
+        }
       }
       this.deps.relaySend(
         serializeControl({
@@ -306,7 +308,8 @@ export class RelaySessionCreateHandler {
   }
 
   private pushHistoryMessages(sessionId: string, resumeSessionId: string): void {
-    readSessionMessagesPage(resumeSessionId)
+    const provider = this.deps.sessionManager.getSession(sessionId)?.provider;
+    readSessionMessagesPage(resumeSessionId, undefined, provider)
       .then((page) => {
         if (page.messages.length === 0) return;
         this.deps.relaySend(

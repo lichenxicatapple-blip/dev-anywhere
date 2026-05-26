@@ -81,21 +81,25 @@ test.describe("session create permission mode", () => {
     }
   }
 
-  for (const [permissionLabel, permissionMode] of [
+  const codexPermissionModes = [
     ["严格审批", "default"],
     ["自动判定", "auto"],
     ["跳过全部审批", "bypassPermissions"],
-  ] as const) {
-    test(`sends Codex PTY ${permissionLabel} permission mode in session_create`, async ({
-      page,
-    }) => {
-      await createSessionWithPermissionMode(page, {
-        name: `Codex PTY ${permissionLabel}`,
-        mode: "pty",
-        provider: "codex",
-        permissionLabel,
-        permissionMode,
+  ] as const;
+
+  for (const mode of ["json", "pty"] as const) {
+    for (const [permissionLabel, permissionMode] of codexPermissionModes) {
+      test(`sends Codex ${mode} ${permissionLabel} permission mode in session_create`, async ({
+        page,
+      }) => {
+        await createSessionWithPermissionMode(page, {
+          name: `Codex ${mode} ${permissionLabel}`,
+          mode,
+          provider: "codex",
+          permissionLabel,
+          permissionMode,
+        });
       });
-    });
+    }
   }
 });

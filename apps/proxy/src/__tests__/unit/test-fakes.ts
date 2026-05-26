@@ -91,6 +91,7 @@ export function createSessionManagerFake(sessions: SessionFake[] = []): SessionM
     listSessions: vi.fn(() => normalized),
     terminateSession: vi.fn(() => ({ success: true })),
     setClaudeSessionId: vi.fn(),
+    setHistorySessionId: vi.fn(),
   } as unknown as SessionManager;
 }
 

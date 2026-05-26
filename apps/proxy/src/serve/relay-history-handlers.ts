@@ -137,14 +137,18 @@ async function readSessionHistoryPageForSession(
   if (!hasSeparateHistory) {
     const sourceId = activeSessionId ?? historySessionId;
     if (!sourceId) return { messages: [], hasMore: false };
-    return readSessionMessagesPage(sourceId, options);
+    return readSessionMessagesPage(sourceId, options, session.provider);
   }
 
   if (options.before?.startsWith(ACTIVE_CURSOR_PREFIX)) {
-    const page = await readSessionMessagesPage(activeSessionId, {
-      ...options,
-      before: stripCursorPrefix(ACTIVE_CURSOR_PREFIX, options.before),
-    });
+    const page = await readSessionMessagesPage(
+      activeSessionId,
+      {
+        ...options,
+        before: stripCursorPrefix(ACTIVE_CURSOR_PREFIX, options.before),
+      },
+      session.provider,
+    );
     return {
       ...page,
       messages: addCursorPrefix(ACTIVE_CURSOR_PREFIX, page.messages),
@@ -155,10 +159,14 @@ async function readSessionHistoryPageForSession(
   }
 
   if (options.before?.startsWith(RESUME_CURSOR_PREFIX)) {
-    const page = await readSessionMessagesPage(historySessionId, {
-      ...options,
-      before: stripCursorPrefix(RESUME_CURSOR_PREFIX, options.before),
-    });
+    const page = await readSessionMessagesPage(
+      historySessionId,
+      {
+        ...options,
+        before: stripCursorPrefix(RESUME_CURSOR_PREFIX, options.before),
+      },
+      session.provider,
+    );
     return {
       ...page,
       messages: addCursorPrefix(RESUME_CURSOR_PREFIX, page.messages),
@@ -169,8 +177,8 @@ async function readSessionHistoryPageForSession(
   }
 
   const [historyPage, activePage] = await Promise.all([
-    readSessionMessagesPage(historySessionId, options),
-    readSessionMessagesPage(activeSessionId, options),
+    readSessionMessagesPage(historySessionId, options, session.provider),
+    readSessionMessagesPage(activeSessionId, options, session.provider),
   ]);
 
   return {

@@ -192,6 +192,18 @@ describe("ChatHeader PTY upload menu", () => {
     );
   });
 
+  it("aligns header actions to the shared chat rail", () => {
+    const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const railInset = container.querySelector<HTMLElement>('[data-slot="chat-header-rail-inset"]');
+    const rail = container.querySelector<HTMLElement>('[data-slot="chat-header-rail"]');
+    const trigger = screen.getByRole("button", { name: "会话操作" });
+
+    expect(railInset?.className).toContain("dev-chat-shell-rail-inset");
+    expect(rail?.className).toContain("dev-message-rail");
+    expect(trigger.className).toContain("justify-self-end");
+  });
+
   it("keeps the overflow menu visually consistent with icons and grouped controls", async () => {
     render(<ChatHeader sessionId="s1" mode="pty" />);
 

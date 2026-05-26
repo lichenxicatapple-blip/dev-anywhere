@@ -10,7 +10,7 @@ describe("PTY back-to-bottom layout", () => {
     });
 
     expect(className).toContain("bottom-12");
-    expect(className).toContain("right-6");
+    expect(className).not.toContain("right-");
   });
 
   it("keeps mobile controls clearance when the soft keyboard controls are visible", () => {
@@ -21,6 +21,6 @@ describe("PTY back-to-bottom layout", () => {
     });
 
     expect(className).toContain("7rem");
-    expect(className).toContain("right-5");
+    expect(className).not.toContain("right-");
   });
 });

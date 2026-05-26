@@ -91,6 +91,7 @@ function ChoiceField({
   const selected = options.find((option) => option.value === value);
   const selectedLabel = selected?.label ?? (value ? value : placeholder);
   const enabledOptions = options.filter((option) => !option.disabled);
+  const selectedHasDetail = Boolean(splitOptionLabel(selectedLabel).detail);
 
   return (
     <div
@@ -110,8 +111,9 @@ function ChoiceField({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={enabledOptions.length === 0}
-        className="mt-2 flex min-h-11 w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-input px-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 md:min-h-9"
+        className={`mt-2 flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-input px-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 ${selectedHasDetail ? "min-h-[60px] py-2" : "min-h-11"}`}
         onClick={() => setOpen((current) => !current)}
+        data-slot="voice-settings-choice-trigger"
       >
         <ChoiceLabel label={selectedLabel} muted={!selected && !value} />
         <ChevronDown
@@ -465,154 +467,167 @@ export function VoiceSettingsPanel() {
       }}
     >
       <div
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 pb-24 sm:px-6 sm:py-5"
-        data-slot="voice-settings-scroll"
+        className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-5 sm:py-3.5"
+        data-slot="voice-settings-body-frame"
       >
-        <div className="grid gap-2 rounded-lg border border-border/75 bg-card/55 p-3.5 sm:p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium leading-none text-muted-foreground">
-                服务商
-              </div>
-              <div className="mt-2 truncate text-base font-medium text-foreground md:text-sm">
-                阿里云百炼
+        <div
+          className="dev-render-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+          data-slot="voice-settings-scroll"
+        >
+          <div className="space-y-3" data-slot="voice-settings-fields">
+            <div className="grid gap-2 rounded-lg border border-border/75 bg-card/55 p-3.5 sm:p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium leading-none text-muted-foreground">
+                    服务商
+                  </div>
+                  <div className="mt-2 truncate text-base font-medium text-foreground md:text-sm">
+                    阿里云百炼
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                  Bailian
+                </span>
               </div>
             </div>
-            <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-              Bailian
-            </span>
+
+            <FieldBlock
+              label="阿里云百炼 API Key"
+              help={clearApiKey ? "保存后会清空已保存的 key" : null}
+            >
+              <div className="flex min-w-0 gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <KeyRound
+                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <input
+                    aria-label="阿里云百炼 API Key"
+                    type="password"
+                    name="dev-anywhere-bailian-api-key"
+                    autoComplete="off"
+                    value={apiKey}
+                    onChange={(event) => {
+                      setApiKey(event.target.value);
+                      setClearApiKey(false);
+                    }}
+                    placeholder={
+                      clearApiKey
+                        ? "保存后清空"
+                        : config.configured
+                          ? "••••••••••••••••"
+                          : "输入 API Key"
+                    }
+                    className={`${inputClassName} w-full pl-9`}
+                  />
+                </div>
+                {config.configured && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 shrink-0 px-3 md:h-9 md:min-h-0"
+                    onClick={() => {
+                      setApiKey("");
+                      setClearApiKey(true);
+                    }}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    清空
+                  </Button>
+                )}
+              </div>
+            </FieldBlock>
+
+            <ChoiceField
+              label="地域"
+              value={config.region}
+              options={regionOptions}
+              onChange={(value) =>
+                setConfig((current) => ({
+                  ...current,
+                  region: value === "intl" ? "intl" : "cn",
+                }))
+              }
+            />
+
+            <ChoiceField
+              label="语音识别模型"
+              value={config.asrModel}
+              options={asrOptions}
+              onChange={(value) => setConfig((current) => ({ ...current, asrModel: value }))}
+            />
+
+            <ChoiceField
+              label="语音合成模型"
+              value={config.ttsModel}
+              options={ttsModelOptions}
+              onChange={(ttsModel) =>
+                setConfig((current) => ({
+                  ...current,
+                  ttsModel,
+                  ttsVoice: firstVoiceForModel(ttsModel),
+                }))
+              }
+            />
+
+            <ChoiceField
+              label="语音音色"
+              value={selectedTtsVoice}
+              options={ttsVoiceOptions}
+              placeholder={compatibleTtsVoices.length === 0 ? "暂无可用音色" : "请选择音色"}
+              onChange={(value) => setConfig((current) => ({ ...current, ttsVoice: value }))}
+              help={voiceCompatibilityMessage}
+            />
+
+            <FieldBlock label="结束停顿时间（秒）" help={turnIdleSecondsMessage}>
+              <input
+                aria-label="结束停顿时间（秒）"
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                value={turnIdleSecondsInput}
+                onChange={(event) => setTurnIdleSecondsInput(event.target.value)}
+                className={`${inputClassName} w-full`}
+              />
+            </FieldBlock>
           </div>
         </div>
-
-        <FieldBlock
-          label="阿里云百炼 API Key"
-          help={clearApiKey ? "保存后会清空已保存的 key" : null}
-        >
-          <div className="flex min-w-0 gap-2">
-            <div className="relative min-w-0 flex-1">
-              <KeyRound
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <input
-                aria-label="阿里云百炼 API Key"
-                type="password"
-                name="dev-anywhere-bailian-api-key"
-                autoComplete="off"
-                value={apiKey}
-                onChange={(event) => {
-                  setApiKey(event.target.value);
-                  setClearApiKey(false);
-                }}
-                placeholder={
-                  clearApiKey
-                    ? "保存后清空"
-                    : config.configured
-                      ? "••••••••••••••••"
-                      : "输入 API Key"
-                }
-                className={`${inputClassName} w-full pl-9`}
-              />
-            </div>
-            {config.configured && (
-              <Button
-                type="button"
-                variant="outline"
-                className="min-h-11 shrink-0 px-3 md:h-9 md:min-h-0"
-                onClick={() => {
-                  setApiKey("");
-                  setClearApiKey(true);
-                }}
-              >
-                <Trash2 className="size-4" aria-hidden="true" />
-                清空
-              </Button>
-            )}
-          </div>
-        </FieldBlock>
-
-        <ChoiceField
-          label="地域"
-          value={config.region}
-          options={regionOptions}
-          onChange={(value) =>
-            setConfig((current) => ({
-              ...current,
-              region: value === "intl" ? "intl" : "cn",
-            }))
-          }
-        />
-
-        <ChoiceField
-          label="语音识别模型"
-          value={config.asrModel}
-          options={asrOptions}
-          onChange={(value) => setConfig((current) => ({ ...current, asrModel: value }))}
-        />
-
-        <ChoiceField
-          label="语音合成模型"
-          value={config.ttsModel}
-          options={ttsModelOptions}
-          onChange={(ttsModel) =>
-            setConfig((current) => ({
-              ...current,
-              ttsModel,
-              ttsVoice: firstVoiceForModel(ttsModel),
-            }))
-          }
-        />
-
-        <ChoiceField
-          label="语音音色"
-          value={selectedTtsVoice}
-          options={ttsVoiceOptions}
-          placeholder={compatibleTtsVoices.length === 0 ? "暂无可用音色" : "请选择音色"}
-          onChange={(value) => setConfig((current) => ({ ...current, ttsVoice: value }))}
-          help={voiceCompatibilityMessage}
-        />
-
-        <FieldBlock label="结束停顿时间（秒）" help={turnIdleSecondsMessage}>
-          <input
-            aria-label="结束停顿时间（秒）"
-            type="number"
-            min={1}
-            step={1}
-            inputMode="numeric"
-            value={turnIdleSecondsInput}
-            onChange={(event) => setTurnIdleSecondsInput(event.target.value)}
-            className={`${inputClassName} w-full`}
-          />
-        </FieldBlock>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-border/70 bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-        {statusText ? (
-          <div
-            role={state.kind === "error" ? "alert" : "status"}
-            aria-live="polite"
-            className={
-              state.kind === "error"
-                ? "min-w-0 flex-1 text-sm text-destructive"
-                : "min-w-0 flex-1 text-sm text-muted-foreground"
-            }
+      <div
+        className="bg-background/95 px-4 pb-3.5 pt-0 backdrop-blur sm:px-5"
+        data-slot="voice-settings-footer"
+      >
+        <div className="mr-4 border-t border-border/70" data-slot="voice-settings-footer-divider" />
+        <div className="mt-3.5 flex items-center justify-end gap-2">
+          {statusText ? (
+            <div
+              role={state.kind === "error" ? "alert" : "status"}
+              aria-live="polite"
+              className={
+                state.kind === "error"
+                  ? "min-w-0 flex-1 text-sm text-destructive"
+                  : "min-w-0 flex-1 text-sm text-muted-foreground"
+              }
+            >
+              {statusText}
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={actionDisabled}
+            onClick={() => void handleTest()}
           >
-            {statusText}
-          </div>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          disabled={actionDisabled}
-          onClick={() => void handleTest()}
-        >
-          <Play className="size-4" aria-hidden="true" />
-          测试
-        </Button>
-        <Button type="submit" disabled={actionDisabled}>
-          <SaveIcon className="size-4" aria-hidden="true" />
-          {state.kind === "saving" ? "保存中..." : "保存"}
-        </Button>
+            <Play className="size-4" aria-hidden="true" />
+            测试
+          </Button>
+          <Button type="submit" disabled={actionDisabled}>
+            <SaveIcon className="size-4" aria-hidden="true" />
+            {state.kind === "saving" ? "保存中..." : "保存"}
+          </Button>
+        </div>
       </div>
     </form>
   );

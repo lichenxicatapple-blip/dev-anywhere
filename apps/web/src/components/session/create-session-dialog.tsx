@@ -68,12 +68,8 @@ function extractMissingCwd(error: string, errorCode?: string): string | null {
 
 function providerStatus(
   provider: ProviderId,
-  mode: SessionMode,
   agentCli: AgentCliStatus | null,
 ): { label: string; disabled: boolean; title?: string } {
-  if (mode === "json" && provider === "codex") {
-    return { label: "仅支持终端模式", disabled: true };
-  }
   if (!agentCli) {
     return { label: "检测中", disabled: true };
   }
@@ -139,15 +135,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }, [open, homePath, agentCli]);
 
   useEffect(() => {
-    if (!open) return;
-    if (mode === "json") {
-      if (provider === "codex") {
-        setProvider("claude");
-      }
-    }
-  }, [open, mode, provider]);
-
-  useEffect(() => {
     if (!cwdPickerOpen) return;
 
     function closePickerOnOutsidePointer(event: PointerEvent) {
@@ -178,17 +165,15 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }
 
   const permissionOptions =
-    mode === "pty" && provider === "codex"
-      ? CODEX_PERMISSION_MODE_OPTIONS
-      : PERMISSION_MODE_OPTIONS;
-  const claudeStatus = providerStatus("claude", mode, agentCli);
-  const codexStatus = providerStatus("codex", mode, agentCli);
-  const selectedStatus = providerStatus(provider, mode, agentCli);
+    provider === "codex" ? CODEX_PERMISSION_MODE_OPTIONS : PERMISSION_MODE_OPTIONS;
+  const claudeStatus = providerStatus("claude", agentCli);
+  const codexStatus = providerStatus("codex", agentCli);
+  const selectedStatus = providerStatus(provider, agentCli);
   const createDisabled = submitting || savingCliPath || selectedStatus.disabled;
   const selectedCli = agentCli?.[provider];
 
-  function normalizePermissionMode(nextProvider: ProviderId, nextMode: SessionMode) {
-    if (nextMode === "pty" && nextProvider === "codex") {
+  function normalizePermissionMode(nextProvider: ProviderId) {
+    if (nextProvider === "codex") {
       const supported = CODEX_PERMISSION_MODE_OPTIONS.some(
         (option) => option.value === permissionMode,
       );
@@ -329,12 +314,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
 
   function handleModeChange(nextMode: SessionMode) {
     setMode(nextMode);
-    if (nextMode === "json" && provider === "codex") {
-      setProvider("claude");
-      normalizePermissionMode("claude", nextMode);
-      return;
-    }
-    normalizePermissionMode(provider, nextMode);
+    normalizePermissionMode(provider);
   }
 
   function handleCwdFieldBlur(event: FocusEvent<HTMLDivElement>) {
@@ -370,20 +350,21 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       <div
         ref={cwdFieldRef}
         className="relative flex min-w-0 flex-col gap-2"
-        onFocus={() => setCwdPickerOpen(true)}
         onBlur={handleCwdFieldBlur}
       >
-        <label htmlFor="create-session-cwd" className="text-sm">
+        <span id="create-session-cwd-label" className="text-sm">
           工作目录
-        </label>
+        </span>
         <input
           id="create-session-cwd"
           type="text"
+          aria-labelledby="create-session-cwd-label"
           name="dev-anywhere-session-cwd"
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
           value={cwd}
+          onFocus={() => setCwdPickerOpen(true)}
           onChange={(e) => {
             setCwd(e.target.value);
             setMissingCwd(null);
@@ -453,9 +434,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
         <div className="flex items-center justify-between">
           <span className="text-sm">Agent CLI</span>
-          <span className="text-xs text-muted-foreground">
-            {mode === "pty" ? "选择要启动的 CLI" : "聊天模式仅支持 Claude Code"}
-          </span>
+          <span className="text-xs text-muted-foreground">选择要启动的 CLI</span>
         </div>
         <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
           <Tooltip>
@@ -496,15 +475,13 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 type="button"
                 aria-pressed={provider === "codex"}
                 aria-label="Codex"
-                aria-disabled={codexStatus.disabled || mode === "json"}
+                aria-disabled={codexStatus.disabled}
                 onClick={() => {
-                  if (mode === "json") return;
                   setProvider("codex");
-                  normalizePermissionMode("codex", mode);
+                  normalizePermissionMode("codex");
                 }}
                 className={cn(
                   "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  mode === "json" && "cursor-not-allowed opacity-45",
                   provider === "codex"
                     ? "border-primary/70 bg-primary/10"
                     : "border-border bg-muted/20",
@@ -514,7 +491,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                 <span
                   className={cn(
                     "text-xs text-muted-foreground",
-                    codexStatus.disabled && agentCli && mode === "pty" && "text-destructive",
+                    codexStatus.disabled && agentCli && "text-destructive",
                   )}
                 >
                   {codexStatus.label}
@@ -611,7 +588,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                       variant="outline"
                       className="h-8 min-h-0 shrink-0 self-end rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground sm:self-auto"
                       onClick={() => openCliPathEditor(provider)}
-                      disabled={mode === "json" && provider === "codex"}
                     >
                       指定路径
                     </Button>
@@ -627,7 +603,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
                     className="absolute right-1 top-1/2 size-11 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-accent/70 hover:text-foreground"
                     aria-label="指定路径"
                     onClick={() => openCliPathEditor(provider)}
-                    disabled={mode === "json" && provider === "codex"}
                   >
                     <PencilLine className="size-4" aria-hidden="true" />
                   </Button>

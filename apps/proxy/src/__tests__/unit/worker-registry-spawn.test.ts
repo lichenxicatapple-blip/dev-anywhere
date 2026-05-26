@@ -57,4 +57,24 @@ describe("WorkerRegistry spawn", () => {
       },
     });
   });
+
+  it("passes the requested provider to the JSON worker process", () => {
+    const relay = createRelayConnectionFake();
+    const registry = new WorkerRegistry({
+      sessionManager: createSessionManagerFake(),
+      permissionBroker: new PermissionBroker(),
+      relayConnection: relay.relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({ CODEX_BIN: "codex" }),
+    });
+
+    registry.spawn("s1", {
+      cwd: "/tmp/project",
+      provider: "codex",
+    });
+
+    expect(spawnScriptMock.mock.calls.at(-1)?.[1]).toEqual(
+      expect.arrayContaining(["--provider", "codex"]),
+    );
+  });
 });

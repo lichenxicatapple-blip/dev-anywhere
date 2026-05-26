@@ -131,14 +131,22 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
       .map((raw) => JSON.parse(raw) as { type?: string; messages?: unknown[]; nextBefore?: string })
       .find((msg) => msg.type === "session_history_messages");
 
-    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith("resume-native", {
-      before: undefined,
-      limit: undefined,
-    });
-    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith("active-native", {
-      before: undefined,
-      limit: undefined,
-    });
+    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith(
+      "resume-native",
+      {
+        before: undefined,
+        limit: undefined,
+      },
+      "claude",
+    );
+    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith(
+      "active-native",
+      {
+        before: undefined,
+        limit: undefined,
+      },
+      "claude",
+    );
     expect(history?.messages).toEqual([
       { role: "user", text: "旧问题", cursor: "resume:b:100", timestamp: 100 },
       { role: "assistant", text: "旧回答", cursor: "resume:b:200", timestamp: 200 },
@@ -184,9 +192,13 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
     );
 
     expect(mockedReadSessionMessagesPage).toHaveBeenCalledTimes(1);
-    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith("resume-native", {
-      before: "b:100",
-      limit: undefined,
-    });
+    expect(mockedReadSessionMessagesPage).toHaveBeenCalledWith(
+      "resume-native",
+      {
+        before: "b:100",
+        limit: undefined,
+      },
+      "claude",
+    );
   });
 });

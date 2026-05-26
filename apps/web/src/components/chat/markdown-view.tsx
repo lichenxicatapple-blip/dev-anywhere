@@ -14,6 +14,8 @@ import {
 } from "react";
 import { Download, ExternalLink, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isFileDownloadPath } from "@/lib/file-download-path";
+import { isImagePreviewPath } from "@/lib/image-preview-path";
 import { findInlinePathLinks, type InlinePathLinkKind } from "@/lib/inline-path-links";
 import { findInlineWebLinks } from "@/lib/inline-web-links";
 import { useFileDownload } from "./file-download-link";
@@ -82,6 +84,22 @@ function decodeInlinePathHref(href: string): { kind: InlinePathLinkKind; path: s
   const kind = rest.slice(0, separator);
   if (kind !== "file" && kind !== "image") return null;
   return { kind, path: decodeURIComponent(rest.slice(separator + 1)) };
+}
+
+function safeDecodeHrefPath(href: string): string {
+  try {
+    return decodeURIComponent(href);
+  } catch {
+    return href;
+  }
+}
+
+function decodeLocalPathHref(href: string): { kind: InlinePathLinkKind; path: string } | null {
+  if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  const path = safeDecodeHrefPath(href);
+  if (isImagePreviewPath(path)) return { kind: "image", path };
+  if (isFileDownloadPath(path)) return { kind: "file", path };
+  return null;
 }
 
 function markdownUrlTransform(value: string, key: string, node: unknown): string {
@@ -202,7 +220,7 @@ function InlinePathAction({
   children: ReactNode;
   tone: "default" | "on-primary";
 }) {
-  const decoded = decodeInlinePathHref(href);
+  const decoded = decodeInlinePathHref(href) ?? decodeLocalPathHref(href);
   const { download } = useFileDownload();
   const { openImagePreview } = useImagePreview();
 

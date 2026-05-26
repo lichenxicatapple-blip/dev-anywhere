@@ -112,6 +112,30 @@ describe("MessageBubble", () => {
     expect(screen.getByText("运行命令：pnpm test")).not.toBeNull();
   });
 
+  it("allows long activity command paths to wrap without early hyphen gaps", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-long-command",
+          role: "activity",
+          text: `运行命令： /bin/zsh -lc "sed -n '1,200p' /Users/catli/.codex/plugins/cache/openai-curated/superpowers/6188456f/skills/using-superpowers/SKILL.md"`,
+          activity: {
+            id: "tool-long-command",
+            source: "claude-native",
+            kind: "tool",
+            status: "done",
+            text: "运行命令",
+            durable: true,
+          },
+        })}
+      />,
+    );
+
+    const activityText = container.querySelector<HTMLElement>('[data-slot="activity-text"]');
+    expect(activityText?.textContent).toContain("openai-curated");
+    expect(activityText?.className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("uses warning styling for errored activity bubbles instead of destructive red", () => {
     const { container } = render(
       <MessageBubble
@@ -211,6 +235,55 @@ describe("MessageBubble", () => {
     );
     expect(container.querySelector('[data-slot="activity-diff-content"]')?.textContent).toContain(
       "new",
+    );
+  });
+
+  it("renders added file activity details as all added diff rows", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-added-file",
+          role: "activity",
+          text: "应用补丁：/tmp/hello_world.rs",
+          activity: {
+            id: "tool-added-file",
+            source: "claude-native",
+            kind: "tool",
+            status: "done",
+            text: "应用补丁：/tmp/hello_world.rs",
+            durable: true,
+            details: [
+              {
+                kind: "diff",
+                title: "新增：/tmp/hello_world.rs",
+                content: '@@ -0,0 +1,3 @@\n+fn main() {\n+    println!("Hello, world!");\n+}\n',
+                oldContent: "",
+                newContent: 'fn main() {\n    println!("Hello, world!");\n}',
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    expect(container.querySelector('[data-slot="activity-detail-content"]')).toBeNull();
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="remove"]'),
+    ).toHaveLength(0);
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="context"]'),
+    ).toHaveLength(0);
+    const addedRows = container.querySelectorAll(
+      '[data-slot="activity-diff-row"][data-kind="add"]',
+    );
+    expect(addedRows).toHaveLength(3);
+    for (const row of addedRows) {
+      expect(row.className).toContain("bg-emerald");
+    }
+    expect(container.querySelector('[data-slot="activity-diff-content"]')?.textContent).toContain(
+      'println!("Hello, world!");',
     );
   });
 
@@ -354,6 +427,26 @@ describe("MessageBubble", () => {
     const inlineLink = paragraph?.querySelector('[data-slot="inline-file-download-link"]');
     expect(inlineLink?.textContent).toBe("README.md");
     expect(container.querySelector('[data-slot="file-download-links"]')).toBeNull();
+  });
+
+  it("renders markdown links to local file paths as download actions", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-local-file-markdown-link",
+            role: "assistant",
+            text: "Open [/Users/catli/MyApps/rust-feature-tests/hello_world.rs](/Users/catli/MyApps/rust-feature-tests/hello_world.rs)",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    const inlineLink = container.querySelector('[data-slot="inline-file-download-link"]');
+    expect(inlineLink?.textContent).toContain("hello_world.rs");
+    expect(
+      container.querySelector('a[href="/Users/catli/MyApps/rust-feature-tests/hello_world.rs"]'),
+    ).toBeNull();
   });
 
   it("renders inline-code file paths inside tables as download actions", () => {

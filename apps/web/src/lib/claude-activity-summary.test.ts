@@ -26,13 +26,21 @@ describe("summarizeClaudeToolActivity", () => {
     expect(summary).not.toContain("very long private content");
   });
 
-  it("exposes raw Write content as collapsed activity details", () => {
+  it("exposes Write content as an added diff detail", () => {
     expect(
       getClaudeToolActivityDetails("Write", {
         file_path: "/tmp/result.txt",
         content: "line 1\nline 2",
       }),
-    ).toEqual([{ title: "写入内容", content: "line 1\nline 2" }]);
+    ).toEqual([
+      {
+        kind: "diff",
+        title: "新增内容",
+        content: "line 1\nline 2",
+        oldContent: "",
+        newContent: "line 1\nline 2",
+      },
+    ]);
   });
 
   it("exposes raw Edit replacement text as a collapsed diff detail", () => {
@@ -76,6 +84,92 @@ describe("summarizeClaudeToolActivity", () => {
         content: "c\nd",
         oldContent: "c",
         newContent: "d",
+      },
+    ]);
+  });
+
+  it("summarizes Codex patch activity and exposes it as a diff detail", () => {
+    const input = {
+      file_path: "/tmp/project/a.txt",
+      content: "@@ -1 +1 @@\n-old\n+new\n",
+      changes: [
+        {
+          path: "/tmp/project/a.txt",
+          kind: "update",
+          diff: "@@ -1 +1 @@\n-old\n+new\n",
+        },
+      ],
+    };
+
+    expect(summarizeClaudeToolActivity("Patch", input)).toBe("应用补丁：/tmp/project/a.txt");
+    expect(getClaudeToolActivityDetails("Patch", input)).toEqual([
+      {
+        kind: "diff",
+        title: "更新：/tmp/project/a.txt",
+        content: "@@ -1 +1 @@\n-old\n+new\n",
+        oldContent: "old",
+        newContent: "new",
+      },
+    ]);
+  });
+
+  it("renders Codex added files as all-added diff details", () => {
+    const diff = [
+      "diff --git a/hello_world.rs b/hello_world.rs",
+      "new file mode 100644",
+      "index 0000000..1111111",
+      "--- /dev/null",
+      "+++ b/hello_world.rs",
+      "@@ -0,0 +1,3 @@",
+      "+fn main() {",
+      '+    println!("Hello, world!");',
+      "+}",
+      "",
+    ].join("\n");
+
+    expect(
+      getClaudeToolActivityDetails("Patch", {
+        file_path: "/tmp/hello_world.rs",
+        changes: [
+          {
+            path: "/tmp/hello_world.rs",
+            kind: "add",
+            diff,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        kind: "diff",
+        title: "新增：/tmp/hello_world.rs",
+        content: diff,
+        oldContent: "",
+        newContent: 'fn main() {\n    println!("Hello, world!");\n}',
+      },
+    ]);
+  });
+
+  it("renders Codex added files sent as plain content as all-added diff details", () => {
+    const content = "# Rust Hello World Feature Demo Design\n\n## Goal\n\nCreate a demo.\n";
+
+    expect(
+      getClaudeToolActivityDetails("Patch", {
+        file_path: "/tmp/design.md",
+        changes: [
+          {
+            path: "/tmp/design.md",
+            kind: "add",
+            diff: content,
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        kind: "diff",
+        title: "新增：/tmp/design.md",
+        content,
+        oldContent: "",
+        newContent: content,
       },
     ]);
   });
