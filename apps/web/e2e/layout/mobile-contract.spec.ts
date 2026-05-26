@@ -236,6 +236,70 @@ test.describe("mobile UX contract", () => {
     await expectTouchTarget(page.locator('[data-slot="file-entry"]').first());
   });
 
+  test("restore session uses a mobile-safe sheet", async ({ page }) => {
+    await selectFakeProxy(page);
+    const longTitle =
+      "This is an automated dev-anywhere restore-session title long enough to stress the mobile sheet bounds";
+    await page.evaluate((title) => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_history_response",
+        sessions: [
+          {
+            id: "hist-mobile-restore-sheet",
+            title,
+            projectDir: "/home/dev/projects/sample-app",
+            updatedAt: Date.now() - 1_000,
+            provider: "claude",
+            preferredMode: "pty",
+          },
+        ],
+      });
+    }, longTitle);
+
+    await page.locator('[data-slot="history-section-header"]:visible').click();
+    await page
+      .locator('[data-slot="history-group-header"]:visible')
+      .filter({ hasText: "sample-app" })
+      .click();
+    const row = page.locator(
+      '[data-slot="history-row"][data-session-id="hist-mobile-restore-sheet"]:visible',
+    );
+    await expect(row).toBeVisible();
+    await row.locator('button[aria-label^="恢复会话"]').click();
+
+    const sheet = page.locator('[data-slot="history-restore-dialog"]');
+    const footer = page.locator('[data-slot="history-restore-footer"]');
+    await expect(sheet).toBeVisible();
+    await expect(footer).toBeVisible();
+    await expectTouchTarget(footer.getByRole("button", { name: "恢复终端" }));
+    await expectTouchTarget(footer.getByRole("button", { name: "取消" }));
+    await expectNoHorizontalDocumentOverflow(page);
+
+    await expect
+      .poll(async () =>
+        sheet.evaluate((node) => {
+          const sheetRect = node.getBoundingClientRect();
+          const footerRect = node
+            .querySelector<HTMLElement>('[data-slot="history-restore-footer"]')
+            ?.getBoundingClientRect();
+          const overflow = Array.from(
+            node.querySelectorAll<HTMLElement>('[role="radio"], [data-slot="sheet-description"]'),
+          ).filter((element) => {
+            const rect = element.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            return rect.left < sheetRect.left - 1 || rect.right > sheetRect.right + 1;
+          });
+          return (
+            sheetRect.top >= -1 &&
+            sheetRect.bottom <= window.innerHeight + 1 &&
+            (footerRect?.bottom ?? 0) <= window.innerHeight + 1 &&
+            overflow.length === 0
+          );
+        }),
+      )
+      .toBe(true);
+  });
+
   test("app shell follows expanded visual viewport when browser chrome moves", async ({ page }) => {
     await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
     const baseline = await page.locator('[data-slot="app-shell"]').evaluate((node) => {

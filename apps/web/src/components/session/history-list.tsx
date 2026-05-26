@@ -17,6 +17,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
@@ -28,6 +35,7 @@ import {
   providerLabel,
   type SessionProvider,
 } from "@/lib/session-provider";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { HistoryRow } from "./history-row";
 
 interface HistoryListProps {
@@ -383,97 +391,133 @@ function HistoryRestoreDialog({
   const terminalSelected = mode === "pty";
   const confirmLabel = terminalSelected ? "恢复终端" : "恢复聊天";
   const destructiveConfirm = permissionMode === "bypassPermissions" && terminalSelected;
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const controls = (
+    <div className="grid min-w-0 gap-4">
+      <div className="grid min-w-0 gap-2">
+        <span className="text-sm font-medium">模式</span>
+        <div role="radiogroup" aria-label="恢复模式" className="grid min-w-0 grid-cols-2 gap-2">
+          {modes.includes("json") && (
+            <RestoreChoiceButton
+              checked={mode === "json"}
+              label="聊天"
+              icon={<MessageSquare className="size-4" aria-hidden="true" />}
+              disabled={submitting}
+              onClick={() => onModeChange("json")}
+            />
+          )}
+          {modes.includes("pty") && (
+            <RestoreChoiceButton
+              checked={mode === "pty"}
+              label="终端"
+              icon={<TerminalSquare className="size-4" aria-hidden="true" />}
+              disabled={submitting}
+              onClick={() => onModeChange("pty")}
+            />
+          )}
+        </div>
+      </div>
+      {terminalSelected && (
+        <div className="grid min-w-0 gap-2">
+          <span className="text-sm font-medium">权限模式</span>
+          <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
+            <PermissionChoiceButton
+              checked={permissionMode === "default"}
+              label="严格审批"
+              description="所有需要权限的操作都要确认。"
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("default")}
+            />
+            <PermissionChoiceButton
+              checked={permissionMode === "auto"}
+              label="自动判定"
+              description="交给 Agent CLI 的原生策略判断。"
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("auto")}
+            />
+            <PermissionChoiceButton
+              checked={permissionMode === "bypassPermissions"}
+              label="跳过全部审批"
+              description="危险模式，会跳过工具审批和部分沙箱保护。"
+              destructive
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("bypassPermissions")}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  const actions = (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        disabled={submitting}
+        onClick={() => onOpenChange(false)}
+      >
+        取消
+      </Button>
+      <Button
+        type="button"
+        variant={destructiveConfirm ? "destructive" : "default"}
+        className={
+          destructiveConfirm
+            ? "!bg-destructive !text-white hover:!bg-destructive/90 hover:!text-white"
+            : undefined
+        }
+        style={
+          destructiveConfirm ? { backgroundColor: "var(--destructive)", color: "#fff" } : undefined
+        }
+        disabled={submitting}
+        onClick={onConfirm}
+      >
+        {submitting ? "恢复中..." : confirmLabel}
+      </Button>
+    </>
+  );
+
+  if (!isDesktop) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[calc(100dvh-0.75rem)] min-w-0 overflow-hidden rounded-t-xl border-t bg-background p-0"
+          data-slot="history-restore-dialog"
+        >
+          <SheetHeader className="min-w-0 shrink-0 px-4 pb-2 pt-4 text-left">
+            <SheetTitle>恢复会话</SheetTitle>
+            <SheetDescription className="min-w-0 truncate pr-10" title={session?.title}>
+              {session?.title ?? ""}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 overflow-y-auto px-4 pb-3" data-slot="history-restore-body">
+            {controls}
+          </div>
+          <div
+            className="shrink-0 border-t border-border/70 bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
+            data-slot="history-restore-footer"
+          >
+            <div className="flex flex-col-reverse gap-2 [&_button]:min-h-11 [&_button]:w-full">
+              {actions}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" data-slot="history-restore-dialog">
-        <DialogHeader>
+      <DialogContent className="min-w-0 sm:max-w-md" data-slot="history-restore-dialog">
+        <DialogHeader className="min-w-0">
           <DialogTitle>恢复会话</DialogTitle>
-          <DialogDescription className="truncate" title={session?.title}>
+          <DialogDescription className="min-w-0 truncate pr-10 sm:pr-0" title={session?.title}>
             {session?.title ?? ""}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <span className="text-sm font-medium">模式</span>
-            <div role="radiogroup" aria-label="恢复模式" className="grid grid-cols-2 gap-2">
-              {modes.includes("json") && (
-                <RestoreChoiceButton
-                  checked={mode === "json"}
-                  label="聊天"
-                  icon={<MessageSquare className="size-4" aria-hidden="true" />}
-                  disabled={submitting}
-                  onClick={() => onModeChange("json")}
-                />
-              )}
-              {modes.includes("pty") && (
-                <RestoreChoiceButton
-                  checked={mode === "pty"}
-                  label="终端"
-                  icon={<TerminalSquare className="size-4" aria-hidden="true" />}
-                  disabled={submitting}
-                  onClick={() => onModeChange("pty")}
-                />
-              )}
-            </div>
-          </div>
-          {terminalSelected && (
-            <div className="grid gap-2">
-              <span className="text-sm font-medium">权限模式</span>
-              <div role="radiogroup" aria-label="权限模式" className="grid gap-2">
-                <PermissionChoiceButton
-                  checked={permissionMode === "default"}
-                  label="严格审批"
-                  description="所有需要权限的操作都要确认。"
-                  disabled={submitting}
-                  onClick={() => onPermissionModeChange("default")}
-                />
-                <PermissionChoiceButton
-                  checked={permissionMode === "auto"}
-                  label="自动判定"
-                  description="交给 Agent CLI 的原生策略判断。"
-                  disabled={submitting}
-                  onClick={() => onPermissionModeChange("auto")}
-                />
-                <PermissionChoiceButton
-                  checked={permissionMode === "bypassPermissions"}
-                  label="跳过全部审批"
-                  description="危险模式，会跳过工具审批和部分沙箱保护。"
-                  destructive
-                  disabled={submitting}
-                  onClick={() => onPermissionModeChange("bypassPermissions")}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={submitting}
-            onClick={() => onOpenChange(false)}
-          >
-            取消
-          </Button>
-          <Button
-            type="button"
-            variant={destructiveConfirm ? "destructive" : "default"}
-            className={
-              destructiveConfirm
-                ? "!bg-destructive !text-white hover:!bg-destructive/90 hover:!text-white"
-                : undefined
-            }
-            style={
-              destructiveConfirm
-                ? { backgroundColor: "var(--destructive)", color: "#fff" }
-                : undefined
-            }
-            disabled={submitting}
-            onClick={onConfirm}
-          >
-            {submitting ? "恢复中..." : confirmLabel}
-          </Button>
-        </DialogFooter>
+        {controls}
+        <DialogFooter>{actions}</DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -501,7 +545,7 @@ function RestoreChoiceButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-3 text-sm outline-none transition-colors",
+        "grid min-h-11 w-full min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-3 text-sm outline-none transition-colors md:h-10 md:min-h-0",
         "focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60",
         checked
           ? "border-primary text-foreground"
@@ -545,7 +589,7 @@ function PermissionChoiceButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-md border p-3 text-left outline-none transition-colors",
+        "grid w-full min-w-0 max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-md border p-3 text-left outline-none transition-colors",
         "focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60",
         checked
           ? destructive
@@ -571,7 +615,7 @@ function PermissionChoiceButton({
           />
         )}
       </span>
-      <span className="grid gap-1">
+      <span className="grid min-w-0 gap-1">
         <span
           className={cn(
             "text-sm font-medium",
@@ -580,7 +624,9 @@ function PermissionChoiceButton({
         >
           {label}
         </span>
-        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+        <span className="min-w-0 break-words text-xs leading-5 text-muted-foreground">
+          {description}
+        </span>
       </span>
       {checked && (
         <Check

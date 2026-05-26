@@ -173,6 +173,66 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(title).toHaveAttribute("title", longTitle);
   });
 
+  test("恢复会话弹窗不会被长标题撑出边框", async ({ page }) => {
+    const longTitle =
+      "不知道你能否看到，我们大概从 0.2.6 版本开始，就一直困于一个 UI 问题，" +
+      "这是一个足够长的历史会话标题，用来确认恢复弹窗内部选项不会越过右边界";
+
+    await page.evaluate((title) => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_history_response",
+        sessions: [
+          {
+            id: "hist-restore-dialog-overflow",
+            title,
+            projectDir: "/home/dev/projects/sample-app",
+            updatedAt: Date.now() - 1_000,
+            provider: "claude",
+            preferredMode: "pty",
+          },
+        ],
+      });
+    }, longTitle);
+
+    await page.locator('[data-slot="history-section-header"]:visible').click();
+    await page
+      .locator('[data-slot="history-group-header"]:visible')
+      .filter({ hasText: "sample-app" })
+      .click();
+
+    const row = page.locator(
+      '[data-slot="history-row"][data-session-id="hist-restore-dialog-overflow"]:visible',
+    );
+    await expect(row).toBeVisible();
+    await row.locator('button[aria-label^="恢复会话"]').click();
+
+    const dialog = page.locator('[data-slot="history-restore-dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("权限模式")).toBeVisible();
+
+    const overflowing = await dialog.evaluate((dialogNode) => {
+      const dialogRect = dialogNode.getBoundingClientRect();
+      return Array.from(
+        dialogNode.querySelectorAll<HTMLElement>(
+          '[role="radio"], [data-slot="dialog-description"]',
+        ),
+      )
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          if (style.display === "none" || style.visibility === "hidden") return false;
+          if (rect.width === 0 || rect.height === 0) return false;
+          return rect.left < dialogRect.left - 1 || rect.right > dialogRect.right + 1;
+        })
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          return `${element.getAttribute("aria-label") ?? element.getAttribute("data-slot") ?? element.tagName}:${Math.round(rect.left)}-${Math.round(rect.right)}`;
+        });
+    });
+
+    expect(overflowing).toEqual([]);
+  });
+
   test("桌面侧栏的活跃会话标题和全部会话在同一个滚动容器中", async ({ page }) => {
     const sameScrollContainer = await page.evaluate(() => {
       const activeHeader = Array.from(document.querySelectorAll("h3")).find((el) =>
