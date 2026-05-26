@@ -58,7 +58,7 @@ test.describe("functional browser walkthrough", () => {
       .click();
     await expect(
       page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }),
-    ).toHaveAttribute("aria-disabled", "true");
+    ).toHaveAttribute("aria-disabled", "false");
     await expect(page.getByText("权限模式")).toBeVisible();
     await page
       .getByLabel("交互方式")
