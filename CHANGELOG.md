@@ -4,6 +4,25 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.39] - 2026-05-27
+
+### 改进
+
+- JSON 模式支持恢复和创建 Codex 会话，Codex app server 会话可复用本机服务并通过 worker registry 管理生命周期。
+- JSON 模式下文件写入、补丁和替换预览改为 diff 样式；新增文件按新增 diff 展示，删除文件按删除 diff 展示。
+- JSON 聊天气泡中的本地文件路径链接支持直接点击下载/预览，不再把绝对路径当成普通站内链接跳转。
+- 聊天页标题栏、输入栏和 BackToBottom 圆形按钮统一使用同一条消息 rail 右边距标准，并补偿滚动条宽度。
+
+### 修复
+
+- 修复 Codex 历史会话恢复时 provider/mode 映射不完整导致聊天历史加载不一致的问题。
+- 修复新建会话和恢复会话中若干硬编码 Claude 逻辑，让权限模式、历史分组和 E2E 测试覆盖 Codex 路径。
+- 统一 Voice Pilot 设置面板的滚动区域和内容边距，减少原生滚动条和上下分隔线不一致造成的视觉跳变。
+
+### 测试
+
+- 新增 Codex app server 会话、worker registry Codex 事件、Codex 会话创建/恢复、diff 预览、本地文件路径下载、BackToBottom rail 对齐和 Voice Pilot 设置布局的回归测试。
+
 ## [0.4.38] - 2026-05-26
 
 ### 修复
