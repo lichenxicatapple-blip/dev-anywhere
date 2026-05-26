@@ -373,4 +373,11 @@ describe("InputBar queued JSON send", () => {
       "working",
     );
   });
+
+  it("keeps turn stopping out of the composer while exposing queue input", () => {
+    const { getByLabelText, queryByLabelText } = render(<InputBar sessionId="s1" />);
+
+    expect(queryByLabelText("停止响应")).toBeNull();
+    expect(getByLabelText("加入发送队列").closest('[data-slot="input-card"]')).not.toBeNull();
+  });
 });

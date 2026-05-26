@@ -9,6 +9,7 @@ import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
 import { ThinkingIndicator } from "./thinking-indicator";
+import { StopButton } from "./send-button";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
@@ -16,6 +17,7 @@ import { EmptyState } from "@/components/shell/empty-state";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 import { estimateChatMessageHeight } from "@/lib/chat-message-size-estimate";
+import { getTurnControlTarget } from "./turn-control-target";
 import {
   appendJsonScrollTrace,
   formatJsonScrollTraceReport,
@@ -61,6 +63,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(() => isJsonScrollTraceEnabled());
+  const [stopPending, setStopPending] = useState(false);
   const preservePrependRef = useRef<{ previousScrollHeight: number } | null>(null);
   const lastTraceGeometryRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const traceJsonScrollRef = useRef<
@@ -295,6 +298,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
     initialScrollDoneRef.current = false;
+    setStopPending(false);
   }, [sessionId]);
   useLayoutEffect(() => {
     if (!scrollEl || messages.length === 0 || initialScrollDoneRef.current) return;
@@ -341,10 +345,27 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const pendingApprovalQueue = pendingApprovals.filter((a) => a.status === "pending");
   const hasPendingApprovals = pendingApprovalQueue.length > 0;
 
-  // Thinking spinner 只在 "请求已发、还没 streaming" 的 gap 段显示:
-  // streaming 中 message-bubble 末尾的光标已经是"正在生成"的信号, 叠加会冗余
-  const lastIsAssistantPartial = lastMsg?.role === "assistant" && lastMsg?.isPartial === true;
-  const showThinking = isWorking && !lastIsAssistantPartial;
+  useEffect(() => {
+    if (!isWorking) setStopPending(false);
+  }, [isWorking]);
+
+  const handleStopTurn = useCallback(() => {
+    if (stopPending) return;
+    setStopPending(true);
+    const sent = relayClientRef?.sendControl({ type: "session_worker_abort", sessionId });
+    if (sent === false || !relayClientRef) setStopPending(false);
+  }, [sessionId, stopPending]);
+
+  const turnControlTarget = getTurnControlTarget({
+    messages,
+    isWorking,
+    hasPendingApprovals,
+  });
+  const turnStopControl =
+    isWorking && !hasPendingApprovals ? (
+      <StopButton isStopping={stopPending} onStop={handleStopTurn} />
+    ) : null;
+  const showThinking = turnControlTarget.showThinking;
   const hasHistoryMessages = messages.some((message) =>
     message.id.startsWith(`history-${sessionId}-`),
   );
@@ -390,27 +411,33 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                   width: "100%",
                 }}
               >
-                {virtualizer.getVirtualItems().map((vi) => (
-                  <div
-                    key={vi.key}
-                    data-index={vi.index}
-                    ref={virtualizer.measureElement}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${vi.start}px)`,
-                    }}
-                  >
-                    <MessageBubble
-                      message={messages[vi.index]}
-                      contentFontSize={effectiveChatContentFontSize}
-                    />
-                  </div>
-                ))}
+                {virtualizer.getVirtualItems().map((vi) => {
+                  const message = messages[vi.index];
+                  return (
+                    <div
+                      key={vi.key}
+                      data-index={vi.index}
+                      ref={virtualizer.measureElement}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${vi.start}px)`,
+                      }}
+                    >
+                      <MessageBubble
+                        message={message}
+                        contentFontSize={effectiveChatContentFontSize}
+                        turnControl={
+                          message?.id === turnControlTarget.messageId ? turnStopControl : undefined
+                        }
+                      />
+                    </div>
+                  );
+                })}
               </div>
-              {showThinking && <ThinkingIndicator />}
+              {showThinking && <ThinkingIndicator turnControl={turnStopControl} />}
             </div>
           )}
         </div>

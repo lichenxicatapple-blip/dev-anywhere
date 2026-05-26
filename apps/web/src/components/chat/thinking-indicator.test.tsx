@@ -16,4 +16,14 @@ describe("ThinkingIndicator", () => {
     expect(row?.className).toContain("mx-auto");
     expect(row?.className).toContain("justify-start");
   });
+
+  it("can host the active turn control without creating a separate status row", () => {
+    const { container } = render(
+      <ThinkingIndicator turnControl={<button type="button">停止响应</button>} />,
+    );
+
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(container.querySelector('[data-slot="thinking-turn-control"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "停止响应" })).not.toBeNull();
+  });
 });

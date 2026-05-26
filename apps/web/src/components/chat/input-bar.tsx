@@ -480,7 +480,6 @@ export function InputBar({ sessionId }: InputBarProps) {
               }}
             />
             <SendButton
-              sessionId={sessionId}
               isWorking={isWorking}
               canSend={canSend}
               canQueue={canQueue}

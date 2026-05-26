@@ -1,16 +1,19 @@
 import { Clock3 } from "lucide-react";
 import { memo } from "react";
+import type { ReactNode } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
 import { MarkdownView } from "./markdown-view";
 
 interface MessageBubbleProps {
   message: ChatMessage;
   contentFontSize?: number;
+  turnControl?: ReactNode;
 }
 
 export const MessageBubble = memo(function MessageBubble({
   message,
   contentFontSize,
+  turnControl,
 }: MessageBubbleProps) {
   const role = message.role;
   const contentStyle = contentFontSize ? { fontSize: contentFontSize } : undefined;
@@ -73,6 +76,14 @@ export const MessageBubble = memo(function MessageBubble({
               />
             )}
             <span className="min-w-0 whitespace-pre-wrap break-words">{message.text}</span>
+            {turnControl ? (
+              <span
+                data-slot="activity-turn-control"
+                className="ml-1 flex shrink-0 items-center border-l border-current/15 pl-1"
+              >
+                {turnControl}
+              </span>
+            ) : null}
           </div>
         </div>
       </article>
@@ -124,6 +135,11 @@ export const MessageBubble = memo(function MessageBubble({
           style={contentStyle}
         >
           <MarkdownView text={message.text} trailingInline={streamingCursor} />
+          {turnControl ? (
+            <div data-slot="assistant-turn-control" className="mt-2 flex justify-end">
+              {turnControl}
+            </div>
+          ) : null}
         </div>
       </div>
     </article>

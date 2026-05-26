@@ -112,6 +112,49 @@ describe("MessageBubble", () => {
     expect(screen.getByText("运行命令：pnpm test")).not.toBeNull();
   });
 
+  it("renders turn controls inside running activity bubbles", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-control",
+          role: "activity",
+          text: "搜索：LLMClient",
+          isPartial: true,
+          activity: {
+            id: "tool-control",
+            source: "claude-native",
+            kind: "tool",
+            status: "running",
+            text: "搜索：LLMClient",
+            durable: false,
+          },
+        })}
+        turnControl={<button type="button">停止响应</button>}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="activity-turn-control"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "停止响应" })).not.toBeNull();
+  });
+
+  it("renders turn controls inside active assistant bubbles without adding another bubble", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "assistant-control",
+          role: "assistant",
+          text: "正在输出内容",
+          isPartial: true,
+        })}
+        turnControl={<button type="button">停止响应</button>}
+      />,
+    );
+
+    expect(container.querySelectorAll('[data-slot="message-bubble"]')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="assistant-turn-control"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "停止响应" })).not.toBeNull();
+  });
+
   it("preserves user-authored line breaks in sent message bubbles", () => {
     const { container } = render(
       <MessageBubble
