@@ -2,6 +2,7 @@ import { ChevronDown, Clock3 } from "lucide-react";
 import { memo, useState } from "react";
 import type { ReactNode } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
+import { ActivityDetailView } from "./activity-detail-view";
 import { MarkdownView } from "./markdown-view";
 
 interface MessageBubbleProps {
@@ -112,17 +113,7 @@ export const MessageBubble = memo(function MessageBubble({
                 className="mt-2 space-y-2 border-t border-current/15 pt-2"
               >
                 {activityDetails.map((item, index) => (
-                  <div key={`${item.title}-${index}`} className="min-w-0">
-                    <div className="mb-1 text-[11px] leading-none text-current/70">
-                      {item.title}
-                    </div>
-                    <pre
-                      data-slot="activity-detail-content"
-                      className="max-h-[min(55vh,520px)] overflow-auto rounded border border-current/10 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words"
-                    >
-                      {item.content}
-                    </pre>
-                  </div>
+                  <ActivityDetailView key={`${item.title}-${index}`} detail={item} />
                 ))}
               </div>
             ) : null}

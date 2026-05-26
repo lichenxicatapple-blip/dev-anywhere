@@ -1,3 +1,5 @@
+import type { ChatActivityDetail } from "./chat-activity-detail";
+
 const SECRET_VALUE_PATTERN =
   /((?:authorization|api[_-]?key|token|password|secret)\s*[:=]\s*)(?:bearer\s+)?[^\s'"]+/giu;
 const SECRET_FLAG_PATTERN = /(--(?:api-key|token|password|secret)(?:=|\s+))[^\s'"]+/giu;
@@ -32,14 +34,28 @@ function filePath(input: Record<string, unknown>): string {
   return asString(input.file_path) || asString(input.path) || asString(input.notebook_path);
 }
 
-export interface ClaudeToolActivityDetail {
-  title: string;
-  content: string;
-}
+export type ClaudeToolActivityDetail = ChatActivityDetail;
 
 function detail(title: string, value: unknown): ClaudeToolActivityDetail | null {
   const content = asOriginalText(value);
   return content ? { title, content } : null;
+}
+
+function replacementDetail(
+  title: string,
+  oldValue: unknown,
+  newValue: unknown,
+): ClaudeToolActivityDetail | null {
+  const oldContent = asOriginalText(oldValue);
+  const newContent = asOriginalText(newValue);
+  if (!oldContent && !newContent) return null;
+  return {
+    kind: "diff",
+    title,
+    content: `${oldContent}\n${newContent}`,
+    oldContent,
+    newContent,
+  };
 }
 
 function compactDetails(
@@ -56,18 +72,14 @@ export function getClaudeToolActivityDetails(
     case "Write":
       return compactDetails([detail("写入内容", input.content)]);
     case "Edit":
-      return compactDetails([
-        detail("替换前", input.old_string),
-        detail("替换后", input.new_string),
-      ]);
+      return compactDetails([replacementDetail("变更预览", input.old_string, input.new_string)]);
     case "MultiEdit": {
       const edits = Array.isArray(input.edits) ? input.edits : [];
       return edits.flatMap((editInput, index) => {
         const edit = editInput && typeof editInput === "object" ? editInput : {};
         const record = edit as Record<string, unknown>;
         return compactDetails([
-          detail(`第 ${index + 1} 处替换前`, record.old_string),
-          detail(`第 ${index + 1} 处替换后`, record.new_string),
+          replacementDetail(`第 ${index + 1} 处变更`, record.old_string, record.new_string),
         ]);
       });
     }

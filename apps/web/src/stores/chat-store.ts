@@ -1,6 +1,7 @@
 // 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import type { ChatActivityDetail } from "@/lib/chat-activity-detail";
 
 export interface ToolCallInfo {
   toolName: string;
@@ -25,10 +26,7 @@ export type ChatActivitySource = "claude-native" | "user-action";
 export type ChatActivityKind = "tool" | "marker";
 export type ChatActivityStatus = "running" | "done" | "error";
 
-export interface ChatActivityDetail {
-  title: string;
-  content: string;
-}
+export type { ChatActivityDetail };
 
 export interface ChatActivityInfo {
   id: string;

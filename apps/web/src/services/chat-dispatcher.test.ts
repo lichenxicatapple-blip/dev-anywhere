@@ -334,8 +334,13 @@ describe("chat-dispatcher permission flow", () => {
     const message = useChatStore.getState().bySessionId.s1.messages[0];
     expect(message.text).toBe("编辑文件：/tmp/output.txt");
     expect(message.activity?.details).toEqual([
-      { title: "替换前", content: "before\ntext" },
-      { title: "替换后", content: "after\ntext" },
+      {
+        kind: "diff",
+        title: "变更预览",
+        content: "before\ntext\nafter\ntext",
+        oldContent: "before\ntext",
+        newContent: "after\ntext",
+      },
     ]);
   });
 

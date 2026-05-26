@@ -16,6 +16,8 @@ import { summarizeToolInput } from "@/utils/summarize-tool-input";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
+import { getClaudeToolActivityDetails } from "@/lib/claude-activity-summary";
+import { ActivityDetailView } from "./activity-detail-view";
 
 // 工具名到图标的映射, 未知工具兜底 Wrench
 const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
@@ -58,6 +60,9 @@ export function ToolApprovalCard({
   const cardRef = useRef<HTMLDivElement>(null);
 
   const summary = summarizeToolInput(approval.toolName, approval.input);
+  const previewDetails = getClaudeToolActivityDetails(approval.toolName, approval.input).filter(
+    (item) => item.content.length,
+  );
   const isResolved = approval.status !== "pending";
   const Icon = toolIcon(approval.toolName);
   const queueLabel =
@@ -164,11 +169,24 @@ export function ToolApprovalCard({
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
       </button>
-      {expanded && (
-        <pre className="text-xs bg-muted rounded p-2 overflow-auto font-mono max-h-[50vh] whitespace-pre-wrap break-words">
-          {JSON.stringify(approval.input, null, 2)}
-        </pre>
-      )}
+      {expanded &&
+        (previewDetails.length > 0 ? (
+          <div
+            data-slot="tool-approval-preview"
+            className="min-w-0 space-y-2 border-t border-border pt-2 text-xs"
+          >
+            {previewDetails.map((item, index) => (
+              <ActivityDetailView key={`${item.title}-${index}`} detail={item} />
+            ))}
+          </div>
+        ) : (
+          <pre
+            data-slot="tool-approval-json"
+            className="text-xs bg-muted rounded p-2 overflow-auto font-mono max-h-[50vh] whitespace-pre-wrap break-words"
+          >
+            {JSON.stringify(approval.input, null, 2)}
+          </pre>
+        ))}
       <div className="flex items-center justify-between gap-2">
         <Button
           variant="ghost"

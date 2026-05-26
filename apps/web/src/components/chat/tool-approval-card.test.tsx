@@ -106,4 +106,32 @@ describe("ToolApprovalCard", () => {
     expect(screen.getByText("2/3")).not.toBeNull();
     expect(screen.getByLabelText("第 2 个审批，共 3 个")).not.toBeNull();
   });
+
+  it("renders Edit approval details as a diff preview instead of raw parameter JSON", () => {
+    const { container } = render(
+      <ToolApprovalCard
+        approval={makeApproval({
+          toolName: "Edit",
+          input: {
+            file_path: "/tmp/result.txt",
+            old_string: "same\nold",
+            new_string: "same\nnew",
+          },
+        })}
+        sessionId="s1"
+        container="inline"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开详情" }));
+
+    expect(container.querySelector('[data-slot="tool-approval-preview"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="tool-approval-json"]')).toBeNull();
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="remove"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="add"]'),
+    ).toHaveLength(1);
+  });
 });

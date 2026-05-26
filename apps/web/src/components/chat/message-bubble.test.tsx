@@ -168,6 +168,52 @@ describe("MessageBubble", () => {
     );
   });
 
+  it("renders replacement activity details as unified diff rows", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-diff",
+          role: "activity",
+          text: "编辑文件：/tmp/result.txt",
+          activity: {
+            id: "tool-diff",
+            source: "claude-native",
+            kind: "tool",
+            status: "done",
+            text: "编辑文件：/tmp/result.txt",
+            durable: true,
+            details: [
+              {
+                kind: "diff",
+                title: "变更预览",
+                content: "same\nold\nsame\nnew",
+                oldContent: "same\nold",
+                newContent: "same\nnew",
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    expect(container.querySelector('[data-slot="activity-diff-content"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="activity-detail-content"]')).toBeNull();
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="remove"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="add"]'),
+    ).toHaveLength(1);
+    expect(container.querySelector('[data-slot="activity-diff-content"]')?.textContent).toContain(
+      "old",
+    );
+    expect(container.querySelector('[data-slot="activity-diff-content"]')?.textContent).toContain(
+      "new",
+    );
+  });
+
   it("renders turn controls inside running activity bubbles", () => {
     const { container } = render(
       <MessageBubble

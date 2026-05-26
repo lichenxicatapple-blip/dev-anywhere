@@ -35,7 +35,7 @@ describe("summarizeClaudeToolActivity", () => {
     ).toEqual([{ title: "写入内容", content: "line 1\nline 2" }]);
   });
 
-  it("exposes raw Edit replacement text as collapsed activity details", () => {
+  it("exposes raw Edit replacement text as a collapsed diff detail", () => {
     expect(
       getClaudeToolActivityDetails("Edit", {
         file_path: "/tmp/result.txt",
@@ -43,12 +43,17 @@ describe("summarizeClaudeToolActivity", () => {
         new_string: "after\ntext",
       }),
     ).toEqual([
-      { title: "替换前", content: "before\ntext" },
-      { title: "替换后", content: "after\ntext" },
+      {
+        kind: "diff",
+        title: "变更预览",
+        content: "before\ntext\nafter\ntext",
+        oldContent: "before\ntext",
+        newContent: "after\ntext",
+      },
     ]);
   });
 
-  it("exposes raw MultiEdit replacement text with per-edit labels", () => {
+  it("exposes raw MultiEdit replacement text as per-edit diff details", () => {
     expect(
       getClaudeToolActivityDetails("MultiEdit", {
         file_path: "/tmp/result.txt",
@@ -58,10 +63,20 @@ describe("summarizeClaudeToolActivity", () => {
         ],
       }),
     ).toEqual([
-      { title: "第 1 处替换前", content: "a" },
-      { title: "第 1 处替换后", content: "b" },
-      { title: "第 2 处替换前", content: "c" },
-      { title: "第 2 处替换后", content: "d" },
+      {
+        kind: "diff",
+        title: "第 1 处变更",
+        content: "a\nb",
+        oldContent: "a",
+        newContent: "b",
+      },
+      {
+        kind: "diff",
+        title: "第 2 处变更",
+        content: "c\nd",
+        oldContent: "c",
+        newContent: "d",
+      },
     ]);
   });
 
