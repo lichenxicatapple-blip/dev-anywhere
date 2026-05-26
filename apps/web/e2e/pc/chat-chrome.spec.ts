@@ -119,6 +119,40 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-back-button"]')).toBeHidden();
   });
 
+  test("mobile header aligns side actions to the JSON user bubble rail", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByLabel("输入聊天消息").fill("标题栏边距测量");
+    await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+
+    const back = page.locator('[data-slot="chat-back-button"]');
+    const overflow = page.locator('[data-slot="chat-overflow-trigger"]');
+    const userBubble = page
+      .locator('[data-slot="message-bubble"][data-role="user"]', {
+        hasText: "标题栏边距测量",
+      })
+      .locator('[data-slot="message-row"] > div');
+    await expect(back).toBeVisible();
+    await expect(overflow).toBeVisible();
+    await expect(userBubble).toBeVisible();
+
+    const [backBox, overflowBox, userBubbleBox, viewportWidth] = await Promise.all([
+      back.boundingBox(),
+      overflow.boundingBox(),
+      userBubble.boundingBox(),
+      page.evaluate(() => window.innerWidth),
+    ]);
+
+    expect(backBox).not.toBeNull();
+    expect(overflowBox).not.toBeNull();
+    expect(userBubbleBox).not.toBeNull();
+    if (!backBox || !overflowBox || !userBubbleBox) return;
+
+    const bubbleRightGap = viewportWidth - (userBubbleBox.x + userBubbleBox.width);
+    const overflowRightGap = viewportWidth - (overflowBox.x + overflowBox.width);
+    expect(Math.abs(overflowRightGap - bubbleRightGap)).toBeLessThanOrEqual(1);
+    expect(Math.abs(backBox.x - bubbleRightGap)).toBeLessThanOrEqual(1);
+  });
+
   test("no standalone permission-mode button or sidebar-toggle", async ({ page }) => {
     const permissionBtn = page.locator(
       '[data-slot="chat-header"] button:has-text("默认"), [data-slot="chat-header"] button:has-text("自动允许"), [data-slot="chat-header"] button:has-text("规划模式")',

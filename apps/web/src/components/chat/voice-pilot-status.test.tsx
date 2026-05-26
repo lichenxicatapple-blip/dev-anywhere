@@ -49,7 +49,11 @@ describe("VoicePilotStatus", () => {
     ).toBe("speak");
     const stopButton = screen.getByRole("button", { name: "停止 Voice Pilot" });
     expect(stopButton.textContent).toBe("");
-    expect(stopButton.className).toContain("size-8");
+    expect(stopButton.className).toContain("absolute");
+    expect(stopButton.className).toContain("right-2");
+    expect(stopButton.className).toContain("top-2");
+    expect(stopButton.className).toContain("size-7");
+    expect(stopButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(stopButton);
 
     expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({

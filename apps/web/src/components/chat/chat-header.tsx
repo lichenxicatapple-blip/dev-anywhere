@@ -42,6 +42,14 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
 import { cn } from "@/lib/utils";
 import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ChatHeaderProps {
   sessionId: string;
@@ -166,6 +174,12 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const minFontSize =
     !isPty && touchEditingSurface ? MOBILE_CHAT_CONTENT_FONT_SIZE_MIN : MIN_CHAT_FONT_SIZE;
   const resetFontSize = isPty ? resetPtyFontSize : resetChatContentFontSize;
+  const [voicePilotConfirmOpen, setVoicePilotConfirmOpen] = useState(false);
+  const [voicePilotStarting, setVoicePilotStarting] = useState(false);
+  const voicePilotControlsWakeLock = voicePilot.enabled;
+  const screenWakeLockChecked = screenWakeLock.active || voicePilotControlsWakeLock;
+  const screenWakeLockDisabled =
+    screenWakeLock.pending || !screenWakeLock.supported || voicePilotControlsWakeLock;
 
   function adjustFontSize(delta: number) {
     if (isPty) {
@@ -205,10 +219,22 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         toast.info("请先在设置里配置 Voice Pilot。");
         return;
       }
-      await ensureMicrophoneReady();
-      enableVoicePilot(sessionId);
+      setVoicePilotConfirmOpen(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function confirmVoicePilotStart(): Promise<void> {
+    setVoicePilotStarting(true);
+    try {
+      await ensureMicrophoneReady();
+      enableVoicePilot(sessionId);
+      setVoicePilotConfirmOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVoicePilotStarting(false);
     }
   }
 
@@ -305,9 +331,9 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 重命名
               </DropdownMenuItem>
               <DropdownMenuCheckboxItem
-                checked={screenWakeLock.active}
+                checked={screenWakeLockChecked}
                 className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
-                disabled={screenWakeLock.pending || !screenWakeLock.supported}
+                disabled={screenWakeLockDisabled}
                 data-slot="chat-menu-screen-wake-lock-item"
                 onCheckedChange={toggleScreenWakeLock}
               >
@@ -315,7 +341,11 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                   <Lightbulb aria-hidden="true" />
                 </ChatMenuIcon>
                 <span className="min-w-0 flex-1">
-                  {screenWakeLock.supported ? "屏幕常亮" : "屏幕常亮（浏览器不支持）"}
+                  {!screenWakeLock.supported
+                    ? "屏幕常亮（浏览器不支持）"
+                    : voicePilotControlsWakeLock
+                      ? "屏幕常亮（Voice Pilot 控制）"
+                      : "屏幕常亮"}
                 </span>
               </DropdownMenuCheckboxItem>
               {!isPty && (
@@ -441,6 +471,44 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
         onOpenChange={setRenameOpen}
         onRename={handleRename}
       />
+      <Dialog
+        open={voicePilotConfirmOpen && !voicePilot.enabled}
+        onOpenChange={(open) => {
+          if (!voicePilotStarting) setVoicePilotConfirmOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" data-slot="voice-pilot-wake-lock-dialog">
+          <DialogHeader>
+            <DialogTitle>开启 Voice Pilot？</DialogTitle>
+            <DialogDescription>
+              开启后会自动保持屏幕常亮，直到你停止 Voice Pilot。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-border bg-muted/35 p-3 text-sm leading-6 text-muted-foreground">
+            <p>运行期间不能单独关闭这个常亮状态。</p>
+            <p>长时间使用可能会显著增加电量消耗和设备发热。</p>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={voicePilotStarting}
+              onClick={() => setVoicePilotConfirmOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={voicePilotStarting}
+              onClick={() => {
+                void confirmVoicePilotStart();
+              }}
+            >
+              {voicePilotStarting ? "正在开启..." : "开启 Voice Pilot"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {isPty ? (
         <>
           <input

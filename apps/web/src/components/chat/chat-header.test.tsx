@@ -253,6 +253,14 @@ describe("ChatHeader PTY upload menu", () => {
     const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
     fireEvent.click(item);
 
+    expect(await screen.findByRole("dialog")).not.toBeNull();
+    expect(screen.getByText("开启后会自动保持屏幕常亮，直到你停止 Voice Pilot。")).not.toBeNull();
+    expect(screen.getByText("运行期间不能单独关闭这个常亮状态。")).not.toBeNull();
+    expect(screen.getByText("长时间使用可能会显著增加电量消耗和设备发热。")).not.toBeNull();
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "开启 Voice Pilot" }));
+
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
         enabled: true,
@@ -285,6 +293,7 @@ describe("ChatHeader PTY upload menu", () => {
     fireEvent.click(item);
 
     await waitFor(() => expect(toastInfo).toHaveBeenCalledWith("请先在设置里配置 Voice Pilot。"));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
   });
 
@@ -309,6 +318,9 @@ describe("ChatHeader PTY upload menu", () => {
 
     const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
     fireEvent.click(item);
+
+    expect(await screen.findByRole("dialog")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "开启 Voice Pilot" }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("未检测到可用麦克风。"));
     expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
@@ -336,6 +348,9 @@ describe("ChatHeader PTY upload menu", () => {
     const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
     fireEvent.click(item);
 
+    expect(await screen.findByRole("dialog")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "开启 Voice Pilot" }));
+
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith("没有麦克风权限，请在浏览器里允许访问麦克风。"),
     );
@@ -358,6 +373,23 @@ describe("ChatHeader PTY upload menu", () => {
 
     await waitFor(() => expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).toBe(false));
     expect(requestVoiceConfig).not.toHaveBeenCalled();
+  });
+
+  it("shows screen wake lock as controlled while Voice Pilot is running", async () => {
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    useVoicePilotStore.getState().enable("s1");
+    render(<ChatHeader sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const wakeLockItem = await screen.findByRole("menuitemcheckbox", {
+      name: "屏幕常亮（Voice Pilot 控制）",
+    });
+    expect(wakeLockItem.getAttribute("aria-checked")).toBe("true");
+    expect(wakeLockItem.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("does not show Voice Pilot for PTY sessions", async () => {

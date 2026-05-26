@@ -233,13 +233,13 @@ function InlinePathAction({
         rel="noopener noreferrer"
         data-slot={isExternalWebLink ? "inline-web-link" : undefined}
         title="移动端点按打开；桌面端按 Cmd/Ctrl 点击打开"
-        className={isExternalWebLink ? "inline-flex items-baseline gap-1" : undefined}
+        className={isExternalWebLink ? "inline break-words [overflow-wrap:anywhere]" : undefined}
         onClick={(event) => {
           if (!shouldOpenExternalLink(event)) event.preventDefault();
         }}
       >
         {isExternalWebLink && (
-          <ExternalLink className="inline size-3 align-[-0.125em]" aria-hidden="true" />
+          <ExternalLink className="mr-1 inline size-3 align-[-0.125em]" aria-hidden="true" />
         )}
         {children}
       </a>

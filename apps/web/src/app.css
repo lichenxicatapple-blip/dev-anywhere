@@ -162,14 +162,12 @@ body {
 }
 
 .dev-voice-pilot-stop {
-  border-color: color-mix(in srgb, var(--voice-pilot-accent) 18%, var(--border));
-  background: color-mix(in srgb, var(--voice-pilot-accent) 6%, transparent);
-  color: color-mix(in srgb, var(--voice-pilot-accent) 62%, var(--muted-foreground));
+  background: transparent;
+  color: color-mix(in srgb, var(--voice-pilot-accent) 58%, var(--muted-foreground));
 }
 
 .dev-voice-pilot-stop:hover {
-  border-color: color-mix(in srgb, var(--voice-pilot-accent) 30%, var(--border));
-  background: color-mix(in srgb, var(--voice-pilot-accent) 10%, var(--background));
+  background: color-mix(in srgb, var(--voice-pilot-accent) 10%, transparent);
   color: color-mix(in srgb, var(--voice-pilot-accent) 72%, var(--foreground));
 }
 
@@ -454,7 +452,10 @@ code.hljs,
   padding-inline: var(--dev-chat-rail-inset);
 }
 
-.dev-chat-shell-rail-inset,
+.dev-chat-shell-rail-inset {
+  padding-inline: calc(var(--dev-chat-rail-inset) + var(--dev-chat-scrollbar-compensation));
+}
+
 .dev-chat-input-rail-inset {
   padding-inline-start: var(--dev-chat-rail-inset);
   padding-inline-end: calc(var(--dev-chat-rail-inset) + var(--dev-chat-scrollbar-compensation));

@@ -72,6 +72,16 @@ describe("MarkdownView XSS 防护", () => {
     expect(link?.getAttribute("rel")).toContain("noopener");
   });
 
+  it("allows long external links to wrap inside mobile chat bubbles", () => {
+    const longUrl =
+      "https://www.nhlbi.nih.gov/health/insomnia/sleep-health-and-mental-health-reference";
+    const { container } = render(<MarkdownView text={longUrl} />);
+    const link = container.querySelector<HTMLElement>('[data-slot="inline-web-link"]');
+    expect(link?.className).toContain("[overflow-wrap:anywhere]");
+    expect(link?.className).toContain("break-words");
+    expect(link?.className).not.toContain("inline-flex");
+  });
+
   it("opens external links on desktop only with cmd/ctrl click", () => {
     mockCoarsePointer(false);
     const { container } = render(<MarkdownView text={"[click](https://example.com)"} />);

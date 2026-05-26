@@ -1,4 +1,4 @@
-import { Square } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -152,11 +152,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
       role="status"
       aria-live="polite"
       className={cn(
-        "dev-voice-pilot-panel mb-2 grid min-h-[4.5rem] grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 overflow-hidden rounded-md border px-3 py-2.5 text-sm shadow-sm",
+        "dev-voice-pilot-panel mb-2 min-h-[4.5rem] overflow-hidden rounded-md border px-3 py-2.5 text-sm shadow-sm",
         active && "dev-voice-pilot-panel-active",
       )}
     >
-      <div className="min-w-0 self-start">
+      <div className="min-w-0 pr-8">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-semibold text-foreground">Voice Pilot</span>
           <span
@@ -170,28 +170,26 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
           <div className="mt-1 min-w-0 truncate text-xs text-muted-foreground">{detailText}</div>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-start">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="停止 Voice Pilot"
-              data-slot="voice-pilot-stop"
-              className="dev-voice-pilot-stop size-8 rounded-[5px] border p-0"
-              onClick={() => disable(sessionId)}
-            >
-              <Square aria-hidden="true" className="size-3 fill-current" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="top">停止 Voice Pilot</TooltipContent>
-        </Tooltip>
-      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="停止 Voice Pilot"
+            data-slot="voice-pilot-stop"
+            className="dev-voice-pilot-stop absolute right-2 top-2 size-7 rounded-[5px] p-0"
+            onClick={() => disable(sessionId)}
+          >
+            <X aria-hidden="true" className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">停止 Voice Pilot</TooltipContent>
+      </Tooltip>
       <div
         data-slot="voice-pilot-waveform"
         data-activity-level={Math.round(currentActivity * 100)}
-        className="dev-voice-waveform col-span-2"
+        className="dev-voice-waveform mt-2"
         style={
           {
             "--voice-level": currentActivity,
