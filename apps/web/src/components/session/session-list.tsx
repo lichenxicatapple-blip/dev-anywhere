@@ -352,10 +352,11 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   const button = (
     <Button
       variant="outline"
+      data-slot="create-session-trigger"
       className={cn(
         compact
-          ? "h-9 w-9 justify-center border-border px-0"
-          : "w-full justify-start gap-2 h-10 border-border",
+          ? "h-11 w-11 justify-center border-border px-0"
+          : "h-11 w-full justify-start gap-2 border-border",
         !hasProxy && "opacity-50 hover:bg-background",
       )}
       aria-label={compact ? "新建会话" : undefined}

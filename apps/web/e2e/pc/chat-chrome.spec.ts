@@ -353,4 +353,35 @@ test.describe("AppShell Settings slot", () => {
     await desktopSettings.click();
     await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
   });
+
+  test("desktop sidebar bottom actions use matching 44px targets", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await installFakeRelay(page);
+    await gotoWithFakeProxy(page, "/#/sessions");
+
+    async function expectMatchingActionHeights() {
+      const create = page.locator('[data-slot="create-session-trigger"]:visible');
+      const settings = page.locator('[data-slot="sidebar-settings-trigger"]:visible');
+      await expect(create).toBeVisible();
+      await expect(settings).toBeVisible();
+
+      const [createBox, settingsBox] = await Promise.all([
+        create.boundingBox(),
+        settings.boundingBox(),
+      ]);
+      expect(createBox).not.toBeNull();
+      expect(settingsBox).not.toBeNull();
+      expect(createBox?.height).toBeGreaterThanOrEqual(44);
+      expect(settingsBox?.height).toBeGreaterThanOrEqual(44);
+      expect(Math.abs((createBox?.height ?? 0) - (settingsBox?.height ?? 0))).toBeLessThanOrEqual(
+        0.5,
+      );
+    }
+
+    await expectMatchingActionHeights();
+
+    await page.locator('[data-slot="sidebar-collapse-trigger"]').click();
+    await expect(page.locator('[data-slot="sidebar-rail"]')).toBeVisible();
+    await expectMatchingActionHeights();
+  });
 });
