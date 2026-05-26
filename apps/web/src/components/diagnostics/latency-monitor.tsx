@@ -3,6 +3,7 @@ import { Activity, ChevronDown, RefreshCw } from "lucide-react";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import type { LatencyProbeResult } from "@/services/relay-client";
 import { useAppStore } from "@/stores/app-store";
+import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,8 @@ type Measurements = Record<LinkKey, LinkMeasurement>;
 
 const ACTIVE_SAMPLE_INTERVAL_MS = 3_000;
 const HIDDEN_SAMPLE_INTERVAL_MS = 10_000;
+const FLOATING_MARGIN_PX = 12;
+const DRAG_THRESHOLD_PX = 4;
 
 const LINK_LABELS: Record<LinkKey, string> = {
   webRelay: "浏览器 ↔ 中转服务",
@@ -33,6 +36,22 @@ const initialMeasurements: Measurements = {
   relayProxy: { state: "idle" },
   webProxy: { state: "idle" },
 };
+
+interface FloatingPosition {
+  x: number;
+  y: number;
+}
+
+interface DragState {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+  dragging: boolean;
+}
 
 function classify(result: LatencyProbeResult): LinkMeasurement {
   if (!result.success || result.rttMs === undefined) {
@@ -101,13 +120,65 @@ function statusLabel(measurement: LinkMeasurement): string {
   return "等待检测";
 }
 
+function readStoredPosition(): FloatingPosition | null {
+  const raw = readStorageValue("local", STORAGE_KEYS.latencyMonitorPosition);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<FloatingPosition>;
+    if (!Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) return null;
+    return { x: Number(parsed.x), y: Number(parsed.y) };
+  } catch {
+    return null;
+  }
+}
+
+function persistPosition(position: FloatingPosition): void {
+  writeStorageValue("local", STORAGE_KEYS.latencyMonitorPosition, JSON.stringify(position));
+}
+
+function viewportSize(): { width: number; height: number } {
+  return {
+    width:
+      window.visualViewport?.width ??
+      window.innerWidth ??
+      document.documentElement.clientWidth ??
+      0,
+    height:
+      window.visualViewport?.height ??
+      window.innerHeight ??
+      document.documentElement.clientHeight ??
+      0,
+  };
+}
+
+function clampPosition(
+  position: FloatingPosition,
+  size: { width: number; height: number },
+): FloatingPosition {
+  const viewport = viewportSize();
+  const minX = FLOATING_MARGIN_PX;
+  const minY = FLOATING_MARGIN_PX;
+  const maxX = Math.max(minX, viewport.width - size.width - FLOATING_MARGIN_PX);
+  const maxY = Math.max(minY, viewport.height - size.height - FLOATING_MARGIN_PX);
+  return {
+    x: Math.min(maxX, Math.max(minX, Math.round(position.x))),
+    y: Math.min(maxY, Math.max(minY, Math.round(position.y))),
+  };
+}
+
 export function LatencyMonitor() {
   const enabled = useAppStore((s) => s.latencyMonitorEnabled);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const [measurements, setMeasurements] = useState<Measurements>(initialMeasurements);
+  const [floatingPosition, setFloatingPosition] = useState<FloatingPosition | null>(() =>
+    readStoredPosition(),
+  );
   const measuringRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const suppressClickRef = useRef(false);
 
   const worstState = useMemo(
     () =>
@@ -189,22 +260,122 @@ export function LatencyMonitor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, connected, proxyOnline, selectedProxyId]);
 
+  useEffect(() => {
+    if (!enabled || !floatingPosition) return;
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const next = clampPosition(floatingPosition, { width: rect.width, height: rect.height });
+    if (next.x === floatingPosition.x && next.y === floatingPosition.y) return;
+    setFloatingPosition(next);
+    persistPosition(next);
+  }, [enabled, floatingPosition]);
+
   if (!enabled) return null;
 
   const compactProxy =
     measurements.webProxy.rttMs !== undefined ? measurements.webProxy : measurements.relayProxy;
 
+  const floatingStyle =
+    floatingPosition !== null
+      ? {
+          left: `${floatingPosition.x}px`,
+          top: `${floatingPosition.y}px`,
+        }
+      : undefined;
+
+  function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>): void {
+    if (event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: rect.left,
+      originY: rect.top,
+      width: rect.width,
+      height: rect.height,
+      dragging: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLButtonElement>): void {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    if (!drag.dragging && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) return;
+    drag.dragging = true;
+    event.preventDefault();
+    const next = clampPosition(
+      {
+        x: drag.originX + deltaX,
+        y: drag.originY + deltaY,
+      },
+      { width: drag.width, height: drag.height },
+    );
+    setFloatingPosition(next);
+  }
+
+  function finishPointerDrag(event: React.PointerEvent<HTMLButtonElement>): void {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragStateRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (!drag.dragging) return;
+    event.preventDefault();
+    suppressClickRef.current = true;
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 200);
+    const deltaX = event.clientX - drag.startX;
+    const deltaY = event.clientY - drag.startY;
+    const next = clampPosition(
+      {
+        x: drag.originX + deltaX,
+        y: drag.originY + deltaY,
+      },
+      { width: drag.width, height: drag.height },
+    );
+    setFloatingPosition(next);
+    persistPosition(next);
+  }
+
+  function cancelPointerDrag(event: React.PointerEvent<HTMLButtonElement>): void {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragStateRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  function handleClickCapture(event: React.MouseEvent<HTMLButtonElement>): void {
+    if (!suppressClickRef.current) return;
+    suppressClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           className={cn(
-            "fixed right-[calc(env(safe-area-inset-right)+0.75rem)] top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs shadow-lg backdrop-blur transition-colors md:right-4 md:top-4",
+            "fixed z-40 flex max-w-[calc(100vw-1.5rem)] touch-none cursor-move select-none items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs shadow-lg backdrop-blur transition-colors",
+            floatingPosition === null &&
+              "right-[calc(env(safe-area-inset-right)+0.75rem)] top-[calc(env(safe-area-inset-top)+3.75rem)] md:right-4 md:top-4",
             toneClasses(tone),
           )}
+          style={floatingStyle}
           data-slot="latency-monitor-trigger"
           aria-label={`延迟监控，中转服务 ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={finishPointerDrag}
+          onPointerCancel={cancelPointerDrag}
+          onClickCapture={handleClickCapture}
         >
           <Activity className="size-3.5" aria-hidden="true" />
           <span className="font-medium text-foreground">延迟</span>

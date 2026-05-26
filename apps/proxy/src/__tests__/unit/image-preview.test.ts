@@ -58,6 +58,22 @@ describe("image preview loading", () => {
     expect(result.dataBase64).toBe(JPEG_BYTES.toString("base64"));
   });
 
+  it("loads absolute images from common system temp roots by default", () => {
+    const defaultTempRoot = mkdtempSync(join("/tmp", "image-preview-default-"));
+    try {
+      const imagePath = join(defaultTempRoot, "shot.png");
+      writeFileSync(imagePath, PNG_BYTES);
+
+      const result = loadImagePreview({ sessionId: "s1", path: imagePath }, { cwd });
+
+      expect(result.success).toBe(true);
+      expect(result.mimeType).toBe("image/png");
+      expect(result.dataBase64).toBe(PNG_BYTES.toString("base64"));
+    } finally {
+      rmSync(defaultTempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("loads absolute images from explicit preview roots", () => {
     const previewRoot = join(root, "screenshots");
     const imagePath = join(previewRoot, "shot.webp");

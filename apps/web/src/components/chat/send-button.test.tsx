@@ -29,21 +29,24 @@ describe("SendButton", () => {
     expect(screen.getByTestId("stop-progress-ring")).not.toBeNull();
   });
 
-  it("exposes a queue action during work without owning the stop action", () => {
+  it("keeps one send action during work and queues through the same button", () => {
     const onQueue = vi.fn();
-    render(
-      <SendButton
-        isWorking
-        canSend={false}
-        canQueue
-        onSend={vi.fn()}
-        onQueue={onQueue}
-      />,
-    );
+    render(<SendButton isWorking canSend={false} canQueue onSend={vi.fn()} onQueue={onQueue} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "加入发送队列" }));
+    const button = screen.getByRole("button", { name: "发送" });
+    fireEvent.click(button);
 
     expect(onQueue).toHaveBeenCalledTimes(1);
+    expect(button.getAttribute("data-busy-queue")).toBe("true");
     expect(screen.queryByRole("button", { name: "停止响应" })).toBeNull();
+  });
+
+  it("does not disappear while work is active and the draft cannot queue", () => {
+    render(
+      <SendButton isWorking canSend={false} canQueue={false} onSend={vi.fn()} onQueue={vi.fn()} />,
+    );
+
+    const button = screen.getByRole("button", { name: "发送" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
   });
 });

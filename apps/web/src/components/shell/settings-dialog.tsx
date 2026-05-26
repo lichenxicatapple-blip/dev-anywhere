@@ -221,7 +221,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <SettingsToggleItem
               icon={<Activity className="size-4" aria-hidden="true" />}
               label="延迟监控"
-              detail="在右上角显示当前连接延迟"
+              detail="显示可拖动的连接延迟浮窗"
               checked={latencyMonitorEnabled}
               onCheckedChange={setLatencyMonitorEnabled}
             />

@@ -1,6 +1,6 @@
-// 发送/入队按钮：idle 显示 Send，working 时仅在有草稿时显示 Queue。
+// 发送按钮：busy 时仍使用同一个发送入口，内部按输入栏状态排队。
 // Stop 是当前 turn 的控制动作，由消息区按 active surface 动态挂载。
-import { ListPlus, Send, Square } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -25,40 +25,26 @@ export function SendButton({
   onSend,
   onQueue,
 }: SendButtonProps) {
-  if (isWorking) {
-    if (!canQueue) return null;
-    return (
-      <Button
-        type="button"
-        size="icon"
-        variant="secondary"
-        className="size-11 md:size-9"
-        onClick={(event) => {
-          event.preventDefault();
-          onQueue?.();
-        }}
-        aria-label="加入发送队列"
-        data-slot="send-button"
-        data-variant="queue"
-      >
-        <ListPlus aria-hidden="true" />
-      </Button>
-    );
-  }
+  const canSubmit = canSend || canQueue;
 
   return (
     <Button
       type="submit"
       size="icon"
       className="size-11 md:size-9"
-      disabled={!canSend}
+      disabled={!canSubmit}
       onClick={(e) => {
         e.preventDefault();
-        onSend();
+        if (canSend) {
+          onSend();
+          return;
+        }
+        if (canQueue) onQueue?.();
       }}
       aria-label="发送"
       data-slot="send-button"
       data-variant="send"
+      data-busy-queue={isWorking && canQueue ? "true" : undefined}
     >
       <Send aria-hidden="true" />
     </Button>

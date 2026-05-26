@@ -17,6 +17,7 @@ import {
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
 import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
+import { getErrnoCode, getErrorMessage, probeProcess } from "./common/process-probe.js";
 import { unlinkIfPresent } from "./common/safe-unlink.js";
 import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
@@ -35,8 +36,19 @@ function stopService(): boolean {
   try {
     process.kill(pid, "SIGTERM");
     console.log(`Service stopped (PID ${pid})`);
-  } catch {
-    console.error(`Process ${pid} not found, cleaning up stale files`);
+  } catch (err) {
+    const code = getErrnoCode(err);
+    if (code === "ESRCH") {
+      console.error(`Process ${pid} not found, cleaning up stale files`);
+    } else if (code === "EPERM") {
+      console.error(`Cannot stop service PID ${pid}: permission denied`);
+      return false;
+    } else {
+      console.error(
+        `Cannot stop service PID ${pid}: ${code ? `${code}: ` : ""}${getErrorMessage(err)}`,
+      );
+      return false;
+    }
   }
   unlinkIfPresent(PID_PATH);
   unlinkIfPresent(SOCK_PATH);
@@ -59,28 +71,29 @@ function showStatus(): Promise<number> {
       return;
     }
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    let alive = false;
-    try {
-      process.kill(pid, 0);
-      alive = true;
-    } catch {
-      // process.kill(pid, 0) 抛错表示进程不存在
-    }
+    const probe = probeProcess(pid);
 
-    if (!alive) {
+    if (probe.status === "not-found") {
       log("Service: dead (stale PID file)");
       resolve(lines);
       return;
     }
 
     log(`Profile: ${PROFILE_NAME}`);
-    log(`Service: running (PID ${pid})`);
+    if (probe.status === "permission-denied") {
+      log(`Service: running (PID ${pid}, permission denied while probing)`);
+    } else if (probe.status === "unknown") {
+      log(`Service: unknown (PID ${pid}, ${probe.code ?? "unknown"}: ${probe.message})`);
+    } else {
+      log(`Service: running (PID ${pid})`);
+    }
     log(`Socket:  ${SOCK_PATH}`);
     log(`Log:     ${SERVICE_LOG_PATH}`);
 
     const sock = connect(SOCK_PATH);
-    sock.on("error", () => {
-      log("Sessions: unable to connect");
+    sock.on("error", (err) => {
+      const code = getErrnoCode(err);
+      log(`Sessions: unable to connect${code ? ` (${code})` : ""}`);
       sock.destroy();
       resolve(lines);
     });
@@ -151,12 +164,18 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
   ensureProfileWorkspace();
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    try {
-      process.kill(pid, 0);
+    const probe = probeProcess(pid);
+    if (probe.status === "alive") {
       console.error(`Service is already running (PID ${pid})`);
       return;
-    } catch {
-      // process.kill(pid, 0) 抛错表示进程不存在，继续启动
+    }
+    if (probe.status === "permission-denied" || probe.status === "unknown") {
+      const reason =
+        probe.status === "permission-denied"
+          ? "permission denied while probing"
+          : `${probe.code ?? "unknown"}: ${probe.message}`;
+      console.error(`Service may already be running (PID ${pid}); cannot verify it: ${reason}`);
+      return;
     }
   }
   unlinkIfPresent(STOPPED_PATH);

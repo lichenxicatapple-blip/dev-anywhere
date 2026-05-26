@@ -110,7 +110,7 @@ describe("HistoryList", () => {
     expect(groupHeaders[0].textContent).toContain("2");
   });
 
-  it("directly restores a Dev Anywhere JSON history row using its preferred mode", async () => {
+  it("opens a restore dialog for a preferred JSON history row and shows its mode tag", async () => {
     const { container } = renderHistoryList([
       {
         id: "claude-history-json",
@@ -123,7 +123,12 @@ describe("HistoryList", () => {
     ]);
     expandHistory(container);
 
+    expect(container.querySelector('[data-slot="history-mode-tag"]')?.textContent).toBe("聊天");
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：恢复 JSON 会话" }));
+    expect(screen.getByRole("dialog", { name: "恢复会话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "恢复聊天" })).toBeTruthy();
+    expect(screen.queryByText("权限模式")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "恢复聊天" }));
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -136,7 +141,13 @@ describe("HistoryList", () => {
     expect(navigateMock).toHaveBeenCalledWith("/chat/restored-session?mode=json");
   });
 
-  it("asks for an explicit mode when Claude history has no Dev Anywhere metadata", async () => {
+  it("shows terminal permission choices only after Terminal is selected and restores bypass mode", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "pty-bypass-session",
+      mode: "pty",
+      provider: "claude",
+    });
     const { container } = renderHistoryList([
       {
         id: "claude-history-unknown",
@@ -148,14 +159,26 @@ describe("HistoryList", () => {
     ]);
     expandHistory(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "以气泡聊天恢复：未知 Claude 历史" }));
+    expect(screen.queryByRole("button", { name: "以气泡聊天恢复：未知 Claude 历史" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "以终端会话恢复：未知 Claude 历史" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "以跳过审批终端恢复：未知 Claude 历史" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：未知 Claude 历史" }));
+    expect(screen.queryByText("权限模式")).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "终端" }));
+    expect(screen.getByText("权限模式")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "跳过全部审批" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复终端" }));
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
         cwd: "/Users/dev/project",
-        mode: "json",
+        mode: "pty",
         provider: "claude",
         resumeSessionId: "claude-history-unknown",
+        permissionMode: "bypassPermissions",
       });
     });
   });

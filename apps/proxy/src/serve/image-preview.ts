@@ -6,6 +6,7 @@ import type { ControlErrorCode as ControlErrorCodeType } from "@dev-anywhere/sha
 import { classifyPathError } from "./path-errors.js";
 
 const MAX_IMAGE_PREVIEW_BYTES = 10 * 1024 * 1024;
+const DEFAULT_TEMP_PREVIEW_ROOTS = [tmpdir(), "/tmp", "/private/tmp", "/var/tmp"];
 
 type ImagePreviewRequest = {
   sessionId: string;
@@ -36,7 +37,9 @@ function isInsideRoot(realFilePath: string, realRootPath: string): boolean {
 }
 
 function allowedRoots(options: ImagePreviewOptions): string[] {
-  return [options.cwd, options.tmpDir ?? tmpdir(), ...(options.previewRoots ?? [])]
+  const tempRoots = options.tmpDir ? [options.tmpDir] : DEFAULT_TEMP_PREVIEW_ROOTS;
+  const roots = [options.cwd, ...tempRoots, ...(options.previewRoots ?? [])];
+  return [...new Set(roots)]
     .map((root) => root.trim())
     .filter(Boolean)
     .flatMap((root) => {

@@ -5,6 +5,7 @@ import { connect, type Socket } from "node:net";
 import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "../common/logger.js";
 import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
+import { probeProcess, processExistsOrIsInaccessible } from "../common/process-probe.js";
 import { unlinkIfPresent } from "../common/safe-unlink.js";
 
 function tryConnectSocket(sockPath: string): Promise<Socket | null> {
@@ -16,12 +17,7 @@ function tryConnectSocket(sockPath: string): Promise<Socket | null> {
 }
 
 export function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return processExistsOrIsInaccessible(pid);
 }
 
 export async function cleanupStaleResources(): Promise<void> {
@@ -42,8 +38,19 @@ export async function cleanupStaleResources(): Promise<void> {
   if (existsSync(PID_PATH)) {
     const pidStr = readFileSync(PID_PATH, "utf-8").trim();
     const pid = parseInt(pidStr, 10);
-    if (!isNaN(pid) && isProcessAlive(pid)) {
+    const probe = !isNaN(pid) ? probeProcess(pid) : null;
+    if (probe?.status === "alive") {
       const msg = `Another service is already running with PID ${pid}`;
+      serviceLogger.error(msg);
+      console.error(msg);
+      await flushLogger(serviceLogger);
+      process.exit(1);
+    }
+    if (probe?.status === "permission-denied" || probe?.status === "unknown") {
+      const msg =
+        probe.status === "permission-denied"
+          ? `Another service may be running with PID ${pid}, but this process cannot probe it (permission denied)`
+          : `Another service may be running with PID ${pid}, but this process cannot verify it (${probe.code ?? "unknown"}: ${probe.message})`;
       serviceLogger.error(msg);
       console.error(msg);
       await flushLogger(serviceLogger);

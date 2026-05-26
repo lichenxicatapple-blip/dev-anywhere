@@ -358,7 +358,7 @@ describe("InputBar queued JSON send", () => {
   it("queues ordinary input locally while the JSON agent is working", () => {
     const { getByLabelText } = render(<InputBar sessionId="s1" />);
 
-    fireEvent.click(getByLabelText("加入发送队列"));
+    fireEvent.click(getByLabelText("发送"));
 
     expect(sendEnvelope).not.toHaveBeenCalled();
     expect((getByLabelText("输入聊天消息") as HTMLTextAreaElement).value).toBe("");
@@ -374,10 +374,10 @@ describe("InputBar queued JSON send", () => {
     );
   });
 
-  it("keeps turn stopping out of the composer while exposing queue input", () => {
+  it("keeps turn stopping out of the composer while keeping send as the queue entrypoint", () => {
     const { getByLabelText, queryByLabelText } = render(<InputBar sessionId="s1" />);
 
     expect(queryByLabelText("停止响应")).toBeNull();
-    expect(getByLabelText("加入发送队列").closest('[data-slot="input-card"]')).not.toBeNull();
+    expect(getByLabelText("发送").closest('[data-slot="input-card"]')).not.toBeNull();
   });
 });

@@ -4,10 +4,19 @@
 // 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞。
 // 刷新按钮: 通过 RelayClient 请求历史会话, proxy 会重新扫 ~/.claude/projects/
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { ChevronRight, RefreshCw } from "lucide-react";
+import { Check, ChevronRight, MessageSquare, RefreshCw, TerminalSquare } from "lucide-react";
 import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
@@ -26,10 +35,15 @@ interface HistoryListProps {
 }
 
 type RestoreMode = "pty" | "json";
+type RestorePermissionMode = "default" | "auto" | "bypassPermissions";
 
 export function HistoryList({ now }: HistoryListProps) {
   const historySessions = useSessionStore((s) => s.historySessions);
   const [resumingId, setResumingId] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<HistorySession | null>(null);
+  const [restoreMode, setRestoreMode] = useState<RestoreMode>("json");
+  const [restorePermissionMode, setRestorePermissionMode] =
+    useState<RestorePermissionMode>("default");
   // 整个历史会话区默认折叠, 让活跃会话占据主视野; 点 header 整体展开后再点 group chevron 看行
   const [sectionExpanded, setSectionExpanded] = useState(false);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<SessionProvider>>(new Set());
@@ -66,7 +80,17 @@ export function HistoryList({ now }: HistoryListProps) {
       }));
   }, [historySessions]);
 
-  async function handleResume(h: HistorySession, mode: RestoreMode) {
+  function openRestoreDialog(h: HistorySession) {
+    setRestoreTarget(h);
+    setRestoreMode(defaultRestoreMode(h));
+    setRestorePermissionMode("default");
+  }
+
+  async function handleResume(
+    h: HistorySession,
+    mode: RestoreMode,
+    permissionMode?: RestorePermissionMode,
+  ) {
     if (resumingId) return;
     const relay = relayClientRef;
     if (!relay) {
@@ -81,6 +105,7 @@ export function HistoryList({ now }: HistoryListProps) {
         mode,
         provider,
         resumeSessionId: h.id,
+        ...(mode === "pty" && permissionMode ? { permissionMode } : {}),
       });
       if (ctrl.error || !ctrl.sessionId) {
         toast.error(`恢复失败：${ctrl.error ?? "未知错误"}`);
@@ -94,6 +119,7 @@ export function HistoryList({ now }: HistoryListProps) {
       };
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
+      setRestoreTarget(null);
     } catch (err) {
       toast.error(`恢复失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -132,6 +158,7 @@ export function HistoryList({ now }: HistoryListProps) {
   }
 
   const hasHistory = historySessions.length > 0;
+  const restoreModes = restoreTarget ? availableRestoreModes(restoreTarget) : [];
 
   return (
     <div data-slot="history-list" className="flex flex-col">
@@ -272,12 +299,8 @@ export function HistoryList({ now }: HistoryListProps) {
                                   now={now}
                                   disabled={resumingId !== null}
                                   loading={resumingId === h.id}
-                                  onClick={() => {
-                                    const mode = directRestoreMode(h);
-                                    if (mode) void handleResume(h, mode);
-                                  }}
-                                  restoreModes={explicitRestoreModes(h)}
-                                  onRestoreMode={(mode) => handleResume(h, mode)}
+                                  onClick={() => openRestoreDialog(h)}
+                                  modeTag={h.preferredMode}
                                 />
                               ))}
                             </ul>
@@ -292,6 +315,23 @@ export function HistoryList({ now }: HistoryListProps) {
           })}
         </ul>
       )}
+      <HistoryRestoreDialog
+        session={restoreTarget}
+        open={restoreTarget !== null}
+        modes={restoreModes}
+        mode={restoreMode}
+        permissionMode={restorePermissionMode}
+        submitting={resumingId !== null}
+        onOpenChange={(open) => {
+          if (!open) setRestoreTarget(null);
+        }}
+        onModeChange={setRestoreMode}
+        onPermissionModeChange={setRestorePermissionMode}
+        onConfirm={() => {
+          if (!restoreTarget) return;
+          void handleResume(restoreTarget, restoreMode, restorePermissionMode);
+        }}
+      />
     </div>
   );
 }
@@ -306,14 +346,251 @@ function normalizeHistoryProjectDir(dir: string): string {
   return trimmed.replace(/\/+$/, "") || "/";
 }
 
-function directRestoreMode(session: HistorySession): RestoreMode | null {
-  if (session.preferredMode) return session.preferredMode;
+function availableRestoreModes(session: HistorySession): RestoreMode[] {
   const provider = historySessionProvider(session);
-  return provider === "codex" ? "pty" : null;
+  return provider === "codex" ? ["pty"] : ["json", "pty"];
 }
 
-function explicitRestoreModes(session: HistorySession): RestoreMode[] | undefined {
-  if (directRestoreMode(session)) return undefined;
-  const provider = historySessionProvider(session);
-  return provider === "claude" ? ["json", "pty"] : undefined;
+function defaultRestoreMode(session: HistorySession): RestoreMode {
+  const modes = availableRestoreModes(session);
+  if (session.preferredMode && modes.includes(session.preferredMode)) return session.preferredMode;
+  return modes[0] ?? "json";
+}
+
+function HistoryRestoreDialog({
+  session,
+  open,
+  modes,
+  mode,
+  permissionMode,
+  submitting,
+  onOpenChange,
+  onModeChange,
+  onPermissionModeChange,
+  onConfirm,
+}: {
+  session: HistorySession | null;
+  open: boolean;
+  modes: RestoreMode[];
+  mode: RestoreMode;
+  permissionMode: RestorePermissionMode;
+  submitting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onModeChange: (mode: RestoreMode) => void;
+  onPermissionModeChange: (mode: RestorePermissionMode) => void;
+  onConfirm: () => void;
+}) {
+  const terminalSelected = mode === "pty";
+  const confirmLabel = terminalSelected ? "恢复终端" : "恢复聊天";
+  const destructiveConfirm = permissionMode === "bypassPermissions" && terminalSelected;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md" data-slot="history-restore-dialog">
+        <DialogHeader>
+          <DialogTitle>恢复会话</DialogTitle>
+          <DialogDescription className="truncate" title={session?.title}>
+            {session?.title ?? ""}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <span className="text-sm font-medium">模式</span>
+            <div role="radiogroup" aria-label="恢复模式" className="grid grid-cols-2 gap-2">
+              {modes.includes("json") && (
+                <RestoreChoiceButton
+                  checked={mode === "json"}
+                  label="聊天"
+                  icon={<MessageSquare className="size-4" aria-hidden="true" />}
+                  disabled={submitting}
+                  onClick={() => onModeChange("json")}
+                />
+              )}
+              {modes.includes("pty") && (
+                <RestoreChoiceButton
+                  checked={mode === "pty"}
+                  label="终端"
+                  icon={<TerminalSquare className="size-4" aria-hidden="true" />}
+                  disabled={submitting}
+                  onClick={() => onModeChange("pty")}
+                />
+              )}
+            </div>
+          </div>
+          {terminalSelected && (
+            <div className="grid gap-2">
+              <span className="text-sm font-medium">权限模式</span>
+              <div role="radiogroup" aria-label="权限模式" className="grid gap-2">
+                <PermissionChoiceButton
+                  checked={permissionMode === "default"}
+                  label="严格审批"
+                  description="所有需要权限的操作都要确认。"
+                  disabled={submitting}
+                  onClick={() => onPermissionModeChange("default")}
+                />
+                <PermissionChoiceButton
+                  checked={permissionMode === "auto"}
+                  label="自动判定"
+                  description="交给 Agent CLI 的原生策略判断。"
+                  disabled={submitting}
+                  onClick={() => onPermissionModeChange("auto")}
+                />
+                <PermissionChoiceButton
+                  checked={permissionMode === "bypassPermissions"}
+                  label="跳过全部审批"
+                  description="危险模式，会跳过工具审批和部分沙箱保护。"
+                  destructive
+                  disabled={submitting}
+                  onClick={() => onPermissionModeChange("bypassPermissions")}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={submitting}
+            onClick={() => onOpenChange(false)}
+          >
+            取消
+          </Button>
+          <Button
+            type="button"
+            variant={destructiveConfirm ? "destructive" : "default"}
+            className={
+              destructiveConfirm
+                ? "!bg-destructive !text-white hover:!bg-destructive/90 hover:!text-white"
+                : undefined
+            }
+            style={
+              destructiveConfirm
+                ? { backgroundColor: "var(--destructive)", color: "#fff" }
+                : undefined
+            }
+            disabled={submitting}
+            onClick={onConfirm}
+          >
+            {submitting ? "恢复中..." : confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RestoreChoiceButton({
+  checked,
+  label,
+  icon,
+  disabled,
+  onClick,
+}: {
+  checked: boolean;
+  label: string;
+  icon: ReactNode;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-label={label}
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "grid h-10 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-3 text-sm outline-none transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60",
+        checked
+          ? "border-primary text-foreground"
+          : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+      )}
+    >
+      {icon}
+      <span className="min-w-0 text-center">{label}</span>
+      <Check
+        className={cn(
+          "size-3.5 justify-self-end transition-opacity",
+          checked ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden="true"
+      />
+    </button>
+  );
+}
+
+function PermissionChoiceButton({
+  checked,
+  label,
+  description,
+  destructive,
+  disabled,
+  onClick,
+}: {
+  checked: boolean;
+  label: string;
+  description: string;
+  destructive?: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-label={label}
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-md border p-3 text-left outline-none transition-colors",
+        "focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60",
+        checked
+          ? destructive
+            ? "border-destructive/70"
+            : "border-primary"
+          : "border-border hover:bg-accent/60",
+      )}
+    >
+      <span
+        className={cn(
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+          checked
+            ? destructive
+              ? "border-destructive"
+              : "border-primary"
+            : "border-muted-foreground/50",
+        )}
+        aria-hidden="true"
+      >
+        {checked && (
+          <span
+            className={cn("size-2 rounded-full", destructive ? "bg-destructive" : "bg-primary")}
+          />
+        )}
+      </span>
+      <span className="grid gap-1">
+        <span
+          className={cn(
+            "text-sm font-medium",
+            destructive ? "text-destructive" : "text-foreground",
+          )}
+        >
+          {label}
+        </span>
+        <span className="text-xs leading-5 text-muted-foreground">{description}</span>
+      </span>
+      {checked && (
+        <Check
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            destructive ? "text-destructive" : "text-primary",
+          )}
+          aria-hidden="true"
+        />
+      )}
+    </button>
+  );
 }
