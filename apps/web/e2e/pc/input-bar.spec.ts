@@ -49,10 +49,14 @@ test.describe("InputBar — slash command picker", () => {
     });
 
     const input = page.getByLabel("输入聊天消息");
+    const send = page.locator('[data-slot="send-button"]');
+
     await input.fill("排队发送这条");
-    await page.getByLabel("加入发送队列").click();
+    await expect(send).toHaveAttribute("data-busy-queue", "true");
+    await send.click();
     await input.fill("这是同一段补充");
-    await page.getByLabel("加入发送队列").click();
+    await expect(send).toHaveAttribute("data-busy-queue", "true");
+    await send.click();
 
     await expect(input).toHaveValue("");
     await expect(
