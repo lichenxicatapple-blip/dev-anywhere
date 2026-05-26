@@ -8,7 +8,10 @@ import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared"
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import type { RelayClient } from "@/services/relay-client";
-import { summarizeClaudeToolActivity } from "@/lib/claude-activity-summary";
+import {
+  getClaudeToolActivityDetails,
+  summarizeClaudeToolActivity,
+} from "@/lib/claude-activity-summary";
 import { showCompactEndToast } from "@/lib/compact-toast";
 import { registerDispatcher } from "./dispatcher-registry";
 
@@ -117,6 +120,7 @@ function handleAssistantToolUse(env: Extract<MessageEnvelope, { type: "assistant
     status: "running",
     toolName: env.payload.toolName,
     text: summarizeClaudeToolActivity(env.payload.toolName, env.payload.parameters),
+    details: getClaudeToolActivityDetails(env.payload.toolName, env.payload.parameters),
     durable: false,
   });
 }

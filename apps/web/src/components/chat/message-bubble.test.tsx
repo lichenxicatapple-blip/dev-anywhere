@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MessageBubble } from "./message-bubble";
 import { ImagePreviewProvider } from "./image-preview";
 import { FileDownloadProvider } from "./file-download-link";
@@ -110,6 +110,62 @@ describe("MessageBubble", () => {
     expect(bubble.getAttribute("data-role")).toBe("activity");
     expect(container.querySelector('[data-slot="activity-spinner"]')).not.toBeNull();
     expect(screen.getByText("运行命令：pnpm test")).not.toBeNull();
+  });
+
+  it("uses warning styling for errored activity bubbles instead of destructive red", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-error",
+          role: "activity",
+          text: "运行命令：pnpm test",
+          activity: {
+            id: "tool-error",
+            source: "claude-native",
+            kind: "tool",
+            status: "error",
+            text: "运行命令：pnpm test",
+            durable: true,
+          },
+        })}
+      />,
+    );
+
+    const activity = container.querySelector<HTMLElement>('[data-slot="activity-bubble"]');
+    expect(activity?.getAttribute("data-status")).toBe("error");
+    expect(activity?.className).toContain("text-[var(--color-status-warning)]");
+    expect(activity?.className).not.toContain("text-destructive");
+    expect(activity?.className).not.toContain("bg-destructive");
+    expect(activity?.className).not.toContain("border-destructive");
+  });
+
+  it("keeps raw activity details collapsed behind a chevron", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-details",
+          role: "activity",
+          text: "写入文件：/tmp/result.txt",
+          activity: {
+            id: "tool-details",
+            source: "claude-native",
+            kind: "tool",
+            status: "done",
+            text: "写入文件：/tmp/result.txt",
+            durable: true,
+            details: [{ title: "写入内容", content: "line 1\nline 2" }],
+          },
+        })}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="activity-details"]')).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开工具详情" }));
+
+    expect(container.querySelector('[data-slot="activity-details"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="activity-detail-content"]')?.textContent).toBe(
+      "line 1\nline 2",
+    );
   });
 
   it("renders turn controls inside running activity bubbles", () => {

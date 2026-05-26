@@ -25,6 +25,11 @@ export type ChatActivitySource = "claude-native" | "user-action";
 export type ChatActivityKind = "tool" | "marker";
 export type ChatActivityStatus = "running" | "done" | "error";
 
+export interface ChatActivityDetail {
+  title: string;
+  content: string;
+}
+
 export interface ChatActivityInfo {
   id: string;
   source: ChatActivitySource;
@@ -33,6 +38,7 @@ export interface ChatActivityInfo {
   text: string;
   durable: boolean;
   toolName?: string;
+  details?: ChatActivityDetail[];
 }
 
 export interface ChatMessage {

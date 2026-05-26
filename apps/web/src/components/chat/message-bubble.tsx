@@ -1,5 +1,5 @@
-import { Clock3 } from "lucide-react";
-import { memo } from "react";
+import { ChevronDown, Clock3 } from "lucide-react";
+import { memo, useState } from "react";
 import type { ReactNode } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
 import { MarkdownView } from "./markdown-view";
@@ -17,13 +17,15 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const role = message.role;
   const contentStyle = contentFontSize ? { fontSize: contentFontSize } : undefined;
+  const [activityDetailsOpen, setActivityDetailsOpen] = useState(false);
 
-  const streamingCursor = role === "user" && message.isPartial ? (
-    <span
-      className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
-      aria-label="streaming"
-    />
-  ) : null;
+  const streamingCursor =
+    role === "user" && message.isPartial ? (
+      <span
+        className="inline-block w-2 h-4 ml-1 bg-[var(--color-status-working)] dev-cursor-blink align-middle"
+        aria-label="streaming"
+      />
+    ) : null;
 
   if (role === "system") {
     return (
@@ -47,42 +49,82 @@ export const MessageBubble = memo(function MessageBubble({
     const isActive = status === "running";
     const activityClass =
       status === "error"
-        ? "border-destructive/40 bg-destructive/10 text-destructive"
+        ? "border-[var(--color-status-warning)]/40 bg-[var(--color-status-warning)]/10 text-[var(--color-status-warning)]"
         : "border-border bg-muted/60 text-muted-foreground";
+    const activityDetails = message.activity?.details?.filter((item) => item.content.length) ?? [];
+    const detailsId = `${message.id}-activity-details`;
     return (
       <article data-slot="message-bubble" data-role="activity" className="dev-chat-rail-inset py-1">
         <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-start">
           <div
             data-slot="activity-bubble"
             data-status={status}
-            className={`flex w-fit max-w-[88%] min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${activityClass}`}
+            className={`w-fit max-w-[88%] min-w-0 rounded-md border px-3 py-1.5 text-xs ${activityClass}`}
             aria-live={isActive ? "polite" : undefined}
             style={contentStyle}
           >
-            {isActive ? (
-              <span
-                data-slot="activity-spinner"
-                className="relative flex size-3 shrink-0 items-center justify-center text-current"
-                aria-hidden="true"
+            <div className="flex min-w-0 items-center gap-2">
+              {isActive ? (
+                <span
+                  data-slot="activity-spinner"
+                  className="relative flex size-3 shrink-0 items-center justify-center text-current"
+                  aria-hidden="true"
+                >
+                  <span className="absolute size-2 rounded-full bg-current opacity-40 animate-ping" />
+                  <span className="size-1.5 rounded-full bg-current opacity-80" />
+                </span>
+              ) : (
+                <span
+                  data-slot="activity-dot"
+                  className="size-1.5 shrink-0 rounded-full bg-current opacity-60"
+                  aria-hidden="true"
+                />
+              )}
+              <span className="min-w-0 whitespace-pre-wrap break-words">{message.text}</span>
+              {activityDetails.length > 0 ? (
+                <button
+                  type="button"
+                  className="-mr-1 flex size-6 shrink-0 items-center justify-center rounded text-current/80 hover:bg-current/10 hover:text-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={activityDetailsOpen ? "收起工具详情" : "展开工具详情"}
+                  aria-expanded={activityDetailsOpen}
+                  aria-controls={detailsId}
+                  onClick={() => setActivityDetailsOpen((open) => !open)}
+                >
+                  <ChevronDown
+                    className={`size-3.5 transition-transform ${activityDetailsOpen ? "" : "-rotate-90"}`}
+                    aria-hidden="true"
+                  />
+                </button>
+              ) : null}
+              {turnControl ? (
+                <span
+                  data-slot="activity-turn-control"
+                  className="ml-1 flex shrink-0 items-center border-l border-current/15 pl-1"
+                >
+                  {turnControl}
+                </span>
+              ) : null}
+            </div>
+            {activityDetailsOpen && activityDetails.length > 0 ? (
+              <div
+                id={detailsId}
+                data-slot="activity-details"
+                className="mt-2 space-y-2 border-t border-current/15 pt-2"
               >
-                <span className="absolute size-2 rounded-full bg-current opacity-40 animate-ping" />
-                <span className="size-1.5 rounded-full bg-current opacity-80" />
-              </span>
-            ) : (
-              <span
-                data-slot="activity-dot"
-                className="size-1.5 shrink-0 rounded-full bg-current opacity-60"
-                aria-hidden="true"
-              />
-            )}
-            <span className="min-w-0 whitespace-pre-wrap break-words">{message.text}</span>
-            {turnControl ? (
-              <span
-                data-slot="activity-turn-control"
-                className="ml-1 flex shrink-0 items-center border-l border-current/15 pl-1"
-              >
-                {turnControl}
-              </span>
+                {activityDetails.map((item, index) => (
+                  <div key={`${item.title}-${index}`} className="min-w-0">
+                    <div className="mb-1 text-[11px] leading-none text-current/70">
+                      {item.title}
+                    </div>
+                    <pre
+                      data-slot="activity-detail-content"
+                      className="max-h-[min(55vh,520px)] overflow-auto rounded border border-current/10 bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words"
+                    >
+                      {item.content}
+                    </pre>
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
         </div>
@@ -96,7 +138,7 @@ export const MessageBubble = memo(function MessageBubble({
       ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary-foreground/40 bg-primary/60 text-primary-foreground/90 px-4 py-2"
       : isQueued
         ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary/50 bg-primary/70 text-primary-foreground/90 px-4 py-2"
-      : "min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2";
+        : "min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2";
     return (
       <article
         data-slot="message-bubble"

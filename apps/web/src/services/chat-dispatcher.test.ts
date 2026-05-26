@@ -313,6 +313,32 @@ describe("chat-dispatcher permission flow", () => {
     expect(messages[2]).toMatchObject({ text: "测试跑完了。", isPartial: true });
   });
 
+  it("attaches raw file edit details to native activity bubbles", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle(
+      envelope({
+        type: "assistant_tool_use",
+        payload: {
+          toolId: "tool-edit",
+          toolName: "Edit",
+          parameters: {
+            file_path: "/tmp/output.txt",
+            old_string: "before\ntext",
+            new_string: "after\ntext",
+          },
+        },
+      }),
+    );
+
+    const message = useChatStore.getState().bySessionId.s1.messages[0];
+    expect(message.text).toBe("编辑文件：/tmp/output.txt");
+    expect(message.activity?.details).toEqual([
+      { title: "替换前", content: "before\ntext" },
+      { title: "替换后", content: "after\ntext" },
+    ]);
+  });
+
   it("keeps native permission requests in the approval queue without duplicate activity bubbles", () => {
     const sendControl = vi.fn();
     const handle = createChatMessageHandler({ sendControl });

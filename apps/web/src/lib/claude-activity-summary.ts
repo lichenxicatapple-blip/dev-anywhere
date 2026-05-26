@@ -6,6 +6,16 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function asOriginalText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function compact(value: string, max = 140): string {
   const text = value.replace(/\s+/gu, " ").trim();
   if (text.length <= max) return text;
@@ -19,7 +29,53 @@ function redact(value: string): string {
 }
 
 function filePath(input: Record<string, unknown>): string {
-  return asString(input.file_path) || asString(input.path);
+  return asString(input.file_path) || asString(input.path) || asString(input.notebook_path);
+}
+
+export interface ClaudeToolActivityDetail {
+  title: string;
+  content: string;
+}
+
+function detail(title: string, value: unknown): ClaudeToolActivityDetail | null {
+  const content = asOriginalText(value);
+  return content ? { title, content } : null;
+}
+
+function compactDetails(
+  details: Array<ClaudeToolActivityDetail | null>,
+): ClaudeToolActivityDetail[] {
+  return details.filter((item): item is ClaudeToolActivityDetail => item !== null);
+}
+
+export function getClaudeToolActivityDetails(
+  toolName: string,
+  input: Record<string, unknown>,
+): ClaudeToolActivityDetail[] {
+  switch (toolName) {
+    case "Write":
+      return compactDetails([detail("写入内容", input.content)]);
+    case "Edit":
+      return compactDetails([
+        detail("替换前", input.old_string),
+        detail("替换后", input.new_string),
+      ]);
+    case "MultiEdit": {
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      return edits.flatMap((editInput, index) => {
+        const edit = editInput && typeof editInput === "object" ? editInput : {};
+        const record = edit as Record<string, unknown>;
+        return compactDetails([
+          detail(`第 ${index + 1} 处替换前`, record.old_string),
+          detail(`第 ${index + 1} 处替换后`, record.new_string),
+        ]);
+      });
+    }
+    case "NotebookEdit":
+      return compactDetails([detail("新的单元格内容", input.new_source)]);
+    default:
+      return [];
+  }
 }
 
 export function summarizeClaudeToolActivity(
