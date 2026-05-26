@@ -361,17 +361,11 @@ export class RelayRouter {
       return;
     }
 
-    try {
-      process.kill(session.pid, "SIGINT");
-      serviceLogger.info(
-        { sessionId: sid, pid: session.pid },
-        "session_worker_abort: SIGINT sent to worker",
-      );
-    } catch (err) {
-      serviceLogger.warn(
-        { sessionId: sid, pid: session.pid, error: String(err) },
-        "session_worker_abort: kill failed",
-      );
+    if (this.deps.workerRegistry.send(sid, { type: "worker_interrupt" })) {
+      serviceLogger.info({ sessionId: sid }, "session_worker_abort: interrupt sent to JSON worker");
+    } else {
+      serviceLogger.warn({ sessionId: sid }, "session_worker_abort: JSON worker unavailable");
+      this.deps.jsonObserver.onChannelBroken(sid);
     }
   }
 

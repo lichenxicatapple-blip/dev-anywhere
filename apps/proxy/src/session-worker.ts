@@ -145,6 +145,13 @@ function handleServeConnection(socket: Socket): void {
         case "worker_input":
           session.sendMessage(msg.content);
           break;
+        case "worker_interrupt":
+          rejectAllPendingApprovals("Turn interrupted");
+          void session.interruptCurrentTurn().then((interrupted) => {
+            if (interrupted) sendToServe({ type: "worker_interrupted" });
+            else console.error("[worker] interrupt requested but Claude child was not running");
+          });
+          break;
         case "worker_stop":
           session.stop();
           break;

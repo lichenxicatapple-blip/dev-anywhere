@@ -62,13 +62,17 @@ export function InputBar({ sessionId }: InputBarProps) {
   const submitOnPlainEnter = isDesktop && !touchEditingSurface;
 
   const value = slice.inputDraft;
+  const trimmedValue = value.trim();
   const isWorking = sessionState === "working";
   const isBusy = isWorking || sessionState === "compacting";
   const pendingApprovals = slice.pendingApprovals;
+  const hasPendingApproval = pendingApprovals.some((a) => a.status === "pending");
 
   const pickerMode = detectPickerMode(value);
   const sendDisabled = computeSendDisabled(isBusy, pendingApprovals);
-  const canSend = !sendDisabled && value.trim() !== "";
+  const canSend = !sendDisabled && trimmedValue !== "";
+  const canQueue =
+    isWorking && !hasPendingApproval && trimmedValue !== "" && !isCompactCommandText(trimmedValue);
 
   // 已插入的原子片段 (slash 命令 / @<路径>), 用于 backspace 整体删除
   const [insertedMentions, setInsertedMentions] = useState<string[]>([]);
@@ -105,23 +109,46 @@ export function InputBar({ sessionId }: InputBarProps) {
     [sessionId, setInputDraft],
   );
 
+  const queueDraft = useCallback(() => {
+    if (!canQueue) return;
+    const now = Date.now();
+    const messageId = `${sessionId}-user-${now}`;
+    addUserMessage(sessionId, {
+      id: messageId,
+      role: "user",
+      text: trimmedValue,
+      isPartial: false,
+      timestamp: now,
+      toolCalls: [],
+      deliveryStatus: "queued",
+    });
+    applyInputDraft("");
+    clearTrackingState();
+  }, [
+    canQueue,
+    trimmedValue,
+    sessionId,
+    addUserMessage,
+    applyInputDraft,
+    clearTrackingState,
+  ]);
+
   const send = useCallback(() => {
-    // 统一闸门: Enter 快捷键曾绕开 canSend 直调 send, working 中按 Enter 仍会发出
-    // 放这里所有入口 (form submit / Enter / SendButton 点击) 都受保护
+    // 只负责真正发给 relay 的路径；form submit / Enter / 按钮先走 submitDraft 分流。
+    // working 中的普通输入应由 queueDraft 入队，不应绕到这里直接发送。
     if (!canSend) return;
-    const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmedValue) return;
     const relay = relayClientRef;
     if (!relay) return;
     const now = Date.now();
     const messageId = `${sessionId}-user-${now}`;
-    const isCompactCommand = isCompactCommandText(trimmed);
+    const isCompactCommand = isCompactCommandText(trimmedValue);
     if (!isCompactCommand) {
       // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
       addUserMessage(sessionId, {
         id: messageId,
         role: "user",
-        text: trimmed,
+        text: trimmedValue,
         isPartial: false,
         timestamp: now,
         toolCalls: [],
@@ -133,7 +160,7 @@ export function InputBar({ sessionId }: InputBarProps) {
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
-      payload: { text: trimmed, messageId },
+      payload: { text: trimmedValue, messageId },
       seq: 0,
       timestamp: now,
       source: "client",
@@ -143,13 +170,21 @@ export function InputBar({ sessionId }: InputBarProps) {
     clearTrackingState();
   }, [
     canSend,
-    value,
+    trimmedValue,
     sessionId,
     addUserMessage,
     updateSessionState,
     applyInputDraft,
     clearTrackingState,
   ]);
+
+  const submitDraft = useCallback(() => {
+    if (canSend) {
+      send();
+      return;
+    }
+    if (canQueue) queueDraft();
+  }, [canSend, canQueue, send, queueDraft]);
 
   // onChange 拦截: backspace 删到原子片段时整体清除, 维护 insertedMentions
   const handleValueChange = (nextVal: string) => {
@@ -180,7 +215,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       if (e.nativeEvent.isComposing) return;
       if (pickerMode === "none" && submitOnPlainEnter) {
         e.preventDefault();
-        send();
+        submitDraft();
       }
     } else if (e.key === "Escape") {
       if (pickerMode !== "none") {
@@ -388,7 +423,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          send();
+          submitDraft();
         }}
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes("Files")) return;
@@ -448,7 +483,9 @@ export function InputBar({ sessionId }: InputBarProps) {
               sessionId={sessionId}
               isWorking={isWorking}
               canSend={canSend}
-              onSend={send}
+              canQueue={canQueue}
+              onSend={submitDraft}
+              onQueue={queueDraft}
             />
           </div>
         </div>

@@ -5,14 +5,52 @@
 //   Envelope 层: assistant_message / tool_use_request / tool_result / thinking / user_input
 //   Control 层: pending_approvals_push / session_history_messages / turn_result
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
-import { useChatStore } from "@/stores/chat-store";
+import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import type { RelayClient } from "@/services/relay-client";
+import { summarizeClaudeToolActivity } from "@/lib/claude-activity-summary";
 import { showCompactEndToast } from "@/lib/compact-toast";
 import { registerDispatcher } from "./dispatcher-registry";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
-type ChatRelay = Pick<RelayClient, "sendControl">;
+type ChatRelay = Pick<RelayClient, "sendControl"> & Partial<Pick<RelayClient, "sendEnvelope">>;
+
+function queuedUserMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => m.role === "user" && m.deliveryStatus === "queued");
+}
+
+function flushQueuedUserInputBatch(sessionId: string, relay: ChatRelay | null): boolean {
+  if (!relay?.sendEnvelope) return false;
+  const store = useChatStore.getState();
+  const slice = store.bySessionId[sessionId];
+  if (!slice) return false;
+  if (slice.pendingApprovals.some((approval) => approval.status === "pending")) return false;
+  const queued = queuedUserMessages(slice.messages);
+  if (queued.length === 0) return false;
+  const text = queued
+    .map((message) => message.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (!text) return false;
+
+  const now = Date.now();
+  for (const queuedMessage of queued) {
+    const sentMessage = { ...queuedMessage };
+    delete sentMessage.deliveryStatus;
+    store.upsertUserMessage(sessionId, sentMessage);
+  }
+  useSessionStore.getState().updateSessionState(sessionId, "working", now);
+  relay.sendEnvelope({
+    type: "user_input",
+    sessionId,
+    payload: { text, messageId: queued[0].id },
+    seq: 0,
+    timestamp: now,
+    source: "client",
+    version: "1",
+  });
+  return true;
+}
 
 function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant_message" }>) {
   const store = useChatStore.getState();
@@ -61,11 +99,26 @@ function handleToolResult(env: Extract<MessageEnvelope, { type: "tool_result" }>
   // 工具结果到达 => 对应 approval 已执行完成, 标记为 approved (被拒绝的不会有 tool_result)
   const store = useChatStore.getState();
   store.updateApprovalStatus(env.sessionId, env.payload.toolId, "approved");
+  store.completeActivityMessage(
+    env.sessionId,
+    env.payload.toolId,
+    env.payload.isError ? "error" : "done",
+  );
 }
 
 function handleAssistantToolUse(env: Extract<MessageEnvelope, { type: "assistant_tool_use" }>) {
   // 非审批型工具调用只承载“正在用哪个工具”的语义。审批型工具仍走 tool_use_request。
-  useChatStore.getState().setWorkingTool(env.sessionId, env.payload.toolName);
+  const store = useChatStore.getState();
+  store.setWorkingTool(env.sessionId, env.payload.toolName);
+  store.upsertActivityMessage(env.sessionId, {
+    id: env.payload.toolId,
+    source: "claude-native",
+    kind: "tool",
+    status: "running",
+    toolName: env.payload.toolName,
+    text: summarizeClaudeToolActivity(env.payload.toolName, env.payload.parameters),
+    durable: false,
+  });
 }
 
 function handlePendingApprovalsPush(
@@ -114,7 +167,10 @@ function handleSessionHistoryMessages(
   });
 }
 
-function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result" }>) {
+function handleTurnResult(
+  msg: Extract<RelayControlMessage, { type: "turn_result" }>,
+  relay: ChatRelay | null,
+) {
   const store = useChatStore.getState();
   const wasCompacting =
     useSessionStore.getState().sessions.find((session) => session.sessionId === msg.sessionId)
@@ -133,6 +189,7 @@ function handleTurnResult(msg: Extract<RelayControlMessage, { type: "turn_result
     }
   }
   store.markTurnComplete(msg.sessionId);
+  flushQueuedUserInputBatch(msg.sessionId, relay);
 }
 
 function handleTerminalTitle(msg: Extract<RelayControlMessage, { type: "terminal_title" }>) {
@@ -176,7 +233,7 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         handleSessionHistoryMessages(msg);
         break;
       case "turn_result":
-        handleTurnResult(msg);
+        handleTurnResult(msg, relay);
         break;
       case "terminal_title":
         handleTerminalTitle(msg);

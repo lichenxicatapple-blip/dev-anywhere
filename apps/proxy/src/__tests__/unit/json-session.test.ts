@@ -488,6 +488,54 @@ describe("JsonSession", () => {
 
       killSpy.mockRestore();
     });
+
+    it("interrupts the active turn without firing session exit and restarts Claude with resume", async () => {
+      const { spawn } = await import("node:child_process");
+      const exitCodes: number[] = [];
+      const session = new JsonSession({
+        onExit: (code) => exitCodes.push(code),
+      });
+      session.start();
+
+      mockChild.mockStdout.write(
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "claude-session-1",
+        }) + "\n",
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      const firstChild = mockChild;
+      const secondChild = createChildProcessFake();
+      let probeCount = 0;
+      const killProbe = vi.spyOn(process, "kill").mockImplementation(() => {
+        probeCount++;
+        if (probeCount === 1) return true;
+        throw new Error("ESRCH");
+      });
+
+      const interrupted = session.interruptCurrentTurn(500);
+      expect(firstChild.kill).toHaveBeenCalledWith("SIGINT");
+
+      mockChild = secondChild;
+      firstChild.emit("exit", 130, "SIGINT");
+      firstChild.stdout!.emit("end");
+
+      await expect(interrupted).resolves.toBe(true);
+      expect(exitCodes).toEqual([]);
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(spawn).mock.calls[1][1]).toEqual(
+        expect.arrayContaining(["--resume", "claude-session-1"]),
+      );
+
+      session.sendMessage("after interrupt");
+      await new Promise((r) => setTimeout(r, 50));
+      const written = secondChild.mockStdin.read();
+      expect(JSON.parse(written.toString().trim()).message.content).toBe("after interrupt");
+
+      killProbe.mockRestore();
+    });
   });
 
   describe("isAlive", () => {

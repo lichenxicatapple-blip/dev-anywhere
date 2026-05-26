@@ -45,6 +45,26 @@ describe("MarkdownView XSS 防护", () => {
     expect(container.querySelector("pre")).not.toBeNull();
   });
 
+  it("wraps unlabelled fenced code block in an overflow container", () => {
+    const { container } = render(
+      <MarkdownView text={"```\ndata/pipeline/sticker/sticker_cluster.py:172\n```"} />,
+    );
+    const code = container.querySelector("pre code");
+    expect(code?.textContent).toContain("sticker_cluster.py");
+    expect(code?.closest('[data-slot="markdown-code-block"]')?.className).toContain(
+      "overflow-x-auto",
+    );
+  });
+
+  it("allows long inline code to break inside chat bubbles", () => {
+    const { container } = render(
+      <MarkdownView text={"`data/pipeline/sticker/sticker_cluster.py:172`"} />,
+    );
+    const code = container.querySelector("code");
+    expect(code?.className).toContain("break-all");
+    expect(code?.className).toContain("whitespace-normal");
+  });
+
   it("renders external links with target=_blank + rel noopener", () => {
     const { container } = render(<MarkdownView text={"[click](https://example.com)"} />);
     const link = container.querySelector("a");

@@ -30,6 +30,56 @@ test.describe("InputBar — slash command picker", () => {
     const send = page.locator('[data-slot="send-button"]');
     await expect(send).toBeDisabled();
   });
+
+  test("working JSON input can be queued and flushes after turn result", async ({ page }) => {
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_status",
+        sessionId: "test-sess",
+        payload: {
+          sessionId: "test-sess",
+          state: "working",
+          lastActive: Date.now(),
+        },
+        seq: Date.now(),
+        timestamp: Date.now(),
+        source: "proxy",
+        version: "1",
+      });
+    });
+
+    const input = page.getByLabel("输入聊天消息");
+    await input.fill("排队发送这条");
+    await page.getByLabel("加入发送队列").click();
+    await input.fill("这是同一段补充");
+    await page.getByLabel("加入发送队列").click();
+
+    await expect(input).toHaveValue("");
+    await expect(
+      page.locator('[data-slot="message-bubble"][data-role="user"]', {
+        hasText: "排队发送这条",
+      }),
+    ).toHaveCount(1);
+    await expect(
+      page.locator('[data-slot="message-bubble"][data-role="user"]', {
+        hasText: "这是同一段补充",
+      }),
+    ).toHaveCount(1);
+    await expect(page.getByText("已排队")).toHaveCount(2);
+    await expect.poll(() => userInputTexts(page)).toEqual([]);
+
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "turn_result",
+        sessionId: "test-sess",
+        success: true,
+        isError: false,
+        result: "",
+      });
+    });
+
+    await expect.poll(() => userInputTexts(page)).toEqual(["排队发送这条\n\n这是同一段补充"]);
+  });
 });
 
 test.describe("InputBar — keyboard submit behavior", () => {

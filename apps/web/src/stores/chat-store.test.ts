@@ -30,12 +30,83 @@ describe("chat-store per-session", () => {
     expect(slice.messages[0].text).toBe("hello");
   });
 
+  it("activity messages split assistant streaming into separate bubbles", () => {
+    useChatStore.getState().appendAssistantText("s1", "我先看一下。");
+    useChatStore.getState().upsertActivityMessage("s1", {
+      id: "tool-1",
+      source: "claude-native",
+      kind: "tool",
+      status: "running",
+      text: "运行命令：pnpm test",
+      durable: false,
+    });
+    useChatStore.getState().appendAssistantText("s1", "结果出来了。");
+
+    const messages = useChatStore.getState().bySessionId["s1"].messages;
+    expect(messages.map((m) => m.role)).toEqual(["assistant", "activity", "assistant"]);
+    expect(messages[0]).toMatchObject({ text: "我先看一下。", isPartial: false });
+    expect(messages[1]).toMatchObject({
+      role: "activity",
+      text: "运行命令：pnpm test",
+      activity: {
+        id: "tool-1",
+        source: "claude-native",
+        kind: "tool",
+        status: "running",
+      },
+    });
+    expect(messages[2]).toMatchObject({ text: "结果出来了。", isPartial: true });
+    expect(new Set(messages.map((m) => m.id)).size).toBe(3);
+  });
+
   it("markTurnComplete flips isPartial false on last message of given session only", () => {
     useChatStore.getState().appendAssistantText("s1", "done?");
     useChatStore.getState().appendAssistantText("s2", "still going");
     useChatStore.getState().markTurnComplete("s1");
     expect(useChatStore.getState().bySessionId["s1"].messages[0].isPartial).toBe(false);
     expect(useChatStore.getState().bySessionId["s2"].messages[0].isPartial).toBe(true);
+  });
+
+  it("completeActivityMessage marks the native activity terminal without touching other sessions", () => {
+    useChatStore.getState().upsertActivityMessage("s1", {
+      id: "tool-1",
+      source: "claude-native",
+      kind: "tool",
+      status: "running",
+      text: "运行命令：pnpm test",
+      durable: false,
+    });
+    useChatStore.getState().upsertActivityMessage("s2", {
+      id: "tool-1",
+      source: "claude-native",
+      kind: "tool",
+      status: "running",
+      text: "运行命令：pnpm build",
+      durable: false,
+    });
+
+    useChatStore.getState().completeActivityMessage("s1", "tool-1", "done");
+
+    expect(useChatStore.getState().bySessionId.s1.messages[0].activity?.status).toBe("done");
+    expect(useChatStore.getState().bySessionId.s1.messages[0].isPartial).toBe(false);
+    expect(useChatStore.getState().bySessionId.s2.messages[0].activity?.status).toBe("running");
+  });
+
+  it("markTurnComplete finishes running activity messages", () => {
+    useChatStore.getState().upsertActivityMessage("s1", {
+      id: "tool-1",
+      source: "claude-native",
+      kind: "tool",
+      status: "running",
+      text: "运行命令：pnpm test",
+      durable: false,
+    });
+
+    useChatStore.getState().markTurnComplete("s1");
+
+    const [tool] = useChatStore.getState().bySessionId.s1.messages;
+    expect(tool.activity?.status).toBe("done");
+    expect(tool.isPartial).toBe(false);
   });
 
   it("addApprovalRequest + updateApprovalStatus scoped by session", () => {

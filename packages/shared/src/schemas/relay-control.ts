@@ -343,7 +343,7 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
-  // 中断当前 turn，client -> proxy，SIGINT 到 worker 进程让 claude CLI abort 当前流
+  // 中断当前 turn，client -> proxy；JSON 由 session-worker 打断 Claude 子进程并保留会话。
   control("session_worker_abort", { sessionId: IdSchema }, "client_to_proxy"),
 
   // turn 完成信号，proxy -> client，对应 claude stream-json 的 result 事件

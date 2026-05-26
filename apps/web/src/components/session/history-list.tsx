@@ -37,27 +37,31 @@ export function HistoryList({ now }: HistoryListProps) {
   const navigate = useNavigate();
 
   const providerGroups = useMemo(() => {
-    const providerMap = new Map<SessionProvider, Map<string, HistorySession[]>>();
+    const providerMap = new Map<
+      SessionProvider,
+      Map<string, { dir: string; sessions: HistorySession[] }>
+    >();
     for (const h of historySessions) {
       const provider = historySessionProvider(h);
       let projectMap = providerMap.get(provider);
       if (!projectMap) {
-        projectMap = new Map<string, HistorySession[]>();
+        projectMap = new Map<string, { dir: string; sessions: HistorySession[] }>();
         providerMap.set(provider, projectMap);
       }
-      const list = projectMap.get(h.projectDir);
-      if (list) list.push(h);
-      else projectMap.set(h.projectDir, [h]);
+      const groupDir = normalizeHistoryProjectDir(h.projectDir);
+      const bucket = projectMap.get(groupDir);
+      if (bucket) bucket.sessions.push(h);
+      else projectMap.set(groupDir, { dir: groupDir, sessions: [h] });
     }
     return Array.from(providerMap.entries())
       .sort(([a], [b]) => compareProvider(a, b))
       .map(([provider, projectMap]) => ({
         provider,
-        sessions: Array.from(projectMap.values()).flat(),
-        projects: Array.from(projectMap.entries()).map(([dir, sessions]) => ({
-          dir,
-          shortDir: formatSessionName(dir),
-          sessions,
+        sessions: Array.from(projectMap.values()).flatMap((group) => group.sessions),
+        projects: Array.from(projectMap.values()).map((group) => ({
+          dir: group.dir,
+          shortDir: formatSessionName(group.dir),
+          sessions: group.sessions,
         })),
       }));
   }, [historySessions]);
@@ -293,7 +297,13 @@ export function HistoryList({ now }: HistoryListProps) {
 }
 
 function historyProjectGroupKey(provider: SessionProvider, dir: string): string {
-  return `${provider}:${dir}`;
+  return `${provider}:${normalizeHistoryProjectDir(dir)}`;
+}
+
+function normalizeHistoryProjectDir(dir: string): string {
+  const trimmed = dir.trim();
+  if (!trimmed || trimmed === "/") return trimmed || "/";
+  return trimmed.replace(/\/+$/, "") || "/";
 }
 
 function directRestoreMode(session: HistorySession): RestoreMode | null {

@@ -108,6 +108,8 @@ export function createPermissionModeApprovalStrategy(
 
 export class JsonSession {
   private child: ChildProcess | null = null;
+  private readonly interruptedChildren = new WeakSet<ChildProcess>();
+  private readonly interruptedExitResolvers = new WeakMap<ChildProcess, () => void>();
   private stderrChunks: string[] = [];
   private writeQueue: Promise<void> = Promise.resolve();
   private claudeSessionId: string | null = null;
@@ -138,11 +140,15 @@ export class JsonSession {
   }
 
   start(): number {
+    return this.startChild(this.resumeSessionId);
+  }
+
+  private startChild(resumeSessionId?: string): number {
     const command = CLAUDE_PROVIDER.buildJsonCommand(
       {
         extraArgs: this.claudeArgs,
         permissionMode: this.permissionMode,
-        resumeSessionId: this.resumeSessionId,
+        resumeSessionId,
         includePartialMessages: this.includePartialMessages,
         hook: this.hook,
       },
@@ -186,10 +192,45 @@ export class JsonSession {
     }
   }
 
+  async interruptCurrentTurn(gracePeriodMs = 5000): Promise<boolean> {
+    const child = this.child;
+    if (!child || !this.isChildAlive(child)) return false;
+
+    this.interruptedChildren.add(child);
+    const drained = new Promise<void>((resolve) => {
+      this.interruptedExitResolvers.set(child, resolve);
+    });
+
+    const signaled = child.kill("SIGINT");
+    if (!signaled) {
+      this.interruptedChildren.delete(child);
+      this.interruptedExitResolvers.delete(child);
+      return false;
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < gracePeriodMs) {
+      if (!this.isChildAlive(child)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (this.isChildAlive(child)) {
+      child.kill("SIGKILL");
+    }
+
+    await Promise.race([drained, new Promise((resolve) => setTimeout(resolve, 1500))]);
+    if (this.child === child) this.child = null;
+    this.startChild(this.claudeSessionId ?? this.resumeSessionId ?? undefined);
+    return true;
+  }
+
   isAlive(): boolean {
-    if (!this.child || !this.child.pid) return false;
+    return this.child ? this.isChildAlive(this.child) : false;
+  }
+
+  private isChildAlive(child: ChildProcess): boolean {
+    if (!child.pid) return false;
     try {
-      process.kill(this.child.pid, 0);
+      process.kill(child.pid, 0);
       return true;
     } catch {
       return false;
@@ -201,10 +242,11 @@ export class JsonSession {
   }
 
   private setupStdoutParsing(): void {
-    if (!this.child?.stdout) return;
+    const child = this.child;
+    if (!child?.stdout) return;
 
     const lineBuffer = new LineBuffer();
-    this.child.stdout.pipe(lineBuffer);
+    child.stdout.pipe(lineBuffer);
 
     lineBuffer.on("data", (line: Buffer | string) => {
       const str = typeof line === "string" ? line : line.toString();
@@ -240,14 +282,16 @@ export class JsonSession {
   }
 
   private setupStderrCollection(): void {
-    if (!this.child?.stderr) return;
-    this.child.stderr.on("data", (chunk: Buffer | string) => {
+    const child = this.child;
+    if (!child?.stderr) return;
+    child.stderr.on("data", (chunk: Buffer | string) => {
       this.stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
     });
   }
 
   private setupExitHandler(): void {
-    if (!this.child) return;
+    const child = this.child;
+    if (!child) return;
     // child 'exit' 触发时, stdout pipe 里可能还堆着最后几行 stream-json (含 'result'
     // event → turn_complete 信号)。直接 fire onExit → caller process.exit(0) 会切断
     // pipe, 这些行永远不解析, session 永卡 WORKING。等 stdout 'end' (所有 chunk 流过
@@ -259,13 +303,19 @@ export class JsonSession {
     const fireOnce = (): void => {
       if (fired || !exited || !stdoutEnded) return;
       fired = true;
+      if (this.interruptedChildren.has(child)) {
+        this.interruptedChildren.delete(child);
+        this.interruptedExitResolvers.get(child)?.();
+        this.interruptedExitResolvers.delete(child);
+        return;
+      }
       this.onExitCb?.(exitCode ?? 1);
     };
-    this.child.stdout?.on("end", () => {
+    child.stdout?.on("end", () => {
       stdoutEnded = true;
       fireOnce();
     });
-    this.child.on("exit", (code: number | null) => {
+    child.on("exit", (code: number | null) => {
       exitCode = code;
       exited = true;
       // 兜底: child 异常退出且 stdout 卡住时 'end' 永不到, 1s 后强制 fire 防 session 永挂

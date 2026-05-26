@@ -56,7 +56,7 @@ describe("MessageBubble", () => {
     expect(marker?.className).not.toContain("bg-card");
   });
 
-  it("shows streaming cursor when assistant isPartial=true", () => {
+  it("does not show a streaming cursor for assistant partial text", () => {
     render(
       <MessageBubble
         message={makeMessage({
@@ -67,10 +67,10 @@ describe("MessageBubble", () => {
         })}
       />,
     );
-    screen.getByLabelText("streaming");
+    expect(screen.queryByLabelText("streaming")).toBeNull();
   });
 
-  it("keeps the streaming cursor inline with the final markdown paragraph", () => {
+  it("keeps assistant partial text as plain markdown without an inline cursor", () => {
     render(
       <MessageBubble
         message={makeMessage({
@@ -82,9 +82,50 @@ describe("MessageBubble", () => {
       />,
     );
 
-    const cursor = screen.getByLabelText("streaming");
-    expect(cursor.parentElement?.tagName.toLowerCase()).toBe("p");
-    expect(cursor.previousSibling?.textContent).toContain("合理的");
+    expect(screen.queryByLabelText("streaming")).toBeNull();
+    expect(screen.getByText(/合理的/).tagName.toLowerCase()).toBe("p");
+  });
+
+  it("renders running activity bubbles in the assistant rail", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-1",
+          role: "activity",
+          text: "运行命令：pnpm test",
+          isPartial: true,
+          activity: {
+            id: "tool-1",
+            source: "claude-native",
+            kind: "tool",
+            status: "running",
+            text: "运行命令：pnpm test",
+            durable: false,
+          },
+        })}
+      />,
+    );
+
+    const bubble = screen.getByRole("article");
+    expect(bubble.getAttribute("data-role")).toBe("activity");
+    expect(container.querySelector('[data-slot="activity-spinner"]')).not.toBeNull();
+    expect(screen.getByText("运行命令：pnpm test")).not.toBeNull();
+  });
+
+  it("preserves user-authored line breaks in sent message bubbles", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "u-newline",
+          role: "user",
+          text: "第一行\n第二行",
+        })}
+      />,
+    );
+
+    const paragraph = container.querySelector("p");
+    expect(paragraph?.textContent).toBe("第一行\n第二行");
+    expect(paragraph?.className).toContain("whitespace-pre-wrap");
   });
 
   it("marks user partial messages with streaming cursor and unconfirmed style", () => {
@@ -101,6 +142,24 @@ describe("MessageBubble", () => {
     expect(screen.getByLabelText("streaming")).not.toBeNull();
     const bubble = container.querySelector('[data-slot="message-bubble"]');
     expect(bubble?.getAttribute("data-partial")).toBe("true");
+    const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
+    expect(body?.className).toContain("border-dashed");
+  });
+
+  it("marks queued user messages without treating them as streaming text", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "u3",
+          role: "user",
+          text: "queued instruction",
+          deliveryStatus: "queued",
+        })}
+      />,
+    );
+
+    expect(screen.getByText("已排队")).not.toBeNull();
+    expect(screen.queryByLabelText("streaming")).toBeNull();
     const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
     expect(body?.className).toContain("border-dashed");
   });

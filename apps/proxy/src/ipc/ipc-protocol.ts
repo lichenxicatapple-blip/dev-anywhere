@@ -202,9 +202,14 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     content: z.string(),
   }),
 
-  // serve → worker: 停止 claude 进程
+  // serve → worker: 停止 claude 进程（终止整个 JSON 会话）
   z.object({
     type: z.literal("worker_stop"),
+  }),
+
+  // serve → worker: 只中断当前 Claude turn，worker 进程必须保活并重建 Claude 子进程。
+  z.object({
+    type: z.literal("worker_interrupt"),
   }),
 
   // serve → worker: 工具审批响应
@@ -226,6 +231,11 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_exit"),
     code: z.number(),
+  }),
+
+  // worker → serve: 当前 turn 已中断，JSON 会话仍可继续接收后续输入。
+  z.object({
+    type: z.literal("worker_interrupted"),
   }),
 
   // worker → serve: 工具审批请求

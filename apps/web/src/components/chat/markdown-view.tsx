@@ -23,6 +23,7 @@ interface MarkdownViewProps {
   text: string;
   tone?: "default" | "on-primary";
   trailingInline?: ReactNode;
+  preserveSoftBreaks?: boolean;
 }
 
 const TRAILING_INLINE_MARKER = "\uE000";
@@ -268,7 +269,10 @@ function shouldOpenExternalLink(event: ReactMouseEvent<HTMLAnchorElement>): bool
 // 直接在 <pre> 上加 overflow-x 会被 prose / highlight.js 注入样式干扰, 分层更稳
 function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   return (
-    <div className="dev-render-scroll not-prose my-3 overflow-x-auto rounded-md bg-popover">
+    <div
+      data-slot="markdown-code-block"
+      className="dev-render-scroll not-prose my-3 max-w-full overflow-x-auto rounded-md bg-popover"
+    >
       <pre className="p-3 text-[0.92em]">
         <code {...rest}>{children}</code>
       </pre>
@@ -276,10 +280,17 @@ function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   );
 }
 
+function reactNodeText(node: ReactNode): string {
+  return Children.toArray(node)
+    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
+    .join("");
+}
+
 export const MarkdownView = memo(function MarkdownView({
   text,
   tone = "default",
   trailingInline,
+  preserveSoftBreaks = false,
 }: MarkdownViewProps) {
   const markdownText = trailingInline ? `${text}${TRAILING_INLINE_MARKER}` : text;
 
@@ -302,11 +313,15 @@ export const MarkdownView = memo(function MarkdownView({
           // 会吃上 prose 默认的 rgba(0,0,0,.5) 黑底, 与 CodeBlock 内部 wrapper 形成两层
           // 这里让 <pre> 透传, 由 code 分支的 CodeBlock 独占包装
           pre: ({ children }) => <>{children}</>,
-          p: ({ children, ...rest }) => (
-            <p {...rest}>{renderWithTrailingInline(children, trailingInline)}</p>
+          p: ({ children, className, ...rest }) => (
+            <p className={cn(className, preserveSoftBreaks && "whitespace-pre-wrap")} {...rest}>
+              {renderWithTrailingInline(children, trailingInline)}
+            </p>
           ),
-          li: ({ children, ...rest }) => (
-            <li {...rest}>{renderWithTrailingInline(children, trailingInline)}</li>
+          li: ({ children, className, ...rest }) => (
+            <li className={cn(className, preserveSoftBreaks && "whitespace-pre-wrap")} {...rest}>
+              {renderWithTrailingInline(children, trailingInline)}
+            </li>
           ),
           a: ({ href = "", children }) => (
             <InlinePathAction href={href} tone={tone}>
@@ -314,7 +329,10 @@ export const MarkdownView = memo(function MarkdownView({
             </InlinePathAction>
           ),
           code: ({ className, children, ...rest }) => {
-            const isBlock = typeof className === "string" && className.includes("language-");
+            const codeText = reactNodeText(children);
+            const isBlock =
+              (typeof className === "string" && className.includes("language-")) ||
+              codeText.includes("\n");
             if (isBlock) {
               return (
                 <CodeBlock {...rest}>
@@ -323,7 +341,10 @@ export const MarkdownView = memo(function MarkdownView({
               );
             }
             return (
-              <code className="rounded bg-muted px-1 py-0.5 text-[0.9em]" {...rest}>
+              <code
+                className="rounded bg-muted px-1 py-0.5 text-[0.9em] break-all whitespace-normal"
+                {...rest}
+              >
                 {children}
               </code>
             );

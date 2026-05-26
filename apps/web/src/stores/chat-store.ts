@@ -21,14 +21,30 @@ export interface QuotedMessage {
   text: string;
 }
 
+export type ChatActivitySource = "claude-native" | "user-action";
+export type ChatActivityKind = "tool" | "marker";
+export type ChatActivityStatus = "running" | "done" | "error";
+
+export interface ChatActivityInfo {
+  id: string;
+  source: ChatActivitySource;
+  kind: ChatActivityKind;
+  status: ChatActivityStatus;
+  text: string;
+  durable: boolean;
+  toolName?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "activity";
   text: string;
   isPartial: boolean;
   timestamp: number;
   toolCalls: ToolCallInfo[];
+  deliveryStatus?: "queued";
   quotedMessage?: QuotedMessage;
+  activity?: ChatActivityInfo;
 }
 
 interface ChatSessionSlice {
@@ -60,6 +76,12 @@ interface ChatStoreState {
   bySessionId: Record<string, ChatSessionSlice>;
 
   appendAssistantText: (sessionId: string, text: string) => void;
+  upsertActivityMessage: (sessionId: string, activity: ChatActivityInfo) => void;
+  completeActivityMessage: (
+    sessionId: string,
+    activityId: string,
+    status: Extract<ChatActivityStatus, "done" | "error">,
+  ) => void;
   addUserMessage: (sessionId: string, message: ChatMessage) => void;
   upsertUserMessage: (sessionId: string, message: ChatMessage) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
@@ -169,6 +191,35 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
   return [...incoming.filter((message) => !existingIds.has(message.id)), ...existing];
 }
 
+let liveMessageCounter = 0;
+
+function liveMessageId(sessionId: string, role: "assistant" | "activity"): string {
+  liveMessageCounter += 1;
+  return `${sessionId}-${role}-${Date.now()}-${liveMessageCounter}`;
+}
+
+function activityMessageId(sessionId: string, activityId: string): string {
+  return `${sessionId}-activity-${activityId}`;
+}
+
+function closeAssistantPartials(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) =>
+    m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
+  );
+}
+
+function completeRunningActivities(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) =>
+    m.role === "activity" && m.activity?.status === "running"
+      ? {
+          ...m,
+          isPartial: false,
+          activity: { ...m.activity, status: "done" },
+        }
+      : m,
+  );
+}
+
 export const useChatStore = create<ChatStoreState>()(
   devtools(
     (set) => ({
@@ -183,7 +234,7 @@ export const useChatStore = create<ChatStoreState>()(
               return { ...slice, messages: [...slice.messages.slice(0, -1), updated] };
             }
             const newMsg: ChatMessage = {
-              id: `${sessionId}-assistant-${Date.now()}`,
+              id: liveMessageId(sessionId, "assistant"),
               role: "assistant",
               text,
               isPartial: true,
@@ -192,6 +243,53 @@ export const useChatStore = create<ChatStoreState>()(
             };
             return { ...slice, messages: [...slice.messages, newMsg] };
           }),
+        ),
+
+      upsertActivityMessage: (sessionId, activity) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            const messageId = activityMessageId(sessionId, activity.id);
+            const existingIndex = slice.messages.findIndex((m) => m.id === messageId);
+            if (existingIndex >= 0) {
+              const next = slice.messages.slice();
+              const existing = next[existingIndex];
+              next[existingIndex] = {
+                ...existing,
+                role: "activity",
+                text: activity.text,
+                isPartial: activity.status === "running",
+                timestamp: Date.now(),
+                activity,
+              };
+              return { ...slice, messages: next };
+            }
+            const newMsg: ChatMessage = {
+              id: messageId,
+              role: "activity",
+              text: activity.text,
+              isPartial: activity.status === "running",
+              timestamp: Date.now(),
+              toolCalls: [],
+              activity,
+            };
+            return { ...slice, messages: [...closeAssistantPartials(slice.messages), newMsg] };
+          }),
+        ),
+
+      completeActivityMessage: (sessionId, activityId, status) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: slice.messages.map((m) =>
+              m.role === "activity" && m.activity?.id === activityId
+                ? {
+                    ...m,
+                    isPartial: false,
+                    activity: { ...m.activity, status },
+                  }
+                : m,
+            ),
+          })),
         ),
 
       addUserMessage: (sessionId, message) =>
@@ -231,9 +329,7 @@ export const useChatStore = create<ChatStoreState>()(
         set((state) =>
           updateSlice(state, sessionId, (slice) => ({
             ...slice,
-            messages: slice.messages.map((m) =>
-              m.role === "assistant" && m.isPartial ? { ...m, isPartial: false } : m,
-            ),
+            messages: completeRunningActivities(closeAssistantPartials(slice.messages)),
             workingToolName: "",
             pendingApprovals: [],
           })),

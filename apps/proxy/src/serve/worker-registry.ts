@@ -293,6 +293,27 @@ export class WorkerRegistry {
         serviceLogger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
         break;
 
+      case "worker_interrupted":
+        this.deps.permissionBroker.cleanupSession(sessionId, "Turn interrupted");
+        this.deps.relayConnection.sendRaw(
+          serializeControl({
+            type: "pending_approvals_push",
+            sessionId,
+            approvals: [],
+          }),
+        );
+        this.deps.relayConnection.sendRaw(
+          serializeControl({
+            type: "turn_result",
+            sessionId,
+            success: false,
+            isError: true,
+          }),
+        );
+        this.deps.jsonObserver.onTurnResult(sessionId);
+        serviceLogger.info({ sessionId }, "JSON turn interrupted");
+        break;
+
       case "worker_approval_request":
         this.forwardApprovalRequest(sessionId, msg);
         break;

@@ -232,6 +232,25 @@ describe("RelayRouter input routing", () => {
     expect(terminalWrite).not.toHaveBeenCalled();
   });
 
+  it("interrupts JSON turns through worker IPC instead of killing the session worker", () => {
+    const workerSend = vi.fn(() => true);
+    const router = createRouter({
+      mode: "json",
+      workerSend,
+    });
+    const killSpy = vi.spyOn(process, "kill");
+
+    router.handle({
+      type: "session_worker_abort",
+      sessionId: "s1",
+    });
+
+    expect(workerSend).toHaveBeenCalledWith("s1", { type: "worker_interrupt" });
+    expect(killSpy).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+  });
+
   it("marks JSON /compact user_input as compacting instead of ordinary working", () => {
     const workerSend = vi.fn(() => true);
     const jsonTurnStart = vi.fn();

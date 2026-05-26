@@ -328,3 +328,49 @@ describe("InputBar compact command", () => {
     expect(toastLoading).toHaveBeenCalledWith("正在压缩上下文...", { id: "compact-s1" });
   });
 });
+
+describe("InputBar queued JSON send", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    sendEnvelope.mockReset();
+    useChatStore.setState({
+      bySessionId: {
+        s1: { ...EMPTY_SLICE, inputDraft: "next instruction" },
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "working" }],
+    });
+  });
+
+  it("queues ordinary input locally while the JSON agent is working", () => {
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+
+    fireEvent.click(getByLabelText("加入发送队列"));
+
+    expect(sendEnvelope).not.toHaveBeenCalled();
+    expect((getByLabelText("输入聊天消息") as HTMLTextAreaElement).value).toBe("");
+    expect(useChatStore.getState().bySessionId.s1.messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        text: "next instruction",
+        deliveryStatus: "queued",
+      }),
+    ]);
+    expect(useSessionStore.getState().sessions.find((s) => s.sessionId === "s1")?.state).toBe(
+      "working",
+    );
+  });
+});

@@ -74,6 +74,42 @@ describe("HistoryList", () => {
     cleanup();
   });
 
+  it("groups the same project directory with or without a trailing slash", () => {
+    const { container } = renderHistoryList([
+      {
+        id: "without-slash",
+        title: "无尾斜杠",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "claude",
+        preferredMode: "json",
+      },
+      {
+        id: "with-slash",
+        title: "有尾斜杠",
+        projectDir: "/Users/dev/project/",
+        updatedAt: Date.now() - 1,
+        provider: "claude",
+        preferredMode: "json",
+      },
+    ]);
+
+    const sectionHeader = container.querySelector<HTMLElement>(
+      '[data-slot="history-section-header"]',
+    );
+    if (!sectionHeader) throw new Error("missing history section header");
+    fireEvent.click(sectionHeader);
+
+    const groupHeaders = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-slot="history-group-header"]'),
+    );
+    expect(groupHeaders).toHaveLength(1);
+    expect(groupHeaders[0].querySelector("[title]")?.getAttribute("title")).toBe(
+      "/Users/dev/project",
+    );
+    expect(groupHeaders[0].textContent).toContain("2");
+  });
+
   it("directly restores a Dev Anywhere JSON history row using its preferred mode", async () => {
     const { container } = renderHistoryList([
       {
