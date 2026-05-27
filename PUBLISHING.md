@@ -98,7 +98,7 @@ sudo ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 The installer prints two credentials:
 
 - `RELAY_PROXY_TOKEN`: put this in each developer machine's `~/.dev-anywhere/config.json` as `relays.cloud.proxyToken`.
-- `RELAY_CLIENT_TOKEN`: open the web client once with `https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>`.
+- `RELAY_CLIENT_TOKEN`: open `https://dev-anywhere.example.com/`, then paste this value in Settings -> Relay Token.
 
 ## Local proxy update
 

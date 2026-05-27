@@ -272,10 +272,11 @@ if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
   cleanup_old_images
   echo
   echo "=== dev-anywhere deployed ==="
-  echo "  Web UI:  https://$DOMAIN/?relayToken=$CLIENT_TOKEN"
+  echo "  Web UI:  https://$DOMAIN/"
   echo "  Health:  https://$DOMAIN/health"
   echo "  Proxy:   wss://$DOMAIN/proxy?token=$PROXY_TOKEN"
   echo "  Client:  wss://$DOMAIN/client?token=$CLIENT_TOKEN"
+  echo "  Client token for Settings -> Relay Token: $CLIENT_TOKEN"
   echo
   echo "Next, on your local machine:"
   echo "  npm install -g @dev-anywhere/proxy"

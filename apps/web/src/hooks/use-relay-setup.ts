@@ -14,7 +14,6 @@ import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
 import {
   clearRelayClientToken,
   getRelayClientToken,
-  persistRelayClientToken,
   toClientWsUrl,
 } from "@/lib/relay-client-token";
 
@@ -97,7 +96,7 @@ export function useRelaySetup(): void {
       }
       if (disposed) return;
       if (authIssue) {
-        // token 不对就把 storage 清空，避免 reload 去掉 ?relayToken= 后还卡在 invalid 状态。
+        // token 不对就把 storage 清空，避免继续用过期凭据重连。
         // missing 时 storage 本来就空，clear 是 no-op。
         if (authIssue === "invalid_client_token") clearRelayClientToken();
         const store = useAppStore.getState();
@@ -109,8 +108,6 @@ export function useRelaySetup(): void {
         store.setPhase("proxy_selecting");
         return;
       }
-      // preflight 通过后再 persist：避免错 token "感染" 浏览器。
-      if (token) persistRelayClientToken(token);
       useAppStore.getState().setRelayClientAuthIssue(null);
       ws.connect(toClientWsUrl(relayUrl));
     }

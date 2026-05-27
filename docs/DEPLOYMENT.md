@@ -74,7 +74,7 @@ Host nginx owns public `80/443` and routes only this domain to those loopback po
 
 The final output includes:
 
-- Web UI URL: `https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>`
+- Web UI URL: `https://dev-anywhere.example.com/`
 - Proxy WebSocket URL: `wss://dev-anywhere.example.com/proxy?token=<RELAY_PROXY_TOKEN>`
 - Client WebSocket URL: `wss://dev-anywhere.example.com/client?token=<RELAY_CLIENT_TOKEN>`
 
@@ -121,10 +121,10 @@ dev-anywhere serve status
 Open the Web UI URL printed by the installer:
 
 ```text
-https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>
+https://dev-anywhere.example.com/
 ```
 
-The browser stores the client token in local browser storage for future launches. On iOS or iPadOS, use Safari's **Add to Home Screen** action to install it as a PWA.
+Open Settings -> Relay Token, paste `RELAY_CLIENT_TOKEN`, then reconnect. The browser stores the client token in local browser storage for future launches. On iOS or iPadOS, use Safari's **Add to Home Screen** action to install it as a PWA, then enter the token again inside the installed app.
 
 For a step-by-step PWA guide, see [Install the PWA](PWA.md).
 
@@ -182,7 +182,7 @@ sudo editor .env
 sudo docker compose up -d
 ```
 
-After rotating `RELAY_PROXY_TOKEN`, update each developer's `~/.dev-anywhere/config.json`. After rotating `RELAY_CLIENT_TOKEN`, reopen the web app with the new `?relayToken=...` URL.
+After rotating `RELAY_PROXY_TOKEN`, update each developer's `~/.dev-anywhere/config.json`. After rotating `RELAY_CLIENT_TOKEN`, update Settings -> Relay Token in each browser or installed PWA.
 
 ## Security Notes
 

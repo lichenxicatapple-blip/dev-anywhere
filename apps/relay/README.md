@@ -46,7 +46,7 @@ PORT=3100 dev-anywhere-relay
 
 **Production warning:** always set both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`. Without a client token, anyone who can reach the relay can connect to `/client`, list proxies, and attempt to bind to a proxy.
 
-For the bundled web client, open the app once with `?relayToken=<RELAY_CLIENT_TOKEN>` in the page URL. The token is stored in local browser storage and appended to `/client` WebSocket connections.
+For the bundled web client, open the app URL, then paste `RELAY_CLIENT_TOKEN` in Settings -> Relay Token. The token is stored in browser-local storage and appended to `/client` WebSocket connections.
 
 ## TLS
 

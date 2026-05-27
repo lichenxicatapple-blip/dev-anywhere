@@ -22,7 +22,7 @@ export function Sidebar({ className }: SidebarProps) {
       <>
         <nav
           className={cn(
-            "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 py-2",
+            "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]",
             className,
           )}
           aria-label="侧边栏"
@@ -49,7 +49,7 @@ export function Sidebar({ className }: SidebarProps) {
     <>
       <nav
         className={cn(
-          "dev-sidebar-shell group/sidebar relative flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-visible",
+          "dev-sidebar-shell group/sidebar relative flex-col w-[280px] shrink-0 bg-card border-r border-border overflow-visible pt-[env(safe-area-inset-top)]",
           className,
         )}
         aria-label="侧边栏"

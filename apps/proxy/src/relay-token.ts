@@ -80,5 +80,6 @@ function printResult(relayName: string, relayUrl: string, result: FetchClientTok
     return;
   }
   console.log(`Token: ${result.clientToken}`);
-  console.log(`URL:   ${httpBase}/?relayToken=${encodeURIComponent(result.clientToken!)}`);
+  console.log(`URL:   ${httpBase}/`);
+  console.log(`Use:   paste the token in Settings -> Relay Token`);
 }

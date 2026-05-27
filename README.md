@@ -102,10 +102,10 @@ dev-anywhere codex
 4. Open the Web UI URL printed by the installer:
 
 ```text
-https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>
+https://dev-anywhere.example.com/
 ```
 
-Choose your developer machine, create or resume a session, and install the page as a PWA on iPhone or iPad if you want a home-screen app.
+Open Settings -> Relay Token, paste the `RELAY_CLIENT_TOKEN` printed by the installer, then reconnect. Choose your developer machine, create or resume a session, and install the page as a PWA on iPhone or iPad if you want a home-screen app.
 
 See the full [Deployment Guide](docs/DEPLOYMENT.md) for VPS preparation, upgrades, health checks, and token rotation. See [Install the PWA](docs/PWA.md) for iPhone, iPad, and desktop installation steps.
 

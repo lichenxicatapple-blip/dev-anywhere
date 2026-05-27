@@ -69,7 +69,6 @@ export function AppShell() {
       </span>
     </Button>
   ) : null;
-
   // 通知容器挂载后，消费启动阶段暂存的消息。
   useEffect(() => {
     if (!pendingToast) return;
@@ -116,7 +115,9 @@ export function AppShell() {
   return (
     <div
       className="flex flex-col bg-background text-foreground"
-      style={{ height: "max(100dvh, var(--dev-visual-viewport-height, 100dvh))" }}
+      style={{
+        height: "max(100dvh, var(--dev-visual-viewport-height, 100dvh))",
+      }}
       data-slot="app-shell"
     >
       {!isChatRoute && (

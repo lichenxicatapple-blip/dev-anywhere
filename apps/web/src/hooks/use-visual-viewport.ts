@@ -115,10 +115,9 @@ export function useVisualViewportInsets(): VisualViewportInsets {
         baselineHeightRef.current = Math.max(baselineHeightRef.current, observedHeight);
       }
 
-      // iOS Safari also changes visualViewport for bottom browser chrome and the
-      // hardware-keyboard accessory bar. Only treat large viewport compression as the
-      // soft keyboard; otherwise we add padding that creates a visible dead zone above
-      // the Safari address bar.
+      // iOS Safari also changes visualViewport for bottom browser chrome.
+      // Only treat large viewport compression as the soft keyboard; otherwise we add
+      // padding that creates a visible dead zone above the Safari address bar.
       const layoutViewportHeight = window.innerHeight;
       const next: VisualViewportInsets = {
         bottomOffset: computeVisualViewportBottomOffset({

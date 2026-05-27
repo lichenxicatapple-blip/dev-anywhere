@@ -17,22 +17,22 @@ interface XtermRawInputOptions {
   isInputEnabled?: () => boolean;
 }
 
-const NATIVE_PUNCTUATION_TIMEOUT_MS = 16;
+const NATIVE_TEXT_TIMEOUT_MS = 16;
 const NATIVE_ECHO_SUPPRESSION_TIMEOUT_MS = 16;
 
-type PendingPunctuationInput = {
+type PendingNativeTextInput = {
   bufferedXtermData: string[];
-  fallback: string;
+  keydownText: string;
   timer: ReturnType<typeof setTimeout>;
 };
 
 type NativeEchoSuppression = {
   data: string;
-  fallback: string;
+  keydownText: string;
   timer: ReturnType<typeof setTimeout>;
 };
 
-type NativeEchoPrefix = Pick<NativeEchoSuppression, "data" | "fallback">;
+type NativeEchoPrefix = Pick<NativeEchoSuppression, "data" | "keydownText">;
 
 function isPrintableAsciiPunctuation(data: string): boolean {
   if (data.length !== 1) return false;
@@ -46,19 +46,29 @@ function isPrintableAsciiPunctuation(data: string): boolean {
   );
 }
 
+function isPrintableAsciiDigit(data: string): boolean {
+  if (data.length !== 1) return false;
+  const code = data.charCodeAt(0);
+  return code >= 0x30 && code <= 0x39;
+}
+
 function shouldRouteKeyThroughNativeInput(
   event: KeyboardEvent,
-  physicalKeyboardMode: boolean,
+  opts: { physicalKeyboardMode?: boolean; imeComposing?: boolean } = {},
 ): boolean {
-  if (physicalKeyboardMode) return false;
   if (event.type !== "keydown") return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
-  // IME composition 期间 keydown 仍然 fire,但字符已被输入法吞进候选;这时启动 punctuation
-  // 探针会让 16ms 超时 fallback 发出一个孤立字符,叠加 IME 提交时的完整字符串,渲染成
+  // IME composition 期间 keydown 仍然 fire,但字符已被输入法吞进候选;这时启动 native
+  // text 探针会让 16ms 超时提交 keydown 原文,叠加 IME 提交时的完整字符串,渲染成
   // "-hello-" 这样的前缀重复。让 xterm 走默认路径,IME commit 的文本最终经
-  // textarea input → xterm.onData 一次性递给我们。
-  if (event.isComposing) return false;
-  return isPrintableAsciiPunctuation(event.key);
+  // textarea input → xterm.onData 一次性递给我们。部分 iOS 事件不可靠设置
+  // event.isComposing, 所以同时看本模块维护的 composition state。
+  if (event.isComposing || opts.imeComposing) return false;
+  return (
+    isPrintableAsciiPunctuation(event.key) ||
+    (opts.physicalKeyboardMode === true &&
+      (event.key === " " || isPrintableAsciiDigit(event.key)))
+  );
 }
 
 function shouldPreserveSystemInputSourceShortcut(event: KeyboardEvent): boolean {
@@ -67,11 +77,17 @@ function shouldPreserveSystemInputSourceShortcut(event: KeyboardEvent): boolean 
   return event.key === " " || event.key === "Spacebar" || event.code === "Space";
 }
 
+function shouldPreserveSystemMetaShortcut(event: KeyboardEvent): boolean {
+  if (event.type !== "keydown") return false;
+  return event.metaKey;
+}
+
 type HelperTextareaSnapshot = {
   inputMode: string | null;
   enterKeyHint: string | null;
   autocapitalize: string | null;
   autocomplete: string | null;
+  autocorrect: string | null;
   spellcheck: boolean;
 };
 
@@ -81,6 +97,7 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
     enterKeyHint: textarea.getAttribute("enterkeyhint"),
     autocapitalize: textarea.getAttribute("autocapitalize"),
     autocomplete: textarea.getAttribute("autocomplete"),
+    autocorrect: textarea.getAttribute("autocorrect"),
     spellcheck: textarea.spellcheck,
   };
 
@@ -89,6 +106,7 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
   textarea.setAttribute("enterkeyhint", "send");
   textarea.setAttribute("autocapitalize", "off");
   textarea.setAttribute("autocomplete", "off");
+  textarea.setAttribute("autocorrect", "off");
   textarea.spellcheck = false;
 
   return () => {
@@ -100,6 +118,8 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
     else textarea.setAttribute("autocapitalize", previous.autocapitalize);
     if (previous.autocomplete === null) textarea.removeAttribute("autocomplete");
     else textarea.setAttribute("autocomplete", previous.autocomplete);
+    if (previous.autocorrect === null) textarea.removeAttribute("autocorrect");
+    else textarea.setAttribute("autocorrect", previous.autocorrect);
     textarea.spellcheck = previous.spellcheck;
   };
 }
@@ -109,7 +129,7 @@ export function attachXtermRawInput(
   sessionId: string,
   options: XtermRawInputOptions = {},
 ): Disposable {
-  let pendingPunctuation: PendingPunctuationInput | undefined;
+  let pendingNativeText: PendingNativeTextInput | undefined;
   let nativeEchoSuppression: NativeEchoSuppression | undefined;
   let isComposing = false;
   let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
@@ -147,11 +167,11 @@ export function attachXtermRawInput(
     nativeEchoSuppression = undefined;
   };
 
-  const expectNativeEchoOnce = (data: string, fallback: string): void => {
+  const expectNativeEchoOnce = (data: string, keydownText: string): void => {
     clearNativeEchoSuppression();
     const suppression: NativeEchoSuppression = {
       data,
-      fallback,
+      keydownText,
       timer: setTimeout(() => {
         if (nativeEchoSuppression === suppression) {
           nativeEchoSuppression = undefined;
@@ -164,22 +184,22 @@ export function attachXtermRawInput(
   const stripNativeEchoPrefix = (data: string, suppression: NativeEchoPrefix): string => {
     const duplicatePrefix = data.startsWith(suppression.data)
       ? suppression.data
-      : data.startsWith(suppression.fallback)
-        ? suppression.fallback
+      : data.startsWith(suppression.keydownText)
+        ? suppression.keydownText
         : "";
     return duplicatePrefix ? data.slice(duplicatePrefix.length) : data;
   };
 
   const stripPendingEchoPrefix = (
     data: string,
-    pending: PendingPunctuationInput,
+    pending: PendingNativeTextInput,
     nativeData: string,
   ): string => {
-    return stripNativeEchoPrefix(data, { data: nativeData, fallback: pending.fallback });
+    return stripNativeEchoPrefix(data, { data: nativeData, keydownText: pending.keydownText });
   };
 
   const flushPendingBufferedXtermData = (
-    pending: PendingPunctuationInput,
+    pending: PendingNativeTextInput,
     nativeData: string,
   ): void => {
     let droppedNativeEcho = false;
@@ -196,38 +216,41 @@ export function attachXtermRawInput(
     }
   };
 
-  const resolvePendingPunctuationInput = (data: string): void => {
-    const pending = pendingPunctuation;
+  const resolvePendingNativeTextInput = (data: string): void => {
+    const pending = pendingNativeText;
     if (!pending) return;
-    pendingPunctuation = undefined;
+    pendingNativeText = undefined;
     clearTimeout(pending.timer);
     sendRawInput(data);
-    expectNativeEchoOnce(data, pending.fallback);
+    expectNativeEchoOnce(data, pending.keydownText);
     flushPendingBufferedXtermData(pending, data);
   };
 
-  const beginPendingPunctuationInput = (fallback: string): void => {
-    if (pendingPunctuation) {
-      resolvePendingPunctuationInput(pendingPunctuation.fallback);
+  const beginPendingNativeTextInput = (keydownText: string): void => {
+    if (pendingNativeText) {
+      resolvePendingNativeTextInput(pendingNativeText.keydownText);
     }
     clearNativeEchoSuppression();
 
-    const pending: PendingPunctuationInput = {
+    const pending: PendingNativeTextInput = {
       bufferedXtermData: [],
-      fallback,
+      keydownText,
       timer: setTimeout(() => {
-        if (pendingPunctuation !== pending) return;
-        resolvePendingPunctuationInput(fallback);
-      }, NATIVE_PUNCTUATION_TIMEOUT_MS),
+        if (pendingNativeText !== pending) return;
+        resolvePendingNativeTextInput(keydownText);
+      }, NATIVE_TEXT_TIMEOUT_MS),
     };
-    pendingPunctuation = pending;
+    pendingNativeText = pending;
   };
 
   const onNativeInput = (event: Event): void => {
     const inputEvent = event as InputEvent;
-    if (inputEvent.isComposing || inputEvent.inputType !== "insertText") return;
     const data = inputEvent.data ?? "";
-    if (pendingPunctuation && data) resolvePendingPunctuationInput(data);
+    if (!inputEvent.isComposing && pendingNativeText && data) {
+      resolvePendingNativeTextInput(data);
+      return;
+    }
+    if (inputEvent.isComposing || inputEvent.inputType !== "insertText") return;
   };
 
   const onCompositionStart = (): void => {
@@ -240,13 +263,16 @@ export function attachXtermRawInput(
     if (textarea) textarea.value = "";
   };
 
-  const onCompositionEnd = (): void => {
+  const onCompositionEnd = (event: CompositionEvent): void => {
     isComposing = false;
+    if (pendingNativeText && event.data) {
+      resolvePendingNativeTextInput(event.data);
+    }
   };
 
   const dataDisposable = term.onData((data) => {
-    if (pendingPunctuation) {
-      pendingPunctuation.bufferedXtermData.push(data);
+    if (pendingNativeText) {
+      pendingNativeText.bufferedXtermData.push(data);
       return;
     }
     if (nativeEchoSuppression) {
@@ -261,11 +287,21 @@ export function attachXtermRawInput(
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.attachCustomKeyEventHandler?.((event) => {
-    if (options.physicalKeyboardMode === true && shouldPreserveSystemInputSourceShortcut(event)) {
-      return false;
+    if (options.physicalKeyboardMode === true) {
+      if (
+        shouldPreserveSystemInputSourceShortcut(event) ||
+        shouldPreserveSystemMetaShortcut(event)
+      ) {
+        return false;
+      }
     }
-    if (shouldRouteKeyThroughNativeInput(event, options.physicalKeyboardMode === true)) {
-      beginPendingPunctuationInput(event.key);
+    if (
+      shouldRouteKeyThroughNativeInput(event, {
+        physicalKeyboardMode: options.physicalKeyboardMode,
+        imeComposing: isComposing,
+      })
+    ) {
+      beginPendingNativeTextInput(event.key);
       return false;
     }
     if (event.type !== "keydown" || event.key !== "Enter") return true;
@@ -288,9 +324,9 @@ export function attachXtermRawInput(
       term.textarea?.removeEventListener("input", onNativeInput);
       term.textarea?.removeEventListener("compositionstart", onCompositionStart, true);
       term.textarea?.removeEventListener("compositionend", onCompositionEnd);
-      if (pendingPunctuation) {
-        clearTimeout(pendingPunctuation.timer);
-        pendingPunctuation = undefined;
+      if (pendingNativeText) {
+        clearTimeout(pendingNativeText.timer);
+        pendingNativeText = undefined;
       }
       if (clearTextareaTimer) {
         clearTimeout(clearTextareaTimer);

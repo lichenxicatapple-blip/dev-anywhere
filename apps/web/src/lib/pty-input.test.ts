@@ -36,11 +36,11 @@ describe("attachXtermRawInput", () => {
       textarea,
       emitData: (data: string) => dataHandler?.(data),
       emitKey: (event: KeyboardEvent) => keyHandler?.(event),
-      emitTextInput: (data: string) => {
+      emitTextInput: (data: string, inputType = "insertText") => {
         textarea.dispatchEvent(
           new InputEvent("input", {
             data,
-            inputType: "insertText",
+            inputType,
             bubbles: true,
             composed: true,
           }),
@@ -49,8 +49,8 @@ describe("attachXtermRawInput", () => {
       emitCompositionStart: () => {
         textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
       },
-      emitCompositionEnd: () => {
-        textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+      emitCompositionEnd: (data = "") => {
+        textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data }));
       },
     };
   }
@@ -61,6 +61,7 @@ describe("attachXtermRawInput", () => {
     ["backspace", "\x7f"],
     ["tab", "\t"],
     ["escape", "\x1b"],
+    ["shift+tab", "\x1b[Z"],
     ["ctrl+c", "\x03"],
     ["arrow up", "\x1b[A"],
     ["arrow down", "\x1b[B"],
@@ -211,19 +212,86 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
   });
 
-  it("lets physical keyboard punctuation go through xterm without the native text probe", () => {
+  it("routes physical keyboard punctuation through native input so hardware IME punctuation is preserved", () => {
     vi.useFakeTimers();
-    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
 
     attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
     const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
-    emitData(",");
     emitTextInput("，");
     vi.runAllTimers();
 
-    expect(shouldContinue).toBe(true);
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
+  });
+
+  it("commits keydown punctuation in physical keyboard mode when native input is not emitted", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
+  });
+
+  it("routes physical-keyboard digits through native input so IME digits are preserved", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "1", code: "Digit1" }));
+    emitTextInput("１");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "１");
+  });
+
+  it("commits keydown digits in physical keyboard mode when native input is not emitted", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "1", code: "Digit1" }));
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "1");
+  });
+
+  it("accepts pending IME punctuation from non-insertText native input events", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "." }));
+    emitTextInput("。", "insertCompositionText");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "。");
+  });
+
+  it("accepts pending IME punctuation from compositionend", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitCompositionEnd } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    emitCompositionEnd("，");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
   });
 
   it("marks the helper textarea as hardware-keyboard oriented without disabling text input context", () => {
@@ -235,6 +303,7 @@ describe("attachXtermRawInput", () => {
     expect(textarea.getAttribute("enterkeyhint")).toBe("send");
     expect(textarea.getAttribute("autocapitalize")).toBe("off");
     expect(textarea.getAttribute("autocomplete")).toBe("off");
+    expect(textarea.getAttribute("autocorrect")).toBe("off");
     expect(textarea.spellcheck).toBe(false);
   });
 
@@ -269,6 +338,23 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
+  it("lets system Meta shortcuts bypass xterm in physical keyboard mode", () => {
+    const { terminal, emitKey } = createTerminal();
+    const event = new KeyboardEvent("keydown", {
+      key: "c",
+      code: "KeyC",
+      metaKey: true,
+    });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(event);
+
+    expect(shouldContinue).toBe(false);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps terminal control shortcuts routed through xterm in physical keyboard mode", () => {
     const { terminal, emitKey } = createTerminal();
 
@@ -276,6 +362,21 @@ describe("attachXtermRawInput", () => {
     const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "c", ctrlKey: true }));
 
     expect(shouldContinue).toBe(true);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab" })],
+    ["Shift+Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab", shiftKey: true })],
+  ])("keeps terminal %s shortcuts routed through xterm in physical keyboard mode", (_label, event) => {
+    const { terminal, emitKey } = createTerminal();
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(event);
+
+    expect(shouldContinue).toBe(true);
+    expect(preventDefault).not.toHaveBeenCalled();
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -398,10 +499,52 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
   });
 
+  it("routes physical-keyboard space through native input so IME space is preserved", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: " ", code: "Space" }));
+    emitTextInput(" ");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", " ");
+  });
+
+  it("commits physical-keyboard space when native input is not emitted", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: " ", code: "Space" }));
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", " ");
+  });
+
+  it("does not duplicate physical-keyboard space when xterm also emitted it", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: " ", code: "Space" }));
+    emitData(" ");
+    emitTextInput(" ");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", " ");
+  });
+
   // 中文 IME 下用户快速输入 "hello-",IME 把 "-" 吃进 composition;
   // 此时 keydown(-) 仍然 fire 但 event.isComposing=true。如果把它当成普通 ASCII 启动
   // punctuation 探针 16ms 等 native echo,IME 同时把 "-" 吞了不发 textarea input,探针
-  // 超时 fallback 发了一个孤立的 "-",紧接着 IME commit "hello-" 经 onData 又来一次,
+  // 超时提交 keydown 原文 "-",紧接着 IME commit "hello-" 经 onData 又来一次,
   // 终端就渲染成 "-hello-"。
   it("does not start a punctuation probe when keydown fires during IME composition", () => {
     vi.useFakeTimers();
@@ -418,6 +561,22 @@ describe("attachXtermRawInput", () => {
     expect(shouldContinue).toBe(true);
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "hello-");
+  });
+
+  it("does not start a native text probe while module composition state is active", () => {
+    vi.useFakeTimers();
+    const { terminal, emitCompositionStart, emitKey, emitData } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    emitCompositionStart();
+    const composingSpace = new KeyboardEvent("keydown", { key: " ", code: "Space" });
+    const shouldContinue = emitKey(composingSpace);
+    emitData("你好");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(true);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
   });
 
   it("can map plain Enter to LF for mobile soft-keyboard newline", () => {

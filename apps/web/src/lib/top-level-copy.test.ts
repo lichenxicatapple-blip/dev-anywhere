@@ -11,20 +11,24 @@ const baseInput = {
 
 describe("getTopLevelSubtitle", () => {
   it("explains that a relay client token is required", () => {
-    expect(
-      getTopLevelSubtitle({
-        ...baseInput,
-        relayClientAuthIssue: "missing_client_token",
-      }),
-    ).toContain("需要 client token");
+    const copy = getTopLevelSubtitle({
+      ...baseInput,
+      relayClientAuthIssue: "missing_client_token",
+    });
+
+    expect(copy).toContain("需要 client token");
+    expect(copy).toContain("设置");
+    expect(copy).not.toContain("relayToken");
   });
 
   it("explains that a stored relay client token is invalid", () => {
-    expect(
-      getTopLevelSubtitle({
-        ...baseInput,
-        relayClientAuthIssue: "invalid_client_token",
-      }),
-    ).toContain("client token 无效");
+    const copy = getTopLevelSubtitle({
+      ...baseInput,
+      relayClientAuthIssue: "invalid_client_token",
+    });
+
+    expect(copy).toContain("client token 无效");
+    expect(copy).toContain("设置");
+    expect(copy).not.toContain("relayToken");
   });
 });

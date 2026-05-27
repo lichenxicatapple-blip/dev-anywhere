@@ -142,6 +142,7 @@ describe("SettingsDialog", () => {
     });
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Voice Pilot用语音输入、听取回复和处理审批",
+      "Relay Token未设置；用于连接需要认证的 Relay",
       "版本",
     ]);
   });
@@ -157,6 +158,45 @@ describe("SettingsDialog", () => {
     expect(useAppStore.getState().desktopInteractionMode).toBe(true);
     expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("1");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("saves relay client token from settings and reloads to reconnect", () => {
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
+    fireEvent.change(screen.getByLabelText("Relay client token"), {
+      target: { value: " client-secret " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新连接" }));
+
+    expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
+    expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows saved relay client token state and can clear it from settings", () => {
+    localStorage.setItem("dev_anywhere_relayClientToken", "old-token");
+    sessionStorage.setItem("dev_anywhere_relayClientToken", "old-token");
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, reload },
+    });
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Relay Token" }).textContent).toContain("已保存");
+    fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
+    expect(screen.getByText("当前 Web App 已保存 token。")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "清空并重新连接" }));
+
+    expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();
+    expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("loads and saves Bailian Voice Pilot settings without dismissing the dialog", async () => {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearRelayClientToken,
   getRelayClientToken,
+  hasStoredRelayClientToken,
   persistRelayClientToken,
   RELAY_CLIENT_TOKEN_KEY,
   toClientWsUrl,
@@ -14,11 +15,11 @@ describe("relay client token handling", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("returns the URL token without persisting it", () => {
+  it("ignores relayToken query and only reads storage", () => {
     window.history.replaceState(null, "", "/?relayToken=client-secret");
 
-    expect(getRelayClientToken()).toBe("client-secret");
-    // URL 上的 token 必须 preflight 之后再 persist；调用 getRelayClientToken 不应该写入。
+    expect(getRelayClientToken()).toBeNull();
+    expect(hasStoredRelayClientToken()).toBe(false);
     expect(localStorage.getItem(RELAY_CLIENT_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(RELAY_CLIENT_TOKEN_KEY)).toBeNull();
   });
@@ -35,11 +36,12 @@ describe("relay client token handling", () => {
     expect(getRelayClientToken()).toBe("client-secret");
   });
 
-  it("URL token wins over stored token when both are present", () => {
+  it("stored token wins over relayToken query", () => {
     persistRelayClientToken("old-stored");
     window.history.replaceState(null, "", "/?relayToken=new-from-url");
 
-    expect(getRelayClientToken()).toBe("new-from-url");
+    expect(getRelayClientToken()).toBe("old-stored");
+    expect(hasStoredRelayClientToken()).toBe(true);
   });
 
   it("clearRelayClientToken removes from both storages", () => {

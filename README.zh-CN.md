@@ -102,10 +102,10 @@ dev-anywhere codex
 4. 打开安装脚本输出的 Web UI 地址：
 
 ```text
-https://dev-anywhere.example.com/?relayToken=<RELAY_CLIENT_TOKEN>
+https://dev-anywhere.example.com/
 ```
 
-选择你的开发机，创建或恢复会话。如果希望像 App 一样使用，可以在 iPhone 或 iPad 上把页面添加到主屏幕。
+打开设置 -> Relay Token，粘贴安装脚本输出的 `RELAY_CLIENT_TOKEN`，然后重新连接。选择你的开发机，创建或恢复会话。如果希望像 App 一样使用，可以在 iPhone 或 iPad 上把页面添加到主屏幕。
 
 VPS 准备、升级、健康检查和 token 轮换见完整的 [部署指南](docs/DEPLOYMENT.md)。iPhone、iPad 和桌面端安装步骤见 [PWA 安装指南](docs/PWA.md)。
 

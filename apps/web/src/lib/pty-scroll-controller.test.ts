@@ -164,6 +164,44 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
     expect(host.style.top).toBe("200px");
 
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(host.style.top).toBe("200px");
+
+    emitRender();
+
+    expect(host.style.top).toBe("180px");
+  });
+
+  it("defers host row jumps during wheel scroll until xterm renders the new row", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.buffer.active.viewportY = 10;
+    host.style.top = "200px";
+    container.scrollTop = 200;
+    terminal.scrollToLine.mockClear();
+
+    const event = new WheelEvent("wheel", { deltaY: -1, cancelable: true });
+    container.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
+    expect(host.style.top).toBe("200px");
+
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(host.style.top).toBe("200px");
+
     emitRender();
 
     expect(host.style.top).toBe("180px");

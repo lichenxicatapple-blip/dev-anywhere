@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, ArrowLeft, AudioLines, ChevronRight, Monitor, Server } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  AudioLines,
+  ChevronRight,
+  KeyRound,
+  Monitor,
+  Save,
+  Server,
+  Trash2,
+} from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
+import {
+  clearRelayClientToken,
+  hasStoredRelayClientToken,
+  persistRelayClientToken,
+} from "@/lib/relay-client-token";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +39,7 @@ type RelayHealthState =
   | { kind: "ready"; version: string; uptime: number }
   | { kind: "error"; message: string };
 
-type SettingsView = "menu" | "version" | "voice";
+type SettingsView = "menu" | "version" | "voice" | "relay-token";
 
 interface RelayHealthResponse {
   status?: string;
@@ -50,6 +65,18 @@ function healthUrl(relayUrl: string): string {
   return new URL("/health", base).toString();
 }
 
+function settingsViewTitle(view: SettingsView): string {
+  if (view === "version") return "版本";
+  if (view === "relay-token") return "Relay Token";
+  return "设置 Voice Pilot";
+}
+
+function settingsViewDescription(view: SettingsView): string {
+  if (view === "version") return "当前 Web 与 Relay 的版本信息";
+  if (view === "relay-token") return "用于连接需要认证的 Relay。保存后会重新加载并重新连接。";
+  return "连接语音服务后，即可以语音交互的形式驱动会话。";
+}
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const relayUrl = useAppStore((s) => s.relayUrl);
   const latencyMonitorEnabled = useAppStore((s) => s.latencyMonitorEnabled);
@@ -58,6 +85,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
+  const relayTokenSaved = hasStoredRelayClientToken();
 
   const loadRelayHealth = useCallback(
     async (signal?: AbortSignal) => {
@@ -170,11 +198,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   <ArrowLeft className="size-4" aria-hidden="true" />
                 </Button>
                 <div className="min-w-0 space-y-1.5 pt-0.5">
-                  <DialogTitle>{view === "version" ? "版本" : "设置 Voice Pilot"}</DialogTitle>
+                  <DialogTitle>{settingsViewTitle(view)}</DialogTitle>
                   <DialogDescription className={cn(view === "voice" && "max-w-[28rem] leading-5")}>
-                    {view === "version"
-                      ? "当前 Web 与 Relay 的版本信息"
-                      : "连接语音服务后，即可以语音交互的形式驱动会话。"}
+                    {settingsViewDescription(view)}
                   </DialogDescription>
                 </div>
               </div>
@@ -212,6 +238,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               muted={relayHealth.kind === "error"}
             />
           </div>
+        ) : view === "relay-token" ? (
+          <RelayTokenPanel saved={relayTokenSaved} />
         ) : view === "voice" ? (
           <VoiceSettingsPanel />
         ) : (
@@ -224,6 +252,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               label="Voice Pilot"
               detail="用语音输入、听取回复和处理审批"
               onClick={() => setView("voice")}
+            />
+            <SettingsMenuItem
+              icon={<KeyRound className="size-4" aria-hidden="true" />}
+              label="Relay Token"
+              detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay`}
+              onClick={() => setView("relay-token")}
             />
             <SettingsToggleItem
               icon={<Monitor className="size-4" aria-hidden="true" />}
@@ -248,6 +282,88 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function RelayTokenPanel({ saved }: { saved: boolean }) {
+  const inputId = useId();
+  const errorId = useId();
+  const [tokenInput, setTokenInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const reloadForReconnect = () => {
+    window.location.reload();
+  };
+
+  const saveToken = () => {
+    const token = tokenInput.trim();
+    if (!token) {
+      setError("请输入 Relay Token。");
+      return;
+    }
+    persistRelayClientToken(token);
+    reloadForReconnect();
+  };
+
+  const clearToken = () => {
+    clearRelayClientToken();
+    reloadForReconnect();
+  };
+
+  return (
+    <form
+      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
+      data-slot="settings-dialog-body"
+      onSubmit={(event) => {
+        event.preventDefault();
+        saveToken();
+      }}
+    >
+      <div className="space-y-3 rounded-md border border-border bg-card/70 p-3">
+        <div className="space-y-1">
+          <div className="text-sm font-medium text-foreground">连接凭据</div>
+          <p className="text-xs text-muted-foreground">
+            {saved ? "当前 Web App 已保存 token。" : "当前 Web App 尚未保存 token。"}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <label htmlFor={inputId} className="text-xs font-medium text-muted-foreground">
+            Relay client token
+          </label>
+          <input
+            id={inputId}
+            type="password"
+            value={tokenInput}
+            onChange={(event) => {
+              setTokenInput(event.currentTarget.value);
+              if (error) setError(null);
+            }}
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby={error ? errorId : undefined}
+            className="h-10 w-full rounded-md border border-border bg-muted px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
+            placeholder="粘贴 Relay Token"
+          />
+          {error ? (
+            <p id={errorId} className="text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        {saved ? (
+          <Button type="button" variant="outline" onClick={clearToken}>
+            <Trash2 className="size-4" aria-hidden="true" />
+            清空并重新连接
+          </Button>
+        ) : null}
+        <Button type="submit" disabled={!tokenInput.trim()}>
+          <Save className="size-4" aria-hidden="true" />
+          保存并重新连接
+        </Button>
+      </div>
+    </form>
   );
 }
 

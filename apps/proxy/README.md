@@ -99,8 +99,8 @@ Config file: `~/.dev-anywhere/config.json`
 
 The hosted relay rejects proxy connections without the `RELAY_PROXY_TOKEN`. Fill
 `relays.cloud.proxyToken` from the relay server's `.env` before switching to
-cloud. If the relay also sets `RELAY_CLIENT_TOKEN`, open the web app once with
-`?relayToken=<RELAY_CLIENT_TOKEN>` so the browser client can authenticate.
+cloud. If the relay also sets `RELAY_CLIENT_TOKEN`, open the web app and paste
+that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
 
