@@ -98,4 +98,39 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       expect(className ?? "").toContain("7rem");
     }
   });
+
+  test("desktop interaction mode suppresses mobile controls and keyboard layout inset", async ({
+    page,
+  }) => {
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-desktop-interaction`,
+      withVisualViewportMock: true,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await page.locator('[data-slot="chat-overflow-trigger"]').click();
+    await page.getByRole("menuitemcheckbox", { name: "桌面交互模式" }).click();
+    await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
+
+    await page.locator('[data-slot="pty-terminal"]').click();
+    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await page.keyboard.type("abc");
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+
+    await expect(page.locator('[data-slot="pty-mobile-controls"]')).toHaveCount(0);
+    await expect(page.locator("[data-keyboard-offset]").first()).toHaveAttribute(
+      "data-keyboard-offset",
+      "0",
+    );
+    await expect(page.locator("[data-keyboard-layout-inset]").first()).toHaveAttribute(
+      "data-keyboard-layout-inset",
+      "0",
+    );
+  });
 });

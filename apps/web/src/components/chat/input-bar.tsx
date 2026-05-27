@@ -47,7 +47,9 @@ export function InputBar({ sessionId }: InputBarProps) {
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
-  const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
+  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
+  const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
   const effectiveChatContentFontSize = getEffectiveChatContentFontSize(
     chatContentFontSize,
     touchEditingSurface,
@@ -59,7 +61,7 @@ export function InputBar({ sessionId }: InputBarProps) {
   const updateSessionState = useSessionStore((s) => s.updateSessionState);
   // 桌面 placeholder 带物理键盘快捷键提示, 手机软键盘上没 Shift / 方向键, 且 320px 会折两行
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const submitOnPlainEnter = isDesktop && !touchEditingSurface;
+  const submitOnPlainEnter = (isDesktop || desktopInteractionMode) && !touchEditingSurface;
 
   const value = slice.inputDraft;
   const trimmedValue = value.trim();
@@ -124,14 +126,7 @@ export function InputBar({ sessionId }: InputBarProps) {
     });
     applyInputDraft("");
     clearTrackingState();
-  }, [
-    canQueue,
-    trimmedValue,
-    sessionId,
-    addUserMessage,
-    applyInputDraft,
-    clearTrackingState,
-  ]);
+  }, [canQueue, trimmedValue, sessionId, addUserMessage, applyInputDraft, clearTrackingState]);
 
   const send = useCallback(() => {
     // 只负责真正发给 relay 的路径；form submit / Enter / 按钮先走 submitDraft 分流。

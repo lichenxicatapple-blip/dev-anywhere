@@ -207,10 +207,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
+  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
-  const ptyPlainEnterBehavior = touchEditingSurface ? "linefeed" : "submit";
-  const keyboardOffset = useVisualViewportBottomOffset();
+  const softKeyboardEditingSurface = touchEditingSurface && !desktopInteractionMode;
+  const ptyPlainEnterBehavior = softKeyboardEditingSurface ? "linefeed" : "submit";
+  const rawKeyboardOffset = useVisualViewportBottomOffset();
+  const keyboardOffset = desktopInteractionMode ? 0 : rawKeyboardOffset;
 
   useEffect(() => {
     activeRef.current = active;
@@ -230,9 +233,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const { ptyInputFocused, suppressPtyFocus, handleFocusCapture, handleBlurCapture } = focus;
-  const showMobilePtyControls = touchEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+  const showMobilePtyControls =
+    softKeyboardEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
   softKeyboardLayoutActiveRef.current =
-    touchEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
+    softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
 
   mobileLayoutDebugRef.current = {
     keyboardOffset,
@@ -384,14 +388,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return activateXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
   }, []);
 
-  const isPtyTapCandidate = useCallback(
-    (point: { clientX: number; clientY: number }): boolean => {
-      const term = terminalRef.current;
-      if (!term) return false;
-      return hasXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
-    },
-    [],
-  );
+  const isPtyTapCandidate = useCallback((point: { clientX: number; clientY: number }): boolean => {
+    const term = terminalRef.current;
+    if (!term) return false;
+    return hasXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
+  }, []);
 
   const selection = usePtySelectionController({
     sessionId,
@@ -520,11 +521,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       sessionId,
       ws,
       relay,
-      // 触屏设备进入会话时不自动聚焦 xterm helper textarea, 否则 Android/iOS 立刻起 IME 把
-      // 视口压成一半, 用户还没看清当前 PTY 内容键盘已遮; 桌面保留 RAF auto-focus。
+      // 软键盘场景进入会话时不自动聚焦 xterm helper textarea, 否则 Android/iOS 立刻起
+      // IME 把视口压成一半, 用户还没看清当前 PTY 内容键盘已遮；桌面交互模式保留 RAF auto-focus。
       // 用户想敲字仍可点 PTY 区域 (handleTerminalContainerMouseDown / pointerdown 都挂了
       // terminal.focus)。
-      scheduleAutoFocus: touchEditingSurface ? () => {} : undefined,
+      scheduleAutoFocus: softKeyboardEditingSurface ? () => {} : undefined,
       createTerminal: async (terminalHost) => {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,
@@ -538,6 +539,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         attachXtermRawInput(term, rawSessionId, {
           ...rawOptions,
           plainEnterBehavior: ptyPlainEnterBehavior,
+          physicalKeyboardMode: desktopInteractionMode,
         }),
       isInputEnabled: canAcceptInput,
       canFocus: canAcceptInput,
@@ -778,10 +780,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, [ptyFontSize]);
 
   useEffect(() => {
-    if (!active || !connection.ready || touchEditingSurface) return;
+    if (!active || !connection.ready || softKeyboardEditingSurface) return;
     const id = requestAnimationFrame(() => terminalRef.current?.focus());
     return () => cancelAnimationFrame(id);
-  }, [active, connection.ready, touchEditingSurface]);
+  }, [active, connection.ready, softKeyboardEditingSurface]);
 
   // === 暴露给 JSX 的命令式句柄（稳定 useCallback，内部读 ref 拿当前 controller）===
   // reason 默认 "viewExternal" — 当 BackToBottom 按钮等明确入口外调时, caller 可传具体 label。

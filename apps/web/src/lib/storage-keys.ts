@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   relayClientToken: "dev_anywhere_relayClientToken",
   latencyMonitorEnabled: "dev_anywhere_latencyMonitorEnabled",
   latencyMonitorPosition: "dev_anywhere_latencyMonitorPosition",
+  desktopInteractionMode: "dev_anywhere_desktopInteractionMode",
 } as const;
 
 function getStorage(kind: StorageKind): Storage | null {

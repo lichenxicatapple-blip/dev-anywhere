@@ -46,6 +46,7 @@ interface AppStoreState {
   chatContentFontSize: number;
   sidebarCollapsed: boolean;
   latencyMonitorEnabled: boolean;
+  desktopInteractionMode: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
 
@@ -66,6 +67,7 @@ interface AppStoreState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
+  setDesktopInteractionMode: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -113,6 +115,10 @@ function loadLatencyMonitorEnabled(): boolean {
   return readStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled) === "1";
 }
 
+function loadDesktopInteractionMode(): boolean {
+  return readStorageValue("local", STORAGE_KEYS.desktopInteractionMode) === "1";
+}
+
 export const useAppStore = create<AppStoreState>()(
   devtools(
     (set, get) => ({
@@ -131,6 +137,7 @@ export const useAppStore = create<AppStoreState>()(
       chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
+      desktopInteractionMode: loadDesktopInteractionMode(),
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -184,6 +191,10 @@ export const useAppStore = create<AppStoreState>()(
       setLatencyMonitorEnabled: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled, enabled ? "1" : "0");
         set({ latencyMonitorEnabled: enabled });
+      },
+      setDesktopInteractionMode: (enabled) => {
+        writeStorageValue("local", STORAGE_KEYS.desktopInteractionMode, enabled ? "1" : "0");
+        set({ desktopInteractionMode: enabled });
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =

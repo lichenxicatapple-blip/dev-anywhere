@@ -211,6 +211,33 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
   });
 
+  it("lets physical keyboard punctuation go through xterm without the native text probe", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "," }));
+    emitData(",");
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(true);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
+  });
+
+  it("marks the helper textarea as hardware-keyboard oriented in physical keyboard mode", () => {
+    const { terminal, textarea } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+
+    expect(textarea.getAttribute("inputmode")).toBe("none");
+    expect(textarea.getAttribute("enterkeyhint")).toBe("send");
+    expect(textarea.getAttribute("autocapitalize")).toBe("off");
+    expect(textarea.getAttribute("autocomplete")).toBe("off");
+    expect(textarea.spellcheck).toBe(false);
+  });
+
   it("does not start a second punctuation probe from the matching keypress event", () => {
     vi.useFakeTimers();
     const { terminal, emitKey, emitTextInput } = createTerminal();

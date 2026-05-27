@@ -13,6 +13,7 @@ interface RawInputTerminal {
 interface XtermRawInputOptions {
   onRawInput?: (data: string) => void;
   plainEnterBehavior?: "submit" | "linefeed";
+  physicalKeyboardMode?: boolean;
   isInputEnabled?: () => boolean;
 }
 
@@ -45,7 +46,11 @@ function isPrintableAsciiPunctuation(data: string): boolean {
   );
 }
 
-function shouldRouteKeyThroughNativeInput(event: KeyboardEvent): boolean {
+function shouldRouteKeyThroughNativeInput(
+  event: KeyboardEvent,
+  physicalKeyboardMode: boolean,
+): boolean {
+  if (physicalKeyboardMode) return false;
   if (event.type !== "keydown") return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
   // IME composition 期间 keydown 仍然 fire,但字符已被输入法吞进候选;这时启动 punctuation
@@ -54,6 +59,42 @@ function shouldRouteKeyThroughNativeInput(event: KeyboardEvent): boolean {
   // textarea input → xterm.onData 一次性递给我们。
   if (event.isComposing) return false;
   return isPrintableAsciiPunctuation(event.key);
+}
+
+type HelperTextareaSnapshot = {
+  inputMode: string | null;
+  enterKeyHint: string | null;
+  autocapitalize: string | null;
+  autocomplete: string | null;
+  spellcheck: boolean;
+};
+
+function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
+  const previous: HelperTextareaSnapshot = {
+    inputMode: textarea.getAttribute("inputmode"),
+    enterKeyHint: textarea.getAttribute("enterkeyhint"),
+    autocapitalize: textarea.getAttribute("autocapitalize"),
+    autocomplete: textarea.getAttribute("autocomplete"),
+    spellcheck: textarea.spellcheck,
+  };
+
+  textarea.setAttribute("inputmode", "none");
+  textarea.setAttribute("enterkeyhint", "send");
+  textarea.setAttribute("autocapitalize", "off");
+  textarea.setAttribute("autocomplete", "off");
+  textarea.spellcheck = false;
+
+  return () => {
+    if (previous.inputMode === null) textarea.removeAttribute("inputmode");
+    else textarea.setAttribute("inputmode", previous.inputMode);
+    if (previous.enterKeyHint === null) textarea.removeAttribute("enterkeyhint");
+    else textarea.setAttribute("enterkeyhint", previous.enterKeyHint);
+    if (previous.autocapitalize === null) textarea.removeAttribute("autocapitalize");
+    else textarea.setAttribute("autocapitalize", previous.autocapitalize);
+    if (previous.autocomplete === null) textarea.removeAttribute("autocomplete");
+    else textarea.setAttribute("autocomplete", previous.autocomplete);
+    textarea.spellcheck = previous.spellcheck;
+  };
 }
 
 export function attachXtermRawInput(
@@ -65,6 +106,10 @@ export function attachXtermRawInput(
   let nativeEchoSuppression: NativeEchoSuppression | undefined;
   let isComposing = false;
   let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
+  const restoreHelperTextareaHints =
+    options.physicalKeyboardMode && term.textarea
+      ? applyPhysicalKeyboardHints(term.textarea)
+      : undefined;
 
   const clearHelperTextareaSoon = (): void => {
     const textarea = term.textarea;
@@ -209,7 +254,7 @@ export function attachXtermRawInput(
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.attachCustomKeyEventHandler?.((event) => {
-    if (shouldRouteKeyThroughNativeInput(event)) {
+    if (shouldRouteKeyThroughNativeInput(event, options.physicalKeyboardMode === true)) {
       beginPendingPunctuationInput(event.key);
       return false;
     }
@@ -241,6 +286,7 @@ export function attachXtermRawInput(
         clearTimeout(clearTextareaTimer);
         clearTextareaTimer = undefined;
       }
+      restoreHelperTextareaHints?.();
       clearNativeEchoSuppression();
     },
   };

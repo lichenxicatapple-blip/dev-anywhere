@@ -61,6 +61,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   // 键盘覆盖的物理 inset。Android Chrome 常会直接压缩 layout viewport，此时再 padding
   // 会二次避让，在 PTY controls 和键盘之间制造一条黑带。
   const { bottomOffset: kbOffset, layoutBottomInset: layoutKbInset } = useVisualViewportInsets();
+  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const effectiveKbOffset = desktopInteractionMode ? 0 : kbOffset;
+  const effectiveLayoutKbInset = desktopInteractionMode ? 0 : layoutKbInset;
 
   // 区分 "用户主动敲 chat URL / refresh" vs "AppShell auto-restore 把我拽来"。
   // 仅当当前 URL 等于 RESTORED_TARGET 时算后者, 一次性消费, 避免后续手动回访被重定向。
@@ -152,9 +155,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       <FileDownloadProvider sessionId={id}>
         <div
           className="flex flex-col h-full"
-          style={{ paddingBottom: layoutKbInset || "env(safe-area-inset-bottom)" }}
-          data-keyboard-offset={kbOffset}
-          data-keyboard-layout-inset={layoutKbInset}
+          style={{ paddingBottom: effectiveLayoutKbInset || "env(safe-area-inset-bottom)" }}
+          data-keyboard-offset={effectiveKbOffset}
+          data-keyboard-layout-inset={effectiveLayoutKbInset}
         >
           <ChatHeader sessionId={id} mode={mode} />
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}

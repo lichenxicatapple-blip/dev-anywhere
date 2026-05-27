@@ -34,3 +34,29 @@ describe("app-store font size persistence", () => {
     expect(useAppStore.getState().chatContentFontSize).toBe(24);
   });
 });
+
+describe("app-store desktop interaction mode persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    vi.resetModules();
+  });
+
+  it("defaults desktop interaction mode to off", async () => {
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().desktopInteractionMode).toBe(false);
+  });
+
+  it("loads and persists desktop interaction mode for the current browser", async () => {
+    localStorage.setItem("dev_anywhere_desktopInteractionMode", "1");
+
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().desktopInteractionMode).toBe(true);
+    useAppStore.getState().setDesktopInteractionMode(false);
+
+    expect(useAppStore.getState().desktopInteractionMode).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("0");
+  });
+});
