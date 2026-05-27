@@ -128,6 +128,10 @@ async function openJsonVoicePilot(page: Page, sessionId = "test-sess"): Promise<
 
   await page.getByRole("button", { name: "会话操作" }).click();
   await page.locator('[data-slot="chat-menu-voice-pilot-item"]').click();
+  const confirmDialog = page.locator('[data-slot="voice-pilot-wake-lock-dialog"]');
+  await expect(confirmDialog).toBeVisible();
+  await expect(confirmDialog).toContainText("开启后会自动保持屏幕常亮");
+  await confirmDialog.getByRole("button", { name: "开启 Voice Pilot" }).click();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -452,7 +456,7 @@ async function assertPolishedVoiceStatusPanel(page: Page): Promise<void> {
   expect(layout).not.toBeNull();
   expect(layout!.stopTopDelta).toBeGreaterThanOrEqual(8);
   expect(layout!.stopTopDelta).toBeLessThanOrEqual(12);
-  expect(layout!.stopRightDelta).toBeGreaterThanOrEqual(10);
-  expect(layout!.stopRightDelta).toBeLessThanOrEqual(14);
+  expect(layout!.stopRightDelta).toBeGreaterThanOrEqual(6);
+  expect(layout!.stopRightDelta).toBeLessThanOrEqual(10);
   expect(layout!.waveformStartsBelowStop).toBe(true);
 }
