@@ -155,7 +155,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       <FileDownloadProvider sessionId={id}>
         <div
           className="flex flex-col h-full"
-          style={{ paddingBottom: effectiveLayoutKbInset || "env(safe-area-inset-bottom)" }}
+          style={effectiveLayoutKbInset ? { paddingBottom: effectiveLayoutKbInset } : undefined}
           data-keyboard-offset={effectiveKbOffset}
           data-keyboard-layout-inset={effectiveLayoutKbInset}
         >
@@ -195,7 +195,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             <>
               <QuotePreviewBar sessionId={id} />
               <div
-                className="dev-chat-input-rail-inset relative z-20 overflow-visible py-2"
+                className="dev-chat-input-rail-inset relative z-20 overflow-visible bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]"
                 data-slot="input-bar-region"
               >
                 <div className="dev-message-rail mx-auto w-full">

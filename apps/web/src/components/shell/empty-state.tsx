@@ -24,11 +24,11 @@ const COPY: Record<Variant, { heading: string; body: string }> = {
   },
   "client-token-missing": {
     heading: "需要 client token",
-    body: "这个 Relay 已启用客户端访问控制。请在设置里填写 Relay Token。",
+    body: "Relay 服务器已启用客户端访问控制。请在设置里填写。",
   },
   "client-token-invalid": {
     heading: "client token 无效",
-    body: "当前浏览器保存的 client token 无效或已过期。请在设置里更新 Relay Token。",
+    body: "当前浏览器保存的 client token 无效或已过期。请在设置里更新。",
   },
   "no-session": {
     heading: "没有选中的会话",

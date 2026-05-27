@@ -20,10 +20,10 @@ export function getTopLevelSubtitle({
   relayClientAuthIssue = null,
 }: TopLevelSubtitleInput): string {
   if (relayClientAuthIssue === "missing_client_token") {
-    return "这个 Relay 需要 client token。请在设置里填写 Relay Token。";
+    return "Relay 服务器需要 client token。请在设置里填写。";
   }
   if (relayClientAuthIssue === "invalid_client_token") {
-    return "当前浏览器保存的 client token 无效或已过期。请在设置里更新 Relay Token。";
+    return "当前浏览器保存的 client token 无效或已过期。请在设置里更新。";
   }
   if (proxiesLength === 0) return "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机。";
   if (surface === "mobile" && route === "proxy-select") return "选择要连接的开发机。";

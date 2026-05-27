@@ -198,7 +198,7 @@ export function VoiceSettingsPanel() {
   useEffect(() => {
     const relay = relayClientRef;
     if (!relay) {
-      setState({ kind: "error", message: "请先连接 Relay" });
+      setState({ kind: "error", message: "请先连接 Relay 服务器" });
       return;
     }
     let cancelled = false;
@@ -337,7 +337,7 @@ export function VoiceSettingsPanel() {
     }
     const relay = relayClientRef;
     if (!relay) {
-      setState({ kind: "error", message: "请先连接 Relay" });
+      setState({ kind: "error", message: "请先连接 Relay 服务器" });
       return;
     }
     const update = buildVoiceConfigUpdate();
@@ -388,7 +388,7 @@ export function VoiceSettingsPanel() {
     }
     const relay = relayClientRef;
     if (!relay) {
-      setState({ kind: "error", message: "请先连接 Relay" });
+      setState({ kind: "error", message: "请先连接 Relay 服务器" });
       return;
     }
     setState({ kind: "testing" });

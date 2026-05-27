@@ -440,6 +440,24 @@ code.hljs,
     border-color 180ms ease-out;
 }
 
+@media (min-width: 768px) {
+  .dev-sidebar-shell::after {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 280px;
+    height: env(safe-area-inset-bottom);
+    border-right: 1px solid var(--border);
+    background: var(--card);
+    content: "";
+    pointer-events: none;
+  }
+
+  .dev-sidebar-shell[data-collapsed="true"]::after {
+    width: 3rem;
+  }
+}
+
 .dev-sidebar-fade {
   animation: dev-sidebar-fade-in 170ms ease-out both;
 }

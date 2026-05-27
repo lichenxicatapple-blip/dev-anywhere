@@ -37,7 +37,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
         ref={setContainerEl}
         className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 pt-2"
         style={{
-          paddingBottom: view.containerPaddingBottom,
+          paddingBottom: `calc(env(safe-area-inset-bottom) + ${view.containerPaddingBottom}px)`,
           touchAction: "pan-x pan-y",
           overflowAnchor: "none",
         }}

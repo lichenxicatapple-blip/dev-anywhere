@@ -26,8 +26,8 @@ const FLOATING_MARGIN_PX = 12;
 const DRAG_THRESHOLD_PX = 4;
 
 const LINK_LABELS: Record<LinkKey, string> = {
-  webRelay: "浏览器 ↔ 中转服务",
-  relayProxy: "中转服务 ↔ 开发机",
+  webRelay: "浏览器 ↔ Relay 服务器",
+  relayProxy: "Relay 服务器 ↔ 开发机",
   webProxy: "浏览器 ↔ 开发机",
 };
 
@@ -195,7 +195,7 @@ export function LatencyMonitor() {
     if (measuringRef.current) return;
     const relay = relayClientRef;
     if (!relay || !connected) {
-      const offline = unavailable("Relay 未连接");
+      const offline = unavailable("Relay 服务器未连接");
       setMeasurements({ webRelay: offline, relayProxy: offline, webProxy: offline });
       return;
     }
@@ -370,7 +370,7 @@ export function LatencyMonitor() {
           )}
           style={floatingStyle}
           data-slot="latency-monitor-trigger"
-          aria-label={`延迟监控，中转服务 ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
+          aria-label={`延迟监控，Relay 服务器 ${formatMs(measurements.webRelay.rttMs)}，开发机 ${formatMs(compactProxy.rttMs)}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishPointerDrag}
@@ -380,7 +380,7 @@ export function LatencyMonitor() {
           <Activity className="size-3.5" aria-hidden="true" />
           <span className="font-medium text-foreground">延迟</span>
           <span className="hidden text-muted-foreground sm:inline">
-            中转 {formatMs(measurements.webRelay.rttMs)}
+            Relay {formatMs(measurements.webRelay.rttMs)}
           </span>
           <span className="text-muted-foreground">开发机 {formatMs(compactProxy.rttMs)}</span>
           <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />

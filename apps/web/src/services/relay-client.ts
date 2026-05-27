@@ -598,7 +598,7 @@ export class RelayClient {
       (msg): msg is Extract<RelayControlMessage, { type: "latency_web_relay_pong" }> =>
         msg.type === "latency_web_relay_pong" && msg.requestId === requestId,
       () => this.ws.send(JSON.stringify({ type: "latency_web_relay_ping", requestId })),
-      "Web 到 Relay 测速超时",
+      "Web 到 Relay 服务器测速超时",
       timeoutMs,
       requestId,
     ).then(() => ({
@@ -613,7 +613,7 @@ export class RelayClient {
       (msg): msg is Extract<RelayControlMessage, { type: "latency_relay_proxy_response" }> =>
         msg.type === "latency_relay_proxy_response" && msg.requestId === requestId,
       () => this.ws.send(JSON.stringify({ type: "latency_relay_proxy_request", requestId })),
-      "Relay 到开发机测速超时",
+      "Relay 服务器到开发机测速超时",
       timeoutMs,
       requestId,
     ).then((resp) => ({
@@ -843,7 +843,7 @@ export class RelayClient {
           (msg as { requestId?: string }).requestId === requestId
         ) {
           const message = (msg as { message?: string }).message ?? "relay error";
-          settle(() => reject(new Error(`relay 拒绝请求: ${message}`)));
+          settle(() => reject(new Error(`Relay 服务器拒绝请求: ${message}`)));
         }
       });
       unsubscribeStatus = this.ws.onStatusChange((connected) => {

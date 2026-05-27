@@ -70,8 +70,8 @@ function settingsViewTitle(view: SettingsView): string {
 }
 
 function settingsViewDescription(view: SettingsView): string {
-  if (view === "version") return "当前 Web 与 Relay 的版本信息";
-  if (view === "relay-token") return "用于连接需要认证的 Relay。保存后自动生效。";
+  if (view === "version") return "当前 Web 与 Relay 服务器的版本信息";
+  if (view === "relay-token") return "用于连接需要认证的 Relay 服务器。保存后自动生效。";
   return "连接语音服务后，即可以语音交互的形式驱动会话。";
 }
 
@@ -109,7 +109,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setRelayHealth({
           kind: "error",
-          message: err instanceof Error ? "当前 Relay 无法读取版本" : "读取失败",
+          message: err instanceof Error ? "当前 Relay 服务器无法读取版本" : "读取失败",
         });
       }
     },
@@ -160,7 +160,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       ? `运行 ${formatUptime(relayHealth.uptime)}`
       : relayHealth.kind === "error"
         ? relayHealth.message
-        : "从当前 Relay /health 读取";
+        : "从当前 Relay 服务器 /health 读取";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -230,7 +230,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             />
             <VersionRow
               icon={<Server className="size-4" aria-hidden="true" />}
-              label="Relay"
+              label="Relay 服务器"
               value={relayVersion}
               detail={relayDetail}
               muted={relayHealth.kind === "error"}
@@ -254,7 +254,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <SettingsMenuItem
               icon={<KeyRound className="size-4" aria-hidden="true" />}
               label="Relay Token"
-              detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay`}
+              detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
               onClick={() => setView("relay-token")}
             />
             <SettingsToggleItem

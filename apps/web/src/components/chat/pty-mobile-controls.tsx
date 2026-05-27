@@ -34,7 +34,7 @@ function clearAgentInputSequence(provider: SessionProvider | undefined): string 
 export function PtyMobileControls({ provider, onInput, onPaste }: PtyMobileControlsProps) {
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-20 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 py-1.5 shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
+      className="absolute inset-x-0 bottom-0 z-20 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
       data-slot="pty-mobile-controls"
       aria-label="终端移动端控制"
     >

@@ -732,7 +732,7 @@ describe("RelayClient request handling", () => {
 
     // 不等 timeout, 立刻拒掉, 错误信息带上 relay 给的原因
     await expect(promise).rejects.toThrow(
-      /relay 拒绝请求.*Message matches neither RelayControl nor MessageEnvelope/,
+      /Relay 服务器拒绝请求.*Message matches neither RelayControl nor MessageEnvelope/,
     );
   });
 

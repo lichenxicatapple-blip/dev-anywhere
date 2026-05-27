@@ -142,7 +142,7 @@ describe("SettingsDialog", () => {
     });
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Voice Pilot用语音输入、听取回复和处理审批",
-      "Relay Token未设置；用于连接需要认证的 Relay",
+      "Relay Token未设置；用于连接需要认证的 Relay 服务器",
       "版本",
     ]);
   });
