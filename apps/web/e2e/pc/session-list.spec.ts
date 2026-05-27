@@ -97,7 +97,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.getByRole("heading", { name: "版本" })).toBeVisible();
     await expect(page.getByText("Web", { exact: true })).toBeVisible();
     await expect(page.getByText(WEB_VERSION)).toBeVisible();
-    await expect(page.getByText("Relay", { exact: true })).toBeVisible();
+    await expect(page.getByText("Relay 服务器", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();
   });
