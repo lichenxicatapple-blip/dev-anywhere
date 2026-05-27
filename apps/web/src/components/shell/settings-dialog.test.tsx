@@ -160,7 +160,7 @@ describe("SettingsDialog", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("saves relay client token from settings and reloads to reconnect", () => {
+  it("saves relay client token from settings and reloads to apply it", () => {
     const reload = vi.fn();
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -172,7 +172,7 @@ describe("SettingsDialog", () => {
     fireEvent.change(screen.getByLabelText("Relay client token"), {
       target: { value: " client-secret " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存并重新连接" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
     expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
@@ -191,8 +191,8 @@ describe("SettingsDialog", () => {
 
     expect(screen.getByRole("button", { name: "Relay Token" }).textContent).toContain("已保存");
     fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
-    expect(screen.getByText("当前 Web App 已保存 token。")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "清空并重新连接" }));
+    expect(screen.getByText("已保存 token")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();
     expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();

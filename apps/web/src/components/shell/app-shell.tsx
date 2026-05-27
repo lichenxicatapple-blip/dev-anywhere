@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
-import { getTopLevelSubtitle } from "@/lib/top-level-copy";
+import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
 import { cn } from "@/lib/utils";
 import { useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
 import {

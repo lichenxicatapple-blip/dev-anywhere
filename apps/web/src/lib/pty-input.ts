@@ -19,6 +19,7 @@ interface XtermRawInputOptions {
 
 const NATIVE_TEXT_TIMEOUT_MS = 16;
 const NATIVE_ECHO_SUPPRESSION_TIMEOUT_MS = 16;
+const RECENT_XTERM_TEXT_TIMEOUT_MS = 16;
 
 type PendingNativeTextInput = {
   bufferedXtermData: string[];
@@ -34,22 +35,39 @@ type NativeEchoSuppression = {
 
 type NativeEchoPrefix = Pick<NativeEchoSuppression, "data" | "keydownText">;
 
-function isPrintableAsciiPunctuation(data: string): boolean {
-  if (data.length !== 1) return false;
+type RecentXtermText = {
+  data: string;
+  timer: ReturnType<typeof setTimeout>;
+};
 
-  const code = data.charCodeAt(0);
-  return (
-    (code >= 0x21 && code <= 0x2f) ||
-    (code >= 0x3a && code <= 0x40) ||
-    (code >= 0x5b && code <= 0x60) ||
-    (code >= 0x7b && code <= 0x7e)
-  );
+function isPrintablePunctuationOrSymbol(data: string): boolean {
+  const chars = Array.from(data);
+  if (chars.length !== 1) return false;
+  return /^[\p{P}\p{S}]$/u.test(chars[0]);
 }
 
 function isPrintableAsciiDigit(data: string): boolean {
   if (data.length !== 1) return false;
   const code = data.charCodeAt(0);
   return code >= 0x30 && code <= 0x39;
+}
+
+function hasNonAsciiText(data: string): boolean {
+  for (const char of data) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint !== undefined && codePoint > 0x7f) return true;
+  }
+  return false;
+}
+
+function shouldAcceptDirectNativeTextCommit(
+  data: string,
+  opts: { physicalKeyboardMode?: boolean },
+): boolean {
+  if (opts.physicalKeyboardMode !== true || data.length === 0) return false;
+  if (data === " ") return true;
+  if (hasNonAsciiText(data)) return true;
+  return Array.from(data).every(isPrintablePunctuationOrSymbol);
 }
 
 function shouldRouteKeyThroughNativeInput(
@@ -65,7 +83,7 @@ function shouldRouteKeyThroughNativeInput(
   // event.isComposing, 所以同时看本模块维护的 composition state。
   if (event.isComposing || opts.imeComposing) return false;
   return (
-    isPrintableAsciiPunctuation(event.key) ||
+    isPrintablePunctuationOrSymbol(event.key) ||
     (opts.physicalKeyboardMode === true &&
       (event.key === " " || isPrintableAsciiDigit(event.key)))
   );
@@ -131,6 +149,7 @@ export function attachXtermRawInput(
 ): Disposable {
   let pendingNativeText: PendingNativeTextInput | undefined;
   let nativeEchoSuppression: NativeEchoSuppression | undefined;
+  let recentXtermText: RecentXtermText | undefined;
   let isComposing = false;
   let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
   const restoreHelperTextareaHints =
@@ -165,6 +184,36 @@ export function attachXtermRawInput(
     if (!nativeEchoSuppression) return;
     clearTimeout(nativeEchoSuppression.timer);
     nativeEchoSuppression = undefined;
+  };
+
+  const clearRecentXtermText = (): void => {
+    if (!recentXtermText) return;
+    clearTimeout(recentXtermText.timer);
+    recentXtermText = undefined;
+  };
+
+  const setRecentXtermText = (data: string): void => {
+    clearRecentXtermText();
+    if (!data) return;
+    const recent: RecentXtermText = {
+      data,
+      timer: setTimeout(() => {
+        if (recentXtermText === recent) {
+          recentXtermText = undefined;
+        }
+      }, RECENT_XTERM_TEXT_TIMEOUT_MS),
+    };
+    recentXtermText = recent;
+  };
+
+  const rememberXtermText = (data: string): void => {
+    setRecentXtermText(`${recentXtermText?.data ?? ""}${data}`);
+  };
+
+  const consumeRecentXtermTextPrefix = (data: string): boolean => {
+    if (!recentXtermText || !data || !recentXtermText.data.startsWith(data)) return false;
+    setRecentXtermText(recentXtermText.data.slice(data.length));
+    return true;
   };
 
   const expectNativeEchoOnce = (data: string, keydownText: string): void => {
@@ -243,6 +292,25 @@ export function attachXtermRawInput(
     pendingNativeText = pending;
   };
 
+  const commitDirectNativeTextInput = (data: string): boolean => {
+    if (
+      !shouldAcceptDirectNativeTextCommit(data, {
+        physicalKeyboardMode: options.physicalKeyboardMode,
+      })
+    ) {
+      return false;
+    }
+
+    if (consumeRecentXtermTextPrefix(data)) {
+      clearHelperTextareaSoon();
+      return true;
+    }
+
+    sendRawInput(data);
+    expectNativeEchoOnce(data, data);
+    return true;
+  };
+
   const onNativeInput = (event: Event): void => {
     const inputEvent = event as InputEvent;
     const data = inputEvent.data ?? "";
@@ -250,7 +318,11 @@ export function attachXtermRawInput(
       resolvePendingNativeTextInput(data);
       return;
     }
-    if (inputEvent.isComposing || inputEvent.inputType !== "insertText") return;
+    if (inputEvent.isComposing) return;
+    if (inputEvent.inputType !== "insertText" && inputEvent.inputType !== "insertCompositionText") {
+      return;
+    }
+    commitDirectNativeTextInput(data);
   };
 
   const onCompositionStart = (): void => {
@@ -282,6 +354,7 @@ export function attachXtermRawInput(
       return;
     }
     sendXtermInput(data);
+    rememberXtermText(data);
   });
   term.textarea?.addEventListener("input", onNativeInput);
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
@@ -334,6 +407,7 @@ export function attachXtermRawInput(
       }
       restoreHelperTextareaHints?.();
       clearNativeEchoSuppression();
+      clearRecentXtermText();
     },
   };
 }

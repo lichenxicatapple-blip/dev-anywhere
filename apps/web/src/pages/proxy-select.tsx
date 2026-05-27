@@ -7,7 +7,7 @@ import { BrandHero } from "@/components/brand/brand-hero";
 import { EmptyState } from "@/components/shell/empty-state";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
-import { getTopLevelSubtitle } from "@/lib/top-level-copy";
+import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
 
 export function ProxySelectPage() {
   const proxies = useAppStore((s) => s.proxies);

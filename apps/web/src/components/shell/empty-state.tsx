@@ -24,7 +24,7 @@ const COPY: Record<Variant, { heading: string; body: string }> = {
   },
   "client-token-missing": {
     heading: "需要 client token",
-    body: "这个 Relay 已启用客户端访问控制。请在设置里填写 Relay Token 后重新连接。",
+    body: "这个 Relay 已启用客户端访问控制。请在设置里填写 Relay Token。",
   },
   "client-token-invalid": {
     heading: "client token 无效",

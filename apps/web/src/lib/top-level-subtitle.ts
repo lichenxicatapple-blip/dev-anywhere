@@ -20,7 +20,7 @@ export function getTopLevelSubtitle({
   relayClientAuthIssue = null,
 }: TopLevelSubtitleInput): string {
   if (relayClientAuthIssue === "missing_client_token") {
-    return "这个 Relay 需要 client token。请在设置里填写 Relay Token 后重新连接。";
+    return "这个 Relay 需要 client token。请在设置里填写 Relay Token。";
   }
   if (relayClientAuthIssue === "invalid_client_token") {
     return "当前浏览器保存的 client token 无效或已过期。请在设置里更新 Relay Token。";

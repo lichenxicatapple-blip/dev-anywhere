@@ -22,7 +22,7 @@ export function Sidebar({ className }: SidebarProps) {
       <>
         <nav
           className={cn(
-            "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]",
+            "dev-sidebar-shell dev-sidebar-rail relative flex-col items-center w-12 shrink-0 bg-card border-r border-border overflow-hidden px-1.5 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-[max(0.5rem,env(safe-area-inset-top))]",
             className,
           )}
           aria-label="侧边栏"
@@ -77,7 +77,10 @@ export function Sidebar({ className }: SidebarProps) {
           </div>
         </div>
 
-        <div className="dev-sidebar-fade flex gap-2 px-2 py-2" data-slot="sidebar-new-session">
+        <div
+          className="dev-sidebar-fade flex gap-2 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2"
+          data-slot="sidebar-new-session"
+        >
           <div className="min-w-0 flex-1">
             <CreateSessionButton />
           </div>

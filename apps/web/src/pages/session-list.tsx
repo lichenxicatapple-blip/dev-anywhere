@@ -5,7 +5,7 @@ import { SessionList } from "@/components/session/session-list";
 import { BrandHero } from "@/components/brand/brand-hero";
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
-import { getTopLevelSubtitle } from "@/lib/top-level-copy";
+import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
 import { readStorageValue, STORAGE_KEYS } from "@/lib/storage-keys";
 import { Navigate } from "react-router";
 

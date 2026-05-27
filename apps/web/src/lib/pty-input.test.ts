@@ -226,6 +226,45 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
   });
 
+  it("routes full-width physical keyboard punctuation through native input", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "，" }));
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(shouldContinue).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
+  });
+
+  it("accepts physical-keyboard IME punctuation committed directly by the helper textarea", () => {
+    vi.useFakeTimers();
+    const { terminal, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
+  });
+
+  it("does not duplicate direct helper-textarea commits already emitted by xterm", () => {
+    vi.useFakeTimers();
+    const { terminal, emitData, emitTextInput } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    emitData("，");
+    emitTextInput("，");
+    vi.runAllTimers();
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "，");
+  });
+
   it("commits keydown punctuation in physical keyboard mode when native input is not emitted", () => {
     vi.useFakeTimers();
     const { terminal, emitKey } = createTerminal();

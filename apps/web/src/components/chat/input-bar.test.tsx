@@ -103,6 +103,12 @@ describe("InputBar clipboard image paste", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it("uses the compact desktop action padding that matches sidebar bottom buttons", () => {
+    const { container } = render(<InputBar sessionId="s1" />);
+
+    expect(container.querySelector('[data-slot="input-actions"]')?.className).toContain("md:p-1");
+  });
+
   // 上传 loading toast 在传输期间给用户存在反馈, 成功后立即消失避免持续打扰。
   it("shows a loading toast during paste upload and dismisses it on success", async () => {
     const upload = deferred<{ success: boolean; path: string }>();

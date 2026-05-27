@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTopLevelSubtitle } from "./top-level-copy";
+import { getTopLevelSubtitle } from "./top-level-subtitle";
 
 const baseInput = {
   route: "proxy-select" as const,

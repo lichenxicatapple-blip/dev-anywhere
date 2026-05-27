@@ -74,7 +74,6 @@ export interface PtyScrollState {
 
 type PendingFrameResult = "none" | "followed" | "marked";
 type TouchScrollGestureMode = "pending" | "vertical" | "horizontal";
-type DeferredHostCommit = { ydisp: number };
 
 const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
 // Input/focus follow can briefly shrink/re-expand the DOM scroll range before the next render
@@ -158,7 +157,6 @@ export function attachPtyScrollController(
   let lastTouchClientY: number | null = null;
   let lastTouchGestureAt: number | null = null;
   let touchScrollGestureMode: TouchScrollGestureMode | null = null;
-  let deferredHostCommit: DeferredHostCommit | null = null;
   // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
   // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
   let userHasHorizontalScrollIntent = false;
@@ -283,8 +281,7 @@ export function attachPtyScrollController(
     notifyScrollState();
   };
 
-  const shouldDeferHostCommitForYdisp = (ydisp: number): boolean =>
-    verticalIntent.touchActive || deferredHostCommit?.ydisp === ydisp;
+  const shouldDeferHostCommitForYdisp = (): boolean => verticalIntent.touchActive;
 
   const cancelPendingTouchScrollNotify = (): void => {
     if (pendingTouchScrollNotifyFrame === null) return;
@@ -619,10 +616,6 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
-    const { cellH } = getDims();
-    const nextYdisp = cellH === 0 ? null : getYdispForScrollTop(next, cellH);
-    const shouldDeferHostCommit = nextYdisp !== null && nextYdisp !== term.buffer.active.viewportY;
-    deferredHostCommit = shouldDeferHostCommit ? { ydisp: nextYdisp } : null;
     container.scrollTop = next;
     lastSeenScrollTop = next;
     syncContainerScroll();
@@ -788,7 +781,7 @@ export function attachPtyScrollController(
     pendingContainerSyncRetry = false;
     const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
     syncViewportAndHostAt(ydisp, cellH, {
-      deferHostUntilRender: opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp(ydisp),
+      deferHostUntilRender: opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp(),
     });
     notifyScroll();
     trace("container-sync:end", { ydisp });
@@ -1324,7 +1317,6 @@ export function attachPtyScrollController(
   const onRender = (): void => {
     trace("render");
     updateSpacer();
-    deferredHostCommit = null;
     // 顺序很关键: retry 必须在 handlePendingNewFrame 之前。如果反过来,
     // handlePendingNewFrame 在 follow 路径里会调 scrollToBottom 改写 scrollTop,
     // 后跑的 syncContainerScroll 就会按"被改写后的 scrollTop"重新对齐,等于无视

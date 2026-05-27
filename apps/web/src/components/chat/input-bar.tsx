@@ -460,7 +460,10 @@ export function InputBar({ sessionId }: InputBarProps) {
             aria-label="输入聊天消息"
             aria-busy={clipboardImageUploading}
           />
-          <div className="self-stretch relative flex items-center p-1.5 gap-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
+          <div
+            className="self-stretch relative flex items-center gap-1 p-1.5 md:p-1 before:absolute before:inset-y-2 before:left-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent"
+            data-slot="input-actions"
+          >
             <AttachMenu
               open={attachOpen}
               onOpenChange={setAttachOpen}

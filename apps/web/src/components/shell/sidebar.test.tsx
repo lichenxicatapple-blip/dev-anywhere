@@ -30,13 +30,16 @@ describe("Sidebar", () => {
   it("keeps the expanded sidebar below standalone app status bars", () => {
     useAppStore.setState({ sidebarCollapsed: false });
 
-    render(
+    const { container } = render(
       <TooltipProvider>
         <Sidebar />
       </TooltipProvider>,
     );
 
     expect(screen.getByLabelText("侧边栏").className).toContain("pt-[env(safe-area-inset-top)]");
+    expect(container.querySelector('[data-slot="sidebar-new-session"]')?.className).toContain(
+      "pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+    );
   });
 
   it("keeps the collapsed sidebar rail below standalone app status bars", () => {
@@ -50,6 +53,9 @@ describe("Sidebar", () => {
 
     expect(screen.getByLabelText("侧边栏").className).toContain(
       "pt-[max(0.5rem,env(safe-area-inset-top))]",
+    );
+    expect(screen.getByLabelText("侧边栏").className).toContain(
+      "pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
     );
   });
 });

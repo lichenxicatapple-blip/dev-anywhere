@@ -7,9 +7,7 @@ import {
   ChevronRight,
   KeyRound,
   Monitor,
-  Save,
   Server,
-  Trash2,
 } from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
@@ -73,7 +71,7 @@ function settingsViewTitle(view: SettingsView): string {
 
 function settingsViewDescription(view: SettingsView): string {
   if (view === "version") return "当前 Web 与 Relay 的版本信息";
-  if (view === "relay-token") return "用于连接需要认证的 Relay。保存后会重新加载并重新连接。";
+  if (view === "relay-token") return "用于连接需要认证的 Relay。保存后自动生效。";
   return "连接语音服务后，即可以语音交互的形式驱动会话。";
 }
 
@@ -319,48 +317,43 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
         saveToken();
       }}
     >
-      <div className="space-y-3 rounded-md border border-border bg-card/70 p-3">
-        <div className="space-y-1">
-          <div className="text-sm font-medium text-foreground">连接凭据</div>
-          <p className="text-xs text-muted-foreground">
-            {saved ? "当前 Web App 已保存 token。" : "当前 Web App 尚未保存 token。"}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <label htmlFor={inputId} className="text-xs font-medium text-muted-foreground">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor={inputId} className="text-sm font-medium text-foreground">
             Relay client token
           </label>
-          <input
-            id={inputId}
-            type="password"
-            value={tokenInput}
-            onChange={(event) => {
-              setTokenInput(event.currentTarget.value);
-              if (error) setError(null);
-            }}
-            autoComplete="off"
-            spellCheck={false}
-            aria-describedby={error ? errorId : undefined}
-            className="h-10 w-full rounded-md border border-border bg-muted px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
-            placeholder="粘贴 Relay Token"
-          />
-          {error ? (
-            <p id={errorId} className="text-xs text-destructive">
-              {error}
-            </p>
-          ) : null}
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {saved ? "已保存 token" : "未保存"}
+          </span>
         </div>
+        <input
+          id={inputId}
+          type="password"
+          value={tokenInput}
+          onChange={(event) => {
+            setTokenInput(event.currentTarget.value);
+            if (error) setError(null);
+          }}
+          autoComplete="off"
+          spellCheck={false}
+          aria-describedby={error ? errorId : undefined}
+          className="h-10 w-full rounded-md border border-border bg-muted px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
+          placeholder="粘贴 Relay Token"
+        />
+        {error ? (
+          <p id={errorId} className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         {saved ? (
           <Button type="button" variant="outline" onClick={clearToken}>
-            <Trash2 className="size-4" aria-hidden="true" />
-            清空并重新连接
+            清空
           </Button>
         ) : null}
         <Button type="submit" disabled={!tokenInput.trim()}>
-          <Save className="size-4" aria-hidden="true" />
-          保存并重新连接
+          保存
         </Button>
       </div>
     </form>

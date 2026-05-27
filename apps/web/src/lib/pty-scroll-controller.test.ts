@@ -173,7 +173,7 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
-  it("defers host row jumps during wheel scroll until xterm renders the new row", () => {
+  it("commits wheel row transitions atomically with xterm viewport changes", () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitRender } = createTerminal({ 19: "prompt" });
     attachPtyScrollController({
@@ -196,11 +196,11 @@ describe("attachPtyScrollController", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
-    expect(host.style.top).toBe("200px");
+    expect(host.style.top).toBe("180px");
 
     container.dispatchEvent(new Event("scroll"));
 
-    expect(host.style.top).toBe("200px");
+    expect(host.style.top).toBe("180px");
 
     emitRender();
 
