@@ -62,6 +62,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const relayUrl = useAppStore((s) => s.relayUrl);
   const latencyMonitorEnabled = useAppStore((s) => s.latencyMonitorEnabled);
   const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
+  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
 
@@ -230,6 +232,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               label="Voice Pilot"
               detail="用语音输入、听取回复和处理审批"
               onClick={() => setView("voice")}
+            />
+            <SettingsToggleItem
+              icon={<Monitor className="size-4" aria-hidden="true" />}
+              label="桌面交互模式"
+              detail="适合平板外接键盘；保留触控，但按桌面输入处理"
+              checked={desktopInteractionMode}
+              onCheckedChange={setDesktopInteractionMode}
             />
             <SettingsToggleItem
               icon={<Activity className="size-4" aria-hidden="true" />}

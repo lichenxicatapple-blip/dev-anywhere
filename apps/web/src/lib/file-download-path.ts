@@ -1,5 +1,6 @@
 // 任意文件下载路径提取: 与 image-preview-path 形状对称, 但排除图片扩展, 让两条 link provider
 // 在同一行不会双重 underline。要求必有扩展 (避免误把纯目录如 /Users 当文件链接)。
+import { isScpLikeRemotePath } from "./scp-like-remote";
 
 // 负 lookbehind 防止匹配 URL (https://... 里的 //example...) 或路径中段 (a/b/c.txt 不该从 b 切)。
 // 路径主干用 greedy `*` 而非 lazy `*?`: 双扩展 (.tar.gz / .min.js / .d.ts) 在 lazy 下只会匹配
@@ -11,7 +12,7 @@
 // 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 防止中文文本里夹杂 ASCII
 // 触发起点后 greedy 扩展把整段中文框成 link。
 const FILE_PATH_RE =
-  /(?<![A-Za-z0-9:/])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
+  /(?<![A-Za-z0-9@:/.-])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
 const DOMAIN_TLD_RE =
@@ -103,6 +104,7 @@ function hasPathSignal(path: string): boolean {
 export function isFileDownloadPath(value: string): boolean {
   const path = trimPathToken(value);
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return false;
+  if (isScpLikeRemotePath(path)) return false;
   if (isBareDomainLike(path)) return false;
   if (IMAGE_EXT_RE.test(path)) return false;
   if (!FILE_EXT_RE.test(path)) return false;

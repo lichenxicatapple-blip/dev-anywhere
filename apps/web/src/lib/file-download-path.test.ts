@@ -101,4 +101,12 @@ describe("file-download-path extraction", () => {
       ),
     ).toEqual(["/var/folders/abc/T/dev-anywhere/up-A7Bx9k.txt"]);
   });
+
+  it("rejects scp-like git remotes", () => {
+    expect(
+      extractFileDownloadPaths("git@github.com:lichenxicatapple-blip/llm-proxy-client.git"),
+    ).toEqual([]);
+    expect(extractFileDownloadPaths("remote github.com:org/repo.git")).toEqual([]);
+    expect(isFileDownloadPath("git@github.com:org/repo.git")).toBe(false);
+  });
 });

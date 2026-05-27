@@ -99,18 +99,18 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     }
   });
 
-  test("desktop interaction mode suppresses mobile controls and keyboard layout inset", async ({
+  test("global desktop interaction setting suppresses mobile controls and keyboard layout inset", async ({
     page,
   }) => {
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-desktop-interaction`,
       withVisualViewportMock: true,
     });
+    await page.evaluate(() => {
+      localStorage.setItem("dev_anywhere_desktopInteractionMode", "1");
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expectPtyTerminalMounted(page);
-
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    await page.getByRole("menuitemcheckbox", { name: "桌面交互模式" }).click();
-    await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
 
     await page.locator('[data-slot="pty-terminal"]').click();
     await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();

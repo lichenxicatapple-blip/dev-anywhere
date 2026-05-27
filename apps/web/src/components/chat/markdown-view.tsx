@@ -39,6 +39,9 @@ type MarkdownAstNode = {
   children?: MarkdownAstNode[];
 };
 
+const SSH_REMOTE_SUFFIX_TOKEN_RE = /^:[^\s`"'<>),，。；：！？、]+/u;
+const SSH_REMOTE_PATH_RE = /^:[A-Za-z0-9._~%+-]+(?:\/[A-Za-z0-9._~%+-]+)+$/;
+
 function replaceTrailingInlineMarker(node: ReactNode, trailingInline: ReactNode): ReactNode {
   if (typeof node === "string") {
     const markerIndex = node.indexOf(TRAILING_INLINE_MARKER);
@@ -149,6 +152,46 @@ function linkifyInlineCodePathNode(value: string): MarkdownAstNode[] | null {
   return matches.length > 0 ? linkifyMatches(value, matches) : null;
 }
 
+function getSingleTextChildValue(node: MarkdownAstNode): string | null {
+  if (node.children?.length !== 1) return null;
+  const child = node.children[0];
+  return child?.type === "text" && typeof child.value === "string" ? child.value : null;
+}
+
+function getMailtoAutolinkText(node: MarkdownAstNode): string | null {
+  if (node.type !== "link" || typeof node.url !== "string") return null;
+  if (!node.url.toLowerCase().startsWith("mailto:")) return null;
+
+  const text = getSingleTextChildValue(node);
+  if (!text) return null;
+
+  const hrefAddress = safeDecodeHrefPath(node.url.slice("mailto:".length));
+  return hrefAddress.toLowerCase() === text.toLowerCase() ? text : null;
+}
+
+function splitSshRemoteSuffix(value: string): { suffix: string; rest: string } | null {
+  const raw = value.match(SSH_REMOTE_SUFFIX_TOKEN_RE)?.[0] ?? "";
+  if (!raw) return null;
+
+  const suffix = raw.replace(/[)\].,;:!?，。；：！？、]+$/u, "");
+  if (!SSH_REMOTE_PATH_RE.test(suffix)) return null;
+
+  return { suffix, rest: value.slice(suffix.length) };
+}
+
+function splitGfmSshRemoteAutolink(
+  child: MarkdownAstNode,
+  nextChild: MarkdownAstNode | undefined,
+): { remote: string; rest: string } | null {
+  if (nextChild?.type !== "text" || typeof nextChild.value !== "string") return null;
+
+  const mailText = getMailtoAutolinkText(child);
+  if (!mailText) return null;
+
+  const suffix = splitSshRemoteSuffix(nextChild.value);
+  return suffix ? { remote: `${mailText}${suffix.suffix}`, rest: suffix.rest } : null;
+}
+
 function linkifyMatches(value: string, matches: InlineAutoLinkMatch[]): MarkdownAstNode[] {
   const nodes: MarkdownAstNode[] = [];
   let offset = 0;
@@ -181,7 +224,16 @@ function linkifyMatches(value: string, matches: InlineAutoLinkMatch[]): Markdown
 function linkifyInlinePathNodes(node: MarkdownAstNode, insideTableCell = false): void {
   if (!node.children) return;
   const nextChildren: MarkdownAstNode[] = [];
-  for (const child of node.children) {
+  for (let index = 0; index < node.children.length; index += 1) {
+    const child = node.children[index];
+    const sshRemote = splitGfmSshRemoteAutolink(child, node.children[index + 1]);
+    if (sshRemote) {
+      nextChildren.push({ type: "text", value: sshRemote.remote });
+      if (sshRemote.rest) nextChildren.push(...linkifyTextNode(sshRemote.rest));
+      index += 1;
+      continue;
+    }
+
     if (child.type === "text" && typeof child.value === "string") {
       nextChildren.push(...linkifyTextNode(child.value));
       continue;
@@ -233,7 +285,12 @@ function InlinePathAction({
         rel="noopener noreferrer"
         data-slot={isExternalWebLink ? "inline-web-link" : undefined}
         title="移动端点按打开；桌面端按 Cmd/Ctrl 点击打开"
-        className={isExternalWebLink ? "inline break-words [overflow-wrap:anywhere]" : undefined}
+        className={cn(
+          "inline [overflow-wrap:anywhere]",
+          isExternalWebLink && "break-words",
+          tone === "on-primary" &&
+            "text-primary-foreground underline decoration-current/50 underline-offset-2 hover:bg-primary-foreground/10",
+        )}
         onClick={(event) => {
           if (!shouldOpenExternalLink(event)) event.preventDefault();
         }}

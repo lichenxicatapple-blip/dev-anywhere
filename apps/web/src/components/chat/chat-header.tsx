@@ -6,7 +6,6 @@ import {
   Lightbulb,
   Mic,
   Minus,
-  Monitor,
   MoreVertical,
   Pencil,
   Plus,
@@ -154,7 +153,6 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const resetPtyFontSize = useAppStore((s) => s.resetPtyFontSize);
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
-  const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
   const renameSession = useSessionStore((s) => s.renameSession);
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
@@ -351,17 +349,6 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                       ? "屏幕常亮（Voice Pilot 控制）"
                       : "屏幕常亮"}
                 </span>
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={desktopInteractionMode}
-                className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
-                data-slot="chat-menu-desktop-interaction-item"
-                onCheckedChange={(checked) => setDesktopInteractionMode(checked === true)}
-              >
-                <ChatMenuIcon>
-                  <Monitor aria-hidden="true" />
-                </ChatMenuIcon>
-                <span className="min-w-0 flex-1">桌面交互模式</span>
               </DropdownMenuCheckboxItem>
               {!isPty && (
                 <DropdownMenuCheckboxItem

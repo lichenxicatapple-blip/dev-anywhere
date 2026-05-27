@@ -36,4 +36,11 @@ describe("inline path link detection", () => {
     expect(findInlinePathLinks("schema + json.loads")).toEqual([]);
     expect(findInlinePathLinks("call os.path.join, then inspect pathlib.Path")).toEqual([]);
   });
+
+  it("does not split scp-like git remotes into file links", () => {
+    expect(
+      findInlinePathLinks("git@github.com:lichenxicatapple-blip/llm-proxy-client.git"),
+    ).toEqual([]);
+    expect(findInlinePathLinks("remote github.com:org/repo.git")).toEqual([]);
+  });
 });

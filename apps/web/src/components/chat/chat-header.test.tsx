@@ -226,13 +226,10 @@ describe("ChatHeader PTY upload menu", () => {
     }
 
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
-    const desktopInteractionItem = screen.getByRole("menuitemcheckbox", {
-      name: "桌面交互模式",
-    });
     expect(menu.className).toContain("w-max");
     expect(menu.className).toContain("min-w-44");
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
-    expect(desktopInteractionItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "桌面交互模式" })).toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
     expect(
@@ -243,21 +240,6 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("终端字号")).toBeNull();
     expect(screen.queryByText("聊天字号")).toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
-  });
-
-  it("persists desktop interaction mode from the overflow menu", async () => {
-    render(<ChatHeader sessionId="s1" mode="pty" />);
-
-    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
-    fireEvent.keyDown(menuTrigger, { key: "Enter" });
-
-    const item = await screen.findByRole("menuitemcheckbox", { name: "桌面交互模式" });
-    expect(useAppStore.getState().desktopInteractionMode).toBe(false);
-
-    fireEvent.click(item);
-
-    expect(useAppStore.getState().desktopInteractionMode).toBe(true);
-    expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("1");
   });
 
   it("lets JSON sessions toggle Voice Pilot from the overflow menu", async () => {

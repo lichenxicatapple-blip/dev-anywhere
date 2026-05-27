@@ -33,6 +33,8 @@ describe("image preview path detection", () => {
     expect(isImagePreviewPath("https://example.com/a.png")).toBe(false);
     expect(isImagePreviewPath("diagram.svg")).toBe(false);
     expect(extractImagePreviewPaths("notes.txt archive.png.bak")).toEqual([]);
+    expect(extractImagePreviewPaths("git@github.com:org/repo.png")).toEqual([]);
+    expect(isImagePreviewPath("github.com:org/repo.png")).toBe(false);
   });
 
   it("isImagePreviewPath accepts each explicit prefix directly", () => {

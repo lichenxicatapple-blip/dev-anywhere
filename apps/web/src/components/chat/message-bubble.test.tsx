@@ -560,4 +560,23 @@ describe("MessageBubble", () => {
     expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
     expect(container.textContent).toContain("json.loads");
   });
+
+  it("keeps scp-like git remotes visible as plain user text", () => {
+    const remote = "git@github.com:lichenxicatapple-blip/llm-proxy-client.git";
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "u-git-remote",
+            role: "user",
+            text: remote,
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+    expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
+    expect(container.textContent).toContain(remote);
+  });
 });
