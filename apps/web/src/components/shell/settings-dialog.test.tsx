@@ -135,7 +135,7 @@ describe("SettingsDialog", () => {
     expect(screen.getByRole("button", { name: /版本/ })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Voice Pilot" })).not.toBeNull();
     expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
-    expect(screen.getByRole("button", { name: /桌面交互模式/ })).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "桌面交互模式" })).not.toBeNull();
     expect(screen.getByText("适合平板外接键盘；保留触控，但按桌面输入处理")).not.toBeNull();
     const menuItems = screen.getAllByRole("button").filter((button) => {
       return button.getAttribute("data-slot") === "settings-menu-item";
@@ -149,14 +149,14 @@ describe("SettingsDialog", () => {
   it("persists desktop interaction mode from global settings", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
-    const toggle = screen.getByRole("button", { name: /桌面交互模式/ });
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    const toggle = screen.getByRole("switch", { name: "桌面交互模式" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
 
     fireEvent.click(toggle);
 
     expect(useAppStore.getState().desktopInteractionMode).toBe(true);
     expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("1");
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
   it("loads and saves Bailian Voice Pilot settings without dismissing the dialog", async () => {

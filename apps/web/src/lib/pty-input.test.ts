@@ -226,16 +226,57 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).toHaveBeenCalledWith("sess-1", ",");
   });
 
-  it("marks the helper textarea as hardware-keyboard oriented in physical keyboard mode", () => {
+  it("marks the helper textarea as hardware-keyboard oriented without disabling text input context", () => {
     const { terminal, textarea } = createTerminal();
 
     attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
 
-    expect(textarea.getAttribute("inputmode")).toBe("none");
+    expect(textarea.getAttribute("inputmode")).toBeNull();
     expect(textarea.getAttribute("enterkeyhint")).toBe("send");
     expect(textarea.getAttribute("autocapitalize")).toBe("off");
     expect(textarea.getAttribute("autocomplete")).toBe("off");
     expect(textarea.spellcheck).toBe(false);
+  });
+
+  it("preserves a pre-existing helper textarea input mode in physical keyboard mode", () => {
+    const { terminal, textarea } = createTerminal();
+    textarea.setAttribute("inputmode", "text");
+
+    const disposable = attachXtermRawInput(terminal, "sess-1", {
+      physicalKeyboardMode: true,
+    });
+
+    expect(textarea.getAttribute("inputmode")).toBe("text");
+
+    disposable.dispose();
+    expect(textarea.getAttribute("inputmode")).toBe("text");
+  });
+
+  it("lets system input-source switching bypass xterm in physical keyboard mode", () => {
+    const { terminal, emitKey } = createTerminal();
+    const event = new KeyboardEvent("keydown", {
+      key: " ",
+      code: "Space",
+      ctrlKey: true,
+    });
+    const preventDefault = vi.spyOn(event, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(event);
+
+    expect(shouldContinue).toBe(false);
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps terminal control shortcuts routed through xterm in physical keyboard mode", () => {
+    const { terminal, emitKey } = createTerminal();
+
+    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+    const shouldContinue = emitKey(new KeyboardEvent("keydown", { key: "c", ctrlKey: true }));
+
+    expect(shouldContinue).toBe(true);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 
   it("does not start a second punctuation probe from the matching keypress event", () => {

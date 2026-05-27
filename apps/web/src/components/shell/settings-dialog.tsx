@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  Activity,
-  ArrowLeft,
-  AudioLines,
-  Check,
-  ChevronRight,
-  Monitor,
-  Server,
-} from "lucide-react";
+import { Activity, ArrowLeft, AudioLines, ChevronRight, Monitor, Server } from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
@@ -272,12 +264,18 @@ function SettingsToggleItem({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const labelId = useId();
+  const detailId = useId();
+
   return (
     <button
       type="button"
+      role="switch"
       className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       onClick={() => onCheckedChange(!checked)}
-      aria-pressed={checked}
+      aria-checked={checked}
+      aria-labelledby={labelId}
+      aria-describedby={detailId}
       data-slot="settings-toggle-item"
     >
       <div
@@ -291,19 +289,27 @@ function SettingsToggleItem({
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-foreground">{label}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+        <div id={labelId} className="text-sm font-medium text-foreground">
+          {label}
+        </div>
+        <div id={detailId} className="mt-1 text-xs text-muted-foreground">
+          {detail}
+        </div>
       </div>
       <span
         className={cn(
-          "flex size-5 shrink-0 items-center justify-center rounded border transition-colors",
-          checked
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-muted-foreground/45 bg-transparent",
+          "relative h-6 w-11 shrink-0 rounded-full border transition-colors",
+          checked ? "border-primary/70 bg-primary/80" : "border-border bg-muted/50",
         )}
         aria-hidden="true"
+        data-slot="settings-toggle-switch"
       >
-        {checked ? <Check className="size-3.5" /> : null}
+        <span
+          className={cn(
+            "absolute top-1/2 size-4 -translate-y-1/2 rounded-full bg-background shadow-sm transition-transform",
+            checked ? "translate-x-[1.35rem]" : "translate-x-1",
+          )}
+        />
       </span>
     </button>
   );

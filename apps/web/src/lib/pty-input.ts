@@ -61,6 +61,12 @@ function shouldRouteKeyThroughNativeInput(
   return isPrintableAsciiPunctuation(event.key);
 }
 
+function shouldPreserveSystemInputSourceShortcut(event: KeyboardEvent): boolean {
+  if (event.type !== "keydown") return false;
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+  return event.key === " " || event.key === "Spacebar" || event.code === "Space";
+}
+
 type HelperTextareaSnapshot = {
   inputMode: string | null;
   enterKeyHint: string | null;
@@ -78,7 +84,8 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
     spellcheck: textarea.spellcheck,
   };
 
-  textarea.setAttribute("inputmode", "none");
+  // iPad hardware keyboards still need the helper textarea to remain a normal
+  // text input context so system input-source switching keeps working.
   textarea.setAttribute("enterkeyhint", "send");
   textarea.setAttribute("autocapitalize", "off");
   textarea.setAttribute("autocomplete", "off");
@@ -254,6 +261,9 @@ export function attachXtermRawInput(
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.attachCustomKeyEventHandler?.((event) => {
+    if (options.physicalKeyboardMode === true && shouldPreserveSystemInputSourceShortcut(event)) {
+      return false;
+    }
     if (shouldRouteKeyThroughNativeInput(event, options.physicalKeyboardMode === true)) {
       beginPendingPunctuationInput(event.key);
       return false;

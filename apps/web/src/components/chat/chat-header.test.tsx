@@ -192,7 +192,7 @@ describe("ChatHeader PTY upload menu", () => {
     );
   });
 
-  it("aligns header actions to the shared chat rail", () => {
+  it("aligns header actions to the shell rail instead of the capped message rail", () => {
     const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
 
     const railInset = container.querySelector<HTMLElement>('[data-slot="chat-header-rail-inset"]');
@@ -200,7 +200,8 @@ describe("ChatHeader PTY upload menu", () => {
     const trigger = screen.getByRole("button", { name: "会话操作" });
 
     expect(railInset?.className).toContain("dev-chat-shell-rail-inset");
-    expect(rail?.className).toContain("dev-message-rail");
+    expect(rail?.className).not.toContain("dev-message-rail");
+    expect(rail?.className).not.toContain("mx-auto");
     expect(trigger.className).toContain("justify-self-end");
   });
 

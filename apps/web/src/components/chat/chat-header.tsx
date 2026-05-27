@@ -282,7 +282,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
     >
       <div className="dev-chat-shell-rail-inset" data-slot="chat-header-rail-inset">
         <div
-          className="dev-message-rail mx-auto grid min-h-12 w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center"
+          className="grid min-h-12 w-full grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center"
           data-slot="chat-header-rail"
         >
           <div className="flex justify-start">
