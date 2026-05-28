@@ -46,8 +46,8 @@ export default defineConfig({
         scope: "/",
         display: "standalone",
         orientation: "any",
-        background_color: "#1E1E1E",
-        theme_color: "#1E1E1E",
+        background_color: "#F6F7F8",
+        theme_color: "#F6F7F8",
         lang: "zh-CN",
         categories: ["developer", "productivity"],
         icons: [

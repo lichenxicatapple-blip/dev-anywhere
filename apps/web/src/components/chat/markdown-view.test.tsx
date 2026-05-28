@@ -22,6 +22,13 @@ function mockCoarsePointer(matches: boolean): void {
 }
 
 describe("MarkdownView XSS 防护", () => {
+  it("uses theme-aware prose tokens instead of permanently inverted prose", () => {
+    const { container } = render(<MarkdownView text={"hello"} />);
+    const root = container.firstElementChild;
+    expect(root?.className).toContain("dev-markdown");
+    expect(root?.className).not.toContain("prose-invert");
+  });
+
   it("drops script tags", () => {
     // 使用段落分隔保证 hello 是独立文本节点, 而非内联在 raw HTML 块里被 skipHtml 一并丢弃
     const { container } = render(<MarkdownView text={"<script>alert(1)</script>\n\nhello"} />);
@@ -63,6 +70,14 @@ describe("MarkdownView XSS 防护", () => {
     const code = container.querySelector("code");
     expect(code?.className).toContain("break-all");
     expect(code?.className).toContain("whitespace-normal");
+  });
+
+  it("keeps inline code readable on primary user bubbles", () => {
+    const { container } = render(<MarkdownView text={"`package.json`"} tone="on-primary" />);
+    const code = container.querySelector("code");
+    expect(code?.className).toContain("bg-primary-foreground/15");
+    expect(code?.className).toContain("text-primary-foreground");
+    expect(code?.className).not.toContain("bg-muted");
   });
 
   it("renders external links with target=_blank + rel noopener", () => {

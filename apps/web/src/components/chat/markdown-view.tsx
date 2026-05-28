@@ -372,7 +372,7 @@ export const MarkdownView = memo(function MarkdownView({
   return (
     <div
       className={cn(
-        "prose prose-invert prose-sm max-w-none",
+        "dev-markdown prose prose-sm max-w-none",
         tone === "on-primary" && "dev-markdown-on-primary",
       )}
       style={{ fontSize: "inherit" }}
@@ -417,7 +417,12 @@ export const MarkdownView = memo(function MarkdownView({
             }
             return (
               <code
-                className="rounded bg-muted px-1 py-0.5 text-[0.9em] break-all whitespace-normal"
+                className={cn(
+                  "rounded px-1 py-0.5 text-[0.9em] break-all whitespace-normal",
+                  tone === "on-primary"
+                    ? "bg-primary-foreground/15 text-primary-foreground"
+                    : "bg-muted",
+                )}
                 {...rest}
               >
                 {children}

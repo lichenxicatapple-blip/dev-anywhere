@@ -471,7 +471,7 @@ export function VoiceSettingsPanel() {
         data-slot="voice-settings-body-frame"
       >
         <div
-          className="dev-render-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+          className="dev-render-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
           data-slot="voice-settings-scroll"
         >
           <div className="space-y-3" data-slot="voice-settings-fields">

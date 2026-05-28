@@ -14,6 +14,12 @@ import {
   STORAGE_KEYS,
   writeStorageValue,
 } from "@/lib/storage-keys";
+import {
+  applyThemePreference,
+  readThemePreference,
+  writeThemePreference,
+  type ThemePreference,
+} from "@/lib/theme-preference";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
 
 type AppPhase =
@@ -45,6 +51,7 @@ interface AppStoreState {
   ptyFontSize: number;
   chatContentFontSize: number;
   sidebarCollapsed: boolean;
+  themePreference: ThemePreference;
   latencyMonitorEnabled: boolean;
   desktopInteractionMode: boolean;
   ptyScrollTraceEnabled: boolean;
@@ -67,6 +74,7 @@ interface AppStoreState {
   resetChatContentFontSize: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
+  setThemePreference: (theme: ThemePreference) => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
   setDesktopInteractionMode: (enabled: boolean) => void;
   setPtyScrollTraceEnabled: (enabled: boolean) => void;
@@ -142,6 +150,7 @@ export const useAppStore = create<AppStoreState>()(
       ptyFontSize: loadPtyFontSize(),
       chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
+      themePreference: readThemePreference(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
       desktopInteractionMode: loadDesktopInteractionMode(),
       ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
@@ -194,6 +203,11 @@ export const useAppStore = create<AppStoreState>()(
         const next = !get().sidebarCollapsed;
         writeStorageValue("local", STORAGE_KEYS.sidebarCollapsed, next ? "1" : "0");
         set({ sidebarCollapsed: next });
+      },
+      setThemePreference: (theme) => {
+        writeThemePreference(theme);
+        applyThemePreference(theme);
+        set({ themePreference: theme });
       },
       setLatencyMonitorEnabled: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled, enabled ? "1" : "0");

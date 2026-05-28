@@ -49,10 +49,12 @@ describe("SettingsDialog", () => {
   });
   beforeEach(() => {
     localStorage.clear();
+    document.documentElement.removeAttribute("data-theme");
     useAppStore.setState({
       desktopInteractionMode: false,
       latencyMonitorEnabled: false,
       ptyScrollTraceEnabled: false,
+      themePreference: "auto",
     });
     playerEnqueue.mockReset();
     playerStop.mockReset();
@@ -141,8 +143,14 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "桌面交互模式" })).not.toBeNull();
     expect(screen.getByText("适合平板外接键盘；保留触控，但按桌面输入处理")).not.toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "主题" })).not.toBeNull();
+    expect(screen.getByRole("radio", { name: "跟随系统" })).not.toBeNull();
+    expect(screen.queryByText(/固定为浅色或深色/)).toBeNull();
     expect(screen.getByRole("switch", { name: "PTY 滚动追踪" })).not.toBeNull();
     expect(screen.getByText("记录终端滚动和视口同步现场，方便复制诊断报告")).not.toBeNull();
+    const scrollArea = document.querySelector<HTMLElement>('[data-slot="settings-dialog-body"]');
+    expect(scrollArea?.className).toContain("pr-4");
+    expect(scrollArea?.className).toContain("sm:pr-1");
     const menuItems = screen.getAllByRole("button").filter((button) => {
       return button.getAttribute("data-slot") === "settings-menu-item";
     });
@@ -151,6 +159,38 @@ describe("SettingsDialog", () => {
       "Relay Token未设置；用于连接需要认证的 Relay 服务器",
       "版本",
     ]);
+  });
+
+  it("persists theme preference while keeping auto as the default", () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    const auto = screen.getByRole("radio", { name: "跟随系统" });
+    const light = screen.getByRole("radio", { name: "浅色" });
+    const dark = screen.getByRole("radio", { name: "深色" });
+    expect(auto.getAttribute("aria-checked")).toBe("true");
+    expect(auto.className).toContain("whitespace-nowrap");
+    expect(localStorage.getItem("dev_anywhere_theme")).toBeNull();
+
+    fireEvent.click(dark);
+
+    expect(useAppStore.getState().themePreference).toBe("dark");
+    expect(localStorage.getItem("dev_anywhere_theme")).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(dark.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(light);
+
+    expect(useAppStore.getState().themePreference).toBe("light");
+    expect(localStorage.getItem("dev_anywhere_theme")).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(light.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(auto);
+
+    expect(useAppStore.getState().themePreference).toBe("auto");
+    expect(localStorage.getItem("dev_anywhere_theme")).toBeNull();
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(auto.getAttribute("aria-checked")).toBe("true");
   });
 
   it("persists desktop interaction mode from global settings", () => {
@@ -289,6 +329,8 @@ describe("SettingsDialog", () => {
     expect(bodyFrame?.className).toContain("px-4");
     expect(bodyFrame?.className).toContain("sm:px-5");
     expect(scrollArea?.className).toContain("dev-render-scroll");
+    expect(scrollArea?.className).toContain("pr-4");
+    expect(scrollArea?.className).toContain("sm:pr-1");
     expect(footer?.className).toContain("sm:px-5");
     expect(footer?.className).toContain("pt-0");
     expect(fields?.className).not.toContain("pb-");

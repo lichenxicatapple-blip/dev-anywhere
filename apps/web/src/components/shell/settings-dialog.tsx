@@ -8,6 +8,7 @@ import {
   KeyRound,
   Monitor,
   Server,
+  SunMoon,
   Terminal,
 } from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
@@ -19,6 +20,7 @@ import {
   hasStoredRelayClientToken,
   persistRelayClientToken,
 } from "@/lib/relay-client-token";
+import type { ThemePreference } from "@/lib/theme-preference";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +41,12 @@ type RelayHealthState =
   | { kind: "error"; message: string };
 
 type SettingsView = "menu" | "version" | "voice" | "relay-token";
+
+const themePreferenceOptions: Array<{ value: ThemePreference; label: string }> = [
+  { value: "auto", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
 
 interface RelayHealthResponse {
   status?: string;
@@ -82,6 +90,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
   const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
+  const themePreference = useAppStore((s) => s.themePreference);
+  const setThemePreference = useAppStore((s) => s.setThemePreference);
   const ptyScrollTraceEnabled = useAppStore((s) => s.ptyScrollTraceEnabled);
   const setPtyScrollTraceEnabled = useAppStore((s) => s.setPtyScrollTraceEnabled);
   const [view, setView] = useState<SettingsView>("menu");
@@ -222,7 +232,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
         {view === "version" ? (
           <div
-            className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
+            className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
             data-slot="settings-dialog-body"
           >
             <VersionRow
@@ -245,7 +255,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <VoiceSettingsPanel />
         ) : (
           <div
-            className="dev-render-scroll min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-1"
+            className="dev-render-scroll min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
             data-slot="settings-dialog-body"
           >
             <SettingsSection title="服务">
@@ -260,6 +270,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 label="Relay Token"
                 detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
                 onClick={() => setView("relay-token")}
+              />
+            </SettingsSection>
+            <SettingsSection title="外观">
+              <SettingsSegmentedItem
+                icon={<SunMoon className="size-4" aria-hidden="true" />}
+                label="主题"
+                value={themePreference}
+                options={themePreferenceOptions}
+                onValueChange={setThemePreference}
               />
             </SettingsSection>
             <SettingsSection title="交互">
@@ -312,6 +331,74 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
   );
 }
 
+function SettingsSegmentedItem({
+  icon,
+  label,
+  detail,
+  value,
+  options,
+  onValueChange,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  value: ThemePreference;
+  options: Array<{ value: ThemePreference; label: string }>;
+  onValueChange: (value: ThemePreference) => void;
+}) {
+  const labelId = useId();
+  const detailId = useId();
+
+  return (
+    <div
+      className="flex w-full items-start gap-3 px-3 py-3 text-left"
+      data-slot="settings-choice-item"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background/55 text-muted-foreground">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div id={labelId} className="text-sm font-medium text-foreground">
+          {label}
+        </div>
+        {detail ? (
+          <div id={detailId} className="mt-1 text-xs text-muted-foreground">
+            {detail}
+          </div>
+        ) : null}
+        <div
+          role="radiogroup"
+          aria-labelledby={labelId}
+          aria-describedby={detail ? detailId : undefined}
+          className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/70 p-1"
+          data-slot="settings-theme-choice"
+        >
+          {options.map((option) => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={cn(
+                  "min-w-0 whitespace-nowrap rounded px-2 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
+                )}
+                onClick={() => onValueChange(option.value)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RelayTokenPanel({ saved }: { saved: boolean }) {
   const inputId = useId();
   const errorId = useId();
@@ -339,7 +426,7 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
 
   return (
     <form
-      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
+      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
       data-slot="settings-dialog-body"
       onSubmit={(event) => {
         event.preventDefault();

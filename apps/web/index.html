@@ -3,9 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F6F7F8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1E1E1E" media="(prefers-color-scheme: dark)" />
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("dev_anywhere_theme");
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.dataset.theme = theme;
+            const color = theme === "light" ? "#F6F7F8" : "#1E1E1E";
+            document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
+              meta.setAttribute("content", color);
+            });
+          }
+        } catch {}
+      })();
+    </script>
     <title>DEV Anywhere</title>
 
-    <meta name="theme-color" content="#1E1E1E" />
     <meta
       name="description"
       content="本地 AI CLI 透明代理和远程镜像: 在浏览器中实时查看和接管本地开发会话"

@@ -2,7 +2,82 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+@custom-variant dark {
+  &:where(:root[data-theme="dark"] *) {
+    @slot;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
 :root {
+  color-scheme: light;
+  --background: #f6f7f8;
+  --foreground: #1f2328;
+  --card: #ffffff;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+  --primary: #9a6a3d;
+  --primary-foreground: #ffffff;
+  --secondary: #eceff3;
+  --secondary-foreground: #24292f;
+  --muted: #eef1f4;
+  --muted-foreground: #667085;
+  --accent: #e8edf3;
+  --accent-foreground: #1f2328;
+  --destructive: #cf222e;
+  --border: #d0d7de;
+  --input: #d8dee4;
+  --ring: #9a6a3d;
+  --radius: 0.375rem;
+
+  --color-status-working: #0969da;
+  --color-status-compacting: #8250df;
+  --color-status-success: #1a7f64;
+  --color-status-warning: #9a6700;
+  --color-status-error: #cf222e;
+  --dev-chat-rail-inset: 0.875rem;
+  --dev-chat-scrollbar-compensation: 11px;
+  --dev-message-rail-width: 90rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: #1e1e1e;
+    --foreground: #d4d4d4;
+    --card: #252526;
+    --card-foreground: #d4d4d4;
+    --popover: #2d2d2d;
+    --popover-foreground: #d4d4d4;
+    --primary: #d4a574;
+    --primary-foreground: #1e1e1e;
+    --secondary: #2d2d2d;
+    --secondary-foreground: #d4d4d4;
+    --muted: #252526;
+    --muted-foreground: #808080;
+    --accent: #2d2d2d;
+    --accent-foreground: #d4d4d4;
+    --destructive: #f44747;
+    --border: #404040;
+    --input: #3c3c3c;
+    --ring: #d4a574;
+
+    --color-status-working: #4fc1ff;
+    --color-status-compacting: #c586c0;
+    --color-status-success: #00d4aa;
+    --color-status-warning: #e8ab5a;
+    --color-status-error: #f44747;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
   --background: #1e1e1e;
   --foreground: #d4d4d4;
   --card: #252526;
@@ -21,16 +96,12 @@
   --border: #404040;
   --input: #3c3c3c;
   --ring: #d4a574;
-  --radius: 0.375rem;
 
   --color-status-working: #4fc1ff;
   --color-status-compacting: #c586c0;
   --color-status-success: #00d4aa;
   --color-status-warning: #e8ab5a;
   --color-status-error: #f44747;
-  --dev-chat-rail-inset: 0.875rem;
-  --dev-chat-scrollbar-compensation: 11px;
-  --dev-message-rail-width: 90rem;
 }
 
 @theme inline {
@@ -336,21 +407,46 @@ code.hljs,
 }
 
 /* Tailwind Typography 默认行为与我们气泡主题的对齐:
-   1. inline code 前后自动加反引号 `` 是冗余 (自定义 <code> 已有 bg+padding 标识)
-   2. prose-invert 默认链接色白, 与正文无区分, 改品牌 primary
-   3. blockquote 默认前景色偏白, 引用语义应弱化
-   4. task list checkbox 原生控件在 dark 下丑, 用 accent-color 套品牌色 */
+   1. prose 默认/反色变量不认识运行时主题 token, 浅色下会把 assistant 气泡文字压得过淡
+   2. inline code 前后自动加反引号 `` 是冗余 (自定义 <code> 已有 bg+padding 标识)
+   3. 链接改品牌 primary, blockquote 语义弱化, task list checkbox 套品牌色 */
+.dev-markdown {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--popover);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"] *))::after {
   content: none;
 }
-.prose-invert :where(a):not(:where([class~="not-prose"] *)) {
+.dev-markdown :where(a):not(:where([class~="not-prose"] *)) {
   color: var(--primary);
 }
-.prose-invert :where(a):not(:where([class~="not-prose"] *)):hover {
-  color: color-mix(in srgb, var(--primary) 85%, white);
+.dev-markdown :where(a):not(:where([class~="not-prose"] *)):hover {
+  color: color-mix(in srgb, var(--primary) 82%, var(--foreground));
 }
-.prose-invert :where(blockquote):not(:where([class~="not-prose"] *)) {
+.dev-markdown-on-primary :where(a):not(:where([class~="not-prose"] *)) {
+  color: var(--primary-foreground);
+}
+.dev-markdown-on-primary :where(a):not(:where([class~="not-prose"] *)):hover {
+  color: var(--primary-foreground);
+  background: color-mix(in srgb, var(--primary-foreground) 10%, transparent);
+}
+.dev-markdown :where(blockquote):not(:where([class~="not-prose"] *)) {
   color: var(--muted-foreground);
 }
 .prose input[type="checkbox"] {
@@ -621,17 +717,21 @@ code.hljs,
   }
 }
 
-/* 用户气泡在 primary 背景上，不能沿用 prose-invert 的浅色正文，否则对比度不足。 */
+/* 用户气泡在 primary 背景上，不能沿用默认 prose token，否则对比度不足。 */
 .dev-markdown-on-primary {
-  --tw-prose-invert-body: var(--primary-foreground);
-  --tw-prose-invert-headings: var(--primary-foreground);
-  --tw-prose-invert-lead: var(--primary-foreground);
-  --tw-prose-invert-links: var(--primary-foreground);
-  --tw-prose-invert-bold: var(--primary-foreground);
-  --tw-prose-invert-counters: var(--primary-foreground);
-  --tw-prose-invert-bullets: var(--primary-foreground);
-  --tw-prose-invert-quotes: var(--primary-foreground);
-  --tw-prose-invert-code: var(--primary-foreground);
+  --tw-prose-body: var(--primary-foreground);
+  --tw-prose-headings: var(--primary-foreground);
+  --tw-prose-lead: var(--primary-foreground);
+  --tw-prose-links: var(--primary-foreground);
+  --tw-prose-bold: var(--primary-foreground);
+  --tw-prose-counters: color-mix(in srgb, var(--primary-foreground) 76%, transparent);
+  --tw-prose-bullets: color-mix(in srgb, var(--primary-foreground) 76%, transparent);
+  --tw-prose-quotes: var(--primary-foreground);
+  --tw-prose-quote-borders: color-mix(in srgb, var(--primary-foreground) 42%, transparent);
+  --tw-prose-captions: color-mix(in srgb, var(--primary-foreground) 76%, transparent);
+  --tw-prose-code: var(--primary-foreground);
+  --tw-prose-pre-code: var(--primary-foreground);
+  --tw-prose-pre-bg: color-mix(in srgb, var(--primary-foreground) 12%, transparent);
 }
 
 /* PTY 只展示自研滚动条，隐藏宿主容器、xterm viewport 和 xterm 自带滚动条。 */
