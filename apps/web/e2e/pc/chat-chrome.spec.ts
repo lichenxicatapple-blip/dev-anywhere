@@ -388,7 +388,7 @@ test.describe("AppShell Settings slot", () => {
     await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
   });
 
-  test("desktop sidebar bottom actions use matching 44px targets", async ({ page }) => {
+  test("desktop sidebar bottom actions align with the JSON input bar", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installFakeRelay(page);
     await gotoWithFakeProxy(page, "/#/sessions");
@@ -413,6 +413,34 @@ test.describe("AppShell Settings slot", () => {
     }
 
     await expectMatchingActionHeights();
+
+    await gotoWithFakeProxy(page, "/#/chat/d51-sess?mode=json");
+    const input = page.locator('[data-slot="input-card"]');
+    const create = page.locator('[data-slot="create-session-trigger"]:visible');
+    const settings = page.locator('[data-slot="sidebar-settings-trigger"]:visible');
+    await expect(input).toBeVisible();
+    await expect(create).toBeVisible();
+    await expect(settings).toBeVisible();
+
+    const [inputBox, createBox, settingsBox] = await Promise.all([
+      input.boundingBox(),
+      create.boundingBox(),
+      settings.boundingBox(),
+    ]);
+    expect(inputBox).not.toBeNull();
+    expect(createBox).not.toBeNull();
+    expect(settingsBox).not.toBeNull();
+    for (const actionBox of [createBox, settingsBox]) {
+      expect(Math.abs((actionBox?.height ?? 0) - (inputBox?.height ?? 0))).toBeLessThanOrEqual(0.5);
+      expect(Math.abs((actionBox?.y ?? 0) - (inputBox?.y ?? 0))).toBeLessThanOrEqual(0.5);
+      expect(
+        Math.abs(
+          (actionBox?.y ?? 0) +
+            (actionBox?.height ?? 0) -
+            ((inputBox?.y ?? 0) + (inputBox?.height ?? 0)),
+        ),
+      ).toBeLessThanOrEqual(0.5);
+    }
 
     await page.locator('[data-slot="sidebar-collapse-trigger"]').click();
     await expect(page.locator('[data-slot="sidebar-rail"]')).toBeVisible();
