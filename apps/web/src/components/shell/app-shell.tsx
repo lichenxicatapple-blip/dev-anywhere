@@ -23,6 +23,19 @@ import {
   writeLastChatRoute,
 } from "@/lib/route-restore";
 
+function isStandaloneDisplay() {
+  if (typeof window === "undefined") return false;
+  const mediaStandalone =
+    typeof window.matchMedia === "function" &&
+    (window.matchMedia("(display-mode: standalone)").matches ||
+      window.matchMedia("(display-mode: fullscreen)").matches);
+  const navigatorStandalone =
+    typeof navigator !== "undefined" &&
+    "standalone" in navigator &&
+    Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+  return mediaStandalone || navigatorStandalone;
+}
+
 export function AppShell() {
   useVisualViewportHeightVar();
   const location = useLocation();
@@ -30,6 +43,7 @@ export function AppShell() {
   const isChatRoute = location.pathname.startsWith("/chat/");
   const isTopLevelRoute = location.pathname === "/" || location.pathname === "/sessions";
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [standaloneDisplay, setStandaloneDisplay] = useState(() => isStandaloneDisplay());
   const proxiesLength = useAppStore((s) => s.proxies.length);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
@@ -77,6 +91,23 @@ export function AppShell() {
     setPendingToast(null);
   }, [pendingToast, setPendingToast]);
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      setStandaloneDisplay(isStandaloneDisplay());
+      return;
+    }
+    const standaloneQuery = window.matchMedia("(display-mode: standalone)");
+    const fullscreenQuery = window.matchMedia("(display-mode: fullscreen)");
+    const update = () => setStandaloneDisplay(isStandaloneDisplay());
+    update();
+    standaloneQuery.addEventListener("change", update);
+    fullscreenQuery.addEventListener("change", update);
+    return () => {
+      standaloneQuery.removeEventListener("change", update);
+      fullscreenQuery.removeEventListener("change", update);
+    };
+  }, []);
+
   // 冷启动恢复上次 chat 路由: 仅首次挂载评估一次, 后续 SPA 内回到 "/" 不再打扰。
   const restoreEvaluatedRef = useRef(false);
   useEffect(() => {
@@ -116,9 +147,11 @@ export function AppShell() {
     <div
       className="flex flex-col bg-background text-foreground"
       style={{
-        height: "max(100dvh, var(--dev-visual-viewport-height, 100dvh))",
+        height:
+          "var(--dev-app-shell-height, max(100dvh, var(--dev-visual-viewport-height, 100dvh)))",
       }}
       data-slot="app-shell"
+      data-standalone-display={standaloneDisplay ? "true" : undefined}
     >
       {!isChatRoute && (
         <Button

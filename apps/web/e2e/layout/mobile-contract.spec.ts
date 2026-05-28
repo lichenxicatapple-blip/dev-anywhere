@@ -322,6 +322,27 @@ test.describe("mobile UX contract", () => {
       .toBeGreaterThanOrEqual(baseline + 70);
   });
 
+  test("standalone tablet shell includes the layout viewport safe-area canvas", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "standalone", {
+        configurable: true,
+        value: true,
+      });
+    });
+    await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
+
+    const shell = page.locator('[data-slot="app-shell"]');
+    await expect(shell).toHaveAttribute("data-standalone-display", "true");
+    await expect
+      .poll(() =>
+        shell.evaluate((node) => {
+          return getComputedStyle(node).getPropertyValue("--dev-app-shell-height").trim();
+        }),
+      )
+      .toContain("100vh");
+  });
+
   test("json input survives visual viewport keyboard changes", async ({ page }) => {
     await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
     const input = page.getByLabel("输入聊天消息");

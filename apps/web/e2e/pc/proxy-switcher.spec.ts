@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, installFakeRelay } from "../helpers";
+import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
 
 // 移动端 < md 下 ProxySelect 以 ProxySwitcher layout="page" 形式直接挂在 AppShell 主区
 // 没有在线 proxy 时 EmptyState 会兜底, 有 proxy 时渲染 data-slot="proxy-item" 列表
@@ -51,5 +51,16 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
     // Popover content 落到 portal, Radix 用 data-slot="popover-content"
     const popoverContent = page.locator('[data-slot="popover-content"]');
     await expect(popoverContent).toBeVisible();
+  });
+
+  test("switching proxy from a chat route returns to the session list", async ({ page }) => {
+    await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
+    await expect(page).toHaveURL(/\/chat\/json-sess/);
+
+    await page.locator('button[data-slot="proxy-switcher-trigger"]').click();
+    await page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible').click();
+
+    await expect(page).toHaveURL(/\/sessions$/);
+    await expect(page.locator('[data-slot="terminated-session-panel"]')).toHaveCount(0);
   });
 });

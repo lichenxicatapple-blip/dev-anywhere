@@ -1,7 +1,7 @@
 // layout=page 用于移动端/空壳页，选中后进入 /sessions。
 // layout=dropdown 用于桌面侧栏顶部，只切换当前绑定的开发机 proxy。
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -23,6 +23,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
+  const location = useLocation();
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -63,6 +64,8 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       });
     setDropdownOpen(false);
     if (layout === "page") {
+      navigate("/sessions");
+    } else if (location.pathname.startsWith("/chat/")) {
       navigate("/sessions");
     }
   }

@@ -69,6 +69,13 @@ body {
   font-family: var(--font-sans);
 }
 
+@media (min-width: 768px) {
+  [data-slot="app-shell"][data-standalone-display="true"] {
+    /* iPad Home Screen PWA: dynamic viewport can exclude the bottom safe-area canvas. */
+    --dev-app-shell-height: max(100vh, 100dvh, var(--dev-visual-viewport-height, 100dvh));
+  }
+}
+
 /* 流式光标: 方波闪烁, 节奏向真终端靠拢 (pulse 的渐变对"打字中"语义偏弱) */
 .dev-cursor-blink {
   animation: dev-cursor-blink 1s steps(2) infinite;
