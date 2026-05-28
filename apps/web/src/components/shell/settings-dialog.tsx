@@ -6,7 +6,6 @@ import {
   AudioLines,
   ChevronRight,
   KeyRound,
-  Keyboard,
   Monitor,
   Server,
   Terminal,
@@ -14,7 +13,6 @@ import {
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
-import { ImeDiagnosticsPanel } from "@/components/shell/ime-diagnostics-panel";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
 import {
   clearRelayClientToken,
@@ -40,7 +38,7 @@ type RelayHealthState =
   | { kind: "ready"; version: string; uptime: number }
   | { kind: "error"; message: string };
 
-type SettingsView = "menu" | "version" | "voice" | "relay-token" | "ime-diagnostics";
+type SettingsView = "menu" | "version" | "voice" | "relay-token";
 
 interface RelayHealthResponse {
   status?: string;
@@ -69,14 +67,12 @@ function healthUrl(relayUrl: string): string {
 function settingsViewTitle(view: SettingsView): string {
   if (view === "version") return "版本";
   if (view === "relay-token") return "Relay Token";
-  if (view === "ime-diagnostics") return "输入法诊断";
   return "设置 Voice Pilot";
 }
 
 function settingsViewDescription(view: SettingsView): string {
   if (view === "version") return "当前 Web 与 Relay 服务器的版本信息";
   if (view === "relay-token") return "用于连接需要认证的 Relay 服务器。保存后自动生效。";
-  if (view === "ime-diagnostics") return "对照不同输入控件，复制输入事件和样式现场。";
   return "连接语音服务后，即可以语音交互的形式驱动会话。";
 }
 
@@ -245,8 +241,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
         ) : view === "relay-token" ? (
           <RelayTokenPanel saved={relayTokenSaved} />
-        ) : view === "ime-diagnostics" ? (
-          <ImeDiagnosticsPanel />
         ) : view === "voice" ? (
           <VoiceSettingsPanel />
         ) : (
@@ -291,12 +285,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 detail="显示可拖动的连接延迟浮窗"
                 checked={latencyMonitorEnabled}
                 onCheckedChange={setLatencyMonitorEnabled}
-              />
-              <SettingsMenuItem
-                icon={<Keyboard className="size-4" aria-hidden="true" />}
-                label="输入法诊断"
-                detail="记录输入事件和控件样式，用于排查 iPadOS 候选词窗"
-                onClick={() => setView("ime-diagnostics")}
               />
             </SettingsSection>
             <SettingsSection title="关于">
