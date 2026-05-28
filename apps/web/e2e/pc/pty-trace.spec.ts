@@ -1,13 +1,17 @@
-// ptyScrollTrace 诊断开关 e2e: ?ptyScrollTrace=1 启动 / hash 变化后启用,
-// 两条路径都能录到 container-scroll.
+// PTY scroll trace 诊断开关 e2e: 设置持久化 / 设置页开关两条路径都能录到 container-scroll.
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-trace";
 
 test.describe("PTY scroll trace diagnostics", () => {
-  test("collects PTY scroll trace when diagnostics are enabled at navigation", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, query: "&ptyScrollTrace=1" });
+  test("collects PTY scroll trace when diagnostics are enabled before navigation", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
+    });
+    await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
     await expect(page.locator('[data-slot="pty-scroll-trace-copy"]')).toBeVisible();
 
@@ -28,14 +32,14 @@ test.describe("PTY scroll trace diagnostics", () => {
       .toBeTruthy();
   });
 
-  test("enables PTY scroll trace after hash query changes", async ({ page }) => {
+  test("enables PTY scroll trace from settings without reloading the chat", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
     await expect(page.locator('[data-slot="pty-scroll-trace-copy"]')).toHaveCount(0);
 
-    await page.evaluate(() => {
-      window.location.hash = `${window.location.hash}&ptyScrollTrace=1`;
-    });
+    await page.locator('[data-slot="sidebar-settings-trigger"]').click();
+    await page.getByRole("switch", { name: "PTY 滚动追踪" }).click();
+    await page.getByRole("button", { name: "Close" }).click();
 
     await expect(page.locator('[data-slot="pty-scroll-trace-copy"]')).toBeVisible();
 
