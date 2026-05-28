@@ -661,7 +661,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
-          className="max-h-[calc(100dvh-0.75rem)] overflow-y-auto rounded-t-xl border-t bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
+          className="inset-x-2 max-h-[calc(100dvh-0.75rem)] w-auto overflow-x-hidden overflow-y-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
           data-slot="create-session-dialog"
         >
           <SheetHeader className="px-0 pb-1 pt-0 text-left">

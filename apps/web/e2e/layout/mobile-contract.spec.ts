@@ -214,6 +214,16 @@ test.describe("mobile UX contract", () => {
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible();
     await expectNoHorizontalDocumentOverflow(page);
+    const surfaceBounds = await dialog.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        innerWidth: window.innerWidth,
+      };
+    });
+    expect(surfaceBounds.left).toBeGreaterThanOrEqual(7);
+    expect(surfaceBounds.right).toBeLessThanOrEqual(surfaceBounds.innerWidth - 7);
 
     await expectTouchTarget(page.getByLabel("工作目录"));
     await expectTouchTarget(page.getByLabel("Agent CLI").getByRole("button", { name: /Claude/ }));
