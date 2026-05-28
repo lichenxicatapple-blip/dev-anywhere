@@ -145,7 +145,10 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
   test("does not pin to bottom when wheel-up occurs mid-stream of continuous PTY output (longHost, /compact pattern)", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, query: "&ptyScrollTrace=1" });
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
+    });
+    await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
     await enterLongHostMode(page, { sessionId: SESSION_ID });

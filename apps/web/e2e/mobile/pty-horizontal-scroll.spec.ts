@@ -57,11 +57,10 @@ test.describe("L4 mobile / PTY input scroll", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-touch-pan`;
-    await setupPtyChat(emuPage, {
-      sessionId,
-      baseUrl: mobileBaseUrl,
-      query: "&ptyScrollTrace=1",
+    await emuPage.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
     });
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 80, 24);
