@@ -49,7 +49,11 @@ describe("SettingsDialog", () => {
   });
   beforeEach(() => {
     localStorage.clear();
-    useAppStore.setState({ desktopInteractionMode: false, latencyMonitorEnabled: false });
+    useAppStore.setState({
+      desktopInteractionMode: false,
+      latencyMonitorEnabled: false,
+      ptyScrollTraceEnabled: false,
+    });
     playerEnqueue.mockReset();
     playerStop.mockReset();
     requestVoiceCapabilities.mockReset();
@@ -137,6 +141,8 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "桌面交互模式" })).not.toBeNull();
     expect(screen.getByText("适合平板外接键盘；保留触控，但按桌面输入处理")).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "PTY 滚动追踪" })).not.toBeNull();
+    expect(screen.getByText("记录终端滚动和视口同步现场，方便复制诊断报告")).not.toBeNull();
     const menuItems = screen.getAllByRole("button").filter((button) => {
       return button.getAttribute("data-slot") === "settings-menu-item";
     });
@@ -158,6 +164,25 @@ describe("SettingsDialog", () => {
     expect(useAppStore.getState().desktopInteractionMode).toBe(true);
     expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("1");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("persists PTY scroll trace from global settings", () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    const toggle = screen.getByRole("switch", { name: "PTY 滚动追踪" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+
+    expect(useAppStore.getState().ptyScrollTraceEnabled).toBe(true);
+    expect(localStorage.getItem("dev_anywhere_pty_scroll_trace")).toBe("1");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(toggle);
+
+    expect(useAppStore.getState().ptyScrollTraceEnabled).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_pty_scroll_trace")).toBe("0");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 
   it("saves relay client token from settings and reloads to apply it", () => {

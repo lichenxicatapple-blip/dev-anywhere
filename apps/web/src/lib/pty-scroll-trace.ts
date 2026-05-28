@@ -92,7 +92,6 @@ declare global {
 
 const store = createScrollTraceStore<PtyScrollTraceEntry>({
   windowKey: "__devAnywherePtyScrollTrace",
-  urlParam: "ptyScrollTrace",
   storageKey: "dev_anywhere_pty_scroll_trace",
   // 稳态噪音去重: 高频 render / host-position / scroll-to-bottom-no-op 等连续相同状态折叠。
   // 用户输入 (wheel / intent / touch) 与 visualViewport / followCursor 等关键诊断信号保持独立。

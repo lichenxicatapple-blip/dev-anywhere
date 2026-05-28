@@ -30,6 +30,7 @@ describe("attachPtyScrollController", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     window.history.replaceState(null, "", "/");
+    window.localStorage.removeItem("dev_anywhere_pty_scroll_trace");
     (window as unknown as { __devAnywherePtyScrollTrace?: unknown }).__devAnywherePtyScrollTrace =
       undefined;
   });
@@ -3011,7 +3012,7 @@ describe("attachPtyScrollController", () => {
     });
 
     it("traces same-row followCursorY skips with zero cursor delta", () => {
-      window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
+      window.localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
       const params = setupTallHost({ cursorY: 25 });
       attach(params);
       (
@@ -3035,7 +3036,7 @@ describe("attachPtyScrollController", () => {
     });
 
     it("traces raw input follow scheduling and fire events", () => {
-      window.history.replaceState(null, "", "/#/chat/s1?mode=pty&ptyScrollTrace=1");
+      window.localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
       const params = setupTallHost({ cursorY: 25 });
       const ctrl = attach(params);
       (

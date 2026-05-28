@@ -8,6 +8,7 @@ import {
   KeyRound,
   Monitor,
   Server,
+  Terminal,
 } from "lucide-react";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
@@ -81,6 +82,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
   const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
+  const ptyScrollTraceEnabled = useAppStore((s) => s.ptyScrollTraceEnabled);
+  const setPtyScrollTraceEnabled = useAppStore((s) => s.setPtyScrollTraceEnabled);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
   const relayTokenSaved = hasStoredRelayClientToken();
@@ -212,7 +215,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           ) : (
             <>
               <DialogTitle>设置</DialogTitle>
-              <DialogDescription>选择要查看或调整的项目。</DialogDescription>
+              <DialogDescription>连接、交互和诊断选项。</DialogDescription>
             </>
           )}
         </DialogHeader>
@@ -242,44 +245,70 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <VoiceSettingsPanel />
         ) : (
           <div
-            className="dev-render-scroll min-h-0 space-y-2 overflow-y-auto overscroll-contain pr-1"
+            className="dev-render-scroll min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-1"
             data-slot="settings-dialog-body"
           >
-            <SettingsMenuItem
-              icon={<AudioLines className="size-4" aria-hidden="true" />}
-              label="Voice Pilot"
-              detail="用语音输入、听取回复和处理审批"
-              onClick={() => setView("voice")}
-            />
-            <SettingsMenuItem
-              icon={<KeyRound className="size-4" aria-hidden="true" />}
-              label="Relay Token"
-              detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
-              onClick={() => setView("relay-token")}
-            />
-            <SettingsToggleItem
-              icon={<Monitor className="size-4" aria-hidden="true" />}
-              label="桌面交互模式"
-              detail="适合平板外接键盘；保留触控，但按桌面输入处理"
-              checked={desktopInteractionMode}
-              onCheckedChange={setDesktopInteractionMode}
-            />
-            <SettingsToggleItem
-              icon={<Activity className="size-4" aria-hidden="true" />}
-              label="延迟监控"
-              detail="显示可拖动的连接延迟浮窗"
-              checked={latencyMonitorEnabled}
-              onCheckedChange={setLatencyMonitorEnabled}
-            />
-            <SettingsMenuItem
-              icon={<Server className="size-4" aria-hidden="true" />}
-              label="版本"
-              onClick={() => setView("version")}
-            />
+            <SettingsSection title="服务">
+              <SettingsMenuItem
+                icon={<AudioLines className="size-4" aria-hidden="true" />}
+                label="Voice Pilot"
+                detail="用语音输入、听取回复和处理审批"
+                onClick={() => setView("voice")}
+              />
+              <SettingsMenuItem
+                icon={<KeyRound className="size-4" aria-hidden="true" />}
+                label="Relay Token"
+                detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
+                onClick={() => setView("relay-token")}
+              />
+            </SettingsSection>
+            <SettingsSection title="交互">
+              <SettingsToggleItem
+                icon={<Monitor className="size-4" aria-hidden="true" />}
+                label="桌面交互模式"
+                detail="适合平板外接键盘；保留触控，但按桌面输入处理"
+                checked={desktopInteractionMode}
+                onCheckedChange={setDesktopInteractionMode}
+              />
+            </SettingsSection>
+            <SettingsSection title="诊断">
+              <SettingsToggleItem
+                icon={<Terminal className="size-4" aria-hidden="true" />}
+                label="PTY 滚动追踪"
+                detail="记录终端滚动和视口同步现场，方便复制诊断报告"
+                checked={ptyScrollTraceEnabled}
+                onCheckedChange={setPtyScrollTraceEnabled}
+              />
+              <SettingsToggleItem
+                icon={<Activity className="size-4" aria-hidden="true" />}
+                label="延迟监控"
+                detail="显示可拖动的连接延迟浮窗"
+                checked={latencyMonitorEnabled}
+                onCheckedChange={setLatencyMonitorEnabled}
+              />
+            </SettingsSection>
+            <SettingsSection title="关于">
+              <SettingsMenuItem
+                icon={<Server className="size-4" aria-hidden="true" />}
+                label="版本"
+                onClick={() => setView("version")}
+              />
+            </SettingsSection>
           </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2" data-slot="settings-section">
+      <h3 className="px-1 text-xs font-medium text-muted-foreground">{title}</h3>
+      <div className="overflow-hidden rounded-lg border border-border bg-card/55 divide-y divide-border/70">
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -380,7 +409,7 @@ function SettingsToggleItem({
     <button
       type="button"
       role="switch"
-      className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="group flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-accent/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       onClick={() => onCheckedChange(!checked)}
       aria-checked={checked}
       aria-labelledby={labelId}
@@ -389,10 +418,8 @@ function SettingsToggleItem({
     >
       <div
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors",
-          checked
-            ? "border-primary/45 bg-primary/15 text-primary"
-            : "border-border text-muted-foreground",
+          "flex size-8 shrink-0 items-center justify-center rounded-md bg-background/55 transition-colors",
+          checked ? "text-primary" : "text-muted-foreground",
         )}
       >
         {icon}
@@ -408,7 +435,7 @@ function SettingsToggleItem({
       <span
         className={cn(
           "relative h-6 w-11 shrink-0 rounded-full border transition-colors",
-          checked ? "border-primary/70 bg-primary/80" : "border-border bg-muted/50",
+          checked ? "border-primary/65 bg-primary/70" : "border-border bg-muted/50",
         )}
         aria-hidden="true"
         data-slot="settings-toggle-switch"
@@ -441,13 +468,13 @@ function SettingsMenuItem({
   return (
     <button
       type="button"
-      className="flex w-full items-center gap-3 rounded-md border border-border bg-card/70 p-3 text-left transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="group flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-accent/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       onClick={onClick}
       aria-labelledby={labelId}
       aria-describedby={detail ? detailId : undefined}
       data-slot="settings-menu-item"
     >
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-primary/35 bg-primary/10 text-primary">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background/55 text-muted-foreground transition-colors group-hover:text-foreground">
         {icon}
       </div>
       <div className="min-w-0 flex-1">

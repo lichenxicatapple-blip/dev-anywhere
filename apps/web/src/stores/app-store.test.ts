@@ -60,3 +60,29 @@ describe("app-store desktop interaction mode persistence", () => {
     expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("0");
   });
 });
+
+describe("app-store PTY scroll trace persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    vi.resetModules();
+  });
+
+  it("defaults PTY scroll trace to off", async () => {
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().ptyScrollTraceEnabled).toBe(false);
+  });
+
+  it("loads and persists PTY scroll trace for the current browser", async () => {
+    localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
+
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().ptyScrollTraceEnabled).toBe(true);
+    useAppStore.getState().setPtyScrollTraceEnabled(false);
+
+    expect(useAppStore.getState().ptyScrollTraceEnabled).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_pty_scroll_trace")).toBe("0");
+  });
+});

@@ -47,6 +47,7 @@ interface AppStoreState {
   sidebarCollapsed: boolean;
   latencyMonitorEnabled: boolean;
   desktopInteractionMode: boolean;
+  ptyScrollTraceEnabled: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
 
@@ -68,6 +69,7 @@ interface AppStoreState {
   toggleSidebarCollapsed: () => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
   setDesktopInteractionMode: (enabled: boolean) => void;
+  setPtyScrollTraceEnabled: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
 }
@@ -119,6 +121,10 @@ function loadDesktopInteractionMode(): boolean {
   return readStorageValue("local", STORAGE_KEYS.desktopInteractionMode) === "1";
 }
 
+function loadPtyScrollTraceEnabled(): boolean {
+  return readStorageValue("local", STORAGE_KEYS.ptyScrollTraceEnabled) === "1";
+}
+
 export const useAppStore = create<AppStoreState>()(
   devtools(
     (set, get) => ({
@@ -138,6 +144,7 @@ export const useAppStore = create<AppStoreState>()(
       sidebarCollapsed: loadSidebarCollapsed(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
       desktopInteractionMode: loadDesktopInteractionMode(),
+      ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
       pendingToast: null,
 
       setConnected: (connected) => set({ connected }),
@@ -195,6 +202,10 @@ export const useAppStore = create<AppStoreState>()(
       setDesktopInteractionMode: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.desktopInteractionMode, enabled ? "1" : "0");
         set({ desktopInteractionMode: enabled });
+      },
+      setPtyScrollTraceEnabled: (enabled) => {
+        writeStorageValue("local", STORAGE_KEYS.ptyScrollTraceEnabled, enabled ? "1" : "0");
+        set({ ptyScrollTraceEnabled: enabled });
       },
       setPhase: (phase) => {
         const phaseBeforeDisconnect =

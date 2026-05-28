@@ -40,10 +40,11 @@ describe("pty scroll trace", () => {
     ).__devAnywherePtyDebug;
   });
 
-  it("can be enabled from a hash-routed chat URL", () => {
+  it("does not enable from a hash-routed chat URL", () => {
+    installLocalStorageStub();
     window.history.replaceState(null, "", "/#/chat/session-1?mode=pty&ptyScrollTrace=1");
 
-    expect(isPtyScrollTraceEnabled()).toBe(true);
+    expect(isPtyScrollTraceEnabled()).toBe(false);
   });
 
   it("can be enabled from localStorage", () => {

@@ -4,7 +4,7 @@
 
 interface ScrollTraceStoreOptions<T> {
   windowKey: string;
-  urlParam: string;
+  urlParam?: string;
   storageKey: string;
   maxEntries?: number;
   // 稳态去重: 返回相同 key 的连续 entry 折叠成单行 + repeat 计数, 旧 entry 的 t 更新成最新一次。
@@ -62,10 +62,12 @@ export function createScrollTraceStore<T extends ScrollTraceEntryBase>(
       hashQueryStart >= 0
         ? new URLSearchParams(window.location.hash.slice(hashQueryStart + 1))
         : null;
-    const pageParams = new URLSearchParams(window.location.search);
-    if (pageParams.get(urlParam) === "1" || routeParams?.get(urlParam) === "1") {
-      persistEnabled();
-      return true;
+    if (urlParam) {
+      const pageParams = new URLSearchParams(window.location.search);
+      if (pageParams.get(urlParam) === "1" || routeParams?.get(urlParam) === "1") {
+        persistEnabled();
+        return true;
+      }
     }
     return getLocalStorageFlag(storageKey) === "1";
   };

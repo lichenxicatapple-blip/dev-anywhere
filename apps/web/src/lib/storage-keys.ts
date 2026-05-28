@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   latencyMonitorEnabled: "dev_anywhere_latencyMonitorEnabled",
   latencyMonitorPosition: "dev_anywhere_latencyMonitorPosition",
   desktopInteractionMode: "dev_anywhere_desktopInteractionMode",
+  ptyScrollTraceEnabled: "dev_anywhere_pty_scroll_trace",
 } as const;
 
 function getStorage(kind: StorageKind): Storage | null {
