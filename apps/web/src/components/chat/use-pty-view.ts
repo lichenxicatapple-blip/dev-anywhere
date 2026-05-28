@@ -36,7 +36,7 @@ import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
+import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import {
@@ -100,6 +100,7 @@ interface UsePtyViewResult {
   ptyInputFocused: boolean;
   showMobilePtyControls: boolean;
   touchEditingSurface: boolean;
+  mobileControlsBottomInset: number;
   connectionOverlay: { connecting: boolean; subscribeDelayed: boolean };
   containerPaddingBottom: number;
   traceEnabled: boolean;
@@ -186,6 +187,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     touchEditingSurface: false,
     ptyInputFocused: false,
     containerPaddingBottom: 0,
+    mobileControlsBottomInset: 0,
   });
   // attachPtyDragSelectAutoscroll 在 onTerminalReady 内部 attach 而 registerTerminal
   // 在它之前发生, 用 ref 把 snapshot 取数函数传给 debug API。
@@ -212,8 +214,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const softKeyboardEditingSurface = touchEditingSurface && !desktopInteractionMode;
   const ptyPlainEnterBehavior = softKeyboardEditingSurface ? "linefeed" : "submit";
-  const rawKeyboardOffset = useVisualViewportBottomOffset();
+  const { bottomOffset: rawKeyboardOffset, layoutBottomInset: rawKeyboardLayoutInset } =
+    useVisualViewportInsets();
   const keyboardOffset = desktopInteractionMode ? 0 : rawKeyboardOffset;
+  const mobileControlsBottomInset = desktopInteractionMode ? 0 : rawKeyboardLayoutInset;
 
   useEffect(() => {
     activeRef.current = active;
@@ -245,6 +249,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     touchEditingSurface,
     ptyInputFocused,
     containerPaddingBottom: mobileLayoutDebugRef.current.containerPaddingBottom,
+    mobileControlsBottomInset,
   };
 
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
@@ -895,6 +900,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     ptyInputFocused,
     showMobilePtyControls,
     touchEditingSurface,
+    mobileControlsBottomInset,
     connectionOverlay: connection.overlay,
     containerPaddingBottom,
     traceEnabled,

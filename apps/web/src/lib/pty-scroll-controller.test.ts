@@ -3011,6 +3011,20 @@ describe("attachPtyScrollController", () => {
       expect(params.container.scrollTop).toBe(17470);
     });
 
+    it("preserves the in-host scroll offset when relayout races with first review scroll", () => {
+      const params = setupTallHost({ cursorY: 25 });
+      const ctrl = attach(params);
+      expect(params.container.scrollTop).toBe(17470);
+
+      params.container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
+      expect(params.container.scrollTop).toBe(17469);
+
+      ctrl.relayout();
+
+      expect(params.terminal.buffer.active.viewportY).toBe(853);
+      expect(params.container.scrollTop).toBe(17469);
+    });
+
     it("traces same-row followCursorY skips with zero cursor delta", () => {
       window.localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
       const params = setupTallHost({ cursorY: 25 });

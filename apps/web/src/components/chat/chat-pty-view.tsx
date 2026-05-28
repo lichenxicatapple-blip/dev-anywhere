@@ -96,6 +96,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
       {view.showMobilePtyControls ? (
         <PtyMobileControls
           provider={provider}
+          bottomInset={view.mobileControlsBottomInset}
           onInput={view.sendMobileInput}
           onPaste={view.pasteMobileClipboard}
         />

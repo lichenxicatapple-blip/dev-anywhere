@@ -100,6 +100,12 @@ test.describe("mobile UX contract", () => {
     expect(Math.abs((visualBox?.height ?? 0) - (typewriterBox?.height ?? 0))).toBeLessThanOrEqual(
       7,
     );
+    expect(
+      Math.abs(
+        (visualBox?.y ?? 0) + (visualBox?.height ?? 0) / 2 -
+          ((typewriterBox?.y ?? 0) + (typewriterBox?.height ?? 0) / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
   });
 
   test("mobile shell settings opens the shared settings dialog", async ({ page }) => {

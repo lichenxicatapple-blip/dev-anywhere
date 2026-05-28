@@ -107,6 +107,7 @@ type HelperTextareaSnapshot = {
   autocomplete: string | null;
   autocorrect: string | null;
   spellcheck: boolean;
+  colorScheme: string;
 };
 
 function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
@@ -117,6 +118,7 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
     autocomplete: textarea.getAttribute("autocomplete"),
     autocorrect: textarea.getAttribute("autocorrect"),
     spellcheck: textarea.spellcheck,
+    colorScheme: textarea.style.colorScheme,
   };
 
   // iPad hardware keyboards still need the helper textarea to remain a normal
@@ -126,6 +128,10 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
   textarea.setAttribute("autocomplete", "off");
   textarea.setAttribute("autocorrect", "off");
   textarea.spellcheck = false;
+  // iPadOS chooses the IME candidate palette from the focused text input.
+  // The helper textarea is invisible, so keep the system IME panel light
+  // without changing the dark terminal UI.
+  textarea.style.colorScheme = "light";
 
   return () => {
     if (previous.inputMode === null) textarea.removeAttribute("inputmode");
@@ -139,6 +145,7 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
     if (previous.autocorrect === null) textarea.removeAttribute("autocorrect");
     else textarea.setAttribute("autocorrect", previous.autocorrect);
     textarea.spellcheck = previous.spellcheck;
+    textarea.style.colorScheme = previous.colorScheme;
   };
 }
 

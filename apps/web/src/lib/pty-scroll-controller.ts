@@ -1196,7 +1196,15 @@ export function attachPtyScrollController(
         trace("pending-sync-retry-fire");
         syncContainerScroll();
       } else {
-        container.scrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
+        const currentYdisp = getYdispForScrollTop(container.scrollTop, cellH);
+        const viewportScrollTop = ydispToScrollTop(term.buffer.active.viewportY, cellH);
+        if (currentYdisp !== term.buffer.active.viewportY) {
+          container.scrollTop = viewportScrollTop;
+        } else if (Math.abs(container.scrollTop - viewportScrollTop) > 1) {
+          trace("relayout:preserve-host-offset", {
+            details: `scrollTop=${Math.round(container.scrollTop)} viewportTop=${Math.round(viewportScrollTop)} ydisp=${currentYdisp}`,
+          });
+        }
         positionHostAt(term.buffer.active.viewportY, cellH);
       }
     }

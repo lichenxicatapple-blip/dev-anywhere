@@ -390,15 +390,28 @@ code.hljs,
   line-height: 1.25;
 }
 
+.dev-mobile-settings-trigger {
+  /* 设置圆点跟品牌第一行视觉居中；断点跟打字机字号同步。 */
+  top: calc(env(safe-area-inset-top) + 0.578125rem);
+}
+
 @media (min-width: 360px) {
   .dev-mobile-brand-typewriter {
     font-size: 1.25rem;
+  }
+
+  .dev-mobile-settings-trigger {
+    top: calc(env(safe-area-inset-top) + 0.65625rem);
   }
 }
 
 @media (min-width: 420px) {
   .dev-mobile-brand-typewriter {
     font-size: 1.5rem;
+  }
+
+  .dev-mobile-settings-trigger {
+    top: calc(env(safe-area-inset-top) + 0.8125rem);
   }
 }
 

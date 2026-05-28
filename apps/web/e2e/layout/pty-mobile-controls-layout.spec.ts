@@ -2,7 +2,7 @@
 // L2 层用 mobile viewport + hasTouch 触发 controls 浮起, L4 emu 由
 // e2e/mobile/pty-mobile-controls.spec.ts 覆盖真触屏交互。
 import { expect, test } from "@playwright/test";
-import { MOBILE_VIEWPORTS } from "../mobile-helpers";
+import { MOBILE_VIEWPORTS, expectNoHorizontalDocumentOverflow } from "../mobile-helpers";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-controls-layout";
@@ -132,5 +132,77 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       "data-keyboard-layout-inset",
       "0",
     );
+  });
+});
+
+test.describe("PTY mobile controls — tablet sidebar geometry", () => {
+  test.use({ viewport: { width: 1024, height: 768 }, hasTouch: true });
+
+  test("spans the visual viewport instead of only the PTY content column", async ({ page }) => {
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-tablet-sidebar`,
+      withVisualViewportMock: true,
+    });
+    await expectPtyTerminalMounted(page);
+    await expect(page.locator('[data-slot="sidebar"]')).toBeVisible();
+
+    await page.locator('[data-slot="pty-terminal"]').click();
+    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await page.keyboard.type("abc");
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+
+    const controls = page.locator('[data-slot="pty-mobile-controls"]');
+    await expect(controls).toBeVisible();
+    await expect
+      .poll(async () => {
+        const box = await controls.boundingBox();
+        return box ? Math.round(box.width) : 0;
+      })
+      .toBe(1024);
+
+    const metrics = await page.evaluate(() => {
+      const controls = document.querySelector<HTMLElement>('[data-slot="pty-mobile-controls"]');
+      const ptyView = document.querySelector<HTMLElement>('[data-slot="chat-pty-view"]');
+      const sidebar = document.querySelector<HTMLElement>('[data-slot="sidebar"]');
+      const controlsRect = controls?.getBoundingClientRect();
+      const ptyRect = ptyView?.getBoundingClientRect();
+      const sidebarRect = sidebar?.getBoundingClientRect();
+      return {
+        viewportWidth: window.innerWidth,
+        controls: controlsRect
+          ? {
+              left: controlsRect.left,
+              right: controlsRect.right,
+              width: controlsRect.width,
+            }
+          : null,
+        ptyView: ptyRect
+          ? {
+              left: ptyRect.left,
+              right: ptyRect.right,
+              width: ptyRect.width,
+            }
+          : null,
+        sidebar: sidebarRect
+          ? {
+              left: sidebarRect.left,
+              right: sidebarRect.right,
+              width: sidebarRect.width,
+            }
+          : null,
+      };
+    });
+    expect(metrics.sidebar?.width ?? 0).toBeGreaterThan(0);
+    expect(metrics.ptyView?.left ?? 0).toBeGreaterThan(0);
+    expect(metrics.controls?.left ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
+    expect(metrics.controls?.right ?? 0).toBeGreaterThanOrEqual(metrics.viewportWidth - 1);
+    expect(metrics.controls?.width ?? 0).toBeGreaterThan(metrics.ptyView?.width ?? 0);
+    await expectNoHorizontalDocumentOverflow(page);
   });
 });

@@ -157,7 +157,7 @@ export function AppShell() {
         <Button
           variant="ghost"
           size="icon"
-          className="group fixed right-4 top-[calc(env(safe-area-inset-top)+1.125rem)] z-30 size-11 rounded-full border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground md:hidden"
+          className="dev-mobile-settings-trigger group fixed right-4 z-30 size-11 rounded-full border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground md:hidden"
           aria-label="设置"
           data-slot="mobile-settings-trigger"
           onClick={() => setSettingsOpen(true)}
