@@ -34,6 +34,9 @@ vi.mock("@/voice/pcm-stream-player", () => ({
   },
 }));
 
+const originalClipboard = navigator.clipboard;
+const originalIsSecureContext = window.isSecureContext;
+
 import { SettingsDialog } from "./settings-dialog";
 import { useAppStore } from "@/stores/app-store";
 
@@ -46,6 +49,14 @@ describe("SettingsDialog", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: originalClipboard,
+    });
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: originalIsSecureContext,
+    });
   });
   beforeEach(() => {
     localStorage.clear();
@@ -149,8 +160,41 @@ describe("SettingsDialog", () => {
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Voice Pilot用语音输入、听取回复和处理审批",
       "Relay Token未设置；用于连接需要认证的 Relay 服务器",
+      "输入法诊断记录输入事件和控件样式，用于排查 iPadOS 候选词窗",
       "版本",
     ]);
+  });
+
+  it("records IME diagnostics and copies a report from settings", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    });
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "输入法诊断" }));
+
+    expect(screen.getByRole("heading", { name: "输入法诊断" })).not.toBeNull();
+    expect(screen.getByText("对照不同输入控件，复制输入事件和样式现场。")).not.toBeNull();
+    const input = screen.getByLabelText("标准 input");
+    fireEvent.keyDown(input, { key: "，", code: "Comma" });
+    fireEvent.change(input, { target: { value: "测试，" } });
+    expect(screen.getByText(/事件 2 条/)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制报告" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const report = writeText.mock.calls[0]?.[0] as string;
+    expect(report).toContain("DEV Anywhere IME diagnostics");
+    expect(report).toContain('"eventType": "keydown"');
+    expect(report).toContain('"eventType": "react-change"');
+    expect(report).toContain('"value": "测试，"');
+    expect(screen.getByText("已复制诊断报告")).not.toBeNull();
   });
 
   it("persists desktop interaction mode from global settings", () => {

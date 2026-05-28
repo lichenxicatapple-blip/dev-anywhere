@@ -335,7 +335,6 @@ describe("attachXtermRawInput", () => {
 
   it("marks the helper textarea as hardware-keyboard oriented without disabling text input context", () => {
     const { terminal, textarea } = createTerminal();
-    textarea.style.colorScheme = "dark";
 
     const disposable = attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
 
@@ -345,10 +344,9 @@ describe("attachXtermRawInput", () => {
     expect(textarea.getAttribute("autocomplete")).toBe("off");
     expect(textarea.getAttribute("autocorrect")).toBe("off");
     expect(textarea.spellcheck).toBe(false);
-    expect(textarea.style.colorScheme).toBe("light");
 
     disposable.dispose();
-    expect(textarea.style.colorScheme).toBe("dark");
+    expect(textarea.getAttribute("enterkeyhint")).toBeNull();
   });
 
   it("preserves a pre-existing helper textarea input mode in physical keyboard mode", () => {
