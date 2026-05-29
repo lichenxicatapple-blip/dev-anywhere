@@ -154,7 +154,7 @@ describe("Hosted PTY registry", () => {
         codexBin,
         [
           "-c",
-          'tui.theme="OneHalfLight"',
+          'theme="light"',
           "--dangerously-bypass-approvals-and-sandbox",
           "resume",
           "codex-session",

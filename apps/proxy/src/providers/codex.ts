@@ -26,8 +26,8 @@ function withCodexTerminalPermissionArgs(args: string[], permissionMode?: string
 }
 
 function codexThemeArgs(terminalTheme?: ProviderTerminalOptions["terminalTheme"]): string[] {
-  if (terminalTheme === "light") return ["-c", 'tui.theme="OneHalfLight"'];
-  if (terminalTheme === "dark") return ["-c", 'tui.theme="OneHalfDark"'];
+  if (terminalTheme === "light") return ["-c", 'theme="light"'];
+  if (terminalTheme === "dark") return ["-c", 'theme="dark"'];
   return [];
 }
 
