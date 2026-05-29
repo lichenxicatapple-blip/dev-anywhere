@@ -722,6 +722,30 @@ test.describe("mobile UX contract", () => {
       )
       .toBe("rgb(246, 247, 248)");
   });
+
+  test("pty IME composition overlay follows the light app theme", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_theme", "light");
+    });
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+    await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await expect(page.locator('[data-slot="pty-host"] .composition-view')).toHaveCount(1);
+
+    const colors = await page
+      .locator('[data-slot="pty-host"] .composition-view')
+      .evaluate((node) => {
+        node.classList.add("active");
+        node.textContent = "pinyin";
+        const style = getComputedStyle(node);
+        return {
+          background: style.backgroundColor,
+          color: style.color,
+        };
+      });
+
+    expect(colors.background).toBe("rgb(246, 247, 248)");
+    expect(colors.color).toBe("rgb(31, 35, 40)");
+  });
 });
 
 async function listIsPinnedToBottom(list: Locator): Promise<boolean> {

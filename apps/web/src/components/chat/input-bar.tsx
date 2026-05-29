@@ -453,6 +453,10 @@ export function InputBar({ sessionId }: InputBarProps) {
             onPaste={handlePaste}
             onKeyDown={onKeyDown}
             enterKeyHint={submitOnPlainEnter ? "send" : "enter"}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder={placeholder}
             className="flex-1 resize-none rounded-none border-0 bg-transparent font-normal shadow-none max-h-60 min-h-11 focus-visible:border-0 focus-visible:ring-0 md:min-h-0 dark:bg-transparent"
             style={{ fontSize: effectiveChatContentFontSize }}

@@ -798,6 +798,14 @@ code.hljs,
   display: none !important;
 }
 
+/* xterm 默认把 IME 组合输入浮层写死成黑底白字；浅色 PTY 下会把正在输入
+   的拼音/文本盖成一条黑块。这里让 composition view 跟随应用主题。 */
+[data-slot="pty-terminal"] .composition-view {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent);
+}
+
 /* 前庭敏感/系统降级偏好: 统一关停循环动画与过渡, 保留即时状态切换 */
 @media (prefers-reduced-motion: reduce) {
   *,
