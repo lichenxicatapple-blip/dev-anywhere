@@ -140,6 +140,56 @@ body {
   font-family: var(--font-sans);
 }
 
+.dev-pty-mobile-controls {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--popover) 96%, transparent);
+  color: var(--popover-foreground);
+  box-shadow: 0 -10px 24px color-mix(in srgb, var(--foreground) 12%, transparent);
+  backdrop-filter: saturate(1.2) blur(10px);
+}
+
+.dev-pty-mobile-key {
+  color: var(--muted-foreground);
+}
+
+.dev-pty-mobile-key:active {
+  color: var(--foreground);
+}
+
+.dev-pty-mobile-key-pill {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.dev-pty-mobile-key-pill-default {
+  border-color: var(--input);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.dev-pty-mobile-key-pill-guarded {
+  border-color: color-mix(in srgb, var(--color-status-warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--color-status-warning) 12%, var(--background));
+  color: var(--color-status-warning);
+}
+
+.dev-pty-mobile-key-pill-arrow {
+  border-color: color-mix(in srgb, var(--color-status-working) 30%, var(--border));
+  background: color-mix(in srgb, var(--color-status-working) 10%, var(--background));
+  color: color-mix(in srgb, var(--color-status-working) 78%, var(--foreground));
+}
+
+.dev-pty-mobile-key-pill-paste {
+  border-color: color-mix(in srgb, var(--color-status-success) 32%, var(--border));
+  background: color-mix(in srgb, var(--color-status-success) 10%, var(--background));
+  color: color-mix(in srgb, var(--color-status-success) 78%, var(--foreground));
+}
+
+.dev-pty-mobile-key-pill-enter {
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, var(--background));
+  color: color-mix(in srgb, var(--primary) 84%, var(--foreground));
+}
+
 @media (min-width: 768px) {
   [data-slot="app-shell"][data-standalone-display="true"] {
     /* iPad Home Screen PWA: dynamic viewport can exclude the bottom safe-area canvas. */

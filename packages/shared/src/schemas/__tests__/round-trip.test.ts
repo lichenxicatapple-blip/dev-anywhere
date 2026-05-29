@@ -82,8 +82,9 @@ describe("RelayControlSchema round-trip stability", () => {
       cwd: "/home/u/proj",
       name: "Release checklist",
       provider: "claude",
-      mode: "json",
+      mode: "pty",
       resumeSessionId: "sess-prev",
+      terminalTheme: "light",
       permissionMode: "default",
     };
     const a = RelayControlSchema.parse(original);

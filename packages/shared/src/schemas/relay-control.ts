@@ -497,6 +497,7 @@ const relayControlDefinitions = [
       provider: z.enum(providerValues),
       mode: z.enum(sessionModeValues).optional(),
       resumeSessionId: z.string().optional(),
+      terminalTheme: z.enum(["light", "dark"]).optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
       permissionMode: z
         .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])

@@ -77,6 +77,7 @@ describe("Hosted PTY registry", () => {
       TERM: "dumb",
       NO_COLOR: "1",
       CLICOLOR: "0",
+      COLORFGBG: "15;0",
       COLORTERM: "ignored",
       KEEP_ME: "yes",
       UNDEFINED_VALUE: undefined,
@@ -90,6 +91,12 @@ describe("Hosted PTY registry", () => {
     });
     expect(env).not.toHaveProperty("NO_COLOR");
     expect(env).not.toHaveProperty("UNDEFINED_VALUE");
+    expect(env).not.toHaveProperty("COLORFGBG");
+  });
+
+  it("sets COLORFGBG from the browser terminal theme instead of inheriting the host shell", () => {
+    expect(normalizeHostedPtyEnv({ COLORFGBG: "15;0" }, "light").COLORFGBG).toBe("0;15");
+    expect(normalizeHostedPtyEnv({ COLORFGBG: "0;15" }, "dark").COLORFGBG).toBe("15;0");
   });
 
   it("spawns Claude PTY with the requested permission mode", () => {
@@ -131,6 +138,7 @@ describe("Hosted PTY registry", () => {
         cwd: "/tmp/project",
         args: ["resume", "codex-session"],
         permissionMode: "bypassPermissions",
+        terminalTheme: "light",
         hook: {
           provider: "codex",
           sessionId: "s1",
@@ -145,7 +153,10 @@ describe("Hosted PTY registry", () => {
       expect(ptySpawnMock).toHaveBeenCalledWith(
         codexBin,
         ["--dangerously-bypass-approvals-and-sandbox", "resume", "codex-session"],
-        expect.objectContaining({ cwd: "/tmp/project" }),
+        expect.objectContaining({
+          cwd: "/tmp/project",
+          env: expect.objectContaining({ COLORFGBG: "0;15" }),
+        }),
       );
     });
   });

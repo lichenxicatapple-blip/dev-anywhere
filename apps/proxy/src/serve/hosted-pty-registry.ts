@@ -40,6 +40,7 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
 
 const HOSTED_PTY_TERM = "xterm-256color";
 const HOSTED_PTY_COLORTERM = "truecolor";
+type HostedPtyTerminalTheme = "light" | "dark";
 
 interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
@@ -58,6 +59,7 @@ interface HostedPtyStartOptions {
   cwd: string;
   args: string[];
   permissionMode?: string;
+  terminalTheme?: HostedPtyTerminalTheme;
   hook: ProviderHookContext;
   cols?: number;
   rows?: number;
@@ -80,7 +82,10 @@ export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: strin
   return provider === "codex" ? ["resume", resumeSessionId] : ["--resume", resumeSessionId];
 }
 
-export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+export function normalizeHostedPtyEnv(
+  env: NodeJS.ProcessEnv,
+  terminalTheme?: HostedPtyTerminalTheme,
+): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
@@ -95,6 +100,13 @@ export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, st
   normalized.TERM = HOSTED_PTY_TERM;
   normalized.COLORTERM = HOSTED_PTY_COLORTERM;
   normalized.CLICOLOR = "1";
+  if (terminalTheme === "light") {
+    normalized.COLORFGBG = "0;15";
+  } else if (terminalTheme === "dark") {
+    normalized.COLORFGBG = "15;0";
+  } else {
+    delete normalized.COLORFGBG;
+  }
   return normalized;
 }
 
@@ -111,7 +123,7 @@ export class HostedPtyRegistry {
       { args: options.args, permissionMode: options.permissionMode, hook: options.hook },
       this.deps.getProviderEnv(),
     );
-    const env = normalizeHostedPtyEnv(command.env);
+    const env = normalizeHostedPtyEnv(command.env, options.terminalTheme);
     const child = pty.spawn(command.command, command.args, {
       name: HOSTED_PTY_TERM,
       cols,

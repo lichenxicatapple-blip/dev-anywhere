@@ -7,6 +7,13 @@ import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pty-controls-layout";
 
+function averageRgbChannel(color: string): number {
+  const channels = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+  if (channels.length < 3) return 0;
+  const normalized = Math.max(...channels) <= 1 ? channels.map((value) => value * 255) : channels;
+  return normalized.reduce((sum, value) => sum + value, 0) / normalized.length;
+}
+
 test.describe("PTY mobile controls — 2-row layout geometry", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
@@ -97,6 +104,55 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       // 控制条可见时 BTB 类应含 7rem 偏移 (同步 use-pty-view containerPaddingBottom = 112px)
       expect(className ?? "").toContain("7rem");
     }
+  });
+
+  test("uses light theme tokens instead of hard-coded dark controls", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_theme", "light");
+    });
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-light-theme`,
+      withVisualViewportMock: true,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await page.locator('[data-slot="pty-terminal"]').click();
+    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await page.keyboard.type("abc");
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+
+    const controls = page.locator('[data-slot="pty-mobile-controls"]');
+    await expect(controls).toBeVisible();
+
+    const colors = await page.evaluate(() => {
+      const controlRoot = document.querySelector<HTMLElement>('[data-slot="pty-mobile-controls"]');
+      const defaultKey = document.querySelector<HTMLElement>(
+        '[data-slot="pty-mobile-key-tab"] .dev-pty-mobile-key-pill',
+      );
+      const pasteKey = document.querySelector<HTMLElement>(
+        '[data-slot="pty-mobile-key-paste"] .dev-pty-mobile-key-pill',
+      );
+      const enterKey = document.querySelector<HTMLElement>(
+        '[data-slot="pty-mobile-key-enter"] .dev-pty-mobile-key-pill',
+      );
+      return {
+        controlRoot: controlRoot ? getComputedStyle(controlRoot).backgroundColor : "",
+        defaultKey: defaultKey ? getComputedStyle(defaultKey).backgroundColor : "",
+        pasteKey: pasteKey ? getComputedStyle(pasteKey).backgroundColor : "",
+        enterKey: enterKey ? getComputedStyle(enterKey).backgroundColor : "",
+      };
+    });
+
+    expect(averageRgbChannel(colors.controlRoot)).toBeGreaterThan(220);
+    expect(averageRgbChannel(colors.defaultKey)).toBeGreaterThan(220);
+    expect(averageRgbChannel(colors.pasteKey)).toBeGreaterThan(210);
+    expect(averageRgbChannel(colors.enterKey)).toBeGreaterThan(210);
   });
 
   test("global desktop interaction setting suppresses mobile controls and keyboard layout inset", async ({

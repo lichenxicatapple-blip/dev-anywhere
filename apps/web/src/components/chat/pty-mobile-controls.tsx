@@ -40,7 +40,7 @@ export function PtyMobileControls({
 }: PtyMobileControlsProps) {
   return (
     <div
-      className="fixed inset-x-0 z-40 flex items-stretch gap-1 border-t border-[#343434] bg-[#202020]/[0.98] px-1 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)] shadow-[0_-10px_24px_rgba(0,0,0,0.35)]"
+      className="dev-pty-mobile-controls fixed inset-x-0 z-40 flex items-stretch gap-1 border-t px-1 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)]"
       style={{ bottom: bottomInset }}
       data-slot="pty-mobile-controls"
       aria-label="终端移动端控制"
@@ -130,26 +130,26 @@ export function PtyMobileControls({
       <div className="grid w-[4.375rem] shrink-0 grid-rows-2 gap-1">
         <button
           type="button"
-          className="inline-flex h-11 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
+          className={KEY_BUTTON_OUTER_CLASS}
           aria-label="粘贴剪贴板"
           data-slot="pty-mobile-key-paste"
           onPointerDown={(event) => event.preventDefault()}
           onClick={onPaste}
         >
-          <span className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border border-[#4B5F54] bg-[#1F3028] px-1.5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+          <span className="dev-pty-mobile-key-pill dev-pty-mobile-key-pill-paste inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border px-1.5 text-xs">
             <ClipboardPaste aria-hidden="true" className="size-3.5" />
             <span>粘贴</span>
           </span>
         </button>
         <button
           type="button"
-          className="inline-flex h-11 items-center justify-center rounded-[6px] text-sm text-[#F1E0CB] transition-colors active:text-white"
+          className={KEY_BUTTON_OUTER_CLASS}
           aria-label="回车"
           data-slot="pty-mobile-key-enter"
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => onInput("\r")}
         >
-          <span className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border border-[#7A6046] bg-[#5A452E] px-1.5 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <span className="dev-pty-mobile-key-pill dev-pty-mobile-key-pill-enter inline-flex h-9 w-full items-center justify-center gap-1 rounded-[6px] border px-1.5 text-xs">
             <CornerDownLeft aria-hidden="true" className="size-3.5" />
             <span>回车</span>
           </span>
@@ -160,14 +160,14 @@ export function PtyMobileControls({
 }
 
 const KEY_BUTTON_OUTER_CLASS =
-  "inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] text-[#D8D8D8] transition-colors active:text-white";
+  "dev-pty-mobile-key inline-flex h-11 min-w-0 items-center justify-center rounded-[6px] transition-colors";
 
 const KEY_PILL_BASE_CLASS =
-  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
-const KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} border-[#3A3A3A] bg-[#1A1A1A]`;
-const GUARDED_KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} border-[#5A452E] bg-[#2B231B] text-[#D6A76B]`;
+  "dev-pty-mobile-key-pill inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono";
+const KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} dev-pty-mobile-key-pill-default`;
+const GUARDED_KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} dev-pty-mobile-key-pill-guarded`;
 const ARROW_KEY_PILL_CLASS =
-  "inline-flex h-9 w-full items-center justify-center rounded-[6px] border border-[#465A72] bg-[#202A34] px-1 text-xs font-mono text-[#DDEBFF] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]";
+  "dev-pty-mobile-key-pill dev-pty-mobile-key-pill-arrow inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono";
 
 interface SinglePressKeyProps {
   label: string;

@@ -29,6 +29,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useAppStore } from "@/stores/app-store";
+import { resolveXtermThemeName } from "@/lib/xterm-theme";
 
 interface CreateSessionDialogProps {
   open: boolean;
@@ -109,7 +111,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const navigate = useNavigate();
   const homePath = useFileStore((s) => s.homePath);
   const agentCli = useFileStore((s) => s.agentCli);
+  const themePreference = useAppStore((s) => s.themePreference);
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const systemPrefersDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const terminalTheme = resolveXtermThemeName(themePreference, systemPrefersDark);
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -213,6 +218,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           name: submittedName || undefined,
           mode,
           provider,
+          ...(mode === "pty" ? { terminalTheme } : {}),
           permissionMode,
         },
         SESSION_CREATE_TIMEOUT_MS,
