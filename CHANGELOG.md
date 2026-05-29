@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.60] - 2026-05-29
+
+### 修复
+
+- 撤销 PTY 内容跟随应用浅色模式渲染的方案：PTY 视图恢复固定终端深色默认外观，避免 Codex / Claude Code 原生 TUI 与 Web 终端主题不一致时出现输入区深浅错乱。
+- 新建或恢复 PTY 会话时不再向 provider 传递浏览器主题，也不再通过协议字段覆盖 Codex / Claude Code 的原生主题设置。
+- 删除浅色 xterm 主题分支和相关 IME / viewport 样式补丁，减少 PTY 主题链路上的临时兼容代码。
+
+### 测试
+
+- 更新 provider、hosted PTY、会话创建、xterm 主题和移动布局回归测试，并跑通 web / proxy / shared 单测、类型检查和构建。
+
 ## [0.4.59] - 2026-05-29
 
 ### 修复

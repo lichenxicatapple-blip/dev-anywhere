@@ -184,7 +184,7 @@ describe("CreateSessionDialog", () => {
     });
   });
 
-  it("passes the resolved terminal theme when creating a PTY session", async () => {
+  it("creates a PTY session without overriding the provider terminal theme", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       sessionId: "claude-pty-1",
@@ -204,13 +204,13 @@ describe("CreateSessionDialog", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith(
-        expect.objectContaining({
+        {
           cwd: "/home/dev",
+          name: undefined,
           mode: "pty",
           provider: "claude",
-          terminalTheme: "light",
           permissionMode: "default",
-        }),
+        },
         expect.any(Number),
       );
     });

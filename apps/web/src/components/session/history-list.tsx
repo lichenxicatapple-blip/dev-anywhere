@@ -26,11 +26,9 @@ import {
 } from "@/components/ui/sheet";
 import { useSessionStore } from "@/stores/session-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import { formatSessionName } from "@/lib/format-session-name";
-import { resolveXtermThemeName } from "@/lib/xterm-theme";
 import {
   compareProvider,
   historySessionProvider,
@@ -58,9 +56,6 @@ export function HistoryList({ now }: HistoryListProps) {
   const [sectionExpanded, setSectionExpanded] = useState(false);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<SessionProvider>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const themePreference = useAppStore((s) => s.themePreference);
-  const systemPrefersDark = useMediaQuery("(prefers-color-scheme: dark)");
-  const terminalTheme = resolveXtermThemeName(themePreference, systemPrefersDark);
   const navigate = useNavigate();
 
   const providerGroups = useMemo(() => {
@@ -118,7 +113,6 @@ export function HistoryList({ now }: HistoryListProps) {
         mode,
         provider,
         resumeSessionId: h.id,
-        ...(mode === "pty" ? { terminalTheme } : {}),
         ...(mode === "pty" && permissionMode ? { permissionMode } : {}),
       });
       if (ctrl.error || !ctrl.sessionId) {

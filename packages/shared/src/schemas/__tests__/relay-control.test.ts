@@ -799,14 +799,12 @@ describe("RelayControlSchema", () => {
       cwd: "/tmp/project",
       provider: "claude",
       mode: "pty",
-      terminalTheme: "dark",
       permissionMode: "default",
     });
     expect(result.type).toBe("session_create");
     if (result.type === "session_create") {
       expect(result.provider).toBe("claude");
       expect(result.mode).toBe("pty");
-      expect(result.terminalTheme).toBe("dark");
     }
 
     expect(() =>

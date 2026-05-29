@@ -84,7 +84,6 @@ describe("RelayControlSchema round-trip stability", () => {
       provider: "claude",
       mode: "pty",
       resumeSessionId: "sess-prev",
-      terminalTheme: "light",
       permissionMode: "default",
     };
     const a = RelayControlSchema.parse(original);

@@ -397,7 +397,6 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       mode: "pty",
       permissionMode: "bypassPermissions",
-      terminalTheme: "light",
     });
 
     expect(hostedStart).toHaveBeenCalledTimes(1);
@@ -405,7 +404,6 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       cwd: "/tmp",
       permissionMode: "bypassPermissions",
-      terminalTheme: "light",
     });
   });
 

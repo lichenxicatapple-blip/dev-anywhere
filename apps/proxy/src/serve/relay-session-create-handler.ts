@@ -246,7 +246,6 @@ export class RelaySessionCreateHandler {
         cwd,
         args: buildHostedPtyArgs(provider, resumeSessionId),
         permissionMode,
-        terminalTheme: msg.terminalTheme,
         hook,
       });
       const session = this.deps.sessionManager.createSession(

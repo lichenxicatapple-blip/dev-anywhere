@@ -8,7 +8,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { DEFAULT_TERMINAL_FONT_SIZE } from "@/lib/chat-font-size";
-import { getXtermTheme, type XtermThemeName } from "@/lib/xterm-theme";
+import { xtermDarkTheme } from "@/lib/xterm-theme";
 import { getPtyDebug, type PtyRendererKind } from "@/lib/pty-render-debug";
 
 interface CreateXtermResult {
@@ -26,7 +26,6 @@ interface CreateXtermResult {
 
 interface CreateXtermOptions {
   fontSize?: number;
-  themeName?: XtermThemeName;
 }
 
 // 提到独立纯函数让单测可以直接断言关键 option 不被无意改回——尤其是
@@ -44,7 +43,7 @@ export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITe
     // 不显示更安全。
     cursorInactiveStyle: "none",
     disableStdin: false,
-    theme: getXtermTheme(options.themeName ?? "dark"),
+    theme: xtermDarkTheme,
     allowProposedApi: true,
   };
 }
