@@ -33,6 +33,7 @@ export interface ProviderTerminalOptions {
   readonly args: string[];
   readonly permissionMode?: string;
   readonly hook?: ProviderHookContext;
+  readonly terminalTheme?: "light" | "dark";
 }
 
 export interface ProviderAdapter {

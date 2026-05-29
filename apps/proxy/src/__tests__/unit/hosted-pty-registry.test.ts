@@ -152,7 +152,13 @@ describe("Hosted PTY registry", () => {
       expect(pid).toBe(2468);
       expect(ptySpawnMock).toHaveBeenCalledWith(
         codexBin,
-        ["--dangerously-bypass-approvals-and-sandbox", "resume", "codex-session"],
+        [
+          "-c",
+          'tui.theme="OneHalfLight"',
+          "--dangerously-bypass-approvals-and-sandbox",
+          "resume",
+          "codex-session",
+        ],
         expect.objectContaining({
           cwd: "/tmp/project",
           env: expect.objectContaining({ COLORFGBG: "0;15" }),

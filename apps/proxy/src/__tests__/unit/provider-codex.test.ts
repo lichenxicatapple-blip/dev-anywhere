@@ -84,6 +84,22 @@ describe("Codex provider", () => {
     });
   });
 
+  it("maps the browser terminal theme to Codex TUI theme overrides", () => {
+    withExecutable("codex", (codexBin) => {
+      const light = CODEX_PROVIDER.buildTerminalCommand(
+        { args: ["resume", "codex-session"], terminalTheme: "light" },
+        { CODEX_BIN: codexBin },
+      );
+      expect(light.args).toEqual(["-c", 'tui.theme="OneHalfLight"', "resume", "codex-session"]);
+
+      const dark = CODEX_PROVIDER.buildTerminalCommand(
+        { args: ["resume", "codex-session"], terminalTheme: "dark" },
+        { CODEX_BIN: codexBin },
+      );
+      expect(dark.args).toEqual(["-c", 'tui.theme="OneHalfDark"', "resume", "codex-session"]);
+    });
+  });
+
   it("keeps Codex approval flags before provider args", () => {
     const hook = {
       provider: "codex" as const,

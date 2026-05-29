@@ -120,7 +120,12 @@ export class HostedPtyRegistry {
     const cols = options.cols ?? DEFAULT_COLS;
     const rows = options.rows ?? DEFAULT_ROWS;
     const command = provider.buildTerminalCommand(
-      { args: options.args, permissionMode: options.permissionMode, hook: options.hook },
+      {
+        args: options.args,
+        permissionMode: options.permissionMode,
+        hook: options.hook,
+        terminalTheme: options.terminalTheme,
+      },
       this.deps.getProviderEnv(),
     );
     const env = normalizeHostedPtyEnv(command.env, options.terminalTheme);

@@ -25,6 +25,19 @@ function withCodexTerminalPermissionArgs(args: string[], permissionMode?: string
   return [...codexApprovalArgs(permissionMode), ...args];
 }
 
+function codexThemeArgs(terminalTheme?: ProviderTerminalOptions["terminalTheme"]): string[] {
+  if (terminalTheme === "light") return ["-c", 'tui.theme="OneHalfLight"'];
+  if (terminalTheme === "dark") return ["-c", 'tui.theme="OneHalfDark"'];
+  return [];
+}
+
+function withCodexTerminalThemeArgs(
+  args: string[],
+  terminalTheme?: ProviderTerminalOptions["terminalTheme"],
+): string[] {
+  return [...codexThemeArgs(terminalTheme), ...args];
+}
+
 export function resolveCodexCommand(env: NodeJS.ProcessEnv): string {
   return resolveExecutable(
     "codex",
@@ -51,7 +64,10 @@ export const CODEX_PROVIDER: ProviderAdapter = {
     };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
-    const args = withCodexTerminalPermissionArgs(options.args, options.permissionMode);
+    const args = withCodexTerminalThemeArgs(
+      withCodexTerminalPermissionArgs(options.args, options.permissionMode),
+      options.terminalTheme,
+    );
     return {
       command: resolveCodexCommand(env),
       args,

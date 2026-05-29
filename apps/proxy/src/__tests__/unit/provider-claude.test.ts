@@ -197,6 +197,31 @@ describe("Claude provider", () => {
     });
   });
 
+  it("maps the browser terminal theme to Claude TUI settings", () => {
+    const hook = {
+      provider: "claude" as const,
+      sessionId: "s1",
+      hookUrl: "http://127.0.0.1:17654/hook",
+      marker: "marker-1",
+      token: "token-1",
+    };
+
+    withExecutable("claude", (claudeBin) => {
+      const command = CLAUDE_PROVIDER.buildTerminalCommand(
+        { args: ["--continue"], hook, terminalTheme: "light" },
+        { CLAUDE_BIN: claudeBin },
+      );
+      const settings = JSON.parse(command.args[command.args.indexOf("--settings") + 1]) as {
+        theme: string;
+        hooks: Record<string, unknown[]>;
+      };
+
+      expect(settings.theme).toBe("light");
+      expect(Array.isArray(settings.hooks.PreToolUse)).toBe(true);
+      expect(settings.hooks.PermissionRequest).toBeUndefined();
+    });
+  });
+
   it("builds Claude hook settings without global config paths", () => {
     const settings = buildClaudeHookSettings();
 

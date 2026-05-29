@@ -116,8 +116,14 @@ function buildHookForwardCommand(event: string): string {
 
 export function buildClaudeHookSettings(options?: {
   includePermissionRequest?: boolean;
+  terminalTheme?: ProviderTerminalOptions["terminalTheme"];
 }): Record<string, unknown> {
   const includePermissionRequest = options?.includePermissionRequest ?? true;
+  const settings: Record<string, unknown> = {};
+  if (options?.terminalTheme) {
+    settings.theme = options.terminalTheme;
+  }
+
   const hooks: Record<string, unknown[]> = {};
   for (const event of CLAUDE_HOOK_EVENTS) {
     if (event === "PermissionRequest" && !includePermissionRequest) continue;
@@ -134,7 +140,7 @@ export function buildClaudeHookSettings(options?: {
       },
     ];
   }
-  return { hooks };
+  return { ...settings, hooks };
 }
 
 function withClaudeHookArgs(args: string[], context: ProviderHookContext | undefined): string[] {
@@ -145,12 +151,18 @@ function withClaudeHookArgs(args: string[], context: ProviderHookContext | undef
 function withClaudeTerminalHookArgs(
   args: string[],
   context: ProviderHookContext | undefined,
+  terminalTheme?: ProviderTerminalOptions["terminalTheme"],
 ): string[] {
-  if (!context) return args;
+  if (!context && !terminalTheme) return args;
   return [
     ...args,
     "--settings",
-    JSON.stringify(buildClaudeHookSettings({ includePermissionRequest: false })),
+    JSON.stringify(
+      buildClaudeHookSettings({
+        includePermissionRequest: false,
+        terminalTheme,
+      }),
+    ),
   ];
 }
 
@@ -205,7 +217,7 @@ export const CLAUDE_PROVIDER: ProviderAdapter = {
     const args = withClaudeTerminalPermissionArgs(options.args, options.permissionMode);
     return {
       command: resolveClaudePtyCommand(env),
-      args: withClaudeTerminalHookArgs(args, options.hook),
+      args: withClaudeTerminalHookArgs(args, options.hook, options.terminalTheme),
       env: withClaudeHookEnv(env, options.hook),
     };
   },
