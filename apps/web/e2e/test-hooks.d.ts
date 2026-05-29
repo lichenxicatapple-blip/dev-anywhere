@@ -84,13 +84,9 @@ interface DevAnywherePtyDebugSnapshot {
   pendingContainerSyncRetry: boolean;
 }
 
-interface DevAnywherePtyRenderDebugApi {
-  forceRedraw: () => number;
-  setRenderer: (kind: "webgl" | "dom") => void;
-  getRenderer: () => "webgl" | "dom";
+interface DevAnywherePtyDebugToolsApi {
   isTraceEnabled: () => boolean;
   setTrace: (enabled: boolean) => void;
-  dumpState: () => void;
   listTerminals: () => string[];
 }
 
@@ -100,7 +96,7 @@ declare global {
     __ccTestPtyTerminals?: Map<string, Terminal>;
     __ccTestPtyLinkProviders?: Map<string, ILinkProvider>;
     __devAnywherePtyDebug?: () => DevAnywherePtyDebugSnapshot | null;
-    __devAnywherePtyRenderDebug?: DevAnywherePtyRenderDebugApi;
+    __devAnywherePtyDebugTools?: DevAnywherePtyDebugToolsApi;
     __ptySmoke: {
       sent: string[];
       socket: {

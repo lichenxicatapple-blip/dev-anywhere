@@ -46,12 +46,7 @@ import {
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
 import { buildPtyScrollDebugSnapshot } from "@/lib/pty-scroll-debug-snapshot";
-import { getPtyDebug } from "@/lib/pty-render-debug";
-import {
-  clearRenderModel,
-  diffModelAgainstBuffer,
-  probeWebglRenderModel,
-} from "@/lib/pty-render-state-probe";
+import { getPtyDebugTools } from "@/lib/pty-debug-tools";
 import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import { registerPtyLinkProvider, registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { useImagePreview } from "./image-preview";
@@ -518,9 +513,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
 
-    let getWebglAddon: (() => Parameters<typeof probeWebglRenderModel>[0] | null) | null = null;
-    let resetWebglPaint: (() => boolean) | null = null;
-
     const termCtrl = attachPtyTerminalController({
       host,
       sessionId,
@@ -535,9 +527,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,
         });
-        // 暴露给后续 onTerminalReady 注册 dumpRenderDiff——靠形状探测拿 model.cells。
-        getWebglAddon = () => result.getWebglAddon();
-        resetWebglPaint = () => result.resetWebglPaint();
         return result;
       },
       attachRawInput: (term, rawSessionId, rawOptions) =>
@@ -567,24 +556,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
-        ptyDebugDeregister = getPtyDebug().registerTerminal(sessionId, {
-          dumpRenderDiff: () => {
-            const addon = getWebglAddon?.();
-            if (!addon) return null;
-            const probed = probeWebglRenderModel(addon, xterm.cols, xterm.rows);
-            if (!probed) return null;
-            return diffModelAgainstBuffer(xterm, probed);
-          },
-          clearRenderModel: () => {
-            const addon = getWebglAddon?.();
-            if (!addon) return false;
-            const probed = probeWebglRenderModel(addon, xterm.cols, xterm.rows);
-            if (!probed) return false;
-            clearRenderModel(probed);
-            xterm.refresh(0, xterm.rows - 1);
-            return true;
-          },
-          resetWebglPaint: () => resetWebglPaint?.() ?? false,
+        ptyDebugDeregister = getPtyDebugTools().registerTerminal(sessionId, {
           getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
         });
 
@@ -738,8 +710,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       unregisterPtyTerminalWindowAccessor();
       termCtrl.dispose();
       terminalRef.current = null;
-      resetWebglPaint = null;
-      getWebglAddon = null;
       scrollControllerRef.current = null;
       terminalControllerRef.current = null;
     };

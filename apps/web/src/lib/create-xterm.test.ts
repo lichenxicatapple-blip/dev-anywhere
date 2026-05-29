@@ -28,8 +28,8 @@ describe("buildXtermTerminalOptions", () => {
 
 describe("createXtermTerminal font invalidation", () => {
   // Sarasa Fixed SC 是 cn-font-split 切片字体,按 unicode-range 懒加载: shard 直到对应字符
-  // 第一次出现才被 fetch。document.fonts.ready 此时已 resolve, WebGL atlas 用 fallback 锁了
-  // 错的 glyph 纹理 (• 带黄底 / claude-code 状态字符 □□)。要在每批新字体落定后重置 atlas。
+  // 第一次出现才被 fetch。document.fonts.ready 此时已 resolve,后续新 shard 落定后需要
+  // 主动 refresh,避免 xterm 继续显示 fallback glyph。
   it("subscribes to font and page lifecycle events and unsubscribes on dispose", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -75,16 +75,12 @@ describe("createXtermTerminal font invalidation", () => {
       expect(pageShowListeners.length).toBeGreaterThanOrEqual(1);
       const focusListeners = windowAdd.mock.calls.filter((args) => args[0] === "focus");
       expect(focusListeners.length).toBeGreaterThanOrEqual(1);
-      // jsdom 没有 WebGL context,这里会走 DOM fallback。手动 reset 应该安全 no-op。
-      expect(result.resetWebglPaint()).toBe(false);
-
       result.dispose();
 
       const removedListeners = removeEventListener.mock.calls.filter(
         (args) => args[0] === "loadingdone",
       );
-      // 同一个 listener 函数引用必须被解绑, 避免 dispose 后 leak + 后续 clearTextureAtlas
-      // 在已 dispose 的 webglAddon 上误触发。
+      // 同一个 listener 函数引用必须被解绑，避免 dispose 后 leak。
       expect(removedListeners.length).toBe(1);
       expect(removedListeners[0][1]).toBe(addedListeners[0][1]);
       expect(

@@ -220,7 +220,7 @@ describe("attachPtyTerminalController", () => {
   it("calls onError and avoids partial wiring when createTerminal rejects", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const h = createHarness();
-    const failure = new Error("WebGL context init failed");
+    const failure = new Error("xterm init failed");
     const createTerminal = vi.fn(async () => {
       throw failure;
     });

@@ -1,4 +1,4 @@
-// 真 Android Chrome: PTY 是 xterm canvas/WebGL, 不能依赖浏览器原生 DOM 文本选择。
+// 真 Android Chrome: PTY 是 xterm 渲染层,不能依赖浏览器原生 DOM 文本选择。
 // 移动端长按应走 DEV Anywhere 自己的 xterm buffer 选区, 支持拖拽范围和边缘自动滚动。
 import type { Page } from "@playwright/test";
 import { execFile } from "node:child_process";

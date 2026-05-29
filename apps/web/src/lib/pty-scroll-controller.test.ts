@@ -2709,7 +2709,7 @@ describe("attachPtyScrollController", () => {
   });
 
   it("recovers host position after a transient cellH=0 measurement window", () => {
-    // 移动端 production blank-render 候选成因之一: WebGL canvas 在某帧 measure 不到尺寸
+    // 移动端 production blank-render 候选成因之一: xterm screen 在某帧 measure 不到尺寸
     // (xterm-screen 暂时 0 高 / 还没 attach), getDims 返回 cellH=0。这帧用户若发生滚动,
     // syncContainerScroll 早返回不动 host, host.style.top 卡在上一次有效值上, viewportY
     // 也没跟着 scrollTop 走。下一次 cellH 恢复到正常 (onRender / relayout 收到通知) 时
@@ -2734,14 +2734,14 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     expect(host.style.top).toBe("200px");
 
-    // 模拟"canvas 不可测"的瞬间: xterm-screen clientHeight 跌成 0 → cellH=0
+    // 模拟"xterm screen 不可测"的瞬间: xterm-screen clientHeight 跌成 0 → cellH=0
     defineSize(screen, { clientHeight: 0, clientWidth: 0 });
     container.scrollTop = 600;
     container.dispatchEvent(new Event("scroll"));
     // 此时 syncContainerScroll 早返回, host.top 滞留在 stale 值 (=200px) ——这是 bug 的种子。
     expect(host.style.top).toBe("200px");
 
-    // 测量恢复到正常 (canvas 完成首次绘制 / WebGL context 恢复)。
+    // 测量恢复到正常。
     // onRender / relayout 触发时, controller 必须自检"用户 scrollTop 与 host 是否对得上",
     // 不一致就补一遍 syncContainerScroll, 让 host 跳到 600 对应的 ydisp=30, host.top=600。
     defineSize(screen, { clientHeight: 400, clientWidth: 800 });

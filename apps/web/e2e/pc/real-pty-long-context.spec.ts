@@ -19,13 +19,12 @@
 //
 // 验证点（针对用户报的 bug 类型）：
 //   1) 终端挂载 + buffer 有真实长上下文（serialize 长度 > 4000）
-//   2) buffer 不含 U+FFFD（CJK 解码 / atlas 拆错的指纹）
+//   2) buffer 不含 U+FFFD（CJK 解码错位的指纹）
 //   3) buffer 中段没有超过 viewport rows 的连续空行（"屏幕中段空一段"探针）
 //   4) PtyDebugSnapshot.spacerDrift 接近 0（spacer/host 几何自洽）
 //   5) 滚顶 → 滚底往返：scrollTop 收敛回初始值附近，无累积漂移
 //   6) 中段位置 scroll 往返：抓 viewportY → 滚开 → 滚回，viewportY 完全相等
 //   7) 反向滚动 10 次 + 10 次后 scrollTop 不超过一格漂移
-//   8) 强制 atlas 重建（forceRedraw）前后 serialize 不变——无 GPU 残留
 import { expect, test, type Page } from "@playwright/test";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_PTY_LONG_CONTEXT === "1";
@@ -48,8 +47,8 @@ test.describe("Real PTY long-context smoke", () => {
       `serialize 长度 ${dump.length} < ${MIN_LONG_CONTEXT_CHARS}——会话太短，不算长上下文，换个 session ID 测`,
     ).toBeGreaterThanOrEqual(MIN_LONG_CONTEXT_CHARS);
 
-    // U+FFFD = "REPLACEMENT CHARACTER"，绝大多数情况下出现意味着 UTF-8 解码错位
-    // 或 atlas 缓存把双字节 cell 拆错——是用户报的"乱码"最可观测的指纹。
+    // U+FFFD = "REPLACEMENT CHARACTER"，绝大多数情况下出现意味着 UTF-8 解码错位,
+    // 是用户报的"乱码"最可观测的指纹。
     const replacementCount = countOccurrences(dump, "\u{FFFD}");
     expect(replacementCount, `serialize 含 U+FFFD ${replacementCount} 处，CJK 渲染错位`).toBe(0);
 
@@ -200,34 +199,6 @@ test.describe("Real PTY long-context smoke", () => {
       Math.abs(finalScrollTop - initialScrollTop),
       `反向滚动后 scrollTop 漂移 ${Math.abs(finalScrollTop - initialScrollTop)} > cellH ${cellH}`,
     ).toBeLessThanOrEqual(cellH);
-  });
-
-  test("force redraw via debug API does not crash and reports a non-empty terminal", async ({
-    page,
-  }) => {
-    await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
-    await waitForLongContextReady(page);
-
-    // forceRedraw 等价于 term.refresh(0, rows-1)。无法断言"前后内容一致"——live session
-    // 一直在产出新数据。能做的是：API 存在 + 调用不抛 + 报告至少一个 terminal 被刷。
-    const refreshed = await page.evaluate(() => {
-      const api = window.__devAnywherePtyRenderDebug;
-      if (!api) return -1;
-      try {
-        return api.forceRedraw();
-      } catch {
-        return -2;
-      }
-    });
-    expect(refreshed, "forceRedraw 抛异常").not.toBe(-2);
-    expect(refreshed, "__devAnywherePtyRenderDebug 没挂上 window").not.toBe(-1);
-    expect(refreshed, "forceRedraw 没刷新到任何 terminal").toBeGreaterThanOrEqual(1);
-
-    // forceRedraw 后页面应仍可见且 buffer 长度未退化.
-    await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
-    await expect
-      .poll(async () => (await readSerialize(page)).length)
-      .toBeGreaterThanOrEqual(MIN_LONG_CONTEXT_CHARS);
   });
 });
 

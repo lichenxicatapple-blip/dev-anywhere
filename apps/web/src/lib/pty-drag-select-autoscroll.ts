@@ -26,7 +26,7 @@ interface DragSelectOptions {
   cancelFrame?: (id: number) => void;
 }
 
-// 暴露给 pty-render-debug.dumpDragSelectState 的诊断快照。
+// 暴露给 pty-debug-tools.dumpDragSelectState 的诊断快照。
 // dispatchTargetTag 区分: "xterm-screen" = 派发到 SelectionService 监听的元素;
 // "host" = 没找到 .xterm-screen 走 fallback, 此时事件不冒泡到 SelectionService。
 export interface DragSelectDebugSnapshot {

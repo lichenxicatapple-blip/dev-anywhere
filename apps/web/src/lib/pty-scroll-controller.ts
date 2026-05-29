@@ -139,7 +139,7 @@ export function attachPtyScrollController(
   let lastSpacerUpdateAt: number | null = null;
   // cellH=0 时 syncContainerScroll 早返回不能动 host/viewportY,但用户的 scrollTop 已经
   // 改了。这一帧不补,host 会停在旧 ydisp 上,直到下一次显式 user scroll 才会再次走到
-  // syncContainerScroll。production blank-render 候选成因之一就是 WebGL canvas 那一帧
+  // syncContainerScroll。production blank-render 候选成因之一就是 xterm screen 那一帧
   // measure 不到尺寸 → 这条路径漏掉一次 sync。用这个标志让 relayout / onRender 在 cellH
   // 恢复后立刻补一次 sync,不依赖用户再滚一下。
   let pendingContainerSyncRetry = false;
@@ -774,7 +774,7 @@ export function attachPtyScrollController(
     trace("container-sync:start");
     const { cellH } = getDims();
     if (cellH === 0) {
-      // canvas 还没 measure 到 / WebGL context 暂失效。先记下,等 onRender / relayout 补。
+      // screen 还没 measure 到。先记下,等 onRender / relayout 补。
       pendingContainerSyncRetry = true;
       return;
     }
@@ -1558,9 +1558,7 @@ export function attachPtyScrollController(
       touchStartedAtCursorAwareBottom && anchor.isAtBottom && !reviewedDuringTouch;
     const atCursorAwareBottomForIntent =
       (!reviewedDuringTouch && anchor.isAtBottom) ||
-      (touchStartedAtCursorAwareBottom &&
-        !reviewedDuringTouch &&
-        stayedNearTouchStart);
+      (touchStartedAtCursorAwareBottom && !reviewedDuringTouch && stayedNearTouchStart);
     touchStartedAtCursorAwareBottom = false;
     touchStartClientX = null;
     touchStartScrollLeft = null;

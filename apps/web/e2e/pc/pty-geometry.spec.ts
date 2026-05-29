@@ -122,8 +122,8 @@ test.describe("PTY geometry edges", () => {
   // 这条 e2e 钉死容器层的可观测行为 (scrollLeft 真的动了, autoscroll 模块在真 DOM 真
   // Playwright pointer event 下生效)。**没有**断 xterm SelectionService 的选区扩展,
   // 因为:
-  //   (1) xterm WebGL 模式 .xterm-screen 上面叠了 .xterm-link-layer canvas, 完全盖住
-  //       click 落点, Playwright 真 mousedown 都到不了 .xterm-screen 上的 listener
+  //   (1) xterm 的 .xterm-screen 上面叠了 .xterm-link-layer canvas, 完全盖住 click 落点,
+  //       Playwright 真 mousedown 都到不了 .xterm-screen 上的 listener
   //       (probe 实测 mousedownTrusted=0)。
   //   (2) 自己用 dispatchEvent 派 untrusted mousedown 倒是能上 .xterm-screen, 但
   //       xterm SelectionService 对 untrusted MouseEvent 不响应, 选区不启动。
