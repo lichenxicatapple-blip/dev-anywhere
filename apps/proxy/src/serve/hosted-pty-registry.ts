@@ -32,6 +32,8 @@ const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const IDLE_CHECK_INTERVAL_MS = 3_000;
 const IDLE_THRESHOLD_MS = 3_000;
+const STARTUP_EXIT_DIAGNOSTIC_WINDOW_MS = 10_000;
+const STARTUP_OUTPUT_PREVIEW_LIMIT = 8_192;
 
 const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   claude: CLAUDE_PROVIDER,
@@ -68,10 +70,12 @@ interface HostedPtySession {
   terminal: InstanceType<typeof HeadlessTerminal>;
   serializeAddon: SerializeAddon;
   idleTimer: NodeJS.Timeout;
+  startedAt: number;
   lastOutputTime: number;
   currentState: PtySemanticState;
   outputSeq: number;
   semanticTextTail: string;
+  startupOutput: string;
   textApprovalWaitActive: boolean;
 }
 
@@ -96,6 +100,25 @@ export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, st
   normalized.COLORTERM = HOSTED_PTY_COLORTERM;
   normalized.CLICOLOR = "1";
   return normalized;
+}
+
+function appendStartupOutput(current: string, data: string): string {
+  if (current.length >= STARTUP_OUTPUT_PREVIEW_LIMIT) return current;
+  const next = current + data;
+  return next.length > STARTUP_OUTPUT_PREVIEW_LIMIT
+    ? next.slice(0, STARTUP_OUTPUT_PREVIEW_LIMIT)
+    : next;
+}
+
+function cleanPtyOutputPreview(output: string): string {
+  return output
+    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[()][A-Za-z0-9]/g, "")
+    .replace(/\r/g, "\n")
+    .replace(/[^\t\n\x20-\x7e\u0080-\uffff]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export class HostedPtyRegistry {
@@ -141,10 +164,12 @@ export class HostedPtyRegistry {
       terminal,
       serializeAddon,
       idleTimer: setInterval(() => this.checkIdle(options.sessionId), IDLE_CHECK_INTERVAL_MS),
+      startedAt: Date.now(),
       lastOutputTime: 0,
       currentState: "turn_complete",
       outputSeq: 0,
       semanticTextTail: "",
+      startupOutput: "",
       textApprovalWaitActive: false,
     };
     this.sessions.set(options.sessionId, hosted);
@@ -152,7 +177,28 @@ export class HostedPtyRegistry {
     child.onData((data) => this.handleData(options.sessionId, data));
     child.onExit(({ exitCode, signal }) => {
       const code = signal ? 128 + signal : exitCode;
-      serviceLogger.info({ sessionId: options.sessionId, code }, "Hosted PTY exited");
+      const current = this.sessions.get(options.sessionId);
+      const uptimeMs = current ? Date.now() - current.startedAt : undefined;
+      const outputPreview = current ? cleanPtyOutputPreview(current.startupOutput) : "";
+      const shouldIncludeStartupOutput =
+        current &&
+        uptimeMs !== undefined &&
+        uptimeMs <= STARTUP_EXIT_DIAGNOSTIC_WINDOW_MS &&
+        outputPreview.length > 0;
+      serviceLogger.info(
+        {
+          sessionId: options.sessionId,
+          code,
+          ...(uptimeMs !== undefined ? { uptimeMs } : {}),
+          ...(shouldIncludeStartupOutput
+            ? {
+                startupOutputChars: current.startupOutput.length,
+                startupOutputPreview: outputPreview,
+              }
+            : {}),
+        },
+        "Hosted PTY exited",
+      );
       this.close(options.sessionId, { kill: false, notify: true });
     });
 
@@ -236,6 +282,7 @@ export class HostedPtyRegistry {
     if (!hosted) return;
     hosted.lastOutputTime = Date.now();
     hosted.outputSeq += 1;
+    hosted.startupOutput = appendStartupOutput(hosted.startupOutput, data);
     hosted.terminal.write(data);
     this.deps.touchSessionActivity(sessionId);
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);

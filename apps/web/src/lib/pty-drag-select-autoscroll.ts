@@ -26,7 +26,7 @@ interface DragSelectOptions {
   cancelFrame?: (id: number) => void;
 }
 
-// 暴露给 pty-debug-tools.dumpDragSelectState 的诊断快照。
+// 供单测断言自动滚动事件是否派发到正确目标。
 // dispatchTargetTag 区分: "xterm-screen" = 派发到 SelectionService 监听的元素;
 // "host" = 没找到 .xterm-screen 走 fallback, 此时事件不冒泡到 SelectionService。
 export interface DragSelectDebugSnapshot {

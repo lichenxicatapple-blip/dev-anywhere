@@ -17,10 +17,7 @@ import type {
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
-import {
-  attachPtyDragSelectAutoscroll,
-  type DragSelectDebugSnapshot,
-} from "@/lib/pty-drag-select-autoscroll";
+import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
@@ -46,7 +43,6 @@ import {
   unregisterPtyTerminalWindowAccessor,
 } from "@/lib/pty-debug-snapshot";
 import { buildPtyScrollDebugSnapshot } from "@/lib/pty-scroll-debug-snapshot";
-import { getPtyDebugTools } from "@/lib/pty-debug-tools";
 import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import { registerPtyLinkProvider, registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { useImagePreview } from "./image-preview";
@@ -184,10 +180,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     containerPaddingBottom: 0,
     mobileControlsBottomInset: 0,
   });
-  // attachPtyDragSelectAutoscroll 在 onTerminalReady 内部 attach 而 registerTerminal
-  // 在它之前发生, 用 ref 把 snapshot 取数函数传给 debug API。
-  const dragSelectSnapshotRef = useRef<(() => DragSelectDebugSnapshot) | null>(null);
-
   // === 视图层状态 ===
   const [scrollState, setScrollState] = useState<PtyScrollState>({
     scrollTop: 0,
@@ -491,7 +483,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     let imageLinkDispose: (() => void) | null = null;
     let fileDownloadLinkDispose: (() => void) | null = null;
-    let ptyDebugDeregister: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
     let resizeDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
@@ -556,9 +547,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
-        ptyDebugDeregister = getPtyDebugTools().registerTerminal(sessionId, {
-          getDragSelectSnapshot: () => dragSelectSnapshotRef.current?.() ?? null,
-        });
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
@@ -667,7 +655,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
         const dragSelect = attachPtyDragSelectAutoscroll({ container, host });
         dragSelectDispose = dragSelect.dispose;
-        dragSelectSnapshotRef.current = dragSelect.getDebugSnapshot;
 
         if (webOwnsPtyGeometry) {
           const resizeCtrl = attachPtyResizeController({
@@ -696,7 +683,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return () => {
       resizeDispose?.();
       dragSelectDispose?.();
-      dragSelectSnapshotRef.current = null;
       scrollDispose?.();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
@@ -704,7 +690,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       registerPtyLinkProvider(sessionId, "image-preview", null);
       registerPtyLinkProvider(sessionId, "file-download", null);
       ptyTouchLinkProvidersRef.current = [];
-      ptyDebugDeregister?.();
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);
       unregisterPtyTerminalWindowAccessor();
