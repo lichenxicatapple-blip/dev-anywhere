@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeVisualViewportBottomOffset,
   computeVisualViewportLayoutBottomInset,
+  isTouchTabletViewport,
 } from "./use-visual-viewport";
 
 describe("computeVisualViewportBottomOffset", () => {
@@ -90,5 +91,17 @@ describe("computeVisualViewportLayoutBottomInset", () => {
         visualViewportOffsetTop: 0,
       }),
     ).toBe(0);
+  });
+});
+
+describe("isTouchTabletViewport", () => {
+  it("detects touch tablet portrait and landscape layouts", () => {
+    expect(isTouchTabletViewport({ width: 1024, height: 768, maxTouchPoints: 5 })).toBe(true);
+    expect(isTouchTabletViewport({ width: 768, height: 1024, maxTouchPoints: 5 })).toBe(true);
+  });
+
+  it("does not treat phones or non-touch desktop viewports as touch tablets", () => {
+    expect(isTouchTabletViewport({ width: 844, height: 390, maxTouchPoints: 5 })).toBe(false);
+    expect(isTouchTabletViewport({ width: 1280, height: 800, maxTouchPoints: 0 })).toBe(false);
   });
 });

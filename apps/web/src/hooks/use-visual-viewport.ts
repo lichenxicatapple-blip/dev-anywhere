@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 const VISUAL_VIEWPORT_HEIGHT_VAR = "--dev-visual-viewport-height";
 const SOFT_KEYBOARD_VIEWPORT_RATIO = 0.78;
+const TOUCH_TABLET_MIN_SHORT_EDGE = 600;
+const TOUCH_TABLET_MIN_LONG_EDGE = 768;
 
 export interface VisualViewportBottomOffsetInput {
   layoutViewportHeight: number;
@@ -15,6 +17,26 @@ export interface VisualViewportBottomOffsetInput {
 export interface VisualViewportInsets {
   bottomOffset: number;
   layoutBottomInset: number;
+}
+
+export interface TouchTabletViewportInput {
+  width: number;
+  height: number;
+  maxTouchPoints: number;
+}
+
+export function isTouchTabletViewport({
+  width,
+  height,
+  maxTouchPoints,
+}: TouchTabletViewportInput): boolean {
+  const shortEdge = Math.min(width, height);
+  const longEdge = Math.max(width, height);
+  return (
+    maxTouchPoints > 0 &&
+    shortEdge >= TOUCH_TABLET_MIN_SHORT_EDGE &&
+    longEdge >= TOUCH_TABLET_MIN_LONG_EDGE
+  );
 }
 
 export function computeVisualViewportBottomOffset({

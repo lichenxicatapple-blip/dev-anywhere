@@ -16,6 +16,7 @@ import type {
 } from "react";
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
 import { createXtermTerminal } from "@/lib/create-xterm";
+import { getXtermTheme, resolveXtermThemeName } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import {
   attachPtyDragSelectAutoscroll,
@@ -210,8 +211,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const themePreference = useAppStore((s) => s.themePreference);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
+  const systemPrefersDark = useMediaQuery("(prefers-color-scheme: dark)");
+  const xtermThemeName = resolveXtermThemeName(themePreference, systemPrefersDark);
+  const xtermThemeNameRef = useRef(xtermThemeName);
+  const xtermTheme = useMemo(() => getXtermTheme(xtermThemeName), [xtermThemeName]);
   const softKeyboardEditingSurface = touchEditingSurface && !desktopInteractionMode;
   const ptyPlainEnterBehavior = softKeyboardEditingSurface ? "linefeed" : "submit";
   const { bottomOffset: rawKeyboardOffset, layoutBottomInset: rawKeyboardLayoutInset } =
@@ -225,6 +231,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     readyRef.current = connection.ready;
   }, [connection.ready]);
+
+  useEffect(() => {
+    xtermThemeNameRef.current = xtermThemeName;
+    const term = terminalRef.current;
+    if (!term) return;
+    term.options.theme = xtermTheme;
+    if (term.rows > 0) term.refresh(0, term.rows - 1);
+  }, [xtermTheme, xtermThemeName]);
 
   const canAcceptInput = useCallback((): boolean => {
     return activeRef.current && readyRef.current;
@@ -534,6 +548,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       createTerminal: async (terminalHost) => {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,
+          themeName: xtermThemeNameRef.current,
         });
         // 暴露给后续 onTerminalReady 注册 dumpRenderDiff——靠形状探测拿 model.cells。
         getWebglAddon = () => result.getWebglAddon();

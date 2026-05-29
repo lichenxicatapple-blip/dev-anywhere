@@ -185,7 +185,7 @@ export function PtyKeepAliveViewport({
   return (
     <div
       ref={ref}
-      className="h-full w-full bg-[#1E1E1E]"
+      className="h-full w-full bg-background"
       data-slot="pty-keepalive-viewport"
       data-session-id={sessionId}
     />
@@ -218,7 +218,7 @@ function PtyKeepAliveLayer({
         return (
           <div
             key={entry.sessionId}
-            className="absolute overflow-hidden bg-[#1E1E1E]"
+            className="absolute overflow-hidden bg-background"
             data-slot="pty-keepalive-entry"
             data-session-id={entry.sessionId}
             data-active={active ? "true" : "false"}

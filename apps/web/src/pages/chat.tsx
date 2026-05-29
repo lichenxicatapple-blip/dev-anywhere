@@ -22,7 +22,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
-import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
+import { isTouchTabletViewport, useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import {
   isRouteSessionEnded,
   resolveChatPresentation,
@@ -62,8 +62,12 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   // 会二次避让，在 PTY controls 和键盘之间制造一条黑带。
   const { bottomOffset: kbOffset, layoutBottomInset: layoutKbInset } = useVisualViewportInsets();
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const touchTabletViewport = useTouchTabletViewport();
   const effectiveKbOffset = desktopInteractionMode ? 0 : kbOffset;
-  const effectiveLayoutKbInset = desktopInteractionMode ? 0 : layoutKbInset;
+  // iPad/PWA 这类触摸平板通常会自己把聚焦输入框上推。这里再给根节点补整段
+  // keyboard padding，会变成可见的底部空白横条。
+  const effectiveLayoutKbInset =
+    desktopInteractionMode || (mode === "json" && touchTabletViewport) ? 0 : layoutKbInset;
 
   // 区分 "用户主动敲 chat URL / refresh" vs "AppShell auto-restore 把我拽来"。
   // 仅当当前 URL 等于 RESTORED_TARGET 时算后者, 一次性消费, 避免后续手动回访被重定向。
@@ -209,6 +213,37 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       </FileDownloadProvider>
     </ImagePreviewProvider>
   );
+}
+
+function readTouchTabletViewport(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return isTouchTabletViewport({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
+  });
+}
+
+function useTouchTabletViewport(): boolean {
+  const [touchTabletViewport, setTouchTabletViewport] = useState(readTouchTabletViewport);
+
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setTouchTabletViewport(readTouchTabletViewport()));
+    };
+
+    window.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("resize", update);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return touchTabletViewport;
 }
 
 function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {

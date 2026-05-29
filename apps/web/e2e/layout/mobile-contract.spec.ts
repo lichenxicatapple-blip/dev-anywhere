@@ -102,7 +102,8 @@ test.describe("mobile UX contract", () => {
     );
     expect(
       Math.abs(
-        (visualBox?.y ?? 0) + (visualBox?.height ?? 0) / 2 -
+        (visualBox?.y ?? 0) +
+          (visualBox?.height ?? 0) / 2 -
           ((typewriterBox?.y ?? 0) + (typewriterBox?.height ?? 0) / 2),
       ),
     ).toBeLessThanOrEqual(1);
@@ -338,7 +339,9 @@ test.describe("mobile UX contract", () => {
       .toBeGreaterThanOrEqual(baseline + 70);
   });
 
-  test("standalone tablet shell includes the layout viewport safe-area canvas", async ({ page }) => {
+  test("standalone tablet shell includes the layout viewport safe-area canvas", async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "standalone", {
@@ -373,6 +376,7 @@ test.describe("mobile UX contract", () => {
 
     const root = page.locator("[data-keyboard-offset]").first();
     await expect(root).toHaveAttribute("data-keyboard-offset", /[1-9]\d*/);
+    await expect(root).toHaveAttribute("data-keyboard-layout-inset", /[1-9]\d*/);
     // BackToBottom 在 visible=false 时用 inert 隔离交互 + AT (替代 aria-hidden +
     // tabIndex, 后者不阻止 retain focus 会触发浏览器警告)。inert 是 IDL boolean
     // property, attribute 序列化是 ""; 用 JS property 断言更稳。
@@ -391,6 +395,44 @@ test.describe("mobile UX contract", () => {
     await input.fill("@");
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="insert"]')).toBeVisible();
     await expectTouchTarget(page.locator('[data-slot="file-entry"]').first());
+  });
+
+  test("json input on touch tablet does not add a visible bottom layout gutter", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "standalone", {
+        configurable: true,
+        value: true,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 5,
+      });
+    });
+    await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
+    const input = page.getByLabel("输入聊天消息");
+    await input.click();
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+
+    const root = page.locator("[data-keyboard-offset]").first();
+    await expect(root).toHaveAttribute("data-keyboard-offset", /[1-9]\d*/);
+    await expect(root).toHaveAttribute("data-keyboard-layout-inset", "0");
+    await expect
+      .poll(() =>
+        root.evaluate((node) => {
+          return getComputedStyle(node).paddingBottom;
+        }),
+      )
+      .toBe("0px");
+    await expectNoHorizontalDocumentOverflow(page);
   });
 
   test("browser chrome viewport changes do not create fake keyboard padding", async ({ page }) => {
@@ -654,6 +696,31 @@ test.describe("mobile UX contract", () => {
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
     await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
     await expectNoHorizontalDocumentOverflow(page);
+  });
+
+  test("pty terminal uses the light xterm theme when the app is in light mode", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_theme", "light");
+    });
+    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+    await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          return window.__ccTestPtyTerminals?.get("claude-pty")?.options.theme?.background;
+        }),
+      )
+      .toBe("#F6F7F8");
+    await expect
+      .poll(() =>
+        page.locator('[data-slot="pty-terminal"]').evaluate((node) => {
+          return getComputedStyle(node).backgroundColor;
+        }),
+      )
+      .toBe("rgb(246, 247, 248)");
   });
 });
 

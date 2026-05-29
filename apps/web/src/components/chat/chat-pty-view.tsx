@@ -35,7 +35,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
       <div
         ref={setContainerEl}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-[#1E1E1E] px-3 pt-2"
+        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-background px-3 pt-2"
         style={{
           paddingBottom: `calc(env(safe-area-inset-bottom) + ${view.containerPaddingBottom}px)`,
           touchAction: "pan-x pan-y",
@@ -123,13 +123,13 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
       ) : null}
       {view.ptySelectionToolbar ? (
         <div
-          className="fixed z-50 flex -translate-x-1/2 gap-1 rounded-md border border-[#4A4A4A] bg-[#2B2B2B] p-1 shadow-lg"
+          className="fixed z-50 flex -translate-x-1/2 gap-1 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
           style={{ left: view.ptySelectionToolbar.left, top: view.ptySelectionToolbar.top }}
           data-slot="pty-selection-toolbar"
         >
           <button
             type="button"
-            className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none text-[#F2F2F2] hover:bg-[#3A3A3A] active:bg-[#454545]"
+            className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80"
             onPointerDown={(event) => event.preventDefault()}
             onClick={view.copyPtySelection}
             aria-label="复制终端选区"
@@ -139,7 +139,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
           {view.ptySelectionDownloadPath ? (
             <button
               type="button"
-              className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none text-[#F2F2F2] hover:bg-[#3A3A3A] active:bg-[#454545]"
+              className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80"
               onPointerDown={(event) => event.preventDefault()}
               onClick={view.downloadPtySelection}
               aria-label="下载终端链接"
@@ -200,7 +200,7 @@ function PtySelectionHandle({
   return (
     <button
       type="button"
-      className="fixed z-50 touch-none rounded-full bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#D6A76B]"
+      className="fixed z-50 touch-none rounded-full bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
       style={{
         left: position.left,
         top: position.top,
@@ -215,7 +215,7 @@ function PtySelectionHandle({
       onTouchStart={onTouchStart}
     >
       <span
-        className="pointer-events-none absolute rounded-full bg-[#D6A76B]"
+        className="pointer-events-none absolute rounded-full bg-primary"
         style={{
           left: x,
           top: y,
@@ -225,7 +225,7 @@ function PtySelectionHandle({
         data-slot="pty-selection-handle-stem"
       />
       <span
-        className="pointer-events-none absolute border-2 border-[#D6A76B] bg-[#1E1E1E] shadow-sm shadow-black/30"
+        className="pointer-events-none absolute border-2 border-primary bg-background shadow-sm shadow-black/30"
         style={{
           left: bulbLeft,
           top: bulbTop,
@@ -256,7 +256,7 @@ function PtyScrollTraceButton() {
   return (
     <button
       type="button"
-      className="absolute left-3 top-3 z-30 rounded border border-[#4A4A4A] bg-[#1E1E1E]/90 px-2 py-1 text-[11px] text-[#C8C8C8]"
+      className="absolute left-3 top-3 z-30 rounded border border-border bg-popover/90 px-2 py-1 text-[11px] text-muted-foreground"
       onPointerDown={(event) => event.preventDefault()}
       onClick={handleClick}
       data-slot="pty-scroll-trace-copy"
