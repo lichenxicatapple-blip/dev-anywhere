@@ -135,9 +135,17 @@
 }
 
 html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+html,
 body {
   @apply bg-background text-foreground;
   font-family: var(--font-sans);
+  overscroll-behavior: none;
 }
 
 .dev-pty-mobile-controls {
@@ -796,6 +804,12 @@ code.hljs,
 [data-slot="pty-terminal"] .xterm-scrollable-element > .scrollbar,
 [data-slot="pty-terminal"] .xterm-scrollable-element > .slider {
   display: none !important;
+}
+
+[data-slot="pty-terminal"] .xterm,
+[data-slot="pty-terminal"] .xterm-viewport,
+[data-slot="pty-terminal"] .xterm-screen {
+  background-color: var(--background) !important;
 }
 
 /* xterm 默认把 IME 组合输入浮层写死成黑底白字；浅色 PTY 下会把正在输入

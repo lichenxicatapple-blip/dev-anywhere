@@ -181,6 +181,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
+  const resetWebglPaintRef = useRef<(() => boolean) | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
     hasSeenSoftKeyboard: false,
@@ -237,6 +238,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     const term = terminalRef.current;
     if (!term) return;
     term.options.theme = xtermTheme;
+    resetWebglPaintRef.current?.();
     if (term.rows > 0) term.refresh(0, term.rows - 1);
   }, [xtermTheme, xtermThemeName]);
 
@@ -553,6 +555,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         // 暴露给后续 onTerminalReady 注册 dumpRenderDiff——靠形状探测拿 model.cells。
         getWebglAddon = () => result.getWebglAddon();
         resetWebglPaint = () => result.resetWebglPaint();
+        resetWebglPaintRef.current = resetWebglPaint;
         return result;
       },
       attachRawInput: (term, rawSessionId, rawOptions) =>
@@ -754,6 +757,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       termCtrl.dispose();
       terminalRef.current = null;
       resetWebglPaint = null;
+      resetWebglPaintRef.current = null;
       getWebglAddon = null;
       scrollControllerRef.current = null;
       terminalControllerRef.current = null;

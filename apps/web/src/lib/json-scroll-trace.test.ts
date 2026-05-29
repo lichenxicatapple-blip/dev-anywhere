@@ -35,10 +35,10 @@ describe("json scroll trace", () => {
     window.__devAnywhereJsonScrollTrace = undefined;
   });
 
-  it("can be enabled from a hash-routed chat URL", () => {
+  it("does not enable from a hash-routed chat URL", () => {
     window.history.replaceState(null, "", "/#/chat/session-1?mode=json&jsonScrollTrace=1");
 
-    expect(isJsonScrollTraceEnabled()).toBe(true);
+    expect(isJsonScrollTraceEnabled()).toBe(false);
   });
 
   it("can be enabled from localStorage", () => {

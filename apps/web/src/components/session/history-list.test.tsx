@@ -214,6 +214,7 @@ describe("HistoryList", () => {
         provider: "claude",
         resumeSessionId: "claude-history-unknown",
         permissionMode: "bypassPermissions",
+        terminalTheme: "light",
       });
     });
   });

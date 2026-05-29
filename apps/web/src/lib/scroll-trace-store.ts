@@ -1,10 +1,9 @@
-// 共用的滚动 trace ring buffer + URL/localStorage 开关。
+// 共用的滚动 trace ring buffer + 持久化开关。
 // PTY 和 JSON 视图各有独立的 trace 列与 entry shape，但 enable / append /
 // 缓冲淘汰 / 报表数值小工具是相同的；这里集中实现一份避免漂移。
 
 interface ScrollTraceStoreOptions<T> {
   windowKey: string;
-  urlParam?: string;
   storageKey: string;
   maxEntries?: number;
   // 稳态去重: 返回相同 key 的连续 entry 折叠成单行 + repeat 计数, 旧 entry 的 t 更新成最新一次。
@@ -39,36 +38,13 @@ function getLocalStorageFlag(key: string): string | null {
 export function createScrollTraceStore<T extends ScrollTraceEntryBase>(
   options: ScrollTraceStoreOptions<T>,
 ): ScrollTraceStore<T> {
-  const { windowKey, urlParam, storageKey, maxEntries = 5000, dedupeKey } = options;
+  const { windowKey, storageKey, maxEntries = 5000, dedupeKey } = options;
   // 按事件名追踪最近一次 push 的 entry 引用。dedup 必须 lookup 同名事件的最近一条而不是 entries 末尾,
   // 否则 cycle 内不同 event 互相隔开 (render → A → B → render → A → B ...) 时 last-only dedup 全失效。
   const lastByEvent = new Map<string, T>();
 
-  // URL flag 命中后落一次 localStorage，路由切换 (HashRouter 改 hash 会丢 query)
-  // 后 isEnabled() 仍能从 localStorage 读到 enabled 状态。
-  const persistEnabled = (): void => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage?.setItem(storageKey, "1");
-    } catch {
-      // ignore storage failures
-    }
-  };
-
   const isEnabled = (): boolean => {
     if (typeof window === "undefined") return false;
-    const hashQueryStart = window.location.hash.indexOf("?");
-    const routeParams =
-      hashQueryStart >= 0
-        ? new URLSearchParams(window.location.hash.slice(hashQueryStart + 1))
-        : null;
-    if (urlParam) {
-      const pageParams = new URLSearchParams(window.location.search);
-      if (pageParams.get(urlParam) === "1" || routeParams?.get(urlParam) === "1") {
-        persistEnabled();
-        return true;
-      }
-    }
     return getLocalStorageFlag(storageKey) === "1";
   };
 

@@ -47,7 +47,6 @@ declare global {
 }
 
 const TRACE_STORAGE_KEY = "dev_anywhere_pty_input_latency_trace";
-const TRACE_URL_PARAM = "ptyInputTrace";
 const MAX_PENDING_INPUTS_PER_SESSION = 80;
 const PENDING_INPUT_TTL_MS = 10_000;
 const decoder = new TextDecoder();
@@ -57,7 +56,6 @@ const pendingBySession = new Map<string, PendingPtyInput[]>();
 
 const store = createScrollTraceStore<PtyInputLatencyTraceEntry>({
   windowKey: "__devAnywherePtyInputLatencyTrace",
-  urlParam: TRACE_URL_PARAM,
   storageKey: TRACE_STORAGE_KEY,
   dedupeKey: (entry) => {
     if (entry.event.startsWith("input")) return null;

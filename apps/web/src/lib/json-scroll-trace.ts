@@ -38,7 +38,6 @@ declare global {
 
 const store = createScrollTraceStore<JsonScrollTraceEntry>({
   windowKey: "__devAnywhereJsonScrollTrace",
-  urlParam: "jsonScrollTrace",
   storageKey: "dev_anywhere_json_scroll_trace",
 });
 

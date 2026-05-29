@@ -184,6 +184,38 @@ describe("CreateSessionDialog", () => {
     });
   });
 
+  it("passes the resolved terminal theme when creating a PTY session", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "claude-pty-1",
+      mode: "pty",
+      provider: "claude",
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole } = renderDialog();
+
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/home/dev",
+          mode: "pty",
+          provider: "claude",
+          terminalTheme: "light",
+          permissionMode: "default",
+        }),
+        expect.any(Number),
+      );
+    });
+  });
+
   it("unblocks the create button when session creation times out", async () => {
     createSession.mockRejectedValue(new Error("创建超时，请检查开发机连接后重试"));
     useFileStore.setState({

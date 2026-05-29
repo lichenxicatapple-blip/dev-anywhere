@@ -319,6 +319,18 @@ test.describe("mobile UX contract", () => {
 
   test("app shell follows expanded visual viewport when browser chrome moves", async ({ page }) => {
     await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const body = getComputedStyle(document.body);
+          const root = getComputedStyle(document.querySelector("#root") as HTMLElement);
+          return {
+            bodyOverflow: body.overflow,
+            rootOverflow: root.overflow,
+          };
+        }),
+      )
+      .toEqual({ bodyOverflow: "hidden", rootOverflow: "hidden" });
     const baseline = await page.locator('[data-slot="app-shell"]').evaluate((node) => {
       return node.getBoundingClientRect().height;
     });
@@ -496,7 +508,10 @@ test.describe("mobile UX contract", () => {
   });
 
   test("json scroll trace records upward history scroll diagnostics", async ({ page }) => {
-    await gotoWithFakeProxy(page, "/#/chat/hist-sess?mode=json&jsonScrollTrace=1");
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_json_scroll_trace", "1");
+    });
+    await gotoWithFakeProxy(page, "/#/chat/hist-sess?mode=json");
 
     const list = page.locator('[data-slot="message-list"]');
     await expect(list).toBeVisible();
@@ -527,7 +542,10 @@ test.describe("mobile UX contract", () => {
   test("json upward scroll keeps virtual height stable for short mobile messages", async ({
     page,
   }) => {
-    await gotoWithFakeProxy(page, "/#/chat/fo-sess?mode=json&jsonScrollTrace=1");
+    await page.addInitScript(() => {
+      localStorage.setItem("dev_anywhere_json_scroll_trace", "1");
+    });
+    await gotoWithFakeProxy(page, "/#/chat/fo-sess?mode=json");
 
     await page.evaluate(() => {
       const hooks = window.__ccTest;
@@ -717,6 +735,13 @@ test.describe("mobile UX contract", () => {
     await expect
       .poll(() =>
         page.locator('[data-slot="pty-terminal"]').evaluate((node) => {
+          return getComputedStyle(node).backgroundColor;
+        }),
+      )
+      .toBe("rgb(246, 247, 248)");
+    await expect
+      .poll(() =>
+        page.locator('[data-slot="pty-host"] .xterm-viewport').evaluate((node) => {
           return getComputedStyle(node).backgroundColor;
         }),
       )
