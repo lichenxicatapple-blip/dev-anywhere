@@ -58,7 +58,7 @@ test.describe("functional browser walkthrough", () => {
       .click();
     await expect(
       page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }),
-    ).toHaveAttribute("aria-disabled", "false");
+    ).not.toHaveAttribute("aria-disabled");
     await expect(page.getByText("权限模式")).toBeVisible();
     await page
       .getByLabel("交互方式")
@@ -83,8 +83,23 @@ test.describe("functional browser walkthrough", () => {
     await expect(page.locator('[data-slot="chat-session-title"]')).toHaveText("Claude Code");
     await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
 
-    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    const terminalInput = page.locator(
+      '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
+    );
+    await terminalInput.focus();
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
+      .toBe("Terminal input");
     await page.keyboard.type("hello");
+    await expect
+      .poll(
+        async () =>
+          (await sentFakeRelayMessages(page))
+            .filter((msg) => msg.type === "remote_input_raw")
+            .map((msg) => String(msg.data ?? ""))
+            .join(""),
+      )
+      .toContain("hello");
     await page.keyboard.press("Shift+Enter");
     await page.keyboard.press("Enter");
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
