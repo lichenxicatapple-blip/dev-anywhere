@@ -157,6 +157,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("pty_semantic_event"),
     sessionId: z.string(),
     state: z.enum(ptySemanticStateValues),
+    seq: z.number().int().nonnegative(),
     title: z.string().optional(),
     tool: z.string().optional(),
   }),

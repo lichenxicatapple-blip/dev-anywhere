@@ -36,3 +36,10 @@ export function resolveChatPresentation(opts: {
   if (opts.routeSessionEnded) return "session-ended";
   return "ok";
 }
+
+export function shouldShowPtyApprovalHint(opts: {
+  ptyWaitingApproval: boolean;
+  ptyAutoYesEnabled: boolean;
+}): boolean {
+  return opts.ptyWaitingApproval && !opts.ptyAutoYesEnabled;
+}

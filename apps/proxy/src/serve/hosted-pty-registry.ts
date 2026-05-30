@@ -77,6 +77,7 @@ interface HostedPtySession {
   lastOutputTime: number;
   currentState: PtySemanticState;
   outputSeq: number;
+  ptyStateSeq: number;
   semanticTextTail: string;
   startupOutput: string;
   textApprovalWaitActive: boolean;
@@ -171,6 +172,7 @@ export class HostedPtyRegistry {
       lastOutputTime: 0,
       currentState: "turn_complete",
       outputSeq: 0,
+      ptyStateSeq: 0,
       semanticTextTail: "",
       startupOutput: "",
       textApprovalWaitActive: false,
@@ -330,7 +332,7 @@ export class HostedPtyRegistry {
     }
     if (!decision.emit) return;
 
-    this.sendPtyState(sessionId, decision.nextState, decision.meta);
+    this.sendPtyState(sessionId, decision.nextState, decision.meta, hosted);
     this.deps.applyPtyStateToSession(sessionId, decision.nextState);
   }
 
@@ -344,7 +346,7 @@ export class HostedPtyRegistry {
 
     hosted.textApprovalWaitActive = false;
     hosted.currentState = "working";
-    this.sendPtyState(sessionId, "working");
+    this.sendPtyState(sessionId, "working", undefined, hosted);
     this.deps.applyPtyStateToSession(sessionId, "working");
   }
 
@@ -357,7 +359,7 @@ export class HostedPtyRegistry {
     hosted.lastOutputTime = 0;
     if (hosted.currentState !== "working") return;
     hosted.currentState = "turn_complete";
-    this.sendPtyState(sessionId, "turn_complete");
+    this.sendPtyState(sessionId, "turn_complete", undefined, hosted);
     this.deps.applyPtyStateToSession(sessionId, "turn_complete");
   }
 
@@ -365,9 +367,12 @@ export class HostedPtyRegistry {
     sessionId: string,
     state: PtySemanticState,
     meta?: { title?: string; tool?: string },
+    hosted: HostedPtySession | undefined = this.sessions.get(sessionId),
   ): void {
+    const seq = hosted ? ++hosted.ptyStateSeq : undefined;
     const payload = {
       state,
+      ...(seq !== undefined ? { seq } : {}),
       ...(meta?.title !== undefined ? { title: meta.title } : {}),
       ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
     };
@@ -403,7 +408,6 @@ export class HostedPtyRegistry {
   private close(sessionId: string, options: { kill: boolean; notify: boolean }): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
-    this.sessions.delete(sessionId);
     clearInterval(hosted.idleTimer);
     if (options.kill) {
       try {
@@ -414,10 +418,11 @@ export class HostedPtyRegistry {
     }
     hosted.terminal.dispose();
     if (options.notify) {
-      this.sendPtyState(sessionId, "turn_complete");
+      this.sendPtyState(sessionId, "turn_complete", undefined, hosted);
       this.deps.sessionManager.terminateSession(sessionId);
       this.deps.onSessionClosed(sessionId);
     }
+    this.sessions.delete(sessionId);
     return true;
   }
 }

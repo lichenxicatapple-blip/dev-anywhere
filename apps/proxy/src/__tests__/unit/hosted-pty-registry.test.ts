@@ -151,4 +151,58 @@ describe("Hosted PTY registry", () => {
       );
     });
   });
+
+  it("emits monotonic PTY semantic sequence numbers", () => {
+    withExecutable("codex", (codexBin) => {
+      const relayConnection = {
+        sendRaw: vi.fn(),
+        sendBinary: vi.fn(),
+      };
+      const registry = new HostedPtyRegistry({
+        sessionManager: {
+          getSession: vi.fn(() => ({
+            id: "s1",
+            mode: "pty",
+            provider: "codex",
+            state: SessionState.IDLE,
+            cwd: "/tmp/project",
+            pid: 2468,
+          })),
+          terminateSession: vi.fn(() => ({ success: true })),
+        } as never,
+        relayConnection: relayConnection as never,
+        getProviderEnv: () => ({ CODEX_BIN: codexBin }),
+        touchSessionActivity: vi.fn(() => true),
+        applyPtyStateToSession: vi.fn(),
+        onSessionClosed: vi.fn(),
+      });
+
+      registry.start({
+        sessionId: "s1",
+        provider: "codex",
+        cwd: "/tmp/project",
+        args: [],
+        hook: {
+          provider: "codex",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("\x1b]9;needs your permission: Bash\x07");
+      onData("\x1b]9;needs your permission: Write\x07");
+      registry.destroyAll();
+
+      const states = relayConnection.sendRaw.mock.calls
+        .map(([raw]) => JSON.parse(raw as string) as { type?: string; payload?: { seq?: number } })
+        .filter((msg) => msg.type === "pty_state");
+
+      expect(states[0]?.payload?.seq).toBe(1);
+      expect(states[1]?.payload?.seq).toBe(2);
+    });
+  });
 });

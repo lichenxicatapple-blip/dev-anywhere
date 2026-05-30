@@ -84,6 +84,9 @@ export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({
   state: z.enum(ptySemanticStateValues),
+  // Semantic event sequence. Present for runtime PTY semantic events; optional for
+  // legacy cleanup messages from older proxies.
+  seq: z.number().int().nonnegative().optional(),
   title: z.string().optional(),
   tool: z.string().optional(),
 });

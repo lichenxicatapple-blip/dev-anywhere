@@ -100,6 +100,28 @@ describe("IPC Protocol", () => {
       ).toBe(true);
     });
 
+    it("requires a PTY semantic event sequence number", async () => {
+      const { IpcMessageSchema } = await importIpc();
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_semantic_event",
+          sessionId: "sess-1",
+          state: "approval_wait",
+          seq: 1,
+          tool: "Bash",
+        }).success,
+      ).toBe(true);
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_semantic_event",
+          sessionId: "sess-1",
+          state: "approval_wait",
+          tool: "Bash",
+        }).success,
+      ).toBe(false);
+    });
+
     it("accepts service status responses with relay naming", async () => {
       const { IpcMessageSchema } = await importIpc();
       const result = IpcMessageSchema.safeParse({

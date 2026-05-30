@@ -74,6 +74,7 @@ class TerminalSession {
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   private serializeAddon: SerializeAddon | null = null;
   private outputSeq = 0;
+  private ptyStateSeq = 0;
   private remoteDetached = false;
   // 记录上次 bridge 连接状态，避免重连抖动重复打印 banner；
   // 初值 null 确保首次状态变更（无论 true/false）都触发一次输出
@@ -263,12 +264,19 @@ class TerminalSession {
         type: "pty_semantic_event",
         sessionId: this.sessionId,
         state,
+        seq: ++this.ptyStateSeq,
         ...(meta?.title !== undefined ? { title: meta.title } : {}),
         ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
       }),
     );
     log.info(
-      { sessionId: this.sessionId, state, title: meta?.title, tool: meta?.tool },
+      {
+        sessionId: this.sessionId,
+        state,
+        seq: this.ptyStateSeq,
+        title: meta?.title,
+        tool: meta?.tool,
+      },
       "PTY semantic event pushed",
     );
   }

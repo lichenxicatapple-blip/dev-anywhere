@@ -64,6 +64,19 @@ describe("session-store agent status", () => {
     expect(useSessionStore.getState().ptyStateBySessionId.s2.state).toBe("working");
   });
 
+  it("keeps the newest PTY semantic state per session by seq", () => {
+    useSessionStore.getState().setPtyState("s1", { state: "approval_wait", seq: 2, tool: "Bash" });
+    useSessionStore
+      .getState()
+      .setPtyState("s1", { state: "approval_wait", seq: 1, tool: "Write" });
+
+    expect(useSessionStore.getState().ptyStateBySessionId.s1).toMatchObject({
+      state: "approval_wait",
+      seq: 2,
+      tool: "Bash",
+    });
+  });
+
   it("prunes PTY titles when replacing or removing sessions", () => {
     useSessionStore.setState({
       sessions: [

@@ -93,9 +93,11 @@ describe("MessageEnvelopeSchema", () => {
     it("validates state approval_wait with tool", () => {
       const result = PtyStatePayloadSchema.parse({
         state: "approval_wait",
+        seq: 3,
         tool: "Bash",
       });
       expect(result.state).toBe("approval_wait");
+      expect(result.seq).toBe(3);
       expect(result.tool).toBe("Bash");
     });
 

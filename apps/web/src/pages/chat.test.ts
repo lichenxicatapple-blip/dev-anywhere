@@ -4,6 +4,7 @@ import {
   isRouteSessionEnded,
   resolveChatPresentation,
   resolveChatStatusState,
+  shouldShowPtyApprovalHint,
 } from "./chat-status";
 
 const baseSession: SessionInfo = {
@@ -146,5 +147,16 @@ describe("resolveChatPresentation", () => {
     expect(
       resolveChatPresentation({ connected: true, proxyOnline: true, routeSessionEnded: true }),
     ).toBe("session-ended");
+  });
+});
+
+describe("shouldShowPtyApprovalHint", () => {
+  it("hides the PTY approval banner after Always yes is enabled", () => {
+    expect(shouldShowPtyApprovalHint({ ptyWaitingApproval: true, ptyAutoYesEnabled: false })).toBe(
+      true,
+    );
+    expect(shouldShowPtyApprovalHint({ ptyWaitingApproval: true, ptyAutoYesEnabled: true })).toBe(
+      false,
+    );
   });
 });

@@ -103,12 +103,22 @@ export const useSessionStore = create<SessionStoreState>()(
           };
         }),
       setPtyState: (sessionId, status) =>
-        set((state) => ({
-          ptyStateBySessionId: {
-            ...state.ptyStateBySessionId,
-            [sessionId]: status,
-          },
-        })),
+        set((state) => {
+          const current = state.ptyStateBySessionId[sessionId];
+          if (
+            current?.seq !== undefined &&
+            status.seq !== undefined &&
+            current.seq > status.seq
+          ) {
+            return state;
+          }
+          return {
+            ptyStateBySessionId: {
+              ...state.ptyStateBySessionId,
+              [sessionId]: status,
+            },
+          };
+        }),
       updateSessionName: (sessionId, name) =>
         set((state) => ({
           sessions: state.sessions.map((s) => (s.sessionId === sessionId ? { ...s, name } : s)),

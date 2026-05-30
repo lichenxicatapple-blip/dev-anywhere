@@ -27,6 +27,7 @@ import {
   isRouteSessionEnded,
   resolveChatPresentation,
   resolveChatStatusState,
+  shouldShowPtyApprovalHint,
 } from "./chat-status";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
@@ -143,6 +144,10 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   });
   const ptyWaitingApproval =
     mode === "pty" && presentation === "ok" && statusState === "waiting_approval";
+  const showPtyApprovalHint = shouldShowPtyApprovalHint({
+    ptyWaitingApproval,
+    ptyAutoYesEnabled,
+  });
 
   useEffect(() => {
     setPtyAutoYesEnabled(false);
@@ -152,6 +157,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     sessionId: id,
     enabled: ptyAutoYesEnabled,
     waiting: ptyWaitingApproval,
+    approvalSeq: ptyState?.state === "approval_wait" ? ptyState.seq : undefined,
   });
 
   return (
@@ -167,7 +173,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
           <StatusLine state={statusState} />
           <div className="flex-1 min-h-0 relative">
-            {ptyWaitingApproval && (
+            {showPtyApprovalHint && (
               <PtyApprovalHint
                 autoYesEnabled={ptyAutoYesEnabled}
                 onAutoYesChange={setPtyAutoYesEnabled}

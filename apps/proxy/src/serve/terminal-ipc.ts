@@ -152,6 +152,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           const logPayload = {
             sessionId: msg.sessionId,
             state: msg.state,
+            seq: msg.seq,
             ...(msg.title !== undefined ? { title: msg.title } : {}),
             ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
           };
@@ -167,6 +168,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               sessionId: msg.sessionId,
               payload: {
                 state: msg.state,
+                seq: msg.seq,
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
                 ...(msg.tool !== undefined ? { tool: msg.tool } : {}),
               },
