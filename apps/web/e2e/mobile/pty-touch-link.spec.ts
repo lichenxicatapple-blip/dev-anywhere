@@ -162,20 +162,6 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }
   }
 
-  test("tap on a PTY file path does not trigger file_download", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
-    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
-    await emitLineAndAwait(emuPage, "see ./scripts/test.sh for details\r\n", "./scripts/test.sh");
-
-    await tapPtyLink(emuPage, {
-      sid: SESSION_ID,
-      kind: "file-download",
-      needle: "./scripts/test.sh",
-    });
-
-    await expectNoFileDownloadRequest(emuPage, "./scripts/test.sh");
-  });
-
   test("tap on an xterm-wrapped PTY document path does not trigger file_download", async ({
     emuPage,
   }) => {

@@ -131,6 +131,11 @@ function emitMicSpeechChunk(callIndex = createPcmCapture.mock.calls.length - 1):
   onChunk(new Uint8Array([0xff, 0x7f, 0xff, 0x7f, 0x00, 0x40, 0x00, 0x40]));
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 import { VoicePilotController } from "./voice-pilot-controller";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -360,7 +365,9 @@ describe("VoicePilotController", () => {
     });
 
     tts.emitJson({ type: "finished", requestId: "reply-1" });
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
+    );
     expect(createPcmCapture).toHaveBeenCalledTimes(1);
 
     act(() => {
@@ -465,7 +472,7 @@ describe("VoicePilotController", () => {
     asrSocket().emitJson({ type: "partial", text: "嗯。" });
     asrSocket().emitJson({ type: "final", text: "嗯。" });
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushMicrotasks();
     expect(sendEnvelope).not.toHaveBeenCalled();
     expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
     const userMessages =
@@ -668,7 +675,7 @@ describe("VoicePilotController", () => {
     });
 
     ttsSocket().emitJson({ type: "finished" });
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await flushMicrotasks();
     expect(useVoicePilotStore.getState().bySessionId.s1?.phase).not.toBe("error");
     expect(useVoicePilotStore.getState().bySessionId.s1?.error).toBeNull();
     expect(createPcmCapture).not.toHaveBeenCalled();
@@ -1045,7 +1052,7 @@ describe("VoicePilotController", () => {
     act(() => {
       useChatStore.getState().markTurnComplete("s1");
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await flushMicrotasks();
     const speaks = ttsSocket()
       .sent.map((item) => (typeof item === "string" ? JSON.parse(item) : null))
       .filter((item) => item?.type === "speak");

@@ -45,30 +45,34 @@ describe("remote_input_raw envelope", () => {
 
 describe("serve.ts remote_input_raw forwarding semantics", () => {
   // 验证核心不变量：parsed data 作为 pty_input 的 data 字段转发，不追加 \r。
-  it.each([
-    ["plain text", "abc"],
-    ["enter", "\r"],
-    ["backspace", "\x7f"],
-    ["tab", "\t"],
-    ["escape", "\x1b"],
-    ["ctrl+c", "\x03"],
-    ["arrow up", "\x1b[A"],
-    ["arrow down", "\x1b[B"],
-    ["arrow right", "\x1b[C"],
-    ["arrow left", "\x1b[D"],
-    ["paste", "first line\nsecond line"],
-    ["ime text", "你好，世界"],
-  ])("preserves %s raw bytes without append", (_label, data) => {
-    const raw = { type: "remote_input_raw", sessionId: "s1", data };
-    const parsed = RelayControlSchema.safeParse(raw);
-    expect(parsed.success).toBe(true);
+  it("preserves raw byte samples without append", () => {
+    for (const [label, data] of [
+      ["plain text", "abc"],
+      ["enter", "\r"],
+      ["backspace", "\x7f"],
+      ["tab", "\t"],
+      ["escape", "\x1b"],
+      ["ctrl+c", "\x03"],
+      ["arrow up", "\x1b[A"],
+      ["arrow down", "\x1b[B"],
+      ["arrow right", "\x1b[C"],
+      ["arrow left", "\x1b[D"],
+      ["paste", "first line\nsecond line"],
+      ["ime text", "你好，世界"],
+    ]) {
+      const raw = { type: "remote_input_raw", sessionId: "s1", data };
+      const parsed = RelayControlSchema.safeParse(raw);
+      expect(parsed.success, label).toBe(true);
 
-    if (parsed.success && parsed.data.type === "remote_input_raw") {
-      const ipc = parseSerializedIpc(serializeRawPtyInput(parsed.data.sessionId, parsed.data.data));
-      expect(ipc.type).toBe("pty_input");
-      if (ipc.type === "pty_input") {
-        expect(ipc.sessionId).toBe("s1");
-        expect(ipc.data).toBe(data);
+      if (parsed.success && parsed.data.type === "remote_input_raw") {
+        const ipc = parseSerializedIpc(
+          serializeRawPtyInput(parsed.data.sessionId, parsed.data.data),
+        );
+        expect(ipc.type, label).toBe("pty_input");
+        if (ipc.type === "pty_input") {
+          expect(ipc.sessionId, label).toBe("s1");
+          expect(ipc.data, label).toBe(data);
+        }
       }
     }
   });

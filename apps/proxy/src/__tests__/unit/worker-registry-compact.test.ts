@@ -54,7 +54,6 @@ describe("WorkerRegistry compact command events", () => {
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
     acceptedSocket?.write(serializeWorkerMsg({ type: "worker_event", seq: 7, event }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   it("surfaces compact local_command failures and returns the session to idle", async () => {
@@ -67,6 +66,7 @@ describe("WorkerRegistry compact command events", () => {
         "<local-command-stderr>Error: Error during compaction: API Error: 502 upstream disconnected</local-command-stderr>",
     });
 
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
     expect(relay.envelopes).toHaveLength(1);
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_message",
@@ -99,6 +99,7 @@ describe("WorkerRegistry compact command events", () => {
       },
     });
 
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
     expect(relay.envelopes).toHaveLength(1);
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_message",
@@ -122,6 +123,7 @@ describe("WorkerRegistry compact command events", () => {
       status: "compacting",
     });
 
+    await new Promise((resolve) => setImmediate(resolve));
     expect(relay.envelopes).toHaveLength(0);
     expect(relay.raw).toHaveLength(0);
     expect(onTurnResult).not.toHaveBeenCalled();

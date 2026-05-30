@@ -43,32 +43,29 @@ function bracketedPastePayload(text: string): string {
 }
 
 test.describe("PTY paste", () => {
-  test("wraps desktop text paste when the remote TUI enables bracketed paste", async ({ page }) => {
-    const sessionId = "pty-paste-desktop-bracketed";
+  test("uses bracketed paste only after the remote TUI enables it", async ({ page }) => {
+    const bracketedSessionId = "pty-paste-desktop-bracketed";
+    const plainSessionId = "pty-paste-desktop-plain";
     const pastedText = `first line\nsecond line\n${"x".repeat(800)}`;
+    const plainText = "first line\nsecond line";
 
-    await setupPtyChat(page, { sessionId, provider: "codex" });
+    await setupPtyChat(page, { sessionId: bracketedSessionId, provider: "codex" });
     await expectPtyTerminalMounted(page);
     await sendPtyOutput(page, "\x1b[?2004h");
-    await waitForBracketedPasteMode(page, sessionId, true);
+    await waitForBracketedPasteMode(page, bracketedSessionId, true);
 
     await ptyInput(page).focus();
     await dispatchTextPaste(ptyInput(page), pastedText);
 
     await expect.poll(() => readRawPtyInput(page)).toBe(bracketedPastePayload(pastedText));
-  });
 
-  test("keeps desktop text paste plain when bracketed paste is not enabled", async ({ page }) => {
-    const sessionId = "pty-paste-desktop-plain";
-    const pastedText = "first line\nsecond line";
-
-    await setupPtyChat(page, { sessionId, provider: "codex" });
+    await setupPtyChat(page, { sessionId: plainSessionId, provider: "codex" });
     await expectPtyTerminalMounted(page);
-    await waitForBracketedPasteMode(page, sessionId, false);
+    await waitForBracketedPasteMode(page, plainSessionId, false);
 
     await ptyInput(page).focus();
-    await dispatchTextPaste(ptyInput(page), pastedText);
+    await dispatchTextPaste(ptyInput(page), plainText);
 
-    await expect.poll(() => readRawPtyInput(page)).toBe(xtermPastePayload(pastedText));
+    await expect.poll(() => readRawPtyInput(page)).toBe(xtermPastePayload(plainText));
   });
 });

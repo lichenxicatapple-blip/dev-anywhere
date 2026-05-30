@@ -60,7 +60,7 @@ async function waitForSoftKeyboard(page: Page): Promise<boolean> {
 test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test.setTimeout(60_000);
 
-  test("does not auto-focus terminal on cold-start; main user tap focuses + sends input", async ({
+  test("does not auto-focus terminal; tap focuses, sends input, and preserves IME punctuation", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -82,6 +82,21 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     await emuPage.keyboard.type("abc");
     await emuPage.keyboard.press("Enter");
     await expect.poll(() => readRawPtyInput(emuPage)).toContain("abc");
+
+    const input = emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+    await expect(input).toBeFocused();
+
+    await input.evaluate((el) => {
+      el.dispatchEvent(
+        new InputEvent("input", {
+          data: "，",
+          inputType: "insertText",
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+    await expect.poll(() => readRawPtyInput(emuPage)).toContain("，");
   });
 
   test("raises the Android soft keyboard and keeps PTY controls above it", async ({ emuPage }) => {
@@ -128,26 +143,5 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       metrics.visualViewportHeight + 2,
     );
     expect(metrics.visualViewportHeight - (metrics.controlsBottom ?? 0)).toBeLessThanOrEqual(24);
-  });
-
-  test("preserves IME-transformed full-width punctuation on emu Chrome", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
-    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
-
-    const input = emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
-    await touchTerminal(emuPage);
-    await expect(input).toBeFocused();
-
-    await input.evaluate((el) => {
-      el.dispatchEvent(
-        new InputEvent("input", {
-          data: "，",
-          inputType: "insertText",
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    });
-    await expect.poll(() => readRawPtyInput(emuPage)).toContain("，");
   });
 });

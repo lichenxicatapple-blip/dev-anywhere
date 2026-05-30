@@ -37,39 +37,38 @@ describe("/api/status, /api/proxies, /api/clients auth", () => {
   describe("dev mode (proxyToken not configured)", () => {
     beforeEach(() => start({}));
 
-    it.each(["/api/status", "/api/proxies", "/api/clients"])("%s 公开放行", async (path) => {
-      const res = await get(path);
-      expect(res.status).toBe(200);
+    it("公开放行 status/proxies/clients", async () => {
+      for (const path of ["/api/status", "/api/proxies", "/api/clients"]) {
+        const res = await get(path);
+        expect(res.status, path).toBe(200);
+      }
     });
   });
 
   describe("public-relay mode (proxyToken configured)", () => {
     beforeEach(() => start({ proxyToken: "proxy-secret" }));
 
-    it.each(["/api/status", "/api/proxies", "/api/clients"])(
-      "%s 无 token 返回 401",
-      async (path) => {
+    it("无 token 时拒绝 status/proxies/clients", async () => {
+      for (const path of ["/api/status", "/api/proxies", "/api/clients"]) {
         const res = await get(path);
-        expect(res.status).toBe(401);
+        expect(res.status, path).toBe(401);
         const body = (await res.json()) as { error?: string };
-        expect(body.error).toBe("invalid_proxy_token");
-      },
-    );
+        expect(body.error, path).toBe("invalid_proxy_token");
+      }
+    });
 
-    it.each(["/api/status", "/api/proxies", "/api/clients"])(
-      "%s 错误 token 返回 401",
-      async (path) => {
+    it("错误 token 时拒绝 status/proxies/clients", async () => {
+      for (const path of ["/api/status", "/api/proxies", "/api/clients"]) {
         const res = await get(path, "wrong");
-        expect(res.status).toBe(401);
-      },
-    );
+        expect(res.status, path).toBe(401);
+      }
+    });
 
-    it.each(["/api/status", "/api/proxies", "/api/clients"])(
-      "%s 正确 token 返回 200",
-      async (path) => {
+    it("正确 token 时允许 status/proxies/clients", async () => {
+      for (const path of ["/api/status", "/api/proxies", "/api/clients"]) {
         const res = await get(path, "proxy-secret");
-        expect(res.status).toBe(200);
-      },
-    );
+        expect(res.status, path).toBe(200);
+      }
+    });
   });
 });

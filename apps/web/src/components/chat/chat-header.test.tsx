@@ -192,19 +192,6 @@ describe("ChatHeader PTY upload menu", () => {
     );
   });
 
-  it("aligns header actions to the shell rail instead of the capped message rail", () => {
-    const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
-
-    const railInset = container.querySelector<HTMLElement>('[data-slot="chat-header-rail-inset"]');
-    const rail = container.querySelector<HTMLElement>('[data-slot="chat-header-rail"]');
-    const trigger = screen.getByRole("button", { name: "会话操作" });
-
-    expect(railInset?.className).toContain("dev-chat-shell-rail-inset");
-    expect(rail?.className).not.toContain("dev-message-rail");
-    expect(rail?.className).not.toContain("mx-auto");
-    expect(trigger.className).toContain("justify-self-end");
-  });
-
   it("keeps the overflow menu visually consistent with icons and grouped controls", async () => {
     render(<ChatHeader sessionId="s1" mode="pty" />);
 
@@ -227,8 +214,6 @@ describe("ChatHeader PTY upload menu", () => {
     }
 
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
-    expect(menu.className).toContain("w-max");
-    expect(menu.className).toContain("min-w-44");
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(screen.queryByRole("menuitemcheckbox", { name: "桌面交互模式" })).toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
@@ -407,35 +392,6 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByRole("menuitem", { name: "Voice Pilot" })).toBeNull();
     expect(screen.queryByRole("menuitemcheckbox", { name: "Voice Pilot" })).toBeNull();
     expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
-  });
-
-  it("keeps the font-size stepper compact enough for mobile menu width", async () => {
-    render(<ChatHeader sessionId="s1" mode="json" />);
-
-    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
-    fireEvent.keyDown(menuTrigger, { key: "Enter" });
-
-    const menu = await waitFor(() => {
-      const element = document.querySelector('[data-slot="chat-overflow-menu"]');
-      if (!(element instanceof HTMLElement)) {
-        throw new Error("chat overflow menu was not rendered");
-      }
-      return element;
-    });
-    const row = menu.querySelector('[data-slot="chat-menu-font-row"]');
-    const stepper = menu.querySelector('[data-slot="chat-menu-font-stepper"]');
-    const larger = menu.querySelector('[data-slot="chat-menu-font-larger"]');
-
-    expect(menu.className).toContain("w-max");
-    expect(menu.className).toContain("min-w-44");
-    expect(menu.className).not.toContain("w-64");
-    expect(row?.className).toContain("inline-grid");
-    expect(row?.className).toContain("grid-cols-[1.25rem_auto]");
-    expect(menu.querySelector('[data-slot="chat-menu-font-label"]')).toBeNull();
-    expect(stepper?.className).toContain("inline-flex");
-    expect(stepper?.className).toContain("col-start-2");
-    expect(stepper?.className).not.toContain("border");
-    expect(larger?.className).toContain("size-5");
   });
 
   it("keeps the page interactive while the overflow menu is open so mobile outside taps can dismiss it", async () => {

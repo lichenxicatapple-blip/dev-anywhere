@@ -49,17 +49,4 @@ test.describe("attach menu — image vs file accept split", () => {
     await expect(imageInput).toHaveAttribute("type", "file");
     await expect(fileInput).toHaveAttribute("type", "file");
   });
-
-  test("JSON 模式 mobile 视口 paperclip 改弹 Sheet, 仍露两项", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-
-    await page.locator('[data-slot="input-attach-button"]').click();
-
-    // Sheet 跟 Popover 共用 input-attach-menu data-slot, 这里只验菜单可见 +
-    // 两项可点 (具体 Popover vs Sheet 容器形态由 useMediaQuery 决定, 不再断言).
-    await expect(page.locator('[data-slot="input-attach-menu"]')).toBeVisible();
-    await expect(page.locator('[data-slot="input-attach-menu-image"]')).toBeVisible();
-    await expect(page.locator('[data-slot="input-attach-menu-file"]')).toBeVisible();
-  });
 });

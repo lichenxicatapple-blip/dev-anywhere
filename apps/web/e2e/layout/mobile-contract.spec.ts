@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   gotoWithFakeProxy,
   installFakeRelay,
@@ -12,6 +12,25 @@ import {
   expectTouchTarget,
   installVisualViewportMock,
 } from "../mobile-helpers";
+
+async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate(
+    (frameCount) =>
+      new Promise<void>((resolve) => {
+        let frames = 0;
+        const tick = () => {
+          frames += 1;
+          if (frames >= frameCount) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    count,
+  );
+}
 
 test.describe("mobile UX contract", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
@@ -567,22 +586,57 @@ test.describe("mobile UX contract", () => {
 
     const list = page.locator('[data-slot="message-list"]');
     await expect(list).toBeVisible();
-    await page.waitForTimeout(300);
+    await expect
+      .poll(() =>
+        list.evaluate((node) => {
+          const el = node as HTMLElement;
+          return el.scrollHeight > el.clientHeight;
+        }),
+      )
+      .toBe(true);
     await list.evaluate((node) => {
       const el = node as HTMLElement;
       el.scrollTop = el.scrollHeight;
       el.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await page.waitForTimeout(200);
+    await expect
+      .poll(() =>
+        list.evaluate((node) => {
+          const el = node as HTMLElement;
+          return el.scrollHeight - (el.scrollTop + el.clientHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(8);
 
     const box = await list.boundingBox();
     expect(box).not.toBeNull();
+    const scrollTraceCountBeforeWheel = await page.evaluate(() => {
+      const trace =
+        (
+          window as Window & {
+            __devAnywhereJsonScrollTrace?: Array<{ event?: string }>;
+          }
+        ).__devAnywhereJsonScrollTrace ?? [];
+      return trace.filter((entry) => entry.event === "scroll").length;
+    });
     await page.mouse.move((box?.x ?? 0) + (box?.width ?? 0) / 2, (box?.y ?? 0) + 40);
     for (let i = 0; i < 10; i += 1) {
       await page.mouse.wheel(0, -260);
-      await page.waitForTimeout(25);
+      await waitForAnimationFrames(page, 1);
     }
-    await page.waitForTimeout(300);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const trace =
+            (
+              window as Window & {
+                __devAnywhereJsonScrollTrace?: Array<{ event?: string }>;
+              }
+            ).__devAnywhereJsonScrollTrace ?? [];
+          return trace.filter((entry) => entry.event === "scroll").length;
+        }),
+      )
+      .toBeGreaterThan(scrollTraceCountBeforeWheel);
 
     const totalSizeRange = await page.evaluate(() => {
       const trace =

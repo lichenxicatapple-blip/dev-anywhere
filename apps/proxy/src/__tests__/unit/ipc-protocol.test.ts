@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PassThrough } from "node:stream";
 
 describe("IPC Protocol", () => {
@@ -143,9 +143,7 @@ describe("IPC Protocol", () => {
       );
       stream.end();
 
-      // LineBuffer emits asynchronously through the transform pipeline
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(2));
       expect(messages).toHaveLength(2);
       expect(messages[0]).toEqual({
         type: "session_status_update",
@@ -177,8 +175,7 @@ describe("IPC Protocol", () => {
       stream.write(fullMsg.slice(splitPoint));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
         type: "session_status_update",
@@ -209,8 +206,7 @@ describe("IPC Protocol", () => {
       );
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(2));
       expect(messages).toHaveLength(2);
     });
 
@@ -235,8 +231,7 @@ describe("IPC Protocol", () => {
       );
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       // 单条坏行不应升级为传输层错误（避免 socket.on("error") → onDisconnect 把整个 session 推 ERROR）。
       expect(messages).toHaveLength(1);
       expect(streamErrors).toHaveLength(0);
@@ -266,8 +261,7 @@ describe("IPC Protocol", () => {
       );
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(streamErrors).toHaveLength(0);
       expect(protocolErrors).toHaveLength(1);
@@ -343,8 +337,7 @@ describe("IPC Protocol", () => {
       stream.write(encodeBinaryIpcFrame("sess-1", ptyData, 7));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(binaryFrames).toHaveLength(1));
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].sessionId).toBe("sess-1");
       expect(Buffer.compare(binaryFrames[0].data, ptyData)).toBe(0);
@@ -374,8 +367,10 @@ describe("IPC Protocol", () => {
       stream.write(encodeBinaryIpcFrame("s2", Buffer.from("pty data 2"), 2));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => {
+        expect(jsonMsgs).toHaveLength(2);
+        expect(binaryFrames).toHaveLength(2);
+      });
       expect(jsonMsgs).toHaveLength(2);
       expect(binaryFrames).toHaveLength(2);
       expect(binaryFrames[0].sessionId).toBe("s1");
@@ -404,8 +399,7 @@ describe("IPC Protocol", () => {
       stream.write(frame.subarray(split2));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(binaryFrames).toHaveLength(1));
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].sessionId).toBe("sess-abc");
       expect(binaryFrames[0].data.toString()).toBe("split me");
@@ -435,8 +429,10 @@ describe("IPC Protocol", () => {
       stream.write(combined);
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => {
+        expect(jsonMsgs).toHaveLength(1);
+        expect(binaryFrames).toHaveLength(1);
+      });
       expect(jsonMsgs).toHaveLength(1);
       expect(binaryFrames).toHaveLength(1);
       expect(binaryFrames[0].data.toString()).toBe("combined");
@@ -455,8 +451,7 @@ describe("IPC Protocol", () => {
       stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(jsonMsgs).toHaveLength(1));
       expect(jsonMsgs).toHaveLength(1);
     });
   });
@@ -508,8 +503,7 @@ describe("Worker Protocol", () => {
       stream.write(serializeWorkerMsg({ type: "worker_exit", code: 0 }));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(4));
       expect(messages).toHaveLength(4);
       expect(messages[0]).toEqual({ type: "worker_ready", pid: 12345 });
       expect(messages[1]).toEqual({
@@ -539,8 +533,7 @@ describe("Worker Protocol", () => {
       stream.write(fullMsg.slice(splitPoint));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({ type: "worker_stop" });
     });
@@ -563,8 +556,7 @@ describe("Worker Protocol", () => {
       stream.write(serializeWorkerMsg({ type: "worker_stop" }));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({ type: "worker_stop" });
       expect(streamErrors).toHaveLength(0);
@@ -591,8 +583,7 @@ describe("Worker Protocol", () => {
       stream.write(serializeWorkerMsg({ type: "worker_stop" }));
       stream.end();
 
-      await new Promise((r) => setTimeout(r, 50));
-
+      await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({ type: "worker_stop" });
       expect(streamErrors).toHaveLength(0);
@@ -635,10 +626,12 @@ describe("Worker Protocol", () => {
       { type: "worker_whitelist_add", payload: { type: "worker_whitelist_add", toolName: "read" } },
     ];
 
-    it.each(WORKER_MESSAGE_SAMPLES)("accepts valid $type message", async ({ payload }) => {
+    it("accepts all valid worker message samples", async () => {
       const { WorkerMessageSchema } = await importIpc();
-      const result = WorkerMessageSchema.safeParse(payload);
-      expect(result.success).toBe(true);
+      for (const { type, payload } of WORKER_MESSAGE_SAMPLES) {
+        const result = WorkerMessageSchema.safeParse(payload);
+        expect(result.success, type).toBe(true);
+      }
     });
 
     it("rejects unknown worker message type", async () => {

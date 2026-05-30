@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
 async function openJsonPreview(page: Page, path: string): Promise<void> {
@@ -29,6 +29,51 @@ async function expectPreviewReady(page: Page, path: string): Promise<void> {
 async function closePreview(page: Page): Promise<void> {
   await page.locator('[data-slot="image-preview-dialog"] [data-slot="dialog-close"]').click();
   await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeHidden();
+}
+
+async function waitForTransformToSettle(transform: Locator): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        transform.evaluate(
+          (el) =>
+            new Promise<boolean>((resolve) => {
+              const samples: string[] = [];
+              const sample = () => {
+                samples.push(getComputedStyle(el).transform);
+                if (samples.length < 5) {
+                  requestAnimationFrame(sample);
+                  return;
+                }
+                resolve(new Set(samples).size === 1);
+              };
+              requestAnimationFrame(sample);
+            }),
+        ),
+      { timeout: 2_000 },
+    )
+    .toBe(true);
+}
+
+async function dragUntilTransformChanges(
+  page: Page,
+  transform: Locator,
+  startTransform: string,
+  x: number,
+  y: number,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x + 60, y + 60, { steps: 10 });
+        await page.mouse.up();
+        return transform.evaluate((el) => getComputedStyle(el).transform);
+      },
+      { timeout: 2_000 },
+    )
+    .not.toBe(startTransform);
 }
 
 test.describe("image preview", () => {
@@ -70,7 +115,7 @@ test.describe("image preview", () => {
       await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
     });
 
-    test("wheel zooms in and double-click resets transform back to identity", async ({ page }) => {
+    test("wheel zooms, mouse drag pans, and double-click resets transform", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/zoom.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
       await openJsonPreview(page, path);
@@ -87,16 +132,17 @@ test.describe("image preview", () => {
       const cx = stageBox!.x + stageBox!.width / 2;
       const cy = stageBox!.y + stageBox!.height / 2;
 
-      // hover 在中心后 wheel up 5 次, 让 scale 走出 1 (cursor-anchored 缩放)。
+      // hover 在中心后 wheel up, 让 scale 走出 1 (cursor-anchored 缩放)。
+      // 不打到 max scale, 否则后续拖拽可能落在边界上不改变 transform。
       await page.mouse.move(cx, cy);
-      for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
+      await page.mouse.wheel(0, -20);
       await expect
         .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
         .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
-      // 等 wheel 的 momentum/RAF 动画自然停, 否则后面 dblclick reset 会跟还在跑的
-      // zoom-in 动画抢同一个动画槽, reset 只走 1 帧就被覆盖回去 (实测 wait < 300ms
-      // 时 reset 卡在中间, 等 400ms 之后稳定)。
-      await page.waitForTimeout(400);
+      await waitForTransformToSettle(transform);
+      const beforePan = await transform.evaluate((el) => getComputedStyle(el).transform);
+
+      await dragUntilTransformChanges(page, transform, beforePan, cx, cy);
 
       // 双击 reset 回 fit: lib 的 dblclick listener 用原生 addEventListener 挂在
       // .react-transform-wrapper 上, target 必须是 wrapper 的后代; 直接对 component
@@ -114,40 +160,6 @@ test.describe("image preview", () => {
       await expect
         .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
         .toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
-    });
-
-    test("after zoom-in, mouse drag pans the transform translation", async ({ page }) => {
-      const path = ".dev-anywhere/clipboard/test-sess/pan.png";
-      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await openJsonPreview(page, path);
-      await expectPreviewReady(page, path);
-
-      const transform = page.locator(
-        '[data-slot="image-preview-stage"] .react-transform-component',
-      );
-      const stage = page.locator('[data-slot="image-preview-stage"]');
-      const stageBox = await stage.boundingBox();
-      expect(stageBox).not.toBeNull();
-      const cx = stageBox!.x + stageBox!.width / 2;
-      const cy = stageBox!.y + stageBox!.height / 2;
-
-      // 先放大, 否则 limitToBounds 在 scale=1 时不允许任何位移。
-      await page.mouse.move(cx, cy);
-      for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
-      // wait transition 稳定后再 cache, 不然 drag 时 zoom 还在动画导致比较不准。
-      await page.waitForTimeout(300);
-      const beforePan = await transform.evaluate((el) => getComputedStyle(el).transform);
-
-      await page.mouse.move(cx, cy);
-      await page.mouse.down();
-      await page.mouse.move(cx + 60, cy + 60, { steps: 10 });
-      await page.mouse.up();
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .not.toBe(beforePan);
     });
 
     test("PTY mode links image paths from terminal output after CJK text", async ({ page }) => {
@@ -228,7 +240,7 @@ test.describe("image preview", () => {
       await expect
         .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
         .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
-      await page.waitForTimeout(400);
+      await waitForTransformToSettle(transform);
 
       // 双击 reset 复用桌面同思路, 直接 dispatch dblclick 不依赖 hit testing。
       await page.evaluate(

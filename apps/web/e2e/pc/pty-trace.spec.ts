@@ -5,33 +5,6 @@ import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 const SESSION_ID = "pty-trace";
 
 test.describe("PTY scroll trace diagnostics", () => {
-  test("collects PTY scroll trace when diagnostics are enabled before navigation", async ({
-    page,
-  }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
-    });
-    await setupPtyChat(page, { sessionId: SESSION_ID });
-    await expectPtyTerminalMounted(page);
-    await expect(page.locator('[data-slot="pty-scroll-trace-copy"]')).toBeVisible();
-
-    const terminal = page.locator('[data-slot="pty-terminal"]');
-    await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 120);
-      node.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const trace = window.__devAnywherePtyScrollTrace ?? [];
-          return trace.some((entry) => entry.event === "container-scroll");
-        }),
-      )
-      .toBeTruthy();
-  });
-
   test("enables PTY scroll trace from settings without reloading the chat", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);

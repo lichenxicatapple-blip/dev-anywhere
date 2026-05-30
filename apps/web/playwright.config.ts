@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 // 本地 Vite 默认 5173，可通过 WEB_BASE_URL 环境变量覆盖
 // 不配置 webServer：开发期由外层脚本或人工启动 Vite，避免 E2E 隐式重启正在调试的服务。
 const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
+const PC_OPT_IN_TESTS = ["**/real-*.spec.ts", "**/chaos/integration/*.spec.ts"];
 
 // Node ≥ 25 下 Playwright 1.52 worker fork 会静默 hang (CPU 近 0、stdout 空、不退出),
 // 项目已知症状, 之前一次 release 上踩过坑。测试脚本 wrapper 会自动切到 v22,
@@ -30,31 +31,27 @@ export default defineConfig({
   retries: 1,
   use: { baseURL: BASE_URL },
   projects: [
-    // L2 layout-*: viewport 模拟, 只查响应式断点, e2e/layout/.
+    // L2 layout: viewport 模拟, 只查响应式断点, e2e/layout/.
+    // 这些 spec 自己用 test.use / setViewportSize 覆盖具体断点; 单 project 避免
+    // 同一批断言在多个 layout project 下重复执行。
     {
-      name: "layout-mobile-small",
+      name: "layout",
       testDir: "./e2e/layout",
       use: { viewport: { width: 375, height: 667 }, hasTouch: true },
-    },
-    {
-      name: "layout-mobile",
-      testDir: "./e2e/layout",
-      use: { viewport: { width: 390, height: 844 }, hasTouch: true },
-    },
-    {
-      name: "layout-mobile-landscape",
-      testDir: "./e2e/layout",
-      use: { viewport: { width: 844, height: 390 }, hasTouch: true },
-    },
-    {
-      name: "layout-desktop",
-      testDir: "./e2e/layout",
-      use: { viewport: { width: 1280, height: 800 } },
     },
     // L3 device-pc: 真桌面 Chromium, e2e/pc/.
     {
       name: "device-pc",
       testDir: "./e2e/pc",
+      testIgnore: PC_OPT_IN_TESTS,
+      use: {},
+    },
+    // L3 opt-in: 真实 CLI/API/backend 和 dev:chaos 编排测试. 默认 PC tier 不跑这些文件;
+    // scripts/test/pc.sh 在显式传入 real/chaos integration spec 时会切到该 project.
+    {
+      name: "device-pc-real",
+      testDir: "./e2e/pc",
+      testMatch: PC_OPT_IN_TESTS,
       use: {},
     },
     // L4 device-mobile-android: 真 Android emu via CDP, e2e/mobile/.

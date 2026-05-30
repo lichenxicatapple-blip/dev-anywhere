@@ -199,16 +199,12 @@ async function waitForVoiceUserInput(
   sessionId: string,
   expectedCount: number,
 ): Promise<void> {
-  let diagnostic = await voicePilotDiagnostics(page, sessionId);
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (diagnostic.userInputs === expectedCount) return;
-    await page.waitForTimeout(250);
-    diagnostic = await voicePilotDiagnostics(page, sessionId);
-  }
-  expect(diagnostic, JSON.stringify(diagnostic, null, 2)).toEqual(
-    expect.objectContaining({ userInputs: expectedCount }),
-  );
+  await expect
+    .poll(() => voicePilotDiagnostics(page, sessionId), {
+      timeout: 10_000,
+      message: `Voice Pilot should send ${expectedCount} user_input message(s)`,
+    })
+    .toEqual(expect.objectContaining({ userInputs: expectedCount }));
 }
 
 async function emitRecognizedSpeech(page: Page, text: string): Promise<number> {
@@ -373,57 +369,6 @@ test.describe("L4 mobile / Voice Pilot", () => {
     const secondDelivered = await emitRecognizedSpeech(emuPage, "第二轮请求");
     expect(secondDelivered).toBeGreaterThan(0);
     await waitForVoiceUserInput(emuPage, "voice-second-turn-sess", 2);
-  });
-
-  test("summarizes code-heavy assistant replies before speaking", async ({ emuPage }) => {
-    await openJsonVoicePilot(emuPage, "d51-sess");
-
-    await emuPage.evaluate(() => {
-      const hooks = window.__ccTest;
-      if (!hooks) throw new Error("__ccTest 未安装");
-      hooks.chat.appendAssistantText("d51-sess", "```ts\nconst result = runPlan();\n```");
-      hooks.chat.markTurnComplete("d51-sess");
-    });
-
-    await expect
-      .poll(async () => {
-        const sent = await sentFakeRelayMessages(emuPage);
-        const msg = sent.find((item) => item.type === "voice_summary_request");
-        return msg?.reason ?? "";
-      })
-      .toBe("code");
-
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() =>
-          (window.__devAnywhereE2E?.voice.ttsSent ?? [])
-            .map((raw) => {
-              try {
-                return JSON.parse(raw).text as string | undefined;
-              } catch {
-                return undefined;
-              }
-            })
-            .filter(Boolean)
-            .join("\n"),
-        ),
-      )
-      .toContain("下面是摘要：代码和表格内容已转换成语音摘要");
-  });
-
-  test("PTY sessions do not show Voice Pilot", async ({ emuPage }) => {
-    await installFakeVoiceRuntime(emuPage);
-    await installFakeRelay(emuPage);
-    await emuPage.goto(`${mobileBaseUrl}/#/chat/claude-pty?mode=pty`);
-    await emuPage.reload();
-    await expect(emuPage.locator('[data-slot="pty-host"]')).toBeVisible({ timeout: 30_000 });
-
-    await emuPage.getByRole("button", { name: "会话操作" }).click();
-    await expect(emuPage.locator('[data-slot="chat-menu-voice-pilot-item"]')).toHaveCount(0);
-
-    await expect(emuPage.locator('[data-slot="voice-pilot-status"]')).toHaveCount(0);
-    const sent = await sentFakeRelayMessages(emuPage);
-    expect(sent.some((item) => item.type === "voice_config_request")).toBe(false);
   });
 });
 

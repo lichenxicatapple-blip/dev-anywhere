@@ -50,10 +50,12 @@ describe("WorkerRegistry onDisconnect", () => {
 
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
+    if (!sock) throw new Error("worker socket did not connect");
 
     // server 端主动 destroy 模拟 worker 进程崩溃
+    const closed = new Promise<void>((resolve) => sock.once("close", () => resolve()));
     acceptedSocket?.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await closed;
 
     expect(onChannelBroken).toHaveBeenCalledWith("s1");
   });
@@ -71,9 +73,11 @@ describe("WorkerRegistry onDisconnect", () => {
 
     const sock = await registry.connect("s-gone", sockPath);
     expect(sock).not.toBeNull();
+    if (!sock) throw new Error("worker socket did not connect");
 
+    const closed = new Promise<void>((resolve) => sock.once("close", () => resolve()));
     acceptedSocket?.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await closed;
 
     // worker_exit 路径会先 terminateSession（删除 session），随后 socket close 触发到这里：
     // 此时 session 已不在，避免重复推送 ERROR（实际上 ERROR 转换会被 FSM 拒绝，但更早 short-circuit 减少噪音）。
@@ -144,9 +148,8 @@ describe("WorkerRegistry onDisconnect", () => {
     expect(sock).not.toBeNull();
 
     acceptedSocket?.write(serializeWorkerMsg({ type: "worker_interrupted" }));
-    await new Promise((r) => setTimeout(r, 50));
 
-    expect(onTurnResult).toHaveBeenCalledWith("s1");
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
     expect(approvalDecision).toHaveBeenCalledWith({
       behavior: "deny",

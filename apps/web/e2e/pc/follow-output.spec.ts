@@ -25,25 +25,39 @@ async function seedMessages(page: Page, count: number): Promise<void> {
 }
 
 async function scrollBy(page: Page, pxFromBottom: number): Promise<void> {
-  await page.evaluate((amount: number) => {
-    const el = document.querySelector('[data-slot="message-list"]');
-    if (!el) return;
-    (el as HTMLElement).scrollTop = el.scrollHeight - (el as HTMLElement).clientHeight - amount;
-    el.dispatchEvent(new Event("scroll"));
-  }, pxFromBottom);
-  // user-gesture timing mock: auto-follow sticky 状态机区分"程序自动 scroll" vs
-  // "用户 manual scroll" 需要看 scroll 事件之间的间隔, 200ms 让 react 当作 user 抢走焦点.
-  await page.waitForTimeout(200);
+  await page.locator('[data-slot="message-list"]').hover();
+  await page.mouse.wheel(0, -pxFromBottom);
+  await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+    "inert",
+    pxFromBottom <= 8,
+  );
 }
 
 async function scrollToBottom(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+        if (!el) return 0;
+        return Math.max(0, el.scrollHeight - el.clientHeight);
+      }),
+    )
+    .toBeGreaterThan(0);
   await page.evaluate(() => {
     const el = document.querySelector('[data-slot="message-list"]');
     if (!el) return;
     (el as HTMLElement).scrollTop = el.scrollHeight;
     el.dispatchEvent(new Event("scroll"));
   });
-  await page.waitForTimeout(200);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+        if (!el) return -1;
+        return el.scrollHeight - (el.scrollTop + el.clientHeight);
+      }),
+    )
+    .toBeLessThanOrEqual(8);
 }
 
 async function startMessageOverlapRecorder(page: Page, frames: number): Promise<void> {
@@ -127,25 +141,6 @@ async function readMessageOverlapSamples(
     return w.__devAnywhereMessageOverlapSamples ?? [];
   });
 }
-
-test.describe("ChatJsonView — follow-output baseline", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test.beforeEach(async ({ page }) => {
-    await installFakeRelay(page);
-    await gotoWithFakeProxy(page, "/#/chat/fo-sess?mode=json");
-  });
-
-  test("BackToBottom absent on empty state", async ({ page }) => {
-    const btb = page.locator('[data-slot="back-to-bottom"]');
-    await expect(btb).toHaveCount(0);
-  });
-
-  test("input-bar-region present (InputBar + SemanticActionPanel wired)", async ({ page }) => {
-    const region = page.locator('[data-slot="input-bar-region"]');
-    await expect(region).toBeVisible();
-  });
-});
 
 test.describe("ChatJsonView — history replay stability", () => {
   test.use({ viewport: { width: 2048, height: 1200 } });
@@ -352,20 +347,12 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await scrollToBottom(page);
   });
 
-  test("hidden at bottom", async ({ page }) => {
+  test("only appears after leaving the bottom threshold", async ({ page }) => {
     const btb = page.locator('[data-slot="back-to-bottom"]');
     await expect(btb).toHaveJSProperty("inert", true);
-  });
-
-  test("within 8px threshold keeps button hidden", async ({ page }) => {
     await scrollBy(page, 5);
-    const btb = page.locator('[data-slot="back-to-bottom"]');
     await expect(btb).toHaveJSProperty("inert", true);
-  });
-
-  test("crossing threshold (10px) reveals button", async ({ page }) => {
     await scrollBy(page, 10);
-    const btb = page.locator('[data-slot="back-to-bottom"]');
     await expect(btb).toHaveJSProperty("inert", false);
   });
 
@@ -376,22 +363,9 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     expect(first).not.toBeNull();
 
     // 继续向上滚动大幅距离, 按钮 viewport 坐标应不变
-    await page.evaluate(() => {
-      const el = document.querySelector('[data-slot="message-list"]');
-      if (el) {
-        (el as HTMLElement).scrollTop = 100;
-        el.dispatchEvent(new Event("scroll"));
-      }
-    });
-    // 等 scrollTop 真到 100 (event 已 dispatch + react render 拍稳).
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
-          return el?.scrollTop ?? -1;
-        }),
-      )
-      .toBe(100);
+    await page.locator('[data-slot="message-list"]').hover();
+    await page.mouse.wheel(0, -600);
+    await expect(btb).toHaveJSProperty("inert", false);
     const second = await btb.boundingBox();
     expect(second).not.toBeNull();
     expect(Math.abs((first!.y ?? 0) - (second!.y ?? 0))).toBeLessThan(2);

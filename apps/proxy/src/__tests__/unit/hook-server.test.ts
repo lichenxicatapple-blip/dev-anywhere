@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HookRegistry } from "#src/serve/hook-registry.js";
 import { HookServer, type AuthenticatedHookEvent } from "#src/serve/hook-server.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
@@ -29,11 +29,7 @@ async function waitForPendingPermission(
   permissionBroker: PermissionBroker,
   sessionId: string,
 ): Promise<void> {
-  const deadline = Date.now() + 500;
-  while (Date.now() < deadline) {
-    if (permissionBroker.listSession(sessionId).length > 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await vi.waitFor(() => expect(permissionBroker.listSession(sessionId)).toHaveLength(1));
 }
 
 afterEach(async () => {

@@ -67,8 +67,8 @@ describe("WorkerRegistry Codex app-server events", () => {
         },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(1));
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_message",
       sessionId: "s1",
@@ -94,8 +94,8 @@ describe("WorkerRegistry Codex app-server events", () => {
         },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    await vi.waitFor(() => expect(relay.raw).toHaveLength(1));
     expect(RelayControlSchema.parse(JSON.parse(relay.raw[0]))).toMatchObject({
       type: "turn_result",
       sessionId: "s1",
@@ -139,8 +139,8 @@ describe("WorkerRegistry Codex app-server events", () => {
         },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_tool_use",
       sessionId: "s1",
@@ -185,8 +185,8 @@ describe("WorkerRegistry Codex app-server events", () => {
         },
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_tool_use",
       sessionId: "s1",
@@ -225,8 +225,9 @@ describe("WorkerRegistry Codex app-server events", () => {
         sessionId: "cx-thread-1",
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "cx-thread-1");
+    await vi.waitFor(() =>
+      expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "cx-thread-1"),
+    );
   });
 });

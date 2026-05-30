@@ -129,8 +129,7 @@ describe("JsonSession claudeSessionId capture", () => {
     };
     mockChild.mockStdout.write(JSON.stringify(systemEvent) + "\n");
 
-    await new Promise((r) => setTimeout(r, 50));
-    expect(session.getClaudeSessionId()).toBe("claude-sess-456");
+    await vi.waitFor(() => expect(session.getClaudeSessionId()).toBe("claude-sess-456"));
   });
 
   it("returns null when no system event received", () => {

@@ -26,9 +26,7 @@ test.describe("JSON inline path links", () => {
     await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
   });
 
-  test("downloads a file from the inline path without rendering a duplicate bottom chip", async ({
-    page,
-  }) => {
+  test("downloads inline file paths without rendering duplicate bottom chips", async ({ page }) => {
     await emitAssistantMessage(page, "Please inspect README.md before continuing.");
 
     await expect(page.locator('[data-slot="file-download-links"]')).toHaveCount(0);
@@ -44,9 +42,7 @@ test.describe("JSON inline path links", () => {
         ),
       )
       .toBe(true);
-  });
 
-  test("downloads an inline-code file path from a markdown table cell", async ({ page }) => {
     const path = "data/pipeline/sticker/sticker_classify.py";
     await emitAssistantMessage(
       page,

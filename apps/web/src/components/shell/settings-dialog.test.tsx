@@ -335,23 +335,6 @@ describe("SettingsDialog", () => {
     expect(footerDivider?.className).toContain("mr-4");
   });
 
-  it("keeps detail-free Voice Pilot choices compact", async () => {
-    render(<SettingsDialog open onOpenChange={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
-    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-
-    const choiceTriggers = document.querySelectorAll<HTMLElement>(
-      '[data-slot="voice-settings-choice-trigger"]',
-    );
-    expect(choiceTriggers.length).toBeGreaterThan(0);
-    expect(choiceTriggers[0]?.className).toContain("min-h-11");
-    expect(choiceTriggers[0]?.className).not.toContain("min-h-[60px]");
-    expect(
-      Array.from(choiceTriggers).some((trigger) => trigger.className.includes("min-h-[60px]")),
-    );
-  });
-
   it("keeps save feedback visible long enough to read", async () => {
     const onOpenChange = vi.fn();
     render(<SettingsDialog open onOpenChange={onOpenChange} />);

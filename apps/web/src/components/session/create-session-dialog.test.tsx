@@ -68,6 +68,25 @@ const availableAgentCli = {
   codex: { available: true, command: "/usr/local/bin/codex" },
 };
 
+const sessionCreatePermissionCases = [
+  ["Claude", "pty", "claude", "严格审批", "default"],
+  ["Claude", "pty", "claude", "自动判定", "auto"],
+  ["Claude", "pty", "claude", "自动接受编辑", "acceptEdits"],
+  ["Claude", "pty", "claude", "只读规划", "plan"],
+  ["Claude", "pty", "claude", "跳过全部审批", "bypassPermissions"],
+  ["Claude", "json", "claude", "严格审批", "default"],
+  ["Claude", "json", "claude", "自动判定", "auto"],
+  ["Claude", "json", "claude", "自动接受编辑", "acceptEdits"],
+  ["Claude", "json", "claude", "只读规划", "plan"],
+  ["Claude", "json", "claude", "跳过全部审批", "bypassPermissions"],
+  ["Codex", "pty", "codex", "严格审批", "default"],
+  ["Codex", "pty", "codex", "自动判定", "auto"],
+  ["Codex", "pty", "codex", "跳过全部审批", "bypassPermissions"],
+  ["Codex", "json", "codex", "严格审批", "default"],
+  ["Codex", "json", "codex", "自动判定", "auto"],
+  ["Codex", "json", "codex", "跳过全部审批", "bypassPermissions"],
+] as const;
+
 function renderDialog() {
   return render(
     <MemoryRouter>
@@ -214,6 +233,56 @@ describe("CreateSessionDialog", () => {
         expect.any(Number),
       );
     });
+  });
+
+  it("sends selected provider/mode permission labels as permissionMode", async () => {
+    for (const [
+      providerLabel,
+      mode,
+      provider,
+      permissionLabel,
+      permissionMode,
+    ] of sessionCreatePermissionCases) {
+      const caseLabel = `${providerLabel} ${mode} ${permissionLabel}`;
+      createSession.mockResolvedValueOnce({
+        type: "session_create_response",
+        sessionId: `${provider}-${mode}-${permissionMode}`,
+        mode,
+        provider,
+      });
+      useFileStore.setState({
+        tree: new Map(),
+        cwd: "",
+        homePath: "/home/dev",
+        agentCli: availableAgentCli,
+      });
+
+      const { getByRole } = renderDialog();
+
+      if (mode === "json") {
+        fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+      }
+      if (provider === "codex") {
+        fireEvent.click(getByRole("button", { name: "Codex" }));
+      }
+      fireEvent.click(getByRole("combobox", { name: "权限模式" }));
+      fireEvent.click(getByRole("option", { name: permissionLabel }));
+      fireEvent.click(getByRole("button", { name: "创建" }));
+
+      await waitFor(() => {
+        expect(createSession, caseLabel).toHaveBeenCalledWith(
+          expect.objectContaining({
+            cwd: "/home/dev",
+            mode,
+            provider,
+            permissionMode,
+          }),
+          expect.any(Number),
+        );
+      });
+      cleanup();
+      createSession.mockReset();
+    }
   });
 
   it("unblocks the create button when session creation times out", async () => {

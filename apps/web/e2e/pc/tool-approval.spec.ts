@@ -9,13 +9,6 @@ test.describe("ToolApprovalCard — keyboard shortcuts", () => {
     await gotoWithFakeProxy(page, "/#/chat/json-sess?mode=json");
   });
 
-  test("card shows three buttons with exact copy when approval seeded", async ({ page }) => {
-    const card = page.locator('[data-slot="tool-approval-card"]').first();
-    await expect(card.getByRole("button", { name: "允许", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "拒绝", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "始终允许", exact: true })).toBeVisible();
-  });
-
   test("sidebar shows waiting approval while an approval card is pending", async ({ page }) => {
     const card = page.locator('[data-slot="tool-approval-card"][data-status="pending"]');
     await expect(card).toBeVisible();

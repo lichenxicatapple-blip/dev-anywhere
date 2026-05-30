@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -33,10 +33,12 @@ describe("scanSessionHistory", () => {
     }
   });
 
-  function writeSession(encodedProject: string, sessionId: string, lines: string[]): void {
+  function writeSession(encodedProject: string, sessionId: string, lines: string[]): string {
     const projectDir = join(testDir, ".claude", "projects", encodedProject);
     mkdirSync(projectDir, { recursive: true });
-    writeFileSync(join(projectDir, `${sessionId}.jsonl`), lines.join("\n") + "\n");
+    const filePath = join(projectDir, `${sessionId}.jsonl`);
+    writeFileSync(filePath, lines.join("\n") + "\n");
+    return filePath;
   }
 
   function writeCodexSession(sessionId: string, lines: string[]): void {
@@ -120,7 +122,6 @@ describe("scanSessionHistory", () => {
     writeSession("-test-myproject", "claude-json-old", [
       JSON.stringify({ type: "user", message: { role: "user", content: "Same title" } }),
     ]);
-    await new Promise((r) => setTimeout(r, 50));
     writeSession("-test-myproject", "claude-unknown-new", [
       JSON.stringify({ type: "user", message: { role: "user", content: "Same title" } }),
     ]);
@@ -192,9 +193,14 @@ describe("scanSessionHistory", () => {
   });
 
   it("sorts results by updatedAt descending", async () => {
-    writeSession("-test-proj", "older", [JSON.stringify({ type: "user", message: "Older" })]);
-    await new Promise((r) => setTimeout(r, 50));
-    writeSession("-test-proj", "newer", [JSON.stringify({ type: "user", message: "Newer" })]);
+    const older = writeSession("-test-proj", "older", [
+      JSON.stringify({ type: "user", message: "Older" }),
+    ]);
+    const newer = writeSession("-test-proj", "newer", [
+      JSON.stringify({ type: "user", message: "Newer" }),
+    ]);
+    utimesSync(older, new Date(1_000), new Date(1_000));
+    utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(2);
@@ -338,15 +344,16 @@ describe("scanSessionHistory", () => {
   });
 
   it("deduplicates sessions with same title + projectDir, keeps newest", async () => {
-    writeSession("-test-proj", "old1", [
+    const older = writeSession("-test-proj", "old1", [
       JSON.stringify({ type: "progress", cwd: "/test/proj", sessionId: "old1" }),
       JSON.stringify({ type: "user", message: "Same question" }),
     ]);
-    await new Promise((r) => setTimeout(r, 50));
-    writeSession("-test-proj", "new1", [
+    const newer = writeSession("-test-proj", "new1", [
       JSON.stringify({ type: "progress", cwd: "/test/proj", sessionId: "new1" }),
       JSON.stringify({ type: "user", message: "Same question" }),
     ]);
+    utimesSync(older, new Date(1_000), new Date(1_000));
+    utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
@@ -356,7 +363,7 @@ describe("scanSessionHistory", () => {
 
   it("does NOT dedup when all user messages are isMeta and titles fall back to unique session IDs", async () => {
     // All user messages are metadata, so the title falls back to the sessionId prefix.
-    writeSession("-test-proj", "aaaaaaaa-1111", [
+    const older = writeSession("-test-proj", "aaaaaaaa-1111", [
       JSON.stringify({
         type: "user",
         isMeta: true,
@@ -371,8 +378,7 @@ describe("scanSessionHistory", () => {
         },
       }),
     ]);
-    await new Promise((r) => setTimeout(r, 50));
-    writeSession("-test-proj", "bbbbbbbb-2222", [
+    const newer = writeSession("-test-proj", "bbbbbbbb-2222", [
       JSON.stringify({
         type: "user",
         isMeta: true,
@@ -387,6 +393,8 @@ describe("scanSessionHistory", () => {
         },
       }),
     ]);
+    utimesSync(older, new Date(1_000), new Date(1_000));
+    utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
     // 没有真实标题时统一显示未命名；同一 provider + projectDir + title 会折叠到最新一条。
@@ -784,14 +792,13 @@ describe("readSessionMessages", () => {
     expect(page.hasMore).toBe(false);
   });
 
-  it.each(["../etc/passwd", "..", "foo/bar", "foo\0bar", "foo bar", "", "with.dot"])(
-    "rejects path-unsafe session id %j",
-    async (badId) => {
+  it("rejects path-unsafe session ids", async () => {
+    for (const badId of ["../etc/passwd", "..", "foo/bar", "foo\0bar", "foo bar", "", "with.dot"]) {
       const messages = await readSessionMessages(badId);
-      expect(messages).toEqual([]);
+      expect(messages, badId).toEqual([]);
       const page = await readSessionMessagesPage(badId, { limit: 5 });
-      expect(page.messages).toEqual([]);
-      expect(page.hasMore).toBe(false);
-    },
-  );
+      expect(page.messages, badId).toEqual([]);
+      expect(page.hasMore, badId).toBe(false);
+    }
+  });
 });

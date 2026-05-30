@@ -35,9 +35,7 @@ test.describe("chat 页异常态展示", () => {
     await page.goto(BASE_URL);
 
     await expect(page).toHaveURL(/#\/chat\/claude-pty/, { timeout: 15_000 });
-    // 给出充足时间确认无误跳, 同时确认占位面板都没出
-    await page.waitForTimeout(1_000);
-    await expect(page).toHaveURL(/#\/chat\/claude-pty/);
+    await expect.poll(() => page.url(), { timeout: 1_000 }).toMatch(/#\/chat\/claude-pty/);
     await expect(page.locator('[data-slot="terminated-session-panel"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="connection-lost-panel"]')).toHaveCount(0);
   });
@@ -102,8 +100,7 @@ test.describe("chat 页异常态展示", () => {
 
     // 由于 last-chat-route 已被清掉, AppShell 不会拽回 /chat/json-sess; 应停在 / 或 sessions
     // (AppShell 会根据 proxy/会话状态自然推进, 但绝对不应是 chat URL)
-    await page.waitForTimeout(1_000);
-    await expect(page).not.toHaveURL(/#\/chat\//);
+    await expect.poll(() => page.url(), { timeout: 1_000 }).not.toMatch(/#\/chat\//);
   });
 
   test("proxy_offline 事件后 chat 主体被 ConnectionLostPanel(proxy) 替代", async ({ page }) => {

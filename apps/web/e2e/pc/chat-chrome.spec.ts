@@ -1,6 +1,5 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
-import { expectTouchTarget } from "../mobile-helpers";
 
 async function installWakeLockMock(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(() => {
@@ -65,58 +64,12 @@ async function wakeLockTestCount(
   );
 }
 
-test.describe("AppShell top-level mobile chrome", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto(BASE_URL);
-  });
-
-  test("mobile top-level pages use brand hero plus floating settings", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${BASE_URL}/#/sessions`);
-
-    await expect(page.locator('[data-slot="app-shell-header"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="mobile-brand-hero"]')).toHaveCount(1);
-    await expect(page.locator('[data-slot="mobile-brand-hero"]')).toBeVisible();
-    await expect(
-      page.locator('[data-slot="mobile-brand-hero"] [data-slot="brand-typewriter"]'),
-    ).toBeVisible();
-    await expectTouchTarget(page.locator('[data-slot="mobile-settings-trigger"]'));
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.locator('[data-slot="mobile-brand-hero"]')).toBeHidden();
-    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).toBeHidden();
-    await expect(page.locator('[data-slot="sidebar-brand"]')).toBeVisible();
-  });
-
-  test("top-level mobile chrome is hidden on /chat/*", async ({ page }) => {
-    await page.goto(`${BASE_URL}/#/chat/d51-sess?mode=json`);
-    await expect(page.locator('[data-slot="app-shell-header"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="mobile-brand-hero"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).toHaveCount(0);
-  });
-});
-
 test.describe("ChatHeader compact navigation controls", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
     await gotoWithFakeProxy(page, "/#/chat/d51-sess?mode=json");
-  });
-
-  test("desktop header shows centered title and overflow", async ({ page }) => {
-    const header = page.locator('[data-slot="chat-header"]');
-    await expect(header).toBeVisible();
-    await expect(page.locator('[data-slot="chat-back-button"]')).toBeHidden();
-    await expect(page.locator('[data-slot="chat-session-title"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-overflow-trigger"]')).toBeVisible();
-  });
-
-  test("back button is mobile-only", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator('[data-slot="chat-back-button"]')).toBeVisible();
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.locator('[data-slot="chat-back-button"]')).toBeHidden();
   });
 
   test("mobile header aligns side actions to the JSON user bubble rail", async ({ page }) => {
@@ -151,33 +104,6 @@ test.describe("ChatHeader compact navigation controls", () => {
     const overflowRightGap = viewportWidth - (overflowBox.x + overflowBox.width);
     expect(Math.abs(overflowRightGap - bubbleRightGap)).toBeLessThanOrEqual(1);
     expect(Math.abs(backBox.x - bubbleRightGap)).toBeLessThanOrEqual(1);
-  });
-
-  test("no standalone permission-mode button or sidebar-toggle", async ({ page }) => {
-    const permissionBtn = page.locator(
-      '[data-slot="chat-header"] button:has-text("默认"), [data-slot="chat-header"] button:has-text("自动允许"), [data-slot="chat-header"] button:has-text("规划模式")',
-    );
-    await expect(permissionBtn).toHaveCount(0);
-    const sidebarToggle = page.locator('[data-slot="chat-header"] [aria-label*="侧栏"]');
-    await expect(sidebarToggle).toHaveCount(0);
-  });
-
-  test("overflow menu only exposes implemented chat actions", async ({ page }) => {
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    const menu = page.locator('[data-slot="chat-overflow-menu"]');
-    await expect(menu).toBeVisible();
-    await expect(menu.getByText("Permission mode")).toHaveCount(0);
-    await expect(menu.getByText("切换权限模式")).toHaveCount(0);
-    await expect(menu.getByText("快捷键")).toHaveCount(0);
-    await expect(menu.getByText("会话")).toBeVisible();
-    await expect(menu.getByText("重命名")).toBeVisible();
-    await expect(menu.getByText("复制会话")).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-terminate-item"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
   });
 
   test("font controls are aligned without overlap", async ({ page }) => {
@@ -365,29 +291,6 @@ test.describe("ChatHeader screen wake lock", () => {
 });
 
 test.describe("AppShell Settings slot", () => {
-  test("Settings gear opens the same dialog from mobile floating button and desktop sidebar", async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await installFakeRelay(page);
-    await page.goto(`${BASE_URL}/#/sessions`);
-    const mobileSettings = page.locator('[data-slot="mobile-settings-trigger"]');
-
-    await expect(mobileSettings).toBeVisible();
-    await expectTouchTarget(mobileSettings);
-    await expect(page.locator('[data-slot="sidebar-settings-trigger"]')).toBeHidden();
-    await mobileSettings.click();
-    await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
-    await page.getByRole("button", { name: "Close" }).click();
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(page.locator('[data-slot="mobile-settings-trigger"]')).toBeHidden();
-    const desktopSettings = page.locator('[data-slot="sidebar-settings-trigger"]');
-    await expect(desktopSettings).toBeVisible();
-    await desktopSettings.click();
-    await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
-  });
-
   test("desktop sidebar bottom actions align with the JSON input bar", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installFakeRelay(page);

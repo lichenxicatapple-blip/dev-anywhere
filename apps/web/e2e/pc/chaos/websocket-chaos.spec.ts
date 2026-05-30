@@ -28,6 +28,28 @@ async function releaseHeldConnections(page: import("@playwright/test").Page): Pr
   });
 }
 
+async function waitForAnimationFrames(
+  page: import("@playwright/test").Page,
+  count = 2,
+): Promise<void> {
+  await page.evaluate(
+    (frameCount) =>
+      new Promise<void>((resolve) => {
+        let frames = 0;
+        const tick = () => {
+          frames += 1;
+          if (frames >= frameCount) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    count,
+  );
+}
+
 test.describe("WebSocket reconnect chaos", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
@@ -259,7 +281,7 @@ test.describe("WebSocket reconnect chaos", () => {
 
     await holdNextConnectionAndDropSocket(page);
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
-    await page.waitForTimeout(100);
+    await waitForAnimationFrames(page);
     await releaseHeldConnections(page);
 
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle", {
@@ -297,10 +319,9 @@ test.describe("WebSocket reconnect chaos", () => {
     await expect(page.getByRole("button", { name: "创建" })).toBeEnabled();
     await expect(page.getByText("连接已断开")).toBeVisible();
     await releaseHeldConnections(page);
-    await page.waitForTimeout(50);
+    await expect(page).toHaveURL(/#\/?$/);
 
     const sent = await sentFakeRelayMessages(page);
     expect(sent.filter((msg) => msg.type === "session_create")).toHaveLength(0);
-    await expect(page).toHaveURL(/#\/?$/);
   });
 });

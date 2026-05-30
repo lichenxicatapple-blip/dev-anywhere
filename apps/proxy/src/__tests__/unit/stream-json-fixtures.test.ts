@@ -44,36 +44,40 @@ describe.each(versions)("stream-json fixtures (%s)", (version) => {
     "control-request",
   ];
 
-  it.each(scenarios)("%s: every event is known or intentionally ignored", (scenario) => {
-    const events = readFixture(version, scenario);
-    for (const ev of events) {
-      const rawType =
-        ev && typeof ev === "object" ? ((ev as { type?: unknown }).type as string) : "<missing>";
-      const parsed = StreamJsonEventSchema.safeParse(ev);
-      if (!parsed.success) {
-        expect(
-          IGNORED_EVENT_TYPES.has(rawType),
-          `unknown event type ${rawType} in ${scenario}; update schema or ignored list`,
-        ).toBe(true);
+  it("keeps every fixture event known or intentionally ignored", () => {
+    for (const scenario of scenarios) {
+      const events = readFixture(version, scenario);
+      for (const ev of events) {
+        const rawType =
+          ev && typeof ev === "object" ? ((ev as { type?: unknown }).type as string) : "<missing>";
+        const parsed = StreamJsonEventSchema.safeParse(ev);
+        if (!parsed.success) {
+          expect(
+            IGNORED_EVENT_TYPES.has(rawType),
+            `unknown event type ${rawType} in ${scenario}; update schema or ignored list`,
+          ).toBe(true);
+        }
       }
     }
   });
 
-  it.each(scenarios)("%s: every assistant/user content block is recognized", (scenario) => {
-    const events = readFixture(version, scenario);
-    for (const ev of events) {
-      if (!ev || typeof ev !== "object") continue;
-      const typed = ev as { type?: string; message?: { content?: unknown[] } };
-      if (typed.type !== "assistant" && typed.type !== "user") continue;
-      const content = typed.message?.content ?? [];
-      for (const block of content) {
-        const parsed = KnownContentBlockSchema.safeParse(block);
-        const blockType =
-          block && typeof block === "object" ? (block as { type?: string }).type : "<missing>";
-        expect(
-          parsed.success,
-          `unrecognized block type ${blockType} in ${scenario}; update KnownContentBlockSchema`,
-        ).toBe(true);
+  it("keeps every assistant/user content block recognized", () => {
+    for (const scenario of scenarios) {
+      const events = readFixture(version, scenario);
+      for (const ev of events) {
+        if (!ev || typeof ev !== "object") continue;
+        const typed = ev as { type?: string; message?: { content?: unknown[] } };
+        if (typed.type !== "assistant" && typed.type !== "user") continue;
+        const content = typed.message?.content ?? [];
+        for (const block of content) {
+          const parsed = KnownContentBlockSchema.safeParse(block);
+          const blockType =
+            block && typeof block === "object" ? (block as { type?: string }).type : "<missing>";
+          expect(
+            parsed.success,
+            `unrecognized block type ${blockType} in ${scenario}; update KnownContentBlockSchema`,
+          ).toBe(true);
+        }
       }
     }
   });

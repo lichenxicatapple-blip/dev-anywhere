@@ -1,6 +1,6 @@
 // PTY 滚动 e2e: back-to-bottom, 新消息提示, approval-wait 视图保持, resize 重新订阅,
 // 触摸滚动期间不抢回底部.
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 import {
   backToBottom,
@@ -23,6 +23,25 @@ import {
 } from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scroll";
+
+async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate(
+    (frameCount) =>
+      new Promise<void>((resolve) => {
+        let frames = 0;
+        const tick = () => {
+          frames += 1;
+          if (frames >= frameCount) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    count,
+  );
+}
 
 test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, touch", () => {
   test("scrolls history, surfaces back-to-bottom, and re-subscribes after resize", async ({
@@ -130,7 +149,12 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     for (let i = 0; i < 8; i++) {
       await sendPtyOutput(page, `continuous output ${i}\r\n`);
     }
-    await page.waitForTimeout(400);
+    await expect
+      .poll(async () => {
+        const metrics = await readPtyScrollMetrics(page);
+        return metrics.scrollTop < metrics.maxScrollTop - 30;
+      })
+      .toBe(true);
 
     const afterOutput = await readPtyScrollMetrics(page);
     // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, scrollTop 跟新 max 应保留相对位置)
@@ -161,13 +185,16 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     // 启动 /compact 风格的连续输出: 每帧 \r 重写进度 + 频繁追加新行让
     // buffer 持续增长 (claude /compact 期间会输出 compacting messages 并不断新增进度行)。
     // 不 await, 让它跟后续 wheel 操作并发发生。
+    const maxScrollTopBeforeStream = (await readPtyScrollMetrics(page)).maxScrollTop;
     await page.evaluate(() => {
-      type AnyWindow = Window & { __ptyCompactRunning?: boolean };
+      type AnyWindow = Window & { __ptyCompactRunning?: boolean; __ptyCompactTicks?: number };
       const w = window as AnyWindow;
       w.__ptyCompactRunning = true;
+      w.__ptyCompactTicks = 0;
       let i = 0;
       const tick = (): void => {
         if (!w.__ptyCompactRunning) return;
+        w.__ptyCompactTicks = (w.__ptyCompactTicks ?? 0) + 1;
         const idx = i++;
         // 每 4 帧追加一行新内容 (buffer.length 增长), 其余只 \r 重写
         const payload =
@@ -182,24 +209,43 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     // 让 stream 进入稳态 (xterm 已经在 60Hz onRender + onFramePending), 并等
     // buffer 涨到足够大确保我们仍在 atBottom 时 max 已经显著 > 初始值
-    await page.waitForTimeout(220);
+    await expect
+      .poll(async () => {
+        const [ticks, metrics] = await Promise.all([
+          page.evaluate(
+            () => (window as Window & { __ptyCompactTicks?: number }).__ptyCompactTicks ?? 0,
+          ),
+          readPtyScrollMetrics(page),
+        ]);
+        return ticks >= 5 && metrics.maxScrollTop > maxScrollTopBeforeStream + 30;
+      })
+      .toBe(true);
 
     // 用户复现是 wheel up 一次就有问题, 但单次 wheel 实际是 wheel event 序列 (~几个)。
     // 模拟用户连续 wheel 几次表达回看意图。
     await terminal.hover();
     for (let i = 0; i < 3; i++) {
       await page.mouse.wheel(0, -80);
-      await page.waitForTimeout(40);
+      await waitForAnimationFrames(page, 1);
     }
 
     // 继续让 stream 跑一会, 看用户的 scrollTop 会不会被拉回去
-    await page.waitForTimeout(500);
+    const ticksAfterWheel = await page.evaluate(
+      () => (window as Window & { __ptyCompactTicks?: number }).__ptyCompactTicks ?? 0,
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { __ptyCompactTicks?: number }).__ptyCompactTicks ?? 0,
+        ),
+      )
+      .toBeGreaterThanOrEqual(ticksAfterWheel + 10);
 
     await page.evaluate(() => {
       type AnyWindow = Window & { __ptyCompactRunning?: boolean };
       (window as AnyWindow).__ptyCompactRunning = false;
     });
-    await page.waitForTimeout(80);
+    await waitForAnimationFrames(page, 2);
 
     const finalState = await readPtyScrollMetrics(page);
     expect(finalState.scrollTop).toBeLessThan(finalState.maxScrollTop - 30);

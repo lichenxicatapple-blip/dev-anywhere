@@ -111,9 +111,10 @@ describe("Voice config tester", () => {
     asr?.emit("ready");
     expect(asr?.pcm).toEqual([firstAudioChunk]);
     expect(asr?.stopped).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(asr?.pcm).toEqual([firstAudioChunk, secondAudioChunk]);
-    expect(asr?.stopped).toBe(true);
+    await vi.waitFor(() => {
+      expect(asr?.pcm).toEqual([firstAudioChunk, secondAudioChunk]);
+      expect(asr?.stopped).toBe(true);
+    });
     asr?.emit("final", "语音助手测试");
 
     await expect(promise).resolves.toEqual({

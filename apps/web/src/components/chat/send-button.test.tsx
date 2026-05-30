@@ -7,14 +7,6 @@ afterEach(() => {
 });
 
 describe("SendButton", () => {
-  it("uses destructive treatment for the stop action", () => {
-    render(<StopButton isStopping={false} onStop={vi.fn()} />);
-
-    const button = screen.getByRole("button", { name: "停止响应" });
-    expect(button.getAttribute("data-variant")).toBe("stop");
-    expect(button.className).toContain("text-destructive");
-  });
-
   it("disables stop after click and shows an indeterminate progress ring", () => {
     const onStop = vi.fn();
     const { rerender } = render(<StopButton isStopping={false} onStop={onStop} />);

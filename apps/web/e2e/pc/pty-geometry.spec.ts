@@ -112,7 +112,12 @@ test.describe("PTY geometry edges", () => {
       await page.evaluate(() => window.__ptySmoke.sendPty("B"));
     }
 
-    await page.waitForTimeout(300);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
     const finalScrollLeft = await terminal.evaluate((el) => (el as HTMLElement).scrollLeft);
     expect(finalScrollLeft).toBe(userScrollLeft);
   });

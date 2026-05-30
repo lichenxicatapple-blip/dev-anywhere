@@ -53,20 +53,6 @@ describe("MessageBubble", () => {
     );
   });
 
-  it("does not show a streaming cursor for assistant partial text", () => {
-    render(
-      <MessageBubble
-        message={makeMessage({
-          id: "a2",
-          role: "assistant",
-          text: "partial",
-          isPartial: true,
-        })}
-      />,
-    );
-    expect(screen.queryByLabelText("streaming")).toBeNull();
-  });
-
   it("keeps assistant partial text as plain markdown without an inline cursor", () => {
     render(
       <MessageBubble
@@ -495,23 +481,6 @@ describe("MessageBubble", () => {
     expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
     expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.com/readme");
     expect(container.querySelector("code")?.textContent).toBe("package.json");
-  });
-
-  it("does not render bare domains as file download actions", () => {
-    const { container } = render(
-      <FileDownloadProvider sessionId="s1">
-        <MessageBubble
-          message={makeMessage({
-            id: "a-bare-domain",
-            role: "assistant",
-            text: "If it persists, check status.claude.com.",
-          })}
-        />
-      </FileDownloadProvider>,
-    );
-
-    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
-    expect(container.textContent).toContain("status.claude.com");
   });
 
   it("renders bare domains as external links instead of download actions", () => {

@@ -14,11 +14,12 @@ async function waitForCondition(
   message: string,
   timeoutMs = 1000,
 ): Promise<void> {
-  const started = Date.now();
-  while (!condition()) {
-    if (Date.now() - started > timeoutMs) throw new Error(message);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await vi.waitFor(
+    () => {
+      if (!condition()) throw new Error(message);
+    },
+    { timeout: timeoutMs },
+  );
 }
 
 async function waitForEvents(events: unknown[], count: number): Promise<void> {

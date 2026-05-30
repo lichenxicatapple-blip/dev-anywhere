@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -83,9 +83,7 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
     };
     acceptedSocket?.write(serializeWorkerMsg(ipcMsg));
 
-    // 等 IPC reader 解码 + dispatch 完成
-    await new Promise((r) => setTimeout(r, 50));
-
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(1));
     expect(relay.envelopes).toHaveLength(1);
 
     // envelope 必须能通过 shared 端的 MessageEnvelopeSchema —— 任何字段漂移或 shape 不合法都会炸

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,13 +9,12 @@ import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connecti
 
 const relayLogger = createLogger({ name: "test", silent: true });
 
-// 等待 relay 处理 proxy_register 消息的辅助函数
-function waitForRegistration(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 100));
-}
-
 let relay: RelayServer;
 let relayPort: number;
+
+async function waitForProxyRegistration(conn: RelayConnection): Promise<void> {
+  await vi.waitFor(() => expect(relay.registry.getProxy(conn.getProxyId())).toBeDefined());
+}
 
 beforeAll(async () => {
   relay = createRelayServer({ logger: relayLogger, heartbeatInterval: 60000 });
@@ -47,9 +46,7 @@ describe("RelayConnection", () => {
     conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
-    // 等待连接建立和注册完成
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
+    await waitForProxyRegistration(conn);
     const proxyId = conn.getProxyId();
     expect(typeof proxyId).toBe("string");
     expect(proxyId.length).toBeGreaterThan(0);
@@ -65,7 +62,7 @@ describe("RelayConnection", () => {
     conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitForProxyRegistration(conn);
 
     const envelope = buildMessage(
       "assistant_message",
@@ -86,7 +83,7 @@ describe("RelayConnection", () => {
     conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitForProxyRegistration(conn);
 
     const received: Record<string, unknown>[] = [];
     conn.on("message", (msg: Record<string, unknown>) => {
@@ -101,8 +98,7 @@ describe("RelayConnection", () => {
     const testPayload = { type: "test", data: "from-relay" };
     proxySocket!.send(JSON.stringify(testPayload));
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
+    await vi.waitFor(() => expect(received).toHaveLength(1));
     expect(received.length).toBe(1);
     expect(received[0]).toEqual(testPayload);
   });
@@ -114,17 +110,15 @@ describe("RelayConnection", () => {
     conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
     conn.connect();
 
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitForProxyRegistration(conn);
 
     const proxyId = conn.getProxyId();
     expect(relay.registry.getProxy(proxyId)).toBeTruthy();
 
     conn.close();
 
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
     // 关闭后 proxy 应该从 registry 中移除
-    expect(relay.registry.getProxy(proxyId)).toBeUndefined();
+    await vi.waitFor(() => expect(relay.registry.getProxy(proxyId)).toBeUndefined());
     conn = null;
   });
 
@@ -155,11 +149,10 @@ describe("RelayConnection", () => {
     // connect() 不应抛异常
     expect(() => conn!.connect()).not.toThrow();
 
-    // 等待 ws "error" → "close" 事件链路把状态推到 WAITING_RECONNECT
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
     // 必须落到 WAITING_RECONNECT；停留在 CONNECTING 表示状态机失败处理被吞掉了
-    expect(conn!.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
+    await vi.waitFor(() =>
+      expect(conn!.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT),
+    );
   });
 
   it("emits 'connected' event on successful connect", async () => {
@@ -175,7 +168,7 @@ describe("RelayConnection", () => {
     conn.connect();
     await connected;
 
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
     expect(relay.registry.getProxy(conn.getProxyId())).toBeDefined();
   });
 
@@ -190,7 +183,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     const disconnected = new Promise<void>((resolve) => {
       conn!.on("disconnected", () => resolve());
@@ -215,7 +208,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     // 断开连接
     const disconnected = new Promise<void>((resolve) => {
@@ -252,7 +245,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await firstConnected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     const proxyId = conn.getProxyId();
 
@@ -265,7 +258,7 @@ describe("RelayConnection", () => {
       conn!.once("connected", () => resolve());
     });
     await reconnected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     // 验证重连后 proxy 仍然使用同一个 proxyId 注册
     expect(relay.registry.getProxy(proxyId)).toBeDefined();
@@ -283,7 +276,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await connected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     let disconnectedEmitted = false;
     conn.on("disconnected", () => {
@@ -292,10 +285,8 @@ describe("RelayConnection", () => {
 
     conn.close();
 
-    // 等待足够长的时间确认没有触发重连
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
     // close() 是主动关闭，不应触发 disconnected 事件
+    await vi.waitFor(() => expect(relay.registry.getProxy(conn!.getProxyId())).toBeUndefined());
     expect(disconnectedEmitted).toBe(false);
     conn = null;
   });
@@ -311,7 +302,7 @@ describe("RelayConnection", () => {
     });
     conn.connect();
     await firstConnected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     const proxyId = conn.getProxyId();
 
@@ -337,7 +328,7 @@ describe("RelayConnection", () => {
       conn!.once("connected", () => resolve());
     });
     await reconnected;
-    await waitForRegistration();
+    await waitForProxyRegistration(conn);
 
     // 重连后的 proxy socket 应该收到了 flush 的消息
     expect(relay.registry.getProxy(proxyId)).toBeDefined();

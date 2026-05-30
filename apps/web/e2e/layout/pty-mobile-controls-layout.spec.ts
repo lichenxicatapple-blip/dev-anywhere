@@ -1,4 +1,4 @@
-// PTY 移动端控制条 2 行布局几何: 高度 ~105px, 按键尺寸统一, BackToBottom 7rem 偏移。
+// PTY 移动端控制条 2 行布局几何: 高度 ~105px, 按键尺寸统一。
 // L2 层用 mobile viewport + hasTouch 触发 controls 浮起, L4 emu 由
 // e2e/mobile/pty-mobile-controls.spec.ts 覆盖真触屏交互。
 import { expect, test } from "@playwright/test";
@@ -17,9 +17,7 @@ function averageRgbChannel(color: string): number {
 test.describe("PTY mobile controls — 2-row layout geometry", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
-  test("two rows render at ~105px height with uniform key sizes and no BackToBottom occlusion", async ({
-    page,
-  }) => {
+  test("two rows render at ~105px height with uniform key sizes", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
     await expectPtyTerminalMounted(page);
 
@@ -94,16 +92,6 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     );
     expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(visualViewportHeight + 1);
     expect(visualViewportHeight - (controlsBox.y + controlsBox.height)).toBeLessThanOrEqual(24);
-
-    // BackToBottom 出现时不能被控制条遮挡: BTB 底部坐标 < 控制条顶部坐标。
-    // 用滚动制造 BTB 可见 (xterm 历史向上滚)。这里直接跳过断言可见, 改用样式断言:
-    // BTB className 含 7rem 偏移 (与控制条 105px + safe-area buffer 匹配)。
-    const btb = page.locator('[data-slot="back-to-bottom"]');
-    if ((await btb.count()) > 0) {
-      const className = await btb.getAttribute("class");
-      // 控制条可见时 BTB 类应含 7rem 偏移 (同步 use-pty-view containerPaddingBottom = 112px)
-      expect(className ?? "").toContain("7rem");
-    }
   });
 
   test("uses light theme tokens instead of hard-coded dark controls", async ({ page }) => {

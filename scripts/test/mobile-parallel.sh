@@ -7,6 +7,10 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 source "$ROOT/scripts/lib/e2e-tiers.sh"
 
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
 REQUESTED_PARALLEL_WORKERS="${TEST_MOBILE_PARALLEL_WORKERS:-}"
 DEFAULT_MAX_PARALLEL_WORKERS="${TEST_MOBILE_MAX_PARALLEL_WORKERS:-2}"
 ROOT_ARTIFACT_DIR="${TEST_MOBILE_ARTIFACT_DIR:-$ROOT/artifacts/test-mobile}"
@@ -29,6 +33,9 @@ mobile_parallel_collect_all_emulators() {
 mobile_parallel_has_device() {
   local candidate="$1"
   local device
+  if [[ "${#ALL_DEVICES[@]}" -eq 0 ]]; then
+    return 1
+  fi
   for device in "${ALL_DEVICES[@]}"; do
     [[ "$device" == "$candidate" ]] && return 0
   done
@@ -74,7 +81,9 @@ mobile_parallel_collect_emulators() {
     return
   fi
 
-  DEVICES=("${ALL_DEVICES[@]}")
+  if [[ "${#ALL_DEVICES[@]}" -gt 0 ]]; then
+    DEVICES=("${ALL_DEVICES[@]}")
+  fi
 }
 
 mobile_parallel_collect_specs() {

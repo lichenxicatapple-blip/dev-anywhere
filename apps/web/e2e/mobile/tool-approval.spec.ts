@@ -1,6 +1,6 @@
-// 真 Android emu Chrome 上工具审批卡片三按钮真触屏交互: 允许 / 拒绝 / 始终允许.
+// 真 Android emu Chrome 上工具审批卡片审批按钮真触屏交互: 允许 / 始终允许.
 // L2 mobile-contract 已验证 touch-target 尺寸 + deny click, L4 真机补 allow / always-allow
-// 路径 + 验证 fakeRelay 收到对应 tool_approve / tool_deny + scope 字段.
+// 路径 + 验证 fakeRelay 收到对应 tool_approve.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
@@ -13,7 +13,7 @@ async function setupApprovalChat(page: import("@playwright/test").Page): Promise
   await expect(card).toBeVisible({ timeout: 30_000 });
 }
 
-test.describe("L4 mobile / tool approval card three-button tap", () => {
+test.describe("L4 mobile / tool approval card approval taps", () => {
   test.setTimeout(60_000);
 
   test("tap '允许' emits tool_approve once", async ({ emuPage }) => {
@@ -40,19 +40,6 @@ test.describe("L4 mobile / tool approval card three-button tap", () => {
       .poll(
         async () =>
           (await sentFakeRelayMessages(emuPage)).filter((m) => m.type === "tool_approve").length,
-      )
-      .toBe(1);
-  });
-
-  test("tap '拒绝' emits tool_deny", async ({ emuPage }) => {
-    await setupApprovalChat(emuPage);
-    const card = emuPage.locator('[data-slot="tool-approval-card"][data-status="pending"]');
-    await card.getByRole("button", { name: "拒绝", exact: true }).click();
-    await expect(card).toHaveCount(0);
-    await expect
-      .poll(
-        async () =>
-          (await sentFakeRelayMessages(emuPage)).filter((m) => m.type === "tool_deny").length,
       )
       .toBe(1);
   });

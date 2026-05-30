@@ -149,9 +149,10 @@ describe("phase-machine request failure handling", () => {
       timers,
       relay,
     );
-    await new Promise((r) => setTimeout(r, 0));
 
-    expect(toastError).toHaveBeenCalledWith("无法获取开发机信息");
+    await vi.waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith("无法获取开发机信息");
+    });
     // 失败不应阻断后续 phase 推进
     expect(useAppStore.getState().phase).toBe("chatting");
     errSpy.mockRestore();
@@ -192,9 +193,10 @@ describe("phase-machine request failure handling", () => {
       timers,
       relay,
     );
-    await new Promise((r) => setTimeout(r, 0));
 
-    expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
+    await vi.waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
+    });
     errSpy.mockRestore();
   });
 });

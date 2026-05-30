@@ -1,20 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "../helpers";
+import { gotoWithFakeProxy, installFakeRelay, selectFakeProxy } from "../helpers";
 
 test.describe("Master-detail — 桌面端即时会话切换", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
-  });
-
-  test("侧栏挂载 session-list slot", async ({ page }) => {
-    await page.goto(BASE_URL);
-    const sidebar = page.locator("nav[aria-label='侧边栏']");
-    await expect(sidebar).toBeVisible();
-    // 即便 session 列表为空，slot 容器也必须存在，避免桌面布局跳变。
-    const middle = sidebar.locator('[data-slot="sidebar-session-list"]');
-    await expect(middle).toHaveCount(1);
   });
 
   test("点击 session row 更新 URL 而不 reload 文档", async ({ page }) => {

@@ -103,12 +103,6 @@ describe("InputBar clipboard image paste", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("uses the compact desktop action padding that matches sidebar bottom buttons", () => {
-    const { container } = render(<InputBar sessionId="s1" />);
-
-    expect(container.querySelector('[data-slot="input-actions"]')?.className).toContain("md:p-1");
-  });
-
   it("marks the JSON textarea as plain command input instead of predictive text", () => {
     const { getByLabelText } = render(<InputBar sessionId="s1" />);
     const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;

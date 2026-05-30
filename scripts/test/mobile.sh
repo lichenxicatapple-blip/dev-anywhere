@@ -7,7 +7,19 @@ cd "$ROOT"
 source "$ROOT/scripts/lib/e2e-tiers.sh"
 source "$ROOT/scripts/lib/smoke-common.sh"
 
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
 REQUIRE="${TEST_MOBILE_REQUIRE_EMULATOR:-0}"
+
+for arg in "$@"; do
+  if [[ "$arg" == "--list" ]]; then
+    smoke_use_stable_node
+    cd "$ROOT/apps/web"
+    exec pnpm exec playwright test --project=device-mobile-android "$@"
+  fi
+done
 
 if ! e2e_mobile_emulator_ready; then
   if [[ "$REQUIRE" == "1" ]]; then

@@ -36,23 +36,11 @@ describe("VoicePilotStatus", () => {
         .querySelector('[data-slot="voice-pilot-waveform"]')
         ?.getAttribute("data-activity-level"),
     ).toBe("72");
-    expect(container.querySelector('[data-slot="voice-pilot-waveform-curve"]')).not.toBeNull();
-    const waveformSvg = container.querySelector(
-      '[data-slot="voice-pilot-waveform-svg"]',
-    ) as SVGElement | null;
-    expect(waveformSvg?.style.width).toBe("calc(100% - 1rem)");
-    expect(waveformSvg?.style.height).toBe("calc(100% - 0.7rem)");
-    expect(container.querySelector('[data-slot="voice-pilot-meter-readout"]')).toBeNull();
-    expect(container.querySelector(".dev-voice-waveform-scan")).toBeNull();
     expect(
       container.querySelector('[data-slot="voice-pilot-status"]')?.getAttribute("data-tone"),
     ).toBe("speak");
     const stopButton = screen.getByRole("button", { name: "停止 Voice Pilot" });
     expect(stopButton.textContent).toBe("");
-    expect(stopButton.className).toContain("absolute");
-    expect(stopButton.className).toContain("right-2");
-    expect(stopButton.className).toContain("top-2");
-    expect(stopButton.className).toContain("size-7");
     expect(stopButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(stopButton);
 

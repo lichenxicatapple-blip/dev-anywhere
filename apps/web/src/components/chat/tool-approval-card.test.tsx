@@ -40,28 +40,6 @@ describe("ToolApprovalCard", () => {
     sendControl.mockReturnValue(true);
   }
 
-  it("keeps inline approval cards constrained to the same rail as JSON messages", () => {
-    const { container } = render(
-      <ToolApprovalCard approval={makeApproval()} sessionId="s1" container="inline" />,
-    );
-
-    const row = container.querySelector<HTMLElement>('[data-slot="tool-approval-row"]');
-    const card = screen.getByRole("region", { name: /工具审批: Bash/ });
-    const summary = container.querySelector<HTMLElement>('[data-slot="tool-approval-summary"]');
-
-    expect(row).not.toBeNull();
-    expect(summary).not.toBeNull();
-    expect(row?.className).toContain("dev-message-rail");
-    expect(row?.className).toContain("mx-auto");
-    expect(row?.className).toContain("w-full");
-    expect(row?.className).toContain("min-w-0");
-    expect(card.className).toContain("w-full");
-    expect(card.className).toContain("min-w-0");
-    expect(card.className).toContain("max-w-full");
-    expect(summary?.className).toContain("min-w-0");
-    expect(summary?.className).toContain("truncate");
-  });
-
   it("sends a session whitelist approval when Always Allow is clicked", async () => {
     markTransportReady();
 

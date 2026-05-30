@@ -53,6 +53,16 @@ if (typeof HTMLCanvasElement !== "undefined") {
   });
 }
 
+if (
+  typeof HTMLElement !== "undefined" &&
+  typeof HTMLElement.prototype.scrollIntoView !== "function"
+) {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: () => {},
+  });
+}
+
 // jsdom 不实现 matchMedia, 给 window / globalThis 装一个最小 mock. 默认全部 query
 // 不匹配 (等价桌面 + hover 设备); 需要测 touch surface 的用例自己 vi.spyOn 覆盖.
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {

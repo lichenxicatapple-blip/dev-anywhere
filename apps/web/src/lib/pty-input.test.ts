@@ -55,33 +55,36 @@ describe("attachXtermRawInput", () => {
     };
   }
 
-  it.each([
-    ["plain text", "abc"],
-    ["enter", "\r"],
-    ["backspace", "\x7f"],
-    ["tab", "\t"],
-    ["escape", "\x1b"],
-    ["shift+tab", "\x1b[Z"],
-    ["ctrl+c", "\x03"],
-    ["arrow up", "\x1b[A"],
-    ["arrow down", "\x1b[B"],
-    ["arrow right", "\x1b[C"],
-    ["arrow left", "\x1b[D"],
-    ["paste", "first line\nsecond line"],
-    ["ime text", "你好，世界"],
-  ])("forwards %s xterm onData payloads as raw PTY input", (_label, data) => {
-    const { terminal, disposeSpy, emitData } = createTerminal();
-    const onRawInput = vi.fn();
+  it("forwards xterm onData payload samples as raw PTY input", () => {
+    for (const [label, data] of [
+      ["plain text", "abc"],
+      ["enter", "\r"],
+      ["backspace", "\x7f"],
+      ["tab", "\t"],
+      ["escape", "\x1b"],
+      ["shift+tab", "\x1b[Z"],
+      ["ctrl+c", "\x03"],
+      ["arrow up", "\x1b[A"],
+      ["arrow down", "\x1b[B"],
+      ["arrow right", "\x1b[C"],
+      ["arrow left", "\x1b[D"],
+      ["paste", "first line\nsecond line"],
+      ["ime text", "你好，世界"],
+    ]) {
+      vi.clearAllMocks();
+      const { terminal, disposeSpy, emitData } = createTerminal();
+      const onRawInput = vi.fn();
 
-    const disposable = attachXtermRawInput(terminal, "sess-1", { onRawInput });
-    emitData(data);
+      const disposable = attachXtermRawInput(terminal, "sess-1", { onRawInput });
+      emitData(data);
 
-    expect(terminal.onData).toHaveBeenCalledTimes(1);
-    expect(sendSpy).toHaveBeenCalledWith("sess-1", data);
-    expect(onRawInput).toHaveBeenCalledWith(data);
+      expect(terminal.onData, label).toHaveBeenCalledTimes(1);
+      expect(sendSpy, label).toHaveBeenCalledWith("sess-1", data);
+      expect(onRawInput, label).toHaveBeenCalledWith(data);
 
-    disposable.dispose();
-    expect(disposeSpy).toHaveBeenCalledTimes(1);
+      disposable.dispose();
+      expect(disposeSpy, label).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("forwards repeated Ctrl+C without debouncing terminal semantics", () => {
@@ -407,23 +410,22 @@ describe("attachXtermRawInput", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab" })],
-    ["Shift+Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab", shiftKey: true })],
-  ])(
-    "keeps terminal %s shortcuts routed through xterm in physical keyboard mode",
-    (_label, event) => {
+  it("keeps terminal Tab shortcuts routed through xterm in physical keyboard mode", () => {
+    for (const [label, event] of [
+      ["Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab" })],
+      ["Shift+Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab", shiftKey: true })],
+    ] as const) {
       const { terminal, emitKey } = createTerminal();
       const preventDefault = vi.spyOn(event, "preventDefault");
 
       attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
       const shouldContinue = emitKey(event);
 
-      expect(shouldContinue).toBe(true);
-      expect(preventDefault).not.toHaveBeenCalled();
-      expect(sendSpy).not.toHaveBeenCalled();
-    },
-  );
+      expect(shouldContinue, label).toBe(true);
+      expect(preventDefault, label).not.toHaveBeenCalled();
+      expect(sendSpy, label).not.toHaveBeenCalled();
+    }
+  });
 
   it("does not start a second punctuation probe from the matching keypress event", () => {
     vi.useFakeTimers();
