@@ -2,13 +2,10 @@
 // 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
 import { type FocusEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { PencilLine } from "lucide-react";
-import type { AgentCliStatus, SessionInfo } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
 import { toast } from "@/components/toast";
-import { ControlErrorCode } from "@dev-anywhere/shared";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -26,67 +23,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilePathPicker } from "@/components/chat/file-path-picker";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { AgentCliPicker } from "./agent-cli-picker";
+import {
+  CODEX_PERMISSION_MODE_OPTIONS,
+  normalizePermissionModeForProvider,
+  PERMISSION_MODE_OPTIONS,
+  type PermissionMode,
+  type ProviderId,
+  PROVIDER_LABEL,
+  providerStatus,
+  type SessionMode,
+  submitSessionCreate,
+} from "./create-session-submit";
 
 interface CreateSessionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-type SessionMode = "pty" | "json";
-type ProviderId = "claude" | "codex";
-type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
-
-const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
-  { value: "default", label: "严格审批" },
-  { value: "auto", label: "自动判定" },
-  { value: "acceptEdits", label: "自动接受编辑" },
-  { value: "plan", label: "只读规划" },
-  { value: "bypassPermissions", label: "跳过全部审批" },
-];
-const CODEX_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
-  { value: "default", label: "严格审批" },
-  { value: "auto", label: "自动判定" },
-  { value: "bypassPermissions", label: "跳过全部审批" },
-];
-const SESSION_CREATE_TIMEOUT_MS = 15_000;
-const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
-const PROVIDER_LABEL: Record<ProviderId, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-};
-
-function extractMissingCwd(error: string, errorCode?: string): string | null {
-  if (errorCode !== ControlErrorCode.PATH_NOT_FOUND || !error.startsWith(MISSING_CWD_PREFIX)) {
-    return null;
-  }
-  const path = error.slice(MISSING_CWD_PREFIX.length).trim();
-  return path || null;
-}
-
-function providerStatus(
-  provider: ProviderId,
-  agentCli: AgentCliStatus | null,
-): { label: string; disabled: boolean; title?: string } {
-  if (!agentCli) {
-    return { label: "检测中", disabled: true };
-  }
-  const status = agentCli[provider];
-  if (status.available) {
-    return { label: "可用", disabled: false, title: status.command };
-  }
-  return { label: "未找到", disabled: true, title: status.error };
-}
-
-function providerTooltip(provider: ProviderId, status: ReturnType<typeof providerStatus>): string {
-  if (status.title) {
-    return status.disabled
-      ? `${PROVIDER_LABEL[provider]}：${status.title}`
-      : `${PROVIDER_LABEL[provider]} 路径：${status.title}`;
-  }
-  return `${PROVIDER_LABEL[provider]}：${status.label}`;
 }
 
 export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
@@ -161,94 +115,54 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }
 
   function handleSubmit() {
-    submitSessionCreate();
+    void handleSubmitSessionCreate();
   }
 
   const permissionOptions =
     provider === "codex" ? CODEX_PERMISSION_MODE_OPTIONS : PERMISSION_MODE_OPTIONS;
-  const claudeStatus = providerStatus("claude", agentCli);
-  const codexStatus = providerStatus("codex", agentCli);
   const selectedStatus = providerStatus(provider, agentCli);
   const createDisabled = submitting || savingCliPath || selectedStatus.disabled;
-  const selectedCli = agentCli?.[provider];
 
   function normalizePermissionMode(nextProvider: ProviderId) {
-    if (nextProvider === "codex") {
-      const supported = CODEX_PERMISSION_MODE_OPTIONS.some(
-        (option) => option.value === permissionMode,
-      );
-      if (!supported) setPermissionMode("default");
-    }
+    const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode);
+    if (normalized !== permissionMode) setPermissionMode(normalized);
   }
 
-  async function submitSessionCreate(cwdOverride?: string) {
-    const targetCwd = (cwdOverride ?? cwd).trim();
-    if (!targetCwd) {
-      toast.error("请输入工作目录");
-      return;
-    }
-    const relay = relayClientRef;
-    if (!relay) {
-      toast.error("请先连接开发机");
-      return;
-    }
-    const submittedName = name.trim();
-    const submittedMode = mode;
-    const submittedProvider = provider;
-    if (selectedStatus.disabled) {
-      const reason = agentCli?.[provider]?.error;
-      toast.error(
-        reason
-          ? `${PROVIDER_LABEL[provider]} 不可用：${reason}`
-          : `${PROVIDER_LABEL[provider]} 暂不可用`,
-      );
-      return;
-    }
+  async function handleSubmitSessionCreate(cwdOverride?: string) {
     setMissingCwd(null);
     setSubmitting(true);
     try {
-      const ctrl = await relay.createSession(
-        {
-          cwd: targetCwd,
-          name: submittedName || undefined,
-          mode,
+      const result = await submitSessionCreate({
+        relay: relayClientRef,
+        agentCli,
+        form: {
+          cwd: cwdOverride ?? cwd,
+          name,
           provider,
           permissionMode,
+          mode,
         },
-        SESSION_CREATE_TIMEOUT_MS,
-      );
-      if (ctrl.error || !ctrl.sessionId) {
-        const missingPath = extractMissingCwd(ctrl.error ?? "", ctrl.errorCode);
-        if (missingPath) {
-          setMissingCwd(missingPath);
-          toast.error("找不到这个工作目录");
+      });
+      if (result.type === "success") {
+        useSessionStore.getState().addSession(result.session);
+        // session 已建好就该入 store（其他地方刷新会看到），但若用户已关闭弹窗就别再
+        // 强行 navigate / 重置表单——他们已经放弃了这次创建，路由跳转是反预期的。
+        if (!latestOpen.current) {
           return;
         }
-        toast.error(`创建失败：${ctrl.error ?? "未知错误"}`);
+        onOpenChange(false);
+        resetForm();
+        navigate(result.route);
         return;
       }
 
-      const resolvedName = ctrl.name?.trim() || undefined;
-      const newSession: SessionInfo = {
-        sessionId: ctrl.sessionId,
-        name: resolvedName,
-        ...(ctrl.nameLocked !== undefined ? { nameLocked: ctrl.nameLocked } : {}),
-        state: "idle",
-        mode: ctrl.mode ?? submittedMode,
-        provider: ctrl.provider ?? submittedProvider,
-        ptyOwner: ctrl.ptyOwner,
-      };
-      useSessionStore.getState().addSession(newSession);
-      // session 已建好就该入 store（其他地方刷新会看到），但若用户已关闭弹窗就别再
-      // 强行 navigate / 重置表单——他们已经放弃了这次创建，路由跳转是反预期的。
-      if (!latestOpen.current) {
+      if (result.type === "missing_cwd") {
+        setMissingCwd(result.path);
+      }
+      toast.error(result.message);
+      if (result.type === "validation_error" || result.type === "relay_missing") {
         return;
       }
-      onOpenChange(false);
-      resetForm();
-      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? submittedMode}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
@@ -431,196 +345,25 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           </button>
         </div>
       </section>
-      <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-sm">Agent CLI</span>
-          <span className="text-xs text-muted-foreground">选择要启动的 CLI</span>
-        </div>
-        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-pressed={provider === "claude"}
-                aria-label="Claude Code"
-                aria-disabled={claudeStatus.disabled}
-                onClick={() => setProvider("claude")}
-                className={cn(
-                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  provider === "claude"
-                    ? "border-primary/70 bg-primary/10"
-                    : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">Claude Code</span>
-                <span
-                  className={cn(
-                    "text-xs text-muted-foreground",
-                    claudeStatus.disabled && agentCli && "text-destructive",
-                  )}
-                >
-                  {claudeStatus.label}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
-              <span className="break-all font-mono text-xs">
-                {providerTooltip("claude", claudeStatus)}
-              </span>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-pressed={provider === "codex"}
-                aria-label="Codex"
-                aria-disabled={codexStatus.disabled}
-                onClick={() => {
-                  setProvider("codex");
-                  normalizePermissionMode("codex");
-                }}
-                className={cn(
-                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  provider === "codex"
-                    ? "border-primary/70 bg-primary/10"
-                    : "border-border bg-muted/20",
-                )}
-              >
-                <span className="text-sm font-medium">Codex</span>
-                <span
-                  className={cn(
-                    "text-xs text-muted-foreground",
-                    codexStatus.disabled && agentCli && "text-destructive",
-                  )}
-                >
-                  {codexStatus.label}
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
-              <span className="break-all font-mono text-xs">
-                {providerTooltip("codex", codexStatus)}
-              </span>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <div
-          className="relative min-w-0 rounded-md border border-border bg-muted/20 px-3 py-2.5 md:p-3"
-          data-slot="agent-cli-path-card"
-        >
-          {editingCliProvider === provider ? (
-            <>
-              <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
-              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-                <label className="min-w-0 flex-1">
-                  <span className="sr-only">CLI 路径</span>
-                  <input
-                    type="text"
-                    list={`agent-cli-path-${editingCliProvider}`}
-                    value={cliPathInput}
-                    onChange={(event) => setCliPathInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void saveCliPath();
-                      }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        setEditingCliProvider(null);
-                        setCliPathInput("");
-                      }
-                    }}
-                    placeholder={
-                      editingCliProvider === "claude"
-                        ? "/home/dev/.local/bin/claude"
-                        : "/home/dev/.local/bin/codex"
-                    }
-                    className="min-h-11 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-10 md:min-h-0 md:text-sm"
-                  />
-                  <datalist id={`agent-cli-path-${editingCliProvider}`}>
-                    {(agentCli?.[editingCliProvider].suggestions ?? []).map((path) => (
-                      <option key={path} value={path} />
-                    ))}
-                  </datalist>
-                </label>
-                <div className="flex shrink-0 justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="min-h-11 shrink-0 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground md:h-8 md:min-h-0"
-                    onClick={() => {
-                      setEditingCliProvider(null);
-                      setCliPathInput("");
-                    }}
-                    disabled={savingCliPath}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    type="button"
-                    className="min-h-11 shrink-0 rounded px-2.5 text-xs font-medium md:h-8 md:min-h-0"
-                    onClick={() => void saveCliPath()}
-                    disabled={savingCliPath || !cliPathInput.trim()}
-                  >
-                    {savingCliPath ? "保存中..." : "保存路径"}
-                  </Button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              {isDesktop ? (
-                <>
-                  <p className="mb-1 text-xs text-muted-foreground">CLI 路径</p>
-                  <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
-                    <p
-                      className={cn(
-                        "flex h-10 min-w-0 flex-1 items-center truncate font-mono text-sm",
-                        selectedCli?.available ? "text-foreground" : "text-destructive",
-                      )}
-                      title={selectedCli?.command ?? selectedCli?.error}
-                    >
-                      {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-8 min-h-0 shrink-0 self-end rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground sm:self-auto"
-                      onClick={() => openCliPathEditor(provider)}
-                    >
-                      指定路径
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="pr-11 text-xs text-muted-foreground">CLI 路径</p>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 size-11 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-                    aria-label="指定路径"
-                    onClick={() => openCliPathEditor(provider)}
-                  >
-                    <PencilLine className="size-4" aria-hidden="true" />
-                  </Button>
-                  <p
-                    className={cn(
-                      "mt-1 min-w-0 break-all pr-11 font-mono text-sm leading-5",
-                      selectedCli?.available ? "text-foreground" : "text-destructive",
-                    )}
-                    title={selectedCli?.command ?? selectedCli?.error}
-                  >
-                    {selectedCli?.command ?? selectedCli?.error ?? "等待检测结果"}
-                  </p>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      </section>
+      <AgentCliPicker
+        agentCli={agentCli}
+        provider={provider}
+        isDesktop={isDesktop}
+        editingCliProvider={editingCliProvider}
+        cliPathInput={cliPathInput}
+        savingCliPath={savingCliPath}
+        onProviderChange={(nextProvider) => {
+          setProvider(nextProvider);
+          normalizePermissionMode(nextProvider);
+        }}
+        onOpenCliPathEditor={openCliPathEditor}
+        onCliPathInputChange={setCliPathInput}
+        onCancelCliPathEditor={() => {
+          setEditingCliProvider(null);
+          setCliPathInput("");
+        }}
+        onSaveCliPath={() => void saveCliPath()}
+      />
       <label className="flex min-w-0 flex-col gap-2">
         <span className="text-sm">权限模式</span>
         <Select

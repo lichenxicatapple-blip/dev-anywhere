@@ -4,9 +4,7 @@ import type { ChildProcess } from "node:child_process";
 import { buildMessage, serializeControl, SessionState } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
-  ContentBlockDeltaSchema,
   IGNORED_EVENT_TYPES,
-  KnownContentBlockSchema,
   StreamJsonEventSchema,
   type StreamJsonEvent,
 } from "../common/stream-json-schema.js";
@@ -14,6 +12,8 @@ import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
 import { getSeqCounterFor } from "../common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
+import { mapClaudeStreamEvent } from "./claude-stream-event-mapper.js";
+import { mapCodexAppServerEvent } from "./codex-app-server-event-mapper.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -23,13 +23,6 @@ import type { PermissionBroker, PermissionDecision } from "./permission-broker.j
 interface CompactCommandOutcome {
   success: boolean;
   message: string;
-}
-
-interface CodexFileChange {
-  path: string;
-  kind: string;
-  diff: string;
-  move_path?: string;
 }
 
 interface WorkerRegistryDeps {
@@ -52,6 +45,12 @@ interface SpawnOptions {
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
   streamDelta?: boolean;
   hook?: ProviderHookContext;
+}
+
+interface ReadyWaiter {
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
 }
 
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
@@ -86,46 +85,6 @@ function parseCompactCommandOutcome(content: string): CompactCommandOutcome | nu
   return null;
 }
 
-function codexPatchKind(kind: unknown): { kind: string; movePath?: string } {
-  if (typeof kind === "string") return { kind };
-  if (!kind || typeof kind !== "object") return { kind: "unknown" };
-  const record = kind as Record<string, unknown>;
-  const kindType = typeof record.type === "string" ? record.type : "unknown";
-  const movePath = typeof record.move_path === "string" ? record.move_path : undefined;
-  return { kind: kindType, movePath };
-}
-
-function codexPatchParameters(item: Record<string, unknown>): Record<string, unknown> {
-  const rawChanges = Array.isArray(item.changes) ? item.changes : [];
-  const changes: CodexFileChange[] = rawChanges.flatMap((rawChange) => {
-    if (!rawChange || typeof rawChange !== "object") return [];
-    const change = rawChange as Record<string, unknown>;
-    const path = typeof change.path === "string" ? change.path : "";
-    const diff = typeof change.diff === "string" ? change.diff : "";
-    if (!path && !diff) return [];
-    const { kind, movePath } = codexPatchKind(change.kind);
-    return [
-      {
-        path,
-        kind,
-        diff,
-        ...(movePath ? { move_path: movePath } : {}),
-      },
-    ];
-  });
-  const paths = changes.map((change) => change.path).filter(Boolean);
-  return {
-    file_path: paths[0] ?? "",
-    paths,
-    changes,
-    content: changes
-      .map((change) => change.diff)
-      .filter(Boolean)
-      .join("\n"),
-    status: typeof item.status === "string" ? item.status : undefined,
-  };
-}
-
 // 管理 session → worker socket 的映射，封装全部 worker IO：
 // - spawn / connect / reconnectAll / destroyAll 生命周期入口
 // - send(sessionId, msg) 统一出口
@@ -133,6 +92,8 @@ function codexPatchParameters(item: Record<string, unknown>): Record<string, unk
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
   private children = new Map<string, ChildProcess>();
+  private readySessions = new Set<string>();
+  private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   // 记录哪些 session 是 spawn 时带 --stream-delta 的；forwardEvent 据此决定是否跳过 aggregated 去重
   private streamDeltaSessions = new Set<string>();
 
@@ -179,6 +140,25 @@ export class WorkerRegistry {
       { sessionId, requestId },
       "Tool approval request lost to relay queue overflow, denying worker",
     );
+  }
+
+  waitForReady(sessionId: string, timeoutMs = 15_000): Promise<void> {
+    if (this.readySessions.has(sessionId)) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        const waiters = this.readyWaiters.get(sessionId);
+        if (waiters) {
+          waiters.delete(waiter);
+          if (waiters.size === 0) this.readyWaiters.delete(sessionId);
+        }
+        reject(new Error(`Worker did not report ready within ${timeoutMs}ms`));
+      }, timeoutMs);
+      timeout.unref?.();
+      const waiter: ReadyWaiter = { resolve, reject, timeout };
+      const waiters = this.readyWaiters.get(sessionId) ?? new Set<ReadyWaiter>();
+      waiters.add(waiter);
+      this.readyWaiters.set(sessionId, waiters);
+    });
   }
 
   spawn(sessionId: string, options?: SpawnOptions): number {
@@ -289,7 +269,12 @@ export class WorkerRegistry {
   delete(sessionId: string): void {
     this.children.delete(sessionId);
     this.sockets.delete(sessionId);
+    this.readySessions.delete(sessionId);
     this.streamDeltaSessions.delete(sessionId);
+    this.rejectReadyWaiters(
+      new Error(`Worker session deleted before ready: ${sessionId}`),
+      sessionId,
+    );
   }
 
   terminateProcess(sessionId: string, signal: NodeJS.Signals = "SIGTERM"): boolean {
@@ -297,8 +282,13 @@ export class WorkerRegistry {
     const sock = this.sockets.get(sessionId);
     sock?.destroy();
     this.sockets.delete(sessionId);
+    this.readySessions.delete(sessionId);
     this.streamDeltaSessions.delete(sessionId);
     this.children.delete(sessionId);
+    this.rejectReadyWaiters(
+      new Error(`Worker process terminated before ready: ${sessionId}`),
+      sessionId,
+    );
     if (!child || child.killed) return false;
     return child.kill(signal);
   }
@@ -316,11 +306,15 @@ export class WorkerRegistry {
       ws.destroy();
     }
     this.sockets.clear();
+    this.readySessions.clear();
+    this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
 
   private handleWorkerMessage(sessionId: string, msg: WorkerMessage): void {
     switch (msg.type) {
       case "worker_ready":
+        this.readySessions.add(sessionId);
+        this.resolveReadyWaiters(sessionId);
         serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
         break;
 
@@ -392,6 +386,8 @@ export class WorkerRegistry {
   // worker 连接断开或异常时的统一清理入口。仅记录一份，不再区分 close vs error 语义。
   private onDisconnect(sessionId: string): void {
     this.sockets.delete(sessionId);
+    this.readySessions.delete(sessionId);
+    this.rejectReadyWaiters(new Error(`Worker disconnected before ready: ${sessionId}`), sessionId);
     this.deps.permissionBroker.cleanupSession(sessionId, "Worker disconnected");
     // worker_exit 消息走 handleWorkerMessage，那条路径已经 terminateSession 把 session 从 manager
     // 中删掉——onDisconnect 紧随其后到达时 getSession 返回 undefined，不触发 ERROR 转换。
@@ -400,6 +396,33 @@ export class WorkerRegistry {
     // WORKING / WAITING_APPROVAL 直到 reaper 60s 周期触发，期间用户既无法手动中止也无法重启。
     if (this.deps.sessionManager.getSession(sessionId)) {
       this.deps.jsonObserver.onChannelBroken(sessionId);
+    }
+  }
+
+  private resolveReadyWaiters(sessionId: string): void {
+    const waiters = this.readyWaiters.get(sessionId);
+    if (!waiters) return;
+    this.readyWaiters.delete(sessionId);
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timeout);
+      waiter.resolve();
+    }
+  }
+
+  private rejectReadyWaiters(err: Error, sessionId?: string): void {
+    const entries =
+      sessionId === undefined
+        ? [...this.readyWaiters.entries()]
+        : ([[sessionId, this.readyWaiters.get(sessionId)]] as Array<
+            [string, Set<ReadyWaiter> | undefined]
+          >);
+    for (const [sid, waiters] of entries) {
+      if (!waiters) continue;
+      this.readyWaiters.delete(sid);
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timeout);
+        waiter.reject(err);
+      }
     }
   }
 
@@ -445,119 +468,29 @@ export class WorkerRegistry {
       return;
     }
 
-    if (ev.type === "stream_event") {
-      const delta = ContentBlockDeltaSchema.safeParse(ev.event);
-      if (!delta.success) return; // 非 content_block_delta 的内层事件（message_start 等）忽略
-      const d = delta.data.delta;
-      if (d.type === "text_delta" && d.text) {
-        relay.sendEnvelope(
-          buildMessage(
-            "assistant_message",
-            sessionId,
-            seq,
-            { text: d.text, isPartial: true },
-            "proxy",
-          ),
-        );
-      } else if (d.type === "thinking_delta" && d.thinking) {
-        relay.sendEnvelope(buildMessage("thinking", sessionId, seq, { text: d.thinking }, "proxy"));
-      }
-      return;
-    }
-
-    if (ev.type === "assistant") {
-      let forwardedContent = false;
-      for (const raw of ev.message.content) {
-        const blockParse = KnownContentBlockSchema.safeParse(raw);
-        if (!blockParse.success) {
-          const rawType =
-            raw && typeof raw === "object"
-              ? ((raw as Record<string, unknown>).type as string | undefined)
-              : undefined;
-          serviceLogger.warn(
-            { sessionId, seq, blockType: rawType ?? "<missing>" },
-            "Unknown assistant content block; Claude CLI schema may have changed",
-          );
-          continue;
-        }
-        const block = blockParse.data;
-        if (block.type === "text") {
-          // streamDelta 下增量已经发过了，aggregated 全文跳过避免重复
-          if (!isStreamDeltaSession && block.text) {
-            forwardedContent = true;
-            relay.sendEnvelope(
-              buildMessage(
-                "assistant_message",
-                sessionId,
-                seq,
-                { text: block.text, isPartial: true },
-                "proxy",
-              ),
-            );
-          }
-        } else if (block.type === "thinking") {
-          // Opus extended thinking 明文被 Anthropic 服务端 redact 时 block.thinking 为空字符串，
-          // 不转发；session WORKING 状态已经覆盖"Claude 在思考"信号，redacted envelope 无新信息
-          if (!isStreamDeltaSession && block.thinking) {
-            forwardedContent = true;
-            relay.sendEnvelope(
-              buildMessage("thinking", sessionId, seq, { text: block.thinking }, "proxy"),
-            );
-          }
-        } else if (block.type === "tool_use") {
-          forwardedContent = true;
-          relay.sendEnvelope(
-            buildMessage(
-              "assistant_tool_use",
-              sessionId,
-              seq,
-              { toolName: block.name, toolId: block.id, parameters: block.input },
-              "proxy",
-            ),
-          );
-        }
-      }
-      if (forwardedContent && this.isCompactingSession(sessionId)) {
-        this.sendCompactTurnResult(sessionId, true);
-      }
-      return;
-    }
-
     if (ev.type === "user") {
       if (typeof ev.message.content === "string") {
         this.handleCompactLocalCommandOutput(sessionId, seq, ev.message.content);
         return;
       }
-      for (const raw of ev.message.content) {
-        const blockParse = KnownContentBlockSchema.safeParse(raw);
-        if (!blockParse.success) continue;
-        const block = blockParse.data;
-        if (block.type !== "tool_result") continue;
-        relay.sendEnvelope(
-          buildMessage(
-            "tool_result",
-            sessionId,
-            seq,
-            { toolId: block.tool_use_id, result: block.content, isError: block.is_error ?? false },
-            "proxy",
-          ),
-        );
-      }
-      return;
     }
 
-    if (ev.type === "result") {
-      const resultText = typeof ev.result === "string" ? ev.result : undefined;
-      relay.sendRaw(
-        serializeControl({
-          type: "turn_result",
-          sessionId,
-          success: ev.subtype === "success",
-          isError: ev.is_error ?? false,
-          ...(resultText ? { result: resultText } : {}),
-        }),
-      );
-      this.deps.jsonObserver.onTurnResult(sessionId);
+    for (const mapped of mapClaudeStreamEvent(sessionId, seq, {
+      event: ev,
+      isStreamDeltaSession,
+      isCompactingSession: this.isCompactingSession(sessionId),
+    })) {
+      if (mapped.kind === "envelope") {
+        relay.sendEnvelope(mapped.envelope);
+      } else if (mapped.kind === "control") {
+        relay.sendRaw(mapped.raw);
+        if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
+      } else {
+        serviceLogger.warn(
+          { sessionId, seq, blockType: mapped.blockType },
+          "Unknown assistant content block; Claude CLI schema may have changed",
+        );
+      }
     }
   }
 
@@ -567,111 +500,14 @@ export class WorkerRegistry {
     event: Record<string, unknown>,
   ): void {
     const relay = this.deps.relayConnection;
-    const method = typeof event.method === "string" ? event.method : "";
-    const params =
-      event.params && typeof event.params === "object"
-        ? (event.params as Record<string, unknown>)
-        : {};
     this.deps.touchSessionActivity?.(sessionId);
-
-    if (method === "item/agentMessage/delta") {
-      const delta = typeof params.delta === "string" ? params.delta : "";
-      if (!delta) return;
-      relay.sendEnvelope(
-        buildMessage(
-          "assistant_message",
-          sessionId,
-          seq,
-          { text: delta, isPartial: true },
-          "proxy",
-        ),
-      );
-      return;
-    }
-
-    const item = params.item && typeof params.item === "object" ? params.item : null;
-    const itemRecord = item as Record<string, unknown> | null;
-
-    if (
-      (method === "item/started" || method === "item/completed") &&
-      itemRecord?.type === "fileChange"
-    ) {
-      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
-      if (!id) return;
-      const status = typeof itemRecord.status === "string" ? itemRecord.status : "";
-      relay.sendEnvelope(
-        buildMessage(
-          "assistant_tool_use",
-          sessionId,
-          seq,
-          { toolName: "Patch", toolId: id, parameters: codexPatchParameters(itemRecord) },
-          "proxy",
-        ),
-      );
-      if (method === "item/completed") {
-        relay.sendEnvelope(
-          buildMessage(
-            "tool_result",
-            sessionId,
-            seq,
-            { toolId: id, result: status || "completed", isError: status === "failed" },
-            "proxy",
-          ),
-        );
+    for (const mapped of mapCodexAppServerEvent(sessionId, seq, event)) {
+      if (mapped.kind === "envelope") {
+        relay.sendEnvelope(mapped.envelope);
+      } else {
+        relay.sendRaw(mapped.raw);
+        if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       }
-      return;
-    }
-
-    if (method === "item/started" && itemRecord?.type === "commandExecution") {
-      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
-      if (!id) return;
-      const command = typeof itemRecord.command === "string" ? itemRecord.command : "";
-      const cwd = typeof itemRecord.cwd === "string" ? itemRecord.cwd : "";
-      relay.sendEnvelope(
-        buildMessage(
-          "assistant_tool_use",
-          sessionId,
-          seq,
-          { toolName: "Bash", toolId: id, parameters: { command, cwd } },
-          "proxy",
-        ),
-      );
-      return;
-    }
-
-    if (method === "item/completed" && itemRecord?.type === "commandExecution") {
-      const id = typeof itemRecord.id === "string" ? itemRecord.id : "";
-      if (!id) return;
-      const output =
-        typeof itemRecord.aggregatedOutput === "string" ? itemRecord.aggregatedOutput : "";
-      const exitCode = typeof itemRecord.exitCode === "number" ? itemRecord.exitCode : null;
-      relay.sendEnvelope(
-        buildMessage(
-          "tool_result",
-          sessionId,
-          seq,
-          { toolId: id, result: output, isError: exitCode !== null && exitCode !== 0 },
-          "proxy",
-        ),
-      );
-      return;
-    }
-
-    if (method === "turn/completed") {
-      const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
-      const status = (turn as { status?: unknown }).status;
-      const error = (turn as { error?: unknown }).error;
-      const success = status === "completed";
-      relay.sendRaw(
-        serializeControl({
-          type: "turn_result",
-          sessionId,
-          success,
-          isError: !success,
-          ...(error ? { result: String(error) } : {}),
-        }),
-      );
-      this.deps.jsonObserver.onTurnResult(sessionId);
     }
   }
 

@@ -410,17 +410,20 @@ describe("attachXtermRawInput", () => {
   it.each([
     ["Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab" })],
     ["Shift+Tab", new KeyboardEvent("keydown", { key: "Tab", code: "Tab", shiftKey: true })],
-  ])("keeps terminal %s shortcuts routed through xterm in physical keyboard mode", (_label, event) => {
-    const { terminal, emitKey } = createTerminal();
-    const preventDefault = vi.spyOn(event, "preventDefault");
+  ])(
+    "keeps terminal %s shortcuts routed through xterm in physical keyboard mode",
+    (_label, event) => {
+      const { terminal, emitKey } = createTerminal();
+      const preventDefault = vi.spyOn(event, "preventDefault");
 
-    attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
-    const shouldContinue = emitKey(event);
+      attachXtermRawInput(terminal, "sess-1", { physicalKeyboardMode: true });
+      const shouldContinue = emitKey(event);
 
-    expect(shouldContinue).toBe(true);
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
+      expect(shouldContinue).toBe(true);
+      expect(preventDefault).not.toHaveBeenCalled();
+      expect(sendSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not start a second punctuation probe from the matching keypress event", () => {
     vi.useFakeTimers();

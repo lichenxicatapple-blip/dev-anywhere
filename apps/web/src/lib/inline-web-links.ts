@@ -1,4 +1,4 @@
-export interface InlineWebLinkMatch {
+interface InlineWebLinkMatch {
   text: string;
   url: string;
   start: number;

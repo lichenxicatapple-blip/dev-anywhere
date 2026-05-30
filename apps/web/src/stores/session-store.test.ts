@@ -64,6 +64,26 @@ describe("session-store agent status", () => {
     expect(useSessionStore.getState().ptyStateBySessionId.s2.state).toBe("working");
   });
 
+  it("prunes PTY titles when replacing or removing sessions", () => {
+    useSessionStore.setState({
+      sessions: [
+        { sessionId: "s1", state: "idle", provider: "claude", mode: "pty" },
+        { sessionId: "s2", state: "idle", provider: "codex", mode: "pty" },
+      ],
+      ptyTitles: { s1: "old title", s2: "live title" },
+    });
+
+    useSessionStore
+      .getState()
+      .setSessions([{ sessionId: "s2", state: "working", provider: "codex", mode: "pty" }]);
+
+    expect(useSessionStore.getState().ptyTitles).toEqual({ s2: "live title" });
+
+    useSessionStore.getState().removeSession("s2");
+
+    expect(useSessionStore.getState().ptyTitles).toEqual({});
+  });
+
   it("marks renamed sessions as user locked without deleting OSC title diagnostics", () => {
     useSessionStore.setState({
       sessions: [

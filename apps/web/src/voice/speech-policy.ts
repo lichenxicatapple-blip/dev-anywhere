@@ -1,8 +1,6 @@
 import type { VoiceSummaryReason } from "@dev-anywhere/shared";
 
-export type SpeechPolicy =
-  | { mode: "direct" }
-  | { mode: "summary_required"; reason: VoiceSummaryReason };
+type SpeechPolicy = { mode: "direct" } | { mode: "summary_required"; reason: VoiceSummaryReason };
 
 interface SpeechPolicyOptions {
   maxDirectChars?: number;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildXtermTerminalOptions, createXtermTerminal } from "./create-xterm";
-import { xtermDarkTheme } from "./xterm-theme";
+import { xtermFixedDarkTheme } from "./xterm-theme";
 
 describe("buildXtermTerminalOptions", () => {
   // 失焦光标走 "outline" 时, xterm 内部计算的 inactive 位置在长会话里会偏离当前
@@ -21,8 +21,8 @@ describe("buildXtermTerminalOptions", () => {
     expect(typeof opts.fontSize).toBe("number");
   });
 
-  it("uses the terminal's dark default theme", () => {
-    expect(buildXtermTerminalOptions().theme).toBe(xtermDarkTheme);
+  it("uses the PTY fixed dark terminal profile", () => {
+    expect(buildXtermTerminalOptions().theme).toBe(xtermFixedDarkTheme);
   });
 });
 

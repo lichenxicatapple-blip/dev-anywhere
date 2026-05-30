@@ -15,6 +15,8 @@ import type { WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { classifyPathError } from "./path-errors.js";
 
+const JSON_WORKER_READY_TIMEOUT_MS = 15_000;
+
 interface RelaySessionCreateHandlerDeps {
   relaySend: RelaySend;
   workerRegistry: WorkerRegistry;
@@ -148,40 +150,61 @@ export class RelaySessionCreateHandler {
       attempt++;
       this.deps.workerRegistry.connect(pendingId, paths.workerSock).then((sock) => {
         if (sock) {
-          const session = this.deps.sessionManager.createSession(
-            "json",
-            sessionCwd,
-            workerPid,
-            name,
-            pendingId,
-            provider,
-            undefined,
-            nameLocked,
-          );
-          if (resumeSessionId) {
-            this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
-          }
-          this.deps.relaySend(
-            serializeControl({
-              type: "session_create_response",
-              requestId,
-              sessionId: session.id,
-              name: session.name,
-              nameLocked: session.nameLocked,
-              mode: "json",
-              provider,
-            }),
-          );
-          if (resumeSessionId) {
-            this.pushHistoryMessages(session.id, resumeSessionId);
-          }
-          serviceLogger.info(
-            { sessionId: session.id, cwd: sessionCwd },
-            "JSON session created via relay",
-          );
-          this.deps.controlHandlers.pushCommandList(session.id, sessionCwd);
-          this.deps.broadcastSessionSync(session);
-          this.deps.broadcastSessionList();
+          this.deps.workerRegistry
+            .waitForReady(pendingId, JSON_WORKER_READY_TIMEOUT_MS)
+            .then(() => {
+              const session = this.deps.sessionManager.createSession(
+                "json",
+                sessionCwd,
+                workerPid,
+                name,
+                pendingId,
+                provider,
+                undefined,
+                nameLocked,
+              );
+              if (resumeSessionId) {
+                this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
+              }
+              this.deps.relaySend(
+                serializeControl({
+                  type: "session_create_response",
+                  requestId,
+                  sessionId: session.id,
+                  name: session.name,
+                  nameLocked: session.nameLocked,
+                  mode: "json",
+                  provider,
+                }),
+              );
+              if (resumeSessionId) {
+                this.pushHistoryMessages(session.id, resumeSessionId);
+              }
+              serviceLogger.info(
+                { sessionId: session.id, cwd: sessionCwd },
+                "JSON session created via relay",
+              );
+              this.deps.controlHandlers.pushCommandList(session.id, sessionCwd);
+              this.deps.broadcastSessionSync(session);
+              this.deps.broadcastSessionList();
+            })
+            .catch((err: unknown) => {
+              const error = err instanceof Error ? err.message : String(err);
+              this.cleanupPendingJsonSession(pendingId);
+              this.deps.relaySend(
+                serializeControl({
+                  type: "session_create_response",
+                  requestId,
+                  sessionId: pendingId,
+                  errorCode: ControlErrorCode.WORKER_START_FAILED,
+                  error,
+                }),
+              );
+              serviceLogger.error(
+                { sessionId: pendingId, error },
+                "Worker failed to report ready via relay",
+              );
+            });
         } else if (attempt < maxRetries) {
           scheduleAttempt(Math.min(100 * attempt, 2000));
         } else {

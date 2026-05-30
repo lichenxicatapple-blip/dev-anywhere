@@ -12,11 +12,11 @@ export type VoiceCommand =
   | { type: "approve_always" }
   | { type: "deny_once" };
 
-export type VoiceRouteResult =
+type VoiceRouteResult =
   | { kind: "command"; command: VoiceCommand }
   | { kind: "agentText"; text: string };
 
-export interface VoiceRouteContext {
+interface VoiceRouteContext {
   phase: VoicePilotPhase | "disabled" | "waitingForAgent";
   approvalPromptActive?: boolean;
 }

@@ -62,6 +62,8 @@ const workerHook: ProviderHookContext | undefined =
     : undefined;
 
 let serveSocket: Socket | null = null;
+const queuedServeMessages: WorkerMessage[] = [];
+let exiting = false;
 const seqCounter = new SeqCounter(sessionId);
 const whitelist = new ToolWhitelist();
 const nextApprovalRequestId = createApprovalRequestIdFactory(sessionId);
@@ -78,6 +80,18 @@ const pendingApprovals = new Map<
 function sendToServe(msg: WorkerMessage): void {
   if (serveSocket?.writable) {
     serveSocket.write(serializeWorkerMsg(msg));
+    return;
+  }
+  if (msg.type !== "worker_approval_request") {
+    queuedServeMessages.push(msg);
+  }
+}
+
+function flushQueuedServeMessages(): void {
+  if (!serveSocket?.writable) return;
+  while (queuedServeMessages.length > 0) {
+    const msg = queuedServeMessages.shift();
+    if (msg) serveSocket.write(serializeWorkerMsg(msg));
   }
 }
 
@@ -121,6 +135,8 @@ function handleProviderEvent(event: StreamJsonEvent): void {
 }
 
 function handleProviderExit(code: number): void {
+  if (exiting) return;
+  exiting = true;
   whitelist.clear();
   sendToServe({ type: "worker_exit", code });
   cleanup();
@@ -158,6 +174,7 @@ const session =
 
 function handleServeConnection(socket: Socket): void {
   serveSocket = takeoverServeSocket(serveSocket, socket);
+  flushQueuedServeMessages();
 
   for (const [requestId, pending] of pendingApprovals) {
     sendToServe({
@@ -253,5 +270,23 @@ process.on("SIGTERM", () => {
 server.listen(sockPath, () => {
   chmodSync(sockPath, 0o600);
   const pid = session.start();
-  sendToServe({ type: "worker_ready", pid });
+  if (!Number.isFinite(pid) || pid <= 0) {
+    console.error("[worker] provider process failed to start: missing child pid");
+    handleProviderExit(1);
+    return;
+  }
+  if (provider === "codex" && session instanceof CodexAppServerSession) {
+    void session
+      .waitUntilReady()
+      .then(() => {
+        sendToServe({ type: "worker_ready", pid });
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[worker] Codex app-server failed to initialize: ${message}`);
+        void session.stop(0).finally(() => handleProviderExit(1));
+      });
+  } else {
+    sendToServe({ type: "worker_ready", pid });
+  }
 });

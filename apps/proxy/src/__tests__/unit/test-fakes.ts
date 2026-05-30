@@ -62,12 +62,14 @@ export function createWorkerRegistryFake(options?: {
   send?: unknown;
   spawn?: unknown;
   connect?: unknown;
+  waitForReady?: unknown;
   terminateProcess?: unknown;
 }): WorkerRegistry {
   return {
     send: options?.send ?? vi.fn(),
     spawn: options?.spawn ?? vi.fn(),
     connect: options?.connect ?? vi.fn(),
+    waitForReady: options?.waitForReady ?? vi.fn(async () => {}),
     terminateProcess: options?.terminateProcess ?? vi.fn(() => false),
   } as unknown as WorkerRegistry;
 }

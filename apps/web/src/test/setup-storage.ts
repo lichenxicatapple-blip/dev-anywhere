@@ -1,3 +1,5 @@
+import "@testing-library/jest-dom/vitest";
+
 function createStorageMock(): Storage {
   const values = new Map<string, string>();
   return {

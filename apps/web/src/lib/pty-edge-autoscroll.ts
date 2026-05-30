@@ -1,11 +1,11 @@
-export interface EdgeAutoscrollRect {
+interface EdgeAutoscrollRect {
   left: number;
   top: number;
   right: number;
   bottom: number;
 }
 
-export interface EdgeAutoscrollOptions {
+interface EdgeAutoscrollOptions {
   pointerX: number;
   pointerY: number;
   rect: EdgeAutoscrollRect;
@@ -19,7 +19,7 @@ export interface EdgeAutoscrollOptions {
   maxSpeedPx?: number;
 }
 
-export interface EdgeAutoscrollDelta {
+interface EdgeAutoscrollDelta {
   dx: number;
   dy: number;
 }

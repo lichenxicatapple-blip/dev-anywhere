@@ -12,7 +12,7 @@ type FileDownloadRequest = {
   path: string;
 };
 
-export type FileDownloadResult = {
+type FileDownloadResult = {
   success: boolean;
   sessionId: string;
   path: string;

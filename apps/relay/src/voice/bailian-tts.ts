@@ -10,7 +10,7 @@ type ProviderSocket = EventEmitter & {
   close: (code?: number, reason?: string) => void;
 };
 
-export type BailianTtsSocketFactory = (url: string, options: SocketOptions) => ProviderSocket;
+type BailianTtsSocketFactory = (url: string, options: SocketOptions) => ProviderSocket;
 
 export interface BailianTtsConfig {
   apiKey: string;

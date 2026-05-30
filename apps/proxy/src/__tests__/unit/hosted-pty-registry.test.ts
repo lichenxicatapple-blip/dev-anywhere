@@ -146,11 +146,7 @@ describe("Hosted PTY registry", () => {
       expect(pid).toBe(2468);
       expect(ptySpawnMock).toHaveBeenCalledWith(
         codexBin,
-        [
-          "--dangerously-bypass-approvals-and-sandbox",
-          "resume",
-          "codex-session",
-        ],
+        ["--dangerously-bypass-approvals-and-sandbox", "resume", "codex-session"],
         expect.objectContaining({ cwd: "/tmp/project" }),
       );
     });

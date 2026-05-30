@@ -22,11 +22,7 @@
 // 选 tab: 默认挑 url 含 "localhost:5173" 的第一个; 可用 EMU_TAB_FILTER 环境变量改 substring.
 // 例: EMU_TAB_FILTER=chat node scripts/tools/emu-debug.mjs metrics
 import { spawn, spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { writeFileSync } from "node:fs";
-
-const require = createRequire(new URL("../../apps/relay/package.json", import.meta.url));
-const WebSocket = require("ws");
 
 const CDP_PORT = Number(process.env.EMU_CDP_PORT ?? 9222);
 const TAB_FILTER = process.env.EMU_TAB_FILTER ?? "localhost:5173";
@@ -59,16 +55,31 @@ async function pickTab() {
 
 class CdpSession {
   constructor(wsUrl) {
+    if (typeof WebSocket !== "function") {
+      throw new Error("emu-debug requires Node 22+ with global WebSocket support");
+    }
     this.ws = new WebSocket(wsUrl);
     this.id = 0;
     this.pending = new Map();
     this.consoleHandlers = [];
     this.ready = new Promise((resolve, reject) => {
-      this.ws.on("open", resolve);
-      this.ws.on("error", reject);
+      this.ws.addEventListener("open", resolve, { once: true });
+      this.ws.addEventListener(
+        "error",
+        () => reject(new Error("CDP WebSocket connection failed")),
+        {
+          once: true,
+        },
+      );
     });
-    this.ws.on("message", (raw) => {
-      const m = JSON.parse(raw.toString());
+    this.ws.addEventListener("message", (event) => {
+      const raw =
+        typeof event.data === "string"
+          ? event.data
+          : Buffer.from(
+              event.data instanceof ArrayBuffer ? event.data : String(event.data),
+            ).toString();
+      const m = JSON.parse(raw);
       if (m.id && this.pending.has(m.id)) {
         const p = this.pending.get(m.id);
         this.pending.delete(m.id);

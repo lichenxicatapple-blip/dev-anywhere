@@ -343,8 +343,10 @@ describe("CreateSessionDialog", () => {
       getByText("未找到");
     });
     const claudeButton = getByRole("button", { name: "Claude Code" }) as HTMLButtonElement;
+    // Missing CLI providers remain selectable so the path editor can be opened; only create is
+    // blocked until the selected provider becomes available.
     expect(claudeButton.disabled).toBe(false);
-    expect(claudeButton.getAttribute("aria-disabled")).toBe("true");
+    expect(claudeButton).not.toHaveAttribute("aria-disabled");
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -495,8 +497,11 @@ describe("CreateSessionDialog", () => {
       provider: "claude",
     });
 
-    // 给微任务跑完
-    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => {
+      expect(useSessionStore.getState().sessions).toContainEqual(
+        expect.objectContaining({ sessionId: "new-sess-1" }),
+      );
+    });
 
     expect(navigateMock).not.toHaveBeenCalled();
   });

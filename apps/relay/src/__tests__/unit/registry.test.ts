@@ -132,6 +132,17 @@ describe("RelayRegistry", () => {
       expect(sessions).toContain("s2");
     });
 
+    it("setSessionsForProxy replaces stale session ids from a fresh sync", () => {
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "stale");
+      registry.addSessionToProxy("p1", "s1");
+
+      registry.setSessionsForProxy("p1", ["s1", "s2"]);
+
+      expect(registry.getSessionsForProxy("p1")).toEqual(["s1", "s2"]);
+      expect(registry.getProxyForSession("stale")).toBeUndefined();
+    });
+
     it("unregisterProxy cleans up sessions", () => {
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");

@@ -94,7 +94,7 @@ export interface PtyVerticalIntentResult {
   };
 }
 
-export interface PtyVerticalIntentReduceOptions {
+interface PtyVerticalIntentReduceOptions {
   atBottomThreshold?: number;
 }
 
@@ -119,8 +119,6 @@ export const isReviewing = (state: PtyVerticalIntentState): boolean => state.mod
 
 export const canPassiveFollow = (state: PtyVerticalIntentState): boolean =>
   state.mode === "following";
-
-export const shouldPauseOutput = isReviewing;
 
 function actionFor(
   previous: PtyVerticalIntentMode,

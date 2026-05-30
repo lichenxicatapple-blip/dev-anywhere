@@ -12,14 +12,14 @@ const MAX_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_FILE_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_FILE_UPLOAD_BYTES / 3) * 4;
 const SAFE_EXT_RE = /^[A-Za-z0-9]{1,6}$/;
 
-export type FileUploadRequest = {
+type FileUploadRequest = {
   sessionId: string;
   mimeType: string;
   dataBase64: string;
   fileName: string;
 };
 
-export type FileUploadResult = {
+type FileUploadResult = {
   success: boolean;
   // 失败时不填,避免空字符串通过 schema 的 z.string().optional() 校验。
   path?: string;

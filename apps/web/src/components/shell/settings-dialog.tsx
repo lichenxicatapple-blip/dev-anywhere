@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -15,6 +15,7 @@ import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
+import { reconnectRelayClient } from "@/hooks/use-relay-setup";
 import {
   clearRelayClientToken,
   hasStoredRelayClientToken,
@@ -96,6 +97,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const setPtyScrollTraceEnabled = useAppStore((s) => s.setPtyScrollTraceEnabled);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
+  const subviewBackButtonRef = useRef<HTMLButtonElement>(null);
+  const voiceScrollRef = useRef<HTMLDivElement>(null);
   const relayTokenSaved = hasStoredRelayClientToken();
 
   const loadRelayHealth = useCallback(
@@ -146,16 +149,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   useEffect(() => {
     if (!open || view !== "voice") return;
     const frame = window.requestAnimationFrame(() => {
-      const voiceDialog = document.querySelector<HTMLElement>(
-        '[data-slot="settings-dialog"][data-view="voice"]',
-      );
-      voiceDialog
-        ?.querySelector<HTMLButtonElement>('[data-slot="voice-settings-back"]')
-        ?.focus({ preventScroll: true });
-      const scroller = voiceDialog?.querySelector<HTMLElement>(
-        '[data-slot="voice-settings-scroll"]',
-      );
-      if (scroller) scroller.scrollTop = 0;
+      subviewBackButtonRef.current?.focus({ preventScroll: true });
+      if (voiceScrollRef.current) voiceScrollRef.current.scrollTop = 0;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [open, view]);
@@ -204,6 +199,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   className="-ml-2 mt-0.5 size-9"
                   aria-label="返回设置"
                   data-slot="voice-settings-back"
+                  ref={subviewBackButtonRef}
                   onClick={() => setView("menu")}
                 >
                   <ArrowLeft className="size-4" aria-hidden="true" />
@@ -231,92 +227,155 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         {view === "version" ? (
-          <div
-            className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
-            data-slot="settings-dialog-body"
-          >
-            <VersionRow
-              icon={<Monitor className="size-4" aria-hidden="true" />}
-              label="Web"
-              value={packageInfo.version}
-              detail="当前浏览器加载的版本"
-            />
-            <VersionRow
-              icon={<Server className="size-4" aria-hidden="true" />}
-              label="Relay 服务器"
-              value={relayVersion}
-              detail={relayDetail}
-              muted={relayHealth.kind === "error"}
-            />
-          </div>
+          <SettingsVersionView
+            relayVersion={relayVersion}
+            relayDetail={relayDetail}
+            relayMuted={relayHealth.kind === "error"}
+          />
         ) : view === "relay-token" ? (
           <RelayTokenPanel saved={relayTokenSaved} />
         ) : view === "voice" ? (
-          <VoiceSettingsPanel />
+          <VoiceSettingsPanel scrollRef={voiceScrollRef} />
         ) : (
-          <div
-            className="dev-render-scroll min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
-            data-slot="settings-dialog-body"
-          >
-            <SettingsSection title="服务">
-              <SettingsMenuItem
-                icon={<AudioLines className="size-4" aria-hidden="true" />}
-                label="Voice Pilot"
-                detail="用语音输入、听取回复和处理审批"
-                onClick={() => setView("voice")}
-              />
-              <SettingsMenuItem
-                icon={<KeyRound className="size-4" aria-hidden="true" />}
-                label="Relay Token"
-                detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
-                onClick={() => setView("relay-token")}
-              />
-            </SettingsSection>
-            <SettingsSection title="外观">
-              <SettingsSegmentedItem
-                icon={<SunMoon className="size-4" aria-hidden="true" />}
-                label="主题"
-                value={themePreference}
-                options={themePreferenceOptions}
-                onValueChange={setThemePreference}
-              />
-            </SettingsSection>
-            <SettingsSection title="交互">
-              <SettingsToggleItem
-                icon={<Monitor className="size-4" aria-hidden="true" />}
-                label="桌面交互模式"
-                detail="适合平板外接键盘；保留触控，但按桌面输入处理"
-                checked={desktopInteractionMode}
-                onCheckedChange={setDesktopInteractionMode}
-              />
-            </SettingsSection>
-            <SettingsSection title="诊断">
-              <SettingsToggleItem
-                icon={<Terminal className="size-4" aria-hidden="true" />}
-                label="PTY 滚动追踪"
-                detail="记录终端滚动和视口同步现场，方便复制诊断报告"
-                checked={ptyScrollTraceEnabled}
-                onCheckedChange={setPtyScrollTraceEnabled}
-              />
-              <SettingsToggleItem
-                icon={<Activity className="size-4" aria-hidden="true" />}
-                label="延迟监控"
-                detail="显示可拖动的连接延迟浮窗"
-                checked={latencyMonitorEnabled}
-                onCheckedChange={setLatencyMonitorEnabled}
-              />
-            </SettingsSection>
-            <SettingsSection title="关于">
-              <SettingsMenuItem
-                icon={<Server className="size-4" aria-hidden="true" />}
-                label="版本"
-                onClick={() => setView("version")}
-              />
-            </SettingsSection>
-          </div>
+          <SettingsMainView
+            relayTokenSaved={relayTokenSaved}
+            themePreference={themePreference}
+            onThemePreferenceChange={setThemePreference}
+            desktopInteractionMode={desktopInteractionMode}
+            onDesktopInteractionModeChange={setDesktopInteractionMode}
+            ptyScrollTraceEnabled={ptyScrollTraceEnabled}
+            onPtyScrollTraceEnabledChange={setPtyScrollTraceEnabled}
+            latencyMonitorEnabled={latencyMonitorEnabled}
+            onLatencyMonitorEnabledChange={setLatencyMonitorEnabled}
+            onOpenVoice={() => setView("voice")}
+            onOpenRelayToken={() => setView("relay-token")}
+            onOpenVersion={() => setView("version")}
+          />
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsVersionView({
+  relayVersion,
+  relayDetail,
+  relayMuted,
+}: {
+  relayVersion: string;
+  relayDetail: string;
+  relayMuted: boolean;
+}) {
+  return (
+    <div
+      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
+      data-slot="settings-dialog-body"
+    >
+      <VersionRow
+        icon={<Monitor className="size-4" aria-hidden="true" />}
+        label="Web"
+        value={packageInfo.version}
+        detail="当前浏览器加载的版本"
+      />
+      <VersionRow
+        icon={<Server className="size-4" aria-hidden="true" />}
+        label="Relay 服务器"
+        value={relayVersion}
+        detail={relayDetail}
+        muted={relayMuted}
+      />
+    </div>
+  );
+}
+
+function SettingsMainView({
+  relayTokenSaved,
+  themePreference,
+  onThemePreferenceChange,
+  desktopInteractionMode,
+  onDesktopInteractionModeChange,
+  ptyScrollTraceEnabled,
+  onPtyScrollTraceEnabledChange,
+  latencyMonitorEnabled,
+  onLatencyMonitorEnabledChange,
+  onOpenVoice,
+  onOpenRelayToken,
+  onOpenVersion,
+}: {
+  relayTokenSaved: boolean;
+  themePreference: ThemePreference;
+  onThemePreferenceChange: (value: ThemePreference) => void;
+  desktopInteractionMode: boolean;
+  onDesktopInteractionModeChange: (checked: boolean) => void;
+  ptyScrollTraceEnabled: boolean;
+  onPtyScrollTraceEnabledChange: (checked: boolean) => void;
+  latencyMonitorEnabled: boolean;
+  onLatencyMonitorEnabledChange: (checked: boolean) => void;
+  onOpenVoice: () => void;
+  onOpenRelayToken: () => void;
+  onOpenVersion: () => void;
+}) {
+  return (
+    <div
+      className="dev-render-scroll min-h-0 space-y-4 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
+      data-slot="settings-dialog-body"
+    >
+      <SettingsSection title="服务">
+        <SettingsMenuItem
+          icon={<AudioLines className="size-4" aria-hidden="true" />}
+          label="Voice Pilot"
+          detail="用语音输入、听取回复和处理审批"
+          onClick={onOpenVoice}
+        />
+        <SettingsMenuItem
+          icon={<KeyRound className="size-4" aria-hidden="true" />}
+          label="Relay Token"
+          detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
+          onClick={onOpenRelayToken}
+        />
+      </SettingsSection>
+      <SettingsSection title="外观">
+        <SettingsSegmentedItem
+          icon={<SunMoon className="size-4" aria-hidden="true" />}
+          label="主题"
+          value={themePreference}
+          options={themePreferenceOptions}
+          onValueChange={onThemePreferenceChange}
+        />
+      </SettingsSection>
+      <SettingsSection title="交互">
+        <SettingsToggleItem
+          icon={<Monitor className="size-4" aria-hidden="true" />}
+          label="桌面交互模式"
+          detail="适合平板外接键盘；保留触控，但按桌面输入处理"
+          checked={desktopInteractionMode}
+          onCheckedChange={onDesktopInteractionModeChange}
+        />
+      </SettingsSection>
+      <SettingsSection title="诊断">
+        <SettingsToggleItem
+          icon={<Terminal className="size-4" aria-hidden="true" />}
+          label="PTY 滚动追踪"
+          detail="记录终端滚动和视口同步现场，方便复制诊断报告"
+          checked={ptyScrollTraceEnabled}
+          onCheckedChange={onPtyScrollTraceEnabledChange}
+        />
+        <SettingsToggleItem
+          icon={<Activity className="size-4" aria-hidden="true" />}
+          label="延迟监控"
+          detail="显示可拖动的连接延迟浮窗"
+          checked={latencyMonitorEnabled}
+          onCheckedChange={onLatencyMonitorEnabledChange}
+        />
+      </SettingsSection>
+      <SettingsSection title="关于">
+        <SettingsMenuItem
+          icon={<Server className="size-4" aria-hidden="true" />}
+          label="版本"
+          onClick={onOpenVersion}
+        />
+      </SettingsSection>
+    </div>
   );
 }
 
@@ -405,8 +464,10 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
   const [tokenInput, setTokenInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const reloadForReconnect = () => {
-    window.location.reload();
+  const reconnect = () => {
+    void reconnectRelayClient().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "Relay 重连失败。");
+    });
   };
 
   const saveToken = () => {
@@ -416,12 +477,12 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
       return;
     }
     persistRelayClientToken(token);
-    reloadForReconnect();
+    reconnect();
   };
 
   const clearToken = () => {
     clearRelayClientToken();
-    reloadForReconnect();
+    reconnect();
   };
 
   return (

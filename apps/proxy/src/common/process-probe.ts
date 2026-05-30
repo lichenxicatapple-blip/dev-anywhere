@@ -1,6 +1,4 @@
-export type ProcessProbeStatus = "alive" | "not-found" | "permission-denied" | "unknown";
-
-export type ProcessProbeResult =
+type ProcessProbeResult =
   | { status: "alive" }
   | { status: "not-found"; code: "ESRCH"; message: string }
   | { status: "permission-denied"; code: "EPERM"; message: string }

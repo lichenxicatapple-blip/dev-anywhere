@@ -316,6 +316,13 @@ export class JsonSession {
       stdoutEnded = true;
       fireOnce();
     });
+    child.on("error", (err: Error) => {
+      this.stderrChunks.push(`Process failed to start: ${err.message}\n`);
+      exitCode = 1;
+      exited = true;
+      stdoutEnded = true;
+      fireOnce();
+    });
     child.on("exit", (code: number | null) => {
       exitCode = code;
       exited = true;

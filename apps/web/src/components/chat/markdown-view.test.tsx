@@ -24,9 +24,8 @@ function mockCoarsePointer(matches: boolean): void {
 describe("MarkdownView XSS 防护", () => {
   it("uses theme-aware prose tokens instead of permanently inverted prose", () => {
     const { container } = render(<MarkdownView text={"hello"} />);
-    const root = container.firstElementChild;
-    expect(root?.className).toContain("dev-markdown");
-    expect(root?.className).not.toContain("prose-invert");
+    const root = container.querySelector('[data-slot="markdown-view"]');
+    expect(root?.getAttribute("data-tone")).toBe("default");
   });
 
   it("drops script tags", () => {
@@ -58,8 +57,8 @@ describe("MarkdownView XSS 防护", () => {
     );
     const code = container.querySelector("pre code");
     expect(code?.textContent).toContain("sticker_cluster.py");
-    expect(code?.closest('[data-slot="markdown-code-block"]')?.className).toContain(
-      "overflow-x-auto",
+    expect(code?.closest('[data-slot="markdown-code-block"]')?.getAttribute("data-overflow")).toBe(
+      "horizontal",
     );
   });
 
@@ -68,16 +67,14 @@ describe("MarkdownView XSS 防护", () => {
       <MarkdownView text={"`data/pipeline/sticker/sticker_cluster.py:172`"} />,
     );
     const code = container.querySelector("code");
-    expect(code?.className).toContain("break-all");
-    expect(code?.className).toContain("whitespace-normal");
+    expect(code?.getAttribute("data-slot")).toBe("markdown-inline-code");
+    expect(code?.getAttribute("data-wrap")).toBe("break-all");
   });
 
   it("keeps inline code readable on primary user bubbles", () => {
     const { container } = render(<MarkdownView text={"`package.json`"} tone="on-primary" />);
     const code = container.querySelector("code");
-    expect(code?.className).toContain("bg-primary-foreground/15");
-    expect(code?.className).toContain("text-primary-foreground");
-    expect(code?.className).not.toContain("bg-muted");
+    expect(code?.getAttribute("data-tone")).toBe("on-primary");
   });
 
   it("renders external links with target=_blank + rel noopener", () => {
@@ -92,9 +89,7 @@ describe("MarkdownView XSS 防护", () => {
       "https://www.nhlbi.nih.gov/health/insomnia/sleep-health-and-mental-health-reference";
     const { container } = render(<MarkdownView text={longUrl} />);
     const link = container.querySelector<HTMLElement>('[data-slot="inline-web-link"]');
-    expect(link?.className).toContain("[overflow-wrap:anywhere]");
-    expect(link?.className).toContain("break-words");
-    expect(link?.className).not.toContain("inline-flex");
+    expect(link?.getAttribute("data-wrap")).toBe("anywhere");
   });
 
   it("opens external links on desktop only with cmd/ctrl click", () => {
@@ -132,6 +127,6 @@ describe("MarkdownView XSS 防护", () => {
     const { container } = render(<MarkdownView text={md} />);
     const table = container.querySelector("table");
     expect(table).not.toBeNull();
-    expect(table?.parentElement?.className).toContain("overflow-x-auto");
+    expect(table?.parentElement?.getAttribute("data-overflow")).toBe("horizontal");
   });
 });

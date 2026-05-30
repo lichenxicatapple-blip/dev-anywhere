@@ -7,13 +7,13 @@ export interface TerminalSelectionPoint {
   column: number;
 }
 
-export interface TerminalSelectionResult {
+interface TerminalSelectionResult {
   anchor: TerminalSelectionPoint;
   focus: TerminalSelectionPoint;
   text: string;
 }
 
-export interface TerminalFileDownloadSelectionResult extends TerminalSelectionResult {
+interface TerminalFileDownloadSelectionResult extends TerminalSelectionResult {
   downloadPath: string;
 }
 

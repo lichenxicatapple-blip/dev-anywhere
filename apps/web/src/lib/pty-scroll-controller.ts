@@ -6,8 +6,18 @@ import {
   computeScrollTarget,
   ydispToScrollTop,
 } from "./pty-scroll";
+import {
+  clearPtyHorizontalIntent,
+  createInitialPtyHorizontalScrollState,
+  markPtyHorizontalUserInput,
+  reducePtyHorizontalContainerScroll,
+  setPtyHorizontalPendingFollow,
+  type PtyHorizontalScrollIntentTrace,
+} from "./pty-horizontal-scroll-model";
+import { decideContainerScrollSource } from "./pty-container-scroll-model";
 import { decideCursorAwareClamp, decideScrollToBottomAction } from "./pty-follow-policy";
-import { appendPtyScrollTrace, isPtyScrollTraceEnabled } from "./pty-scroll-trace";
+import { attachPtyScrollDomAdapter } from "./pty-scroll-dom-adapter";
+import { createPtyScrollTraceAdapter } from "./pty-scroll-trace-adapter";
 import {
   canPassiveFollow,
   createInitialPtyVerticalIntentState,
@@ -17,8 +27,11 @@ import {
   type PtyVerticalIntentResult,
 } from "./pty-vertical-intent-fsm";
 import type { PtyScrollDebugProbe } from "./pty-scroll-debug-snapshot";
+import { PTY_SCROLL_CONFIG } from "./pty-scroll-config";
+import { decideFollowCursorY } from "./pty-scroll-model";
 import { parsePx } from "./pty-style-utils";
 import { createPtyStyleWriter } from "./pty-style-writer";
+import { createPtyTouchScrollHandler } from "./pty-touch-scroll-handler";
 import { findCanvasLastNonEmptyRow, measureXtermCellSize } from "./pty-xterm-metrics";
 
 interface PtyScrollControllerOptions {
@@ -73,23 +86,6 @@ export interface PtyScrollState {
 }
 
 type PendingFrameResult = "none" | "followed" | "marked";
-type TouchScrollGestureMode = "pending" | "vertical" | "horizontal";
-
-const NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX = 48;
-// Input/focus follow can briefly shrink/re-expand the DOM scroll range before the next render
-// settles. Keep this scoped to scheduled follow-to-bottom paths; keyboard visualViewport drift is
-// intentionally not restored here.
-const RECENT_RAW_INPUT_LAYOUT_DRIFT_MS = 1_000;
-// Only repair native scroll positions that are physically impossible for the active gesture.
-// Smaller deltas are left to the browser, otherwise slow finger drags become jittery.
-const TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX = 512;
-// Real Android can report scrollTop near host.style.top during a bottom touch. This guard fixes
-// the catastrophic replay, while ignoring the tiny host-top-adjacent deltas seen on real devices.
-const TOUCH_HOST_TOP_JUMP_MIN_THRESHOLD_PX = 64;
-const TOUCH_GESTURE_SLOP_PX = 16;
-const TOUCH_HORIZONTAL_GESTURE_SLOP_PX = 6;
-const TOUCH_HORIZONTAL_LOCK_RATIO = 1;
-const TOUCH_VERTICAL_LOCK_RATIO = 1.25;
 
 export function attachPtyScrollController(
   options: PtyScrollControllerOptions,
@@ -109,7 +105,7 @@ export function attachPtyScrollController(
     onUserVerticalScrollIntentChange,
     onTouchReviewStart,
     onTouchBoundaryPrevent,
-    atBottomThreshold = 8,
+    atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
   } = options;
 
   const getDims = (): { cellH: number; cellW: number } =>
@@ -150,19 +146,7 @@ export function attachPtyScrollController(
   // 横向同样需要区分 "我们刚刚 followCursorX 改 scrollLeft" vs "用户主动横向滚",
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
   // 误把这次改写当成用户滚动 → 状态错乱。
-  let pendingFollowCursorScrollLeft: number | null = null;
-  let touchStartedAtCursorAwareBottom = false;
-  let touchStartClientX: number | null = null;
-  let touchStartScrollLeft: number | null = null;
-  let lastTouchClientY: number | null = null;
-  let lastTouchGestureAt: number | null = null;
-  let touchScrollGestureMode: TouchScrollGestureMode | null = null;
-  // 用户主动横向滚到光标视窗外的意图标记。followCursorX 看到此 flag 时不再 snap 回光标位置;
-  // 用户滚回到光标可见范围 (followCursorX 看到光标已 in viewport) 时清掉, 重新 engage 跟踪。
-  let userHasHorizontalScrollIntent = false;
-  let lastHorizontalUserInputAt: number | null = null;
-  let unmarkedHorizontalScrollOriginLeft: number | null = null;
-  let lastSeenScrollLeft = 0;
+  let horizontalState = createInitialPtyHorizontalScrollState();
   // 纵向同样需要"用户向下滚到底"的方向判定来释放 intent。longHost 模式下
   // isAtBottom = cursorInViewport, 用户小幅 wheel up 时 cursor 仍可见 → atBottom 仍 true,
   // 仅看 atBottom + 时间窗会把刚 set 的 intent 立刻清掉。改成跟 onContainerScroll 拿到的
@@ -182,11 +166,31 @@ export function attachPtyScrollController(
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
 
-  const setUserHasHorizontalScrollIntent = (value: boolean, details?: string): void => {
-    if (!value) unmarkedHorizontalScrollOriginLeft = null;
-    if (userHasHorizontalScrollIntent === value) return;
-    userHasHorizontalScrollIntent = value;
-    trace(value ? "horizontal-intent:set" : "horizontal-intent:clear", details ? { details } : {});
+  const traceAdapter = createPtyScrollTraceAdapter({
+    container,
+    host,
+    term,
+    atBottomThreshold,
+    getDims,
+    getVerticalInsets,
+    getPrevCursorBufferRow: () => prevCursorBufferRow,
+    getPendingProgrammaticScrollTop: () => pendingProgrammaticScrollTop,
+    getPendingFollowCursorScrollTop: () => pendingFollowCursorScrollTop,
+    getPendingFollowCursorScrollLeft: () => horizontalState.pendingFollowLeft,
+    getPendingContainerSyncRetry: () => pendingContainerSyncRetry,
+    getHorizontalIntent: () => horizontalState.intent,
+    getVerticalIntent: () => verticalIntent,
+    getUserHasVerticalScrollIntent: () => userHasVerticalScrollIntent(),
+  });
+  const trace = traceAdapter.trace;
+
+  const traceHorizontalIntent = (event: PtyHorizontalScrollIntentTrace | null): void => {
+    if (!event) return;
+    if (event.kind === "ignore") {
+      trace("horizontal-intent:ignore", { details: event.details });
+      return;
+    }
+    trace(`horizontal-intent:${event.kind}`, { details: event.details });
   };
 
   const hasHorizontalOverflow = (): boolean =>
@@ -194,17 +198,16 @@ export function attachPtyScrollController(
 
   const clearHorizontalIntentIfUnscrollable = (site: string): boolean => {
     if (hasHorizontalOverflow()) return false;
-    lastHorizontalUserInputAt = null;
-    unmarkedHorizontalScrollOriginLeft = null;
-    pendingFollowCursorScrollLeft = null;
+    const result = clearPtyHorizontalIntent(horizontalState, {
+      details: `site=${site} reason=not-scrollable scrollWidth=${container.scrollWidth} clientWidth=${container.clientWidth}`,
+      scrollLeft: container.scrollLeft,
+    });
+    horizontalState = result.state;
+    traceHorizontalIntent(result.trace);
     if (container.scrollLeft !== 0) {
       container.scrollLeft = 0;
+      horizontalState = { ...horizontalState, lastSeenLeft: 0 };
     }
-    lastSeenScrollLeft = container.scrollLeft;
-    setUserHasHorizontalScrollIntent(
-      false,
-      `site=${site} reason=not-scrollable scrollWidth=${container.scrollWidth} clientWidth=${container.clientWidth}`,
-    );
     return true;
   };
 
@@ -213,9 +216,12 @@ export function attachPtyScrollController(
       clearHorizontalIntentIfUnscrollable("markHorizontalUserInput");
       return;
     }
-    lastHorizontalUserInputAt = performance.now();
-    unmarkedHorizontalScrollOriginLeft = null;
-    setUserHasHorizontalScrollIntent(true, details);
+    const result = markPtyHorizontalUserInput(horizontalState, {
+      now: performance.now(),
+      details,
+    });
+    horizontalState = result.state;
+    traceHorizontalIntent(result.trace);
   };
 
   const getScrollState = (): PtyScrollState => ({
@@ -313,138 +319,6 @@ export function attachPtyScrollController(
     if (pendingTouchScrollNotifyFrame === null) return;
     cancelPendingTouchScrollNotify();
     notifyScroll();
-  };
-
-  // focus 字段加细 — 之前只录 aria-label 或 tagName, 用户 trace 里看到 "BUTTON"
-  // 不知道是哪个按钮。补 data-slot / id / class 摘要, 让 trace 能直接定位元素。
-  const describeFocus = (): string | null => {
-    const el = document.activeElement;
-    if (!el) return null;
-    const aria = el.getAttribute("aria-label") ?? "";
-    const tag = el.tagName;
-    const slot =
-      typeof el.closest === "function"
-        ? (el.closest("[data-slot]")?.getAttribute("data-slot") ?? "")
-        : "";
-    const id = (el as HTMLElement).id ? `#${(el as HTMLElement).id}` : "";
-    const cls =
-      typeof el.className === "string" && el.className
-        ? "." + el.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".")
-        : "";
-    if (aria) return `${aria}|${tag}${id}${cls}{${slot}}`;
-    return `${tag}${id}${cls}{${slot}}`;
-  };
-
-  const trace = (
-    event: string,
-    extra: {
-      action?: string;
-      reason?: string;
-      scope?: string;
-      ydisp?: number;
-      details?: string;
-      cursorDeltaRows?: number | null;
-      scrollDeltaToAnchor?: number;
-      vvHeightDelta?: number;
-      vvOffsetDelta?: number;
-    } = {},
-  ): void => {
-    if (!isPtyScrollTraceEnabled()) return;
-    const containerRect = container.getBoundingClientRect();
-    const hostRect = host.getBoundingClientRect();
-    const visualViewport = window.visualViewport;
-    const { cellH, cellW } = getDims();
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const buffer = term.buffer.active;
-    const cursorBufferRow = buffer.baseY + buffer.cursorY;
-    const anchor = computeScrollAnchor({
-      rows: term.rows,
-      cellH,
-      bufferLength: buffer.length,
-      cursorBufferRow,
-      visibleContentHeight,
-      paddingTop,
-      paddingBottom,
-      containerScrollTop: container.scrollTop,
-      containerScrollHeight: container.scrollHeight,
-      containerClientHeight: container.clientHeight,
-      atBottomThreshold,
-    });
-    const defaultCursorDeltaRows =
-      prevCursorBufferRow === null ? null : cursorBufferRow - prevCursorBufferRow;
-    const cursorDeltaRows =
-      extra.cursorDeltaRows !== undefined ? extra.cursorDeltaRows : defaultCursorDeltaRows;
-    const scrollDeltaToAnchor =
-      extra.scrollDeltaToAnchor !== undefined
-        ? extra.scrollDeltaToAnchor
-        : container.scrollTop - anchor.bottomScrollTop;
-    const currentHostTop = parsePx(host.style.top);
-    const expectedHostTop =
-      cellH > 0
-        ? computeHostTop({
-            ydisp: buffer.viewportY,
-            rows: term.rows,
-            cellH,
-            visibleContentHeight,
-          })
-        : 0;
-    const currentHostHeight = parsePx(host.style.height);
-    const viewportTop = container.scrollTop;
-    const viewportBottom = viewportTop + container.clientHeight;
-    const hostBottom = currentHostTop + currentHostHeight;
-    const hostOverlap = Math.max(
-      0,
-      Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
-    );
-    appendPtyScrollTrace({
-      t: performance.now(),
-      event,
-      scope: extra.scope,
-      action: extra.action,
-      reason: extra.reason,
-      scrollTop: container.scrollTop,
-      scrollLeft: container.scrollLeft,
-      scrollHeight: container.scrollHeight,
-      scrollWidth: container.scrollWidth,
-      clientHeight: container.clientHeight,
-      clientWidth: container.clientWidth,
-      innerHeight: window.innerHeight,
-      visualViewportHeight: visualViewport?.height,
-      visualViewportOffsetTop: visualViewport?.offsetTop,
-      containerTop: containerRect.top,
-      containerBottom: containerRect.bottom,
-      hostRectTop: hostRect.top,
-      hostRectBottom: hostRect.bottom,
-      viewportY: buffer.viewportY,
-      bufferLength: buffer.length,
-      hostTop: host.style.top,
-      cellH,
-      cellW,
-      cursorX: buffer.cursorX,
-      cursorY: buffer.cursorY,
-      cursorBufferRow,
-      cursorDeltaRows,
-      cursorInViewport: anchor.cursorInViewport,
-      anchorBottomScrollTop: anchor.bottomScrollTop,
-      scrollDeltaToAnchor,
-      pendingProgrammaticScrollTop,
-      pendingFollowCursorScrollTop,
-      pendingFollowCursorScrollLeft,
-      pendingContainerSyncRetry,
-      horizontalIntent: userHasHorizontalScrollIntent,
-      intentMode: verticalIntent.mode,
-      intentSource: verticalIntent.source,
-      intentTransition: verticalIntent.lastTransitionId,
-      prevCursorBufferRow,
-      hostTopDrift: currentHostTop - expectedHostTop,
-      viewportHostCoverage: container.clientHeight > 0 ? hostOverlap / container.clientHeight : 0,
-      focus: describeFocus(),
-      atBottom: anchor.isAtBottom,
-      touchActive: verticalIntent.touchActive,
-      userIntent: userHasVerticalScrollIntent(),
-      ...extra,
-    });
   };
 
   const traceRawInputFollowScheduled = (source: string = "rawInput"): void => {
@@ -643,20 +517,21 @@ export function attachPtyScrollController(
     const clamped = Math.max(0, Math.min(1, ratio));
     container.scrollLeft = maxScrollLeft * clamped;
     markHorizontalUserInput(`site=scrollToXRatio ratio=${clamped}`);
-    lastSeenScrollLeft = container.scrollLeft;
+    horizontalState = { ...horizontalState, lastSeenLeft: container.scrollLeft };
     notifyScroll();
   };
 
   const resetHorizontalScroll = (reason: string = "external"): void => {
     const previous = container.scrollLeft;
-    lastHorizontalUserInputAt = null;
-    unmarkedHorizontalScrollOriginLeft = null;
-    pendingFollowCursorScrollLeft = null;
-    setUserHasHorizontalScrollIntent(false, `site=resetHorizontalScroll reason=${reason}`);
+    const result = clearPtyHorizontalIntent(horizontalState, {
+      details: `site=resetHorizontalScroll reason=${reason}`,
+      scrollLeft: 0,
+    });
+    horizontalState = result.state;
+    traceHorizontalIntent(result.trace);
     if (previous !== 0) {
       container.scrollLeft = 0;
     }
-    lastSeenScrollLeft = container.scrollLeft;
     trace(`horizontal-scroll-reset[${reason}]`, {
       details: `scrollLeft=${previous}->${container.scrollLeft}`,
     });
@@ -667,9 +542,6 @@ export function attachPtyScrollController(
   // 用 buffer revision 当 cache key：xterm.onWriteParsed 写完就 ++，加上 viewportY/rows
   // 一起作 key——viewport 滚动或 resize 都会改 cache。
   let bufferRevision = 0;
-  const dispWriteParsed = term.onWriteParsed?.(() => {
-    bufferRevision += 1;
-  });
   let cachedCanvasLastYKey: string | null = null;
   let cachedCanvasLastY = -1;
   const getCachedCanvasLastY = (): number => {
@@ -788,8 +660,7 @@ export function attachPtyScrollController(
   };
 
   const isRecentTouchNativeScroll = (): boolean =>
-    verticalIntent.touchActive ||
-    (lastTouchGestureAt !== null && performance.now() - lastTouchGestureAt <= 500);
+    verticalIntent.touchActive || touchHandler.isRecentNativeScroll();
 
   const skipSameRowTouchScrollSync = (effectiveScrollTop: number): boolean => {
     if (!isRecentTouchNativeScroll()) return false;
@@ -825,94 +696,25 @@ export function attachPtyScrollController(
     return decision.scrollTop;
   };
 
-  const getTouchScrollExpectation = (currentYOverride?: number | null) => {
-    if (!verticalIntent.touchActive) return false;
-    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
-    const touchStartY = verticalIntent.touchStartY;
-    const currentY = currentYOverride ?? lastTouchClientY;
-    if (touchStartScrollTop === null || touchStartY === null || currentY === null) return false;
-
-    const anchor = getCurrentAnchor();
-    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-    const cursorAwareMaxScrollTop = Math.min(domMaxScrollTop, anchor.bottomScrollTop);
-    const gestureBaseScrollTop = touchStartedAtCursorAwareBottom
-      ? anchor.bottomScrollTop
-      : touchStartScrollTop;
-    const expectedScrollTop = Math.max(
-      0,
-      Math.min(cursorAwareMaxScrollTop, gestureBaseScrollTop + (touchStartY - currentY)),
-    );
-    return {
-      touchStartScrollTop,
-      touchStartY,
-      currentY,
-      gestureBaseScrollTop,
-      expectedScrollTop,
-      cursorAwareMaxScrollTop,
-      touchDeltaY: currentY - touchStartY,
-    };
-  };
-
-  const getTouchMovement = (currentX: number | null, currentY: number | null) => {
-    const startY = verticalIntent.touchStartY;
-    if (startY === null || currentY === null) return null;
-    const dx = touchStartClientX !== null && currentX !== null ? currentX - touchStartClientX : 0;
-    const dy = currentY - startY;
-    return {
-      dx,
-      dy,
-      absDx: Math.abs(dx),
-      absDy: Math.abs(dy),
-      distance: Math.hypot(dx, dy),
-      startY,
-    };
-  };
-
-  const getTouchHorizontalExpectation = (currentX: number | null) => {
-    if (!verticalIntent.touchActive) return false;
-    if (touchStartClientX === null || touchStartScrollLeft === null || currentX === null) {
-      return false;
-    }
-    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    const expectedScrollLeft = Math.max(
-      0,
-      Math.min(maxScrollLeft, touchStartScrollLeft + (touchStartClientX - currentX)),
-    );
-    return {
-      touchStartX: touchStartClientX,
-      currentX,
-      touchStartScrollLeft,
-      expectedScrollLeft,
-      maxScrollLeft,
-      touchDeltaX: currentX - touchStartClientX,
-    };
-  };
-
-  const describeTouchScrollExpectation = (
-    expectation: ReturnType<typeof getTouchScrollExpectation>,
-    rawScrollTop: number,
-    effectiveScrollTop: number,
-    previousScrollTop: number,
-    verticalDelta: number,
-  ): string | null => {
-    if (!expectation) return null;
-    return [
-      `raw=${Math.round(rawScrollTop)}`,
-      `effective=${Math.round(effectiveScrollTop)}`,
-      `prev=${Math.round(previousScrollTop)}`,
-      `delta=${Math.round(verticalDelta)}`,
-      `expected=${Math.round(expectation.expectedScrollTop)}`,
-      `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
-      `base=${Math.round(expectation.gestureBaseScrollTop)}`,
-      `startY=${Math.round(expectation.touchStartY)}`,
-      `currentY=${Math.round(expectation.currentY)}`,
-      `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
-      `max=${Math.round(expectation.cursorAwareMaxScrollTop)}`,
-    ].join(" ");
-  };
+  const touchHandler = createPtyTouchScrollHandler({
+    container,
+    atBottomThreshold,
+    trace,
+    getPageResumePending: () => pageResumeRestorePendingFromFollowing,
+    getVerticalIntent: () => verticalIntent,
+    dispatchVerticalIntent,
+    getCurrentAnchor,
+    getLastSeenScrollTop: () => lastSeenScrollTop,
+    hasHorizontalOverflow,
+    clearHorizontalIntentIfUnscrollable,
+    markHorizontalUserInput,
+    onTouchBoundaryPrevent,
+    notifyAtBottom,
+    flushPendingTouchScrollNotify,
+  });
 
   const restoreImpossibleTouchScrollJump = (effectiveScrollTop: number): boolean => {
-    const expectation = getTouchScrollExpectation();
+    const expectation = touchHandler.getScrollExpectation();
     if (!expectation) return false;
     const { touchStartScrollTop, touchStartY, currentY, gestureBaseScrollTop, expectedScrollTop } =
       expectation;
@@ -925,11 +727,12 @@ export function attachPtyScrollController(
       Number.isFinite(hostTop) &&
       Math.abs(effectiveScrollTop - hostTop) <= atBottomThreshold &&
       Math.abs(anchor.bottomScrollTop - hostTop) <= container.clientHeight + atBottomThreshold &&
-      Math.abs(expectedScrollTop - effectiveScrollTop) > TOUCH_HOST_TOP_JUMP_MIN_THRESHOLD_PX;
+      Math.abs(expectedScrollTop - effectiveScrollTop) >
+        PTY_SCROLL_CONFIG.touch.hostTopJumpMinThresholdPx;
     if (!hasTouchMovement && !jumpedToDomTop && !jumpedToHostTop) return false;
 
     const impossibleJumpThreshold = Math.max(
-      TOUCH_SCROLL_JUMP_MIN_THRESHOLD_PX,
+      PTY_SCROLL_CONFIG.touch.scrollJumpMinThresholdPx,
       container.clientHeight * 1.25,
     );
     if (
@@ -969,7 +772,7 @@ export function attachPtyScrollController(
     if (!canPassiveFollow(verticalIntent)) return false;
     const recentRawInputFollow =
       lastRawInputFollowAt !== null &&
-      performance.now() - lastRawInputFollowAt <= RECENT_RAW_INPUT_LAYOUT_DRIFT_MS;
+      performance.now() - lastRawInputFollowAt <= PTY_SCROLL_CONFIG.rawInput.recentLayoutDriftMs;
     if (!recentRawInputFollow) return false;
 
     const anchor = getCurrentAnchor();
@@ -989,49 +792,16 @@ export function attachPtyScrollController(
 
   const onContainerScroll = (): void => {
     trace("container-scroll");
-    clearHorizontalIntentIfUnscrollable("onContainerScroll");
-    // 横向 scroll 意图检测: 跟 followCursorX 的程序化写入区分。我们刚改 scrollLeft
-    // 不算 user intent; 其它路径下 scrollLeft 与上次记录不同 → 视为用户主动横向滚动。
-    const horizontalChanged =
-      hasHorizontalOverflow() && container.scrollLeft !== lastSeenScrollLeft;
-    if (horizontalChanged) {
-      const isPendingFollowCursorScrollLeft =
-        pendingFollowCursorScrollLeft !== null &&
-        Math.abs(container.scrollLeft - pendingFollowCursorScrollLeft) <= 1;
-      if (!isPendingFollowCursorScrollLeft) {
-        const hasRecentHorizontalUserInput =
-          lastHorizontalUserInputAt !== null &&
-          performance.now() - lastHorizontalUserInputAt <= 500;
-        if (hasRecentHorizontalUserInput) {
-          unmarkedHorizontalScrollOriginLeft = null;
-          setUserHasHorizontalScrollIntent(
-            true,
-            `site=onContainerScroll prev=${lastSeenScrollLeft} next=${container.scrollLeft}`,
-          );
-        } else {
-          const origin =
-            unmarkedHorizontalScrollOriginLeft === null
-              ? lastSeenScrollLeft
-              : unmarkedHorizontalScrollOriginLeft;
-          unmarkedHorizontalScrollOriginLeft = origin;
-          const nativeDelta = Math.abs(container.scrollLeft - origin);
-          if (nativeDelta >= NATIVE_HORIZONTAL_SCROLL_INTENT_THRESHOLD_PX) {
-            setUserHasHorizontalScrollIntent(
-              true,
-              `site=onContainerScroll-native prev=${origin} next=${container.scrollLeft} delta=${nativeDelta}`,
-            );
-            unmarkedHorizontalScrollOriginLeft = null;
-          } else {
-            trace("horizontal-intent:ignore", {
-              details: `site=onContainerScroll prev=${lastSeenScrollLeft} next=${container.scrollLeft} nativeDelta=${nativeDelta}`,
-            });
-          }
-        }
-      } else {
-        unmarkedHorizontalScrollOriginLeft = null;
-      }
-      pendingFollowCursorScrollLeft = null;
-      lastSeenScrollLeft = container.scrollLeft;
+    const horizontalResult = reducePtyHorizontalContainerScroll(horizontalState, {
+      hasOverflow: hasHorizontalOverflow(),
+      scrollLeft: container.scrollLeft,
+      now: performance.now(),
+      nativeIntentThresholdPx: PTY_SCROLL_CONFIG.horizontal.nativeIntentThresholdPx,
+    });
+    horizontalState = horizontalResult.state;
+    traceHorizontalIntent(horizontalResult.trace);
+    if (horizontalResult.resetScrollLeft) {
+      container.scrollLeft = 0;
     }
     // 纵向 delta: 区分用户主动向下滚 vs 向上滚, 用于 intent 释放方向判定。每条
     // scroll 事件都更新 lastSeen, 程序化与用户路径共用。
@@ -1040,10 +810,10 @@ export function attachPtyScrollController(
     const verticalDelta = rawScrollTop - lastSeenScrollTop;
     const effectiveScrollTop = clampCursorAwareBottomOverscroll(rawScrollTop);
     if (verticalIntent.touchActive) {
-      const expectation = getTouchScrollExpectation();
+      const expectation = touchHandler.getScrollExpectation();
       trace("container-scroll:touch-active", {
         details:
-          describeTouchScrollExpectation(
+          touchHandler.describeScrollExpectation(
             expectation,
             rawScrollTop,
             effectiveScrollTop,
@@ -1053,7 +823,18 @@ export function attachPtyScrollController(
       });
     }
     lastSeenScrollTop = effectiveScrollTop;
-    if (syncing.external) {
+    const sourceDecision = decideContainerScrollSource({
+      syncingExternal: syncing.external,
+      effectiveScrollTop,
+      pendingFollowTop: pendingFollowCursorScrollTop,
+      pendingProgrammaticTop: pendingProgrammaticScrollTop,
+      atBottom: getCurrentAnchor().isAtBottom,
+      canPassiveFollow: canPassiveFollow(verticalIntent),
+    });
+    pendingFollowCursorScrollTop = sourceDecision.nextPendingFollowTop;
+    pendingProgrammaticScrollTop = sourceDecision.nextPendingProgrammaticTop;
+
+    if (sourceDecision.action === "external-sync") {
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "external-sync",
@@ -1066,12 +847,7 @@ export function attachPtyScrollController(
     }
     // followCursorY 自己刚刚程序化设了 scrollTop,不能让本次 scroll 事件被当成"用户回看"
     // 而把 intent 置 true; 也不要走 scrollToBottom 兜底,否则会和 followCursorY 互踩。
-    const isPendingFollowCursorScroll =
-      pendingFollowCursorScrollTop !== null &&
-      Math.abs(effectiveScrollTop - pendingFollowCursorScrollTop) <= 1;
-    if (isPendingFollowCursorScroll) {
-      pendingFollowCursorScrollTop = null;
-      pendingProgrammaticScrollTop = null;
+    if (sourceDecision.action === "programmatic-follow") {
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "programmatic-follow",
@@ -1082,14 +858,8 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
-    pendingFollowCursorScrollTop = null;
     const atBottom = getCurrentAnchor().isAtBottom;
-    const isPendingProgrammaticScroll =
-      pendingProgrammaticScrollTop !== null &&
-      Math.abs(effectiveScrollTop - pendingProgrammaticScrollTop) <= 1 &&
-      canPassiveFollow(verticalIntent);
-    if (!atBottom && isPendingProgrammaticScroll) {
-      pendingProgrammaticScrollTop = null;
+    if (sourceDecision.action === "programmatic-drift") {
       dispatchVerticalIntent({
         type: "container-scroll",
         source: "programmatic-bottom",
@@ -1100,7 +870,6 @@ export function attachPtyScrollController(
       scrollToBottom("programmaticDrift");
       return;
     }
-    pendingProgrammaticScrollTop = null;
     if (restoreImpossibleTouchScrollJump(effectiveScrollTop)) {
       return;
     }
@@ -1221,66 +990,77 @@ export function attachPtyScrollController(
   // 把视口拉到光标处。无变动的 onRender 帧 (focus 切换 / theme 重绘 / 同 buffer 重 paint)
   // 不该改 scrollTop, 否则进入瞬间就跳成 cursor 居中, 失去终端"贴底"心智。
   const followCursorY = (): void => {
-    if (userHasVerticalScrollIntent()) {
-      // intent=true 期间 (用户主动回看) 完全让出, 同时丢弃 prev 记录, 让回到底部后的下次
-      // 光标变动重新进入跟随。否则用户拖回去的轨迹会被记成 prev, 释放 intent 后第一次比对
-      // 就误判为"光标变了"而拉一下。
-      prevCursorBufferRow = null;
-      trace("followCursorY:skip", { details: "intent" });
-      return;
-    }
     const { cellH } = getDims();
-    if (cellH <= 0) {
-      trace("followCursorY:skip", { details: "cellH=0" });
-      return;
-    }
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const hostHeight = term.rows * cellH;
-    if (hostHeight <= visibleContentHeight) {
-      // host 装得下, 几何贴底等于光标可见, 走原路径就行, 不需要 followCursorY 介入。
-      // 顺手清 prev 防止下次进入 host>vch 时拿旧 buffer 的行号比对。
-      prevCursorBufferRow = null;
-      trace("followCursorY:skip", { details: "shortHost" });
-      return;
-    }
     const buffer = term.buffer.active;
     const cursorBufferRow = buffer.baseY + buffer.cursorY;
     const prevRow = prevCursorBufferRow;
-    const cursorDeltaRows = prevRow === null ? null : cursorBufferRow - prevRow;
     const anchor = getCurrentAnchor();
-    if (prevCursorBufferRow === cursorBufferRow && anchor.cursorInViewport) {
+    const decision = decideFollowCursorY({
+      reviewing: userHasVerticalScrollIntent(),
+      cellH,
+      rows: term.rows,
+      visibleContentHeight,
+      cursorBufferRow,
+      prevCursorBufferRow,
+      cursorInViewport: anchor.cursorInViewport,
+      targetScrollTop: anchor.bottomScrollTop,
+      currentScrollTop: container.scrollTop,
+    });
+
+    if (decision.reason === "intent") {
+      // intent=true 期间 (用户主动回看) 完全让出, 同时丢弃 prev 记录, 让回到底部后的下次
+      // 光标变动重新进入跟随。否则用户拖回去的轨迹会被记成 prev, 释放 intent 后第一次比对
+      // 就误判为"光标变了"而拉一下。
+      prevCursorBufferRow = decision.nextPrevCursorBufferRow;
+      trace("followCursorY:skip", { details: decision.reason });
+      return;
+    }
+    if (decision.reason === "cellH=0") {
+      trace("followCursorY:skip", { details: decision.reason });
+      return;
+    }
+    if (decision.reason === "shortHost") {
+      // host 装得下, 几何贴底等于光标可见, 走原路径就行, 不需要 followCursorY 介入。
+      // 顺手清 prev 防止下次进入 host>vch 时拿旧 buffer 的行号比对。
+      prevCursorBufferRow = decision.nextPrevCursorBufferRow;
+      trace("followCursorY:skip", { details: decision.reason });
+      return;
+    }
+    if (decision.reason === "same-row") {
       // 仅 trace 开启时记录 same-row skip, 帮助判断"没跟随"到底是光标未变还是策略阻断。
       // 稳态同名事件会被 scroll trace store 折叠, 不让报告被 render 帧刷爆。
       trace("followCursorY:skip[same-row]", {
-        cursorDeltaRows: 0,
+        cursorDeltaRows: decision.cursorDeltaRows,
         details: `cursorRow=${cursorBufferRow} same-row`,
       });
       return;
     }
-    prevCursorBufferRow = cursorBufferRow;
-    if (anchor.cursorInViewport) {
+    prevCursorBufferRow = decision.nextPrevCursorBufferRow;
+    if (decision.reason === "inViewport") {
       trace("followCursorY:skip", {
-        cursorDeltaRows,
+        cursorDeltaRows: decision.cursorDeltaRows,
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} inViewport`,
       });
       return;
     }
     // anchor.bottomScrollTop 在 long-host 分支里就是把光标行像素居中后的目标 scrollTop。
-    if (Math.abs(anchor.bottomScrollTop - container.scrollTop) <= 1) {
+    if (decision.reason === "aligned") {
       trace("followCursorY:skip", {
-        cursorDeltaRows,
+        cursorDeltaRows: decision.cursorDeltaRows,
         details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} aligned`,
       });
       return;
     }
-    pendingFollowCursorScrollTop = anchor.bottomScrollTop;
+    if (decision.action !== "follow") return;
+    pendingFollowCursorScrollTop = decision.targetScrollTop;
     const prevScrollTop = container.scrollTop;
-    container.scrollTop = anchor.bottomScrollTop;
+    container.scrollTop = decision.targetScrollTop;
     trace("followCursorY:hit", {
-      cursorDeltaRows,
-      scrollDeltaToAnchor: prevScrollTop - anchor.bottomScrollTop,
-      details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} scrollTop=${Math.round(prevScrollTop)}->${Math.round(anchor.bottomScrollTop)}`,
+      cursorDeltaRows: decision.cursorDeltaRows,
+      scrollDeltaToAnchor: prevScrollTop - decision.targetScrollTop,
+      details: `cursorRow=${prevRow ?? "null"}->${cursorBufferRow} scrollTop=${Math.round(prevScrollTop)}->${Math.round(decision.targetScrollTop)}`,
     });
   };
 
@@ -1300,14 +1080,16 @@ export function attachPtyScrollController(
     const cursorInViewportX = cursorPxX >= viewportLeft && cursorPxX <= viewportRight;
     if (cursorInViewportX) {
       // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
-      setUserHasHorizontalScrollIntent(
-        false,
-        `site=followCursorX cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
-      );
+      const result = clearPtyHorizontalIntent(horizontalState, {
+        details: `site=followCursorX cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
+        scrollLeft: container.scrollLeft,
+      });
+      horizontalState = result.state;
+      traceHorizontalIntent(result.trace);
       trace("followCursorX:skip", { details: "cursorInViewport" });
       return;
     }
-    if (userHasHorizontalScrollIntent) {
+    if (horizontalState.intent) {
       trace("followCursorX:skip", {
         details: `horizontalIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
       });
@@ -1315,10 +1097,11 @@ export function attachPtyScrollController(
     }
     const target = Math.max(0, cursorPxX - container.clientWidth / 2);
     const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    pendingFollowCursorScrollLeft = Math.min(maxScrollLeft, target);
-    container.scrollLeft = pendingFollowCursorScrollLeft;
+    const pendingFollowLeft = Math.min(maxScrollLeft, target);
+    horizontalState = setPtyHorizontalPendingFollow(horizontalState, pendingFollowLeft);
+    container.scrollLeft = pendingFollowLeft;
     trace("followCursorX:hit", {
-      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} target=${pendingFollowCursorScrollLeft}`,
+      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} target=${pendingFollowLeft}`,
     });
   };
 
@@ -1361,310 +1144,22 @@ export function attachPtyScrollController(
     scrollByWheelDelta(event.deltaY);
   };
 
-  const onTouchStart = (event: TouchEvent): void => {
-    if (pageResumeRestorePendingFromFollowing) {
-      trace("touchstart:page-resume-pending");
-      return;
-    }
-    const touch = event.touches?.[0] ?? null;
-    lastTouchGestureAt = performance.now();
-    const startX = touch?.clientX ?? null;
-    const startY = touch?.clientY ?? null;
-    clearHorizontalIntentIfUnscrollable("touchstart");
-    const anchor = getCurrentAnchor();
-    touchStartedAtCursorAwareBottom = anchor.isAtBottom;
-    touchStartClientX = startX;
-    touchStartScrollLeft = container.scrollLeft;
-    lastTouchClientY = startY;
-    touchScrollGestureMode = startY === null ? null : "pending";
-    dispatchVerticalIntent({
-      type: "touch-start",
-      clientY: startY,
-      scrollTop: container.scrollTop,
-    });
-    trace("touchstart", {
-      details: [
-        `startX=${startX ?? "null"}`,
-        `startY=${startY ?? "null"}`,
-        `startScroll=${Math.round(container.scrollTop)}`,
-        `bottom=${Math.round(anchor.bottomScrollTop)}`,
-        `atBottom=${anchor.isAtBottom ? 1 : 0}`,
-      ].join(" "),
-    });
-  };
-
-  const onTouchMove = (event: TouchEvent): void => {
-    if (pageResumeRestorePendingFromFollowing) {
-      trace("touchmove:page-resume-pending");
-      return;
-    }
-    const touch = event.touches?.[0] ?? null;
-    lastTouchGestureAt = performance.now();
-    const currentX = touch?.clientX ?? null;
-    const currentY = touch?.clientY ?? null;
-    lastTouchClientY = currentY;
-    const movement = getTouchMovement(currentX, currentY);
-    trace("touchmove", {
-      details:
-        currentY === null
-          ? "currentY=null"
-          : (describeTouchScrollExpectation(
-              getTouchScrollExpectation(currentY),
-              container.scrollTop,
-              container.scrollTop,
-              lastSeenScrollTop,
-              container.scrollTop - lastSeenScrollTop,
-            ) ??
-            [
-              `mode=${touchScrollGestureMode ?? "none"}`,
-              `currentY=${Math.round(currentY)}`,
-              movement
-                ? `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" ")),
-    });
-
-    const horizontallyScrollable = hasHorizontalOverflow();
-    if (!horizontallyScrollable) {
-      clearHorizontalIntentIfUnscrollable("touchmove");
-    }
-
-    if (verticalIntent.touchActive && touchScrollGestureMode === null && currentY !== null) {
-      touchScrollGestureMode = "pending";
-    }
-
-    if (touchScrollGestureMode === "pending" && movement) {
-      const horizontalDominates =
-        horizontallyScrollable &&
-        movement.absDx >= TOUCH_HORIZONTAL_GESTURE_SLOP_PX &&
-        movement.absDx > movement.absDy * TOUCH_HORIZONTAL_LOCK_RATIO;
-      const verticalDominates =
-        movement.absDy >= TOUCH_GESTURE_SLOP_PX &&
-        (!horizontallyScrollable || movement.absDy > movement.absDx * TOUCH_VERTICAL_LOCK_RATIO);
-      if (horizontalDominates) {
-        touchScrollGestureMode = "horizontal";
-        trace("touchmove:horizontal-lock", {
-          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`,
-        });
-      } else if (!verticalDominates) {
-        lastTouchClientY = currentY;
-        trace("touchmove:pending", {
-          details: [
-            `dx=${Math.round(movement.dx)}`,
-            `dy=${Math.round(movement.dy)}`,
-            `distance=${Math.round(movement.distance)}`,
-            `hThreshold=${TOUCH_HORIZONTAL_GESTURE_SLOP_PX}`,
-            `vThreshold=${TOUCH_GESTURE_SLOP_PX}`,
-          ].join(" "),
-        });
-        if (movement.absDy < TOUCH_GESTURE_SLOP_PX) {
-          dispatchVerticalIntent({
-            type: "touch-move",
-            clientY: currentY,
-            reviewThresholdPx: TOUCH_GESTURE_SLOP_PX,
-          });
-        }
-        return;
-      } else {
-        touchScrollGestureMode = "vertical";
-        trace("touchmove:vertical-lock", {
-          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${TOUCH_GESTURE_SLOP_PX}`,
-        });
-      }
-    }
-
-    if (touchScrollGestureMode === "horizontal") {
-      const expectation = getTouchHorizontalExpectation(currentX);
-      if (!horizontallyScrollable || !expectation) {
-        clearHorizontalIntentIfUnscrollable("touchmove-horizontal");
-        trace("touchmove:horizontal-native", {
-          details: movement
-            ? `blocked dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`
-            : "blocked movement=null",
-        });
-        return;
-      }
-      if (movement) {
-        markHorizontalUserInput(
-          `site=touchmove-horizontal dx=${Math.round(movement.absDx)} dy=${Math.round(movement.absDy)}`,
-        );
-      }
-      trace("touchmove:horizontal-native", {
-        details: [
-          `scrollLeft=${Math.round(container.scrollLeft)}`,
-          `expected=${Math.round(expectation.expectedScrollLeft)}`,
-          `startScrollLeft=${Math.round(expectation.touchStartScrollLeft)}`,
-          `startX=${Math.round(expectation.touchStartX)}`,
-          `currentX=${Math.round(expectation.currentX)}`,
-          `touchDeltaX=${Math.round(expectation.touchDeltaX)}`,
-          `max=${Math.round(expectation.maxScrollLeft)}`,
-        ].join(" "),
-      });
-      return;
-    }
-
-    if (touchScrollGestureMode !== "vertical") {
-      return;
-    }
-
-    const expectation = getTouchScrollExpectation(currentY);
-    if (expectation) {
-      trace("touchmove:vertical-native", {
-        details: [
-          `scrollTop=${Math.round(container.scrollTop)}`,
-          `expected=${Math.round(expectation.expectedScrollTop)}`,
-          `startScroll=${Math.round(expectation.touchStartScrollTop)}`,
-          `base=${Math.round(expectation.gestureBaseScrollTop)}`,
-          `startY=${Math.round(expectation.touchStartY)}`,
-          `currentY=${Math.round(expectation.currentY)}`,
-          `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
-        ].join(" "),
-      });
-    }
-    const keepFollowingAtBottomBoundary =
-      expectation &&
-      touchStartedAtCursorAwareBottom &&
-      expectation.expectedScrollTop >= expectation.cursorAwareMaxScrollTop - atBottomThreshold &&
-      currentY !== null &&
-      currentY <= expectation.touchStartY;
-    if (keepFollowingAtBottomBoundary) {
-      trace("touchmove:bottom-boundary-follow");
-      return;
-    }
-
-    const result = dispatchVerticalIntent({
-      type: "touch-move",
-      clientY: currentY,
-      reviewThresholdPx: TOUCH_GESTURE_SLOP_PX,
-    });
-    if (result.notifyTouchReviewStart) {
-      onTouchBoundaryPrevent?.();
-      trace("touchmove:review");
-    }
-  };
-
-  const finishTouchGesture = (type: "touch-end" | "touch-cancel"): void => {
-    // 触摸结束时, 若 touchstart→touchend 净位移为向下且抵达 atBottom, 释放 intent。
-    // onContainerScroll 的 touchActive 期间不释放, 由 FSM 在 touch end/cancel 统一判定。
-    const touchStartScrollTop = verticalIntent.touchStartScrollTop;
-    const liveScrollTop = container.scrollTop;
-    const anchor = getCurrentAnchor();
-    const stayedNearTouchStart =
-      touchStartScrollTop === null || liveScrollTop >= touchStartScrollTop - atBottomThreshold;
-    const reviewedDuringTouch = verticalIntent.touchReviewNotified;
-    const releaseOnSemanticBottom =
-      touchStartedAtCursorAwareBottom && anchor.isAtBottom && !reviewedDuringTouch;
-    const atCursorAwareBottomForIntent =
-      (!reviewedDuringTouch && anchor.isAtBottom) ||
-      (touchStartedAtCursorAwareBottom && !reviewedDuringTouch && stayedNearTouchStart);
-    touchStartedAtCursorAwareBottom = false;
-    touchStartClientX = null;
-    touchStartScrollLeft = null;
-    lastTouchClientY = null;
-    touchScrollGestureMode = null;
-    dispatchVerticalIntent({
-      type,
-      scrollTop: liveScrollTop,
-      atCursorAwareBottom: atCursorAwareBottomForIntent,
-      releaseOnSemanticBottom,
-    });
-    lastTouchGestureAt = performance.now();
-    flushPendingTouchScrollNotify();
-    notifyAtBottom();
-  };
-
-  const onTouchEnd = (): void => {
-    if (pageResumeRestorePendingFromFollowing) {
-      trace("touchend:page-resume-pending");
-      return;
-    }
-    finishTouchGesture("touch-end");
-    trace("touchend");
-  };
-
-  const onTouchCancel = (): void => {
-    if (pageResumeRestorePendingFromFollowing) {
-      trace("touchcancel:page-resume-pending");
-      return;
-    }
-    // iOS momentum scroll 被 visualViewport 重排打断 / 系统手势接管时 fire。
-    // touchend 永远不会再来, 必须按 touchend 同等清理 intent / state。
-    finishTouchGesture("touch-cancel");
-    trace("touchcancel");
-  };
-
-  container.addEventListener("wheel", onWheel, { passive: false, capture: true });
-  container.addEventListener("touchstart", onTouchStart, { passive: true });
-  container.addEventListener("touchmove", onTouchMove, { passive: true });
-  container.addEventListener("touchend", onTouchEnd, { passive: true });
-  container.addEventListener("touchcancel", onTouchCancel, { passive: true });
-  container.addEventListener("scroll", onContainerScroll, { passive: true });
-
-  // visualViewport 软键盘 / iOS Safari 地址栏收合 / 缩放等会改 vv.height / offsetTop, 触发
-  // 容器 reflow + xterm onRender; 没独立 trace 时只能在别的事件里捎带快照, 看不出 reflow 边界。
-  // 移动端文本上下抖动嫌疑路径: vv:resize/scroll → onRender → followCursorY 串起来。
-  let prevVvHeight: number | null = null;
-  let prevVvOffsetTop: number | null = null;
-  const onVvResize = (): void => {
-    if (!isPtyScrollTraceEnabled()) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const dh = prevVvHeight === null ? 0 : vv.height - prevVvHeight;
-    const dy = prevVvOffsetTop === null ? 0 : vv.offsetTop - prevVvOffsetTop;
-    prevVvHeight = vv.height;
-    prevVvOffsetTop = vv.offsetTop;
-    trace("vv:resize", { vvHeightDelta: dh, vvOffsetDelta: dy });
-  };
-  const onVvScroll = (): void => {
-    if (!isPtyScrollTraceEnabled()) return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const dh = prevVvHeight === null ? 0 : vv.height - prevVvHeight;
-    const dy = prevVvOffsetTop === null ? 0 : vv.offsetTop - prevVvOffsetTop;
-    prevVvHeight = vv.height;
-    prevVvOffsetTop = vv.offsetTop;
-    trace("vv:scroll", { vvHeightDelta: dh, vvOffsetDelta: dy });
-  };
-  window.visualViewport?.addEventListener("resize", onVvResize);
-  window.visualViewport?.addEventListener("scroll", onVvScroll);
-
-  // window 级 wheel sniffer (capture-phase): 不论 wheel 是否能到 container, 都能看到
-  // 事件确实发生 + 目标是哪个元素 + 谁先 preventDefault 了。trace 里区分两种"看不到 wheel"的
-  // 情形 — (a) 用户根本没滚 vs (b) 滚了但 button / popover 等吃掉了。仅诊断用,
-  // 不修改任何控制流; 只在 trace 启用时录入。
-  const onWindowWheelSniff = (event: WheelEvent): void => {
-    if (!isPtyScrollTraceEnabled()) return;
-    const target = event.target as Element | null;
-    const reachesContainer =
-      target === container || (target instanceof Node && container.contains(target));
-    const targetSlot =
-      target && typeof target.closest === "function"
-        ? (target.closest("[data-slot]")?.getAttribute("data-slot") ?? "")
-        : "";
-    const targetTag = target?.tagName ?? "";
-    const targetCls =
-      target && typeof (target as Element).className === "string" && (target as Element).className
-        ? "." +
-          ((target as Element).className as string)
-            .split(/\s+/)
-            .filter(Boolean)
-            .slice(0, 2)
-            .join(".")
-        : "";
-    trace(
-      `wheel:window deltaY=${Math.round(event.deltaY)} reachesContainer=${reachesContainer ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0} target=${targetTag}${targetCls}{${targetSlot}}`,
-    );
-  };
-  window.addEventListener("wheel", onWindowWheelSniff, { passive: true, capture: true });
-  const dispScroll = term.onScroll(onTermScroll);
-  const dispRender = term.onRender(onRender);
-  // host 自身的尺寸由 updateSpacer 主动写，再 observe 它会形成"写→ ResizeObserver
-  // → relayout → 又写"的反馈环。container 的尺寸（窗口/侧边栏变化）才需要 observe。
-  // xterm 内部 cols/rows 变化通过 onScroll/onRender 已能捕获。
-  const ro = new ResizeObserver(relayout);
-  ro.observe(container);
+  const domAdapter = attachPtyScrollDomAdapter({
+    container,
+    term,
+    onWheel,
+    onTouchStart: touchHandler.onTouchStart,
+    onTouchMove: touchHandler.onTouchMove,
+    onTouchEnd: touchHandler.onTouchEnd,
+    onTouchCancel: touchHandler.onTouchCancel,
+    onContainerScroll,
+    onTermScroll,
+    onRender,
+    onRelayout: relayout,
+    onWriteParsed: () => {
+      bufferRevision += 1;
+    },
+  });
 
   const getDebugProbe = (): PtyScrollDebugProbe => {
     const { cellH, cellW } = getDims();
@@ -1679,15 +1174,15 @@ export function attachPtyScrollController(
       verticalIntentMode: verticalIntent.mode,
       verticalIntentSource: verticalIntent.source,
       verticalIntentTransitionId: verticalIntent.lastTransitionId,
-      userHasHorizontalScrollIntent,
+      userHasHorizontalScrollIntent: horizontalState.intent,
       pendingProgrammaticScrollTop,
       pendingFollowCursorScrollTop,
-      pendingFollowCursorScrollLeft,
+      pendingFollowCursorScrollLeft: horizontalState.pendingFollowLeft,
       prevCursorBufferRow,
       lastSeenScrollTop,
-      lastSeenScrollLeft,
+      lastSeenScrollLeft: horizontalState.lastSeenLeft,
       touchScrollActive: verticalIntent.touchActive,
-      touchScrollGestureMode,
+      touchScrollGestureMode: touchHandler.getState().gestureMode,
       syncingInternal: syncing.internal,
       syncingExternal: syncing.external,
       atBottomThreshold,
@@ -1698,20 +1193,9 @@ export function attachPtyScrollController(
 
   return {
     dispose: () => {
-      container.removeEventListener("scroll", onContainerScroll);
-      container.removeEventListener("wheel", onWheel, { capture: true });
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove", onTouchMove);
-      container.removeEventListener("touchend", onTouchEnd);
-      container.removeEventListener("touchcancel", onTouchCancel);
-      window.removeEventListener("wheel", onWindowWheelSniff, { capture: true });
-      window.visualViewport?.removeEventListener("resize", onVvResize);
-      window.visualViewport?.removeEventListener("scroll", onVvScroll);
-      dispScroll.dispose();
-      dispRender.dispose();
-      dispWriteParsed?.dispose();
+      domAdapter.dispose();
+      traceAdapter.dispose();
       cancelPendingTouchScrollNotify();
-      ro.disconnect();
     },
     relayout,
     scrollToBottom,

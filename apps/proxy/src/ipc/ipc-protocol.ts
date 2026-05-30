@@ -246,7 +246,8 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     input: z.record(z.string(), z.unknown()),
   }),
 
-  // worker → serve: worker 就绪，claude 已启动
+  // worker → serve: worker 就绪。Claude 在进程启动后发送；Codex 在 app-server
+  // initialize + thread/start|resume 完成后发送，避免 session_create 早于 provider ready。
   z.object({
     type: z.literal("worker_ready"),
     pid: z.number(),

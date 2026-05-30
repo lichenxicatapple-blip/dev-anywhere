@@ -16,7 +16,7 @@ import { createBailianVoiceConfigTester, type VoiceConfigTester } from "./config
 import type { StoredVoiceConfig } from "./config-store.js";
 import type { VoiceProviderAdapter } from "./provider.js";
 
-export interface BailianVoiceProviderOptions {
+interface BailianVoiceProviderOptions {
   asrClientFactory?: (config: BailianAsrConfig) => BailianAsrClient;
   ttsClientFactory?: (config: BailianTtsConfig) => BailianTtsClient;
   capabilitiesProvider?: VoiceCapabilitiesProvider;

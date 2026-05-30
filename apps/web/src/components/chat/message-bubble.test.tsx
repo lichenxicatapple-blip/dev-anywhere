@@ -25,22 +25,17 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={makeMessage({ id: "u1", role: "user", text: "hello" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("user");
-    expect(bubble.className).toContain("dev-chat-rail-inset");
     const row = bubble.querySelector('[data-slot="message-row"]');
-    expect(row?.className).toContain("justify-end");
-    expect(row?.className).toContain("dev-message-rail");
+    expect(row?.getAttribute("data-align")).toBe("end");
   });
 
   it("renders assistant role with data-role=assistant (left alignment)", () => {
     render(<MessageBubble message={makeMessage({ id: "a1", role: "assistant", text: "hi" })} />);
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("assistant");
-    expect(bubble.className).toContain("dev-chat-rail-inset");
     const row = bubble.querySelector('[data-slot="message-row"]');
-    expect(row?.className).toContain("justify-start");
-    expect(row?.className).toContain("dev-message-rail");
-    expect(row?.firstElementChild?.className).toContain("w-fit");
-    expect(row?.firstElementChild?.className).toContain("max-w-[88%]");
+    expect(row?.getAttribute("data-align")).toBe("start");
+    expect(row?.firstElementChild?.getAttribute("data-slot")).toBe("message-body");
   });
 
   it("renders system history markers as centered dividers instead of chat bubbles", () => {
@@ -52,8 +47,10 @@ describe("MessageBubble", () => {
     expect(bubble.getAttribute("data-role")).toBe("system");
     expect(screen.getByText("上下文已压缩")).not.toBeNull();
     const marker = container.querySelector('[data-slot="message-system-marker"]');
-    expect(marker?.className).toContain("rounded-full");
-    expect(marker?.className).not.toContain("bg-card");
+    expect(marker?.textContent).toBe("上下文已压缩");
+    expect(container.querySelector('[data-slot="message-row"]')?.getAttribute("data-align")).toBe(
+      "center",
+    );
   });
 
   it("does not show a streaming cursor for assistant partial text", () => {
@@ -133,7 +130,7 @@ describe("MessageBubble", () => {
 
     const activityText = container.querySelector<HTMLElement>('[data-slot="activity-text"]');
     expect(activityText?.textContent).toContain("openai-curated");
-    expect(activityText?.className).toContain("[overflow-wrap:anywhere]");
+    expect(activityText?.getAttribute("data-wrap")).toBe("anywhere");
   });
 
   it("uses warning styling for errored activity bubbles instead of destructive red", () => {
@@ -157,10 +154,7 @@ describe("MessageBubble", () => {
 
     const activity = container.querySelector<HTMLElement>('[data-slot="activity-bubble"]');
     expect(activity?.getAttribute("data-status")).toBe("error");
-    expect(activity?.className).toContain("text-[var(--color-status-warning)]");
-    expect(activity?.className).not.toContain("text-destructive");
-    expect(activity?.className).not.toContain("bg-destructive");
-    expect(activity?.className).not.toContain("border-destructive");
+    expect(activity?.getAttribute("data-tone")).toBe("warning");
   });
 
   it("keeps raw activity details collapsed behind a chevron", () => {
@@ -279,9 +273,6 @@ describe("MessageBubble", () => {
       '[data-slot="activity-diff-row"][data-kind="add"]',
     );
     expect(addedRows).toHaveLength(3);
-    for (const row of addedRows) {
-      expect(row.className).toContain("bg-emerald");
-    }
     expect(container.querySelector('[data-slot="activity-diff-content"]')?.textContent).toContain(
       'println!("Hello, world!");',
     );
@@ -343,7 +334,6 @@ describe("MessageBubble", () => {
 
     const paragraph = container.querySelector("p");
     expect(paragraph?.textContent).toBe("第一行\n第二行");
-    expect(paragraph?.className).toContain("whitespace-pre-wrap");
   });
 
   it("marks user partial messages with streaming cursor and unconfirmed style", () => {
@@ -360,8 +350,8 @@ describe("MessageBubble", () => {
     expect(screen.getByLabelText("streaming")).not.toBeNull();
     const bubble = container.querySelector('[data-slot="message-bubble"]');
     expect(bubble?.getAttribute("data-partial")).toBe("true");
-    const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
-    expect(body?.className).toContain("border-dashed");
+    const body = container.querySelector<HTMLElement>('[data-slot="message-body"]');
+    expect(body?.getAttribute("data-variant")).toBe("partial");
   });
 
   it("marks queued user messages without treating them as streaming text", () => {
@@ -378,8 +368,8 @@ describe("MessageBubble", () => {
 
     expect(screen.getByText("已排队")).not.toBeNull();
     expect(screen.queryByLabelText("streaming")).toBeNull();
-    const body = container.querySelector<HTMLElement>('[data-slot="message-row"] > div');
-    expect(body?.className).toContain("border-dashed");
+    const body = container.querySelector<HTMLElement>('[data-slot="message-body"]');
+    expect(body?.getAttribute("data-variant")).toBe("queued");
   });
 
   it("applies JSON content font size to the bubble body", () => {

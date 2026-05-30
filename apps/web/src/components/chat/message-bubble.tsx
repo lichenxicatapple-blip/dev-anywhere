@@ -31,7 +31,11 @@ export const MessageBubble = memo(function MessageBubble({
   if (role === "system") {
     return (
       <article data-slot="message-bubble" data-role="system" className="dev-chat-rail-inset py-2">
-        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full items-center">
+        <div
+          data-slot="message-row"
+          data-align="center"
+          className="dev-message-rail mx-auto flex w-full items-center"
+        >
           <div className="h-px flex-1 bg-border" />
           <div
             data-slot="message-system-marker"
@@ -56,10 +60,15 @@ export const MessageBubble = memo(function MessageBubble({
     const detailsId = `${message.id}-activity-details`;
     return (
       <article data-slot="message-bubble" data-role="activity" className="dev-chat-rail-inset py-1">
-        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-start">
+        <div
+          data-slot="message-row"
+          data-align="start"
+          className="dev-message-rail mx-auto flex w-full justify-start"
+        >
           <div
             data-slot="activity-bubble"
             data-status={status}
+            data-tone={status === "error" ? "warning" : "neutral"}
             className={`w-fit max-w-[88%] min-w-0 rounded-md border px-3 py-1.5 text-xs ${activityClass}`}
             aria-live={isActive ? "polite" : undefined}
             style={contentStyle}
@@ -83,6 +92,7 @@ export const MessageBubble = memo(function MessageBubble({
               )}
               <span
                 data-slot="activity-text"
+                data-wrap="anywhere"
                 className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]"
               >
                 {message.text}
@@ -142,8 +152,17 @@ export const MessageBubble = memo(function MessageBubble({
         data-partial={message.isPartial ? "true" : undefined}
         className="dev-chat-rail-inset py-2"
       >
-        <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-end">
-          <div className={userBodyClass} style={contentStyle}>
+        <div
+          data-slot="message-row"
+          data-align="end"
+          className="dev-message-rail mx-auto flex w-full justify-end"
+        >
+          <div
+            data-slot="message-body"
+            data-variant={message.isPartial ? "partial" : isQueued ? "queued" : "sent"}
+            className={userBodyClass}
+            style={contentStyle}
+          >
             <MarkdownView
               text={message.text}
               tone="on-primary"
@@ -167,8 +186,13 @@ export const MessageBubble = memo(function MessageBubble({
 
   return (
     <article data-slot="message-bubble" data-role={role} className="dev-chat-rail-inset py-2">
-      <div data-slot="message-row" className="dev-message-rail mx-auto flex w-full justify-start">
+      <div
+        data-slot="message-row"
+        data-align="start"
+        className="dev-message-rail mx-auto flex w-full justify-start"
+      >
         <div
+          data-slot="message-body"
           className="w-fit max-w-[88%] min-w-0 rounded-md bg-card text-foreground px-4 py-2"
           style={contentStyle}
         >

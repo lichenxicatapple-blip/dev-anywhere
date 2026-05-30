@@ -12,7 +12,7 @@ import type {
   PtyVerticalIntentTransitionId,
 } from "./pty-vertical-intent-fsm";
 
-export interface PtyScrollTraceEntry {
+interface PtyScrollTraceEntry {
   t: number;
   event: string;
   scope?: string;

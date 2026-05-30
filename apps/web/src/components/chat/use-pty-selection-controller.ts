@@ -21,7 +21,6 @@ import {
   getPtySelectionHandles,
   type PtySelectionHandleMetrics,
   type PtySelectionHandles,
-  type PtySelectionHandlePosition,
 } from "@/lib/pty-selection-layout";
 import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
 import {
@@ -31,7 +30,7 @@ import {
 
 const LONG_PRESS_MOVE_THRESHOLD_PX = 8;
 
-export type { PtySelectionHandleMetrics, PtySelectionHandles, PtySelectionHandlePosition };
+export type { PtySelectionHandleMetrics, PtySelectionHandles };
 export type { PtySelectionHandleKind } from "./use-pty-selection-gesture-driver";
 
 interface PointerHandlers {

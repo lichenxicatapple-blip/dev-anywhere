@@ -42,6 +42,37 @@ function setRuntimeRefs(refs: RelayRuntime): void {
   relayClientRef = refs.relayClientRef;
 }
 
+function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
+  if (authIssue === "invalid_client_token") clearRelayClientToken();
+  const store = useAppStore.getState();
+  store.setRelayClientAuthIssue(authIssue);
+  store.setConnected(false);
+  store.setProxyOnline(false);
+  store.setProxy(null, null);
+  store.setProxies([]);
+  store.setPhase("proxy_selecting");
+}
+
+export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> {
+  const ws = wsManagerRef;
+  if (!ws) return;
+  const relayUrl = useAppStore.getState().relayUrl || window.location.origin;
+  const token = getRelayClientToken();
+  let authIssue: RelayClientAuthIssue | null;
+  try {
+    authIssue = await checkRelayClientAuth(relayUrl, token, signal);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    throw err;
+  }
+  if (authIssue) {
+    applyRelayClientAuthIssue(authIssue);
+    return;
+  }
+  useAppStore.getState().setRelayClientAuthIssue(null);
+  ws.connect(toClientWsUrl(relayUrl));
+}
+
 export function useRelaySetup(): void {
   const wsRef = useRef<WebSocketManager | null>(null);
   const relayRef = useRef<RelayClient | null>(null);
@@ -86,33 +117,9 @@ export function useRelaySetup(): void {
     // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
     const unregisterResource = registerResourceDispatcher();
 
-    async function connectWithAuthPreflight(): Promise<void> {
-      const token = getRelayClientToken();
-      let authIssue: RelayClientAuthIssue | null = null;
-      try {
-        authIssue = await checkRelayClientAuth(relayUrl, token, abort.signal);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-      }
-      if (disposed) return;
-      if (authIssue) {
-        // token 不对就把 storage 清空，避免继续用过期凭据重连。
-        // missing 时 storage 本来就空，clear 是 no-op。
-        if (authIssue === "invalid_client_token") clearRelayClientToken();
-        const store = useAppStore.getState();
-        store.setRelayClientAuthIssue(authIssue);
-        store.setConnected(false);
-        store.setProxyOnline(false);
-        store.setProxy(null, null);
-        store.setProxies([]);
-        store.setPhase("proxy_selecting");
-        return;
-      }
-      useAppStore.getState().setRelayClientAuthIssue(null);
-      ws.connect(toClientWsUrl(relayUrl));
-    }
-
-    void connectWithAuthPreflight();
+    void reconnectRelayClient(abort.signal).finally(() => {
+      if (disposed) ws.close();
+    });
 
     return () => {
       disposed = true;

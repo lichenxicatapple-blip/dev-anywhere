@@ -80,6 +80,42 @@ describe("WorkerRegistry onDisconnect", () => {
     expect(onChannelBroken).not.toHaveBeenCalled();
   });
 
+  it("resolves waitForReady when worker_ready arrives", async () => {
+    const registry = new WorkerRegistry({
+      sessionManager: createSessionManagerFake([{ id: "s1", mode: "json" }]),
+      permissionBroker: new PermissionBroker(),
+      relayConnection: createRelayConnectionFake().relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+
+    const ready = registry.waitForReady("s1", 1000);
+    const sock = await registry.connect("s1", sockPath);
+    expect(sock).not.toBeNull();
+
+    acceptedSocket?.write(serializeWorkerMsg({ type: "worker_ready", pid: 12345 }));
+
+    await expect(ready).resolves.toBeUndefined();
+  });
+
+  it("rejects waitForReady when the worker socket closes before ready", async () => {
+    const registry = new WorkerRegistry({
+      sessionManager: createSessionManagerFake([{ id: "s1", mode: "json" }]),
+      permissionBroker: new PermissionBroker(),
+      relayConnection: createRelayConnectionFake().relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+
+    const ready = registry.waitForReady("s1", 1000);
+    const sock = await registry.connect("s1", sockPath);
+    expect(sock).not.toBeNull();
+
+    acceptedSocket?.destroy();
+
+    await expect(ready).rejects.toThrow(/disconnected before ready/i);
+  });
+
   it("turns worker_interrupted into a non-terminating JSON turn_result", async () => {
     const onTurnResult = vi.fn();
     const sessionManager = createSessionManagerFake([{ id: "s1", mode: "json" }]);

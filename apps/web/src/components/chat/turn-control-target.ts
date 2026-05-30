@@ -1,6 +1,6 @@
 import type { ChatMessage } from "@/stores/chat-store";
 
-export interface TurnControlTarget {
+interface TurnControlTarget {
   messageId: string | null;
   showThinking: boolean;
 }

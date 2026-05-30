@@ -3,7 +3,7 @@ import { isImagePreviewPath } from "./image-preview-path";
 
 export type InlinePathLinkKind = "file" | "image";
 
-export interface InlinePathLinkMatch {
+interface InlinePathLinkMatch {
   kind: InlinePathLinkKind;
   path: string;
   start: number;

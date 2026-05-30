@@ -9,7 +9,7 @@ import type { ILinkProvider, Terminal } from "@xterm/xterm";
 
 // PTY xterm link provider 在真实浏览器里需要鼠标精确落到字符 cell 才会激活,
 // e2e 通过此 hook 直接调 provideLinks → activate, 绕过坐标投影。
-export type PtyLinkKind = "image-preview" | "file-download";
+type PtyLinkKind = "image-preview" | "file-download";
 
 interface CCTestHooks {
   chat: {

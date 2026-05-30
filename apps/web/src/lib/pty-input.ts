@@ -84,8 +84,7 @@ function shouldRouteKeyThroughNativeInput(
   if (event.isComposing || opts.imeComposing) return false;
   return (
     isPrintablePunctuationOrSymbol(event.key) ||
-    (opts.physicalKeyboardMode === true &&
-      (event.key === " " || isPrintableAsciiDigit(event.key)))
+    (opts.physicalKeyboardMode === true && (event.key === " " || isPrintableAsciiDigit(event.key)))
   );
 }
 

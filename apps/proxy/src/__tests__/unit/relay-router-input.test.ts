@@ -31,6 +31,7 @@ function createRouter(options: {
   relayConnection?: ReturnType<typeof createRelayConnectionFake>;
   workerSpawn?: (sessionId: string, options?: unknown) => number;
   workerConnect?: () => Promise<Socket | null>;
+  workerWaitForReady?: (sessionId: string, timeoutMs?: number) => Promise<void>;
   workerTerminateProcess?: (sessionId: string) => boolean;
   cleanupHookContext?: (sessionId: string) => void;
   hostedStart?: (options: unknown) => number;
@@ -63,11 +64,15 @@ function createRouter(options: {
       send: options.workerSend,
       spawn: options.workerSpawn,
       connect: options.workerConnect ? vi.fn(options.workerConnect) : undefined,
+      waitForReady: options.workerWaitForReady ? vi.fn(options.workerWaitForReady) : undefined,
       terminateProcess: options.workerTerminateProcess
         ? vi.fn(options.workerTerminateProcess)
         : undefined,
     }),
-    controlHandlers: {} as never,
+    controlHandlers: {
+      pushCommandList: vi.fn(),
+      pushFileTree: vi.fn(),
+    } as never,
     relayConnection: (options.relayConnection ?? createRelayConnectionFake()).relayConnection,
     relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
@@ -382,6 +387,104 @@ describe("RelayRouter input routing", () => {
       permissionMode: "default",
     });
     router.destroy();
+  });
+
+  it("waits for worker_ready before creating a JSON session", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn((_sessionId: string, _options?: unknown) => 1234);
+    const workerSocket = createWritableSocketFake().socket;
+    const createSession = vi.fn(() => ({
+      id: "json-session",
+      mode: "json",
+      provider: "codex",
+      state: SessionState.IDLE,
+      cwd: "/tmp",
+      pid: 1234,
+      createdAt: 1,
+      updatedAt: 1,
+      name: "~/tmp",
+      nameLocked: false,
+    }));
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+      workerConnect: async () => workerSocket,
+      workerWaitForReady: async () => ready,
+      sessionManager: {
+        createSession,
+        setHistorySessionId: vi.fn(),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-ready",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(relaySend).not.toHaveBeenCalled();
+
+    resolveReady();
+    await vi.runAllTimersAsync();
+
+    expect(createSession).toHaveBeenCalledTimes(1);
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-ready",
+      sessionId: "json-session",
+      mode: "json",
+      provider: "codex",
+    });
+  });
+
+  it("returns a session_create_response when worker_ready fails after socket connect", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const cleanupHookContext = vi.fn();
+    const workerTerminateProcess = vi.fn(() => true);
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerConnect: async () => createWritableSocketFake().socket,
+      workerWaitForReady: async () => {
+        throw new Error("Codex initialize timed out");
+      },
+      workerTerminateProcess,
+      cleanupHookContext,
+      sessionManager: {
+        createSession: vi.fn(),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-fail-ready",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-fail-ready",
+      errorCode: ControlErrorCode.WORKER_START_FAILED,
+      error: "Codex initialize timed out",
+    });
+    expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
+    expect(cleanupHookContext).toHaveBeenCalledTimes(1);
   });
 
   it("passes permissionMode to hosted PTY start during session_create", () => {

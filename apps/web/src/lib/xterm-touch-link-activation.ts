@@ -1,7 +1,7 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { measureXtermCellSize } from "./pty-xterm-metrics";
 
-export interface XtermTouchLinkPoint {
+interface XtermTouchLinkPoint {
   clientX: number;
   clientY: number;
 }

@@ -16,7 +16,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<ControlErrorCodeType, string>> = {
   [ControlErrorCode.PROCESS_START_FAILED]: "进程启动失败",
 };
 
-export interface DescribeControlErrorOptions {
+interface DescribeControlErrorOptions {
   errorCode?: ControlErrorCodeType;
   rawError?: string;
   fallback: string;

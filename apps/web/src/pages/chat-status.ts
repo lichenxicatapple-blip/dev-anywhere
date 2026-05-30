@@ -24,7 +24,7 @@ export function resolveChatStatusState(options: {
 // 决定 chat 主体区域要不要被占位面板替代。
 // 优先级: relay 断 > proxy 离线 > session 终止 > 正常内容。
 // !connected 时 proxy / session 状态不可信, 不能向下推断。
-export type ChatPresentation = "ok" | "relay-disconnected" | "proxy-offline" | "session-ended";
+type ChatPresentation = "ok" | "relay-disconnected" | "proxy-offline" | "session-ended";
 
 export function resolveChatPresentation(opts: {
   connected: boolean;

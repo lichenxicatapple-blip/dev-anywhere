@@ -152,6 +152,13 @@ export class RelayRegistry {
     }
   }
 
+  setSessionsForProxy(proxyId: string, sessionIds: readonly string[]): void {
+    const state = this.proxyStates.get(proxyId);
+    if (state) {
+      state.sessions = new Set(sessionIds);
+    }
+  }
+
   // 通过 sessionId 反查所属 proxyId
   getProxyForSession(sessionId: string): string | undefined {
     for (const [proxyId, state] of this.proxyStates) {

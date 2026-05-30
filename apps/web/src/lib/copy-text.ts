@@ -1,4 +1,4 @@
-export type CopyTextResult = "clipboard" | "failed";
+type CopyTextResult = "clipboard" | "failed";
 
 export async function copyText(text: string): Promise<CopyTextResult> {
   const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);

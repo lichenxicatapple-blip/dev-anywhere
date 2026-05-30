@@ -6,7 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import "@xterm/xterm/css/xterm.css";
 import { DEFAULT_TERMINAL_FONT_SIZE } from "@/lib/chat-font-size";
-import { xtermDarkTheme } from "@/lib/xterm-theme";
+import { xtermFixedDarkTheme } from "@/lib/xterm-theme";
 
 interface CreateXtermResult {
   terminal: Terminal;
@@ -33,7 +33,7 @@ export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITe
     // 不显示更安全。
     cursorInactiveStyle: "none",
     disableStdin: false,
-    theme: xtermDarkTheme,
+    theme: xtermFixedDarkTheme,
     allowProposedApi: true,
   };
 }

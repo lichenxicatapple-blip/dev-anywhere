@@ -1,4 +1,4 @@
-export interface VoiceTurnBufferSnapshot {
+interface VoiceTurnBufferSnapshot {
   draft: string;
   partial: string;
   hasDraft: boolean;
@@ -8,7 +8,7 @@ type VoiceTurnTimer = ReturnType<typeof setTimeout>;
 type VoiceTurnSetTimeout = (handler: () => void, timeoutMs: number) => VoiceTurnTimer;
 type VoiceTurnClearTimeout = (timer: VoiceTurnTimer) => void;
 
-export interface VoiceTurnBufferOptions {
+interface VoiceTurnBufferOptions {
   idleTimeoutMs: number;
   onTurnReady: (text: string) => void;
   setTimeoutFn?: VoiceTurnSetTimeout;

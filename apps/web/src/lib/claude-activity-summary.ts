@@ -34,7 +34,7 @@ function filePath(input: Record<string, unknown>): string {
   return asString(input.file_path) || asString(input.path) || asString(input.notebook_path);
 }
 
-export type ClaudeToolActivityDetail = ChatActivityDetail;
+type ClaudeToolActivityDetail = ChatActivityDetail;
 
 function patchKindLabel(kind: unknown): string {
   switch (kind) {

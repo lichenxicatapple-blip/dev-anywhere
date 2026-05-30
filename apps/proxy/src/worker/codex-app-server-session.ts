@@ -11,6 +11,7 @@ interface CodexAppServerSessionOptions {
   workDir?: string;
   resumeSessionId?: string;
   permissionMode?: string;
+  requestTimeoutMs?: number;
   approvalStrategy?: ApprovalStrategy;
   onEvent?: (event: StreamJsonEvent) => void;
   onThreadId?: (threadId: string) => void;
@@ -18,8 +19,10 @@ interface CodexAppServerSessionOptions {
 }
 
 interface PendingRequest {
+  method: string;
   resolve: (result: unknown) => void;
   reject: (err: Error) => void;
+  timeout: NodeJS.Timeout;
 }
 
 const CLIENT_INFO = {
@@ -27,6 +30,7 @@ const CLIENT_INFO = {
   title: "Dev Anywhere",
   version: "0.0.0",
 };
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 function approvalPolicy(permissionMode?: string): "untrusted" | "on-request" | "never" {
   switch (permissionMode) {
@@ -79,11 +83,15 @@ export class CodexAppServerSession {
   private pendingRequests = new Map<JsonRpcId, PendingRequest>();
   private threadReady: Promise<string>;
   private resolveThreadReady: (threadId: string) => void = () => {};
+  private rejectThreadReady: (err: Error) => void = () => {};
+  private threadReadySettled = false;
+  private exitReported = false;
   private codexThreadId: string | null = null;
   private activeTurnId: string | null = null;
   private readonly workDir: string;
   private readonly resumeSessionId?: string;
   private readonly permissionMode?: string;
+  private readonly requestTimeoutMs: number;
   private readonly approvalStrategy: ApprovalStrategy;
   private readonly onEvent?: (event: StreamJsonEvent) => void;
   private readonly onThreadId?: (threadId: string) => void;
@@ -93,12 +101,14 @@ export class CodexAppServerSession {
     this.workDir = options.cwd ?? options.workDir ?? process.cwd();
     this.resumeSessionId = options.resumeSessionId;
     this.permissionMode = options.permissionMode;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.approvalStrategy = options.approvalStrategy ?? denyAllStrategy;
     this.onEvent = options.onEvent;
     this.onThreadId = options.onThreadId;
     this.onExitCb = options.onExit;
-    this.threadReady = new Promise((resolve) => {
+    this.threadReady = new Promise((resolve, reject) => {
       this.resolveThreadReady = resolve;
+      this.rejectThreadReady = reject;
     });
   }
 
@@ -117,23 +127,31 @@ export class CodexAppServerSession {
     this.setupStdoutParsing();
     this.setupStderrCollection();
     this.setupExitHandler();
-    void this.initializeThread();
+    void this.initializeThread().catch((err) => this.rejectThreadReadyOnce(toError(err)));
 
     return this.child.pid!;
   }
 
+  waitUntilReady(): Promise<string> {
+    return this.threadReady;
+  }
+
   sendMessage(content: string): void {
-    void this.threadReady.then((threadId) =>
-      this.request("turn/start", {
-        threadId,
-        input: [{ type: "text", text: content, text_elements: [] }],
-        approvalPolicy: approvalPolicy(this.permissionMode),
-      }).then((result) => {
-        if (isRecord(result) && isRecord(result.turn) && typeof result.turn.id === "string") {
-          this.activeTurnId = result.turn.id;
-        }
-      }),
-    );
+    void this.threadReady
+      .then((threadId) =>
+        this.request("turn/start", {
+          threadId,
+          input: [{ type: "text", text: content, text_elements: [] }],
+          approvalPolicy: approvalPolicy(this.permissionMode),
+        }).then((result) => {
+          if (isRecord(result) && isRecord(result.turn) && typeof result.turn.id === "string") {
+            this.activeTurnId = result.turn.id;
+          }
+        }),
+      )
+      .catch(() => {
+        // Startup failure is surfaced through waitUntilReady / worker_ready; queued user input is dropped.
+      });
   }
 
   async stop(gracePeriodMs = 5000): Promise<void> {
@@ -182,11 +200,12 @@ export class CodexAppServerSession {
       ? await this.request("thread/resume", this.threadParams({ threadId: this.resumeSessionId }))
       : await this.request("thread/start", this.threadParams());
     const threadId = getThreadId(result);
-    if (threadId) {
-      this.codexThreadId = threadId;
-      this.onThreadId?.(threadId);
-      this.resolveThreadReady(threadId);
+    if (!threadId) {
+      throw new Error("Codex app-server thread start did not return a thread id");
     }
+    this.codexThreadId = threadId;
+    this.onThreadId?.(threadId);
+    this.resolveThreadReadyOnce(threadId);
   }
 
   private threadParams(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -204,15 +223,29 @@ export class CodexAppServerSession {
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = this.nextRequestId++;
     const payload = { jsonrpc: "2.0", id, method, params };
-    this.writeLine(payload);
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(
+          new Error(
+            `Codex app-server request ${method} timed out after ${this.requestTimeoutMs}ms`,
+          ),
+        );
+      }, this.requestTimeoutMs);
+      timeout.unref?.();
+      this.pendingRequests.set(id, { method, resolve, reject, timeout });
+      if (!this.writeLine(payload)) {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(new Error(`Codex app-server stdin is not writable for ${method}`));
+      }
     });
   }
 
-  private writeLine(payload: Record<string, unknown>): void {
-    if (!this.child?.stdin?.writable) return;
+  private writeLine(payload: Record<string, unknown>): boolean {
+    if (!this.child?.stdin?.writable) return false;
     this.child.stdin.write(`${JSON.stringify(payload)}\n`);
+    return true;
   }
 
   private setupStdoutParsing(): void {
@@ -257,6 +290,7 @@ export class CodexAppServerSession {
     const pending = this.pendingRequests.get(id);
     if (!pending) return;
     this.pendingRequests.delete(id);
+    clearTimeout(pending.timeout);
     if (isRecord(message.error)) {
       pending.reject(new Error(String(message.error.message ?? "Codex app-server request failed")));
       return;
@@ -354,8 +388,49 @@ export class CodexAppServerSession {
   private setupExitHandler(): void {
     const child = this.child;
     if (!child) return;
+    child.on("error", (err: Error) => {
+      const error = new Error(`Codex app-server failed to start: ${err.message}`);
+      this.stderrChunks.push(`${error.message}\n`);
+      this.rejectAllPendingRequests(error);
+      this.rejectThreadReadyOnce(error);
+      this.reportExit(1);
+    });
     child.on("exit", (code: number | null) => {
-      this.onExitCb?.(code ?? 1);
+      const exitCode = code ?? 1;
+      const err = new Error(`Codex app-server exited before ready (code ${exitCode})`);
+      this.rejectAllPendingRequests(err);
+      this.rejectThreadReadyOnce(err);
+      this.reportExit(exitCode);
     });
   }
+
+  private reportExit(code: number): void {
+    if (this.exitReported) return;
+    this.exitReported = true;
+    this.onExitCb?.(code);
+  }
+
+  private resolveThreadReadyOnce(threadId: string): void {
+    if (this.threadReadySettled) return;
+    this.threadReadySettled = true;
+    this.resolveThreadReady(threadId);
+  }
+
+  private rejectThreadReadyOnce(err: Error): void {
+    if (this.threadReadySettled) return;
+    this.threadReadySettled = true;
+    this.rejectThreadReady(err);
+  }
+
+  private rejectAllPendingRequests(err: Error): void {
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(err);
+    }
+    this.pendingRequests.clear();
+  }
+}
+
+function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
 }

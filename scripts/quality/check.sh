@@ -31,6 +31,7 @@ run_check "format" pnpm format:check
 run_check "lint" pnpm lint
 run_check "typecheck" pnpm -r run typecheck
 run_check "knip" pnpm knip
+run_check "unit" pnpm test:unit
 
 failed=0
 for i in "${!PIDS[@]}"; do

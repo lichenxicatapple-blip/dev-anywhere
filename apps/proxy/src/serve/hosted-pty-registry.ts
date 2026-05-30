@@ -42,6 +42,9 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
 
 const HOSTED_PTY_TERM = "xterm-256color";
 const HOSTED_PTY_COLORTERM = "truecolor";
+const ANSI_OSC_RE = new RegExp(String.raw`\x1b\][^\x07]*(?:\x07|\x1b\\)`, "g");
+const ANSI_CSI_RE = new RegExp(String.raw`\x1b\[[0-?]*[ -/]*[@-~]`, "g");
+const ANSI_CHARSET_RE = new RegExp(String.raw`\x1b[()][A-Za-z0-9]`, "g");
 
 interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
@@ -112,9 +115,9 @@ function appendStartupOutput(current: string, data: string): string {
 
 function cleanPtyOutputPreview(output: string): string {
   return output
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1b[()][A-Za-z0-9]/g, "")
+    .replace(ANSI_OSC_RE, "")
+    .replace(ANSI_CSI_RE, "")
+    .replace(ANSI_CHARSET_RE, "")
     .replace(/\r/g, "\n")
     .replace(/[^\t\n\x20-\x7e\u0080-\uffff]/g, "")
     .replace(/\n{3,}/g, "\n\n")

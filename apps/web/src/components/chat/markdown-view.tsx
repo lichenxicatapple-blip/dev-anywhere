@@ -284,6 +284,7 @@ function InlinePathAction({
         target="_blank"
         rel="noopener noreferrer"
         data-slot={isExternalWebLink ? "inline-web-link" : undefined}
+        data-wrap={isExternalWebLink ? "anywhere" : undefined}
         title="移动端点按打开；桌面端按 Cmd/Ctrl 点击打开"
         className={cn(
           "inline [overflow-wrap:anywhere]",
@@ -346,6 +347,7 @@ function CodeBlock({ children, ...rest }: { children?: ReactNode }) {
   return (
     <div
       data-slot="markdown-code-block"
+      data-overflow="horizontal"
       className="dev-render-scroll not-prose my-3 max-w-full overflow-x-auto rounded-md bg-popover"
     >
       <pre className="p-3 text-[0.92em]">
@@ -371,6 +373,8 @@ export const MarkdownView = memo(function MarkdownView({
 
   return (
     <div
+      data-slot="markdown-view"
+      data-tone={tone}
       className={cn(
         "dev-markdown prose prose-sm max-w-none",
         tone === "on-primary" && "dev-markdown-on-primary",
@@ -417,6 +421,9 @@ export const MarkdownView = memo(function MarkdownView({
             }
             return (
               <code
+                data-slot="markdown-inline-code"
+                data-wrap="break-all"
+                data-tone={tone}
                 className={cn(
                   "rounded px-1 py-0.5 text-[0.9em] break-all whitespace-normal",
                   tone === "on-primary"
@@ -433,7 +440,11 @@ export const MarkdownView = memo(function MarkdownView({
           // not-prose 禁用 prose 对 table/th/td 的默认规则, 避免与自定义冲突
           // th/td 用 whitespace-nowrap 让宽度按内容撑开, 超过 bubble 宽度时外层滚动
           table: ({ children, ...rest }) => (
-            <div className="dev-render-scroll not-prose my-3 w-fit max-w-full overflow-x-auto rounded-md border border-border/60">
+            <div
+              data-slot="markdown-table-wrapper"
+              data-overflow="horizontal"
+              className="dev-render-scroll not-prose my-3 w-fit max-w-full overflow-x-auto rounded-md border border-border/60"
+            >
               <table className="border-collapse text-[0.92em]" {...rest}>
                 {children}
               </table>

@@ -806,11 +806,13 @@ code.hljs,
   display: none !important;
 }
 
+/* PTY shell 固定深色, 不跟随 app 主题; 远端 ANSI 内容颜色由 xterm profile/远端输出决定。 */
 [data-slot="pty-terminal"] {
   background: #1e1e1e;
   color: #d4d4d4;
 }
 
+/* 覆盖 xterm 默认 CSS 的透明/默认背景, 避免容器缝隙漏出 app 背景。 */
 [data-slot="pty-terminal"] .xterm,
 [data-slot="pty-terminal"] .xterm-viewport,
 [data-slot="pty-terminal"] .xterm-screen {

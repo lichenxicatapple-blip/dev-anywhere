@@ -716,9 +716,7 @@ test.describe("mobile UX contract", () => {
     await expectNoHorizontalDocumentOverflow(page);
   });
 
-  test("pty terminal keeps its terminal theme when the app is in light mode", async ({
-    page,
-  }) => {
+  test("pty terminal keeps its terminal theme when the app is in light mode", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("dev_anywhere_theme", "light");
     });

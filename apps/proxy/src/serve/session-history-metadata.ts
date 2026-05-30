@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import type { ProviderId } from "../providers/types.js";
 
-export interface SessionHistoryMetadataRecord {
+interface SessionHistoryMetadataRecord {
   nativeSessionId: string;
   devAnywhereSessionId: string;
   provider: ProviderId;
@@ -12,7 +12,7 @@ export interface SessionHistoryMetadataRecord {
   updatedAt: number;
 }
 
-export interface HistorySessionLike {
+interface HistorySessionLike {
   id: string;
   provider: ProviderId;
   title?: string;
@@ -69,7 +69,7 @@ export function readSessionHistoryMetadata(
   }
 }
 
-export function writeSessionHistoryMetadata(
+function writeSessionHistoryMetadata(
   metadataPath: string,
   records: SessionHistoryMetadataRecord[],
 ): void {

@@ -174,9 +174,10 @@ export function handleProxyConnection(
     if (result.kind === "control" && result.message.type === "session_sync") {
       if (!proxyWs.proxyId) return;
       const { sessions } = result.message;
-      for (const s of sessions) {
-        registry.addSessionToProxy(proxyWs.proxyId, s.id);
-      }
+      registry.setSessionsForProxy(
+        proxyWs.proxyId,
+        sessions.map((s) => s.id),
+      );
       logger.info({ proxyId: proxyWs.proxyId, count: sessions.length }, "Session sync received");
       return;
     }

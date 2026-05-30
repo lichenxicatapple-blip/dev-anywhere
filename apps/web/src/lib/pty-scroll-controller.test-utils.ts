@@ -53,7 +53,7 @@ export function touchEvent(type: string, clientY: number, clientX = 0): TouchEve
   return event;
 }
 
-export type PtyScrollTestTerminal = Terminal & {
+type PtyScrollTestTerminal = Terminal & {
   rows: number;
   cols: number;
   scrollToLine: ReturnType<typeof vi.fn>;

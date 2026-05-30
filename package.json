@@ -22,6 +22,7 @@
     "dev:health": "scripts/dev/health.sh",
     "dev:relay:restart": "bash scripts/dev/relay-restart.sh",
     "dev:chaos": "bash scripts/dev/chaos.sh",
+    "tools:emu-debug": "node scripts/tools/emu-debug.mjs",
     "test:unit": "bash scripts/test/unit.sh",
     "test:layout": "bash scripts/test/layout.sh",
     "test:pc": "bash scripts/test/pc.sh",

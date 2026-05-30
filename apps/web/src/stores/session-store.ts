@@ -60,6 +60,9 @@ export const useSessionStore = create<SessionStoreState>()(
                 activeSessionIds.has(sid),
               ),
             ),
+            ptyTitles: Object.fromEntries(
+              Object.entries(state.ptyTitles).filter(([sid]) => activeSessionIds.has(sid)),
+            ),
           };
         }),
       addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
@@ -71,6 +74,9 @@ export const useSessionStore = create<SessionStoreState>()(
           ),
           ptyStateBySessionId: Object.fromEntries(
             Object.entries(state.ptyStateBySessionId).filter(([sid]) => sid !== sessionId),
+          ),
+          ptyTitles: Object.fromEntries(
+            Object.entries(state.ptyTitles).filter(([sid]) => sid !== sessionId),
           ),
         })),
       updateSessionState: (sessionId, newState, lastActive) =>

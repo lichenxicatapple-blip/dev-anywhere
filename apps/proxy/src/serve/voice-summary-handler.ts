@@ -52,7 +52,7 @@ export function buildClaudeSpeechSummaryCommand({
   };
 }
 
-export const runClaudeSpeechSummary: VoiceSummaryRunner = ({ cwd, prompt, env, timeoutMs }) => {
+const runClaudeSpeechSummary: VoiceSummaryRunner = ({ cwd, prompt, env, timeoutMs }) => {
   const { command, args } = buildClaudeSpeechSummaryCommand({ env, prompt });
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {

@@ -7,19 +7,19 @@ const SOFT_KEYBOARD_VIEWPORT_RATIO = 0.78;
 const TOUCH_TABLET_MIN_SHORT_EDGE = 600;
 const TOUCH_TABLET_MIN_LONG_EDGE = 768;
 
-export interface VisualViewportBottomOffsetInput {
+interface VisualViewportBottomOffsetInput {
   layoutViewportHeight: number;
   visualViewportHeight: number;
   visualViewportOffsetTop: number;
   baselineViewportHeight: number;
 }
 
-export interface VisualViewportInsets {
+interface VisualViewportInsets {
   bottomOffset: number;
   layoutBottomInset: number;
 }
 
-export interface TouchTabletViewportInput {
+interface TouchTabletViewportInput {
   width: number;
   height: number;
   maxTouchPoints: number;
@@ -102,10 +102,6 @@ export function useVisualViewportHeightVar(): void {
 
 export function useVisualViewportBottomOffset(): number {
   return useVisualViewportInsets().bottomOffset;
-}
-
-export function useVisualViewportLayoutBottomInset(): number {
-  return useVisualViewportInsets().layoutBottomInset;
 }
 
 export function useVisualViewportInsets(): VisualViewportInsets {

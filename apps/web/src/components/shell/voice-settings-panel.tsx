@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type {
   VoiceCapabilities,
   VoiceConfigUpdate,
@@ -178,7 +178,7 @@ function ChoiceLabel({ label, muted = false }: { label: string; muted?: boolean 
   );
 }
 
-export function VoiceSettingsPanel() {
+export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivElement> } = {}) {
   const [config, setConfig] = useState<VoiceProviderConfig>(DEFAULT_CONFIG);
   const [turnIdleSecondsInput, setTurnIdleSecondsInput] = useState(
     String(DEFAULT_CONFIG.turnIdleSeconds),
@@ -473,6 +473,7 @@ export function VoiceSettingsPanel() {
         <div
           className="dev-render-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
           data-slot="voice-settings-scroll"
+          ref={scrollRef}
         >
           <div className="space-y-3" data-slot="voice-settings-fields">
             <div className="grid gap-2 rounded-lg border border-border/75 bg-card/55 p-3.5 sm:p-3">

@@ -39,7 +39,7 @@ export interface DragSelectDebugSnapshot {
   lastDispatchedAt: number | null;
 }
 
-export interface DragSelectAutoscroll {
+interface DragSelectAutoscroll {
   dispose: () => void;
   getDebugSnapshot: () => DragSelectDebugSnapshot;
 }

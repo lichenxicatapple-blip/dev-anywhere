@@ -5,13 +5,13 @@ import { toast } from "@/components/toast";
 
 const MAX_FILE_UPLOAD_BYTES = 100 * 1024 * 1024;
 
-export type FileUploadPayload = {
+type FileUploadPayload = {
   fileName: string;
   mimeType: string;
   dataBase64: string;
 };
 
-export async function fileToUploadPayload(file: File): Promise<FileUploadPayload> {
+async function fileToUploadPayload(file: File): Promise<FileUploadPayload> {
   if (file.size > MAX_FILE_UPLOAD_BYTES) {
     throw new Error("文件超过 100MB 限制");
   }

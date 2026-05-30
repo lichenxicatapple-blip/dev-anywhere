@@ -21,6 +21,23 @@ function writeStdout(message: Record<string, unknown>): void {
   mockChild.mockStdout.write(`${JSON.stringify(message)}\n`);
 }
 
+async function waitForCondition(
+  condition: () => boolean,
+  message: string,
+  maxTicks = 50,
+): Promise<void> {
+  for (let tick = 0; tick < maxTicks; tick++) {
+    if (condition()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error(message);
+}
+
+async function waitForStdinLines(message = "stdin write timed out") {
+  await waitForCondition(() => mockChild.mockStdin.readableLength > 0, message);
+  return readStdinLines();
+}
+
 describe("CodexAppServerSession", () => {
   let CodexAppServerSession: typeof import("#src/worker/codex-app-server-session.js").CodexAppServerSession;
 
@@ -57,6 +74,67 @@ describe("CodexAppServerSession", () => {
     });
   });
 
+  it("rejects readiness when initialize never responds", async () => {
+    const session = new CodexAppServerSession({
+      cwd: "/tmp/project",
+      requestTimeoutMs: 5,
+    });
+    session.start();
+    readStdinLines();
+
+    await expect(session.waitUntilReady()).rejects.toThrow(/initialize.*timed out/i);
+  });
+
+  it("rejects readiness and pending requests when app-server exits before thread is ready", async () => {
+    const session = new CodexAppServerSession({ cwd: "/tmp/project" });
+    session.start();
+    readStdinLines();
+    const ready = session.waitUntilReady();
+
+    mockChild.emit("exit", 1);
+
+    await expect(ready).rejects.toThrow(/exited before ready/i);
+  });
+
+  it("rejects readiness when app-server spawn emits an error", async () => {
+    const exitCodes: number[] = [];
+    const session = new CodexAppServerSession({
+      cwd: "/tmp/project",
+      onExit: (code) => exitCodes.push(code),
+    });
+    session.start();
+    readStdinLines();
+
+    mockChild.emit("error", new Error("spawn ENOENT"));
+
+    await expect(session.waitUntilReady()).rejects.toThrow(/failed to start.*spawn ENOENT/i);
+    expect(exitCodes).toEqual([1]);
+    expect(session.getStderr()).toContain("spawn ENOENT");
+  });
+
+  it("rejects readiness when thread start does not return a thread id", async () => {
+    const session = new CodexAppServerSession({ cwd: "/tmp/project" });
+    session.start();
+    readStdinLines();
+
+    writeStdout({
+      id: 1,
+      result: {
+        userAgent: "codex",
+        codexHome: "/tmp",
+        platformFamily: "unix",
+        platformOs: "macos",
+      },
+    });
+    const threadStart = (await waitForStdinLines())[0];
+    writeStdout({
+      id: threadStart.id,
+      result: { thread: {} },
+    });
+
+    await expect(session.waitUntilReady()).rejects.toThrow(/thread id/i);
+  });
+
   it("starts a thread after initialize and maps permission mode", async () => {
     const session = new CodexAppServerSession({
       cwd: "/tmp/project",
@@ -74,9 +152,8 @@ describe("CodexAppServerSession", () => {
         platformOs: "macos",
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(readStdinLines()[0]).toMatchObject({
+    expect((await waitForStdinLines())[0]).toMatchObject({
       method: "thread/start",
       params: {
         cwd: "/tmp/project",
@@ -101,17 +178,15 @@ describe("CodexAppServerSession", () => {
         platformOs: "macos",
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const threadStart = readStdinLines()[0];
+    const threadStart = (await waitForStdinLines())[0];
     writeStdout({
       id: threadStart.id,
       result: {
         thread: { id: "thread-1" },
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(readStdinLines()[0]).toMatchObject({
+    expect((await waitForStdinLines())[0]).toMatchObject({
       method: "turn/start",
       params: {
         threadId: "thread-1",
@@ -132,7 +207,7 @@ describe("CodexAppServerSession", () => {
       method: "item/agentMessage/delta",
       params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", delta: "OK" },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForCondition(() => events.length === 1, "codex notification timed out");
 
     expect(events).toEqual([
       {
@@ -157,7 +232,10 @@ describe("CodexAppServerSession", () => {
       method: "item/commandExecution/requestApproval",
       params: { command: "pnpm test", cwd: "/tmp/project" },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForCondition(
+      () => approvalStrategy.mock.calls.length === 1 && mockChild.mockStdin.readableLength > 0,
+      "approval response timed out",
+    );
 
     expect(approvalStrategy).toHaveBeenCalledWith("Bash", {
       command: "pnpm test",
@@ -184,7 +262,10 @@ describe("CodexAppServerSession", () => {
       method: "execCommandApproval",
       params: { command: ["pnpm", "test"], cwd: "/tmp/project" },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForCondition(
+      () => approvalStrategy.mock.calls.length === 1 && mockChild.mockStdin.readableLength > 0,
+      "legacy approval response timed out",
+    );
 
     expect(approvalStrategy).toHaveBeenCalledWith("Bash", {
       command: "pnpm test",
@@ -215,7 +296,10 @@ describe("CodexAppServerSession", () => {
       method: "item/permissions/requestApproval",
       params: { reason: "Need project access", permissions },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForCondition(
+      () => approvalStrategy.mock.calls.length === 1 && mockChild.mockStdin.readableLength > 0,
+      "permission approval response timed out",
+    );
 
     expect(approvalStrategy).toHaveBeenCalledWith("Permissions", {
       reason: "Need project access",
@@ -247,9 +331,9 @@ describe("CodexAppServerSession", () => {
         },
       },
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const response = (await waitForStdinLines("permission denial response timed out"))[0];
 
-    expect(readStdinLines()[0]).toMatchObject({
+    expect(response).toMatchObject({
       jsonrpc: "2.0",
       id: "permission-approval-2",
       result: { permissions: {}, scope: "turn", strictAutoReview: true },

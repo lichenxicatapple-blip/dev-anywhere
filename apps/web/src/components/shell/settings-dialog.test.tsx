@@ -6,6 +6,7 @@ const {
   playerStop,
   requestVoiceCapabilities,
   requestVoiceConfig,
+  reconnectRelayClient,
   testVoiceConfig,
   updateVoiceConfig,
 } = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ const {
   playerStop: vi.fn(),
   requestVoiceCapabilities: vi.fn(),
   requestVoiceConfig: vi.fn(),
+  reconnectRelayClient: vi.fn(),
   testVoiceConfig: vi.fn(),
   updateVoiceConfig: vi.fn(),
 }));
@@ -24,6 +26,7 @@ vi.mock("@/hooks/use-relay-setup", () => ({
     testVoiceConfig,
     updateVoiceConfig,
   },
+  reconnectRelayClient,
   wsManagerRef: null,
 }));
 
@@ -109,6 +112,8 @@ describe("SettingsDialog", () => {
       },
     });
     updateVoiceConfig.mockReset();
+    reconnectRelayClient.mockReset();
+    reconnectRelayClient.mockResolvedValue(undefined);
     testVoiceConfig.mockReset();
     testVoiceConfig.mockResolvedValue({ success: true });
     updateVoiceConfig.mockResolvedValue({
@@ -225,12 +230,7 @@ describe("SettingsDialog", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("saves relay client token from settings and reloads to apply it", () => {
-    const reload = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { ...window.location, reload },
-    });
+  it("saves relay client token from settings and reconnects without reloading", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
@@ -241,17 +241,12 @@ describe("SettingsDialog", () => {
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
     expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(reconnectRelayClient).toHaveBeenCalledTimes(1);
   });
 
   it("shows saved relay client token state and can clear it from settings", () => {
     localStorage.setItem("dev_anywhere_relayClientToken", "old-token");
     sessionStorage.setItem("dev_anywhere_relayClientToken", "old-token");
-    const reload = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { ...window.location, reload },
-    });
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Relay Token" }).textContent).toContain("已保存");
@@ -261,7 +256,7 @@ describe("SettingsDialog", () => {
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();
     expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(reconnectRelayClient).toHaveBeenCalledTimes(1);
   });
 
   it("loads and saves Bailian Voice Pilot settings without dismissing the dialog", async () => {

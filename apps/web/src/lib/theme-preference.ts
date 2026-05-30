@@ -14,7 +14,7 @@ function isThemePreference(value: string | null): value is ThemePreference {
   return value === "auto" || value === "light" || value === "dark";
 }
 
-export function normalizeThemePreference(value: string | null): ThemePreference {
+function normalizeThemePreference(value: string | null): ThemePreference {
   return isThemePreference(value) ? value : "auto";
 }
 

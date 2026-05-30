@@ -1,6 +1,6 @@
-export type ScrollToBottomAction = "blocked-by-review" | "noop" | "follow";
+type ScrollToBottomAction = "blocked-by-review" | "noop" | "follow";
 
-export interface ScrollToBottomPolicyInput {
+interface ScrollToBottomPolicyInput {
   force: boolean;
   reviewing: boolean;
   viewportY: number;
@@ -10,7 +10,7 @@ export interface ScrollToBottomPolicyInput {
   atBottom: boolean;
 }
 
-export interface ScrollToBottomPolicyResult {
+interface ScrollToBottomPolicyResult {
   action: ScrollToBottomAction;
 }
 
@@ -28,13 +28,13 @@ export function decideScrollToBottomAction(
   return { action: "follow" };
 }
 
-export interface CursorAwareClampInput {
+interface CursorAwareClampInput {
   rawScrollTop: number;
   bottomScrollTop: number;
   domMaxScrollTop: number;
 }
 
-export interface CursorAwareClampResult {
+interface CursorAwareClampResult {
   action: "keep" | "clamp";
   scrollTop: number;
 }

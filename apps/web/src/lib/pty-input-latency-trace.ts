@@ -16,7 +16,7 @@ interface PendingPtyInput {
   paintAt: number | null;
 }
 
-export interface PtyInputLatencyTraceEntry {
+interface PtyInputLatencyTraceEntry {
   t: number;
   event: string;
   sessionId: string;
@@ -62,8 +62,6 @@ const store = createScrollTraceStore<PtyInputLatencyTraceEntry>({
     return `${entry.event}|${entry.sessionId}|${entry.outputSeq ?? ""}|${entry.pendingInputs ?? ""}`;
   },
 });
-
-export const isPtyInputLatencyTraceEnabled = store.isEnabled;
 
 export function installPtyInputLatencyTrace(): void {
   if (typeof window === "undefined") return;
@@ -191,7 +189,7 @@ export function markPtyOutputWritten(sessionId: string, bytes: number, chunkCoun
   }
 }
 
-export function formatPtyInputLatencyTraceReport(): string {
+function formatPtyInputLatencyTraceReport(): string {
   const trace = store.getAll();
   const rows = trace.slice(-200);
   const pending = [...pendingBySession.values()].flat();

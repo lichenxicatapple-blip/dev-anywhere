@@ -9,6 +9,32 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => mockChild),
 }));
 
+async function waitForCondition(
+  condition: () => boolean,
+  message: string,
+  timeoutMs = 1000,
+): Promise<void> {
+  const started = Date.now();
+  while (!condition()) {
+    if (Date.now() - started > timeoutMs) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+async function waitForEvents(events: unknown[], count: number): Promise<void> {
+  await waitForCondition(
+    () => events.length >= count,
+    `timed out waiting for ${count} event(s); got ${events.length}`,
+  );
+}
+
+async function readStdinWhenReady(child = mockChild): Promise<Buffer> {
+  await waitForCondition(() => child.mockStdin.readableLength > 0, "stdin write timed out");
+  const written = child.mockStdin.read();
+  if (!written) throw new Error("stdin became readable but returned no data");
+  return Buffer.isBuffer(written) ? written : Buffer.from(written);
+}
+
 describe("JsonSession", () => {
   let JsonSession: typeof import("#src/worker/json-session.js").JsonSession;
   let createPermissionModeApprovalStrategy: typeof import("#src/worker/json-session.js").createPermissionModeApprovalStrategy;
@@ -110,7 +136,7 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(systemEvent) + "\n");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForEvents(events, 1);
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe("system");
     });
@@ -128,7 +154,7 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(assistantEvent) + "\n");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForEvents(events, 1);
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe("assistant");
     });
@@ -147,7 +173,7 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(resultEvent) + "\n");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForEvents(events, 1);
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe("result");
     });
@@ -164,7 +190,7 @@ describe("JsonSession", () => {
         JSON.stringify({ type: "result", result: "ok", session_id: "s1" }) + "\n",
       );
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForEvents(events, 1);
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe("result");
     });
@@ -240,11 +266,8 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(controlRequest) + "\n");
 
-      await new Promise((r) => setTimeout(r, 100));
-
       // 读取写入到 stdin 的数据
-      const written = mockChild.mockStdin.read();
-      expect(written).not.toBeNull();
+      const written = await readStdinWhenReady();
       const response = JSON.parse(written.toString().trim());
       expect(response.type).toBe("control_response");
       expect(response.response.response.behavior).toBe("deny");
@@ -271,9 +294,7 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(controlRequest) + "\n");
 
-      await new Promise((r) => setTimeout(r, 100));
-
-      const written = mockChild.mockStdin.read();
+      const written = await readStdinWhenReady();
       const response = JSON.parse(written.toString().trim());
       expect(response.type).toBe("control_response");
       expect(response.response.response.behavior).toBe("allow");
@@ -298,7 +319,7 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(controlRequest) + "\n");
 
-      await new Promise((r) => setTimeout(r, 100));
+      await readStdinWhenReady();
       // control_request 由内部处理，不应传递到 onEvent
       expect(events.filter((e) => e.type === "control_request")).toHaveLength(0);
     });
@@ -310,9 +331,7 @@ describe("JsonSession", () => {
       session.start();
       session.sendMessage("Hello Claude");
 
-      await new Promise((r) => setTimeout(r, 50));
-
-      const written = mockChild.mockStdin.read();
+      const written = await readStdinWhenReady();
       const parsed = JSON.parse(written.toString().trim());
       expect(parsed).toEqual({
         type: "user",
@@ -330,7 +349,10 @@ describe("JsonSession", () => {
       session.sendMessage("message-1");
       session.sendMessage("message-2");
 
-      await new Promise((r) => setTimeout(r, 100));
+      await waitForCondition(
+        () => mockChild.mockStdin.readableLength > 0,
+        "queued stdin writes timed out",
+      );
 
       // 读取所有写入
       const allData = mockChild.mockStdin.read();
@@ -353,15 +375,13 @@ describe("JsonSession", () => {
       const session = new JsonSession();
       // start 之前 child 为 null，writeToStdin 会 reject
       session.sendMessage("before-start");
-      await new Promise((r) => setTimeout(r, 30));
+      await waitForCondition(() => errSpy.mock.calls.length > 0, "write failure was not logged");
 
       // start 之后正常的 sendMessage 必须能走通；如果 writeQueue 永久 rejected，这条会静默失败
       session.start();
       session.sendMessage("after-start");
-      await new Promise((r) => setTimeout(r, 50));
 
-      const written = mockChild.mockStdin.read();
-      expect(written).not.toBeNull();
+      const written = await readStdinWhenReady();
       const parsed = JSON.parse(written.toString().trim());
       expect(parsed.message.content).toBe("after-start");
 
@@ -390,11 +410,8 @@ describe("JsonSession", () => {
       };
       mockChild.mockStdout.write(JSON.stringify(controlRequest) + "\n");
 
-      await new Promise((r) => setTimeout(r, 100));
-
       // approval 失败时必须仍向 claude 写一个 deny 响应，否则 claude 永远等待 control_response
-      const written = mockChild.mockStdin.read();
-      expect(written).not.toBeNull();
+      const written = await readStdinWhenReady();
       const response = JSON.parse(written.toString().trim());
       expect(response.type).toBe("control_response");
       expect(response.response.request_id).toBe("req-fail");
@@ -412,7 +429,10 @@ describe("JsonSession", () => {
       mockChild.mockStderr.write("warning: something\n");
       mockChild.mockStderr.write("error: something else\n");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(
+        () => session.getStderr() === "warning: something\nerror: something else\n",
+        "stderr collection timed out",
+      );
       expect(session.getStderr()).toBe("warning: something\nerror: something else\n");
     });
   });
@@ -430,7 +450,7 @@ describe("JsonSession", () => {
       mockChild.emit("exit", 0, null);
       mockChild.stdout!.emit("end");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(() => exitCodes.length === 1, "exit callback timed out");
       expect(exitCodes).toEqual([0]);
     });
 
@@ -444,8 +464,22 @@ describe("JsonSession", () => {
       mockChild.emit("exit", null, null);
       mockChild.stdout!.emit("end");
 
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(() => exitCodes.length === 1, "exit callback timed out");
       expect(exitCodes).toEqual([1]);
+    });
+
+    it("reports child spawn errors through onExit", async () => {
+      const exitCodes: number[] = [];
+      const session = new JsonSession({
+        onExit: (code) => exitCodes.push(code),
+      });
+      session.start();
+
+      mockChild.emit("error", new Error("spawn ENOENT"));
+
+      await waitForCondition(() => exitCodes.length === 1, "spawn error callback timed out");
+      expect(exitCodes).toEqual([1]);
+      expect(session.getStderr()).toContain("spawn ENOENT");
     });
 
     // 兜底: child 异常退出且 stdout 卡住, 'end' 永不到时, 1s 后强制 fire onExit 防 session 永挂。
@@ -504,7 +538,10 @@ describe("JsonSession", () => {
           session_id: "claude-session-1",
         }) + "\n",
       );
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForCondition(
+        () => session.getClaudeSessionId() === "claude-session-1",
+        "session id not captured",
+      );
 
       const firstChild = mockChild;
       const secondChild = createChildProcessFake();
@@ -530,8 +567,7 @@ describe("JsonSession", () => {
       );
 
       session.sendMessage("after interrupt");
-      await new Promise((r) => setTimeout(r, 50));
-      const written = secondChild.mockStdin.read();
+      const written = await readStdinWhenReady(secondChild);
       expect(JSON.parse(written.toString().trim()).message.content).toBe("after interrupt");
 
       killProbe.mockRestore();

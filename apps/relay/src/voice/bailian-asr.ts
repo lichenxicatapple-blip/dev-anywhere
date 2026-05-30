@@ -10,8 +10,7 @@ type ProviderSocket = EventEmitter & {
   close: (code?: number, reason?: string) => void;
 };
 
-export type BailianAsrEvent = "ready" | "partial" | "final" | "error" | "closed";
-export type BailianAsrSocketFactory = (url: string, options: SocketOptions) => ProviderSocket;
+type BailianAsrSocketFactory = (url: string, options: SocketOptions) => ProviderSocket;
 
 export interface BailianAsrConfig {
   apiKey: string;

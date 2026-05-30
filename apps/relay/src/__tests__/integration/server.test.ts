@@ -9,6 +9,18 @@ import { tmpdir } from "node:os";
 
 const logger = createLogger({ name: "test", silent: true });
 
+async function waitForCondition(
+  condition: () => boolean,
+  message: string,
+  timeoutMs = 1000,
+): Promise<void> {
+  const started = Date.now();
+  while (!condition()) {
+    if (Date.now() - started > timeoutMs) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 describe("Relay Server Integration", () => {
   let relay: RelayServer;
   let port: number;
@@ -61,8 +73,10 @@ describe("Relay Server Integration", () => {
     await waitForOpen(proxy);
 
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "test-proxy" }));
-    // 等待注册处理完毕
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(
+      () => relay.registry.listProxies().includes("test-proxy"),
+      "proxy registration timed out",
+    );
 
     expect(relay.registry.listProxies()).toContain("test-proxy");
   });
@@ -71,7 +85,7 @@ describe("Relay Server Integration", () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const client = connectClient();
     await waitForOpen(client);
@@ -88,7 +102,7 @@ describe("Relay Server Integration", () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const client = connectClient();
     await waitForOpen(client);
@@ -151,7 +165,7 @@ describe("Relay Server Integration", () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const res = await fetch(`http://127.0.0.1:${port}/status`);
     expect(res.status).toBe(200);
@@ -165,11 +179,11 @@ describe("Relay Server Integration", () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
     expect(relay.registry.listProxies()).toContain("p1");
 
     proxy.close();
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForCondition(() => !relay.registry.isProxyOnline("p1"), "proxy did not go offline");
     // proxy 断连后标记离线，状态永久保留等待重连
     expect(relay.registry.listProxies()).toContain("p1");
     expect(relay.registry.isProxyOnline("p1")).toBe(false);
@@ -204,7 +218,10 @@ describe("Relay Server Heartbeat", () => {
     const proxy = new WebSocket(`ws://127.0.0.1:${port}/proxy`);
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "hb-test" }));
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForCondition(
+      () => relay.registry.listProxies().includes("hb-test"),
+      "proxy not listed",
+    );
     expect(relay.registry.listProxies()).toContain("hb-test");
 
     // 禁用 pong 响应来模拟死连接
@@ -213,8 +230,11 @@ describe("Relay Server Heartbeat", () => {
       // 不回复 pong
     });
 
-    // 等待两个心跳周期让死连接被终止并标记离线
-    await new Promise((r) => setTimeout(r, 350));
+    await waitForCondition(
+      () => !relay.registry.isProxyOnline("hb-test"),
+      "dead proxy was not marked offline",
+      1000,
+    );
     // 死连接被 terminate 后标记离线，proxyId 仍在列表但不在线
     expect(relay.registry.listProxies()).toContain("hb-test");
     expect(relay.registry.isProxyOnline("hb-test")).toBe(false);
