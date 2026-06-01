@@ -1,6 +1,6 @@
 import express from "express";
 import { existsSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,17 @@ export interface RelayServer {
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGED_FONTS_DIR = resolve(MODULE_DIR, "../assets/fonts");
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function requestRemoteAddress(request: IncomingMessage): string | undefined {
+  const forwardedFor = firstHeaderValue(request.headers["x-forwarded-for"]);
+  const firstForwarded = forwardedFor?.split(",")[0]?.trim();
+  return firstForwarded || request.socket.remoteAddress;
+}
 
 // 创建中转服务器，Express HTTP + ws WebSocket 双端点
 export function createRelayServer(options: RelayServerOptions): RelayServer {
@@ -222,8 +233,11 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     handleProxyConnection(ws, registry, logger, relayChaos);
   });
 
-  clientWss.on("connection", (ws) => {
-    handleClientConnection(ws, registry, logger, relayChaos, voiceConfigStore, voiceProviders);
+  clientWss.on("connection", (ws, request) => {
+    handleClientConnection(ws, registry, logger, relayChaos, voiceConfigStore, voiceProviders, {
+      userAgent: firstHeaderValue(request.headers["user-agent"]),
+      remoteAddress: requestRemoteAddress(request),
+    });
   });
 
   voiceAsrWss.on("connection", (ws) => {

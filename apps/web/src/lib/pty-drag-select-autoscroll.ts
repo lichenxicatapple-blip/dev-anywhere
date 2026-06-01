@@ -21,6 +21,7 @@ interface DragSelectOptions {
   host: HTMLElement;
   edgePx?: number;
   maxSpeedPx?: number;
+  onHorizontalScrollIntent?: (reason: string) => void;
   // 测试注入: 默认 requestAnimationFrame / cancelAnimationFrame。jsdom 下走 setTimeout 桩。
   requestFrame?: (cb: () => void) => number;
   cancelFrame?: (id: number) => void;
@@ -53,6 +54,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     host,
     edgePx = DEFAULT_EDGE_PX,
     maxSpeedPx = DEFAULT_MAX_SPEED_PX,
+    onHorizontalScrollIntent,
     requestFrame = (cb) => requestAnimationFrame(cb),
     cancelFrame = (id) => cancelAnimationFrame(id),
   } = opts;
@@ -109,7 +111,10 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
       maxSpeedPx,
     });
 
-    if (dx !== 0) container.scrollLeft += dx;
+    if (dx !== 0) {
+      onHorizontalScrollIntent?.(`dragSelectAutoscroll dx=${Math.round(dx)}`);
+      container.scrollLeft += dx;
+    }
     if (dy !== 0) container.scrollTop += dy;
 
     if (dx !== 0 || dy !== 0) {

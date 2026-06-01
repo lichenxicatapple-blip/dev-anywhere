@@ -136,6 +136,24 @@ export async function installFakeRelay(page: Page): Promise<void> {
         lastActive: now - (index + 3) * 60_000,
       })),
     ];
+    const relayClients = [
+      {
+        clientId: "browser-current",
+        connectedAt: now - 30_000,
+        current: true,
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        remoteAddress: "127.0.0.1",
+      },
+      {
+        clientId: "browser-ipad",
+        proxyId: "proxy-1",
+        connectedAt: now - 120_000,
+        userAgent:
+          "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        remoteAddress: "192.168.1.23",
+      },
+    ];
     const persistedSessions = localStorage.getItem(sessionStorageKey);
     const sessions: FakeSession[] = persistedSessions
       ? (JSON.parse(persistedSessions) as FakeSession[])
@@ -399,6 +417,37 @@ export async function installFakeRelay(page: Page): Promise<void> {
               proxyId: "proxy-1",
             });
             break;
+          case "relay_client_list_request":
+            this.emitJson({
+              type: "relay_client_list_response",
+              requestId: msg.requestId,
+              clients: relayClients,
+            });
+            break;
+          case "relay_client_kick": {
+            const clientId = String(msg.clientId ?? "");
+            if (relayClients.some((client) => client.clientId === clientId && client.current)) {
+              this.emitJson({
+                type: "relay_client_kick_response",
+                requestId: msg.requestId,
+                clientId,
+                success: false,
+                error: "不能断开当前客户端",
+              });
+              break;
+            }
+            const clientIndex = relayClients.findIndex((client) => client.clientId === clientId);
+            const success = clientIndex !== -1;
+            if (success) relayClients.splice(clientIndex, 1);
+            this.emitJson({
+              type: "relay_client_kick_response",
+              requestId: msg.requestId,
+              clientId,
+              success,
+              ...(success ? {} : { error: "客户端不在线" }),
+            });
+            break;
+          }
           case "session_list":
             this.emitJson(envelope("session_list", "system", { sessions }));
             break;

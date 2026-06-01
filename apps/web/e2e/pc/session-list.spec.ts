@@ -81,6 +81,28 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.getByText("运行 2 分钟")).toBeVisible();
   });
 
+  test("设置菜单可以查看并断开其他 Relay 客户端", async ({ page }) => {
+    await page.getByRole("button", { name: "设置" }).click();
+    await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
+
+    const clientEntry = page.getByRole("button", { name: "客户端管理" });
+    await expect(clientEntry).toContainText("已连接的浏览器页面和设备");
+    await clientEntry.click();
+
+    await expect(page.getByRole("heading", { name: "客户端管理" })).toBeVisible();
+    await expect(page.getByText("2 个在线客户端")).toBeVisible();
+    await expect(page.getByText("当前设备")).toBeVisible();
+    await expect(page.getByText("browser-current")).toBeVisible();
+    await expect(page.getByText("browser-ipad")).toBeVisible();
+    await expect(page.getByText("开发机 proxy-1")).toBeVisible();
+
+    await page.getByRole("button", { name: "断开" }).click();
+
+    await expect(page.getByText("browser-ipad")).toHaveCount(0);
+    await expect(page.getByText("1 个在线客户端")).toBeVisible();
+    await expect(page.getByText("browser-current")).toBeVisible();
+  });
+
   test("同路径的 Claude/Codex 历史目录折叠状态互不影响", async ({ page }) => {
     await page.evaluate(() => {
       window.__devAnywhereE2E?.socket?.emitJson({

@@ -313,6 +313,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     (sessionId, data, outputSeq) => {
       if (!sessionManager.getSession(sessionId)) return;
       touchSessionActivity(sessionManager, relayConnection, sessionId);
+      applyPtyStateToSession(bridgeDeps, sessionId, "working");
       relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
     },
     (err, line) => {

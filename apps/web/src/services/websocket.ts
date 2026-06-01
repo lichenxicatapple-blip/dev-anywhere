@@ -1,6 +1,6 @@
 // WebSocket 连接管理器，使用原生 WebSocket，支持文本和二进制消息分发，指数退避重连
 
-import { decodeBinaryFrame } from "@dev-anywhere/shared";
+import { decodeBinaryFrame, RelayCloseCode } from "@dev-anywhere/shared";
 
 type SendOptions = {
   queueWhenDisconnected?: boolean;
@@ -179,8 +179,12 @@ export class WebSocketManager {
       }
     });
 
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
       if (this.ws !== ws) return;
+      if (event.code === RelayCloseCode.CLIENT_KICKED) {
+        this.closed = true;
+        this.cancelReconnectTimer();
+      }
       this.connected = false;
       this.ws = null;
       this.statusHandlers.forEach((h) => h(false));

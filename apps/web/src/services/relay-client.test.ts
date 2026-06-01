@@ -65,6 +65,55 @@ describe("RelayClient request handling", () => {
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ type: "proxy_list_request" });
   });
 
+  it("resolves relay client list requests from the matching response", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestRelayClients();
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "relay_client_list_response",
+      requestId,
+      clients: [
+        {
+          clientId: "client-1",
+          connectedAt: 1760000000000,
+          current: true,
+        },
+      ],
+    });
+
+    await expect(promise).resolves.toEqual([
+      { clientId: "client-1", connectedAt: 1760000000000, current: true },
+    ]);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "relay_client_list_request",
+    });
+  });
+
+  it("sends relay client kick requests and returns the relay result", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.kickRelayClient("client-2");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "relay_client_kick_response",
+      requestId,
+      clientId: "client-2",
+      success: true,
+    });
+
+    await expect(promise).resolves.toEqual({
+      clientId: "client-2",
+      success: true,
+      error: undefined,
+      errorCode: undefined,
+    });
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "relay_client_kick",
+      clientId: "client-2",
+    });
+  });
+
   it("times out unanswered requests instead of leaving the UI pending forever", async () => {
     vi.useFakeTimers();
     try {

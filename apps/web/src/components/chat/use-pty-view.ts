@@ -133,6 +133,7 @@ interface ScrollControllerHandle {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string) => void;
+  markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
   getDebugProbe: () => PtyScrollDebugProbe;
@@ -653,7 +654,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           };
         });
 
-        const dragSelect = attachPtyDragSelectAutoscroll({ container, host });
+        const dragSelect = attachPtyDragSelectAutoscroll({
+          container,
+          host,
+          onHorizontalScrollIntent: (reason) =>
+            scrollControllerRef.current?.markHorizontalScrollIntent(reason),
+        });
         dragSelectDispose = dragSelect.dispose;
 
         if (webOwnsPtyGeometry) {

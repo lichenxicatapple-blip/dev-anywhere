@@ -6,16 +6,20 @@ import {
   AudioLines,
   ChevronRight,
   KeyRound,
+  LogOut,
   Monitor,
+  RefreshCw,
   Server,
   SunMoon,
   Terminal,
+  Users,
 } from "lucide-react";
+import type { RelayClientInfo } from "@dev-anywhere/shared";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
-import { reconnectRelayClient } from "@/hooks/use-relay-setup";
+import { reconnectRelayClient, relayClientRef } from "@/hooks/use-relay-setup";
 import {
   clearRelayClientToken,
   hasStoredRelayClientToken,
@@ -41,7 +45,7 @@ type RelayHealthState =
   | { kind: "ready"; version: string; uptime: number }
   | { kind: "error"; message: string };
 
-type SettingsView = "menu" | "version" | "voice" | "relay-token";
+type SettingsView = "menu" | "version" | "voice" | "relay-token" | "clients";
 
 const themePreferenceOptions: Array<{ value: ThemePreference; label: string }> = [
   { value: "auto", label: "跟随系统" },
@@ -76,12 +80,14 @@ function healthUrl(relayUrl: string): string {
 function settingsViewTitle(view: SettingsView): string {
   if (view === "version") return "版本";
   if (view === "relay-token") return "Relay Token";
+  if (view === "clients") return "客户端管理";
   return "设置 Voice Pilot";
 }
 
 function settingsViewDescription(view: SettingsView): string {
   if (view === "version") return "当前 Web 与 Relay 服务器的版本信息";
   if (view === "relay-token") return "用于连接需要认证的 Relay 服务器。保存后自动生效。";
+  if (view === "clients") return "查看当前连接到 Relay 的 Web 客户端。";
   return "连接语音服务后，即可以语音交互的形式驱动会话。";
 }
 
@@ -234,6 +240,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           />
         ) : view === "relay-token" ? (
           <RelayTokenPanel saved={relayTokenSaved} />
+        ) : view === "clients" ? (
+          <RelayClientsPanel />
         ) : view === "voice" ? (
           <VoiceSettingsPanel scrollRef={voiceScrollRef} />
         ) : (
@@ -249,6 +257,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             onLatencyMonitorEnabledChange={setLatencyMonitorEnabled}
             onOpenVoice={() => setView("voice")}
             onOpenRelayToken={() => setView("relay-token")}
+            onOpenClients={() => setView("clients")}
             onOpenVersion={() => setView("version")}
           />
         )}
@@ -300,6 +309,7 @@ function SettingsMainView({
   onLatencyMonitorEnabledChange,
   onOpenVoice,
   onOpenRelayToken,
+  onOpenClients,
   onOpenVersion,
 }: {
   relayTokenSaved: boolean;
@@ -313,6 +323,7 @@ function SettingsMainView({
   onLatencyMonitorEnabledChange: (checked: boolean) => void;
   onOpenVoice: () => void;
   onOpenRelayToken: () => void;
+  onOpenClients: () => void;
   onOpenVersion: () => void;
 }) {
   return (
@@ -332,6 +343,12 @@ function SettingsMainView({
           label="Relay Token"
           detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
           onClick={onOpenRelayToken}
+        />
+        <SettingsMenuItem
+          icon={<Users className="size-4" aria-hidden="true" />}
+          label="客户端管理"
+          detail="已连接的浏览器页面和设备"
+          onClick={onOpenClients}
         />
       </SettingsSection>
       <SettingsSection title="外观">
@@ -534,6 +551,174 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+function formatClientId(clientId: string): string {
+  if (clientId.length <= 16) return clientId;
+  return `${clientId.slice(0, 8)}...${clientId.slice(-4)}`;
+}
+
+function summarizeUserAgent(userAgent: string | undefined): string {
+  if (!userAgent) return "未知浏览器";
+  const browser = userAgent.includes("Edg/")
+    ? "Edge"
+    : userAgent.includes("Chrome/")
+      ? "Chrome"
+      : userAgent.includes("Firefox/")
+        ? "Firefox"
+        : userAgent.includes("Safari/")
+          ? "Safari"
+          : "浏览器";
+  const os = userAgent.includes("iPhone")
+    ? "iPhone"
+    : userAgent.includes("iPad")
+      ? "iPad"
+      : userAgent.includes("Mac OS X")
+        ? "macOS"
+        : userAgent.includes("Windows")
+          ? "Windows"
+          : userAgent.includes("Android")
+            ? "Android"
+            : "";
+  return os ? `${browser} · ${os}` : browser;
+}
+
+function connectedFor(connectedAt: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - connectedAt) / 1000));
+  return `已连接 ${formatUptime(seconds)}`;
+}
+
+function RelayClientsPanel() {
+  const [clients, setClients] = useState<RelayClientInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [kickingClientId, setKickingClientId] = useState<string | null>(null);
+
+  const loadClients = useCallback(async () => {
+    const relay = relayClientRef;
+    if (!relay) {
+      setClients([]);
+      setError("Relay 未连接。");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setClients(await relay.requestRelayClients());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取客户端列表失败。");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadClients();
+  }, [loadClients]);
+
+  const kickClient = useCallback(async (clientId: string) => {
+    const relay = relayClientRef;
+    if (!relay) {
+      setError("Relay 未连接。");
+      return;
+    }
+    setKickingClientId(clientId);
+    setError(null);
+    try {
+      const result = await relay.kickRelayClient(clientId);
+      if (!result.success) {
+        setError(result.error ?? "断开客户端失败。");
+        return;
+      }
+      setClients((items) => items.filter((item) => item.clientId !== clientId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "断开客户端失败。");
+    } finally {
+      setKickingClientId(null);
+    }
+  }, []);
+
+  return (
+    <div
+      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
+      data-slot="settings-dialog-body"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">
+          {loading ? "正在读取..." : `${clients.length} 个在线客户端`}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void loadClients()}
+          disabled={loading}
+        >
+          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden="true" />
+          刷新
+        </Button>
+      </div>
+
+      {error ? (
+        <div className="rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {!loading && clients.length === 0 ? (
+        <div className="rounded-md border border-border bg-card/70 px-3 py-6 text-center text-sm text-muted-foreground">
+          当前没有在线客户端
+        </div>
+      ) : null}
+
+      {clients.map((client) => {
+        const isCurrent = client.current === true;
+        const isKicking = kickingClientId === client.clientId;
+        return (
+          <div
+            key={client.clientId}
+            className="rounded-md border border-border bg-card/70 p-3"
+            data-slot="relay-client-row"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 space-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div className="truncate text-sm font-medium text-foreground">
+                    {summarizeUserAgent(client.userAgent)}
+                  </div>
+                  {isCurrent ? (
+                    <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+                      当前设备
+                    </span>
+                  ) : null}
+                </div>
+                <div className="font-mono text-xs text-muted-foreground">
+                  {formatClientId(client.clientId)}
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>{connectedFor(client.connectedAt)}</span>
+                  {client.proxyId ? <span>开发机 {formatClientId(client.proxyId)}</span> : null}
+                  {client.remoteAddress ? <span>{client.remoteAddress}</span> : null}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={isCurrent || isKicking}
+                onClick={() => void kickClient(client.clientId)}
+              >
+                <LogOut className="size-3.5" aria-hidden="true" />
+                {isCurrent ? "当前" : isKicking ? "断开中..." : "断开"}
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

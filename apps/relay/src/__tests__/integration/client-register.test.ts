@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
+import { RelayCloseCode } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import {
   waitForOpen,
@@ -64,6 +65,75 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("client_register_response");
     expect(response.status).toBe("new");
     expect(response.proxyId).toBeUndefined();
+  });
+
+  it("lists connected relay clients and lets one client kick another", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    const client1 = connectClient();
+    await waitForOpen(client1);
+    client1.send(JSON.stringify({ type: "client_register", clientId: "c1" }));
+    await waitForMessageType(client1, "client_register_response");
+    client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessageType(client1, "proxy_select_response");
+
+    const client2 = connectClient();
+    await waitForOpen(client2);
+    client2.send(JSON.stringify({ type: "client_register", clientId: "c2" }));
+    await waitForMessageType(client2, "client_register_response");
+
+    const listPromise = waitForMessageType(client1, "relay_client_list_response");
+    client1.send(JSON.stringify({ type: "relay_client_list_request", requestId: "clients-1" }));
+    const listResponse = JSON.parse(await listPromise);
+    expect(listResponse.clients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientId: "c1", proxyId: "p1", current: true }),
+        expect.objectContaining({ clientId: "c2" }),
+      ]),
+    );
+
+    const kickedPromise = waitForMessageType(client2, "relay_client_kicked");
+    const closePromise = new Promise<number>((resolve) => {
+      client2.once("close", (code) => resolve(code));
+    });
+    const kickResponsePromise = waitForMessageType(client1, "relay_client_kick_response");
+    client1.send(
+      JSON.stringify({ type: "relay_client_kick", requestId: "kick-1", clientId: "c2" }),
+    );
+
+    const kickResponse = JSON.parse(await kickResponsePromise);
+    expect(kickResponse).toMatchObject({
+      type: "relay_client_kick_response",
+      requestId: "kick-1",
+      clientId: "c2",
+      success: true,
+    });
+    expect(JSON.parse(await kickedPromise)).toMatchObject({ type: "relay_client_kicked" });
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_KICKED);
+  });
+
+  it("rejects relay client self-kick", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(JSON.stringify({ type: "client_register", clientId: "c1" }));
+    await waitForMessageType(client, "client_register_response");
+
+    const responsePromise = waitForMessageType(client, "relay_client_kick_response");
+    client.send(
+      JSON.stringify({ type: "relay_client_kick", requestId: "kick-self", clientId: "c1" }),
+    );
+
+    expect(JSON.parse(await responsePromise)).toMatchObject({
+      type: "relay_client_kick_response",
+      requestId: "kick-self",
+      clientId: "c1",
+      success: false,
+      error: "不能断开当前客户端",
+    });
+    expect(client.readyState).toBe(WebSocket.OPEN);
   });
 
   it("returns status 'restored' with proxyId for known client with online proxy", async () => {

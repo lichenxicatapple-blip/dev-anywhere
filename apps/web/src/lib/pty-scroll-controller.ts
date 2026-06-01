@@ -68,6 +68,7 @@ interface PtyScrollController {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string) => void;
+  markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
@@ -536,6 +537,10 @@ export function attachPtyScrollController(
       details: `scrollLeft=${previous}->${container.scrollLeft}`,
     });
     notifyScroll();
+  };
+
+  const markHorizontalScrollIntent = (reason: string = "external"): void => {
+    markHorizontalUserInput(`site=${reason}`);
   };
 
   // canvasLastY 扫描会跑到 term.rows 行，每帧 onRender 都跑一次浪费。
@@ -1204,6 +1209,7 @@ export function attachPtyScrollController(
     scrollToRatio,
     scrollToXRatio,
     resetHorizontalScroll,
+    markHorizontalScrollIntent,
     traceRawInputFollowScheduled,
     traceRawInputFollowFire,
     getDebugProbe,

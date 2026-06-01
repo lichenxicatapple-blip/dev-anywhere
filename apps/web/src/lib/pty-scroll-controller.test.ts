@@ -2347,6 +2347,31 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollLeft).toBe(220);
   });
 
+  it("preserves drag-select horizontal autoscroll before the browser scroll event arrives", () => {
+    const { container, spacer, host } = createDom();
+    defineScrollWidth(container, 1600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    controller.markHorizontalScrollIntent("dragSelectAutoscroll dx=14");
+    container.scrollLeft = 14;
+
+    terminal.buffer.active.cursorX = 0; // cursorPxX = 0, viewport [14, 814] -> left of view
+    emitRender();
+
+    expect(container.scrollLeft).toBe(14);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+  });
+
   it("treats a large unmarked native horizontal scroll as user review intent", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);

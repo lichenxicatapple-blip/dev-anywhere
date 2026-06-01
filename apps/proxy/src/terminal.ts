@@ -15,6 +15,7 @@ import {
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
+  normalizePtySemanticText,
 } from "./common/osc-extractor.js";
 import { createFSM, type PtySemanticState } from "@dev-anywhere/shared";
 import { shouldReleaseTextApprovalOnInput } from "./common/pty-approval-state.js";
@@ -207,6 +208,7 @@ class TerminalSession {
 
     const oscSequences = extractOscSequences(data);
     const oscSignal = extractOscSignals(data, this.provider.id);
+    const hasTextActivity = normalizePtySemanticText(data).length > 0;
     this.semanticTextTail = appendPtySemanticTextTail(this.semanticTextTail, data);
     const textSignal = oscSignal
       ? null
@@ -236,6 +238,7 @@ class TerminalSession {
       currentState: this.currentPtyState,
       signal: signal ?? null,
       allowTitleOnlyApprovalRelease: !this.textApprovalWaitActive,
+      hasTextActivity,
     });
     this.currentPtyState = decision.nextState;
     if (decision.nextState !== "approval_wait") {

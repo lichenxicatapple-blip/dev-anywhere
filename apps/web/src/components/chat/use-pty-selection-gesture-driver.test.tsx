@@ -7,7 +7,10 @@ import {
   type PtySelectionHandleKind,
 } from "./use-pty-selection-gesture-driver";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function dispatchTouch(
   type: string,
@@ -28,6 +31,7 @@ function Harness({
   onHandleDragStart,
   onHandleDragMove,
   onHandleDragEnd,
+  onHorizontalScrollIntent,
 }: {
   onHandleDragStart: (kind: PtySelectionHandleKind) => void;
   onHandleDragMove: (
@@ -38,6 +42,7 @@ function Harness({
     kind: PtySelectionHandleKind,
     point: { clientX: number; clientY: number } | null,
   ) => void;
+  onHorizontalScrollIntent?: (reason: string) => void;
 }) {
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const terminalRef = useRef({ focus: vi.fn() } as unknown as Terminal);
@@ -50,6 +55,7 @@ function Harness({
     onLongPressStart: vi.fn(),
     onLongPressMove: vi.fn(),
     onLongPressEnd: vi.fn(),
+    onHorizontalScrollIntent,
     onHandleDragStart,
     onHandleDragMove,
     onHandleDragEnd,
@@ -65,6 +71,25 @@ function Harness({
       />
     </div>
   );
+}
+
+function defineScrollableBox(element: HTMLElement): void {
+  Object.defineProperty(element, "scrollWidth", { configurable: true, value: 1600 });
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 600 });
+  Object.defineProperty(element, "clientWidth", { configurable: true, value: 800 });
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 400 });
+  element.getBoundingClientRect = () =>
+    ({
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 400,
+      width: 800,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => null,
+    }) as DOMRect;
 }
 
 describe("usePtySelectionGestureDriver", () => {
@@ -100,5 +125,44 @@ describe("usePtySelectionGestureDriver", () => {
 
     const released = dispatchTouch("touchmove", root, { clientX: 122, clientY: 222 });
     expect(released.defaultPrevented).toBe(false);
+  });
+
+  it("marks horizontal intent before handle autoscroll changes scrollLeft", () => {
+    const rafState: { pendingFrame?: FrameRequestCallback } = {};
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
+      rafState.pendingFrame = cb;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const onHandleDragStart = vi.fn<(kind: PtySelectionHandleKind) => void>();
+    const onHandleDragMove =
+      vi.fn<(kind: PtySelectionHandleKind, point: { clientX: number; clientY: number }) => void>();
+    const onHandleDragEnd =
+      vi.fn<
+        (kind: PtySelectionHandleKind, point: { clientX: number; clientY: number } | null) => void
+      >();
+    const onHorizontalScrollIntent = vi.fn<(reason: string) => void>();
+    const { getByTestId } = render(
+      <Harness
+        onHandleDragStart={onHandleDragStart}
+        onHandleDragMove={onHandleDragMove}
+        onHandleDragEnd={onHandleDragEnd}
+        onHorizontalScrollIntent={onHorizontalScrollIntent}
+      />,
+    );
+
+    const root = getByTestId("root");
+    const handle = getByTestId("handle");
+    defineScrollableBox(root);
+
+    dispatchTouch("touchstart", handle, { clientX: 120, clientY: 220 });
+    dispatchTouch("touchmove", window, { clientX: 795, clientY: 220 });
+    rafState.pendingFrame?.(0);
+
+    expect(root.scrollLeft).toBeGreaterThan(0);
+    expect(onHorizontalScrollIntent).toHaveBeenCalledWith(
+      expect.stringContaining("selectionGestureAutoscroll"),
+    );
   });
 });

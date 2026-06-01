@@ -139,6 +139,11 @@ export async function handleRelayMessage(
     return;
   }
 
+  if (msg.type === "relay_client_kicked") {
+    toast.info("这个客户端已被断开");
+    return;
+  }
+
   // proxy_offline: 更新标记并刷新列表
   if (msg.type === "proxy_offline") {
     relay.listProxies();

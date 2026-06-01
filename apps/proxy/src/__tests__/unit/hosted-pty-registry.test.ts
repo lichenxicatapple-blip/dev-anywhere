@@ -205,4 +205,52 @@ describe("Hosted PTY registry", () => {
       expect(states[1]?.payload?.seq).toBe(2);
     });
   });
+
+  it("promotes an idle session to working when PTY bytes arrive without a semantic state", () => {
+    withExecutable("codex", (codexBin) => {
+      const applyPtyStateToSession = vi.fn();
+      const registry = new HostedPtyRegistry({
+        sessionManager: {
+          getSession: vi.fn(() => ({
+            id: "s1",
+            mode: "pty",
+            provider: "codex",
+            state: SessionState.IDLE,
+            cwd: "/tmp/project",
+            pid: 2468,
+          })),
+          terminateSession: vi.fn(() => ({ success: true })),
+        } as never,
+        relayConnection: {
+          sendRaw: vi.fn(),
+          sendBinary: vi.fn(),
+        } as never,
+        getProviderEnv: () => ({ CODEX_BIN: codexBin }),
+        touchSessionActivity: vi.fn(() => true),
+        applyPtyStateToSession,
+        onSessionClosed: vi.fn(),
+      });
+
+      registry.start({
+        sessionId: "s1",
+        provider: "codex",
+        cwd: "/tmp/project",
+        args: [],
+        hook: {
+          provider: "codex",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("\x1b]0;⠧ dev-anywhere\x07");
+      registry.destroyAll();
+
+      expect(applyPtyStateToSession).toHaveBeenCalledWith("s1", "working");
+    });
+  });
 });

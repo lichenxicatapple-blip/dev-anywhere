@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import {
   ControlErrorCode,
   isClientToProxyRelayControlType,
+  RelayCloseCode,
   RelayErrorCode,
   serializeControl,
 } from "@dev-anywhere/shared";
@@ -25,6 +26,11 @@ interface ClientSocket extends WebSocket {
   boundProxyId?: string;
 }
 
+interface ClientConnectionInfo {
+  userAgent?: string;
+  remoteAddress?: string;
+}
+
 // 处理 client_register 消息：三种状态 restored / proxy_offline / new。
 // relay 不缓存输出；恢复由 proxy 重新推送 session_list/agent_status/snapshot 等状态。
 function handleClientRegister(
@@ -34,6 +40,7 @@ function handleClientRegister(
   logger: Logger,
 ): void {
   clientWs.clientId = clientId;
+  registry.updateConnectedClientId(clientWs, clientId);
 
   const binding = registry.getClientBinding(clientId);
 
@@ -74,6 +81,87 @@ function handleClientRegister(
   );
 
   logger.info({ clientId, proxyId, status: "restored" }, "Client registered");
+}
+
+function handleRelayClientListRequest(
+  clientWs: ClientSocket,
+  registry: RelayRegistry,
+  requestId: string | undefined,
+): void {
+  clientWs.send(
+    JSON.stringify({
+      type: "relay_client_list_response",
+      requestId,
+      clients: registry.getConnectedClientDetails(clientWs.clientId),
+    }),
+  );
+}
+
+function handleRelayClientKick(
+  clientWs: ClientSocket,
+  registry: RelayRegistry,
+  logger: Logger,
+  requestId: string,
+  targetClientId: string,
+): void {
+  if (targetClientId === clientWs.clientId) {
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_client_kick_response",
+        requestId,
+        clientId: targetClientId,
+        success: false,
+        errorCode: ControlErrorCode.UNKNOWN,
+        error: "不能断开当前客户端",
+      }),
+    );
+    return;
+  }
+
+  const targets = registry.getConnectedClientSockets(targetClientId);
+  if (targets.length === 0) {
+    clientWs.send(
+      JSON.stringify({
+        type: "relay_client_kick_response",
+        requestId,
+        clientId: targetClientId,
+        success: false,
+        errorCode: ControlErrorCode.UNKNOWN,
+        error: "客户端不在线",
+      }),
+    );
+    return;
+  }
+
+  const kickedMessage = JSON.stringify({
+    type: "relay_client_kicked",
+    reason: "由客户端管理断开",
+  });
+  for (const target of targets) {
+    try {
+      target.send(kickedMessage);
+      target.close(RelayCloseCode.CLIENT_KICKED, "client kicked");
+    } catch (err) {
+      logger.warn({ err, clientId: targetClientId }, "Failed to close kicked client");
+      target.terminate();
+    } finally {
+      registry.removeClientWs(target);
+      registry.unbindClientById(targetClientId);
+    }
+  }
+
+  clientWs.send(
+    JSON.stringify({
+      type: "relay_client_kick_response",
+      requestId,
+      clientId: targetClientId,
+      success: true,
+    }),
+  );
+  logger.info(
+    { byClientId: clientWs.clientId, targetClientId, targetCount: targets.length },
+    "Relay client kicked",
+  );
 }
 
 function rejectNotBound(ws: ClientSocket): void {
@@ -128,10 +216,11 @@ export function handleClientConnection(
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
+  connectionInfo: ClientConnectionInfo = {},
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
-  registry.addClientWs(clientWs);
+  registry.addClientWs(clientWs, connectionInfo);
 
   clientWs.on("pong", () => {
     clientWs.isAlive = true;
@@ -163,6 +252,16 @@ export function handleClientConnection(
 
       if (msg.type === "client_register") {
         handleClientRegister(msg.clientId, clientWs, registry, logger);
+        return;
+      }
+
+      if (msg.type === "relay_client_list_request") {
+        handleRelayClientListRequest(clientWs, registry, msg.requestId);
+        return;
+      }
+
+      if (msg.type === "relay_client_kick") {
+        handleRelayClientKick(clientWs, registry, logger, msg.requestId, msg.clientId);
         return;
       }
 

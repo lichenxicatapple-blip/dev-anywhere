@@ -15,6 +15,7 @@ import {
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
+  normalizePtySemanticText,
 } from "../common/osc-extractor.js";
 import { shouldReleaseTextApprovalOnInput } from "../common/pty-approval-state.js";
 import { decidePtySemanticTransition } from "../common/pty-semantic-machine.js";
@@ -290,11 +291,13 @@ export class HostedPtyRegistry {
     hosted.startupOutput = appendStartupOutput(hosted.startupOutput, data);
     hosted.terminal.write(data);
     this.deps.touchSessionActivity(sessionId);
+    this.deps.applyPtyStateToSession(sessionId, "working");
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
     const oscSequences = extractOscSequences(data);
     const session = this.deps.sessionManager.getSession(sessionId);
     const oscSignal = extractOscSignals(data, session?.provider);
+    const hasTextActivity = normalizePtySemanticText(data).length > 0;
     hosted.semanticTextTail = appendPtySemanticTextTail(hosted.semanticTextTail, data);
     const textSignal = oscSignal
       ? null
@@ -325,6 +328,7 @@ export class HostedPtyRegistry {
       signal: signal ?? null,
       sessionStateIsWaitingApproval: session?.state === SessionState.WAITING_APPROVAL,
       allowTitleOnlyApprovalRelease: !hosted.textApprovalWaitActive,
+      hasTextActivity,
     });
     hosted.currentState = decision.nextState;
     if (decision.nextState !== "approval_wait") {

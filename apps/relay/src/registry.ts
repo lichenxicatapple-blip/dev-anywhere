@@ -31,11 +31,18 @@ interface ClientBinding {
   connectionState: ClientConnectionState;
 }
 
+interface ClientConnectionMetadata {
+  clientId?: string;
+  connectedAt: number;
+  userAgent?: string;
+  remoteAddress?: string;
+}
+
 // 代理注册、客户端绑定、宽限期管理
 export class RelayRegistry {
   private proxyStates = new Map<string, ProxyState>();
   private clientBindings = new Map<string, ClientBinding>();
-  private connectedClients = new Set<WebSocket>();
+  private connectedClients = new Map<WebSocket, ClientConnectionMetadata>();
 
   registerProxy(proxyId: string, ws: WebSocket, name?: string): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
@@ -224,8 +231,27 @@ export class RelayRegistry {
     return count;
   }
 
-  addClientWs(ws: WebSocket): void {
-    this.connectedClients.add(ws);
+  addClientWs(
+    ws: WebSocket,
+    metadata: Partial<Omit<ClientConnectionMetadata, "connectedAt">> & {
+      connectedAt?: number;
+    } = {},
+  ): void {
+    this.connectedClients.set(ws, {
+      connectedAt: metadata.connectedAt ?? Date.now(),
+      ...(metadata.clientId !== undefined ? { clientId: metadata.clientId } : {}),
+      ...(metadata.userAgent !== undefined ? { userAgent: metadata.userAgent } : {}),
+      ...(metadata.remoteAddress !== undefined ? { remoteAddress: metadata.remoteAddress } : {}),
+    });
+  }
+
+  updateConnectedClientId(ws: WebSocket, clientId: string): void {
+    const metadata = this.connectedClients.get(ws);
+    if (metadata) {
+      metadata.clientId = clientId;
+      return;
+    }
+    this.addClientWs(ws, { clientId });
   }
 
   removeClientWs(ws: WebSocket): void {
@@ -234,12 +260,22 @@ export class RelayRegistry {
 
   getAllClientWs(): WebSocket[] {
     const clients: WebSocket[] = [];
-    for (const ws of this.connectedClients) {
+    for (const ws of this.connectedClients.keys()) {
       if (ws.readyState === WebSocket.OPEN) {
         clients.push(ws);
       }
     }
     return clients;
+  }
+
+  getConnectedClientSockets(clientId: string): WebSocket[] {
+    const sockets: WebSocket[] = [];
+    for (const [ws, metadata] of this.connectedClients) {
+      if (metadata.clientId === clientId && ws.readyState === WebSocket.OPEN) {
+        sockets.push(ws);
+      }
+    }
+    return sockets;
   }
 
   // 获取单个 proxy 的详细状态信息
@@ -287,6 +323,37 @@ export class RelayRegistry {
           binding.ws !== undefined &&
           binding.ws.readyState === WebSocket.OPEN,
         connectionState: binding.connectionState,
+      });
+    }
+    return details;
+  }
+
+  getConnectedClientDetails(currentClientId?: string): Array<{
+    clientId: string;
+    proxyId?: string;
+    connectedAt: number;
+    current?: boolean;
+    userAgent?: string;
+    remoteAddress?: string;
+  }> {
+    const details: Array<{
+      clientId: string;
+      proxyId?: string;
+      connectedAt: number;
+      current?: boolean;
+      userAgent?: string;
+      remoteAddress?: string;
+    }> = [];
+    for (const [ws, metadata] of this.connectedClients) {
+      if (ws.readyState !== WebSocket.OPEN || !metadata.clientId) continue;
+      const binding = this.clientBindings.get(metadata.clientId);
+      details.push({
+        clientId: metadata.clientId,
+        ...(binding?.proxyId !== undefined ? { proxyId: binding.proxyId } : {}),
+        connectedAt: metadata.connectedAt,
+        ...(metadata.clientId === currentClientId ? { current: true } : {}),
+        ...(metadata.userAgent !== undefined ? { userAgent: metadata.userAgent } : {}),
+        ...(metadata.remoteAddress !== undefined ? { remoteAddress: metadata.remoteAddress } : {}),
       });
     }
     return details;

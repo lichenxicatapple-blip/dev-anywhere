@@ -48,6 +48,7 @@ interface PointerHandlers {
 interface SelectionScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
+  markHorizontalScrollIntent: (reason?: string) => void;
 }
 
 interface UsePtySelectionControllerOptions {
@@ -592,6 +593,8 @@ export function usePtySelectionController(
     onLongPressStart: handlePtyLongPressStart,
     onLongPressMove: handlePtyLongPressMove,
     onLongPressEnd: handlePtyLongPressEnd,
+    onHorizontalScrollIntent: (reason) =>
+      scrollControllerRef.current?.markHorizontalScrollIntent(reason),
     onHandleDragStart: handlePtySelectionHandleDragStart,
     onHandleDragMove: handlePtySelectionHandleDragMove,
     onHandleDragEnd: handlePtySelectionHandleDragEnd,

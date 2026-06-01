@@ -74,11 +74,14 @@ describe("applyPtyStateToSession", () => {
     });
 
     it("WORKING session → guard 拦截（已经在 WORKING）", () => {
+      const getPendingApprovalCount = vi.fn().mockReturnValue(0);
       const deps = makeDeps({
         getSession: vi.fn().mockReturnValue(makeSession(SessionState.WORKING)),
+        getPendingApprovalCount,
       });
       applyPtyStateToSession(deps, "s1", "working");
       expect(deps.changeSessionState).not.toHaveBeenCalled();
+      expect(getPendingApprovalCount).not.toHaveBeenCalled();
     });
 
     it("TERMINATED / ERROR session → guard 拦截", () => {

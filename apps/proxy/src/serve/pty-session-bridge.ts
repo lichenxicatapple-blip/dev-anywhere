@@ -40,6 +40,12 @@ export function applyPtyStateToSession(
       deps.changeSessionState(sessionId, SessionState.WAITING_APPROVAL);
       break;
     case "working": {
+      if (
+        session.state !== SessionState.IDLE &&
+        session.state !== SessionState.WAITING_APPROVAL
+      ) {
+        break;
+      }
       const pending = deps.getPendingApprovalCount(sessionId);
       if (shouldPromotePtyActivityToWorking(session, pending)) {
         deps.changeSessionState(sessionId, SessionState.WORKING);

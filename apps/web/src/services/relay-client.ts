@@ -9,6 +9,7 @@ import type {
   FileTreeGroup,
   HistorySession,
   MessageEnvelope,
+  RelayClientInfo,
   RelayControlMessage,
   VoiceConfigUpdate,
   VoiceCapabilities,
@@ -27,6 +28,12 @@ type ProxyInfoResult = Array<{
   online: boolean;
   sessions?: string[];
 }>;
+type RelayClientListResult = RelayClientInfo[];
+type RelayClientKickResponse = Extract<RelayControlMessage, { type: "relay_client_kick_response" }>;
+type RelayClientKickResult = {
+  clientId: string;
+  success: boolean;
+} & RequestError;
 type SessionHistoryMessage = Extract<
   RelayControlMessage,
   { type: "session_history_messages" }
@@ -209,6 +216,45 @@ export class RelayClient {
       timeoutMs,
       requestId,
     ).then((msg) => msg.proxies as ProxyInfoResult);
+  }
+
+  requestRelayClients(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<RelayClientListResult> {
+    const requestId = nextRequestId("relay-clients");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "relay_client_list_response" }> =>
+        msg.type === "relay_client_list_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "relay_client_list_request", requestId })),
+      "读取客户端列表超时",
+      timeoutMs,
+      requestId,
+    ).then((msg) => msg.clients);
+  }
+
+  kickRelayClient(
+    clientId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<RelayClientKickResult> {
+    const requestId = nextRequestId("relay-client-kick");
+    return this.waitForMessage(
+      (msg): msg is RelayClientKickResponse =>
+        msg.type === "relay_client_kick_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "relay_client_kick",
+            requestId,
+            clientId,
+          }),
+        ),
+      "断开客户端超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      clientId: resp.clientId,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
   }
 
   // 选择并绑定一个代理，返回 Promise 等待 proxy_select_response ACK

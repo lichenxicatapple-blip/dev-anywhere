@@ -296,6 +296,46 @@ describe("RelayRegistry", () => {
     });
   });
 
+  describe("connected client details", () => {
+    it("lists registered connected clients including metadata and current marker", () => {
+      const clientWs = createMockWs();
+      registry.addClientWs(clientWs, {
+        connectedAt: 1760000000000,
+        userAgent: "Safari",
+        remoteAddress: "127.0.0.1",
+      });
+      registry.updateConnectedClientId(clientWs, "c1");
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", clientWs);
+
+      expect(registry.getConnectedClientDetails("c1")).toEqual([
+        {
+          clientId: "c1",
+          proxyId: "p1",
+          connectedAt: 1760000000000,
+          current: true,
+          userAgent: "Safari",
+          remoteAddress: "127.0.0.1",
+        },
+      ]);
+    });
+
+    it("does not list unregistered or closed client sockets", () => {
+      registry.addClientWs(createMockWs());
+      registry.addClientWs(createMockWs(WebSocket.CLOSED), { clientId: "closed-client" });
+
+      expect(registry.getConnectedClientDetails()).toEqual([]);
+    });
+
+    it("returns open sockets for a connected client id", () => {
+      const clientWs = createMockWs();
+      registry.addClientWs(clientWs, { clientId: "c1" });
+      registry.addClientWs(createMockWs(WebSocket.CLOSED), { clientId: "c1" });
+
+      expect(registry.getConnectedClientSockets("c1")).toEqual([clientWs]);
+    });
+  });
+
   describe("state transitions", () => {
     describe("proxy connection state", () => {
       it("getProxyConnectionState returns 'online' after registration", () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachPtyDragSelectAutoscroll,
   type DragSelectDebugSnapshot,
@@ -15,6 +15,7 @@ interface Harness {
   pendingFrame: (() => void) | null;
   flushFrame: () => void;
   getSnapshot: () => DragSelectDebugSnapshot;
+  onHorizontalScrollIntent: ReturnType<typeof vi.fn<(reason: string) => void>>;
   dispose: () => void;
 }
 
@@ -57,10 +58,12 @@ function createHarness(opts: {
   const cancelFrame = (): void => {
     pendingFrame = null;
   };
+  const onHorizontalScrollIntent = vi.fn<(reason: string) => void>();
 
   const handle = attachPtyDragSelectAutoscroll({
     container,
     host,
+    onHorizontalScrollIntent,
     requestFrame,
     cancelFrame,
   });
@@ -82,6 +85,7 @@ function createHarness(opts: {
       fn?.();
     },
     getSnapshot: handle.getDebugSnapshot,
+    onHorizontalScrollIntent,
     dispose() {
       handle.dispose();
       container.remove();
@@ -135,6 +139,9 @@ describe("pty drag-select autoscroll", () => {
     pointerMove({ x: 790, y: 200 }); // 10px from right edge → inside 28px zone
     h.flushFrame();
     expect(h.container.scrollLeft).toBeGreaterThan(0);
+    expect(h.onHorizontalScrollIntent).toHaveBeenCalledWith(
+      expect.stringContaining("dragSelectAutoscroll"),
+    );
   });
 
   it("scrolls left when mouse drag enters the left edge zone (cursor returned to col 0)", () => {

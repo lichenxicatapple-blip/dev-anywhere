@@ -83,6 +83,7 @@ export { isCompactCommandText } from "./slash-commands.js";
 // relay control
 export {
   ProxyInfoSchema,
+  RelayClientInfoSchema,
   AgentCliAvailabilitySchema,
   AgentCliStatusSchema,
   DirEntrySchema,
@@ -97,6 +98,7 @@ export {
 } from "./schemas/relay-control.js";
 export type {
   ProxyInfo,
+  RelayClientInfo,
   AgentCliAvailability,
   AgentCliStatus,
   DirEntry,
@@ -124,6 +126,7 @@ export type { ControlErrorCode as ControlErrorCodeType } from "./constants/contr
 export { providerValues, ptyOwnerValues, sessionModeValues } from "./constants/enums.js";
 export type { ProviderId, PtyOwner, SessionMode } from "./constants/enums.js";
 export { PtySemanticState, ptySemanticStateValues } from "./constants/pty.js";
+export { RelayCloseCode } from "./constants/relay-close-codes.js";
 
 // logger 不在主入口导出: 它依赖 node:fs / node:os, 会被 vite 当作浏览器模块拉进 web bundle
 // 让整个 web 启动崩。Node 端从 "@dev-anywhere/shared/logger" 子路径导入。

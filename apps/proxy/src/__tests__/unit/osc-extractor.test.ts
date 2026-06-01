@@ -116,6 +116,12 @@ describe("extractOscSignals", () => {
     expect(text).not.toContain("\x1b");
   });
 
+  it("strips title-only OSC while preserving visible terminal output", () => {
+    const text = normalizePtySemanticText("\x1b]0;codex\x07Running tests...\r\n");
+
+    expect(text).toBe("Running tests...");
+  });
+
   it("returns approval_wait for Claude hook command confirmation text", () => {
     const text = [
       "Hook PreToolUse:Bash requires confirmation for this command. [settings]",

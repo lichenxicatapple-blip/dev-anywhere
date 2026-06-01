@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const {
   playerEnqueue,
   playerStop,
+  kickRelayClient,
+  requestRelayClients,
   requestVoiceCapabilities,
   requestVoiceConfig,
   reconnectRelayClient,
@@ -12,6 +14,8 @@ const {
 } = vi.hoisted(() => ({
   playerEnqueue: vi.fn(),
   playerStop: vi.fn(),
+  kickRelayClient: vi.fn(),
+  requestRelayClients: vi.fn(),
   requestVoiceCapabilities: vi.fn(),
   requestVoiceConfig: vi.fn(),
   reconnectRelayClient: vi.fn(),
@@ -21,6 +25,8 @@ const {
 
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {
+    kickRelayClient,
+    requestRelayClients,
     requestVoiceCapabilities,
     requestVoiceConfig,
     testVoiceConfig,
@@ -61,6 +67,27 @@ describe("SettingsDialog", () => {
     });
     playerEnqueue.mockReset();
     playerStop.mockReset();
+    requestRelayClients.mockReset();
+    requestRelayClients.mockResolvedValue([
+      {
+        clientId: "current-client",
+        connectedAt: Date.now() - 60_000,
+        current: true,
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        remoteAddress: "127.0.0.1",
+      },
+      {
+        clientId: "other-client",
+        proxyId: "proxy-1",
+        connectedAt: Date.now() - 120_000,
+        userAgent:
+          "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        remoteAddress: "192.168.1.23",
+      },
+    ]);
+    kickRelayClient.mockReset();
+    kickRelayClient.mockResolvedValue({ clientId: "other-client", success: true });
     requestVoiceCapabilities.mockReset();
     requestVoiceCapabilities.mockResolvedValue({
       capabilities: {
@@ -162,8 +189,31 @@ describe("SettingsDialog", () => {
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Voice Pilot用语音输入、听取回复和处理审批",
       "Relay Token未设置；用于连接需要认证的 Relay 服务器",
+      "客户端管理已连接的浏览器页面和设备",
       "版本",
     ]);
+  });
+
+  it("lists connected relay clients and can disconnect another client", async () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "客户端管理" }));
+
+    expect(await screen.findByRole("heading", { name: "客户端管理" })).not.toBeNull();
+    await waitFor(() => expect(requestRelayClients).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("2 个在线客户端")).not.toBeNull();
+    expect(screen.getByText("当前设备")).not.toBeNull();
+    expect(screen.getByText("current-client")).not.toBeNull();
+    expect(screen.getByText("other-client")).not.toBeNull();
+    expect(screen.getByText("开发机 proxy-1")).not.toBeNull();
+
+    const buttons = screen.getAllByRole("button", { name: "断开" });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]!);
+
+    await waitFor(() => expect(kickRelayClient).toHaveBeenCalledWith("other-client"));
+    await waitFor(() => expect(screen.queryByText("other-client")).toBeNull());
+    expect(screen.getByText("current-client")).not.toBeNull();
   });
 
   it("persists theme preference while keeping auto as the default", () => {

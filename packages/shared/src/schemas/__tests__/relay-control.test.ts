@@ -373,6 +373,37 @@ describe("RelayControlSchema", () => {
     expect(() => RelayControlSchema.parse({ type: "client_register", clientId: "" })).toThrow();
   });
 
+  it("accepts relay client management messages", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "relay_client_list_response",
+        requestId: "clients-1",
+        clients: [
+          {
+            clientId: "client-1",
+            proxyId: "proxy-1",
+            connectedAt: 1760000000000,
+            current: true,
+            userAgent: "Safari",
+            remoteAddress: "127.0.0.1",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      type: "relay_client_list_response",
+      clients: [{ clientId: "client-1", current: true }],
+    });
+    expect(
+      RelayControlSchema.parse({
+        type: "relay_client_kick",
+        requestId: "kick-1",
+        clientId: "client-2",
+      }),
+    ).toMatchObject({ type: "relay_client_kick", clientId: "client-2" });
+    expect(isClientToProxyRelayControlType("relay_client_kick")).toBe(false);
+    expect(isProxyToClientRelayControlType("relay_client_kicked")).toBe(false);
+  });
+
   it("rejects client_register_response with unknown status", () => {
     expect(() =>
       RelayControlSchema.parse({ type: "client_register_response", status: "invalid" }),

@@ -6,7 +6,7 @@ import { decidePtySemanticTransition } from "#src/common/pty-semantic-machine.js
 // 规则 2: currentState=approval_wait + signal.state!=approval_wait → stateAfterApprovalRelease, emit=true
 //          signal.state===null（title-only）也走这条 → turn_complete（codex cancel 语义）
 // 规则 3: 审批上下文 + signal.state!=turn_complete → 维持 approval_wait, emit=true
-// 规则 4: title-only signal（非审批上下文）→ 维持 currentState, emit=false
+// 规则 4: 纯 title-only signal（非审批上下文）→ 维持 currentState, emit=false
 // 规则 5: signal.state ∈ {turn_complete} → signal.state, emit=true
 // 规则 6: currentState!=working + 无显式 working signal → 推到 working, emit=true
 // 规则 7: currentState=working + 无信号 → 不变，emit=false
@@ -124,6 +124,24 @@ describe("decidePtySemanticTransition", () => {
         signal: { state: null, title: "fresh title" },
       });
       expect(r).toEqual({ nextState: "turn_complete", emit: false });
+    });
+
+    it("turn_complete + title-only signal + 可见文本 → working", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "turn_complete",
+        signal: { state: null, title: "codex" },
+        hasTextActivity: true,
+      });
+      expect(r).toEqual({ nextState: "working", emit: true });
+    });
+
+    it("working + title-only signal + 可见文本 → 不重复 emit", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "working",
+        signal: { state: null, title: "codex" },
+        hasTextActivity: true,
+      });
+      expect(r).toEqual({ nextState: "working", emit: false });
     });
   });
 

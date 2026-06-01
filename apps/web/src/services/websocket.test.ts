@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RelayCloseCode } from "@dev-anywhere/shared";
 import { WebSocketManager } from "./websocket";
 
 class FakeWebSocket extends EventTarget {
@@ -23,6 +24,13 @@ class FakeWebSocket extends EventTarget {
   close(): void {
     this.readyState = FakeWebSocket.CLOSED;
     this.dispatchEvent(new Event("close"));
+  }
+
+  closeWithCode(code: number): void {
+    this.readyState = FakeWebSocket.CLOSED;
+    const event = new Event("close") as Event & { code: number };
+    Object.defineProperty(event, "code", { value: code });
+    this.dispatchEvent(event);
   }
 
   open(): void {
@@ -119,6 +127,21 @@ describe("WebSocketManager", () => {
     expect(ws1.readyState).toBe(FakeWebSocket.CONNECTING);
 
     manager.close();
+  });
+
+  it("does not reconnect after the relay kicks this client", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    const ws = sockets[0]!;
+    ws.open();
+
+    ws.closeWithCode(RelayCloseCode.CLIENT_KICKED);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(manager.isConnected()).toBe(false);
   });
 
   it("removes wake listeners on close so document/window do not retain the manager", () => {

@@ -22,6 +22,16 @@ export const ProxyInfoSchema = z.object({
 });
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
+export const RelayClientInfoSchema = z.object({
+  clientId: IdSchema,
+  proxyId: IdSchema.optional(),
+  connectedAt: z.number().int().nonnegative(),
+  current: z.boolean().optional(),
+  userAgent: z.string().optional(),
+  remoteAddress: z.string().optional(),
+});
+export type RelayClientInfo = z.infer<typeof RelayClientInfoSchema>;
+
 export const AgentCliAvailabilitySchema = z.object({
   available: z.boolean(),
   command: z.string().optional(),
@@ -128,6 +138,21 @@ const relayControlDefinitions = [
   control("proxy_list_response", {
     ...RequestIdShape,
     proxies: z.array(ProxyInfoSchema),
+  }),
+  control("relay_client_list_request", RequestIdShape),
+  control("relay_client_list_response", {
+    ...RequestIdShape,
+    clients: z.array(RelayClientInfoSchema),
+  }),
+  control("relay_client_kick", { ...RequiredRequestIdShape, clientId: IdSchema }),
+  control("relay_client_kick_response", {
+    ...RequiredRequestIdShape,
+    clientId: IdSchema,
+    success: z.boolean(),
+    ...RequestErrorShape,
+  }),
+  control("relay_client_kicked", {
+    reason: z.string().optional(),
   }),
   control("proxy_select", { ...RequestIdShape, proxyId: IdSchema }),
   control("proxy_select_response", {
