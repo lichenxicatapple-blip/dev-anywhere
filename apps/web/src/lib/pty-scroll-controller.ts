@@ -736,7 +736,9 @@ export function attachPtyScrollController(
       effectiveScrollTop <= atBottomThreshold && gestureBaseScrollTop > container.clientHeight;
     const hostTop = parseFloat(host.style.top || "0");
     const anchor = getCurrentAnchor();
+    const hostTopRestoreEligible = touchHandler.getState().startedAtCursorAwareBottom;
     const jumpedToHostTop =
+      hostTopRestoreEligible &&
       Number.isFinite(hostTop) &&
       Math.abs(effectiveScrollTop - hostTop) <= atBottomThreshold &&
       Math.abs(anchor.bottomScrollTop - hostTop) <= container.clientHeight + atBottomThreshold &&

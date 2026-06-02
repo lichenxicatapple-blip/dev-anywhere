@@ -208,7 +208,9 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("当前设备")).not.toBeNull();
     expect(document.querySelector('[data-client-id="current-client"]')).not.toBeNull();
     expect(document.querySelector('[data-client-id="other-client"]')).not.toBeNull();
-    expect(screen.getByText("开发机 Work Mac")).not.toBeNull();
+    expect(screen.getByText("开发机")).not.toBeNull();
+    expect(screen.getByText("Work Mac")).not.toBeNull();
+    expect(screen.queryByText("开发机 Work Mac")).toBeNull();
 
     const buttons = screen.getAllByRole("button", { name: "断开" });
     expect(buttons).toHaveLength(1);

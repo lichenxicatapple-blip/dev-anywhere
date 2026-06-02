@@ -559,9 +559,9 @@ function formatClientId(clientId: string): string {
   return `${clientId.slice(0, 8)}...${clientId.slice(-4)}`;
 }
 
-function formatProxyLabel(proxyId: string, proxyNameById: Map<string, string>): string {
+function formatProxyName(proxyId: string, proxyNameById: Map<string, string>): string {
   const name = proxyNameById.get(proxyId)?.trim();
-  return `开发机 ${name || formatClientId(proxyId)}`;
+  return name || formatClientId(proxyId);
 }
 
 function summarizeUserAgent(userAgent: string | undefined): string {
@@ -733,7 +733,7 @@ function RelayClientsPanel() {
                   {client.proxyId ? (
                     <RelayClientDetailRow
                       label="开发机"
-                      value={formatProxyLabel(client.proxyId, proxyNameById)}
+                      value={formatProxyName(client.proxyId, proxyNameById)}
                       title={client.proxyId}
                     />
                   ) : null}

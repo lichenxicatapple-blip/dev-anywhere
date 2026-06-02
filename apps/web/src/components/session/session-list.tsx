@@ -469,7 +469,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
           onSelect={handleCreateAgent}
         >
           <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-          新建 Agent 会话
+          Agent 会话
         </DropdownMenuItem>
         <DropdownMenuItem
           className="min-h-9 gap-2.5"
@@ -478,7 +478,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
           onSelect={handleCreateTerminal}
         >
           <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-          {creatingTerminal ? "正在创建终端会话..." : "新建终端会话"}
+          {creatingTerminal ? "正在创建终端会话..." : "终端会话"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -537,7 +537,7 @@ function CreateSessionTypeSheet({
             onClick={onCreateAgent}
           >
             <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-            新建 Agent 会话
+            Agent 会话
           </Button>
           <Button
             type="button"
@@ -548,7 +548,7 @@ function CreateSessionTypeSheet({
             onClick={onCreateTerminal}
           >
             <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-            {creatingTerminal ? "正在创建终端会话..." : "新建终端会话"}
+            {creatingTerminal ? "正在创建终端会话..." : "终端会话"}
           </Button>
         </div>
       </SheetContent>

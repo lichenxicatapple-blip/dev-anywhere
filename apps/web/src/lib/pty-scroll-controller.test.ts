@@ -1373,6 +1373,58 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
 
+  it("does not restore a host-top-adjacent native touch scroll while reviewing", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "50px";
+    defineSize(container, { clientHeight: 651, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 58,
+    });
+    defineScrollWidth(container, 1456);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 720, clientWidth: 1432 });
+    const { terminal, emitRender } = createTerminal({ 5033: "review prompt" });
+    terminal.rows = 36;
+    terminal.cols = 179;
+    terminal.buffer.active.length = 5036;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 33;
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBe(100127);
+
+    container.scrollTop = 99919;
+    container.dispatchEvent(new Event("scroll"));
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(true);
+    expect(host.style.top).toBe("99900px");
+
+    container.dispatchEvent(touchEvent("touchstart", 355));
+    container.scrollTop = 99897;
+    container.dispatchEvent(new Event("scroll"));
+    emitRender();
+    expect(host.style.top).toBe("99880px");
+
+    container.dispatchEvent(touchEvent("touchmove", 468));
+    terminal.scrollToLine.mockClear();
+    container.scrollTop = 99884;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(container.scrollTop).toBe(99884);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
   it("does not restore tiny host-top-adjacent deltas at cursor-aware bottom", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "prompt" });
