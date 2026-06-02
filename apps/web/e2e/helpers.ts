@@ -979,6 +979,18 @@ export async function selectFakeProxy(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
+export async function openCreateAgentSessionDialog(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await page.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
+    await page.locator('[data-slot="create-agent-session-sheet-item"]').click();
+  } else {
+    await page.locator('[data-slot="create-session-trigger"]:visible').last().click();
+  }
+  const dialog = page.locator('[data-slot="create-session-dialog"]');
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 export async function gotoWithFakeProxy(page: Page, path: string): Promise<void> {
   await selectFakeProxy(page);
   await page.goto(`${BASE_URL}${path}`);

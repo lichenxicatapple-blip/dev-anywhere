@@ -6,7 +6,7 @@
 //
 // 历史会话区 (HistoryList) 渲染在活跃列表下方, 即使无活跃会话但有历史时也可见,
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
 import { Bot, ChevronDown, ChevronRight, Loader2, Plus, Terminal } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
@@ -404,10 +404,14 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const { creatingTerminal, createTerminal } = useTerminalCreator();
 
+  function showMissingProxyTip() {
+    setTipOpen(true);
+    window.setTimeout(() => setTipOpen(false), 2000);
+  }
+
   function handleCreateAgent() {
     if (!hasProxy) {
-      setTipOpen(true);
-      window.setTimeout(() => setTipOpen(false), 2000);
+      showMissingProxyTip();
       return;
     }
     setOpen(true);
@@ -415,11 +419,15 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
 
   function handleCreateTerminal() {
     if (!hasProxy) {
-      setTipOpen(true);
-      window.setTimeout(() => setTipOpen(false), 2000);
+      showMissingProxyTip();
       return;
     }
     void createTerminal();
+  }
+
+  function handleBlockedTrigger(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    showMissingProxyTip();
   }
 
   const compactButton = (
@@ -432,75 +440,78 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
       )}
       aria-label="新建会话"
       aria-disabled={!hasProxy}
-      onClick={handleCreateAgent}
+      onClick={!hasProxy ? handleBlockedTrigger : undefined}
     >
       <Plus aria-hidden="true" />
     </Button>
   );
 
-  const expandedButton = (
-    <div className="flex h-[46px] w-full min-w-0" data-slot="create-session-split-trigger">
+  const expandedActions = (
+    <div className="grid min-w-0 grid-cols-2 gap-2" data-slot="create-session-actions">
       <Button
         variant="outline"
         data-slot="create-session-trigger"
         className={cn(
-          "h-[46px] min-w-0 flex-1 justify-start gap-2 rounded-r-none border-border",
+          "h-[46px] min-w-0 justify-center gap-2 border-border px-3",
           !hasProxy && "opacity-50 hover:bg-background",
         )}
+        aria-label="新建 Agent 会话"
         aria-disabled={!hasProxy}
         onClick={handleCreateAgent}
       >
-        <Plus aria-hidden="true" />
-        新建会话
+        <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
+        <span className="truncate">Agent</span>
       </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            className={cn(
-              "h-[46px] w-10 shrink-0 rounded-l-none border-l-0 border-border px-0",
-              !hasProxy && "opacity-50 hover:bg-background",
-            )}
-            aria-label="选择新建类型"
-            aria-disabled={!hasProxy}
-            onClick={(event) => {
-              if (hasProxy) return;
-              event.preventDefault();
-              setTipOpen(true);
-              window.setTimeout(() => setTipOpen(false), 2000);
-            }}
-          >
-            <ChevronDown className="size-4" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44" data-slot="create-session-type-menu">
-          <DropdownMenuItem
-            className="min-h-9 gap-2.5"
-            data-slot="create-agent-session-item"
-            onSelect={handleCreateAgent}
-          >
-            <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-            Agent 会话
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="min-h-9 gap-2.5"
-            data-slot="create-terminal-session-item"
-            disabled={creatingTerminal}
-            onSelect={handleCreateTerminal}
-          >
-            <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-            {creatingTerminal ? "正在创建终端..." : "终端"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Button
+        variant="outline"
+        data-slot="create-terminal-session-trigger"
+        className={cn(
+          "h-[46px] min-w-0 justify-center gap-2 border-border px-3",
+          !hasProxy && "opacity-50 hover:bg-background",
+        )}
+        aria-label="新建终端"
+        aria-disabled={!hasProxy}
+        disabled={hasProxy && creatingTerminal}
+        onClick={handleCreateTerminal}
+      >
+        <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+        <span className="truncate">{creatingTerminal ? "创建中" : "终端"}</span>
+      </Button>
     </div>
   );
 
-  const button = compact ? compactButton : expandedButton;
+  const compactMenuButton = hasProxy ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{compactButton}</DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44" data-slot="create-session-type-menu">
+        <DropdownMenuItem
+          className="min-h-9 gap-2.5"
+          data-slot="create-agent-session-item"
+          onSelect={handleCreateAgent}
+        >
+          <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
+          Agent 会话
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-9 gap-2.5"
+          data-slot="create-terminal-session-item"
+          disabled={creatingTerminal}
+          onSelect={handleCreateTerminal}
+        >
+          <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+          {creatingTerminal ? "正在创建终端..." : "终端"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : (
+    compactButton
+  );
+
+  const button = compact ? compactMenuButton : expandedActions;
 
   return (
     <>
-      {hasProxy && !compact ? (
+      {hasProxy ? (
         button
       ) : (
         <Tooltip

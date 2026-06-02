@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openCreateAgentSessionDialog } from "../../../helpers";
 
 const expectRelayDown = process.env.DEV_ANYWHERE_EXPECT_RELAY_DOWN === "1";
 
@@ -32,8 +33,7 @@ test.describe("real local chaos UI", () => {
       page.locator('[data-slot="session-row"]:visible, [data-slot="active-empty"]:visible').first(),
     ).toBeVisible({ timeout: 15_000 });
 
-    await page.locator('button:has-text("新建会话"):visible').last().click();
-    await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+    await openCreateAgentSessionDialog(page);
 
     await page.getByLabel("工作目录").focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible({

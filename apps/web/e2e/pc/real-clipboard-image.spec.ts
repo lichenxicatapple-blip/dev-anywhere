@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { openCreateAgentSessionDialog } from "../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE === "1";
 const relayPort = "3100";
@@ -138,8 +139,7 @@ async function createSession(
   options: { mode: "json" | "pty"; provider?: "claude" | "codex"; cwd: string },
 ): Promise<string> {
   await selectFirstProxy(page);
-  await page.locator('button:has-text("新建会话"):visible').last().click();
-  await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+  await openCreateAgentSessionDialog(page);
   await page.getByLabel("工作目录").fill(options.cwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
 

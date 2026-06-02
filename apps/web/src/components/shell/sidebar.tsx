@@ -110,11 +110,11 @@ function SidebarSettingsButton({
           data-slot="sidebar-settings-trigger"
           onClick={onClick}
           className={cn(
-            "inline-flex items-center justify-center shrink-0 border border-border text-muted-foreground outline-none transition-[color,background-color,border-color,box-shadow]",
+            "inline-flex items-center justify-center shrink-0 border text-muted-foreground outline-none transition-[color,background-color,border-color,box-shadow]",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             compact
-              ? "h-11 w-11 rounded-md bg-card/70 hover:border-primary/60 hover:bg-accent hover:text-foreground"
-              : "h-[46px] w-[46px] rounded-md bg-background hover:bg-accent hover:text-foreground",
+              ? "h-11 w-11 rounded-md border-border bg-card/70 hover:border-primary/60 hover:bg-accent hover:text-foreground"
+              : "h-[46px] w-[46px] rounded-md border-transparent bg-transparent hover:border-border/70 hover:bg-accent hover:text-foreground",
           )}
         >
           <Settings className="size-4" aria-hidden="true" />

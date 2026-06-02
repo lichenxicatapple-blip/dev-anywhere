@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { installFakeRelay, selectFakeProxy } from "../helpers";
+import {
+  installFakeRelay,
+  openCreateAgentSessionDialog,
+  selectFakeProxy,
+} from "../helpers";
 import webPackage from "../../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;
@@ -13,7 +17,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
   });
 
   test("新建会话弹窗内容不会被长 CLI 路径撑出边框", async ({ page }) => {
-    await page.locator('button:has-text("新建会话"):visible').last().click();
+    await openCreateAgentSessionDialog(page);
 
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     const form = page.locator('[data-slot="create-session-form"]');
@@ -47,9 +51,10 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expectFormContained();
   });
 
-  test("桌面新建菜单可以创建纯终端", async ({ page }) => {
-    await page.getByRole("button", { name: "选择新建类型" }).click();
-    await page.getByRole("menuitem", { name: "终端" }).click();
+  test("桌面底部终端按钮可以创建纯终端", async ({ page }) => {
+    await expect(page.locator('[data-slot="create-session-split-trigger"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="create-session-type-menu"]')).toHaveCount(0);
+    await page.locator('[data-slot="create-terminal-session-trigger"]:visible').click();
 
     await expect(page).toHaveURL(/\/chat\/created-terminal-\d+\?mode=pty/);
     await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("终端 · ~");

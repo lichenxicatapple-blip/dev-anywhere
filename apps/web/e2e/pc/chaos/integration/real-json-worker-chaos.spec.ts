@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
+import { openCreateAgentSessionDialog } from "../../../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS === "1";
 const chaosRoot =
@@ -64,8 +65,7 @@ async function createJsonSession(page: Page, cwd: string): Promise<string> {
   await page.goto("/#/sessions");
   await selectFirstProxy(page);
 
-  await page.locator('button:has-text("新建会话"):visible').last().click();
-  await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+  await openCreateAgentSessionDialog(page);
   await page.getByLabel("工作目录").fill(cwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);

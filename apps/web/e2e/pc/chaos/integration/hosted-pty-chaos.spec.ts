@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openCreateAgentSessionDialog } from "../../../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS === "1";
 const chaosCwd =
@@ -32,8 +33,7 @@ test.describe("hosted PTY real chaos", () => {
     await page.goto("/#/sessions");
     await selectFirstProxy(page);
 
-    await page.locator('button:has-text("新建会话"):visible').last().click();
-    await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+    await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").fill(chaosCwd);
     if (provider === "codex") {
       await page.getByRole("button", { name: /Codex/ }).click();

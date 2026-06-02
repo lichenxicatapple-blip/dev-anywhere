@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { openCreateAgentSessionDialog } from "../helpers";
 
 type Provider = "claude" | "codex";
 
@@ -59,8 +60,7 @@ async function createHostedPtySession(
   await page.goto("/#/sessions");
   await selectFirstProxy(page);
 
-  await page.locator('button:has-text("新建会话"):visible').last().click();
-  await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+  await openCreateAgentSessionDialog(page);
   await page.getByLabel("工作目录").fill(smokeCwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
@@ -96,8 +96,7 @@ async function createJsonSession(
   await page.goto("/#/sessions");
   await selectFirstProxy(page);
 
-  await page.locator('button:has-text("新建会话"):visible').last().click();
-  await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+  await openCreateAgentSessionDialog(page);
   await page.getByLabel("工作目录").fill(smokeCwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);

@@ -1,5 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
+import {
+  installFakeRelay,
+  openCreateAgentSessionDialog,
+  selectFakeProxy,
+  sentFakeRelayMessages,
+} from "../helpers";
 
 async function terminateSessionFromList(page: Page, sessionId: string): Promise<void> {
   await page.goto(`${page.url().split("#")[0]}#/sessions`);
@@ -45,8 +50,7 @@ test.describe("functional browser walkthrough", () => {
       page.locator('[data-slot="history-row"][data-session-id="hist-claude-1"]:visible'),
     ).toBeVisible();
 
-    await page.locator('button:has-text("新建会话"):visible').last().click();
-    await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+    await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible();
     await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
@@ -184,7 +188,7 @@ test.describe("functional browser walkthrough", () => {
 
   test("creating a session can create a child directory before launch", async ({ page }) => {
     await selectFakeProxy(page);
-    await page.locator('button:has-text("新建会话"):visible').last().click();
+    await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").fill("/home/dev");
     await page.locator('[data-slot="file-path-picker"] button:has-text("新建目录")').click();
     await page.getByPlaceholder("目录名称").fill("new-project-e2e");

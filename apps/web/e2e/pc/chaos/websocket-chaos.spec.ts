@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../../helpers";
+import {
+  BASE_URL,
+  installFakeRelay,
+  openCreateAgentSessionDialog,
+  selectFakeProxy,
+  sentFakeRelayMessages,
+} from "../../helpers";
 import { expectPtyAtBottom, ptyTerminal, readPtyScrollMetrics } from "../../pty-scroll-helpers";
 
 async function holdNextConnectionAndDropSocket(
@@ -306,8 +312,7 @@ test.describe("WebSocket reconnect chaos", () => {
       );
     }
     await selectFakeProxy(page);
-    await page.getByRole("button", { name: "新建会话" }).first().click();
-    await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible();
+    await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
 
     await holdNextConnectionAndDropSocket(page);

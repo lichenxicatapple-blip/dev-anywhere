@@ -20,6 +20,10 @@ function isLocalTerminalPty(session: SessionInfo | null): boolean {
   return session?.mode === "pty" && session.ptyOwner === "local-terminal";
 }
 
+function isPureTerminalSession(session: SessionInfo | null): boolean {
+  return session?.kind === "terminal";
+}
+
 export function sessionTerminationCopy(session: SessionInfo | null): {
   title: string;
   description: string;
@@ -33,6 +37,16 @@ export function sessionTerminationCopy(session: SessionInfo | null): {
         "这只会断开当前页面和本地终端的连接，本地终端里的 Claude/Codex 会继续运行。重新接入前，页面不能继续查看或输入这个会话。",
       confirmLabel: "断开远程连接",
       destructive: false,
+    };
+  }
+
+  if (isPureTerminalSession(session)) {
+    return {
+      title: "终止终端？",
+      description:
+        "这会停止当前终端进程，并清理这个终端会话的运行状态。终止后不能继续输入，也无法恢复正在执行的命令。",
+      confirmLabel: "终止终端",
+      destructive: true,
     };
   }
 
