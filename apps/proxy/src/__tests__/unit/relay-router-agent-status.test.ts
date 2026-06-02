@@ -31,6 +31,7 @@ describe("RelayRouter agent_status_request", () => {
       relaySend: options.relaySend,
       terminalSockets: new Map(),
       hostedPtyRegistry: {} as never,
+      terminalWorkerSpawner: {} as never,
       broadcastSessionList: () => {},
       broadcastSessionSync: () => {},
       jsonObserver: {} as never,

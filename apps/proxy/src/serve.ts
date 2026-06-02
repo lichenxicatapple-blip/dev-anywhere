@@ -26,6 +26,7 @@ import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
 import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
+import { TerminalWorkerSpawner } from "./serve/terminal-worker-spawner.js";
 import { applyPtyStateToSession, type PtySessionBridgeDeps } from "./serve/pty-session-bridge.js";
 import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
 import { createEventBridge } from "./serve/event-bridge.js";
@@ -234,6 +235,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       applyPtyStateToSession(ptyBridgeDeps, sessionId, ptyState),
     onSessionClosed: eventBridge.cleanupSessionResources,
   });
+  const terminalWorkerSpawner = new TerminalWorkerSpawner();
 
   relayConnection.connect();
   serviceLogger.info(
@@ -256,6 +258,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relaySend,
     terminalSockets,
     hostedPtyRegistry,
+    terminalWorkerSpawner,
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
     jsonObserver,

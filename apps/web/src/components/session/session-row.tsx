@@ -127,7 +127,8 @@ export function SessionRow({
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
   const lastActiveLabel = lastActive !== undefined ? formatRelativeTime(lastActive, now) : null;
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
-  const terminateLabel = isLocalTerminalPty ? "断开远程连接" : "终止会话";
+  const terminateLabel =
+    session.kind === "terminal" ? "终止终端" : isLocalTerminalPty ? "断开远程连接" : "终止会话";
   return (
     <li
       className={cn(

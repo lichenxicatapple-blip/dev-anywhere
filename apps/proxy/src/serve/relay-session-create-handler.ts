@@ -12,6 +12,7 @@ import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import { readSessionMessagesPage } from "./session-history.js";
+import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { classifyPathError } from "./path-errors.js";
@@ -23,6 +24,7 @@ interface RelaySessionCreateHandlerDeps {
   workerRegistry: WorkerRegistry;
   sessionManager: SessionManager;
   hostedPtyRegistry: HostedPtyRegistry;
+  terminalWorkerSpawner: TerminalWorkerSpawner;
   controlHandlers: ControlMessageHandlers;
   permissionBroker: PermissionBroker;
   agentStatusRegistry: AgentStatusRegistry;
@@ -356,10 +358,10 @@ export class RelaySessionCreateHandler {
     const nameLocked = requestedName !== undefined;
 
     try {
-      const pid = this.deps.hostedPtyRegistry.start({
+      const pid = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
-        kind: "terminal",
         cwd,
+        name,
       });
       const session = this.deps.sessionManager.createSession(
         "pty",
@@ -368,7 +370,7 @@ export class RelaySessionCreateHandler {
         name,
         pendingId,
         "claude",
-        "proxy-hosted",
+        "local-terminal",
         nameLocked,
         "terminal",
       );
@@ -382,7 +384,7 @@ export class RelaySessionCreateHandler {
           kind: "terminal",
           mode: "pty",
           provider: session.provider,
-          ptyOwner: "proxy-hosted",
+          ptyOwner: "local-terminal",
         }),
       );
       this.deps.broadcastSessionSync(session);

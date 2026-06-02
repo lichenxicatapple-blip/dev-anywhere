@@ -61,6 +61,31 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
   });
 
+  it("terminates pure terminal workers instead of detaching their remote view", () => {
+    const terminalWrite = vi.fn();
+    const deps = createDeps(
+      {
+        id: "s1",
+        kind: "terminal",
+        mode: "pty",
+        ptyOwner: "local-terminal",
+      },
+      { terminalWrite },
+    );
+
+    const result = terminateSessionByOwnership(deps as never, "s1");
+
+    expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.controlHandlers.cleanup).toHaveBeenCalledWith("s1");
+    expect(deps.terminalSockets.has("s1")).toBe(false);
+    expect(IpcMessageSchema.parse(JSON.parse(terminalWrite.mock.calls[0][0].trim()))).toEqual({
+      type: "pty_terminate",
+      sessionId: "s1",
+    });
+    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
+  });
+
   it("terminates hosted PTY through HostedPtyRegistry", () => {
     const deps = createDeps({
       id: "s1",

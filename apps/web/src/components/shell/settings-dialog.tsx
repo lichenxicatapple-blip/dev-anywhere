@@ -591,7 +591,26 @@ function summarizeUserAgent(userAgent: string | undefined): string {
 
 function connectedFor(connectedAt: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - connectedAt) / 1000));
-  return `已连接 ${formatUptime(seconds)}`;
+  return formatUptime(seconds);
+}
+
+function RelayClientDetailRow({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
+  return (
+    <div className="grid grid-cols-[3.75rem_minmax(0,1fr)] items-baseline gap-2 text-xs leading-5">
+      <span className="shrink-0 text-muted-foreground/80">{label}</span>
+      <span className="min-w-0 truncate text-muted-foreground" title={title ?? value}>
+        {value}
+      </span>
+    </div>
+  );
 }
 
 function RelayClientsPanel() {
@@ -659,7 +678,7 @@ function RelayClientsPanel() {
       data-slot="settings-dialog-body"
     >
       <div
-        className="flex min-h-10 items-center justify-between gap-3"
+        className="flex min-h-9 items-center gap-2"
         data-slot="relay-clients-toolbar"
       >
         <div className="text-sm font-medium text-foreground">
@@ -667,15 +686,15 @@ function RelayClientsPanel() {
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          className="h-9 min-w-24 justify-center"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="刷新客户端列表"
+          title="刷新"
           onClick={() => void loadClients()}
           disabled={loading}
           data-slot="relay-clients-refresh"
         >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden="true" />
-          刷新
         </Button>
       </div>
 
@@ -709,14 +728,18 @@ function RelayClientsPanel() {
                     {summarizeUserAgent(client.userAgent)}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
-                  <span>{connectedFor(client.connectedAt)}</span>
+                <div className="space-y-1">
+                  <RelayClientDetailRow label="已连接" value={connectedFor(client.connectedAt)} />
                   {client.proxyId ? (
-                    <span title={client.proxyId}>
-                      {formatProxyLabel(client.proxyId, proxyNameById)}
-                    </span>
+                    <RelayClientDetailRow
+                      label="开发机"
+                      value={formatProxyLabel(client.proxyId, proxyNameById)}
+                      title={client.proxyId}
+                    />
                   ) : null}
-                  {client.remoteAddress ? <span>{client.remoteAddress}</span> : null}
+                  {client.remoteAddress ? (
+                    <RelayClientDetailRow label="来源 IP" value={client.remoteAddress} />
+                  ) : null}
                 </div>
               </div>
               {isCurrent ? (

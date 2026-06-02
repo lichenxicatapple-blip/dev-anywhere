@@ -35,7 +35,15 @@ export function ChatPtyView({
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
 
-  const view = usePtyView({ sessionId, ptyOwner, active, containerEl, spacerRef, xtermHostRef });
+  const view = usePtyView({
+    sessionId,
+    sessionKind,
+    ptyOwner,
+    active,
+    containerEl,
+    spacerRef,
+    xtermHostRef,
+  });
   const handleMetrics = view.ptySelectionHandleMetrics;
 
   return (

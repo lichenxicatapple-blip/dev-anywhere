@@ -19,6 +19,7 @@ describe("RelayRouter hook permission decisions", () => {
       relaySend: (data) => options.sent?.push(data),
       terminalSockets: new Map(),
       hostedPtyRegistry: {} as never,
+      terminalWorkerSpawner: {} as never,
       broadcastSessionList: () => {},
       broadcastSessionSync: () => {},
       jsonObserver: {} as never,

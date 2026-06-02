@@ -35,6 +35,7 @@ function createRouter(options: {
   workerTerminateProcess?: (sessionId: string) => boolean;
   cleanupHookContext?: (sessionId: string) => void;
   hostedStart?: (options: unknown) => number;
+  terminalWorkerStart?: (options: unknown) => number;
   sessionManager?: SessionManager;
   broadcastSessionList?: () => void;
   voiceSummaryRunner?: VoiceSummaryRunner;
@@ -82,6 +83,9 @@ function createRouter(options: {
       snapshot: vi.fn(() => false),
       resize: vi.fn(() => false),
       terminate: vi.fn(() => false),
+    } as never,
+    terminalWorkerSpawner: {
+      start: options.terminalWorkerStart ?? vi.fn(() => 5678),
     } as never,
     broadcastSessionList: options.broadcastSessionList ?? (() => {}),
     broadcastSessionSync: () => {},
@@ -510,18 +514,19 @@ describe("RelayRouter input routing", () => {
     });
   });
 
-  it("creates a pure shell terminal without agent provider startup", () => {
+  it("creates a pure shell terminal as a restart-surviving terminal worker", () => {
     const relaySend = vi.fn();
     const hostedStart = vi.fn(() => 4321);
+    const terminalWorkerStart = vi.fn(() => 5678);
     const createSession = vi.fn(() => ({
       id: "terminal-session",
       kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "proxy-hosted",
+      ptyOwner: "local-terminal",
       state: SessionState.IDLE,
       cwd: "/Users/dev",
-      pid: 4321,
+      pid: 5678,
       createdAt: 1,
       updatedAt: 1,
       name: "终端 · ~",
@@ -530,6 +535,7 @@ describe("RelayRouter input routing", () => {
       mode: "pty",
       relaySend,
       hostedStart,
+      terminalWorkerStart,
       sessionManager: {
         createSession,
       } as unknown as SessionManager,
@@ -542,21 +548,22 @@ describe("RelayRouter input routing", () => {
       mode: "pty",
     });
 
-    expect(hostedStart).toHaveBeenCalledWith(
+    expect(hostedStart).not.toHaveBeenCalled();
+    expect(terminalWorkerStart).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: expect.any(String),
-        kind: "terminal",
         cwd: expect.any(String),
+        name: "终端 · ~",
       }),
     );
     expect(createSession).toHaveBeenCalledWith(
       "pty",
       expect.any(String),
-      4321,
+      5678,
       "终端 · ~",
       expect.any(String),
       "claude",
-      "proxy-hosted",
+      "local-terminal",
       false,
       "terminal",
     );
@@ -567,7 +574,7 @@ describe("RelayRouter input routing", () => {
       sessionId: "terminal-session",
       kind: "terminal",
       mode: "pty",
-      ptyOwner: "proxy-hosted",
+      ptyOwner: "local-terminal",
       name: "终端 · ~",
     });
   });

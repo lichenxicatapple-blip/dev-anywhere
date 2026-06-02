@@ -43,6 +43,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     cwd: z.string(),
     pid: z.number(),
     sessionId: z.string().optional(),
+    kind: z.enum(["agent", "terminal"]).optional(),
   }),
 
   // 服务端响应创建会话
@@ -90,6 +91,12 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   // serve → terminal：Web 端移除本地终端会话时，只断开远程视图，不杀本地 CLI。
   z.object({
     type: z.literal("pty_detach"),
+    sessionId: z.string(),
+  }),
+
+  // serve → terminal worker：终止 Web 创建的纯终端进程。
+  z.object({
+    type: z.literal("pty_terminate"),
     sessionId: z.string(),
   }),
 
@@ -165,6 +172,14 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   // terminal → serve：终端尺寸变化
   z.object({
     type: z.literal("pty_resize"),
+    sessionId: z.string(),
+    cols: z.number(),
+    rows: z.number(),
+  }),
+
+  // serve → terminal worker：Web owns pure terminal geometry, so resize requests flow down.
+  z.object({
+    type: z.literal("pty_resize_request"),
     sessionId: z.string(),
     cols: z.number(),
     rows: z.number(),

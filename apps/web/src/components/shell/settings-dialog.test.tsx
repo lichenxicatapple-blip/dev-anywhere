@@ -204,6 +204,7 @@ describe("SettingsDialog", () => {
     expect(await screen.findByRole("heading", { name: "客户端管理" })).not.toBeNull();
     await waitFor(() => expect(requestRelayClients).toHaveBeenCalledTimes(1));
     expect(screen.getByText("2 个在线客户端")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "刷新客户端列表" })).not.toBeNull();
     expect(screen.getByText("当前设备")).not.toBeNull();
     expect(document.querySelector('[data-client-id="current-client"]')).not.toBeNull();
     expect(document.querySelector('[data-client-id="other-client"]')).not.toBeNull();

@@ -87,21 +87,33 @@ export interface SessionViaRelay {
   proxyId: string;
   cwd: string;
   mode: "pty" | "json";
+  kind?: "agent" | "terminal";
+  ptyOwner?: "local-terminal" | "proxy-hosted";
   // 主动发协议消息到 relay (e.g. session_subscribe / user_input).
   send: (payload: Record<string, unknown>) => void;
   // 订阅所有 JSON envelope (含 broadcast). 返回 dispose.
   onJson: (handler: (msg: Record<string, unknown>) => void) => () => void;
   // 订阅 binary PTY frame. 返回 dispose. payload 解码: 1B sid 长度 + sid + 4B seq + bytes.
   onBinary: (handler: (buf: ArrayBuffer) => void) => () => void;
+  // proxy graceful restart 后，Web 会重新 select 当前 proxy；协议级测试也需要显式模拟。
+  selectProxy: () => Promise<void>;
   // teardown: 发 session_terminate 并关 ws.
   terminate: () => Promise<void>;
 }
 
-export interface SpawnSessionOptions {
-  mode: "pty" | "json";
-  cwd: string;
-  provider: "claude" | "codex";
-}
+export type SpawnSessionOptions =
+  | {
+      kind?: "agent";
+      mode: "pty" | "json";
+      cwd: string;
+      provider: "claude" | "codex";
+    }
+  | {
+      kind: "terminal";
+      mode: "pty";
+      cwd?: string;
+      provider?: "claude" | "codex";
+    };
 
 export async function spawnSessionViaRelay(
   runtime: LocalRuntime,
@@ -126,10 +138,16 @@ export async function spawnSessionViaRelay(
     throw new Error(`relay-control: proxy_select 失败: ${selectResp.error}`);
   }
 
-  const createResp = await ws.request<{ sessionId?: string; error?: string }>("session_create", {
-    cwd: options.cwd,
-    provider: options.provider,
+  const createResp = await ws.request<{
+    sessionId?: string;
+    error?: string;
+    kind?: "agent" | "terminal";
+    ptyOwner?: "local-terminal" | "proxy-hosted";
+  }>("session_create", {
     mode: options.mode,
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.provider !== undefined ? { provider: options.provider } : {}),
+    ...(options.kind !== undefined ? { kind: options.kind } : {}),
   });
   if (!createResp.sessionId) {
     throw new Error(
@@ -138,14 +156,25 @@ export async function spawnSessionViaRelay(
   }
 
   const sessionId = createResp.sessionId;
+  const selectProxy = async (): Promise<void> => {
+    const resp = await ws.request<{ success: boolean; error?: string }>("proxy_select", {
+      proxyId,
+    });
+    if (!resp.success) {
+      throw new Error(`relay-control: proxy_select 失败: ${resp.error}`);
+    }
+  };
   return {
     sessionId,
     proxyId,
-    cwd: options.cwd,
+    cwd: options.cwd ?? "",
     mode: options.mode,
+    kind: createResp.kind ?? options.kind,
+    ptyOwner: createResp.ptyOwner,
     send: (payload) => ws.send(payload),
     onJson: (handler) => ws.onJson(handler),
     onBinary: (handler) => ws.onBinary(handler),
+    selectProxy,
     terminate: async () => {
       try {
         await ws.request("session_terminate", { sessionId }).catch(() => {});

@@ -60,6 +60,7 @@ import { useTerminalPaste } from "./use-terminal-paste";
 
 interface UsePtyViewOptions {
   sessionId: string;
+  sessionKind?: "agent" | "terminal";
   ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
   containerEl: HTMLDivElement | null;
@@ -145,7 +146,15 @@ interface TerminalControllerHandle {
 }
 
 export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
-  const { sessionId, ptyOwner, active = true, containerEl, spacerRef, xtermHostRef } = options;
+  const {
+    sessionId,
+    sessionKind,
+    ptyOwner,
+    active = true,
+    containerEl,
+    spacerRef,
+    xtermHostRef,
+  } = options;
 
   // === sub-hooks (各自管自己的 state，互不依赖) ===
   const connection = usePtyConnectionState();
@@ -198,7 +207,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
-  const webOwnsPtyGeometry = ptyOwner === "proxy-hosted";
+  const webOwnsPtyGeometry = ptyOwner === "proxy-hosted" || sessionKind === "terminal";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const softKeyboardEditingSurface = touchEditingSurface && !desktopInteractionMode;
   const ptyPlainEnterBehavior = softKeyboardEditingSurface ? "linefeed" : "submit";

@@ -59,6 +59,7 @@ export interface LocalRuntime {
   relayUrl: string;
   relayHttpUrl: string;
   relayPort: number;
+  hookPort: number;
   profileName: string;
   profileHome: string;
   // 杀 relay 进程, 让 web 进入 relay-down 状态. proxy daemon 不动.
@@ -215,6 +216,7 @@ export async function spawnLocalRuntime(options: SpawnOptions = {}): Promise<Loc
     relayUrl: `ws://localhost:${relayPort}`,
     relayHttpUrl,
     relayPort,
+    hookPort,
     profileName: PROFILE_NAME,
     profileHome,
     killRelay,

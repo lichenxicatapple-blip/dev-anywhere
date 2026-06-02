@@ -95,15 +95,18 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               msg.sessionId,
               provider,
               "local-terminal",
+              undefined,
+              msg.kind,
             );
           if (existing) {
             sessionManager.setPid(session.id, msg.pid);
           }
+          const hook = msg.kind === "terminal" ? undefined : createHookContext(session.id, provider);
           socket.write(
             serializeIpc({
               type: "session_create_response",
               sessionId: session.id,
-              hook: createHookContext(session.id, provider),
+              ...(hook !== undefined ? { hook } : {}),
             }),
           );
           serviceLogger.info(

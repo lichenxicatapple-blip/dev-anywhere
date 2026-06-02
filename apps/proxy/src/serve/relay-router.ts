@@ -28,6 +28,7 @@ import { RelayPermissionHandlers } from "./relay-permission-handlers.js";
 import { RelayResourceHandlers } from "./relay-resource-handlers.js";
 import { RelaySessionCreateHandler } from "./relay-session-create-handler.js";
 import type { RelaySend } from "./relay-router-types.js";
+import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
 import { VoiceSummaryHandler, type VoiceSummaryRunner } from "./voice-summary-handler.js";
 
 interface RelayRouterDeps {
@@ -38,6 +39,7 @@ interface RelayRouterDeps {
   relaySend: RelaySend;
   terminalSockets: Map<string, Socket>;
   hostedPtyRegistry: HostedPtyRegistry;
+  terminalWorkerSpawner: TerminalWorkerSpawner;
   broadcastSessionList: () => void;
   broadcastSessionSync: (session: SessionInfo) => void;
   // user_input 注入触发 turn 开始（JSON 观察器）
@@ -100,6 +102,7 @@ export class RelayRouter {
       workerRegistry: deps.workerRegistry,
       sessionManager: deps.sessionManager,
       hostedPtyRegistry: deps.hostedPtyRegistry,
+      terminalWorkerSpawner: deps.terminalWorkerSpawner,
       controlHandlers: deps.controlHandlers,
       permissionBroker: deps.permissionBroker,
       agentStatusRegistry: deps.agentStatusRegistry,
@@ -434,8 +437,15 @@ export class RelayRouter {
     const cols = msg.cols;
     const rows = msg.rows;
     if (!sid || !cols || !rows) return;
-    if (!this.deps.hostedPtyRegistry.resize(sid, cols, rows)) {
-      serviceLogger.debug({ sessionId: sid, cols, rows }, "Resize request ignored: not hosted PTY");
+    if (this.deps.hostedPtyRegistry.resize(sid, cols, rows)) {
+      return;
     }
+    const ts = this.deps.terminalSockets.get(sid);
+    if (ts?.writable) {
+      ts.write(serializeIpc({ type: "pty_resize_request", sessionId: sid, cols, rows }));
+      serviceLogger.info({ sessionId: sid, cols, rows }, "Resize request forwarded to terminal");
+      return;
+    }
+    serviceLogger.debug({ sessionId: sid, cols, rows }, "Resize request ignored: PTY unavailable");
   }
 }
