@@ -24,5 +24,6 @@ export const PTY_SCROLL_CONFIG = {
     horizontalGestureSlopPx: 6,
     horizontalLockRatio: 1,
     verticalLockRatio: 1.25,
+    nativeScrollRecentMs: 500,
   },
 } as const;

@@ -1109,6 +1109,41 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
   });
 
+  it("does not clear horizontal touch intent while the cursor is still visible", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 400, clientWidth: 360 });
+    defineScrollWidth(container, 1200);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    terminal.buffer.active.cursorX = 2;
+
+    container.dispatchEvent(touchEvent("touchstart", 300, 320));
+    container.dispatchEvent(touchEvent("touchmove", 302, 200));
+    container.scrollLeft = 15;
+    container.dispatchEvent(new Event("scroll"));
+
+    emitRender();
+
+    expect(container.scrollLeft).toBe(15);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+
+    container.scrollLeft = 26;
+    container.dispatchEvent(new Event("scroll"));
+    emitRender();
+
+    expect(container.scrollLeft).toBe(26);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+  });
+
   it("locks horizontal touch pan on a small mostly-horizontal move", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });

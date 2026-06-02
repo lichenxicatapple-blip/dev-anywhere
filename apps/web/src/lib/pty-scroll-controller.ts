@@ -718,6 +718,14 @@ export function attachPtyScrollController(
     flushPendingTouchScrollNotify,
   });
 
+  const shouldHoldHorizontalIntentForTouch = (): boolean => {
+    if (!horizontalState.intent) return false;
+    return (
+      touchHandler.getState().gestureMode === "horizontal" ||
+      touchHandler.isRecentHorizontalGesture()
+    );
+  };
+
   const restoreImpossibleTouchScrollJump = (effectiveScrollTop: number): boolean => {
     const expectation = touchHandler.getScrollExpectation();
     if (!expectation) return false;
@@ -1084,6 +1092,12 @@ export function attachPtyScrollController(
     const viewportRight = viewportLeft + container.clientWidth;
     const cursorInViewportX = cursorPxX >= viewportLeft && cursorPxX <= viewportRight;
     if (cursorInViewportX) {
+      if (shouldHoldHorizontalIntentForTouch()) {
+        trace("followCursorX:skip", {
+          details: `horizontalTouchIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
+        });
+        return;
+      }
       // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
       const result = clearPtyHorizontalIntent(horizontalState, {
         details: `site=followCursorX cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,

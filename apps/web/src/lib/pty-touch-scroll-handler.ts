@@ -9,6 +9,7 @@ import {
   beginPtyTouchScroll,
   createInitialPtyTouchScrollState,
   ensurePtyTouchPendingMode,
+  markPtyTouchHorizontalGesture,
   markPtyTouchGesture,
   resetPtyTouchScrollSession,
   setPtyTouchGestureMode,
@@ -51,6 +52,7 @@ interface PtyTouchScrollHandler {
   onTouchEnd: () => void;
   onTouchCancel: () => void;
   isRecentNativeScroll: () => boolean;
+  isRecentHorizontalGesture: () => boolean;
   getScrollExpectation: (
     currentYOverride?: number | null,
   ) => ReturnType<typeof computeTouchScrollExpectation>;
@@ -181,7 +183,8 @@ export function createPtyTouchScrollHandler({
     const touch = event.touches?.[0] ?? null;
     const currentX = touch?.clientX ?? null;
     const currentY = touch?.clientY ?? null;
-    state = updatePtyTouchMove(state, { currentY, now: performance.now() });
+    const now = performance.now();
+    state = updatePtyTouchMove(state, { currentY, now });
     const movement = getMovement(currentX, currentY);
     trace("touchmove", {
       details:
@@ -226,6 +229,7 @@ export function createPtyTouchScrollHandler({
           movement.absDy > movement.absDx * PTY_SCROLL_CONFIG.touch.verticalLockRatio);
       if (horizontalDominates) {
         state = setPtyTouchGestureMode(state, "horizontal");
+        state = markPtyTouchHorizontalGesture(state, now);
         trace("touchmove:horizontal-lock", {
           details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`,
         });
@@ -267,6 +271,7 @@ export function createPtyTouchScrollHandler({
         return;
       }
       if (movement) {
+        state = markPtyTouchHorizontalGesture(state, now);
         markHorizontalUserInput(
           `site=touchmove-horizontal dx=${Math.round(movement.absDx)} dy=${Math.round(movement.absDy)}`,
         );
@@ -373,7 +378,12 @@ export function createPtyTouchScrollHandler({
     onTouchCancel,
     isRecentNativeScroll: () =>
       getVerticalIntent().touchActive ||
-      (state.lastGestureAt !== null && performance.now() - state.lastGestureAt <= 500),
+      (state.lastGestureAt !== null &&
+        performance.now() - state.lastGestureAt <= PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs),
+    isRecentHorizontalGesture: () =>
+      state.lastHorizontalGestureAt !== null &&
+      performance.now() - state.lastHorizontalGestureAt <=
+        PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs,
     getScrollExpectation,
     describeScrollExpectation: describeTouchScrollExpectation,
     getState: () => state,
