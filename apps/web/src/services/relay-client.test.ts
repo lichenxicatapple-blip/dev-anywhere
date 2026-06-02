@@ -236,6 +236,82 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("keeps upload requests pending beyond the generic request timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay, ws } = createClient();
+      const imageUpload = relay.uploadClipboardImage("s1", {
+        mimeType: "image/png",
+        dataBase64: "AQID",
+        fileName: "shot.png",
+      });
+      const fileUpload = relay.uploadFile("s1", {
+        fileName: "large.png",
+        mimeType: "image/png",
+        dataBase64: "AQID",
+      });
+      let imageSettled = false;
+      let fileSettled = false;
+      void imageUpload
+        .finally(() => {
+          imageSettled = true;
+        })
+        .catch(() => {});
+      void fileUpload
+        .finally(() => {
+          fileSettled = true;
+        })
+        .catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await Promise.resolve();
+
+      expect(imageSettled).toBe(false);
+      expect(fileSettled).toBe(false);
+
+      const imageRequestId = sentRequestId(ws, 0);
+      const fileRequestId = sentRequestId(ws, 1);
+      ws.emit({
+        type: "clipboard_image_upload_response",
+        requestId: imageRequestId,
+        sessionId: "s1",
+        success: true,
+        path: "/tmp/shot.png",
+      });
+      ws.emit({
+        type: "file_upload_response",
+        requestId: fileRequestId,
+        sessionId: "s1",
+        success: true,
+        path: "/tmp/large.png",
+      });
+
+      await expect(imageUpload).resolves.toMatchObject({ success: true, path: "/tmp/shot.png" });
+      await expect(fileUpload).resolves.toMatchObject({ success: true, path: "/tmp/large.png" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still times out unanswered uploads after the upload-specific window", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay } = createClient();
+      const promise = relay.uploadFile("s1", {
+        fileName: "large.png",
+        mimeType: "image/png",
+        dataBase64: "AQID",
+      });
+      const assertion = expect(promise).rejects.toThrow("上传文件超时");
+
+      await vi.advanceTimersByTimeAsync(60_100);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for matching session rename responses", async () => {
     const { relay, ws } = createClient();
     const promise = relay.renameSession("s1", "Release checklist");

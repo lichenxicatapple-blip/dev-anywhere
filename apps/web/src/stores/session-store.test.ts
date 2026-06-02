@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useSessionStore } from "./session-store";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
+import { ptyAutoYesSessionKey, useSessionStore } from "./session-store";
 
 describe("session-store agent status", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     useSessionStore.setState({
       sessions: [],
       sessionListLoaded: false,
@@ -10,6 +12,7 @@ describe("session-store agent status", () => {
       ptyTitles: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
+      ptyAutoYesBySessionKey: {},
     });
   });
 
@@ -66,9 +69,7 @@ describe("session-store agent status", () => {
 
   it("keeps the newest PTY semantic state per session by seq", () => {
     useSessionStore.getState().setPtyState("s1", { state: "approval_wait", seq: 2, tool: "Bash" });
-    useSessionStore
-      .getState()
-      .setPtyState("s1", { state: "approval_wait", seq: 1, tool: "Write" });
+    useSessionStore.getState().setPtyState("s1", { state: "approval_wait", seq: 1, tool: "Write" });
 
     expect(useSessionStore.getState().ptyStateBySessionId.s1).toMatchObject({
       state: "approval_wait",
@@ -121,5 +122,28 @@ describe("session-store agent status", () => {
       cwd: "/Users/dev/project",
     });
     expect(useSessionStore.getState().ptyTitles.s1).toBe("✻ Working");
+  });
+
+  it("keeps PTY auto-yes scoped to proxy/session across list replacement and clears it on removal", () => {
+    const sessionKey = ptyAutoYesSessionKey("proxy-a", "s1");
+    const otherProxySessionKey = ptyAutoYesSessionKey("proxy-b", "s1");
+    if (!sessionKey || !otherProxySessionKey) throw new Error("missing session key");
+
+    useSessionStore.getState().setPtyAutoYes(sessionKey, true);
+    useSessionStore.getState().setPtyAutoYes(otherProxySessionKey, true);
+    useSessionStore
+      .getState()
+      .setSessions([{ sessionId: "s2", state: "working", provider: "codex", mode: "pty" }]);
+
+    expect(useSessionStore.getState().ptyAutoYesBySessionKey).toEqual({
+      [sessionKey]: true,
+      [otherProxySessionKey]: true,
+    });
+    expect(sessionStorage.getItem(STORAGE_KEYS.ptyAutoYesSessions)).toContain(sessionKey);
+
+    useSessionStore.getState().removeSession("s1");
+
+    expect(useSessionStore.getState().ptyAutoYesBySessionKey).toEqual({});
+    expect(sessionStorage.getItem(STORAGE_KEYS.ptyAutoYesSessions)).toBeNull();
   });
 });

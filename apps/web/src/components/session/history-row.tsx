@@ -2,7 +2,7 @@
 // 总在某个 projectDir group 下渲染, 所以本行不再重复展示 projectDir。
 // 标题与时间分两行：历史标题信息量优先，时间作为小号副信息避免挤压标题。
 // 行内不放前导图标: 每行前导时钟图标信息量为零 (group header 已表达"历史"语义), 纯靠左侧 pl-10 缩进体现层级
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, MessageSquare, TerminalSquare } from "lucide-react";
 import type { HistorySession } from "@dev-anywhere/shared";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
@@ -82,16 +82,22 @@ function HistoryTitle({ title, modeTag }: { title: string; modeTag?: RestoreMode
 }
 
 function HistoryModeTag({ mode }: { mode: RestoreMode }) {
+  const label = mode === "json" ? "聊天视图" : "终端视图";
+  const Icon = mode === "json" ? MessageSquare : TerminalSquare;
+
   return (
     <span
       data-slot="history-mode-tag"
       data-mode={mode}
+      role="img"
+      aria-label={label}
+      title={label}
       className={cn(
-        "shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none",
+        "inline-flex size-5 shrink-0 items-center justify-center rounded border",
         "border-border bg-muted/50 text-muted-foreground",
       )}
     >
-      {mode === "json" ? "聊天" : "终端"}
+      <Icon className="size-3" aria-hidden="true" />
     </span>
   );
 }

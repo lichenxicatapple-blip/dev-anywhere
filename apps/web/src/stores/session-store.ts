@@ -8,6 +8,47 @@ import type {
   HistorySession,
   PtyStatePayload,
 } from "@dev-anywhere/shared";
+import {
+  readStorageValue,
+  removeStorageValue,
+  STORAGE_KEYS,
+  writeStorageValue,
+} from "@/lib/storage-keys";
+
+export function ptyAutoYesSessionKey(
+  proxyId: string | null | undefined,
+  sessionId: string,
+): string | null {
+  if (!proxyId || !sessionId) return null;
+  return `${encodeURIComponent(proxyId)}:${encodeURIComponent(sessionId)}`;
+}
+
+function ptyAutoYesKeyBelongsToSession(key: string, sessionId: string): boolean {
+  return key.endsWith(`:${encodeURIComponent(sessionId)}`);
+}
+
+function readPtyAutoYesBySessionKey(): Record<string, boolean> {
+  const raw = readStorageValue("session", STORAGE_KEYS.ptyAutoYesSessions);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, true] => entry[1] === true),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writePtyAutoYesBySessionKey(value: Record<string, boolean>): void {
+  const enabledEntries = Object.entries(value).filter(([, enabled]) => enabled);
+  if (enabledEntries.length === 0) {
+    removeStorageValue("session", STORAGE_KEYS.ptyAutoYesSessions);
+    return;
+  }
+  writeStorageValue("session", STORAGE_KEYS.ptyAutoYesSessions, JSON.stringify(value));
+}
 
 interface SessionStoreState {
   sessions: SessionInfo[];
@@ -20,6 +61,8 @@ interface SessionStoreState {
   // PTY 语义元信息: terminal/proxy 从 OSC 等信号抽取。会话生命周期以 sessions[].state 为准。
   ptyStateBySessionId: Record<string, PtyStatePayload>;
   agentStatusBySessionId: Record<string, AgentStatusPayload>;
+  // PTY "Always yes" 是用户对某个开发机上的某个会话做出的临时授权，不跟随页面路由重置。
+  ptyAutoYesBySessionKey: Record<string, boolean>;
 
   setSessions: (sessions: SessionInfo[]) => void;
   addSession: (session: SessionInfo) => void;
@@ -31,6 +74,7 @@ interface SessionStoreState {
   updateSessionName: (sessionId: string, name: string) => void;
   renameSession: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
+  setPtyAutoYes: (sessionKey: string, enabled: boolean) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
 }
 
@@ -43,6 +87,7 @@ export const useSessionStore = create<SessionStoreState>()(
       ptyTitles: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
+      ptyAutoYesBySessionKey: readPtyAutoYesBySessionKey(),
 
       setSessions: (sessions) =>
         set((state) => {
@@ -67,18 +112,27 @@ export const useSessionStore = create<SessionStoreState>()(
         }),
       addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
       removeSession: (sessionId) =>
-        set((state) => ({
-          sessions: state.sessions.filter((s) => s.sessionId !== sessionId),
-          agentStatusBySessionId: Object.fromEntries(
-            Object.entries(state.agentStatusBySessionId).filter(([sid]) => sid !== sessionId),
-          ),
-          ptyStateBySessionId: Object.fromEntries(
-            Object.entries(state.ptyStateBySessionId).filter(([sid]) => sid !== sessionId),
-          ),
-          ptyTitles: Object.fromEntries(
-            Object.entries(state.ptyTitles).filter(([sid]) => sid !== sessionId),
-          ),
-        })),
+        set((state) => {
+          const ptyAutoYesBySessionKey = Object.fromEntries(
+            Object.entries(state.ptyAutoYesBySessionKey).filter(
+              ([key]) => !ptyAutoYesKeyBelongsToSession(key, sessionId),
+            ),
+          );
+          writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
+          return {
+            sessions: state.sessions.filter((s) => s.sessionId !== sessionId),
+            agentStatusBySessionId: Object.fromEntries(
+              Object.entries(state.agentStatusBySessionId).filter(([sid]) => sid !== sessionId),
+            ),
+            ptyStateBySessionId: Object.fromEntries(
+              Object.entries(state.ptyStateBySessionId).filter(([sid]) => sid !== sessionId),
+            ),
+            ptyTitles: Object.fromEntries(
+              Object.entries(state.ptyTitles).filter(([sid]) => sid !== sessionId),
+            ),
+            ptyAutoYesBySessionKey,
+          };
+        }),
       updateSessionState: (sessionId, newState, lastActive) =>
         set((state) => ({
           sessions: state.sessions.map((s) =>
@@ -105,11 +159,7 @@ export const useSessionStore = create<SessionStoreState>()(
       setPtyState: (sessionId, status) =>
         set((state) => {
           const current = state.ptyStateBySessionId[sessionId];
-          if (
-            current?.seq !== undefined &&
-            status.seq !== undefined &&
-            current.seq > status.seq
-          ) {
+          if (current?.seq !== undefined && status.seq !== undefined && current.seq > status.seq) {
             return state;
           }
           return {
@@ -133,6 +183,14 @@ export const useSessionStore = create<SessionStoreState>()(
         set((state) => ({
           ptyTitles: { ...state.ptyTitles, [sessionId]: title },
         })),
+      setPtyAutoYes: (sessionKey, enabled) =>
+        set((state) => {
+          const ptyAutoYesBySessionKey = { ...state.ptyAutoYesBySessionKey };
+          if (enabled) ptyAutoYesBySessionKey[sessionKey] = true;
+          else delete ptyAutoYesBySessionKey[sessionKey];
+          writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
+          return { ptyAutoYesBySessionKey };
+        }),
       setHistorySessions: (sessions) => set({ historySessions: sessions }),
     }),
     { name: "session-store" },

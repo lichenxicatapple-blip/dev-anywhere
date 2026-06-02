@@ -62,6 +62,8 @@ describe("SettingsDialog", () => {
     useAppStore.setState({
       desktopInteractionMode: false,
       latencyMonitorEnabled: false,
+      proxies: [{ proxyId: "proxy-1", name: "Work Mac", online: true }],
+      proxyListLoaded: true,
       ptyScrollTraceEnabled: false,
       themePreference: "auto",
     });
@@ -203,17 +205,19 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(requestRelayClients).toHaveBeenCalledTimes(1));
     expect(screen.getByText("2 个在线客户端")).not.toBeNull();
     expect(screen.getByText("当前设备")).not.toBeNull();
-    expect(screen.getByText("current-client")).not.toBeNull();
-    expect(screen.getByText("other-client")).not.toBeNull();
-    expect(screen.getByText("开发机 proxy-1")).not.toBeNull();
+    expect(document.querySelector('[data-client-id="current-client"]')).not.toBeNull();
+    expect(document.querySelector('[data-client-id="other-client"]')).not.toBeNull();
+    expect(screen.getByText("开发机 Work Mac")).not.toBeNull();
 
     const buttons = screen.getAllByRole("button", { name: "断开" });
     expect(buttons).toHaveLength(1);
     fireEvent.click(buttons[0]!);
 
     await waitFor(() => expect(kickRelayClient).toHaveBeenCalledWith("other-client"));
-    await waitFor(() => expect(screen.queryByText("other-client")).toBeNull());
-    expect(screen.getByText("current-client")).not.toBeNull();
+    await waitFor(() =>
+      expect(document.querySelector('[data-client-id="other-client"]')).toBeNull(),
+    );
+    expect(document.querySelector('[data-client-id="current-client"]')).not.toBeNull();
   });
 
   it("persists theme preference while keeping auto as the default", () => {

@@ -20,6 +20,9 @@ import type {
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
 const LATENCY_PROBE_TIMEOUT_MS = 3_000;
+const UPLOAD_REQUEST_TIMEOUT_FLOOR_MS = 60_000;
+const UPLOAD_REQUEST_TIMEOUT_CEILING_MS = 5 * 60_000;
+const UPLOAD_REQUEST_BYTES_PER_SECOND = 256 * 1024;
 
 export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
@@ -92,6 +95,16 @@ type FileUploadRequest = Omit<
   Extract<RelayControlMessage, { type: "file_upload_request" }>,
   "type" | "requestId" | "sessionId"
 >;
+
+function uploadRequestTimeoutMs(dataBase64: string): number {
+  const payloadBytes = Math.ceil((dataBase64.length * 3) / 4);
+  const transferMs = Math.ceil((payloadBytes / UPLOAD_REQUEST_BYTES_PER_SECOND) * 1000);
+  return Math.min(
+    UPLOAD_REQUEST_TIMEOUT_CEILING_MS,
+    Math.max(UPLOAD_REQUEST_TIMEOUT_FLOOR_MS, UPLOAD_REQUEST_TIMEOUT_FLOOR_MS + transferMs),
+  );
+}
+
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -326,7 +339,7 @@ export class RelayClient {
   uploadClipboardImage(
     sessionId: string,
     image: ClipboardImageUploadRequest,
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs = uploadRequestTimeoutMs(image.dataBase64),
   ): Promise<ClipboardImageUploadResult> {
     const requestId = nextRequestId("clipboard-image");
     return this.waitForMessage(
@@ -428,7 +441,7 @@ export class RelayClient {
   uploadFile(
     sessionId: string,
     file: FileUploadRequest,
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs = uploadRequestTimeoutMs(file.dataBase64),
   ): Promise<FileUploadResult> {
     const requestId = nextRequestId("file-upload");
     return this.waitForMessage(

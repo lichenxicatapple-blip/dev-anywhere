@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -559,6 +559,11 @@ function formatClientId(clientId: string): string {
   return `${clientId.slice(0, 8)}...${clientId.slice(-4)}`;
 }
 
+function formatProxyLabel(proxyId: string, proxyNameById: Map<string, string>): string {
+  const name = proxyNameById.get(proxyId)?.trim();
+  return `开发机 ${name || formatClientId(proxyId)}`;
+}
+
 function summarizeUserAgent(userAgent: string | undefined): string {
   if (!userAgent) return "未知浏览器";
   const browser = userAgent.includes("Edg/")
@@ -590,10 +595,18 @@ function connectedFor(connectedAt: number): string {
 }
 
 function RelayClientsPanel() {
+  const proxies = useAppStore((s) => s.proxies);
   const [clients, setClients] = useState<RelayClientInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [kickingClientId, setKickingClientId] = useState<string | null>(null);
+  const proxyNameById = useMemo(() => {
+    return new Map(
+      proxies
+        .map((proxy) => [proxy.proxyId, proxy.name] as const)
+        .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string"),
+    );
+  }, [proxies]);
 
   const loadClients = useCallback(async () => {
     const relay = relayClientRef;
@@ -645,16 +658,21 @@ function RelayClientsPanel() {
       className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
       data-slot="settings-dialog-body"
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs text-muted-foreground">
-          {loading ? "正在读取..." : `${clients.length} 个在线客户端`}
+      <div
+        className="flex min-h-10 items-center justify-between gap-3"
+        data-slot="relay-clients-toolbar"
+      >
+        <div className="text-sm font-medium text-foreground">
+          {loading ? "正在读取客户端" : `${clients.length} 个在线客户端`}
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
+          className="h-9 min-w-24 justify-center"
           onClick={() => void loadClients()}
           disabled={loading}
+          data-slot="relay-clients-refresh"
         >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden="true" />
           刷新
@@ -681,39 +699,48 @@ function RelayClientsPanel() {
             key={client.clientId}
             className="rounded-md border border-border bg-card/70 p-3"
             data-slot="relay-client-row"
+            data-client-id={client.clientId}
+            title={`客户端 ${client.clientId}`}
           >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <div className="truncate text-sm font-medium text-foreground">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-start">
+              <div className="min-w-0 space-y-1.5">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium leading-5 text-foreground">
                     {summarizeUserAgent(client.userAgent)}
                   </div>
-                  {isCurrent ? (
-                    <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
-                      当前设备
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
+                  <span>{connectedFor(client.connectedAt)}</span>
+                  {client.proxyId ? (
+                    <span title={client.proxyId}>
+                      {formatProxyLabel(client.proxyId, proxyNameById)}
                     </span>
                   ) : null}
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {formatClientId(client.clientId)}
-                </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span>{connectedFor(client.connectedAt)}</span>
-                  {client.proxyId ? <span>开发机 {formatClientId(client.proxyId)}</span> : null}
                   {client.remoteAddress ? <span>{client.remoteAddress}</span> : null}
                 </div>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="self-start"
-                disabled={isCurrent || isKicking}
-                onClick={() => void kickClient(client.clientId)}
-              >
-                <LogOut className="size-3.5" aria-hidden="true" />
-                {isCurrent ? "当前" : isKicking ? "断开中..." : "断开"}
-              </Button>
+              {isCurrent ? (
+                <div
+                  className="inline-flex h-9 w-full items-center justify-center rounded-md border border-primary/30 bg-primary/10 px-3 text-sm font-normal text-primary"
+                  aria-label="当前设备"
+                  data-slot="relay-client-current-indicator"
+                >
+                  当前设备
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-full justify-center"
+                  disabled={isKicking}
+                  onClick={() => void kickClient(client.clientId)}
+                  data-slot="relay-client-action"
+                >
+                  <LogOut className="size-3.5" aria-hidden="true" />
+                  {isKicking ? "断开中..." : "断开"}
+                </Button>
+              )}
             </div>
           </div>
         );

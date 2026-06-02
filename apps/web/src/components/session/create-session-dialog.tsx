@@ -406,6 +406,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           side="bottom"
           className="inset-x-2 max-h-[calc(100dvh-0.75rem)] w-auto overflow-x-hidden overflow-y-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
           data-slot="create-session-dialog"
+          onOpenAutoFocus={(event) => event.preventDefault()}
         >
           <SheetHeader className="px-0 pb-1 pt-0 text-left">
             <SheetTitle>新建会话</SheetTitle>

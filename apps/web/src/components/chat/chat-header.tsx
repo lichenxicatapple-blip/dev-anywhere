@@ -1,6 +1,7 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
 import {
   ArrowLeft,
+  Check,
   ImageIcon,
   Keyboard,
   Lightbulb,
@@ -25,7 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { useSessionStore } from "@/stores/session-store";
+import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import {
   getEffectiveChatContentFontSize,
   MAX_CHAT_FONT_SIZE,
@@ -147,6 +148,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
+  const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const adjustPtyFontSize = useAppStore((s) => s.adjustPtyFontSize);
   const adjustChatContentFontSize = useAppStore((s) => s.adjustChatContentFontSize);
   const setChatContentFontSize = useAppStore((s) => s.setChatContentFontSize);
@@ -154,6 +156,11 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
   const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
   const renameSession = useSessionStore((s) => s.renameSession);
+  const ptyAutoYesKey = ptyAutoYesSessionKey(selectedProxyId, sessionId);
+  const ptyAutoYesEnabled = useSessionStore((s) =>
+    ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
+  );
+  const setPtyAutoYes = useSessionStore((s) => s.setPtyAutoYes);
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
   const isPty = mode === "pty" || session?.mode === "pty";
@@ -352,6 +359,22 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                       : "屏幕常亮"}
                 </span>
               </DropdownMenuCheckboxItem>
+              {isPty && !isTerminalSession && (
+                <DropdownMenuCheckboxItem
+                  checked={ptyAutoYesEnabled}
+                  className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
+                  disabled={!ptyAutoYesKey}
+                  data-slot="chat-menu-pty-auto-yes-item"
+                  onCheckedChange={(checked) => {
+                    if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, checked === true);
+                  }}
+                >
+                  <ChatMenuIcon>
+                    <Check aria-hidden="true" />
+                  </ChatMenuIcon>
+                  <span className="min-w-0 flex-1">Always yes</span>
+                </DropdownMenuCheckboxItem>
+              )}
               {!isPty && !isTerminalSession && (
                 <DropdownMenuCheckboxItem
                   checked={voicePilot.enabled}

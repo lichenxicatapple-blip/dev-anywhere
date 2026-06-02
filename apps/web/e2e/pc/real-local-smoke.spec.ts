@@ -221,6 +221,7 @@ async function openCreateSessionDialog(page: Page): Promise<void> {
     return;
   }
   await page.locator('[data-slot="create-session-trigger"]:visible').last().click();
+  await page.locator('[data-slot="create-agent-session-item"]').click();
 }
 
 function isMobile(page: Page): boolean {

@@ -6,9 +6,9 @@
 //
 // 历史会话区 (HistoryList) 渲染在活跃列表下方, 即使无活跃会话但有历史时也可见,
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
-import { Bot, ChevronDown, ChevronRight, Loader2, Plus, Terminal } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Loader2, PlusCircle, Terminal } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -280,7 +280,7 @@ export function SessionList({ layout }: SessionListProps) {
             data-slot="create-session-mobile-trigger"
             onClick={() => setCreateTypeOpen(true)}
           >
-            <Plus aria-hidden="true" />
+            <PlusCircle aria-hidden="true" />
             新建
           </Button>
         </div>
@@ -351,8 +351,7 @@ export function SessionList({ layout }: SessionListProps) {
 function groupActiveSessionsByProvider(sessions: SessionInfo[]) {
   const map = new Map<ActiveSessionGroupKey, SessionInfo[]>();
   for (const session of sessions) {
-    const key: ActiveSessionGroupKey =
-      session.kind === "terminal" ? "terminal" : session.provider;
+    const key: ActiveSessionGroupKey = session.kind === "terminal" ? "terminal" : session.provider;
     const list = map.get(key);
     if (list) list.push(session);
     else map.set(key, [session]);
@@ -401,6 +400,7 @@ function useTerminalCreator() {
 export function CreateSessionButton({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const [tipOpen, setTipOpen] = useState(false);
+  const suppressMenuRestoreFocusRef = useRef(false);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const { creatingTerminal, createTerminal } = useTerminalCreator();
 
@@ -414,6 +414,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
       showMissingProxyTip();
       return;
     }
+    suppressMenuRestoreFocusRef.current = true;
     setOpen(true);
   }
 
@@ -430,67 +431,45 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
     showMissingProxyTip();
   }
 
-  const compactButton = (
+  const triggerButton = (
     <Button
       variant="outline"
       data-slot="create-session-trigger"
       className={cn(
-        "h-11 w-11 justify-center border-border px-0",
+        compact
+          ? "h-11 w-11 justify-center border-border px-0"
+          : "h-[46px] w-full justify-center gap-2 border-border px-3",
         !hasProxy && "opacity-50 hover:bg-background",
       )}
       aria-label="新建会话"
       aria-disabled={!hasProxy}
       onClick={!hasProxy ? handleBlockedTrigger : undefined}
     >
-      <Plus aria-hidden="true" />
+      <PlusCircle className="size-4 text-muted-foreground" aria-hidden="true" />
+      {!compact && <span className="truncate">新建</span>}
     </Button>
   );
 
-  const expandedActions = (
-    <div className="grid min-w-0 grid-cols-2 gap-2" data-slot="create-session-actions">
-      <Button
-        variant="outline"
-        data-slot="create-session-trigger"
-        className={cn(
-          "h-[46px] min-w-0 justify-center gap-2 border-border px-3",
-          !hasProxy && "opacity-50 hover:bg-background",
-        )}
-        aria-label="新建 Agent 会话"
-        aria-disabled={!hasProxy}
-        onClick={handleCreateAgent}
-      >
-        <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">Agent</span>
-      </Button>
-      <Button
-        variant="outline"
-        data-slot="create-terminal-session-trigger"
-        className={cn(
-          "h-[46px] min-w-0 justify-center gap-2 border-border px-3",
-          !hasProxy && "opacity-50 hover:bg-background",
-        )}
-        aria-label="新建终端"
-        aria-disabled={!hasProxy}
-        disabled={hasProxy && creatingTerminal}
-        onClick={handleCreateTerminal}
-      >
-        <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{creatingTerminal ? "创建中" : "终端"}</span>
-      </Button>
-    </div>
-  );
-
-  const compactMenuButton = hasProxy ? (
+  const menuButton = hasProxy ? (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>{compactButton}</DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44" data-slot="create-session-type-menu">
+      <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={compact ? "end" : "start"}
+        className="w-52"
+        data-slot="create-session-type-menu"
+        onCloseAutoFocus={(event) => {
+          if (!suppressMenuRestoreFocusRef.current) return;
+          suppressMenuRestoreFocusRef.current = false;
+          event.preventDefault();
+        }}
+      >
         <DropdownMenuItem
           className="min-h-9 gap-2.5"
           data-slot="create-agent-session-item"
           onSelect={handleCreateAgent}
         >
           <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-          Agent 会话
+          新建 Agent 会话
         </DropdownMenuItem>
         <DropdownMenuItem
           className="min-h-9 gap-2.5"
@@ -499,26 +478,24 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
           onSelect={handleCreateTerminal}
         >
           <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-          {creatingTerminal ? "正在创建终端..." : "终端"}
+          {creatingTerminal ? "正在创建终端会话..." : "新建终端会话"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   ) : (
-    compactButton
+    triggerButton
   );
-
-  const button = compact ? compactMenuButton : expandedActions;
 
   return (
     <>
       {hasProxy ? (
-        button
+        menuButton
       ) : (
         <Tooltip
           open={!hasProxy ? tipOpen : undefined}
           onOpenChange={!hasProxy ? setTipOpen : undefined}
         >
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipTrigger asChild>{menuButton}</TooltipTrigger>
           <TooltipContent side="top">{hasProxy ? "新建会话" : "请先连接开发机"}</TooltipContent>
         </Tooltip>
       )}
@@ -560,7 +537,7 @@ function CreateSessionTypeSheet({
             onClick={onCreateAgent}
           >
             <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
-            Agent 会话
+            新建 Agent 会话
           </Button>
           <Button
             type="button"
@@ -571,7 +548,7 @@ function CreateSessionTypeSheet({
             onClick={onCreateTerminal}
           >
             <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-            {creatingTerminal ? "正在创建终端..." : "终端"}
+            {creatingTerminal ? "正在创建终端会话..." : "新建终端会话"}
           </Button>
         </div>
       </SheetContent>

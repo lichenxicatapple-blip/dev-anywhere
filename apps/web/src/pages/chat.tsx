@@ -20,7 +20,7 @@ import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
-import { useSessionStore } from "@/stores/session-store";
+import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { isTouchTabletViewport, useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import {
@@ -46,17 +46,22 @@ export function ChatPage() {
 function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
+  const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
   const isTerminalSession = session?.kind === "terminal";
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const agentStatus = useSessionStore((s) => s.agentStatusBySessionId[id]);
   const ptyState = useSessionStore((s) => s.ptyStateBySessionId[id]);
+  const ptyAutoYesKey = ptyAutoYesSessionKey(selectedProxyId, id);
+  const ptyAutoYesEnabled = useSessionStore((s) =>
+    ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
+  );
+  const setPtyAutoYes = useSessionStore((s) => s.setPtyAutoYes);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
   const routeSessionEnded = isRouteSessionEnded(session, sessionListLoaded);
   const presentation = resolveChatPresentation({ connected, proxyOnline, routeSessionEnded });
-  const [ptyAutoYesEnabled, setPtyAutoYesEnabled] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   // keyboardOffset 表示键盘是否打开/大概高度；layoutKbInset 才是当前 layout viewport 仍被
@@ -154,13 +159,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     ptyAutoYesEnabled,
   });
 
-  useEffect(() => {
-    setPtyAutoYesEnabled(false);
-  }, [id]);
-
   usePtyAutoEnterApproval({
     sessionId: id,
-    enabled: !isTerminalSession && ptyAutoYesEnabled,
+    enabled: !isTerminalSession && ptyAutoYesEnabled && Boolean(ptyAutoYesKey),
     waiting: ptyWaitingApproval,
     approvalSeq: ptyState?.state === "approval_wait" ? ptyState.seq : undefined,
   });
@@ -181,7 +182,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             {showPtyApprovalHint && (
               <PtyApprovalHint
                 autoYesEnabled={ptyAutoYesEnabled}
-                onAutoYesChange={setPtyAutoYesEnabled}
+                onAutoYesChange={(enabled) => {
+                  if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, enabled);
+                }}
               />
             )}
             {presentation === "session-ended" ? (

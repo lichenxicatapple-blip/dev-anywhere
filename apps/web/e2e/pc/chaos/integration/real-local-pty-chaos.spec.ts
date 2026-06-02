@@ -101,7 +101,7 @@ async function openLocalRuntimeSession(page: Page, uniqueName: string): Promise<
     .locator('[data-slot="session-row"]:visible')
     .filter({ hasText: uniqueName })
     .filter({ hasText: provider === "codex" ? "Codex" : "Claude" })
-    .filter({ hasText: "终端" });
+    .filter({ has: page.locator('[data-slot="session-mode-icon"][data-mode="pty"]') });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.locator("button").first().click();
   await expect(page).toHaveURL(/\/chat\/[^?]+\?mode=pty/, { timeout: 15_000 });

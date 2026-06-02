@@ -123,7 +123,9 @@ describe("HistoryList", () => {
     ]);
     expandHistory(container);
 
-    expect(container.querySelector('[data-slot="history-mode-tag"]')?.textContent).toBe("聊天");
+    expect(
+      container.querySelector('[data-slot="history-mode-tag"]')?.getAttribute("aria-label"),
+    ).toBe("聊天视图");
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：恢复 JSON 会话" }));
     expect(screen.getByRole("dialog", { name: "恢复会话" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "恢复聊天" })).toBeTruthy();

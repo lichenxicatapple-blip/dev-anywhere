@@ -318,6 +318,17 @@ test.describe("mobile UX contract", () => {
     await expect(dialog).toBeVisible();
     await expectMobileInsetSurface(page, dialog);
     await expectTouchTarget(dialog.locator('[data-slot="sheet-close"]'));
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const active = document.activeElement;
+          if (!active) return "";
+          const label =
+            active.getAttribute("aria-label") ?? active.getAttribute("aria-labelledby") ?? "";
+          return `${active.tagName}:${label}`;
+        }),
+      )
+      .not.toMatch(/^(INPUT|TEXTAREA):/);
 
     await expectTouchTarget(page.getByLabel("工作目录"));
     await expectTouchTarget(page.getByLabel("Agent CLI").getByRole("button", { name: /Claude/ }));

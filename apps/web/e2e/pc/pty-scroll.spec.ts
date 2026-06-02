@@ -93,6 +93,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtyTerminalMounted(page);
 
     await sendPtyLines(page, { count: 120, prefix: "resume-follow" });
+    await expectPtyScrollable(page, 100);
     await expectPtyAtBottom(page);
 
     const staleBottomGap = await ptyTerminal(page).evaluate((el) => {

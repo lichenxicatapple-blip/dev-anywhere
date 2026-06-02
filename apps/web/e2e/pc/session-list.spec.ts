@@ -1,9 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  installFakeRelay,
-  openCreateAgentSessionDialog,
-  selectFakeProxy,
-} from "../helpers";
+import { installFakeRelay, openCreateAgentSessionDialog, selectFakeProxy } from "../helpers";
 import webPackage from "../../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;
@@ -54,7 +50,8 @@ test.describe("CreateSessionDialog — 字段校验", () => {
   test("桌面底部终端按钮可以创建纯终端", async ({ page }) => {
     await expect(page.locator('[data-slot="create-session-split-trigger"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="create-session-type-menu"]')).toHaveCount(0);
-    await page.locator('[data-slot="create-terminal-session-trigger"]:visible').click();
+    await page.locator('[data-slot="create-session-trigger"]:visible').click();
+    await page.locator('[data-slot="create-terminal-session-item"]').click();
 
     await expect(page).toHaveURL(/\/chat\/created-terminal-\d+\?mode=pty/);
     await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("终端 · ~");
@@ -111,15 +108,15 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.getByRole("heading", { name: "客户端管理" })).toBeVisible();
     await expect(page.getByText("2 个在线客户端")).toBeVisible();
     await expect(page.getByText("当前设备")).toBeVisible();
-    await expect(page.getByText("browser-current")).toBeVisible();
-    await expect(page.getByText("browser-ipad")).toBeVisible();
-    await expect(page.getByText("开发机 proxy-1")).toBeVisible();
+    await expect(page.locator('[data-client-id="browser-current"]')).toBeVisible();
+    await expect(page.locator('[data-client-id="browser-ipad"]')).toBeVisible();
+    await expect(page.getByText("开发机 Local Mac")).toBeVisible();
 
     await page.getByRole("button", { name: "断开" }).click();
 
-    await expect(page.getByText("browser-ipad")).toHaveCount(0);
+    await expect(page.locator('[data-client-id="browser-ipad"]')).toHaveCount(0);
     await expect(page.getByText("1 个在线客户端")).toBeVisible();
-    await expect(page.getByText("browser-current")).toBeVisible();
+    await expect(page.locator('[data-client-id="browser-current"]')).toBeVisible();
   });
 
   test("同路径的 Claude/Codex 历史目录折叠状态互不影响", async ({ page }) => {

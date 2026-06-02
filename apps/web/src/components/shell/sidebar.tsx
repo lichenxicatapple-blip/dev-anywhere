@@ -84,7 +84,9 @@ export function Sidebar({ className }: SidebarProps) {
           <div className="min-w-0 flex-1">
             <CreateSessionButton />
           </div>
-          <SidebarSettingsButton onClick={() => setSettingsOpen(true)} />
+          <div className="min-w-0 flex-1">
+            <SidebarSettingsButton onClick={() => setSettingsOpen(true)} />
+          </div>
         </div>
       </nav>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
@@ -114,10 +116,11 @@ function SidebarSettingsButton({
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             compact
               ? "h-11 w-11 rounded-md border-border bg-card/70 hover:border-primary/60 hover:bg-accent hover:text-foreground"
-              : "h-[46px] w-[46px] rounded-md border-transparent bg-transparent hover:border-border/70 hover:bg-accent hover:text-foreground",
+              : "h-[46px] w-full gap-2 rounded-md border-border bg-background hover:border-primary/50 hover:bg-accent hover:text-foreground",
           )}
         >
           <Settings className="size-4" aria-hidden="true" />
+          {!compact && <span className="truncate text-sm font-medium">设置</span>}
         </button>
       </TooltipTrigger>
       <TooltipContent

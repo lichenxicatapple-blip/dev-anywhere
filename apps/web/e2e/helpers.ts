@@ -985,6 +985,7 @@ export async function openCreateAgentSessionDialog(page: Page) {
     await page.locator('[data-slot="create-agent-session-sheet-item"]').click();
   } else {
     await page.locator('[data-slot="create-session-trigger"]:visible').last().click();
+    await page.locator('[data-slot="create-agent-session-item"]').click();
   }
   const dialog = page.locator('[data-slot="create-session-dialog"]');
   await expect(dialog).toBeVisible();

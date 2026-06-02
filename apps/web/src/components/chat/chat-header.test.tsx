@@ -55,7 +55,7 @@ vi.mock("@/hooks/use-screen-wake-lock", () => ({
 }));
 
 import { ChatHeader } from "./chat-header";
-import { useSessionStore } from "@/stores/session-store";
+import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { useVoicePilotStore } from "@/voice/voice-pilot-store";
 
@@ -63,6 +63,7 @@ describe("ChatHeader PTY upload menu", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
+    sessionStorage.clear();
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
@@ -107,8 +108,13 @@ describe("ChatHeader PTY upload menu", () => {
         },
       ],
       ptyTitles: {},
+      ptyAutoYesBySessionKey: {},
     });
-    useAppStore.setState({ ptyFontSize: 14, chatContentFontSize: 14 });
+    useAppStore.setState({
+      ptyFontSize: 14,
+      chatContentFontSize: 14,
+      selectedProxyId: "proxy-1",
+    });
   });
 
   // Radix DropdownMenu 用 Portal + pointer events, jsdom 下交互复杂。这里跳过菜单 UI,
@@ -121,6 +127,20 @@ describe("ChatHeader PTY upload menu", () => {
     if (!input) throw new Error("hidden upload input not rendered");
     return input;
   }
+
+  it("lets PTY agent sessions toggle Always yes from the overflow menu", async () => {
+    const key = ptyAutoYesSessionKey("proxy-1", "s1");
+    if (!key) throw new Error("missing PTY auto yes key");
+    render(<ChatHeader sessionId="s1" mode="pty" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: "Always yes" });
+    fireEvent.click(item);
+
+    expect(useSessionStore.getState().ptyAutoYesBySessionKey[key]).toBe(true);
+  });
 
   it("uploads picked file and writes the @<path> token into the terminal", async () => {
     const { container } = render(<ChatHeader sessionId="s1" mode="pty" />);

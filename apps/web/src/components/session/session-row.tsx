@@ -1,6 +1,6 @@
 // meta 行所有 pill (mode / 状态 / 相对时间) 统一 h-5 text-xs 对齐，避免 shadcn Badge rounded-full 跟裸 span 撞不齐的锯齿感
 // 状态点走 --color-status-* tokens; 选中态走侧栏结构光带, 不复用状态色。
-import { MoreHorizontal } from "lucide-react";
+import { MessageSquare, MoreHorizontal, TerminalSquare } from "lucide-react";
 import type { SessionInfo } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,10 +87,24 @@ function SessionStateDot({ session }: { session: SessionInfo }) {
   );
 }
 
-function sessionModeLabel(mode: SessionInfo["mode"]): string {
-  if (mode === "pty") return "终端";
-  if (mode === "json") return "聊天";
-  return "";
+function SessionModeIcon({ mode }: { mode: SessionInfo["mode"] }) {
+  if (mode !== "pty" && mode !== "json") return null;
+
+  const label = mode === "json" ? "聊天视图" : "终端视图";
+  const Icon = mode === "json" ? MessageSquare : TerminalSquare;
+
+  return (
+    <span
+      className="inline-flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground"
+      role="img"
+      aria-label={label}
+      title={label}
+      data-slot="session-mode-icon"
+      data-mode={mode}
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+    </span>
+  );
 }
 
 export function SessionRow({
@@ -146,11 +160,7 @@ export function SessionRow({
         </span>
         {hasMeta && (
           <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
-            {session.mode && (
-              <span className="text-muted-foreground shrink-0">
-                {sessionModeLabel(session.mode)}
-              </span>
-            )}
+            {session.mode && <SessionModeIcon mode={session.mode} />}
             {session.mode && (
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                 ·
