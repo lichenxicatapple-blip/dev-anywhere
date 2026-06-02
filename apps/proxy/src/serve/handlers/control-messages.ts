@@ -332,6 +332,7 @@ export function createControlMessageHandlers(
             type: "session_sync",
             sessions: activeSessions.map((s) => ({
               id: s.id,
+              ...(s.kind !== undefined ? { kind: s.kind } : {}),
               mode: s.mode,
               provider: s.provider,
               ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),

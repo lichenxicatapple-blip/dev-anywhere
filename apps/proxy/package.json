@@ -42,7 +42,7 @@
     "dev": "tsx src/index.ts",
     "serve": "tsx src/serve.ts",
     "sample:stream-json": "tsx scripts/sample-stream-json.ts",
-    "test": "vitest run",
+    "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
     "prepack": "pnpm run build",

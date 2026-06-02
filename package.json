@@ -8,7 +8,7 @@
     "lint:source-refs": "node scripts/quality/check-source-comment-refs.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
+    "test": "bash scripts/test/vitest.sh",
     "test:integration": "TEST_SCOPE=integration vitest run",
     "typecheck": "tsc -b",
     "knip": "knip",

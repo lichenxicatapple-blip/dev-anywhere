@@ -10,6 +10,7 @@ import {
 import type { SessionProvider } from "@/lib/session-provider";
 
 interface PtyMobileControlsProps {
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   bottomInset?: number;
   onInput: (data: string) => void;
@@ -22,7 +23,11 @@ const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 const CODEX_CLEAR_GUARD_MS = 1200;
 
-function clearAgentInputSequence(provider: SessionProvider | undefined): string {
+function clearInputSequence(
+  sessionKind: "agent" | "terminal" | undefined,
+  provider: SessionProvider | undefined,
+): string {
+  if (sessionKind === "terminal") return "\x15";
   return provider === "codex" ? "\x03" : "\x1b\x1b";
 }
 
@@ -33,6 +38,7 @@ function clearAgentInputSequence(provider: SessionProvider | undefined): string 
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
 // onPointerDown preventDefault 防把焦点抢走 xterm。
 export function PtyMobileControls({
+  sessionKind,
   provider,
   bottomInset = 0,
   onInput,
@@ -89,6 +95,7 @@ export function PtyMobileControls({
         </SinglePressKey>
 
         <ClearInputKey
+          sessionKind={sessionKind}
           provider={provider}
           label="清空输入区"
           slot="pty-mobile-key-clear"
@@ -192,13 +199,14 @@ function SinglePressKey({ label, slot, onPress, children }: SinglePressKeyProps)
 }
 
 interface ClearInputKeyProps {
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   label: string;
   slot: string;
   onInput: (data: string) => void;
 }
 
-function ClearInputKey({ provider, label, slot, onInput }: ClearInputKeyProps) {
+function ClearInputKey({ sessionKind, provider, label, slot, onInput }: ClearInputKeyProps) {
   const guardTimerRef = useRef<number | null>(null);
   const guardedRef = useRef(false);
   const [guarded, setGuarded] = useState(false);
@@ -228,7 +236,7 @@ function ClearInputKey({ provider, label, slot, onInput }: ClearInputKeyProps) {
 
   const handlePress = (): void => {
     if (provider === "codex" && guardedRef.current) return;
-    onInput(clearAgentInputSequence(provider));
+    onInput(clearInputSequence(sessionKind, provider));
     if (provider === "codex") startCodexGuard();
   };
 

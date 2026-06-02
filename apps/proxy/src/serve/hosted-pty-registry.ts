@@ -60,6 +60,7 @@ interface HostedPtyRegistryDeps {
 
 interface HostedPtyStartOptions {
   sessionId: string;
+  kind?: "agent";
   provider: ProviderId;
   cwd: string;
   args: string[];
@@ -69,7 +70,17 @@ interface HostedPtyStartOptions {
   rows?: number;
 }
 
+interface HostedShellStartOptions {
+  sessionId: string;
+  kind: "terminal";
+  cwd: string;
+  shell?: string;
+  cols?: number;
+  rows?: number;
+}
+
 interface HostedPtySession {
+  kind: "agent" | "terminal";
   child: IPty;
   terminal: InstanceType<typeof HeadlessTerminal>;
   serializeAddon: SerializeAddon;
@@ -131,18 +142,25 @@ export class HostedPtyRegistry {
 
   constructor(private readonly deps: HostedPtyRegistryDeps) {}
 
-  start(options: HostedPtyStartOptions): number {
-    const provider = PROVIDERS[options.provider];
+  start(options: HostedPtyStartOptions | HostedShellStartOptions): number {
+    const kind = options.kind ?? "agent";
     const cols = options.cols ?? DEFAULT_COLS;
     const rows = options.rows ?? DEFAULT_ROWS;
-    const command = provider.buildTerminalCommand(
-      {
-        args: options.args,
-        permissionMode: options.permissionMode,
-        hook: options.hook,
-      },
-      this.deps.getProviderEnv(),
-    );
+    const command =
+      options.kind === "terminal"
+        ? {
+            command: options.shell ?? this.deps.getProviderEnv().SHELL ?? "/bin/sh",
+            args: [],
+            env: this.deps.getProviderEnv(),
+          }
+        : PROVIDERS[options.provider].buildTerminalCommand(
+            {
+              args: options.args,
+              permissionMode: options.permissionMode,
+              hook: options.hook,
+            },
+            this.deps.getProviderEnv(),
+          );
     const env = normalizeHostedPtyEnv(command.env);
     const child = pty.spawn(command.command, command.args, {
       name: HOSTED_PTY_TERM,
@@ -165,6 +183,7 @@ export class HostedPtyRegistry {
       });
 
     const hosted: HostedPtySession = {
+      kind,
       child,
       terminal,
       serializeAddon,
@@ -211,7 +230,8 @@ export class HostedPtyRegistry {
     serviceLogger.info(
       {
         sessionId: options.sessionId,
-        provider: options.provider,
+        kind,
+        ...(options.kind !== "terminal" ? { provider: options.provider } : {}),
         command: command.command,
         pid: child.pid,
         cwd: options.cwd,
@@ -230,7 +250,9 @@ export class HostedPtyRegistry {
   write(sessionId: string, data: string, traceId?: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
-    this.releaseTextApprovalOnInput(sessionId, hosted, data);
+    if (hosted.kind === "agent") {
+      this.releaseTextApprovalOnInput(sessionId, hosted, data);
+    }
     hosted.child.write(data);
     serviceLogger.debug(
       { sessionId, traceId, bytes: data.length },
@@ -291,12 +313,17 @@ export class HostedPtyRegistry {
     hosted.startupOutput = appendStartupOutput(hosted.startupOutput, data);
     hosted.terminal.write(data);
     this.deps.touchSessionActivity(sessionId);
-    this.deps.applyPtyStateToSession(sessionId, "working");
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
     const oscSequences = extractOscSequences(data);
     const session = this.deps.sessionManager.getSession(sessionId);
     const oscSignal = extractOscSignals(data, session?.provider);
+    if (oscSignal?.title) {
+      this.sendTerminalTitle(sessionId, oscSignal.title);
+    }
+    if (hosted.kind === "terminal") return;
+
+    this.deps.applyPtyStateToSession(sessionId, "working");
     const hasTextActivity = normalizePtySemanticText(data).length > 0;
     hosted.semanticTextTail = appendPtySemanticTextTail(hosted.semanticTextTail, data);
     const textSignal = oscSignal
@@ -317,7 +344,7 @@ export class HostedPtyRegistry {
         "Hosted PTY OSC sequences parsed",
       );
     }
-    if (signal?.title) {
+    if (signal?.title && signal.title !== oscSignal?.title) {
       this.sendTerminalTitle(sessionId, signal.title);
     }
 
@@ -357,6 +384,7 @@ export class HostedPtyRegistry {
   private checkIdle(sessionId: string): void {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return;
+    if (hosted.kind === "terminal") return;
     if (hosted.lastOutputTime === 0 || Date.now() - hosted.lastOutputTime <= IDLE_THRESHOLD_MS) {
       return;
     }

@@ -224,6 +224,7 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith(
         {
+          kind: "agent",
           cwd: "/home/dev",
           name: undefined,
           mode: "pty",

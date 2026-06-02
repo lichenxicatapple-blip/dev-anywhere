@@ -152,6 +152,27 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("spawns a pure shell terminal without provider args", () => {
+    withExecutable("zsh", (shellPath) => {
+      const registry = createRegistry("claude", shellPath);
+
+      const pid = registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      registry.destroyAll();
+
+      expect(pid).toBe(2468);
+      expect(ptySpawnMock).toHaveBeenCalledWith(
+        shellPath,
+        [],
+        expect.objectContaining({ cwd: "/tmp" }),
+      );
+    });
+  });
+
   it("emits monotonic PTY semantic sequence numbers", () => {
     withExecutable("codex", (codexBin) => {
       const relayConnection = {
@@ -251,6 +272,48 @@ describe("Hosted PTY registry", () => {
       registry.destroyAll();
 
       expect(applyPtyStateToSession).toHaveBeenCalledWith("s1", "working");
+    });
+  });
+
+  it("does not infer agent semantic state for pure terminal bytes", () => {
+    withExecutable("zsh", (shellPath) => {
+      const applyPtyStateToSession = vi.fn();
+      const registry = new HostedPtyRegistry({
+        sessionManager: {
+          getSession: vi.fn(() => ({
+            id: "terminal-1",
+            kind: "terminal",
+            mode: "pty",
+            provider: "claude",
+            state: SessionState.IDLE,
+            cwd: "/tmp",
+            pid: 2468,
+          })),
+          terminateSession: vi.fn(() => ({ success: true })),
+        } as never,
+        relayConnection: {
+          sendRaw: vi.fn(),
+          sendBinary: vi.fn(),
+        } as never,
+        getProviderEnv: () => ({ SHELL: shellPath }),
+        touchSessionActivity: vi.fn(() => true),
+        applyPtyStateToSession,
+        onSessionClosed: vi.fn(),
+      });
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("$ echo hi\r\n");
+      registry.destroyAll();
+
+      expect(applyPtyStateToSession).not.toHaveBeenCalledWith("terminal-1", "working");
     });
   });
 });

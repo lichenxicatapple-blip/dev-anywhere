@@ -20,10 +20,12 @@ test.describe("real local smoke", () => {
 
     await expectMobileSettingsDialog(page);
 
-    const create = page.locator('button:has-text("新建会话"):visible').last();
+    const create = page
+      .locator('[data-slot="create-session-trigger"], [data-slot="create-session-mobile-trigger"]')
+      .last();
     await expect(create).toBeVisible({ timeout: 15_000 });
     if (isMobile(page)) await expectTouchTarget(create);
-    await create.click();
+    await openCreateSessionDialog(page);
 
     const heading = page.getByRole("heading", { name: "新建会话" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
@@ -75,7 +77,7 @@ test.describe("real local smoke", () => {
     await page.goto("/#/sessions");
     await selectFirstProxy(page);
     try {
-      await page.locator('button:has-text("新建会话"):visible').last().click();
+      await openCreateSessionDialog(page);
       await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible({
         timeout: 15_000,
       });
@@ -111,7 +113,7 @@ test.describe("real local smoke", () => {
     await page.goto("/#/sessions");
     await selectFirstProxy(page);
     try {
-      await page.locator('button:has-text("新建会话"):visible').last().click();
+      await openCreateSessionDialog(page);
       await expect(page.getByRole("heading", { name: "新建会话" })).toBeVisible({
         timeout: 15_000,
       });
@@ -210,6 +212,15 @@ async function expectSessionListReady(page: Page): Promise<void> {
   await expect(page.getByText("请求开发机列表超时")).toHaveCount(0);
   await expect(page.getByText("连接开发机超时")).toHaveCount(0);
   await expect(page.getByText("Relay 客户端未就绪")).toHaveCount(0);
+}
+
+async function openCreateSessionDialog(page: Page): Promise<void> {
+  if (isMobile(page)) {
+    await page.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
+    await page.locator('[data-slot="create-agent-session-sheet-item"]').click();
+    return;
+  }
+  await page.locator('[data-slot="create-session-trigger"]:visible').last().click();
 }
 
 function isMobile(page: Page): boolean {

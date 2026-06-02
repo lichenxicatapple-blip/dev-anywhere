@@ -824,9 +824,10 @@ describe("RelayControlSchema", () => {
     }
   });
 
-  it("requires provider on session_create", () => {
+  it("accepts agent and terminal session_create", () => {
     const result = RelayControlSchema.parse({
       type: "session_create",
+      kind: "agent",
       cwd: "/tmp/project",
       provider: "claude",
       mode: "pty",
@@ -834,16 +835,22 @@ describe("RelayControlSchema", () => {
     });
     expect(result.type).toBe("session_create");
     if (result.type === "session_create") {
+      expect(result.kind).toBe("agent");
       expect(result.provider).toBe("claude");
       expect(result.mode).toBe("pty");
     }
 
-    expect(() =>
-      RelayControlSchema.parse({
-        type: "session_create",
-        cwd: "/tmp/project",
-      }),
-    ).toThrow();
+    const terminal = RelayControlSchema.parse({
+      type: "session_create",
+      kind: "terminal",
+      mode: "pty",
+    });
+    expect(terminal.type).toBe("session_create");
+    if (terminal.type === "session_create") {
+      expect(terminal.kind).toBe("terminal");
+      expect(terminal.cwd).toBeUndefined();
+      expect(terminal.provider).toBeUndefined();
+    }
   });
 
   it("routes terminal_resize_request from client to proxy", () => {

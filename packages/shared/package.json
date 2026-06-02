@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsup && rm -f dist/.tsbuildinfo && tsc -p tsconfig.build.json --outDir dist",
     "dev": "tsup --watch",
-    "test": "vitest run",
+    "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

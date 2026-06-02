@@ -47,6 +47,20 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expectFormContained();
   });
 
+  test("桌面新建菜单可以创建纯终端", async ({ page }) => {
+    await page.getByRole("button", { name: "选择新建类型" }).click();
+    await page.getByRole("menuitem", { name: "终端" }).click();
+
+    await expect(page).toHaveURL(/\/chat\/created-terminal-\d+\?mode=pty/);
+    await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("终端 · ~");
+    await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
+    await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
+
+    const row = page.locator('[data-slot="session-row"]').filter({ hasText: "终端 · ~" });
+    await expect(row).toContainText("终端");
+    await expect(row).toContainText("运行中");
+  });
+
   test("桌面侧边栏可以显式收起和展开", async ({ page }) => {
     await expect(page.locator('[data-slot="sidebar-session-list"]')).toBeVisible();
 

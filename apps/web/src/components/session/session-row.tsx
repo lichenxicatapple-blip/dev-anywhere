@@ -59,8 +59,25 @@ const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; lab
   },
 };
 
-function StateDot({ state }: { state: SessionInfo["state"] }) {
-  const style = STATE_STYLE[state];
+function stateStyleForSession(session: SessionInfo): { dot: string; text: string; label: string } {
+  if (session.kind !== "terminal") return STATE_STYLE[session.state];
+  if (session.state === "terminated") return STATE_STYLE.terminated;
+  if (session.state === "error") {
+    return {
+      dot: "bg-[var(--color-status-error)]",
+      text: "text-[var(--color-status-error)]",
+      label: "已断开",
+    };
+  }
+  return {
+    dot: "bg-[var(--color-status-success)]",
+    text: "text-[var(--color-status-success)]",
+    label: "运行中",
+  };
+}
+
+function SessionStateDot({ session }: { session: SessionInfo }) {
+  const style = stateStyleForSession(session);
   return (
     <span
       className={cn("inline-block size-2 rounded-full shrink-0", style.dot)}
@@ -122,7 +139,7 @@ export function SessionRow({
         aria-pressed={selected}
       >
         <span className="flex items-center gap-2 min-w-0">
-          <StateDot state={session.state} />
+          <SessionStateDot session={session} />
           <span className="text-sm font-normal truncate flex-1" title={rawName}>
             {displayName}
           </span>
@@ -139,7 +156,7 @@ export function SessionRow({
                 ·
               </span>
             )}
-            {session.provider && (
+            {session.provider && session.kind !== "terminal" && (
               <>
                 <span className="font-mono text-muted-foreground shrink-0">
                   {providerLabel(session.provider)}
@@ -149,8 +166,8 @@ export function SessionRow({
                 </span>
               </>
             )}
-            <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
-              {STATE_STYLE[session.state].label}
+            <span className={cn("shrink-0", stateStyleForSession(session).text)}>
+              {stateStyleForSession(session).label}
             </span>
             {lastActiveLabel && (
               <>

@@ -15,6 +15,7 @@ PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
   PLAYWRIGHT_FLAKY_ARGS+=(--fail-on-flaky-tests)
 fi
+unset NO_COLOR FORCE_COLOR
 PROJECT="${PLAYWRIGHT_PC_PROJECT:-device-pc}"
 
 pc_arg_is_opt_in_spec() {
@@ -47,4 +48,8 @@ trap smoke_cleanup EXIT
 smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL"
 
 cd "$ROOT/apps/web"
-WEB_BASE_URL="$BASE_URL" exec ./node_modules/.bin/playwright test --project="$PROJECT" "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$@"
+if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
+  WEB_BASE_URL="$BASE_URL" exec ./node_modules/.bin/playwright test --project="$PROJECT" "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$@"
+else
+  WEB_BASE_URL="$BASE_URL" exec ./node_modules/.bin/playwright test --project="$PROJECT" "$@"
+fi

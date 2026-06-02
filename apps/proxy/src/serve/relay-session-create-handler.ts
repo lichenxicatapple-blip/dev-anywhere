@@ -1,4 +1,5 @@
 import { rmSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
 import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
@@ -66,6 +67,18 @@ function normalizeSessionName(name: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function resolveTerminalCwd(): string {
+  const home = homedir();
+  if (home) {
+    try {
+      if (statSync(home).isDirectory()) return home;
+    } catch {
+      // fall through to process.cwd()
+    }
+  }
+  return process.cwd();
+}
+
 export class RelaySessionCreateHandler {
   // 跟踪每个 pendingId 当前挂起的 retry timer。SIGTERM 抵达时 destroy() 会 clear
   // 这些 timer 并执行 cleanupPendingJsonSession，否则 worker 子进程在窗口期内可能成为孤儿
@@ -83,6 +96,11 @@ export class RelaySessionCreateHandler {
   }
 
   onSessionCreate(msg: ControlMessage<"session_create">): void {
+    if (msg.kind === "terminal") {
+      this.createShellTerminalSession(msg);
+      return;
+    }
+
     const { requestId, cwd } = msg;
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
@@ -327,6 +345,60 @@ export class RelaySessionCreateHandler {
         },
         "Hosted PTY session create failed",
       );
+    }
+  }
+
+  private createShellTerminalSession(msg: ControlMessage<"session_create">): void {
+    const pendingId = nanoid();
+    const cwd = resolveTerminalCwd();
+    const requestedName = normalizeSessionName(msg.name);
+    const name = requestedName ?? "终端 · ~";
+    const nameLocked = requestedName !== undefined;
+
+    try {
+      const pid = this.deps.hostedPtyRegistry.start({
+        sessionId: pendingId,
+        kind: "terminal",
+        cwd,
+      });
+      const session = this.deps.sessionManager.createSession(
+        "pty",
+        cwd,
+        pid,
+        name,
+        pendingId,
+        "claude",
+        "proxy-hosted",
+        nameLocked,
+        "terminal",
+      );
+      this.deps.relaySend(
+        serializeControl({
+          type: "session_create_response",
+          requestId: msg.requestId,
+          sessionId: session.id,
+          name: session.name,
+          nameLocked: session.nameLocked,
+          kind: "terminal",
+          mode: "pty",
+          provider: session.provider,
+          ptyOwner: "proxy-hosted",
+        }),
+      );
+      this.deps.broadcastSessionSync(session);
+      this.deps.broadcastSessionList();
+      serviceLogger.info({ sessionId: session.id, cwd }, "Shell terminal session created");
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      this.deps.relaySend(
+        serializeControl({
+          type: "session_create_response",
+          requestId: msg.requestId,
+          errorCode: ControlErrorCode.PROCESS_START_FAILED,
+          error,
+        }),
+      );
+      serviceLogger.warn({ cwd, error }, "Shell terminal session create failed");
     }
   }
 

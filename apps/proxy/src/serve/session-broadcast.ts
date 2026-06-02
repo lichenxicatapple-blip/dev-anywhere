@@ -8,6 +8,7 @@ const ACTIVITY_STATUS_PUSH_INTERVAL_MS = 15_000;
 function toSessionListPayload(s: SessionInfo) {
   return {
     sessionId: s.id,
+    ...(s.kind !== undefined ? { kind: s.kind } : {}),
     mode: s.mode,
     provider: s.provider,
     ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
@@ -61,6 +62,7 @@ export function broadcastSessionSync(relay: RelayConnection, session: SessionInf
       sessions: [
         {
           id: session.id,
+          ...(session.kind !== undefined ? { kind: session.kind } : {}),
           mode: session.mode,
           provider: session.provider,
           ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),

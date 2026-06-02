@@ -12,6 +12,7 @@ describe("SessionListPayloadSchema", () => {
       sessions: [
         {
           sessionId: "s1",
+          kind: "agent",
           name: "sess1",
           state: "idle",
           provider: "claude",
@@ -28,6 +29,7 @@ describe("SessionListPayloadSchema", () => {
     expect(result.sessions[0].cwd).toBe("/Users/dev/project");
     expect(result.sessions[0].nameLocked).toBe(true);
     expect(result.sessions[0].provider).toBe("claude");
+    expect(result.sessions[0].kind).toBe("agent");
     expect(result.sessions[0].ptyOwner).toBe("local-terminal");
     expect(result.sessions[1].provider).toBe("codex");
     expect(result.sessions[1].name).toBeUndefined();
@@ -36,6 +38,23 @@ describe("SessionListPayloadSchema", () => {
   it("accepts empty session list", () => {
     const result = SessionListPayloadSchema.parse({ sessions: [] });
     expect(result.sessions).toEqual([]);
+  });
+
+  it("accepts terminal session kind", () => {
+    const result = SessionListPayloadSchema.parse({
+      sessions: [
+        {
+          sessionId: "terminal-1",
+          kind: "terminal",
+          name: "终端 · ~",
+          state: "idle",
+          provider: "claude",
+          mode: "pty",
+          ptyOwner: "proxy-hosted",
+        },
+      ],
+    });
+    expect(result.sessions[0].kind).toBe("terminal");
   });
 
   it("rejects invalid session state", () => {

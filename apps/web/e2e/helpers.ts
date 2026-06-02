@@ -88,10 +88,12 @@ export async function installFakeRelay(page: Page): Promise<void> {
 
     type FakeSession = {
       sessionId: string;
+      kind?: "agent" | "terminal";
       name?: string;
       state: "idle" | "working" | "waiting_approval" | "error" | "terminated";
       mode: "pty" | "json";
       provider: "claude" | "codex";
+      ptyOwner?: "local-terminal" | "proxy-hosted";
       lastActive: number;
       cwd?: string;
       nameLocked?: boolean;
@@ -606,6 +608,34 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "session_create": {
+            if (msg.kind === "terminal") {
+              const sessionId = `created-terminal-${++createCount}`;
+              const cwd = "/home/dev";
+              sessions.unshift({
+                sessionId,
+                kind: "terminal",
+                name: "终端 · ~",
+                cwd,
+                state: "idle",
+                mode: "pty",
+                provider: "claude",
+                ptyOwner: "proxy-hosted",
+                lastActive: Date.now(),
+              });
+              persistSessions();
+              this.emitJson({
+                type: "session_create_response",
+                requestId: msg.requestId,
+                sessionId,
+                kind: "terminal",
+                name: "终端 · ~",
+                mode: "pty",
+                provider: "claude",
+                ptyOwner: "proxy-hosted",
+              });
+              this.emitJson(envelope("session_list", "system", { sessions }));
+              break;
+            }
             const provider = msg.provider === "codex" ? "codex" : "claude";
             const mode = msg.mode === "json" ? "json" : "pty";
             const cwd = String(msg.cwd ?? "");
@@ -940,7 +970,13 @@ export async function selectFakeProxy(page: Page): Promise<void> {
     await page.locator('[data-slot="proxy-switcher-trigger"]').click();
   }
   await page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible').last().click();
-  await expect(page.getByRole("button", { name: "新建会话" }).first()).toBeVisible();
+  await expect(
+    page
+      .locator(
+        '[data-slot="create-session-trigger"]:visible, [data-slot="create-session-mobile-trigger"]:visible',
+      )
+      .first(),
+  ).toBeVisible();
 }
 
 export async function gotoWithFakeProxy(page: Page, path: string): Promise<void> {

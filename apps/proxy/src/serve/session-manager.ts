@@ -11,6 +11,7 @@ import {
 
 export interface SessionInfo {
   id: string;
+  kind?: "agent" | "terminal";
   mode: "pty" | "json";
   provider: ProviderId;
   ptyOwner?: "local-terminal" | "proxy-hosted";
@@ -164,6 +165,7 @@ export class SessionManager {
     provider: ProviderId = "claude",
     ptyOwner?: "local-terminal" | "proxy-hosted",
     nameLocked?: boolean,
+    kind?: "agent" | "terminal",
   ): SessionInfo {
     const now = Date.now();
     const pendingPtyMetadata =
@@ -175,6 +177,7 @@ export class SessionManager {
     const resolvedNameLocked = pendingPtyMetadata?.nameLocked ?? (nameLocked ? true : undefined);
     const info: SessionInfo = {
       id: id ?? nanoid(),
+      ...(kind !== undefined && kind !== "agent" ? { kind } : {}),
       mode,
       provider,
       ...(mode === "pty" && ptyOwner !== undefined ? { ptyOwner } : {}),
@@ -195,7 +198,10 @@ export class SessionManager {
     this.sessions.set(info.id, info);
     this.pendingPtyReconnectMetadata.delete(info.id);
     this.save();
-    serviceLogger.info({ sessionId: info.id, mode, provider, ptyOwner, name }, "Session created");
+    serviceLogger.info(
+      { sessionId: info.id, kind: info.kind, mode, provider, ptyOwner, name },
+      "Session created",
+    );
     return info;
   }
 
@@ -403,6 +409,7 @@ export class SessionManager {
   private toPersistedRecord(s: PersistedSessionRecord | SessionInfo): PersistedSessionRecord {
     return {
       id: s.id,
+      ...(s.kind !== undefined && s.kind !== "agent" ? { kind: s.kind } : {}),
       mode: s.mode,
       provider: s.provider,
       ...(s.mode === "pty" && s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
@@ -456,6 +463,15 @@ export class SessionManager {
         continue;
       }
       const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
+      if (info.kind !== undefined && info.kind !== "agent" && info.kind !== "terminal") {
+        const sessionId = String(info.id);
+        this.onSessionRemoved?.(sessionId);
+        serviceLogger.warn(
+          { sessionId, kind: info.kind },
+          "Session persistence file has invalid kind; cleaning session",
+        );
+        continue;
+      }
       if (!isProviderId(info.provider)) {
         const sessionId = String(info.id);
         this.onSessionRemoved?.(sessionId);

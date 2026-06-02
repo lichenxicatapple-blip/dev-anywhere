@@ -183,7 +183,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           "grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-4 sm:max-w-[440px] sm:p-6",
           view === "voice" && "max-h-[min(760px,calc(100dvh-1rem))] !gap-0 !p-0 sm:max-w-[480px]",
           view === "voice" &&
-            "max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:h-[calc(100dvh-0.75rem)] max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-x-0 max-sm:border-b-0",
+            "max-sm:top-auto max-sm:bottom-0 max-sm:left-2 max-sm:right-2 max-sm:h-[calc(100dvh-1rem)] max-sm:w-auto max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:border-x max-sm:border-b-0",
         )}
         data-slot="settings-dialog"
         data-view={view}
@@ -202,7 +202,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="-ml-2 mt-0.5 size-9"
+                  className="-ml-2 mt-0.5 size-11 sm:size-9"
                   aria-label="返回设置"
                   data-slot="voice-settings-back"
                   ref={subviewBackButtonRef}

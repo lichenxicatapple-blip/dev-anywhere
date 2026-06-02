@@ -17,12 +17,19 @@ import { usePtyView } from "./use-pty-view";
 
 interface ChatPtyViewProps {
   sessionId: string;
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
 }
 
-export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: ChatPtyViewProps) {
+export function ChatPtyView({
+  sessionId,
+  sessionKind,
+  provider,
+  ptyOwner,
+  active = true,
+}: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +102,7 @@ export function ChatPtyView({ sessionId, provider, ptyOwner, active = true }: Ch
       />
       {view.showMobilePtyControls ? (
         <PtyMobileControls
+          sessionKind={sessionKind}
           provider={provider}
           bottomInset={view.mobileControlsBottomInset}
           onInput={view.sendMobileInput}

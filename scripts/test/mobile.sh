@@ -44,6 +44,7 @@ PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
   PLAYWRIGHT_FLAKY_ARGS+=(--fail-on-flaky-tests)
 fi
+unset NO_COLOR FORCE_COLOR
 
 mkdir -p "$ARTIFACT_DIR"
 trap 'e2e_mobile_remove_forward_port "$CDP_PORT"; e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
@@ -189,6 +190,21 @@ mobile_record_timing() {
   REPORT_TOTAL_MS+=("$5")
 }
 
+mobile_run_playwright_spec() {
+  local spec="$1"
+  if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
+    WEB_BASE_URL="$BASE_URL" \
+      MOBILE_VITE_BASE_URL="$BASE_URL" \
+      MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
+  else
+    WEB_BASE_URL="$BASE_URL" \
+      MOBILE_VITE_BASE_URL="$BASE_URL" \
+      MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec"
+  fi
+}
+
 mobile_print_timing_report() {
   local count i total_reset_ms total_test_ms total_ms top_n
   count="${#REPORT_SPEC[@]}"
@@ -241,10 +257,7 @@ for spec in "${SPECS[@]}"; do
   # mobile 跑独立 vite 在 5174 不是 host 5173, 不让 helpers 默认值 5173 把 emu 带去
   # connection refused。
   TEST_START_MS="$(mobile_now_ms)"
-  if WEB_BASE_URL="$BASE_URL" \
-    MOBILE_VITE_BASE_URL="$BASE_URL" \
-    MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
-    ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"; then
+  if mobile_run_playwright_spec "$spec"; then
     SPEC_STATUS="passed"
   else
     SPEC_RC="$?"

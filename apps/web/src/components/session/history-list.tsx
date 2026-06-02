@@ -481,7 +481,7 @@ function HistoryRestoreDialog({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
-          className="max-h-[calc(100dvh-0.75rem)] min-w-0 overflow-hidden rounded-t-xl border-t bg-background p-0"
+          className="inset-x-2 w-auto max-h-[calc(100dvh-0.75rem)] min-w-0 overflow-hidden rounded-t-xl border bg-background p-0"
           data-slot="history-restore-dialog"
         >
           <SheetHeader className="min-w-0 shrink-0 px-4 pb-2 pt-4 text-left">

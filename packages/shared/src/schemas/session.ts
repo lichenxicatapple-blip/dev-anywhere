@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
+import {
+  providerValues,
+  ptyOwnerValues,
+  sessionKindValues,
+  sessionModeValues,
+} from "../constants/enums.js";
 import { ptySemanticStateValues } from "../constants/pty.js";
 import { IdSchema } from "./id.js";
 
@@ -24,6 +29,7 @@ const agentStatusPhaseValues = [
 // lastActive: 最近一次状态变更或运行时活动时间戳 (ms), 用于列表"最近活动 N 分钟前"显示, 可选
 export const SessionInfoSchema = z.object({
   sessionId: IdSchema,
+  kind: z.enum(sessionKindValues).optional(),
   name: z.string().optional(),
   // cwd 只用于展示完整路径/tooltip，不作为前端路由或权限判断来源。
   cwd: z.string().optional(),

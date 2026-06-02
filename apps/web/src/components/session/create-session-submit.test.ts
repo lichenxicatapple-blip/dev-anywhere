@@ -8,6 +8,7 @@ import {
   providerStatus,
   PROVIDER_LABEL,
   submitSessionCreate,
+  submitTerminalCreate,
 } from "./create-session-submit";
 
 const agentCli = {
@@ -175,11 +176,47 @@ describe("create-session submit model", () => {
     });
     expect(relay.createSession).toHaveBeenCalledWith(
       {
+        kind: "agent",
         cwd: "/home/dev",
         name: "Release checklist",
         mode: "pty",
         provider: "claude",
         permissionMode: "default",
+      },
+      expect.any(Number),
+    );
+  });
+
+  it("creates a pure terminal without cwd or provider availability", async () => {
+    const relay = {
+      createSession: vi.fn().mockResolvedValue({
+        type: "session_create_response",
+        sessionId: "term-1",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+        name: "终端 · ~",
+      }),
+    };
+
+    await expect(submitTerminalCreate({ relay })).resolves.toEqual({
+      type: "success",
+      session: {
+        sessionId: "term-1",
+        kind: "terminal",
+        name: "终端 · ~",
+        state: "idle",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+      },
+      route: "/chat/term-1?mode=pty",
+    });
+    expect(relay.createSession).toHaveBeenCalledWith(
+      {
+        kind: "terminal",
+        mode: "pty",
       },
       expect.any(Number),
     );

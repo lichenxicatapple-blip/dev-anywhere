@@ -32,6 +32,40 @@ async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
   );
 }
 
+async function openMobileCreateTypeSheet(page: Page): Promise<Locator> {
+  await page.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
+  const sheet = page.locator('[data-slot="create-session-type-sheet"]');
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+async function expectMobileInsetSurface(
+  page: Page,
+  surface: Locator,
+  options: { minInset?: number; requireTopInset?: boolean } = {},
+): Promise<void> {
+  const minInset = options.minInset ?? 7;
+  await expect(surface).toBeVisible();
+  await expect
+    .poll(async () => {
+      return surface.evaluate(
+        (node, { minInset: expectedInset, requireTopInset }) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            rect.left >= expectedInset &&
+            rect.right <= window.innerWidth - expectedInset &&
+            rect.width <= window.innerWidth - expectedInset * 2 + 1 &&
+            rect.top >= (requireTopInset ? expectedInset : -1) &&
+            rect.bottom <= window.innerHeight + 1
+          );
+        },
+        { minInset, requireTopInset: options.requireTopInset ?? false },
+      );
+    })
+    .toBe(true);
+  await expectNoHorizontalDocumentOverflow(page);
+}
+
 test.describe("mobile UX contract", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
@@ -61,7 +95,7 @@ test.describe("mobile UX contract", () => {
     await expect(page.locator('[data-slot="mobile-brand-hero"]')).not.toContainText("左侧");
     await expectTouchTarget(page.locator('[data-slot="mobile-switch-proxy"]'));
     await expectNoHorizontalDocumentOverflow(page);
-    await expectTouchTarget(page.locator('button:has-text("新建会话"):visible').last());
+    await expectTouchTarget(page.locator('[data-slot="create-session-mobile-trigger"]'));
     await expectAllVisibleTouchTargets(
       page,
       '[data-slot="session-row"] button, [data-slot="history-row"]',
@@ -136,9 +170,47 @@ test.describe("mobile UX contract", () => {
     await expectTouchTarget(settings);
     await settings.click();
 
-    await expect(page.locator('[data-slot="settings-dialog"]')).toBeVisible();
+    const dialog = page.locator('[data-slot="settings-dialog"]');
+    await expect(dialog).toBeVisible();
     await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
-    await expectNoHorizontalDocumentOverflow(page);
+    await expectMobileInsetSurface(page, dialog, { requireTopInset: true });
+  });
+
+  test("mobile Voice Pilot settings keep an inset dialog shell", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.locator('[data-slot="mobile-settings-trigger"]').click();
+    await page.getByRole("button", { name: "Voice Pilot" }).click();
+
+    const dialog = page.locator('[data-slot="settings-dialog"][data-view="voice"]');
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole("heading", { name: "设置 Voice Pilot" })).toBeVisible();
+    await expectTouchTarget(dialog.locator('[data-slot="voice-settings-back"]'));
+    await expectMobileInsetSurface(page, dialog, { requireTopInset: true });
+  });
+
+  test("mobile chat dialogs keep inset shells and touch-safe actions", async ({ page }) => {
+    await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+    await expect(page.getByLabel("输入聊天消息")).toBeVisible();
+
+    await page.getByRole("button", { name: "会话操作" }).click();
+    await page.locator('[data-slot="chat-menu-rename"]').click();
+    const renameDialog = page.locator('[data-slot="session-rename-dialog"]');
+    await expect(renameDialog).toBeVisible();
+    await expectMobileInsetSurface(page, renameDialog, { requireTopInset: true });
+    await expectTouchTarget(renameDialog.locator('[data-slot="dialog-close"]'));
+    await expectTouchTarget(renameDialog.getByRole("button", { name: "取消" }));
+    await expectTouchTarget(renameDialog.getByRole("button", { name: "保存" }));
+    await renameDialog.locator('[data-slot="dialog-close"]').click();
+    await expect(renameDialog).toBeHidden();
+
+    await page.getByRole("button", { name: "会话操作" }).click();
+    await page.locator('[data-slot="chat-menu-voice-pilot-item"]').click();
+    const voiceDialog = page.locator('[data-slot="voice-pilot-wake-lock-dialog"]');
+    await expect(voiceDialog).toBeVisible();
+    await expectMobileInsetSurface(page, voiceDialog, { requireTopInset: true });
+    await expectTouchTarget(voiceDialog.locator('[data-slot="dialog-close"]'));
+    await expectTouchTarget(voiceDialog.getByRole("button", { name: "取消" }));
+    await expectTouchTarget(voiceDialog.getByRole("button", { name: "开启 Voice Pilot" }));
   });
 
   test("mobile landscape settings dialog keeps close control inside the viewport", async ({
@@ -235,21 +307,17 @@ test.describe("mobile UX contract", () => {
     page,
   }) => {
     await selectFakeProxy(page);
-    await page.locator('button:has-text("新建会话"):visible').last().click();
+    const sheet = await openMobileCreateTypeSheet(page);
+    await expectMobileInsetSurface(page, sheet);
+    await expectTouchTarget(sheet.locator('[data-slot="create-agent-session-sheet-item"]'));
+    await expectTouchTarget(sheet.locator('[data-slot="create-terminal-session-sheet-item"]'));
+    await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
+    await sheet.locator('[data-slot="create-agent-session-sheet-item"]').click();
 
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible();
-    await expectNoHorizontalDocumentOverflow(page);
-    const surfaceBounds = await dialog.evaluate((node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        left: rect.left,
-        right: rect.right,
-        innerWidth: window.innerWidth,
-      };
-    });
-    expect(surfaceBounds.left).toBeGreaterThanOrEqual(7);
-    expect(surfaceBounds.right).toBeLessThanOrEqual(surfaceBounds.innerWidth - 7);
+    await expectMobileInsetSurface(page, dialog);
+    await expectTouchTarget(dialog.locator('[data-slot="sheet-close"]'));
 
     await expectTouchTarget(page.getByLabel("工作目录"));
     await expectTouchTarget(page.getByLabel("Agent CLI").getByRole("button", { name: /Claude/ }));
@@ -270,6 +338,64 @@ test.describe("mobile UX contract", () => {
     await page.getByLabel("工作目录").focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible();
     await expectTouchTarget(page.locator('[data-slot="file-entry"]').first());
+  });
+
+  test("mobile create type sheet can start a pure terminal session", async ({ page }) => {
+    await selectFakeProxy(page);
+    const sheet = await openMobileCreateTypeSheet(page);
+
+    await expect(sheet.getByRole("heading", { name: "新建" })).toBeVisible();
+    await expectMobileInsetSurface(page, sheet);
+    await expectTouchTarget(sheet.locator('[data-slot="create-agent-session-sheet-item"]'));
+    await expectTouchTarget(sheet.locator('[data-slot="create-terminal-session-sheet-item"]'));
+    await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
+    await expect
+      .poll(() =>
+        sheet.evaluate((node) => {
+          const color = getComputedStyle(node).backgroundColor.replace(/\s+/g, "");
+          return color !== "rgb(255,255,255)" && color !== "rgba(0,0,0,0)";
+        }),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        page.locator('[data-slot="sheet-overlay"]').evaluate((node) => {
+          const color = getComputedStyle(node).backgroundColor;
+          const slashAlpha = color.match(/\/\s*([0-9.]+)\s*\)/);
+          if (slashAlpha) return Number.parseFloat(slashAlpha[1]);
+          const match = color.match(/rgba?\(([^)]+)\)/);
+          if (!match) return -1;
+          const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+          return parts.length >= 4 ? (parts[3] ?? 1) : 1;
+        }),
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page.locator('[data-slot="sheet-overlay"]').evaluate((node) => {
+          const color = getComputedStyle(node).backgroundColor;
+          const slashAlpha = color.match(/\/\s*([0-9.]+)\s*\)/);
+          if (slashAlpha) return Number.parseFloat(slashAlpha[1]);
+          const match = color.match(/rgba?\(([^)]+)\)/);
+          if (!match) return 1;
+          const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+          return parts.length >= 4 ? (parts[3] ?? 1) : 1;
+        }),
+      )
+      .toBeLessThanOrEqual(0.2);
+
+    await sheet.locator('[data-slot="create-terminal-session-sheet-item"]').click();
+
+    await expect(page).toHaveURL(/\/chat\/created-terminal-\d+\?mode=pty/);
+    await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("终端 · ~");
+    await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
+    await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
+    await expectNoHorizontalDocumentOverflow(page);
+
+    const terminalCreate = (await sentFakeRelayMessages(page)).find(
+      (msg) => msg.type === "session_create" && msg.kind === "terminal",
+    );
+    expect(terminalCreate).toMatchObject({ kind: "terminal", mode: "pty" });
   });
 
   test("restore session uses a mobile-safe sheet", async ({ page }) => {
@@ -307,9 +433,10 @@ test.describe("mobile UX contract", () => {
     const footer = page.locator('[data-slot="history-restore-footer"]');
     await expect(sheet).toBeVisible();
     await expect(footer).toBeVisible();
+    await expectMobileInsetSurface(page, sheet);
+    await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
     await expectTouchTarget(footer.getByRole("button", { name: "恢复终端" }));
     await expectTouchTarget(footer.getByRole("button", { name: "取消" }));
-    await expectNoHorizontalDocumentOverflow(page);
 
     await expect
       .poll(async () =>

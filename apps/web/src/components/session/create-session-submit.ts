@@ -37,11 +37,23 @@ type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_creat
 interface CreateSessionRelay {
   createSession(
     request: {
+      kind?: "agent" | "terminal";
       cwd: string;
       name?: string;
       mode: SessionMode;
       provider: ProviderId;
       permissionMode: PermissionMode;
+    },
+    timeoutMs?: number,
+  ): Promise<SessionCreateResponse>;
+}
+
+interface CreateTerminalRelay {
+  createSession(
+    request: {
+      kind: "terminal";
+      mode: "pty";
+      name?: string;
     },
     timeoutMs?: number,
   ): Promise<SessionCreateResponse>;
@@ -60,6 +72,12 @@ type CreateSessionSubmitResult =
   | { type: "relay_missing"; message: string }
   | { type: "provider_unavailable"; message: string }
   | { type: "missing_cwd"; message: string; path: string }
+  | { type: "create_error"; message: string }
+  | { type: "exception"; message: string }
+  | { type: "success"; session: SessionInfo; route: string };
+
+type CreateTerminalSubmitResult =
+  | { type: "relay_missing"; message: string }
   | { type: "create_error"; message: string }
   | { type: "exception"; message: string }
   | { type: "success"; session: SessionInfo; route: string };
@@ -145,6 +163,7 @@ export async function submitSessionCreate({
   try {
     const response = await relay.createSession(
       {
+        kind: "agent",
         cwd: targetCwd,
         name: submittedName || undefined,
         mode: submittedMode,
@@ -166,6 +185,7 @@ export async function submitSessionCreate({
     const resolvedName = response.name?.trim() || undefined;
     const session: SessionInfo = {
       sessionId: response.sessionId,
+      ...(response.kind !== undefined ? { kind: response.kind } : {}),
       name: resolvedName,
       ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
       state: "idle",
@@ -174,6 +194,46 @@ export async function submitSessionCreate({
       ...(response.ptyOwner !== undefined ? { ptyOwner: response.ptyOwner } : {}),
     };
     return { type: "success", session, route: `/chat/${response.sessionId}?mode=${mode}` };
+  } catch (err) {
+    return { type: "exception", message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function submitTerminalCreate({
+  relay,
+  timeoutMs = SESSION_CREATE_TIMEOUT_MS,
+}: {
+  relay: CreateTerminalRelay | null | undefined;
+  timeoutMs?: number;
+}): Promise<CreateTerminalSubmitResult> {
+  if (!relay) {
+    return { type: "relay_missing", message: "请先连接开发机" };
+  }
+
+  try {
+    const response = await relay.createSession(
+      {
+        kind: "terminal",
+        mode: "pty",
+      },
+      timeoutMs,
+    );
+
+    if (response.error || !response.sessionId) {
+      return { type: "create_error", message: `创建终端失败：${response.error ?? "未知错误"}` };
+    }
+
+    const session: SessionInfo = {
+      sessionId: response.sessionId,
+      kind: "terminal",
+      name: response.name?.trim() || "终端 · ~",
+      ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
+      state: "idle",
+      mode: "pty",
+      provider: response.provider ?? "claude",
+      ...(response.ptyOwner !== undefined ? { ptyOwner: response.ptyOwner } : {}),
+    };
+    return { type: "success", session, route: `/chat/${response.sessionId}?mode=pty` };
   } catch (err) {
     return { type: "exception", message: err instanceof Error ? err.message : String(err) };
   }

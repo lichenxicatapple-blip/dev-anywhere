@@ -16,7 +16,8 @@ test.describe("L4 mobile / error UI states", () => {
     await emuPage.reload();
     await selectFakeProxy(emuPage);
 
-    await emuPage.locator('button:has-text("新建会话"):visible').last().click();
+    await emuPage.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
+    await emuPage.locator('[data-slot="create-agent-session-sheet-item"]').click();
     const dialog = emuPage.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
@@ -48,7 +49,8 @@ test.describe("L4 mobile / error UI states", () => {
     await emuPage.reload();
     await selectFakeProxy(emuPage);
 
-    await emuPage.locator('button:has-text("新建会话"):visible').last().click();
+    await emuPage.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
+    await emuPage.locator('[data-slot="create-agent-session-sheet-item"]').click();
     const dialog = emuPage.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 

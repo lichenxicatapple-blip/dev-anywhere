@@ -8,12 +8,19 @@
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useState } from "react";
 import { useNavigate, useMatch } from "react-router";
-import { ChevronRight, Plus, Loader2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Loader2, Plus, Terminal } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
 import type { SessionInfo } from "@dev-anywhere/shared";
@@ -21,6 +28,7 @@ import { compareProvider, providerLabel, type SessionProvider } from "@/lib/sess
 import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
+import { submitTerminalCreate } from "./create-session-submit";
 import { SessionRenameDialog } from "./session-rename-dialog";
 import { SessionTerminationDialog } from "./session-termination-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
@@ -30,6 +38,8 @@ import { resolveSessionRowState } from "@/lib/session-row-state";
 interface SessionListProps {
   layout: "page" | "sidebar";
 }
+
+type ActiveSessionGroupKey = SessionProvider | "terminal";
 
 export function SessionList({ layout }: SessionListProps) {
   const sessions = useSessionStore((s) => s.sessions);
@@ -47,11 +57,13 @@ export function SessionList({ layout }: SessionListProps) {
   const isLoading = !proxyListLoaded || (hasProxy && !sessionListLoaded);
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createTypeOpen, setCreateTypeOpen] = useState(false);
   const [pendingRename, setPendingRename] = useState<SessionInfo | null>(null);
   const [pendingTermination, setPendingTermination] = useState<SessionInfo | null>(null);
-  const [collapsedActiveProviders, setCollapsedActiveProviders] = useState<Set<SessionProvider>>(
-    new Set(),
-  );
+  const { creatingTerminal, createTerminal } = useTerminalCreator();
+  const [collapsedActiveProviders, setCollapsedActiveProviders] = useState<
+    Set<ActiveSessionGroupKey>
+  >(new Set());
   // 每分钟推一次 now，让活跃/历史会话里的相对时间跟着走；store 不动也能滚
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -98,7 +110,7 @@ export function SessionList({ layout }: SessionListProps) {
     toast.success("已重命名会话");
   }
 
-  function toggleActiveProvider(provider: SessionProvider) {
+  function toggleActiveProvider(provider: ActiveSessionGroupKey) {
     setCollapsedActiveProviders((prev) => {
       const next = new Set(prev);
       if (next.has(provider)) next.delete(provider);
@@ -214,7 +226,7 @@ export function SessionList({ layout }: SessionListProps) {
               "text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
             )}
           >
-            <span className="font-mono">{providerLabel(group.provider)}</span>
+            <span className="font-mono">{sessionGroupLabel(group.provider)}</span>
             <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
             <span className="tabular-nums">{group.sessions.length}</span>
             <ChevronRight
@@ -263,11 +275,25 @@ export function SessionList({ layout }: SessionListProps) {
           {historyElement}
         </div>
         <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] border-t border-border">
-          <Button className="min-h-11 w-full md:min-h-0" onClick={() => setCreateOpen(true)}>
+          <Button
+            className="min-h-11 w-full md:min-h-0"
+            data-slot="create-session-mobile-trigger"
+            onClick={() => setCreateTypeOpen(true)}
+          >
             <Plus aria-hidden="true" />
-            新建会话
+            新建
           </Button>
         </div>
+        <CreateSessionTypeSheet
+          open={createTypeOpen}
+          creatingTerminal={creatingTerminal}
+          onOpenChange={setCreateTypeOpen}
+          onCreateAgent={() => {
+            setCreateTypeOpen(false);
+            setCreateOpen(true);
+          }}
+          onCreateTerminal={() => void createTerminal(() => setCreateTypeOpen(false))}
+        />
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         <SessionTerminationDialog
           open={pendingTermination !== null}
@@ -323,15 +349,52 @@ export function SessionList({ layout }: SessionListProps) {
 }
 
 function groupActiveSessionsByProvider(sessions: SessionInfo[]) {
-  const map = new Map<SessionProvider, SessionInfo[]>();
+  const map = new Map<ActiveSessionGroupKey, SessionInfo[]>();
   for (const session of sessions) {
-    const list = map.get(session.provider);
+    const key: ActiveSessionGroupKey =
+      session.kind === "terminal" ? "terminal" : session.provider;
+    const list = map.get(key);
     if (list) list.push(session);
-    else map.set(session.provider, [session]);
+    else map.set(key, [session]);
   }
   return Array.from(map.entries())
-    .sort(([a], [b]) => compareProvider(a, b))
+    .sort(([a], [b]) => compareSessionGroup(a, b))
     .map(([provider, groupedSessions]) => ({ provider, sessions: groupedSessions }));
+}
+
+function sessionGroupLabel(provider: ActiveSessionGroupKey): string {
+  return provider === "terminal" ? "终端" : providerLabel(provider);
+}
+
+function compareSessionGroup(a: ActiveSessionGroupKey, b: ActiveSessionGroupKey) {
+  if (a === b) return 0;
+  if (a === "terminal") return -1;
+  if (b === "terminal") return 1;
+  return compareProvider(a, b);
+}
+
+function useTerminalCreator() {
+  const navigate = useNavigate();
+  const [creatingTerminal, setCreatingTerminal] = useState(false);
+
+  async function createTerminal(onCreated?: () => void): Promise<void> {
+    if (creatingTerminal) return;
+    setCreatingTerminal(true);
+    try {
+      const result = await submitTerminalCreate({ relay: relayClientRef });
+      if (result.type !== "success") {
+        toast.error(result.message);
+        return;
+      }
+      useSessionStore.getState().addSession(result.session);
+      onCreated?.();
+      navigate(result.route);
+    } finally {
+      setCreatingTerminal(false);
+    }
+  }
+
+  return { creatingTerminal, createTerminal };
 }
 
 // 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因
@@ -339,8 +402,9 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   const [open, setOpen] = useState(false);
   const [tipOpen, setTipOpen] = useState(false);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+  const { creatingTerminal, createTerminal } = useTerminalCreator();
 
-  function handleClick() {
+  function handleCreateAgent() {
     if (!hasProxy) {
       setTipOpen(true);
       window.setTimeout(() => setTipOpen(false), 2000);
@@ -349,24 +413,90 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
     setOpen(true);
   }
 
-  const button = (
+  function handleCreateTerminal() {
+    if (!hasProxy) {
+      setTipOpen(true);
+      window.setTimeout(() => setTipOpen(false), 2000);
+      return;
+    }
+    void createTerminal();
+  }
+
+  const compactButton = (
     <Button
       variant="outline"
       data-slot="create-session-trigger"
       className={cn(
-        compact
-          ? "h-11 w-11 justify-center border-border px-0"
-          : "h-[46px] w-full justify-start gap-2 border-border",
+        "h-11 w-11 justify-center border-border px-0",
         !hasProxy && "opacity-50 hover:bg-background",
       )}
-      aria-label={compact ? "新建会话" : undefined}
+      aria-label="新建会话"
       aria-disabled={!hasProxy}
-      onClick={handleClick}
+      onClick={handleCreateAgent}
     >
       <Plus aria-hidden="true" />
-      {!compact && "新建会话"}
     </Button>
   );
+
+  const expandedButton = (
+    <div className="flex h-[46px] w-full min-w-0" data-slot="create-session-split-trigger">
+      <Button
+        variant="outline"
+        data-slot="create-session-trigger"
+        className={cn(
+          "h-[46px] min-w-0 flex-1 justify-start gap-2 rounded-r-none border-border",
+          !hasProxy && "opacity-50 hover:bg-background",
+        )}
+        aria-disabled={!hasProxy}
+        onClick={handleCreateAgent}
+      >
+        <Plus aria-hidden="true" />
+        新建会话
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            className={cn(
+              "h-[46px] w-10 shrink-0 rounded-l-none border-l-0 border-border px-0",
+              !hasProxy && "opacity-50 hover:bg-background",
+            )}
+            aria-label="选择新建类型"
+            aria-disabled={!hasProxy}
+            onClick={(event) => {
+              if (hasProxy) return;
+              event.preventDefault();
+              setTipOpen(true);
+              window.setTimeout(() => setTipOpen(false), 2000);
+            }}
+          >
+            <ChevronDown className="size-4" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44" data-slot="create-session-type-menu">
+          <DropdownMenuItem
+            className="min-h-9 gap-2.5"
+            data-slot="create-agent-session-item"
+            onSelect={handleCreateAgent}
+          >
+            <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
+            Agent 会话
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="min-h-9 gap-2.5"
+            data-slot="create-terminal-session-item"
+            disabled={creatingTerminal}
+            onSelect={handleCreateTerminal}
+          >
+            <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+            {creatingTerminal ? "正在创建终端..." : "终端"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
+  const button = compact ? compactButton : expandedButton;
 
   return (
     <>
@@ -383,5 +513,57 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
       )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />
     </>
+  );
+}
+
+function CreateSessionTypeSheet({
+  open,
+  creatingTerminal,
+  onOpenChange,
+  onCreateAgent,
+  onCreateTerminal,
+}: {
+  open: boolean;
+  creatingTerminal: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreateAgent: () => void;
+  onCreateTerminal: () => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        overlayClassName="bg-black/10 dark:bg-black/30"
+        className="inset-x-2 w-auto rounded-t-xl border border-border/80 bg-background px-3 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+        data-slot="create-session-type-sheet"
+      >
+        <SheetHeader className="px-1 pb-1 pt-0 text-left">
+          <SheetTitle>新建</SheetTitle>
+        </SheetHeader>
+        <div className="grid gap-2 pb-1" data-slot="create-session-type-options">
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
+            data-slot="create-agent-session-sheet-item"
+            onClick={onCreateAgent}
+          >
+            <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
+            Agent 会话
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
+            data-slot="create-terminal-session-sheet-item"
+            disabled={creatingTerminal}
+            onClick={onCreateTerminal}
+          >
+            <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+            {creatingTerminal ? "正在创建终端..." : "终端"}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

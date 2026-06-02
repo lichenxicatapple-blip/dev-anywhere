@@ -47,6 +47,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
+  const isTerminalSession = session?.kind === "terminal";
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const agentStatus = useSessionStore((s) => s.agentStatusBySessionId[id]);
   const ptyState = useSessionStore((s) => s.ptyStateBySessionId[id]);
@@ -84,6 +85,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
 
   // 会话资源按 session 做 request-scoped snapshot，避免会话切换时沿用旧命令或旧文件树。
   useEffect(() => {
+    if (isTerminalSession) return;
     if (!connected || !proxyOnline) return;
     if (routeSessionEnded) return;
     const relay = relayClientRef;
@@ -114,7 +116,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       .catch((err: unknown) => {
         console.error("[chat] requestAgentStatuses failed", { sessionId: id }, err);
       });
-  }, [id, connected, proxyOnline, routeSessionEnded]);
+  }, [id, connected, proxyOnline, routeSessionEnded, isTerminalSession]);
 
   // session 通过任何路径被终止 (用户主动终止 / 子进程退出广播) 后清掉上次 chat 路由记录,
   // 否则下次冷启动还会自动跳到一个已经不存在的 sessionId, 体验上多走一步。
@@ -143,7 +145,10 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     hasPendingApproval: mode === "json" && pendingApprovals.some((a) => a.status === "pending"),
   });
   const ptyWaitingApproval =
-    mode === "pty" && presentation === "ok" && statusState === "waiting_approval";
+    !isTerminalSession &&
+    mode === "pty" &&
+    presentation === "ok" &&
+    statusState === "waiting_approval";
   const showPtyApprovalHint = shouldShowPtyApprovalHint({
     ptyWaitingApproval,
     ptyAutoYesEnabled,
@@ -155,7 +160,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
 
   usePtyAutoEnterApproval({
     sessionId: id,
-    enabled: ptyAutoYesEnabled,
+    enabled: !isTerminalSession && ptyAutoYesEnabled,
     waiting: ptyWaitingApproval,
     approvalSeq: ptyState?.state === "approval_wait" ? ptyState.seq : undefined,
   });
@@ -171,7 +176,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         >
           <ChatHeader sessionId={id} mode={mode} />
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
-          <StatusLine state={statusState} />
+          {!isTerminalSession && <StatusLine state={statusState} />}
           <div className="flex-1 min-h-0 relative">
             {showPtyApprovalHint && (
               <PtyApprovalHint
@@ -187,6 +192,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             ) : mode === "pty" ? (
               <PtyKeepAliveViewport
                 sessionId={id}
+                sessionKind={session?.kind}
                 provider={session?.provider}
                 ptyOwner={session?.ptyOwner}
               />

@@ -510,6 +510,68 @@ describe("RelayRouter input routing", () => {
     });
   });
 
+  it("creates a pure shell terminal without agent provider startup", () => {
+    const relaySend = vi.fn();
+    const hostedStart = vi.fn(() => 4321);
+    const createSession = vi.fn(() => ({
+      id: "terminal-session",
+      kind: "terminal",
+      mode: "pty",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      state: SessionState.IDLE,
+      cwd: "/Users/dev",
+      pid: 4321,
+      createdAt: 1,
+      updatedAt: 1,
+      name: "终端 · ~",
+    }));
+    const router = createRouter({
+      mode: "pty",
+      relaySend,
+      hostedStart,
+      sessionManager: {
+        createSession,
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-terminal-1",
+      kind: "terminal",
+      mode: "pty",
+    });
+
+    expect(hostedStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: expect.any(String),
+        kind: "terminal",
+        cwd: expect.any(String),
+      }),
+    );
+    expect(createSession).toHaveBeenCalledWith(
+      "pty",
+      expect.any(String),
+      4321,
+      "终端 · ~",
+      expect.any(String),
+      "claude",
+      "proxy-hosted",
+      false,
+      "terminal",
+    );
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-terminal-1",
+      sessionId: "terminal-session",
+      kind: "terminal",
+      mode: "pty",
+      ptyOwner: "proxy-hosted",
+      name: "终端 · ~",
+    });
+  });
+
   it("records Codex hosted PTY resume history id during session_create", () => {
     const setHistorySessionId = vi.fn();
     const setClaudeSessionId = vi.fn();

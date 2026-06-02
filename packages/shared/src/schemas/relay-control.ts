@@ -11,7 +11,12 @@ import {
 } from "./voice.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
-import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
+import {
+  providerValues,
+  ptyOwnerValues,
+  sessionKindValues,
+  sessionModeValues,
+} from "../constants/enums.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -517,9 +522,10 @@ const relayControlDefinitions = [
     "session_create",
     {
       ...RequestIdShape,
-      cwd: z.string(),
+      kind: z.enum(sessionKindValues).optional(),
+      cwd: z.string().optional(),
       name: z.string().optional(),
-      provider: z.enum(providerValues),
+      provider: z.enum(providerValues).optional(),
       mode: z.enum(sessionModeValues).optional(),
       resumeSessionId: z.string().optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
@@ -537,6 +543,7 @@ const relayControlDefinitions = [
       sessionId: IdSchema.optional(),
       name: z.string().optional(),
       nameLocked: z.boolean().optional(),
+      kind: z.enum(sessionKindValues).optional(),
       mode: z.enum(sessionModeValues).optional(),
       provider: z.enum(providerValues).optional(),
       ptyOwner: z.enum(ptyOwnerValues).optional(),
@@ -677,6 +684,7 @@ const relayControlDefinitions = [
     sessions: z.array(
       z.object({
         id: z.string(),
+        kind: z.enum(sessionKindValues).optional(),
         mode: z.enum(sessionModeValues),
         provider: z.enum(providerValues),
         ptyOwner: z.enum(ptyOwnerValues).optional(),

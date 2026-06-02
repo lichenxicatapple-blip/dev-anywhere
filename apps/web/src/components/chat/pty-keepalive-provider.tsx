@@ -19,6 +19,7 @@ import { ChatPtyView } from "./chat-pty-view";
 type PtyOwner = "local-terminal" | "proxy-hosted";
 
 interface CachedPtyEntry extends PtyKeepAliveEntry {
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }
@@ -32,6 +33,7 @@ interface ViewportRect {
 
 interface ActivePtyView {
   sessionId: string;
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }
@@ -80,7 +82,12 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
       });
       return touched.map((entry) =>
         entry.sessionId === view.sessionId
-          ? { ...entry, provider: view.provider, ptyOwner: view.ptyOwner }
+          ? {
+              ...entry,
+              sessionKind: view.sessionKind,
+              provider: view.provider,
+              ptyOwner: view.ptyOwner,
+            }
           : entry,
       );
     });
@@ -137,10 +144,12 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
 
 export function PtyKeepAliveViewport({
   sessionId,
+  sessionKind,
   provider,
   ptyOwner,
 }: {
   sessionId: string;
+  sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   ptyOwner?: PtyOwner;
 }) {
@@ -154,9 +163,9 @@ export function PtyKeepAliveViewport({
   const { activate, deactivate, updateViewportRect } = context;
 
   useLayoutEffect(() => {
-    activate({ sessionId, provider, ptyOwner });
+    activate({ sessionId, sessionKind, provider, ptyOwner });
     return () => deactivate(sessionId);
-  }, [activate, deactivate, sessionId, provider, ptyOwner]);
+  }, [activate, deactivate, sessionId, sessionKind, provider, ptyOwner]);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -235,6 +244,7 @@ function PtyKeepAliveLayer({
             <ImagePreviewProvider sessionId={entry.sessionId}>
               <ChatPtyView
                 sessionId={entry.sessionId}
+                sessionKind={entry.sessionKind}
                 provider={entry.provider}
                 ptyOwner={entry.ptyOwner}
                 active={active}

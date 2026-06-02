@@ -45,7 +45,7 @@
   "scripts": {
     "build": "tsup && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "dev": "tsx src/index.ts",
-    "test": "vitest run",
+    "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },

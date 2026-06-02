@@ -157,6 +157,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
   const isPty = mode === "pty" || session?.mode === "pty";
+  const isTerminalSession = session?.kind === "terminal";
   const screenWakeLock = useScreenWakeLockScope(sessionId);
   const voicePilot = useVoicePilotStore(
     (s) => s.bySessionId[sessionId] ?? DEFAULT_VOICE_PILOT_STATE,
@@ -166,10 +167,11 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const hasLockedName = Boolean(session?.nameLocked && session?.name);
   const title =
     (hasLockedName && session?.name) ||
+    (isTerminalSession && session?.name) ||
     (isPty && ptyTitle) ||
     session?.name ||
     sessionId.slice(0, 8);
-  const isLivePtyTitle = Boolean(isPty && ptyTitle && !hasLockedName);
+  const isLivePtyTitle = Boolean(isPty && !isTerminalSession && ptyTitle && !hasLockedName);
   const fontSize = isPty
     ? ptyFontSize
     : getEffectiveChatContentFontSize(chatContentFontSize, touchEditingSurface);
@@ -202,7 +204,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   }
 
   async function toggleVoicePilot(nextChecked: boolean | "indeterminate") {
-    if (isPty) {
+    if (isPty || isTerminalSession) {
       toast.info("Voice Pilot 目前适用于聊天会话。");
       return;
     }
@@ -350,7 +352,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                       : "屏幕常亮"}
                 </span>
               </DropdownMenuCheckboxItem>
-              {!isPty && (
+              {!isPty && !isTerminalSession && (
                 <DropdownMenuCheckboxItem
                   checked={voicePilot.enabled}
                   className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
@@ -364,7 +366,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
                 </DropdownMenuCheckboxItem>
               )}
               <DropdownMenuSeparator />
-              {isPty ? (
+              {isPty && !isTerminalSession ? (
                 <>
                   {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留
                   低频且不适合常驻浮层的 Ctrl+O。 */}
