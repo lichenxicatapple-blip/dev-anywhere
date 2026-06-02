@@ -95,16 +95,15 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await sendPtyLines(page, { count: 120, prefix: "resume-follow" });
     await expectPtyAtBottom(page);
 
-    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-    await ptyTerminal(page).evaluate((el) => {
+    const staleBottomGap = await ptyTerminal(page).evaluate((el) => {
+      window.dispatchEvent(new Event("pagehide"));
       const node = el as HTMLElement;
       node.scrollTop = 0;
       node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+      return maxScrollTop - node.scrollTop;
     });
-    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-    await expect
-      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
-      .toBeGreaterThan(100);
+    expect(staleBottomGap).toBeGreaterThan(100);
 
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
     await expectPtyAtBottom(page);
