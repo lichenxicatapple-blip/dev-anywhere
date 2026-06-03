@@ -354,7 +354,7 @@ export class RelaySessionCreateHandler {
     const pendingId = nanoid();
     const cwd = resolveTerminalCwd();
     const requestedName = normalizeSessionName(msg.name);
-    const name = requestedName ?? "终端 · ~";
+    const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
 
     try {

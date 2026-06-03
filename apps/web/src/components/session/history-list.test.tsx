@@ -2,8 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createSession, navigateMock, toastError } = vi.hoisted(() => ({
+const { createSession, requestSessionHistory, navigateMock, toastError } = vi.hoisted(() => ({
   createSession: vi.fn(),
+  requestSessionHistory: vi.fn(),
   navigateMock: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock("react-router", async () => {
 vi.mock("@/hooks/use-relay-setup", () => ({
   relayClientRef: {
     createSession,
+    requestSessionHistory,
   },
 }));
 
@@ -68,6 +70,8 @@ describe("HistoryList", () => {
     });
     navigateMock.mockClear();
     toastError.mockClear();
+    requestSessionHistory.mockReset();
+    requestSessionHistory.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -108,6 +112,40 @@ describe("HistoryList", () => {
       "/Users/dev/project",
     );
     expect(groupHeaders[0].textContent).toContain("2");
+  });
+
+  it("spins the refresh button while refreshing all sessions", async () => {
+    let resolveRefresh: (sessions: HistorySession[]) => void = () => {};
+    requestSessionHistory.mockReturnValueOnce(
+      new Promise<HistorySession[]>((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+    const { container } = renderHistoryList([
+      {
+        id: "history-1",
+        title: "历史会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "claude",
+        preferredMode: "json",
+      },
+    ]);
+
+    const refreshButton = container.querySelector<HTMLElement>('[data-slot="history-refresh"]');
+    if (!refreshButton) throw new Error("missing history refresh button");
+    fireEvent.click(refreshButton);
+
+    expect(requestSessionHistory).toHaveBeenCalledTimes(1);
+    expect(refreshButton.getAttribute("aria-busy")).toBe("true");
+    expect(refreshButton).toBeDisabled();
+    expect(refreshButton.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
+
+    resolveRefresh([]);
+
+    await waitFor(() => {
+      expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    });
   });
 
   it("opens a restore dialog for a preferred JSON history row and shows its mode tag", async () => {

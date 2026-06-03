@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
-import { formatSessionName } from "@/lib/format-session-name";
+import { formatSessionName, formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { providerLabel } from "@/lib/session-provider";
 
 interface SessionRowProps {
@@ -118,9 +118,12 @@ export function SessionRow({
   const lastActive = session.lastActive;
   const rawName = session.cwd ?? session.name ?? session.sessionId;
   const formattedName = formatSessionName(session.name);
+  const terminalPathName = formatUnlockedTerminalPathName(session);
   const displayName =
     session.nameLocked && session.name
       ? session.name
+      : terminalPathName
+        ? terminalPathName
       : formattedName === "New Session"
         ? session.sessionId.slice(0, 8)
         : formattedName;

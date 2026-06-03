@@ -52,6 +52,7 @@ export function HistoryList({ now }: HistoryListProps) {
   const [restoreMode, setRestoreMode] = useState<RestoreMode>("json");
   const [restorePermissionMode, setRestorePermissionMode] =
     useState<RestorePermissionMode>("default");
+  const [refreshing, setRefreshing] = useState(false);
   // 整个历史会话区默认折叠, 让活跃会话占据主视野; 点 header 整体展开后再点 group chevron 看行
   const [sectionExpanded, setSectionExpanded] = useState(false);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<SessionProvider>>(new Set());
@@ -137,12 +138,16 @@ export function HistoryList({ now }: HistoryListProps) {
 
   function handleRefresh() {
     const relay = relayClientRef;
-    if (!relay) return;
+    if (!relay || refreshing) return;
+    setRefreshing(true);
     void relay
       .requestSessionHistory()
       .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
       .catch((err) => {
         toast.error(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setRefreshing(false);
       });
   }
 
@@ -170,64 +175,55 @@ export function HistoryList({ now }: HistoryListProps) {
 
   return (
     <div data-slot="history-list" className="flex flex-col">
-      {/* section header 整行做 toggle 触发器; 刷新按钮放里边要 stopPropagation, 否则点刷新也会 toggle */}
+      {/* section header 只负责展开/折叠; 刷新按钮独立，避免嵌套交互控件。 */}
       {/* 历史为空时 header 的 toggle/chevron 都禁用, 只保留刷新 (可能扫完 claude 目录后就出来了) */}
-      <button
-        type="button"
-        onClick={() => hasHistory && setSectionExpanded((v) => !v)}
-        disabled={!hasHistory}
-        aria-expanded={hasHistory ? sectionExpanded : undefined}
-        data-slot="history-section-header"
-        data-expanded={sectionExpanded}
-        className={cn(
-          "w-full flex items-center gap-1.5 px-4 py-2 min-h-[36px]",
-          "text-left transition-colors outline-none",
-          "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-          "disabled:hover:bg-transparent disabled:cursor-default",
-        )}
-      >
-        <h3 className="text-sm font-semibold text-foreground">
-          全部会话
-          {hasHistory ? (
-            <span className="ml-1 text-muted-foreground/70 font-normal">
-              · {historySessions.length}
-            </span>
-          ) : null}
-        </h3>
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleRefresh();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              e.stopPropagation();
-              handleRefresh();
-            }
-          }}
-          aria-label="刷新全部会话"
-          data-slot="history-refresh"
+      <div className="flex min-h-[36px] w-full items-center gap-1.5 px-4 py-1.5">
+        <button
+          type="button"
+          onClick={() => hasHistory && setSectionExpanded((v) => !v)}
+          disabled={!hasHistory}
+          aria-expanded={hasHistory ? sectionExpanded : undefined}
+          data-slot="history-section-header"
+          data-expanded={sectionExpanded}
           className={cn(
-            "ml-auto size-6 rounded-md flex items-center justify-center",
-            "text-muted-foreground hover:text-foreground hover:bg-accent",
-            "transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-0.5 text-left",
+            "transition-colors outline-none",
+            "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            "disabled:cursor-default disabled:hover:text-inherit",
           )}
         >
-          <RefreshCw className="size-3.5" aria-hidden="true" />
-        </span>
-        {hasHistory ? (
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground/80 transition-transform",
-              sectionExpanded && "rotate-90",
-            )}
-            aria-hidden="true"
-          />
-        ) : null}
-      </button>
+          <h3 className="min-w-0 text-sm font-semibold text-foreground">
+            全部会话
+            {hasHistory ? (
+              <span className="ml-1 text-muted-foreground/70 font-normal">
+                · {historySessions.length}
+              </span>
+            ) : null}
+          </h3>
+          {hasHistory ? (
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground/80 transition-transform",
+                sectionExpanded && "rotate-90",
+              )}
+              aria-hidden="true"
+            />
+          ) : null}
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="刷新全部会话"
+          aria-busy={refreshing}
+          title="刷新"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          data-slot="history-refresh"
+        >
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} aria-hidden="true" />
+        </Button>
+      </div>
       {!hasHistory && (
         <div className="px-4 py-3 text-sm text-muted-foreground/70" data-slot="history-empty">
           暂无会话记录

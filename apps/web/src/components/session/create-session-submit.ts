@@ -226,7 +226,7 @@ export async function submitTerminalCreate({
     const session: SessionInfo = {
       sessionId: response.sessionId,
       kind: "terminal",
-      name: response.name?.trim() || "终端 · ~",
+      name: response.name?.trim() || undefined,
       ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
       state: "idle",
       mode: "pty",

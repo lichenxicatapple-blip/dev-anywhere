@@ -212,6 +212,55 @@ describe("ChatHeader PTY upload menu", () => {
     );
   });
 
+  it("shows pure terminal cwd until the user renames it", () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "term-1",
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          state: "idle",
+          name: "Terminal",
+          cwd: "/Users/dev/MyApps/dev-anywhere",
+          ptyOwner: "local-terminal",
+        },
+      ],
+      ptyTitles: { "term-1": "Claude Code" },
+    });
+
+    const { container } = render(<ChatHeader sessionId="term-1" mode="pty" />);
+
+    expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
+      "~/MyApps/dev-anywhere",
+    );
+  });
+
+  it("keeps a user-renamed pure terminal title over cwd", () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "term-1",
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          state: "idle",
+          name: "Release shell",
+          nameLocked: true,
+          cwd: "/Users/dev/MyApps/dev-anywhere",
+          ptyOwner: "local-terminal",
+        },
+      ],
+      ptyTitles: { "term-1": "Claude Code" },
+    });
+
+    const { container } = render(<ChatHeader sessionId="term-1" mode="pty" />);
+
+    expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
+      "Release shell",
+    );
+  });
+
   it("keeps the overflow menu visually consistent with icons and grouped controls", async () => {
     render(<ChatHeader sessionId="s1" mode="pty" />);
 

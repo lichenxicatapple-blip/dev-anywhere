@@ -398,7 +398,7 @@ test.describe("mobile UX contract", () => {
     await sheet.locator('[data-slot="create-terminal-session-sheet-item"]').click();
 
     await expect(page).toHaveURL(/\/chat\/created-terminal-\d+\?mode=pty/);
-    await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("终端 · ~");
+    await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("~/workspace");
     await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
     await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
     await expectNoHorizontalDocumentOverflow(page);

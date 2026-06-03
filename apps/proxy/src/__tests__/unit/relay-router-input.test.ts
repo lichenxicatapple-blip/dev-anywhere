@@ -10,6 +10,7 @@ import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
+import { tildify } from "#src/common/paths.js";
 import type { Socket } from "node:net";
 import {
   createRelayConnectionFake,
@@ -113,6 +114,7 @@ function createRouter(options: {
 describe("RelayRouter input routing", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("echoes accepted JSON user_input back through relay for other clients", () => {
@@ -517,20 +519,22 @@ describe("RelayRouter input routing", () => {
   it("creates a pure shell terminal as a restart-surviving terminal worker", () => {
     const relaySend = vi.fn();
     const hostedStart = vi.fn(() => 4321);
-    const terminalWorkerStart = vi.fn(() => 5678);
-    const createSession = vi.fn(() => ({
-      id: "terminal-session",
-      kind: "terminal",
-      mode: "pty",
-      provider: "claude",
-      ptyOwner: "local-terminal",
-      state: SessionState.IDLE,
-      cwd: "/Users/dev",
-      pid: 5678,
-      createdAt: 1,
-      updatedAt: 1,
-      name: "终端 · ~",
-    }));
+    const terminalWorkerStart = vi.fn((_options: unknown) => 5678);
+    const createSession = vi.fn(
+      (_mode: unknown, sessionCwd: string, pid: number, name: string) => ({
+        id: "terminal-session",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+        state: SessionState.IDLE,
+        cwd: sessionCwd,
+        pid,
+        createdAt: 1,
+        updatedAt: 1,
+        name,
+      }),
+    );
     const router = createRouter({
       mode: "pty",
       relaySend,
@@ -549,18 +553,23 @@ describe("RelayRouter input routing", () => {
     });
 
     expect(hostedStart).not.toHaveBeenCalled();
-    expect(terminalWorkerStart).toHaveBeenCalledWith(
+    const terminalOptions = terminalWorkerStart.mock.calls[0][0] as {
+      sessionId: string;
+      cwd: string;
+      name: string;
+    };
+    const terminalName = tildify(terminalOptions.cwd);
+    expect(terminalOptions).toEqual(
       expect.objectContaining({
         sessionId: expect.any(String),
-        cwd: expect.any(String),
-        name: "终端 · ~",
+        name: terminalName,
       }),
     );
     expect(createSession).toHaveBeenCalledWith(
       "pty",
-      expect.any(String),
+      terminalOptions.cwd,
       5678,
-      "终端 · ~",
+      terminalName,
       expect.any(String),
       "claude",
       "local-terminal",
@@ -575,7 +584,7 @@ describe("RelayRouter input routing", () => {
       kind: "terminal",
       mode: "pty",
       ptyOwner: "local-terminal",
-      name: "终端 · ~",
+      name: terminalName,
     });
   });
 

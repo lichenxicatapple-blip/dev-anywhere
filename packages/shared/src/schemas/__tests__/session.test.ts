@@ -46,7 +46,7 @@ describe("SessionListPayloadSchema", () => {
         {
           sessionId: "terminal-1",
           kind: "terminal",
-          name: "终端 · ~",
+          name: "~/workspace",
           state: "idle",
           provider: "claude",
           mode: "pty",

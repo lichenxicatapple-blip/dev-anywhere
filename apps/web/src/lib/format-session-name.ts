@@ -1,3 +1,5 @@
+import type { SessionInfo } from "@dev-anywhere/shared";
+
 // 格式化 session 名称：将长路径截断为易读的短路径
 // ~/workspace/dev-anywhere/apps/proxy → ~/…/apps/proxy
 // ~/my-project/ → ~/my-project
@@ -17,4 +19,12 @@ export function formatSessionName(name: string | undefined): string {
   const prefix = parts[0] === "~" ? "~" : "";
   const tail = parts.slice(-2).join("/");
   return `${prefix}/…/${tail}`;
+}
+
+export function formatUnlockedTerminalPathName(
+  session: Pick<SessionInfo, "kind" | "name" | "cwd" | "nameLocked"> | undefined,
+): string | undefined {
+  if (!session || session.kind !== "terminal" || session.nameLocked) return undefined;
+  const rawName = session.cwd ?? session.name;
+  return rawName ? formatSessionName(rawName) : undefined;
 }

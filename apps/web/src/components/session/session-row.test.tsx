@@ -27,6 +27,29 @@ describe("SessionRow", () => {
     );
   });
 
+  it("shows pure terminal cwd when it has not been renamed", () => {
+    render(
+      <SessionRow
+        session={{
+          sessionId: "term-1",
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          state: "idle",
+          name: "Terminal",
+          cwd: "/Users/dev/MyApps/dev-anywhere",
+          ptyOwner: "local-terminal",
+        }}
+        selected={false}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("~/MyApps/dev-anywhere").getAttribute("title")).toBe(
+      "/Users/dev/MyApps/dev-anywhere",
+    );
+  });
+
   it("renders sidebar menu items as text-only and marks remote disconnect as destructive", async () => {
     render(
       <SessionRow

@@ -196,7 +196,7 @@ describe("create-session submit model", () => {
         mode: "pty",
         provider: "claude",
         ptyOwner: "proxy-hosted",
-        name: "终端 · ~",
+        name: "~/workspace",
       }),
     };
 
@@ -205,7 +205,7 @@ describe("create-session submit model", () => {
       session: {
         sessionId: "term-1",
         kind: "terminal",
-        name: "终端 · ~",
+        name: "~/workspace",
         state: "idle",
         mode: "pty",
         provider: "claude",

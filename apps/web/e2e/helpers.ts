@@ -610,11 +610,12 @@ export async function installFakeRelay(page: Page): Promise<void> {
           case "session_create": {
             if (msg.kind === "terminal") {
               const sessionId = `created-terminal-${++createCount}`;
-              const cwd = "/home/dev";
+              const cwd = "/home/dev/workspace";
+              const name = "~/workspace";
               sessions.unshift({
                 sessionId,
                 kind: "terminal",
-                name: "终端 · ~",
+                name,
                 cwd,
                 state: "idle",
                 mode: "pty",
@@ -628,7 +629,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 requestId: msg.requestId,
                 sessionId,
                 kind: "terminal",
-                name: "终端 · ~",
+                name,
                 mode: "pty",
                 provider: "claude",
                 ptyOwner: "local-terminal",

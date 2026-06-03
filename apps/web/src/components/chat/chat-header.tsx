@@ -35,6 +35,7 @@ import {
 } from "@/lib/chat-font-size";
 import { useAppStore } from "@/stores/app-store";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
@@ -172,9 +173,10 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const enableVoicePilot = useVoicePilotStore((s) => s.enable);
   const disableVoicePilot = useVoicePilotStore((s) => s.disable);
   const hasLockedName = Boolean(session?.nameLocked && session?.name);
+  const terminalPathTitle = formatUnlockedTerminalPathName(session);
   const title =
     (hasLockedName && session?.name) ||
-    (isTerminalSession && session?.name) ||
+    terminalPathTitle ||
     (isPty && ptyTitle) ||
     session?.name ||
     sessionId.slice(0, 8);
