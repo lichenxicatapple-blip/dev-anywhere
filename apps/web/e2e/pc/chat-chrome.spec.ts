@@ -130,6 +130,9 @@ test.describe("ChatHeader compact navigation controls", () => {
         reset.boundingBox(),
         resetLabel.boundingBox(),
       ]);
+    const valueFontSize = await value.evaluate((node) =>
+      parseFloat(getComputedStyle(node).fontSize),
+    );
 
     expect(rowBox).not.toBeNull();
     expect(stepperBox).not.toBeNull();
@@ -152,8 +155,12 @@ test.describe("ChatHeader compact navigation controls", () => {
     }
 
     expect(Math.abs(smallerBox.width - largerBox.width)).toBeLessThanOrEqual(1);
-    expect(valueBox.x - (smallerBox.x + smallerBox.width)).toBeGreaterThanOrEqual(0);
-    expect(largerBox.x - (valueBox.x + valueBox.width)).toBeGreaterThanOrEqual(0);
+    expect(smallerBox.width).toBeGreaterThanOrEqual(20.5);
+    expect(smallerBox.width).toBeLessThanOrEqual(23);
+    expect(valueBox.x - (smallerBox.x + smallerBox.width)).toBeGreaterThanOrEqual(6);
+    expect(largerBox.x - (valueBox.x + valueBox.width)).toBeGreaterThanOrEqual(6);
+    expect(valueBox.width).toBeGreaterThanOrEqual(40);
+    expect(valueFontSize).toBeGreaterThanOrEqual(14);
     expect(
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
     ).toBeLessThanOrEqual(1);

@@ -14,7 +14,6 @@ import { ImagePreviewProvider } from "@/components/chat/image-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
 import { PtyApprovalHint } from "@/components/chat/pty-approval-hint";
-import { usePtyAutoEnterApproval } from "@/components/chat/use-pty-auto-enter-approval";
 import { VoicePilotController } from "@/components/chat/voice-pilot-controller";
 import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
@@ -157,13 +156,6 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const showPtyApprovalHint = shouldShowPtyApprovalHint({
     ptyWaitingApproval,
     ptyAutoYesEnabled,
-  });
-
-  usePtyAutoEnterApproval({
-    sessionId: id,
-    enabled: !isTerminalSession && ptyAutoYesEnabled && Boolean(ptyAutoYesKey),
-    waiting: ptyWaitingApproval,
-    approvalSeq: ptyState?.state === "approval_wait" ? ptyState.seq : undefined,
   });
 
   return (

@@ -7,6 +7,7 @@ import { MobileBrandHero } from "@/components/brand/mobile-brand-hero";
 import { LatencyMonitor } from "@/components/diagnostics/latency-monitor";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
+import { PtyAutoYesController } from "@/components/chat/pty-auto-yes-controller";
 import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -172,6 +173,8 @@ export function AppShell() {
       )}
 
       {!isChatRoute && <MobileBrandHero subtitle={mobileSubtitle} action={mobileHeroAction} />}
+
+      <PtyAutoYesController />
 
       <div className="flex flex-1 overflow-hidden">
         <Sidebar className="hidden md:flex" />
