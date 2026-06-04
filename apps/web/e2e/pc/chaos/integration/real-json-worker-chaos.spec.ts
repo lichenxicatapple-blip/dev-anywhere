@@ -146,9 +146,31 @@ async function terminateSessionByControl(sessionId: string): Promise<void> {
   });
 
   try {
+    const register = waitForRelayMessage<{
+      type: "client_register_response";
+      status: "new" | "restored" | "proxy_offline";
+    }>(
+      ws,
+      (
+        msg,
+      ): msg is {
+        type: "client_register_response";
+        status: "new" | "restored" | "proxy_offline";
+      } => msg.type === "client_register_response",
+    );
+    ws.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: `e2e-cleanup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await register;
+
     const listRequestId = `cleanup-list-${Date.now()}`;
-    ws.send(JSON.stringify({ type: "proxy_list_request", requestId: listRequestId }));
-    const list = await waitForRelayMessage<{
+    const listResponse = waitForRelayMessage<{
       type: "proxy_list_response";
       proxies: Array<{ proxyId: string; online: boolean }>;
     }>(
@@ -163,18 +185,21 @@ async function terminateSessionByControl(sessionId: string): Promise<void> {
         msg.requestId === listRequestId &&
         Array.isArray(msg.proxies),
     );
+    ws.send(JSON.stringify({ type: "proxy_list_request", requestId: listRequestId }));
+    const list = await listResponse;
     const proxyId = list.proxies.find((proxy) => proxy.online)?.proxyId;
     if (!proxyId) throw new Error("no online proxy for cleanup");
 
     const selectRequestId = `cleanup-select-${Date.now()}`;
-    ws.send(JSON.stringify({ type: "proxy_select", requestId: selectRequestId, proxyId }));
-    await waitForRelayMessage(
+    const selectResponse = waitForRelayMessage(
       ws,
       (msg): msg is { type: "proxy_select_response"; success: boolean } =>
         msg.type === "proxy_select_response" &&
         msg.requestId === selectRequestId &&
         msg.success === true,
     );
+    ws.send(JSON.stringify({ type: "proxy_select", requestId: selectRequestId, proxyId }));
+    await selectResponse;
 
     ws.send(JSON.stringify({ type: "session_terminate", sessionId }));
     await new Promise((resolve) => setTimeout(resolve, 300));
