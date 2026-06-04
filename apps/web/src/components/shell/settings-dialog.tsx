@@ -25,6 +25,7 @@ import {
   hasStoredRelayClientToken,
   persistRelayClientToken,
 } from "@/lib/relay-client-token";
+import { formatClientDeviceLabel } from "@/lib/client-device";
 import type { ThemePreference } from "@/lib/theme-preference";
 import {
   Dialog,
@@ -52,6 +53,9 @@ const themePreferenceOptions: Array<{ value: ThemePreference; label: string }> =
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
 ];
+
+const SETTINGS_SUBVIEW_BODY_CLASS =
+  "dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1";
 
 interface RelayHealthResponse {
   status?: string;
@@ -85,9 +89,9 @@ function settingsViewTitle(view: SettingsView): string {
 }
 
 function settingsViewDescription(view: SettingsView): string {
-  if (view === "version") return "当前 Web 与 Relay 服务器的版本信息";
-  if (view === "relay-token") return "用于连接需要认证的 Relay 服务器。保存后自动生效。";
-  if (view === "clients") return "查看当前连接到 Relay 的 Web 客户端。";
+  if (view === "version") return "Web 与 Relay 服务器版本。";
+  if (view === "relay-token") return "连接受保护的 Relay 服务器，保存后立即重连。";
+  if (view === "clients") return "管理当前连接的 Web 客户端。";
   return "连接语音服务后，即可以语音交互的形式驱动会话。";
 }
 
@@ -192,6 +196,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogHeader
           className={cn(
             view === "menu" && "pr-12 text-left",
+            view !== "menu" && "text-left",
             view === "voice" && "gap-0 px-4 pb-0 pt-3.5 text-left sm:px-5 sm:pt-4",
           )}
         >
@@ -210,9 +215,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 >
                   <ArrowLeft className="size-4" aria-hidden="true" />
                 </Button>
-                <div className="min-w-0 space-y-1.5 pt-0.5">
+                <div className="min-w-0 space-y-1.5 pt-0.5 text-left">
                   <DialogTitle>{settingsViewTitle(view)}</DialogTitle>
-                  <DialogDescription className={cn(view === "voice" && "max-w-[28rem] leading-5")}>
+                  <DialogDescription className="max-w-[28rem] leading-5">
                     {settingsViewDescription(view)}
                   </DialogDescription>
                 </div>
@@ -276,10 +281,7 @@ function SettingsVersionView({
   relayMuted: boolean;
 }) {
   return (
-    <div
-      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
-      data-slot="settings-dialog-body"
-    >
+    <div className={SETTINGS_SUBVIEW_BODY_CLASS} data-slot="settings-dialog-body">
       <VersionRow
         icon={<Monitor className="size-4" aria-hidden="true" />}
         label="Web"
@@ -341,7 +343,7 @@ function SettingsMainView({
         <SettingsMenuItem
           icon={<KeyRound className="size-4" aria-hidden="true" />}
           label="Relay Token"
-          detail={`${relayTokenSaved ? "已保存" : "未设置"}；用于连接需要认证的 Relay 服务器`}
+          detail={`${relayTokenSaved ? "已保存" : "未设置"} · 受保护的 Relay 服务器`}
           onClick={onOpenRelayToken}
         />
         <SettingsMenuItem
@@ -490,7 +492,7 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
   const saveToken = () => {
     const token = tokenInput.trim();
     if (!token) {
-      setError("请输入 Relay Token。");
+      setError("请输入 token。");
       return;
     }
     persistRelayClientToken(token);
@@ -504,22 +506,17 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
 
   return (
     <form
-      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
+      className={SETTINGS_SUBVIEW_BODY_CLASS}
       data-slot="settings-dialog-body"
       onSubmit={(event) => {
         event.preventDefault();
         saveToken();
       }}
     >
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <label htmlFor={inputId} className="text-sm font-medium text-foreground">
-            Relay client token
-          </label>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {saved ? "已保存 token" : "未保存"}
-          </span>
-        </div>
+      <div className="rounded-md border border-border bg-card/70 p-3" data-slot="relay-token-card">
+        <label htmlFor={inputId} className="text-sm font-medium text-foreground">
+          Token
+        </label>
         <input
           id={inputId}
           type="password"
@@ -531,11 +528,11 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
           autoComplete="off"
           spellCheck={false}
           aria-describedby={error ? errorId : undefined}
-          className="h-10 w-full rounded-md border border-border bg-muted px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
-          placeholder="粘贴 Relay Token"
+          className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
+          placeholder="粘贴 token"
         />
         {error ? (
-          <p id={errorId} className="text-xs text-destructive">
+          <p id={errorId} className="mt-2 text-xs text-destructive">
             {error}
           </p>
         ) : null}
@@ -564,29 +561,8 @@ function formatProxyName(proxyId: string, proxyNameById: Map<string, string>): s
   return name || formatClientId(proxyId);
 }
 
-function summarizeUserAgent(userAgent: string | undefined): string {
-  if (!userAgent) return "未知浏览器";
-  const browser = userAgent.includes("Edg/")
-    ? "Edge"
-    : userAgent.includes("Chrome/")
-      ? "Chrome"
-      : userAgent.includes("Firefox/")
-        ? "Firefox"
-        : userAgent.includes("Safari/")
-          ? "Safari"
-          : "浏览器";
-  const os = userAgent.includes("iPhone")
-    ? "iPhone"
-    : userAgent.includes("iPad")
-      ? "iPad"
-      : userAgent.includes("Mac OS X")
-        ? "macOS"
-        : userAgent.includes("Windows")
-          ? "Windows"
-          : userAgent.includes("Android")
-            ? "Android"
-            : "";
-  return os ? `${browser} · ${os}` : browser;
+function summarizeRelayClient(client: RelayClientInfo): string {
+  return formatClientDeviceLabel(client);
 }
 
 function connectedFor(connectedAt: number): string {
@@ -673,14 +649,8 @@ function RelayClientsPanel() {
   }, []);
 
   return (
-    <div
-      className="dev-render-scroll min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-4 sm:pr-1"
-      data-slot="settings-dialog-body"
-    >
-      <div
-        className="flex min-h-9 items-center gap-2"
-        data-slot="relay-clients-toolbar"
-      >
+    <div className={SETTINGS_SUBVIEW_BODY_CLASS} data-slot="settings-dialog-body">
+      <div className="flex min-h-9 items-center gap-2" data-slot="relay-clients-toolbar">
         <div className="text-sm font-medium text-foreground">
           {loading ? "正在读取客户端" : `${clients.length} 个在线客户端`}
         </div>
@@ -725,14 +695,14 @@ function RelayClientsPanel() {
               <div className="min-w-0 space-y-1.5">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium leading-5 text-foreground">
-                    {summarizeUserAgent(client.userAgent)}
+                    {summarizeRelayClient(client)}
                   </div>
                 </div>
                 <div className="space-y-1">
                   <RelayClientDetailRow label="已连接" value={connectedFor(client.connectedAt)} />
                   {client.proxyId ? (
                     <RelayClientDetailRow
-                      label="开发机"
+                      label="连接到"
                       value={formatProxyName(client.proxyId, proxyNameById)}
                       title={client.proxyId}
                     />

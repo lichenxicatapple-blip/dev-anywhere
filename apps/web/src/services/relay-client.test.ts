@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { RelayClient } from "./relay-client";
 
 class FakeWebSocketManager {
@@ -48,6 +48,32 @@ function createClient(): { relay: RelayClient; ws: FakeWebSocketManager } {
 }
 
 describe("RelayClient request handling", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("registers a device descriptor for client management", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+    const { relay, ws } = createClient();
+
+    relay.register();
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "client_register",
+      clientId: "client-1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+      browserName: "Safari",
+      osName: "iPad",
+      deviceKind: "tablet",
+    });
+  });
+
   it("resolves proxy list requests from the matching response", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestProxyList();
@@ -236,7 +262,7 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("keeps upload requests pending beyond the generic request timeout", async () => {
+  it("keeps large payload requests pending beyond the generic request timeout", async () => {
     vi.useFakeTimers();
     try {
       const { relay, ws } = createClient();
@@ -250,8 +276,10 @@ describe("RelayClient request handling", () => {
         mimeType: "image/png",
         dataBase64: "AQID",
       });
+      const imagePreview = relay.requestImagePreview("s1", "/tmp/large.png");
       let imageSettled = false;
       let fileSettled = false;
+      let previewSettled = false;
       void imageUpload
         .finally(() => {
           imageSettled = true;
@@ -262,15 +290,22 @@ describe("RelayClient request handling", () => {
           fileSettled = true;
         })
         .catch(() => {});
+      void imagePreview
+        .finally(() => {
+          previewSettled = true;
+        })
+        .catch(() => {});
 
       await vi.advanceTimersByTimeAsync(10_000);
       await Promise.resolve();
 
       expect(imageSettled).toBe(false);
       expect(fileSettled).toBe(false);
+      expect(previewSettled).toBe(false);
 
       const imageRequestId = sentRequestId(ws, 0);
       const fileRequestId = sentRequestId(ws, 1);
+      const previewRequestId = sentRequestId(ws, 2);
       ws.emit({
         type: "clipboard_image_upload_response",
         requestId: imageRequestId,
@@ -285,9 +320,23 @@ describe("RelayClient request handling", () => {
         success: true,
         path: "/tmp/large.png",
       });
+      ws.emit({
+        type: "image_preview_response",
+        requestId: previewRequestId,
+        sessionId: "s1",
+        success: true,
+        path: "/tmp/large.png",
+        mimeType: "image/png",
+        dataBase64: "AQID",
+        size: 3,
+      });
 
       await expect(imageUpload).resolves.toMatchObject({ success: true, path: "/tmp/shot.png" });
       await expect(fileUpload).resolves.toMatchObject({ success: true, path: "/tmp/large.png" });
+      await expect(imagePreview).resolves.toMatchObject({
+        success: true,
+        path: "/tmp/large.png",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -305,6 +354,21 @@ describe("RelayClient request handling", () => {
       const assertion = expect(promise).rejects.toThrow("上传文件超时");
 
       await vi.advanceTimersByTimeAsync(60_100);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still times out unanswered image previews after the preview-specific window", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay } = createClient();
+      const promise = relay.requestImagePreview("s1", "/tmp/large.png");
+      const assertion = expect(promise).rejects.toThrow("读取图片超时");
+
+      await vi.advanceTimersByTimeAsync(100_100);
 
       await assertion;
     } finally {

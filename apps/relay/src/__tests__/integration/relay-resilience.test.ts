@@ -121,6 +121,16 @@ async function fetchJson(port: number, path: string): Promise<Record<string, unk
   return res.json() as Promise<Record<string, unknown>>;
 }
 
+function clientRegister(clientId: string): Record<string, unknown> {
+  return {
+    type: "client_register",
+    clientId,
+    browserName: "Chrome",
+    osName: "macOS",
+    deviceKind: "desktop",
+  };
+}
+
 // 每个 describe 块内的 WebSocket 自动清理
 function createSocketTracker() {
   const sockets: WebSocket[] = [];
@@ -209,6 +219,8 @@ describe("proxy lifecycle", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(`client-${id}`)));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -247,6 +259,8 @@ describe("proxy lifecycle", () => {
       // client 绑定
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(`client-${id}`)));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       await waitForMessage(client); // consume proxy_select_response ACK
       await collectMessages(client, 3, 1000);
@@ -291,6 +305,8 @@ describe("proxy lifecycle", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(`client-${id}`)));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       await waitForMessage(client); // consume proxy_select_response ACK
       await collectMessages(client, 1, 1000);
@@ -367,7 +383,7 @@ describe("proxy lifecycle", () => {
       // 先建一个 client 订阅，便于观察是否收到伪造的 proxy_offline
       const client = ws.client(port);
       await waitForOpen(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: `client-${id}` }));
+      client.send(JSON.stringify(clientRegister(`client-${id}`)));
       await waitForMessage(client); // consume client_register_response
 
       const proxy1 = ws.proxy(port);
@@ -428,6 +444,10 @@ describe("proxy lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client1);
       await waitForOpen(client2);
+      client1.send(JSON.stringify(clientRegister(`client-${id}-1`)));
+      client2.send(JSON.stringify(clientRegister(`client-${id}-2`)));
+      await waitForMessage(client1); // consume client_register_response
+      await waitForMessage(client2); // consume client_register_response
       client1.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       client2.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -526,6 +546,8 @@ describe("client lifecycle", () => {
       expect(listResp.proxies.some((p: { proxyId: string }) => p.proxyId === proxyId)).toBe(true);
 
       // proxy_select + 双向
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -546,6 +568,8 @@ describe("client lifecycle", () => {
       const client = ws.client(port);
       await waitForOpen(client);
 
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
       const msgP = waitForMessage(client);
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "ghost" }));
       const resp = JSON.parse(await msgP);
@@ -573,6 +597,8 @@ describe("client lifecycle", () => {
       const client = ws.client(port);
       await waitForOpen(client);
 
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
       const msgP = waitForMessage(client);
       client.send(JSON.stringify({ type: "proxy_select", proxyId }));
       const resp = JSON.parse(await msgP);
@@ -598,7 +624,7 @@ describe("client lifecycle", () => {
 
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId }));
+      client1.send(JSON.stringify(clientRegister(clientId)));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -616,7 +642,7 @@ describe("client lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const allMsgs = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId }));
+      client2.send(JSON.stringify(clientRegister(clientId)));
       const received = await allMsgs;
 
       expect(received.length).toBe(1);
@@ -641,7 +667,7 @@ describe("client lifecycle", () => {
 
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId }));
+      client1.send(JSON.stringify(clientRegister(clientId)));
       await waitForMessage(client1);
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -654,7 +680,7 @@ describe("client lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const msgP = waitForMessage(client2);
-      client2.send(JSON.stringify({ type: "client_register", clientId }));
+      client2.send(JSON.stringify(clientRegister(clientId)));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("proxy_offline");
 
@@ -674,7 +700,7 @@ describe("client lifecycle", () => {
       const client = ws.client(port);
       await waitForOpen(client);
       const msgP = waitForMessage(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: uid("fresh") }));
+      client.send(JSON.stringify(clientRegister(uid("fresh"))));
       const resp = JSON.parse(await msgP);
       expect(resp.type).toBe("client_register_response");
       expect(resp.status).toBe("new");
@@ -694,6 +720,8 @@ describe("client lifecycle", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -753,7 +781,7 @@ describe("client lifecycle", () => {
       // client1 注册绑定，收到 seq 1,2
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId }));
+      client1.send(JSON.stringify(clientRegister(clientId)));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -775,7 +803,7 @@ describe("client lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const restoreMsgs = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId }));
+      client2.send(JSON.stringify(clientRegister(clientId)));
       const restored = await restoreMsgs;
       expect(JSON.parse(restored[0]).status).toBe("restored");
 
@@ -923,6 +951,8 @@ describe("heartbeat dead connection detection", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister("hb-p-c")));
+      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "hb-p" }));
       await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -950,7 +980,7 @@ describe("heartbeat dead connection detection", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: "hb-c1" }));
+      client.send(JSON.stringify(clientRegister("hb-c1")));
       await waitForMessage(client);
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "hb-c" }));
       await waitForMessage(client); // consume proxy_select_response ACK
@@ -967,7 +997,7 @@ describe("heartbeat dead connection detection", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const msgP = waitForMessage(client2);
-      client2.send(JSON.stringify({ type: "client_register", clientId: "hb-c1" }));
+      client2.send(JSON.stringify(clientRegister("hb-c1")));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("restored");
       expect(resp.proxyId).toBe("hb-c");
@@ -1010,7 +1040,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
 
       const client = ws.client(port);
       await waitForOpen(client);
-      client.send(JSON.stringify({ type: "client_register", clientId: "cable-c" }));
+      client.send(JSON.stringify(clientRegister("cable-c")));
       await waitForMessage(client); // new
       client.send(JSON.stringify({ type: "proxy_select", proxyId: "cable" }));
       await waitForMessage(client); // consume proxy_select_response ACK
@@ -1073,7 +1103,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const clientId = "multi-c";
       const client1 = ws.client(port);
       await waitForOpen(client1);
-      client1.send(JSON.stringify({ type: "client_register", clientId }));
+      client1.send(JSON.stringify(clientRegister(clientId)));
       await waitForMessage(client1); // new
       client1.send(JSON.stringify({ type: "proxy_select", proxyId: "multi" }));
       await waitForMessage(client1); // consume proxy_select_response ACK
@@ -1096,7 +1126,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const client2 = ws.client(port);
       await waitForOpen(client2);
       const allRestore = collectMessages(client2, 1);
-      client2.send(JSON.stringify({ type: "client_register", clientId }));
+      client2.send(JSON.stringify(clientRegister(clientId)));
       const restoreReceived = await allRestore;
 
       const restoredResp = JSON.parse(restoreReceived[0]);

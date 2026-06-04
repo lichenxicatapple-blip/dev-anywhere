@@ -35,6 +35,11 @@ interface ClientConnectionMetadata {
   clientId?: string;
   connectedAt: number;
   userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+  browserName?: string;
+  osName?: string;
+  deviceKind?: "desktop" | "tablet" | "phone" | "unknown";
   remoteAddress?: string;
 }
 
@@ -241,6 +246,11 @@ export class RelayRegistry {
       connectedAt: metadata.connectedAt ?? Date.now(),
       ...(metadata.clientId !== undefined ? { clientId: metadata.clientId } : {}),
       ...(metadata.userAgent !== undefined ? { userAgent: metadata.userAgent } : {}),
+      ...(metadata.platform !== undefined ? { platform: metadata.platform } : {}),
+      ...(metadata.maxTouchPoints !== undefined ? { maxTouchPoints: metadata.maxTouchPoints } : {}),
+      ...(metadata.browserName !== undefined ? { browserName: metadata.browserName } : {}),
+      ...(metadata.osName !== undefined ? { osName: metadata.osName } : {}),
+      ...(metadata.deviceKind !== undefined ? { deviceKind: metadata.deviceKind } : {}),
       ...(metadata.remoteAddress !== undefined ? { remoteAddress: metadata.remoteAddress } : {}),
     });
   }
@@ -252,6 +262,25 @@ export class RelayRegistry {
       return;
     }
     this.addClientWs(ws, { clientId });
+  }
+
+  updateConnectedClientMetadata(
+    ws: WebSocket,
+    metadata: Partial<Omit<ClientConnectionMetadata, "connectedAt">>,
+  ): void {
+    const current = this.connectedClients.get(ws);
+    if (!current) {
+      this.addClientWs(ws, metadata);
+      return;
+    }
+    if (metadata.clientId !== undefined) current.clientId = metadata.clientId;
+    if (metadata.userAgent !== undefined) current.userAgent = metadata.userAgent;
+    if (metadata.platform !== undefined) current.platform = metadata.platform;
+    if (metadata.maxTouchPoints !== undefined) current.maxTouchPoints = metadata.maxTouchPoints;
+    if (metadata.browserName !== undefined) current.browserName = metadata.browserName;
+    if (metadata.osName !== undefined) current.osName = metadata.osName;
+    if (metadata.deviceKind !== undefined) current.deviceKind = metadata.deviceKind;
+    if (metadata.remoteAddress !== undefined) current.remoteAddress = metadata.remoteAddress;
   }
 
   removeClientWs(ws: WebSocket): void {
@@ -334,6 +363,11 @@ export class RelayRegistry {
     connectedAt: number;
     current?: boolean;
     userAgent?: string;
+    platform?: string;
+    maxTouchPoints?: number;
+    browserName: string;
+    osName: string;
+    deviceKind: "desktop" | "tablet" | "phone" | "unknown";
     remoteAddress?: string;
   }> {
     const details: Array<{
@@ -342,10 +376,16 @@ export class RelayRegistry {
       connectedAt: number;
       current?: boolean;
       userAgent?: string;
+      platform?: string;
+      maxTouchPoints?: number;
+      browserName: string;
+      osName: string;
+      deviceKind: "desktop" | "tablet" | "phone" | "unknown";
       remoteAddress?: string;
     }> = [];
     for (const [ws, metadata] of this.connectedClients) {
       if (ws.readyState !== WebSocket.OPEN || !metadata.clientId) continue;
+      if (!metadata.browserName || !metadata.osName || !metadata.deviceKind) continue;
       const binding = this.clientBindings.get(metadata.clientId);
       details.push({
         clientId: metadata.clientId,
@@ -353,6 +393,13 @@ export class RelayRegistry {
         connectedAt: metadata.connectedAt,
         ...(metadata.clientId === currentClientId ? { current: true } : {}),
         ...(metadata.userAgent !== undefined ? { userAgent: metadata.userAgent } : {}),
+        ...(metadata.platform !== undefined ? { platform: metadata.platform } : {}),
+        ...(metadata.maxTouchPoints !== undefined
+          ? { maxTouchPoints: metadata.maxTouchPoints }
+          : {}),
+        browserName: metadata.browserName,
+        osName: metadata.osName,
+        deviceKind: metadata.deviceKind,
         ...(metadata.remoteAddress !== undefined ? { remoteAddress: metadata.remoteAddress } : {}),
       });
     }

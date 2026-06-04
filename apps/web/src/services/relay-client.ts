@@ -16,13 +16,15 @@ import type {
   VoiceProviderConfig,
   VoiceSummaryReason,
 } from "@dev-anywhere/shared";
+import { describeCurrentClientDevice } from "@/lib/client-device";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
 const LATENCY_PROBE_TIMEOUT_MS = 3_000;
-const UPLOAD_REQUEST_TIMEOUT_FLOOR_MS = 60_000;
-const UPLOAD_REQUEST_TIMEOUT_CEILING_MS = 5 * 60_000;
-const UPLOAD_REQUEST_BYTES_PER_SECOND = 256 * 1024;
+const LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS = 60_000;
+const LARGE_PAYLOAD_REQUEST_TIMEOUT_CEILING_MS = 5 * 60_000;
+const LARGE_PAYLOAD_REQUEST_BYTES_PER_SECOND = 256 * 1024;
+const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
 export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
@@ -96,14 +98,22 @@ type FileUploadRequest = Omit<
   "type" | "requestId" | "sessionId"
 >;
 
-function uploadRequestTimeoutMs(dataBase64: string): number {
-  const payloadBytes = Math.ceil((dataBase64.length * 3) / 4);
-  const transferMs = Math.ceil((payloadBytes / UPLOAD_REQUEST_BYTES_PER_SECOND) * 1000);
+function largePayloadRequestTimeoutMs(payloadBytes: number): number {
+  const transferMs = Math.ceil((payloadBytes / LARGE_PAYLOAD_REQUEST_BYTES_PER_SECOND) * 1000);
   return Math.min(
-    UPLOAD_REQUEST_TIMEOUT_CEILING_MS,
-    Math.max(UPLOAD_REQUEST_TIMEOUT_FLOOR_MS, UPLOAD_REQUEST_TIMEOUT_FLOOR_MS + transferMs),
+    LARGE_PAYLOAD_REQUEST_TIMEOUT_CEILING_MS,
+    Math.max(
+      LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS,
+      LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS + transferMs,
+    ),
   );
 }
+
+function uploadRequestTimeoutMs(dataBase64: string): number {
+  return largePayloadRequestTimeoutMs(Math.ceil((dataBase64.length * 3) / 4));
+}
+
+const IMAGE_PREVIEW_REQUEST_TIMEOUT_MS = largePayloadRequestTimeoutMs(IMAGE_PREVIEW_MAX_BYTES);
 
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
@@ -201,14 +211,16 @@ export class RelayClient {
     });
   }
 
-  // 发送 client_register，携带 clientId 和各 session 已收到的最大 seq
+  // 发送 client_register，携带 clientId 和设备描述，便于客户端管理识别设备。
   // 注册意味着新连接，旧绑定对新 relay 实例无效
   register(): void {
     this.boundProxyId = null;
+    const clientDevice = describeCurrentClientDevice();
     this.ws.send(
       JSON.stringify({
         type: "client_register",
         clientId: this.clientId,
+        ...clientDevice,
       }),
     );
   }
@@ -371,7 +383,7 @@ export class RelayClient {
   requestImagePreview(
     sessionId: string,
     path: string,
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    timeoutMs = IMAGE_PREVIEW_REQUEST_TIMEOUT_MS,
   ): Promise<ImagePreviewResult> {
     const requestId = nextRequestId("image-preview");
     return this.waitForMessage(

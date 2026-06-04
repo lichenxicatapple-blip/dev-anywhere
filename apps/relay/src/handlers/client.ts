@@ -7,7 +7,6 @@ import {
   serializeControl,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
-import { nanoid } from "nanoid";
 import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeClientMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
@@ -31,16 +30,46 @@ interface ClientConnectionInfo {
   remoteAddress?: string;
 }
 
+interface ClientRegisterInfo {
+  clientId: string;
+  userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+  browserName: string;
+  osName: string;
+  deviceKind: "desktop" | "tablet" | "phone" | "unknown";
+}
+
+function isMalformedClientRegister(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as { type?: unknown } | null;
+    return parsed !== null && typeof parsed === "object" && parsed.type === "client_register";
+  } catch {
+    return false;
+  }
+}
+
 // 处理 client_register 消息：三种状态 restored / proxy_offline / new。
 // relay 不缓存输出；恢复由 proxy 重新推送 session_list/agent_status/snapshot 等状态。
 function handleClientRegister(
-  clientId: string,
+  registration: ClientRegisterInfo,
   clientWs: ClientSocket,
   registry: RelayRegistry,
   logger: Logger,
 ): void {
+  const { clientId } = registration;
   clientWs.clientId = clientId;
-  registry.updateConnectedClientId(clientWs, clientId);
+  registry.updateConnectedClientMetadata(clientWs, {
+    clientId,
+    ...(registration.userAgent !== undefined ? { userAgent: registration.userAgent } : {}),
+    ...(registration.platform !== undefined ? { platform: registration.platform } : {}),
+    ...(registration.maxTouchPoints !== undefined
+      ? { maxTouchPoints: registration.maxTouchPoints }
+      : {}),
+    browserName: registration.browserName,
+    osName: registration.osName,
+    deviceKind: registration.deviceKind,
+  });
 
   const binding = registry.getClientBinding(clientId);
 
@@ -174,6 +203,21 @@ function rejectNotBound(ws: ClientSocket): void {
   );
 }
 
+function rejectNotRegistered(ws: ClientSocket, requestId: string | undefined): void {
+  ws.send(
+    JSON.stringify({
+      type: "relay_error",
+      requestId,
+      code: RelayErrorCode.NOT_REGISTERED,
+      message: "Client must register before selecting a proxy",
+    }),
+  );
+}
+
+function closeRejectedClientProtocol(ws: ClientSocket): void {
+  ws.close(RelayCloseCode.CLIENT_PROTOCOL_REJECTED, "client protocol rejected");
+}
+
 function rejectProxySelect(ws: ClientSocket, requestId: string | undefined, proxyId: string): void {
   ws.send(
     JSON.stringify({
@@ -251,7 +295,7 @@ export function handleClientConnection(
       );
 
       if (msg.type === "client_register") {
-        handleClientRegister(msg.clientId, clientWs, registry, logger);
+        handleClientRegister(msg, clientWs, registry, logger);
         return;
       }
 
@@ -363,13 +407,14 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_select") {
+        if (!clientWs.clientId) {
+          rejectNotRegistered(clientWs, msg.requestId);
+          closeRejectedClientProtocol(clientWs);
+          return;
+        }
         if (!registry.isProxyOnline(msg.proxyId)) {
           rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
-        }
-        // 没有 clientId 时自动分配，统一通过 clientId 绑定
-        if (!clientWs.clientId) {
-          clientWs.clientId = `anon-${nanoid(10)}`;
         }
         const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
         if (!bound) {
@@ -422,6 +467,9 @@ export function handleClientConnection(
         message: `${result.error} | raw: ${raw.slice(0, 200)}`,
       }),
     );
+    if (isMalformedClientRegister(raw)) {
+      closeRejectedClientProtocol(clientWs);
+    }
   });
 
   clientWs.on("close", () => {

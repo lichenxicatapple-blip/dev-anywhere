@@ -33,6 +33,11 @@ export const RelayClientInfoSchema = z.object({
   connectedAt: z.number().int().nonnegative(),
   current: z.boolean().optional(),
   userAgent: z.string().optional(),
+  platform: z.string().optional(),
+  maxTouchPoints: z.number().int().nonnegative().optional(),
+  browserName: z.string().min(1),
+  osName: z.string().min(1),
+  deviceKind: z.enum(["desktop", "tablet", "phone", "unknown"]),
   remoteAddress: z.string().optional(),
 });
 export type RelayClientInfo = z.infer<typeof RelayClientInfoSchema>;
@@ -246,6 +251,12 @@ const relayControlDefinitions = [
   // 客户端注册协议
   control("client_register", {
     clientId: IdSchema,
+    userAgent: z.string().optional(),
+    platform: z.string().optional(),
+    maxTouchPoints: z.number().int().nonnegative().optional(),
+    browserName: z.string().min(1),
+    osName: z.string().min(1),
+    deviceKind: z.enum(["desktop", "tablet", "phone", "unknown"]),
   }),
   control("client_register_response", {
     status: z.enum(["restored", "proxy_offline", "new"]),

@@ -455,6 +455,39 @@ async function selectVisibleTerminalRowsWithTestDriver(
   await expectSelectionOverlayAttachedEventually(page);
 }
 
+async function selectVisibleTerminalTextWithTestDriver(
+  page: Page,
+  sessionId: string,
+  text: string,
+): Promise<void> {
+  const selected = await page.evaluate(
+    ({ sid, target }) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const controller = window.__ccTestPtySelectionControllers?.get(sid);
+      if (!term || !controller) return false;
+      const buffer = term.buffer.active;
+      for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+        const line = buffer.getLine(row)?.translateToString(true) ?? "";
+        const column = line.indexOf(target);
+        if (column < 0) continue;
+        return controller.selectRange({
+          anchorRow: row,
+          focusRow: row,
+          anchorColumn: column,
+          focusColumn: Math.min(column + target.length - 1, term.cols - 1),
+        });
+      }
+      return false;
+    },
+    { sid: sessionId, target: text },
+  );
+  if (!selected) {
+    throw new Error(`test selection driver could not select ${JSON.stringify(text)}`);
+  }
+  await waitForSelectionToContain(page, sessionId, [text]);
+  await expectSelectionOverlayAttachedEventually(page);
+}
+
 async function installClipboardProbe(page: Page): Promise<void> {
   await page.evaluate(() => {
     Object.defineProperty(navigator, "clipboard", {
@@ -674,7 +707,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
       )
       .toBe("@./build/out.tar.gz");
     await expect(emuPage.getByRole("button", { name: "复制终端选区" })).toBeVisible();
-    const downloadButton = emuPage.getByRole("button", { name: "下载终端链接" });
+    const downloadButton = emuPage.getByRole("button", { name: "下载终端选区文件" });
     await expect(downloadButton).toBeVisible();
 
     await downloadButton.click();
@@ -695,6 +728,43 @@ test.describe("L4 mobile / PTY long press copy", () => {
       )
       .toBe(true);
     await expect(downloadButton).toBeHidden();
+  });
+
+  test("selected image path previews from the toolbar even when surrounding text is noisy", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-selected-image-preview`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty("artifact a=b.jpg ready\r\n");
+    });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("a=b.jpg");
+
+    await selectVisibleTerminalTextWithTestDriver(emuPage, sessionId, "b.jpg");
+
+    await expect(emuPage.getByRole("button", { name: "复制终端选区" })).toBeVisible();
+    const previewButton = emuPage.getByRole("button", { name: "预览终端选区图片" });
+    await expect(previewButton).toBeVisible();
+
+    await previewButton.click();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() =>
+          (window.__ptySmoke?.sent ?? []).some((raw) => {
+            try {
+              const message = JSON.parse(raw) as { type?: string; path?: string };
+              return message.type === "image_preview_request" && message.path === "b.jpg";
+            } catch {
+              return false;
+            }
+          }),
+        ),
+      )
+      .toBe(true);
+    await expect(previewButton).toBeHidden();
   });
 
   test("keeps copy handles anchored when long press closes the soft keyboard", async ({

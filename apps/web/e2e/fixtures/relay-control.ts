@@ -123,7 +123,13 @@ export async function spawnSessionViaRelay(
   await ws.ready();
 
   const clientId = `e2e-client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  ws.send({ type: "client_register", clientId });
+  ws.send({
+    type: "client_register",
+    clientId,
+    browserName: "Chrome",
+    osName: "macOS",
+    deviceKind: "desktop",
+  });
 
   const proxiesResp = await ws.request<{
     proxies: Array<{ proxyId: string }>;

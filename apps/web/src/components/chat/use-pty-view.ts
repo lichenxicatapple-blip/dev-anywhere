@@ -51,6 +51,7 @@ import { usePtyFocusState } from "./use-pty-focus-state";
 import { usePtyFollowState } from "./use-pty-follow-state";
 import {
   usePtySelectionController,
+  type PtySelectionPathAction,
   type PtySelectionHandleKind,
   type PtySelectionHandleMetrics,
   type PtySelectionHandles,
@@ -108,10 +109,10 @@ interface UsePtyViewResult {
   focusHandlers: FocusHandlers;
   ptySelectionToolbar: { left: number; top: number } | null;
   ptySelectionHandles: PtySelectionHandles | null;
-  ptySelectionDownloadPath: string | null;
+  ptySelectionPathAction: PtySelectionPathAction | null;
   ptySelectionHandleMetrics: PtySelectionHandleMetrics;
   copyPtySelection: () => void;
-  downloadPtySelection: () => void;
+  openPtySelectionPathAction: () => void;
   handlePtySelectionHandlePointerDown: (
     kind: PtySelectionHandleKind,
     event: ReactPointerEvent<HTMLElement>,
@@ -409,6 +410,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onTap: handlePtyTap,
     isTapCandidate: isPtyTapCandidate,
     onDownloadPath: downloadPtyPath,
+    onPreviewPath: openImagePreview,
   });
   ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;
 
@@ -886,10 +888,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     focusHandlers,
     ptySelectionToolbar: selection.ptySelectionToolbar,
     ptySelectionHandles: selection.ptySelectionHandles,
-    ptySelectionDownloadPath: selection.ptySelectionDownloadPath,
+    ptySelectionPathAction: selection.ptySelectionPathAction,
     ptySelectionHandleMetrics: selection.ptySelectionHandleMetrics,
     copyPtySelection: selection.copyPtySelection,
-    downloadPtySelection: selection.downloadPtySelection,
+    openPtySelectionPathAction: selection.openPtySelectionPathAction,
     handlePtySelectionHandlePointerDown: selection.handlePtySelectionHandlePointerDown,
     handlePtySelectionHandleTouchStart: selection.handlePtySelectionHandleTouchStart,
     isPtyDragOver,

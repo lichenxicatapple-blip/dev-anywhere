@@ -77,6 +77,11 @@ describe("SettingsDialog", () => {
         current: true,
         userAgent:
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
         remoteAddress: "127.0.0.1",
       },
       {
@@ -85,6 +90,9 @@ describe("SettingsDialog", () => {
         connectedAt: Date.now() - 120_000,
         userAgent:
           "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
         remoteAddress: "192.168.1.23",
       },
     ]);
@@ -190,10 +198,34 @@ describe("SettingsDialog", () => {
     });
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Voice Pilot用语音输入、听取回复和处理审批",
-      "Relay Token未设置；用于连接需要认证的 Relay 服务器",
+      "Relay Token未设置 · 受保护的 Relay 服务器",
       "客户端管理已连接的浏览器页面和设备",
       "版本",
     ]);
+  });
+
+  it("keeps settings subview headers left-aligned consistently", () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    for (const label of ["Relay Token", "客户端管理", "版本", "Voice Pilot"]) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+
+      const header = document.querySelector<HTMLElement>('[data-slot="dialog-header"]');
+      const description = document.querySelector<HTMLElement>('[data-slot="dialog-description"]');
+      const heading = label === "Voice Pilot" ? "设置 Voice Pilot" : label;
+      expect(screen.getByRole("heading", { name: heading })).not.toBeNull();
+      expect(header?.className).toContain("text-left");
+      expect(description?.className).toContain("max-w-[28rem]");
+      expect(description?.className).toContain("leading-5");
+      const body = document.querySelector<HTMLElement>('[data-slot="settings-dialog-body"]');
+      if (label !== "Voice Pilot") {
+        expect(body?.className).toContain("space-y-3");
+        expect(body?.className).toContain("pr-4");
+        expect(body?.className).toContain("sm:pr-1");
+      }
+
+      fireEvent.click(screen.getByRole("button", { name: "返回设置" }));
+    }
   });
 
   it("lists connected relay clients and can disconnect another client", async () => {
@@ -208,9 +240,10 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("当前设备")).not.toBeNull();
     expect(document.querySelector('[data-client-id="current-client"]')).not.toBeNull();
     expect(document.querySelector('[data-client-id="other-client"]')).not.toBeNull();
-    expect(screen.getByText("开发机")).not.toBeNull();
+    expect(screen.getAllByText("Safari · iPad")).toHaveLength(2);
+    expect(screen.getByText("连接到")).not.toBeNull();
     expect(screen.getByText("Work Mac")).not.toBeNull();
-    expect(screen.queryByText("开发机 Work Mac")).toBeNull();
+    expect(screen.queryByText("连接到 Work Mac")).toBeNull();
 
     const buttons = screen.getAllByRole("button", { name: "断开" });
     expect(buttons).toHaveLength(1);
@@ -291,7 +324,8 @@ describe("SettingsDialog", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
-    fireEvent.change(screen.getByLabelText("Relay client token"), {
+    expect(screen.queryByText("未保存")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Token"), {
       target: { value: " client-secret " },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
@@ -308,7 +342,9 @@ describe("SettingsDialog", () => {
 
     expect(screen.getByRole("button", { name: "Relay Token" }).textContent).toContain("已保存");
     fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
-    expect(screen.getByText("已保存 token")).not.toBeNull();
+    expect(document.querySelector('[data-slot="relay-token-card"]')).not.toBeNull();
+    expect(screen.queryByText("已保存 token")).toBeNull();
+    expect(screen.queryByText("未保存")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBeNull();

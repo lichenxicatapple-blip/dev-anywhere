@@ -24,13 +24,17 @@ import {
 } from "@/lib/pty-selection-layout";
 import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
 import {
+  resolvePtySelectionPathAction,
+  type PtySelectionPathAction,
+} from "@/lib/pty-selection-path-action";
+import {
   usePtySelectionGestureDriver,
   type PtySelectionHandleKind,
 } from "./use-pty-selection-gesture-driver";
 
 const LONG_PRESS_MOVE_THRESHOLD_PX = 8;
 
-export type { PtySelectionHandleMetrics, PtySelectionHandles };
+export type { PtySelectionHandleMetrics, PtySelectionHandles, PtySelectionPathAction };
 export type { PtySelectionHandleKind } from "./use-pty-selection-gesture-driver";
 
 interface PointerHandlers {
@@ -64,16 +68,17 @@ interface UsePtySelectionControllerOptions {
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
   onDownloadPath: (path: string) => void;
+  onPreviewPath: (path: string) => void;
 }
 
 interface UsePtySelectionControllerResult {
   pointerHandlers: PointerHandlers;
   ptySelectionToolbar: { left: number; top: number } | null;
   ptySelectionHandles: PtySelectionHandles | null;
-  ptySelectionDownloadPath: string | null;
+  ptySelectionPathAction: PtySelectionPathAction | null;
   ptySelectionHandleMetrics: PtySelectionHandleMetrics;
   copyPtySelection: () => void;
-  downloadPtySelection: () => void;
+  openPtySelectionPathAction: () => void;
   handlePtySelectionHandlePointerDown: (
     kind: PtySelectionHandleKind,
     event: ReactPointerEvent<HTMLElement>,
@@ -116,6 +121,7 @@ export function usePtySelectionController(
     onTap,
     isTapCandidate,
     onDownloadPath,
+    onPreviewPath,
   } = options;
 
   const selectionAnchorRef = useRef<TerminalSelectionPoint | null>(null);
@@ -125,7 +131,7 @@ export function usePtySelectionController(
     null,
   );
   const selectionDraggedRef = useRef(false);
-  const selectedDownloadPathRef = useRef<string | null>(null);
+  const selectedPathActionRef = useRef<PtySelectionPathAction | null>(null);
   const selectedPtyTextRef = useRef("");
   const stopPtySelectionGestureRef = useRef<(() => void) | null>(null);
   const [ptySelectionToolbar, setPtySelectionToolbar] = useState<{
@@ -133,7 +139,8 @@ export function usePtySelectionController(
     top: number;
   } | null>(null);
   const [ptySelectionHandles, setPtySelectionHandles] = useState<PtySelectionHandles | null>(null);
-  const [ptySelectionDownloadPath, setPtySelectionDownloadPath] = useState<string | null>(null);
+  const [ptySelectionPathAction, setPtySelectionPathAction] =
+    useState<PtySelectionPathAction | null>(null);
   const ptySelectionHandleMetrics = useMemo<PtySelectionHandleMetrics>(
     () => computePtySelectionHandleMetrics(ptyFontSize),
     [ptyFontSize],
@@ -167,6 +174,18 @@ export function usePtySelectionController(
       });
     },
     [terminalRef, xtermHostRef],
+  );
+
+  const setSelectedPathAction = useCallback(
+    (selectedText: string, explicitDownloadPath?: string | null): PtySelectionPathAction | null => {
+      const action =
+        resolvePtySelectionPathAction(selectedText) ??
+        (explicitDownloadPath ? { kind: "file-download", path: explicitDownloadPath } : null);
+      selectedPathActionRef.current = action;
+      setPtySelectionPathAction(action);
+      return action;
+    },
+    [],
   );
 
   const getToolbarPositionForSelectionHandles = useCallback(
@@ -208,13 +227,24 @@ export function usePtySelectionController(
     selectionAnchorRef.current = null;
     selectionFocusRef.current = null;
     selectionDraggedRef.current = false;
-    selectedDownloadPathRef.current = null;
+    selectedPathActionRef.current = null;
     selectedPtyTextRef.current = "";
     terminalRef.current?.clearSelection();
     setPtySelectionToolbar(null);
     setPtySelectionHandles(null);
-    setPtySelectionDownloadPath(null);
+    setPtySelectionPathAction(null);
   }, [terminalRef]);
+
+  const hidePtySelectionControls = useCallback((selectedText: string = ""): void => {
+    selectionAnchorRef.current = null;
+    selectionFocusRef.current = null;
+    selectionDraggedRef.current = false;
+    selectedPathActionRef.current = null;
+    selectedPtyTextRef.current = selectedText;
+    setPtySelectionToolbar(null);
+    setPtySelectionHandles(null);
+    setPtySelectionPathAction(null);
+  }, []);
 
   const capturePtyLongPressCandidate = useCallback(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
@@ -249,14 +279,13 @@ export function usePtySelectionController(
       selectionAnchorRef.current = nextAnchor;
       selectionFocusRef.current = nextFocus;
       selectionDraggedRef.current = true;
-      selectedDownloadPathRef.current = null;
-      setPtySelectionDownloadPath(null);
       const selected = selectTerminalRange({ terminal, anchor: nextAnchor, focus: nextFocus });
       selectedPtyTextRef.current = selected?.text ?? "";
+      setSelectedPathAction(selected?.text ?? "");
       setPtySelectionHandles(selected ? getSelectionHandles(nextAnchor, nextFocus) : null);
       return selected;
     },
-    [getSelectionHandles, terminalRef, xtermHostRef],
+    [getSelectionHandles, setSelectedPathAction, terminalRef, xtermHostRef],
   );
 
   const applyPtyInitialSelection = useCallback(
@@ -290,9 +319,8 @@ export function usePtySelectionController(
 
       selectionAnchorRef.current = selected.anchor;
       selectionFocusRef.current = selected.focus;
-      selectedDownloadPathRef.current = linkSelection?.downloadPath ?? null;
-      setPtySelectionDownloadPath(linkSelection?.downloadPath ?? null);
       selectedPtyTextRef.current = selected.text;
+      setSelectedPathAction(selected.text, linkSelection?.downloadPath);
       const handles = getSelectionHandles(selected.anchor, selected.focus);
       setPtySelectionHandles(handles);
       if (showToolbar) {
@@ -308,6 +336,7 @@ export function usePtySelectionController(
       getSelectionHandles,
       getToolbarPosition,
       getToolbarPositionForSelectionHandles,
+      setSelectedPathAction,
       terminalRef,
       xtermHostRef,
     ],
@@ -324,6 +353,52 @@ export function usePtySelectionController(
     setPtySelectionHandles(handles);
     setPtySelectionToolbar(handles ? getToolbarPositionForSelectionHandles(handles) : null);
   }, [getSelectionHandles, getToolbarPositionForSelectionHandles]);
+
+  const showToolbarForNativeSelection = useCallback(
+    (point: { clientX: number; clientY: number }): void => {
+      const selectedText = terminalRef.current?.getSelection?.() ?? "";
+      const action = setSelectedPathAction(selectedText);
+      selectedPtyTextRef.current = selectedText;
+      selectionAnchorRef.current = null;
+      selectionFocusRef.current = null;
+      selectionDraggedRef.current = false;
+      setPtySelectionHandles(null);
+      setPtySelectionToolbar(action ? getToolbarPosition(point.clientX, point.clientY) : null);
+    },
+    [getToolbarPosition, setSelectedPathAction, terminalRef],
+  );
+
+  useEffect(() => {
+    const host = xtermHostRef.current;
+    if (!host) return;
+
+    let mouseDownInTerminal = false;
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.pointerType !== "mouse" || event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(".xterm")) return;
+      mouseDownInTerminal = true;
+      hidePtySelectionControls(terminalRef.current?.getSelection?.() ?? "");
+    };
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.pointerType !== "mouse" || !mouseDownInTerminal) return;
+      mouseDownInTerminal = false;
+      const point = { clientX: event.clientX, clientY: event.clientY };
+      window.setTimeout(() => showToolbarForNativeSelection(point), 0);
+    };
+    const handlePointerCancel = (): void => {
+      mouseDownInTerminal = false;
+    };
+
+    host.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("pointerup", handlePointerUp, true);
+    window.addEventListener("pointercancel", handlePointerCancel, true);
+    return () => {
+      host.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("pointerup", handlePointerUp, true);
+      window.removeEventListener("pointercancel", handlePointerCancel, true);
+    };
+  }, [hidePtySelectionControls, showToolbarForNativeSelection, terminalRef, xtermHostRef]);
 
   useLayoutEffect(() => {
     if (!ptySelectionToolbar && !ptySelectionHandles) return;
@@ -403,21 +478,21 @@ export function usePtySelectionController(
       if (!point) {
         selectionAnchorRef.current = null;
         selectionFocusRef.current = null;
-        selectedDownloadPathRef.current = null;
+        selectedPathActionRef.current = null;
         selectedPtyTextRef.current = "";
         setPtySelectionToolbar(null);
         setPtySelectionHandles(null);
-        setPtySelectionDownloadPath(null);
+        setPtySelectionPathAction(null);
         return;
       }
       selectionAnchorRef.current = point;
       selectionFocusRef.current = point;
       selectionDraggedRef.current = false;
-      selectedDownloadPathRef.current = null;
+      selectedPathActionRef.current = null;
       selectedPtyTextRef.current = "";
       setPtySelectionToolbar(null);
       setPtySelectionHandles(null);
-      setPtySelectionDownloadPath(null);
+      setPtySelectionPathAction(null);
       applyPtyInitialSelection({ point, clientX, clientY, showToolbar: false });
     },
     [applyPtyInitialSelection, terminalRef, xtermHostRef],
@@ -478,9 +553,8 @@ export function usePtySelectionController(
 
       selectionAnchorRef.current = selected.anchor;
       selectionFocusRef.current = selected.focus;
-      selectedDownloadPathRef.current = linkSelection?.downloadPath ?? null;
-      setPtySelectionDownloadPath(linkSelection?.downloadPath ?? null);
       selectedPtyTextRef.current = selected.text;
+      setSelectedPathAction(selected.text, linkSelection?.downloadPath);
       const handles = getSelectionHandles(selected.anchor, selected.focus);
       setPtySelectionHandles(handles);
       setPtySelectionToolbar(
@@ -494,6 +568,7 @@ export function usePtySelectionController(
       getSelectionHandles,
       getToolbarPosition,
       getToolbarPositionForSelectionHandles,
+      setSelectedPathAction,
       showToolbarForCurrentSelection,
       terminalRef,
       xtermHostRef,
@@ -511,12 +586,13 @@ export function usePtySelectionController(
     });
   }, [clearPtySelection, terminalRef]);
 
-  const downloadPtySelection = useCallback((): void => {
-    const path = selectedDownloadPathRef.current;
-    if (!path) return;
-    onDownloadPath(path);
+  const openPtySelectionPathAction = useCallback((): void => {
+    const action = selectedPathActionRef.current;
+    if (!action) return;
+    if (action.kind === "image-preview") onPreviewPath(action.path);
+    else onDownloadPath(action.path);
     clearPtySelection();
-  }, [clearPtySelection, onDownloadPath]);
+  }, [clearPtySelection, onDownloadPath, onPreviewPath]);
 
   const isSelectionActive = useCallback((): boolean => selectionAnchorRef.current !== null, []);
 
@@ -560,9 +636,9 @@ export function usePtySelectionController(
 
         selectionAnchorRef.current = selected.anchor;
         selectionFocusRef.current = selected.focus;
-        selectedDownloadPathRef.current = null;
+        selectedPathActionRef.current = null;
         selectedPtyTextRef.current = selected.text;
-        setPtySelectionDownloadPath(null);
+        setSelectedPathAction(selected.text);
         const handles = getSelectionHandles(selected.anchor, selected.focus);
         setPtySelectionHandles(handles);
         setPtySelectionToolbar(handles ? getToolbarPositionForSelectionHandles(handles) : null);
@@ -579,6 +655,7 @@ export function usePtySelectionController(
     getSelectionHandles,
     getToolbarPositionForSelectionHandles,
     sessionId,
+    setSelectedPathAction,
     terminalRef,
   ]);
 
@@ -606,10 +683,10 @@ export function usePtySelectionController(
     pointerHandlers: selectionGesture.pointerHandlers,
     ptySelectionToolbar,
     ptySelectionHandles,
-    ptySelectionDownloadPath,
+    ptySelectionPathAction,
     ptySelectionHandleMetrics,
     copyPtySelection,
-    downloadPtySelection,
+    openPtySelectionPathAction,
     handlePtySelectionHandlePointerDown: selectionGesture.handlePtySelectionHandlePointerDown,
     handlePtySelectionHandleTouchStart: selectionGesture.handlePtySelectionHandleTouchStart,
   };

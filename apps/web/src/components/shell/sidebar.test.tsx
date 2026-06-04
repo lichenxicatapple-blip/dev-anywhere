@@ -37,8 +37,14 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByLabelText("侧边栏").className).toContain("pt-[env(safe-area-inset-top)]");
+    expect(container.querySelector('[data-slot="sidebar-session-list"]')?.className).toContain(
+      "min-h-0",
+    );
     expect(container.querySelector('[data-slot="sidebar-new-session"]')?.className).toContain(
-      "pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+      "pb-[calc(var(--dev-safe-area-bottom,env(safe-area-inset-bottom))+0.5rem)]",
+    );
+    expect(container.querySelector('[data-slot="sidebar-new-session"]')?.className).toContain(
+      "shrink-0",
     );
   });
 
@@ -55,7 +61,7 @@ describe("Sidebar", () => {
       "pt-[max(0.5rem,env(safe-area-inset-top))]",
     );
     expect(screen.getByLabelText("侧边栏").className).toContain(
-      "pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+      "pb-[calc(var(--dev-safe-area-bottom,env(safe-area-inset-bottom))+0.5rem)]",
     );
   });
 });

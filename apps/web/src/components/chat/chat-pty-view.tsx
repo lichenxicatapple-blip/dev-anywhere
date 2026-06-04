@@ -152,15 +152,19 @@ export function ChatPtyView({
           >
             复制
           </button>
-          {view.ptySelectionDownloadPath ? (
+          {view.ptySelectionPathAction ? (
             <button
               type="button"
               className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80"
               onPointerDown={(event) => event.preventDefault()}
-              onClick={view.downloadPtySelection}
-              aria-label="下载终端链接"
+              onClick={view.openPtySelectionPathAction}
+              aria-label={
+                view.ptySelectionPathAction.kind === "image-preview"
+                  ? "预览终端选区图片"
+                  : "下载终端选区文件"
+              }
             >
-              下载
+              {view.ptySelectionPathAction.kind === "image-preview" ? "预览" : "下载"}
             </button>
           ) : null}
         </div>

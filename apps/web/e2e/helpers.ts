@@ -145,6 +145,11 @@ export async function installFakeRelay(page: Page): Promise<void> {
         current: true,
         userAgent:
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
         remoteAddress: "127.0.0.1",
       },
       {
@@ -153,6 +158,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
         connectedAt: now - 120_000,
         userAgent:
           "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
         remoteAddress: "192.168.1.23",
       },
     ];

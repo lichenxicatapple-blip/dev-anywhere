@@ -373,6 +373,36 @@ describe("RelayControlSchema", () => {
     expect(() => RelayControlSchema.parse({ type: "client_register", clientId: "" })).toThrow();
   });
 
+  it("rejects client_register without device descriptor", () => {
+    expect(() =>
+      RelayControlSchema.parse({ type: "client_register", clientId: "client-1" }),
+    ).toThrow();
+  });
+
+  it("accepts client_register with required device descriptor and optional browser hints", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "client_register",
+        clientId: "client-1",
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
+      }),
+    ).toMatchObject({
+      type: "client_register",
+      clientId: "client-1",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+      browserName: "Safari",
+      osName: "iPad",
+      deviceKind: "tablet",
+    });
+  });
+
   it("accepts relay client management messages", () => {
     expect(
       RelayControlSchema.parse({
@@ -385,13 +415,27 @@ describe("RelayControlSchema", () => {
             connectedAt: 1760000000000,
             current: true,
             userAgent: "Safari",
+            platform: "MacIntel",
+            maxTouchPoints: 5,
+            browserName: "Safari",
+            osName: "iPad",
+            deviceKind: "tablet",
             remoteAddress: "127.0.0.1",
           },
         ],
       }),
     ).toMatchObject({
       type: "relay_client_list_response",
-      clients: [{ clientId: "client-1", current: true }],
+      clients: [
+        {
+          clientId: "client-1",
+          current: true,
+          platform: "MacIntel",
+          browserName: "Safari",
+          osName: "iPad",
+          deviceKind: "tablet",
+        },
+      ],
     });
     expect(
       RelayControlSchema.parse({

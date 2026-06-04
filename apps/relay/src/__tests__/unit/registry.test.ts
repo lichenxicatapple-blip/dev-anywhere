@@ -302,6 +302,11 @@ describe("RelayRegistry", () => {
       registry.addClientWs(clientWs, {
         connectedAt: 1760000000000,
         userAgent: "Safari",
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
         remoteAddress: "127.0.0.1",
       });
       registry.updateConnectedClientId(clientWs, "c1");
@@ -315,6 +320,11 @@ describe("RelayRegistry", () => {
           connectedAt: 1760000000000,
           current: true,
           userAgent: "Safari",
+          platform: "MacIntel",
+          maxTouchPoints: 5,
+          browserName: "Safari",
+          osName: "iPad",
+          deviceKind: "tablet",
           remoteAddress: "127.0.0.1",
         },
       ]);
@@ -323,6 +333,12 @@ describe("RelayRegistry", () => {
     it("does not list unregistered or closed client sockets", () => {
       registry.addClientWs(createMockWs());
       registry.addClientWs(createMockWs(WebSocket.CLOSED), { clientId: "closed-client" });
+
+      expect(registry.getConnectedClientDetails()).toEqual([]);
+    });
+
+    it("does not list registered client sockets without a device descriptor", () => {
+      registry.addClientWs(createMockWs(), { clientId: "missing-descriptor-client" });
 
       expect(registry.getConnectedClientDetails()).toEqual([]);
     });

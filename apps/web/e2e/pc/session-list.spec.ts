@@ -111,9 +111,12 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.locator('[data-client-id="browser-current"]')).toBeVisible();
     const otherClient = page.locator('[data-client-id="browser-ipad"]');
     await expect(otherClient).toBeVisible();
-    await expect(otherClient.getByText("开发机", { exact: true })).toBeVisible();
+    await expect(
+      page.locator('[data-client-id="browser-current"]').getByText("Safari · iPad"),
+    ).toBeVisible();
+    await expect(otherClient.getByText("连接到", { exact: true })).toBeVisible();
     await expect(otherClient.getByText("Local Mac", { exact: true })).toBeVisible();
-    await expect(page.getByText("开发机 Local Mac")).toHaveCount(0);
+    await expect(page.getByText("连接到 Local Mac")).toHaveCount(0);
 
     await page.getByRole("button", { name: "断开" }).click();
 

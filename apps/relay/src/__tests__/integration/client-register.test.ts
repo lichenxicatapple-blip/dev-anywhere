@@ -49,22 +49,45 @@ describe("client_register protocol", () => {
     return ws;
   }
 
+  function clientRegister(clientId: string): Record<string, unknown> {
+    return {
+      type: "client_register",
+      clientId,
+      browserName: "Chrome",
+      osName: "macOS",
+      deviceKind: "desktop",
+    };
+  }
+
   it("returns status 'new' for unknown clientId", async () => {
     const client = connectClient();
     await waitForOpen(client);
 
     const msgPromise = waitForMessage(client);
-    client.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "fresh-client",
-      }),
-    );
+    client.send(JSON.stringify(clientRegister("fresh-client")));
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
     expect(response.status).toBe("new");
     expect(response.proxyId).toBeUndefined();
+  });
+
+  it("rejects incomplete client_register without device descriptor", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+
+    const msgPromise = waitForMessage(client);
+    const closePromise = new Promise<number>((resolve) => {
+      client.once("close", (code) => resolve(code));
+    });
+    client.send(JSON.stringify({ type: "client_register", clientId: "old-client" }));
+
+    const response = JSON.parse(await msgPromise);
+    expect(response).toMatchObject({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+    });
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
   });
 
   it("lists connected relay clients and lets one client kick another", async () => {
@@ -75,14 +98,26 @@ describe("client_register protocol", () => {
 
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(JSON.stringify({ type: "client_register", clientId: "c1" }));
+    client1.send(JSON.stringify(clientRegister("c1")));
     await waitForMessageType(client1, "client_register_response");
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessageType(client1, "proxy_select_response");
 
     const client2 = connectClient();
     await waitForOpen(client2);
-    client2.send(JSON.stringify({ type: "client_register", clientId: "c2" }));
+    client2.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "c2",
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+        platform: "MacIntel",
+        maxTouchPoints: 5,
+        browserName: "Safari",
+        osName: "iPad",
+        deviceKind: "tablet",
+      }),
+    );
     await waitForMessageType(client2, "client_register_response");
 
     const listPromise = waitForMessageType(client1, "relay_client_list_response");
@@ -91,7 +126,14 @@ describe("client_register protocol", () => {
     expect(listResponse.clients).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ clientId: "c1", proxyId: "p1", current: true }),
-        expect.objectContaining({ clientId: "c2" }),
+        expect.objectContaining({
+          clientId: "c2",
+          platform: "MacIntel",
+          maxTouchPoints: 5,
+          browserName: "Safari",
+          osName: "iPad",
+          deviceKind: "tablet",
+        }),
       ]),
     );
 
@@ -118,7 +160,7 @@ describe("client_register protocol", () => {
   it("rejects relay client self-kick", async () => {
     const client = connectClient();
     await waitForOpen(client);
-    client.send(JSON.stringify({ type: "client_register", clientId: "c1" }));
+    client.send(JSON.stringify(clientRegister("c1")));
     await waitForMessageType(client, "client_register_response");
 
     const responsePromise = waitForMessageType(client, "relay_client_kick_response");
@@ -146,12 +188,7 @@ describe("client_register protocol", () => {
     // 第一个客户端连接并绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client1.send(JSON.stringify(clientRegister("c1")));
     // 新 client 没有绑定，收到 new
     const newResponse = JSON.parse(await waitForMessage(client1));
     expect(newResponse.status).toBe("new");
@@ -170,12 +207,7 @@ describe("client_register protocol", () => {
     connections.push(client2);
 
     const msgPromise = waitForMessage(client2);
-    client2.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client2.send(JSON.stringify(clientRegister("c1")));
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
@@ -193,12 +225,7 @@ describe("client_register protocol", () => {
     // 客户端连接、注册并绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client1.send(JSON.stringify(clientRegister("c1")));
     await waitForMessage(client1); // new response
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client1); // consume proxy_select_response ACK
@@ -231,12 +258,7 @@ describe("client_register protocol", () => {
     connections.push(client2);
 
     const allMessages = collectMessages(client2, 1);
-    client2.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client2.send(JSON.stringify(clientRegister("c1")));
 
     const received = await allMessages;
     expect(received.length).toBe(1);
@@ -256,12 +278,7 @@ describe("client_register protocol", () => {
     // 客户端绑定
     const client1 = connectClient();
     await waitForOpen(client1);
-    client1.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client1.send(JSON.stringify(clientRegister("c1")));
     await waitForMessage(client1); // new
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client1); // consume proxy_select_response ACK
@@ -278,12 +295,7 @@ describe("client_register protocol", () => {
     connections.push(client2);
 
     const msgPromise = waitForMessage(client2);
-    client2.send(
-      JSON.stringify({
-        type: "client_register",
-        clientId: "c1",
-      }),
-    );
+    client2.send(JSON.stringify(clientRegister("c1")));
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
@@ -301,6 +313,8 @@ describe("client_register protocol", () => {
     // 客户端绑定
     const client = connectClient();
     await waitForOpen(client);
+    client.send(JSON.stringify(clientRegister("c1")));
+    await waitForMessage(client); // consume client_register_response
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -335,6 +349,8 @@ describe("client_register protocol", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    client.send(JSON.stringify(clientRegister("c1")));
+    await waitForMessage(client); // consume client_register_response
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -355,6 +371,8 @@ describe("client_register protocol", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    client.send(JSON.stringify(clientRegister("c1")));
+    await waitForMessage(client); // consume client_register_response
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -384,6 +402,8 @@ describe("client_register protocol", () => {
     const client = connectClient();
     await waitForOpen(client);
 
+    client.send(JSON.stringify(clientRegister("c1")));
+    await waitForMessage(client); // consume client_register_response
     const msgPromise = waitForMessage(client);
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
 
@@ -424,7 +444,7 @@ describe("client_register protocol", () => {
     expect(response.proxies[0].sessions).toEqual(expect.arrayContaining(["s1", "s2"]));
   });
 
-  it("proxy_select still works for clients without client_register", async () => {
+  it("rejects proxy_select before client_register", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
@@ -432,30 +452,18 @@ describe("client_register protocol", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    const msgPromise = waitForMessage(client);
+    const closePromise = new Promise<number>((resolve) => {
+      client.once("close", (code) => resolve(code));
+    });
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
 
-    // 先消费 proxy_select_response ACK
-    const ack = JSON.parse(await waitForMessage(client));
-    expect(ack.type).toBe("proxy_select_response");
-    expect(ack.success).toBe(true);
-
-    // proxy -> client 应该工作
-    const msgPromise = waitForMessage(client);
-    proxy.send(
-      JSON.stringify({
-        seq: 1,
-        sessionId: "s1",
-        timestamp: Date.now(),
-        source: "proxy" as const,
-        version: "1.0",
-        type: "assistant_message" as const,
-        payload: { text: "hello", isPartial: false },
-      }),
-    );
-
     const msg = JSON.parse(await msgPromise);
-    expect(msg.type).toBe("assistant_message");
-    expect(msg.payload.text).toBe("hello");
+    expect(msg).toMatchObject({
+      type: "relay_error",
+      code: "NOT_REGISTERED",
+    });
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
   });
 
   it("proxy receives proxy_register_response with status 'new' on first register", async () => {

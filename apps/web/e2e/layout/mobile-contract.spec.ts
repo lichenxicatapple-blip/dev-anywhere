@@ -162,6 +162,124 @@ test.describe("mobile UX contract", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  test("mobile landscape sessions keep the active list visible above the create bar", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 740, height: 320 });
+    await selectFakeProxy(page);
+
+    const hero = page.locator('[data-slot="mobile-brand-hero"]');
+    const subtitle = hero.locator(".dev-mobile-brand-subtitle");
+    const switchProxy = page.locator('[data-slot="mobile-switch-proxy"]');
+    const createButton = page.locator('[data-slot="create-session-mobile-trigger"]');
+
+    await expect(hero).toBeVisible();
+    await expect(switchProxy).toBeVisible();
+    await expectTouchTarget(switchProxy);
+
+    const metrics = await page.evaluate(() => {
+      const rectOf = (selector: string) => {
+        const rect = document.querySelector<HTMLElement>(selector)?.getBoundingClientRect();
+        return rect
+          ? { top: rect.top, bottom: rect.bottom, height: rect.height, width: rect.width }
+          : null;
+      };
+      return {
+        innerHeight: window.innerHeight,
+        hero: rectOf('[data-slot="mobile-brand-hero"]'),
+        firstRow:
+          Array.from(document.querySelectorAll<HTMLElement>('[data-slot="session-row"]'))
+            .map((node) => {
+              const rect = node.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom, height: rect.height, width: rect.width };
+            })
+            .find((rect) => rect.height > 0 && rect.width > 0) ?? null,
+        createButton: rectOf('[data-slot="create-session-mobile-trigger"]'),
+        subtitleDisplay: getComputedStyle(
+          document.querySelector<HTMLElement>(".dev-mobile-brand-subtitle")!,
+        ).display,
+      };
+    });
+
+    expect(metrics.hero).not.toBeNull();
+    expect(metrics.firstRow).not.toBeNull();
+    expect(metrics.createButton).not.toBeNull();
+    expect(metrics.hero?.height ?? 0).toBeLessThanOrEqual(84);
+    expect(metrics.firstRow?.height ?? 0).toBeGreaterThan(0);
+    expect(metrics.subtitleDisplay).toBe("none");
+    expect(metrics.firstRow?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      (metrics.createButton?.top ?? 0) - 8,
+    );
+    expect(metrics.createButton?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      metrics.innerHeight + 1,
+    );
+    await expectNoHorizontalDocumentOverflow(page);
+  });
+
+  test("tablet sidebar keeps bottom actions above the iPad safe-area fill", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await selectFakeProxy(page);
+    await page.addStyleTag({
+      content: ".dev-sidebar-shell { --dev-safe-area-bottom: 64px; }",
+    });
+
+    const sidebar = page.locator('[data-slot="sidebar"]');
+    const footer = page.locator('[data-slot="sidebar-new-session"]');
+    const create = footer.locator('[data-slot="create-session-trigger"]');
+    const settings = footer.locator('[data-slot="sidebar-settings-trigger"]');
+
+    await expect(sidebar).toBeVisible();
+    await expect(footer).toBeVisible();
+    await expectTouchTarget(create);
+    await expectTouchTarget(settings);
+
+    const metrics = await page.evaluate(() => {
+      const sidebarNode = document.querySelector<HTMLElement>('[data-slot="sidebar"]');
+      const footerNode = document.querySelector<HTMLElement>('[data-slot="sidebar-new-session"]');
+      const createNode = footerNode?.querySelector<HTMLElement>(
+        '[data-slot="create-session-trigger"]',
+      );
+      const settingsNode = footerNode?.querySelector<HTMLElement>(
+        '[data-slot="sidebar-settings-trigger"]',
+      );
+      const rectOf = (node: HTMLElement | null | undefined) => {
+        const rect = node?.getBoundingClientRect();
+        return rect
+          ? { top: rect.top, bottom: rect.bottom, height: rect.height, width: rect.width }
+          : null;
+      };
+      return {
+        innerHeight: window.innerHeight,
+        sidebarIsolation: sidebarNode ? getComputedStyle(sidebarNode).isolation : null,
+        sidebarAfterZ: sidebarNode ? getComputedStyle(sidebarNode, "::after").zIndex : null,
+        footerPosition: footerNode ? getComputedStyle(footerNode).position : null,
+        footerZ: footerNode ? getComputedStyle(footerNode).zIndex : null,
+        safeAreaBottom: Number.parseFloat(
+          sidebarNode
+            ? getComputedStyle(sidebarNode).getPropertyValue("--dev-safe-area-bottom")
+            : "",
+        ),
+        footer: rectOf(footerNode),
+        create: rectOf(createNode),
+        settings: rectOf(settingsNode),
+      };
+    });
+
+    expect(metrics.sidebarIsolation).toBe("isolate");
+    expect(metrics.sidebarAfterZ).toBe("0");
+    expect(metrics.footerPosition).toBe("relative");
+    expect(metrics.footerZ).toBe("1");
+    expect(metrics.footer?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      metrics.innerHeight + 1,
+    );
+    const safeAreaTop = metrics.innerHeight - metrics.safeAreaBottom;
+    expect(metrics.create?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(safeAreaTop + 1);
+    expect(metrics.settings?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      safeAreaTop + 1,
+    );
+    await expectNoHorizontalDocumentOverflow(page);
+  });
+
   test("mobile shell settings opens the shared settings dialog", async ({ page }) => {
     await selectFakeProxy(page);
     const settings = page.locator('[data-slot="mobile-settings-trigger"]');
