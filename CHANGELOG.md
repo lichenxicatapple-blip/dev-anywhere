@@ -4,6 +4,21 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.74] - 2026-06-05
+
+### 改进
+
+- 文件下载和图片预览改为 Relay HTTP streaming 链路：Web 只申请一次性 URL，文件内容由 Proxy 以二进制帧流式传给 Relay，再由浏览器直接下载或预览，避免大文件经过 WebSocket JSON/base64。
+- 剪贴板图片和文件上传改为正式 HTTP PUT 上传链路：Web 通过 Relay 获取上传 URL，Relay 将 HTTP body 以二进制帧转发给 Proxy 落盘，不再在浏览器端读成 base64 payload。
+- 移除旧的 `clipboard_image_upload`、`file_upload_request`、`image_preview`、`file_download` 控制消息和相关兼容分支，上传、下载、预览统一使用新协议。
+- Web 本地开发代理补齐 `/api` 转发，确保本地 Vite 页面能直接访问 Relay 的文件 URL 和上传 URL。
+
+### 测试
+
+- 新增 Relay 真实 HTTP streaming 集成测试、Proxy 上传落盘单测、共享二进制帧协议测试，以及 Web 上传/下载/预览回归测试。
+- 跑通真实 relay/proxy E2E：JSON/PTY 粘贴图片上传、PTY 文件选择上传、JSON inline 文件路径真实下载均通过。
+- 跑通 PC 文件下载/图片预览 E2E 和 Android 模拟器移动端长按预览/下载相关 E2E。
+
 ## [0.4.73] - 2026-06-05
 
 ### 改进
