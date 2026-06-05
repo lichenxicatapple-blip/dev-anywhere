@@ -34,6 +34,8 @@ import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
 import { handleTerminalConnection } from "./serve/terminal-ipc.js";
 import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
 import { createServeShutdown } from "./serve/shutdown.js";
+import { RemoteFileUploadManager } from "./serve/remote-file-upload.js";
+import { RemoteFileStreamManager } from "./serve/remote-file-stream.js";
 import type { ProviderId } from "./providers/types.js";
 
 function resolveInterruptedApprovals(
@@ -139,7 +141,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const getProviderEnv = (): NodeJS.ProcessEnv => buildProviderEnv(proxyConfig, process.env);
   const getAgentCliSuggestions = (): Partial<Record<ProviderId, string[]>> =>
     proxyConfig.agentCliSuggestions;
-  const getPreviewRoots = (): string[] => proxyConfig.previewRoots;
   const setAgentCliPath = (provider: ProviderId, path: string): void => {
     const field = provider === "claude" ? "claudeBin" : "codexBin";
     const existing = proxyConfig.agentCliSuggestions[provider] ?? [];
@@ -236,6 +237,14 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     onSessionClosed: eventBridge.cleanupSessionResources,
   });
   const terminalWorkerSpawner = new TerminalWorkerSpawner();
+  const remoteFileStreamManager = new RemoteFileStreamManager({
+    relayConnection,
+    sessionManager,
+  });
+  const remoteFileUploadManager = new RemoteFileUploadManager({
+    relayConnection,
+    sessionManager,
+  });
 
   relayConnection.connect();
   serviceLogger.info(
@@ -270,10 +279,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     getProviderEnv,
     getAgentCliSuggestions,
     setAgentCliPath,
-    getPreviewRoots,
+    remoteFileStreamManager,
+    remoteFileUploadManager,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
+  relayConnection.on("binary", (data: Buffer) => {
+    if (!remoteFileUploadManager.handleBinary(data)) {
+      serviceLogger.warn({ bytes: data.length }, "Relay binary message dropped: unknown frame");
+    }
+  });
   relayConnection.on("connected", () => {
     // fire-and-forget 但显式吞掉 rejection，否则 reinitializeOnReconnect 内部任意 IO 异常
     // 或 schema 校验错误会变 unhandledRejection，Node 默认终止整个 serve 进程。

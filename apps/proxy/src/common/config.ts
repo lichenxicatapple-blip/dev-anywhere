@@ -18,7 +18,6 @@ export interface ProxyConfig {
   hookPort?: number;
   claudeBin?: string;
   codexBin?: string;
-  previewRoots: string[];
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
     relayName: "cli" | "profile";
@@ -63,7 +62,6 @@ const ProxyConfigFileSchema = z
     profiles: z.record(z.string(), ProxyProfileSchema),
     relays: z.record(z.string(), RelayTargetSchema),
     agentCli: AgentCliSchema.optional(),
-    previewRoots: z.array(z.string()).optional(),
     logLevel: LogLevelSchema.optional(),
   })
   .strict();
@@ -175,7 +173,6 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
     hookPort: env.hookPort ?? defaultHookPortForProfile(PROFILE_NAME),
     claudeBin,
     codexBin,
-    previewRoots: uniqueAbsolutePaths(fromFile.previewRoots ?? []),
     agentCliSuggestions: {
       claude: uniqueAbsolutePaths([
         env.claudeBin,

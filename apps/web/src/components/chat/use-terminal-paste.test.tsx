@@ -214,7 +214,7 @@ describe("useTerminalPaste", () => {
     expect(sendRemoteInputRaw).not.toHaveBeenCalled();
   });
 
-  // 仅有非 image file (没 image item) 时: 走 file_upload_request, 不会误判成 image 路径。
+  // 仅有非 image file (没 image item) 时: 走普通文件上传, 不会误判成 image 路径。
   it("prefers image branch when both image and non-image files coexist", async () => {
     uploadClipboardImageFromPaste.mockResolvedValueOnce({
       pathMention: "@.dev-anywhere/clipboard/s1/shot.png ",

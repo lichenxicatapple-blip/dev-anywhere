@@ -19,9 +19,10 @@ async function expectPreviewReady(page: Page, path: string): Promise<void> {
   const sent = await sentFakeRelayMessages(page);
   expect(sent).toContainEqual(
     expect.objectContaining({
-      type: "image_preview_request",
+      type: "remote_file_url_request",
       sessionId: expect.any(String),
       path,
+      disposition: "inline",
     }),
   );
 }
@@ -110,7 +111,7 @@ test.describe("image preview", () => {
 
       await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
       await expect(page.locator('[data-slot="image-preview-error"]')).toContainText(
-        "浏览器无法解码这张图片",
+        "浏览器无法读取或解码这张图片",
       );
       await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
     });

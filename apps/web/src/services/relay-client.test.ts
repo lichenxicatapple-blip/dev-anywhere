@@ -214,44 +214,52 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("waits for matching clipboard image upload responses", async () => {
-    const { relay, ws } = createClient();
-    const promise = relay.uploadClipboardImage("s1", {
-      mimeType: "image/png",
-      dataBase64: "AQID",
-      fileName: "shot.png",
+  it("uploads clipboard images through a remote upload URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        sessionId: "s1",
+        success: true,
+        path: ".dev-anywhere/clipboard/s1/shot.png",
+      }),
     });
+    vi.stubGlobal("fetch", fetchMock);
+    const { relay, ws } = createClient();
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    const promise = relay.uploadClipboardImage("s1", file);
     const requestId = sentRequestId(ws);
 
     ws.emit({
-      type: "clipboard_image_upload_response",
+      type: "remote_file_upload_url_response",
       requestId: "other-request",
       sessionId: "s1",
       success: true,
-      path: "/wrong.png",
+      uploadUrl: "/api/remote-uploads/wrong",
     });
     ws.emit({
-      type: "clipboard_image_upload_response",
+      type: "remote_file_upload_url_response",
       requestId,
       sessionId: "other-session",
       success: true,
-      path: "/wrong-session.png",
+      uploadUrl: "/api/remote-uploads/wrong-session",
     });
     ws.emit({
-      type: "clipboard_image_upload_response",
+      type: "remote_file_upload_url_response",
       requestId,
       sessionId: "s1",
       success: true,
-      path: ".dev-anywhere/clipboard/s1/shot.png",
+      uploadUrl: "/api/remote-uploads/token-1",
+      expiresAt: 123,
     });
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
-      type: "clipboard_image_upload",
+      type: "remote_file_upload_url_request",
       requestId,
       sessionId: "s1",
+      kind: "clipboard_image",
       mimeType: "image/png",
-      dataBase64: "AQID",
       fileName: "shot.png",
+      size: 3,
     });
     await expect(promise).resolves.toEqual({
       sessionId: "s1",
@@ -260,120 +268,36 @@ describe("RelayClient request handling", () => {
       error: undefined,
       errorCode: undefined,
     });
+    expect(fetchMock).toHaveBeenCalledWith("/api/remote-uploads/token-1", {
+      method: "PUT",
+      headers: { "Content-Type": "image/png" },
+      body: file,
+    });
   });
 
-  it("keeps large payload requests pending beyond the generic request timeout", async () => {
-    vi.useFakeTimers();
-    try {
-      const { relay, ws } = createClient();
-      const imageUpload = relay.uploadClipboardImage("s1", {
-        mimeType: "image/png",
-        dataBase64: "AQID",
-        fileName: "shot.png",
-      });
-      const fileUpload = relay.uploadFile("s1", {
-        fileName: "large.png",
-        mimeType: "image/png",
-        dataBase64: "AQID",
-      });
-      const imagePreview = relay.requestImagePreview("s1", "/tmp/large.png");
-      let imageSettled = false;
-      let fileSettled = false;
-      let previewSettled = false;
-      void imageUpload
-        .finally(() => {
-          imageSettled = true;
-        })
-        .catch(() => {});
-      void fileUpload
-        .finally(() => {
-          fileSettled = true;
-        })
-        .catch(() => {});
-      void imagePreview
-        .finally(() => {
-          previewSettled = true;
-        })
-        .catch(() => {});
+  it("returns upload URL failures without issuing an HTTP upload", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { relay, ws } = createClient();
+    const file = new File([new Uint8Array([1])], "large.png", { type: "image/png" });
+    const promise = relay.uploadFile("s1", file);
+    const requestId = sentRequestId(ws);
 
-      await vi.advanceTimersByTimeAsync(10_000);
-      await Promise.resolve();
+    ws.emit({
+      type: "remote_file_upload_url_response",
+      requestId,
+      sessionId: "s1",
+      success: false,
+      error: "当前未连接开发机",
+    });
 
-      expect(imageSettled).toBe(false);
-      expect(fileSettled).toBe(false);
-      expect(previewSettled).toBe(false);
-
-      const imageRequestId = sentRequestId(ws, 0);
-      const fileRequestId = sentRequestId(ws, 1);
-      const previewRequestId = sentRequestId(ws, 2);
-      ws.emit({
-        type: "clipboard_image_upload_response",
-        requestId: imageRequestId,
-        sessionId: "s1",
-        success: true,
-        path: "/tmp/shot.png",
-      });
-      ws.emit({
-        type: "file_upload_response",
-        requestId: fileRequestId,
-        sessionId: "s1",
-        success: true,
-        path: "/tmp/large.png",
-      });
-      ws.emit({
-        type: "image_preview_response",
-        requestId: previewRequestId,
-        sessionId: "s1",
-        success: true,
-        path: "/tmp/large.png",
-        mimeType: "image/png",
-        dataBase64: "AQID",
-        size: 3,
-      });
-
-      await expect(imageUpload).resolves.toMatchObject({ success: true, path: "/tmp/shot.png" });
-      await expect(fileUpload).resolves.toMatchObject({ success: true, path: "/tmp/large.png" });
-      await expect(imagePreview).resolves.toMatchObject({
-        success: true,
-        path: "/tmp/large.png",
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("still times out unanswered uploads after the upload-specific window", async () => {
-    vi.useFakeTimers();
-    try {
-      const { relay } = createClient();
-      const promise = relay.uploadFile("s1", {
-        fileName: "large.png",
-        mimeType: "image/png",
-        dataBase64: "AQID",
-      });
-      const assertion = expect(promise).rejects.toThrow("上传文件超时");
-
-      await vi.advanceTimersByTimeAsync(60_100);
-
-      await assertion;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("still times out unanswered image previews after the preview-specific window", async () => {
-    vi.useFakeTimers();
-    try {
-      const { relay } = createClient();
-      const promise = relay.requestImagePreview("s1", "/tmp/large.png");
-      const assertion = expect(promise).rejects.toThrow("读取图片超时");
-
-      await vi.advanceTimersByTimeAsync(100_100);
-
-      await assertion;
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(promise).resolves.toEqual({
+      sessionId: "s1",
+      success: false,
+      error: "当前未连接开发机",
+      errorCode: undefined,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("waits for matching session rename responses", async () => {
@@ -418,49 +342,48 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("waits for matching image preview responses", async () => {
+  it("waits for matching remote file URL responses", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.requestImagePreview("s1", ".dev-anywhere/clipboard/s1/shot.png");
+    const promise = relay.requestRemoteFileUrl("s1", "build/out.tar.gz", "download");
     const requestId = sentRequestId(ws);
 
     ws.emit({
-      type: "image_preview_response",
+      type: "remote_file_url_response",
       requestId: "other-request",
       sessionId: "s1",
       success: true,
-      path: "wrong.png",
+      url: "/api/remote-files/wrong",
     });
     ws.emit({
-      type: "image_preview_response",
+      type: "remote_file_url_response",
       requestId,
       sessionId: "other-session",
       success: true,
-      path: "wrong-session.png",
+      url: "/api/remote-files/wrong-session",
     });
     ws.emit({
-      type: "image_preview_response",
+      type: "remote_file_url_response",
       requestId,
       sessionId: "s1",
+      path: "build/out.tar.gz",
       success: true,
-      path: ".dev-anywhere/clipboard/s1/shot.png",
-      mimeType: "image/png",
-      dataBase64: "AQID",
-      size: 3,
+      url: "/api/remote-files/token-1",
+      expiresAt: 123,
     });
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
-      type: "image_preview_request",
+      type: "remote_file_url_request",
       requestId,
       sessionId: "s1",
-      path: ".dev-anywhere/clipboard/s1/shot.png",
+      path: "build/out.tar.gz",
+      disposition: "download",
     });
     await expect(promise).resolves.toEqual({
       sessionId: "s1",
       success: true,
-      path: ".dev-anywhere/clipboard/s1/shot.png",
-      mimeType: "image/png",
-      dataBase64: "AQID",
-      size: 3,
+      path: "build/out.tar.gz",
+      url: "/api/remote-files/token-1",
+      expiresAt: 123,
       error: undefined,
       errorCode: undefined,
     });

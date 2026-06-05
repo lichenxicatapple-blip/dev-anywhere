@@ -42,12 +42,14 @@ describe("uploadFileAndShowToast", () => {
   }
 
   it("returns the path and shows default success toast on success", async () => {
+    const file = makeFile();
     const path = await uploadFileAndShowToast({
       relay: relayWith({ success: true, path: ".dev-anywhere/uploads/s1/notes.txt" }),
       sessionId: "s1",
-      file: makeFile(),
+      file,
     });
     expect(path).toBe(".dev-anywhere/uploads/s1/notes.txt");
+    expect(uploadFile).toHaveBeenCalledWith("s1", file);
     expect(toastSuccess).toHaveBeenCalledWith("已上传 .dev-anywhere/uploads/s1/notes.txt", {
       id: "loading-id",
     });

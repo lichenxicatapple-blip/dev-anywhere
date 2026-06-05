@@ -30,6 +30,8 @@ import { RelaySessionCreateHandler } from "./relay-session-create-handler.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
 import { VoiceSummaryHandler, type VoiceSummaryRunner } from "./voice-summary-handler.js";
+import type { RemoteFileUploadManager } from "./remote-file-upload.js";
+import type { RemoteFileStreamManager } from "./remote-file-stream.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -55,7 +57,8 @@ interface RelayRouterDeps {
   getProviderEnv: () => NodeJS.ProcessEnv;
   getAgentCliSuggestions: () => Partial<Record<ProviderHookContext["provider"], string[]>>;
   setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
-  getPreviewRoots?: () => string[];
+  remoteFileStreamManager: RemoteFileStreamManager;
+  remoteFileUploadManager: RemoteFileUploadManager;
   voiceSummaryRunner?: VoiceSummaryRunner;
 }
 
@@ -81,7 +84,8 @@ export class RelayRouter {
       terminalSockets: deps.terminalSockets,
       hostedPtyRegistry: deps.hostedPtyRegistry,
       jsonObserver: deps.jsonObserver,
-      previewRoots: deps.getPreviewRoots?.(),
+      remoteFileStreamManager: deps.remoteFileStreamManager,
+      remoteFileUploadManager: deps.remoteFileUploadManager,
     });
     this.resourceHandlers = new RelayResourceHandlers({
       relaySend: deps.relaySend,
@@ -170,17 +174,20 @@ export class RelayRouter {
       case "latency_relay_proxy_ping":
         this.onRelayProxyLatencyPing(msg);
         return;
-      case "clipboard_image_upload":
-        this.inputHandlers.onClipboardImageUpload(msg);
+      case "remote_file_stream_request":
+        this.inputHandlers.onRemoteFileStreamRequest(msg);
         return;
-      case "image_preview_request":
-        this.inputHandlers.onImagePreviewRequest(msg);
+      case "remote_file_stream_cancel":
+        this.inputHandlers.onRemoteFileStreamCancel(msg);
         return;
-      case "file_download_request":
-        this.inputHandlers.onFileDownloadRequest(msg);
+      case "remote_file_upload_stream_request":
+        this.inputHandlers.onRemoteFileUploadStreamRequest(msg);
         return;
-      case "file_upload_request":
-        void this.inputHandlers.onFileUploadRequest(msg);
+      case "remote_file_upload_stream_complete":
+        this.inputHandlers.onRemoteFileUploadStreamComplete(msg);
+        return;
+      case "remote_file_upload_stream_cancel":
+        this.inputHandlers.onRemoteFileUploadStreamCancel(msg);
         return;
       case "tool_approve":
         this.permissionHandlers.onToolApprove(msg);

@@ -9,6 +9,7 @@ import type { RelayRegistry } from "../registry.js";
 import { parseMessage, routeProxyMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
 import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
+import type { RemoteFileBridge } from "../remote-file-bridge.js";
 
 // binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
 const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
@@ -86,6 +87,7 @@ export function handleProxyConnection(
   registry: RelayRegistry,
   logger: Logger,
   chaos?: RelayChaos,
+  remoteFileBridge?: RemoteFileBridge,
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
@@ -99,6 +101,9 @@ export function handleProxyConnection(
     if (isBinary) {
       if (data.length < 2 || data.length > MAX_BINARY_FRAME_SIZE) {
         logger.warn({ size: data.length }, "Binary frame rejected: invalid size");
+        return;
+      }
+      if (proxyWs.proxyId && remoteFileBridge?.handleProxyBinary(proxyWs.proxyId, data)) {
         return;
       }
       const sessionIdLen = data[0];
@@ -203,6 +208,18 @@ export function handleProxyConnection(
 
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
+      if (proxyWs.proxyId && result.message.type === "remote_file_stream_response") {
+        remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
+        return;
+      }
+      if (proxyWs.proxyId && result.message.type === "remote_file_stream_complete") {
+        remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
+        return;
+      }
+      if (proxyWs.proxyId && result.message.type === "remote_file_upload_stream_response") {
+        remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
+        return;
+      }
       if (isProxyToClientRelayControlType(result.message.type)) {
         if (!proxyWs.proxyId) {
           rejectNotRegistered(proxyWs);

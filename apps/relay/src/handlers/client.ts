@@ -5,6 +5,7 @@ import {
   RelayCloseCode,
   RelayErrorCode,
   serializeControl,
+  type ControlErrorCodeType,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
@@ -14,6 +15,7 @@ import { handleVoiceConfigControl } from "../voice/client-controls.js";
 import type { VoiceConfigStore } from "../voice/config-store.js";
 import type { VoiceProviderRegistry } from "../voice/provider.js";
 import { startRelayProxyLatencyProbe } from "../latency-probes.js";
+import type { RemoteFileBridge } from "../remote-file-bridge.js";
 
 // JSON 控制消息最大允许长度（1MB）。挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
 const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
@@ -252,6 +254,44 @@ function sendRelayProxyProbeFailure(
   ws.send(response);
 }
 
+function sendRemoteFileUrlFailure(
+  ws: ClientSocket,
+  requestId: string,
+  sessionId: string,
+  error: string,
+  errorCode: ControlErrorCodeType = ControlErrorCode.UNKNOWN,
+): void {
+  ws.send(
+    serializeControl({
+      type: "remote_file_url_response",
+      requestId,
+      sessionId,
+      success: false,
+      error,
+      errorCode,
+    }),
+  );
+}
+
+function sendRemoteFileUploadUrlFailure(
+  ws: ClientSocket,
+  requestId: string,
+  sessionId: string,
+  error: string,
+  errorCode: ControlErrorCodeType = ControlErrorCode.UNKNOWN,
+): void {
+  ws.send(
+    serializeControl({
+      type: "remote_file_upload_url_response",
+      requestId,
+      sessionId,
+      success: false,
+      error,
+      errorCode,
+    }),
+  );
+}
+
 // 处理远程客户端 WebSocket 连接生命周期
 export function handleClientConnection(
   ws: WebSocket,
@@ -260,6 +300,7 @@ export function handleClientConnection(
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
+  remoteFileBridge?: RemoteFileBridge,
   connectionInfo: ClientConnectionInfo = {},
 ): void {
   const clientWs = ws as ClientSocket;
@@ -306,6 +347,117 @@ export function handleClientConnection(
 
       if (msg.type === "relay_client_kick") {
         handleRelayClientKick(clientWs, registry, logger, msg.requestId, msg.clientId);
+        return;
+      }
+
+      if (msg.type === "remote_file_url_request") {
+        if (!remoteFileBridge) {
+          sendRemoteFileUrlFailure(clientWs, msg.requestId, msg.sessionId, "文件流服务不可用");
+          return;
+        }
+        if (!clientWs.clientId) {
+          sendRemoteFileUrlFailure(
+            clientWs,
+            msg.requestId,
+            msg.sessionId,
+            "客户端未注册",
+            ControlErrorCode.UNKNOWN,
+          );
+          return;
+        }
+        const targetProxyId = clientWs.boundProxyId;
+        if (!targetProxyId || !registry.isProxyOnline(targetProxyId)) {
+          sendRemoteFileUrlFailure(
+            clientWs,
+            msg.requestId,
+            msg.sessionId,
+            "当前未连接开发机",
+            ControlErrorCode.PROXY_OFFLINE,
+          );
+          return;
+        }
+        const ownerProxyId = registry.getProxyForSession(msg.sessionId);
+        if (ownerProxyId && ownerProxyId !== targetProxyId) {
+          sendRemoteFileUrlFailure(
+            clientWs,
+            msg.requestId,
+            msg.sessionId,
+            "会话不属于当前开发机",
+            ControlErrorCode.SESSION_NOT_FOUND,
+          );
+          return;
+        }
+        const { url, expiresAt } = remoteFileBridge.createUrl({
+          clientId: clientWs.clientId,
+          proxyId: targetProxyId,
+          sessionId: msg.sessionId,
+          path: msg.path,
+          disposition: msg.disposition,
+        });
+        clientWs.send(
+          serializeControl({
+            type: "remote_file_url_response",
+            requestId: msg.requestId,
+            sessionId: msg.sessionId,
+            path: msg.path,
+            success: true,
+            url,
+            expiresAt,
+          }),
+        );
+        return;
+      }
+
+      if (msg.type === "remote_file_upload_url_request") {
+        if (!remoteFileBridge) {
+          sendRemoteFileUploadUrlFailure(clientWs, msg.requestId, msg.sessionId, "上传服务不可用");
+          return;
+        }
+        if (!clientWs.clientId) {
+          sendRemoteFileUploadUrlFailure(clientWs, msg.requestId, msg.sessionId, "客户端未注册");
+          return;
+        }
+        const targetProxyId = clientWs.boundProxyId;
+        if (!targetProxyId || !registry.isProxyOnline(targetProxyId)) {
+          sendRemoteFileUploadUrlFailure(
+            clientWs,
+            msg.requestId,
+            msg.sessionId,
+            "当前未连接开发机",
+            ControlErrorCode.PROXY_OFFLINE,
+          );
+          return;
+        }
+        const ownerProxyId = registry.getProxyForSession(msg.sessionId);
+        if (ownerProxyId && ownerProxyId !== targetProxyId) {
+          sendRemoteFileUploadUrlFailure(
+            clientWs,
+            msg.requestId,
+            msg.sessionId,
+            "会话不属于当前开发机",
+            ControlErrorCode.SESSION_NOT_FOUND,
+          );
+          return;
+        }
+        const { uploadUrl, expiresAt } = remoteFileBridge.createUploadUrl({
+          clientId: clientWs.clientId,
+          proxyId: targetProxyId,
+          sessionId: msg.sessionId,
+          kind: msg.kind,
+          fileName: msg.fileName,
+          mimeType: msg.mimeType,
+          size: msg.size,
+        });
+        clientWs.send(
+          serializeControl({
+            type: "remote_file_upload_url_response",
+            requestId: msg.requestId,
+            sessionId: msg.sessionId,
+            success: true,
+            uploadUrl,
+            expiresAt,
+          }),
+        );
         return;
       }
 

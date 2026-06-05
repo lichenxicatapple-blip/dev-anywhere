@@ -101,9 +101,8 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     await installFakeRelay(page);
   });
 
-  // 仅断言协议消息不够: 中间还有 base64 → Blob → blob URL → <a download> → click 这段
-  // 完全在浏览器里, 必须等 Playwright 的 download 事件并把文件读出来对比字节, 才能证明
-  // 用户实际拿到了正确文件而不是 0 字节 / 错文件名 / blob URL revoked 抢跑。
+  // 仅断言协议消息不够: 必须等 Playwright 的 download 事件并把文件读出来对比字节,
+  // 才能证明浏览器实际进入了下载链路, 而不是只拿到了一个未使用的 URL。
   test("cmd+click triggers a real browser download with correct filename and bytes", async ({
     page,
   }) => {
@@ -116,7 +115,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     await activate(page, "file-download", path, "meta");
     const download = await downloadPromise;
 
-    // fake relay file_download_response 固定回 dataBase64 "QUJD" -> bytes "ABC", filename 取 path 末段
+    // fake relay remote_file_url_response 固定回 data URL "ABC", filename 取 path 末段。
     expect(download.suggestedFilename()).toBe("out.tar.gz");
     const stream = await download.createReadStream();
     const chunks: Buffer[] = [];
@@ -136,7 +135,8 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .poll(async () => {
         const sent = await sentFakeRelayMessages(page);
         return sent.some(
-          (m: FakeRelayMessage) => m.type === "file_download_request" && m.path === path,
+          (m: FakeRelayMessage) =>
+            m.type === "remote_file_url_request" && m.path === path && m.disposition === "download",
         );
       })
       .toBe(true);
@@ -159,11 +159,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
 
     await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeHidden();
     const sent = await sentFakeRelayMessages(page);
-    expect(sent.some((m: FakeRelayMessage) => m.type === "file_download_request")).toBe(false);
-    expect(sent.some((m: FakeRelayMessage) => m.type === "image_preview_request")).toBe(false);
+    expect(sent.some((m: FakeRelayMessage) => m.type === "remote_file_url_request")).toBe(false);
   });
 
-  test("cmd+click on an image path opens preview dialog and emits image_preview_request", async ({
+  test("cmd+click on an image path opens preview dialog and emits remote_file_url_request", async ({
     page,
   }) => {
     await gotoPty(page);
@@ -181,7 +180,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         const sent = await sentFakeRelayMessages(page);
         return sent.some(
           (m: FakeRelayMessage) =>
-            m.type === "image_preview_request" && m.sessionId === "claude-pty" && m.path === path,
+            m.type === "remote_file_url_request" &&
+            m.sessionId === "claude-pty" &&
+            m.path === path &&
+            m.disposition === "inline",
         );
       })
       .toBe(true);
@@ -206,9 +208,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         const sent = await sentFakeRelayMessages(page);
         return sent.some(
           (m: FakeRelayMessage) =>
-            m.type === "image_preview_request" &&
+            m.type === "remote_file_url_request" &&
             m.sessionId === "claude-pty" &&
-            m.path === "b.jpg",
+            m.path === "b.jpg" &&
+            m.disposition === "inline",
         );
       })
       .toBe(true);
@@ -231,7 +234,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         .poll(async () => {
           const sent = await sentFakeRelayMessages(page);
           return sent.some(
-            (m: FakeRelayMessage) => m.type === "file_download_request" && m.path === path,
+            (m: FakeRelayMessage) =>
+              m.type === "remote_file_url_request" &&
+              m.path === path &&
+              m.disposition === "download",
           );
         })
         .toBe(true);

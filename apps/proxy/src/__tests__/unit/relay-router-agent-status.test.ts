@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
@@ -6,6 +6,14 @@ import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter agent_status_request", () => {
+  function createRemoteFileStreamManagerFake() {
+    return { start: vi.fn(), cancel: vi.fn() } as never;
+  }
+
+  function createRemoteFileUploadManagerFake() {
+    return { start: vi.fn(), complete: vi.fn(), cancel: vi.fn(), handleBinary: vi.fn() } as never;
+  }
+
   function createRouter(options: {
     registry: AgentStatusRegistry;
     relaySend: (data: string) => void;
@@ -45,6 +53,8 @@ describe("RelayRouter agent_status_request", () => {
       getProviderEnv: () => ({}),
       getAgentCliSuggestions: () => ({}),
       setAgentCliPath: () => {},
+      remoteFileStreamManager: createRemoteFileStreamManagerFake(),
+      remoteFileUploadManager: createRemoteFileUploadManagerFake(),
     });
   }
 

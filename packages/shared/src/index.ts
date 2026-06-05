@@ -137,8 +137,15 @@ export { RelayCloseCode } from "./constants/relay-close-codes.js";
 // 让整个 web 启动崩。Node 端从 "@dev-anywhere/shared/logger" 子路径导入。
 
 // binary PTY frame codec
-export { encodeBinaryFrame, decodeBinaryFrame, binaryFrameHeaderLength } from "./binary-frame.js";
-export type { DecodedBinaryFrame } from "./binary-frame.js";
+export {
+  encodeBinaryFrame,
+  decodeBinaryFrame,
+  binaryFrameHeaderLength,
+  encodeFileStreamFrame,
+  decodeFileStreamFrame,
+  fileStreamFrameHeaderLength,
+} from "./binary-frame.js";
+export type { DecodedBinaryFrame, DecodedFileStreamFrame } from "./binary-frame.js";
 
 // FSM helper (createFSM / defineFSM)
 export { createFSM, defineFSM } from "./state-machine.js";

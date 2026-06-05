@@ -35,11 +35,12 @@ test.describe("clipboard image paste", () => {
     const sent = await sentFakeRelayMessages(page);
     expect(sent).toContainEqual(
       expect.objectContaining({
-        type: "clipboard_image_upload",
+        type: "remote_file_upload_url_request",
         sessionId: "test-sess",
+        kind: "clipboard_image",
         mimeType: "image/png",
-        dataBase64: "AQID",
         fileName: "shot.png",
+        size: 3,
       }),
     );
     expect(sent.some((msg) => msg.type === "user_input")).toBe(false);
@@ -68,11 +69,12 @@ test.describe("clipboard image paste", () => {
     const sent = await sentFakeRelayMessages(page);
     expect(sent).toContainEqual(
       expect.objectContaining({
-        type: "clipboard_image_upload",
+        type: "remote_file_upload_url_request",
         sessionId: "claude-pty",
+        kind: "clipboard_image",
         mimeType: "image/png",
-        dataBase64: "AQID",
         fileName: "shot.png",
+        size: 3,
       }),
     );
   });

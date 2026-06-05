@@ -5,6 +5,14 @@ import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter hook permission decisions", () => {
+  function createRemoteFileStreamManagerFake() {
+    return { start: vi.fn(), cancel: vi.fn() } as never;
+  }
+
+  function createRemoteFileUploadManagerFake() {
+    return { start: vi.fn(), complete: vi.fn(), cancel: vi.fn(), handleBinary: vi.fn() } as never;
+  }
+
   function createRouter(options: {
     permissionBroker: PermissionBroker;
     workerSend: ReturnType<typeof vi.fn>;
@@ -35,6 +43,8 @@ describe("RelayRouter hook permission decisions", () => {
       getProviderEnv: () => ({}),
       getAgentCliSuggestions: () => ({}),
       setAgentCliPath: () => {},
+      remoteFileStreamManager: createRemoteFileStreamManagerFake(),
+      remoteFileUploadManager: createRemoteFileUploadManagerFake(),
     });
   }
 

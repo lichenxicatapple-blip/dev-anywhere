@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Download, type Locator, type Page } from "@playwright/test";
 import { openCreateAgentSessionDialog } from "../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE === "1";
@@ -321,8 +321,32 @@ async function previewJsonImagePath(page: Page, imagePath: string): Promise<void
     "true",
     { timeout: 20_000 },
   );
-  await expect(page.locator('[data-slot="image-preview-meta"]')).toContainText("image/png");
+  await expect(page.locator('[data-slot="image-preview-meta"]')).toContainText("图片已加载");
   await page.keyboard.press("Escape");
+}
+
+async function readDownload(download: Download): Promise<Buffer> {
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error("download stream unavailable");
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function downloadJsonFilePath(page: Page, filePath: string): Promise<Download> {
+  const input = page.getByLabel("输入聊天消息");
+  await input.fill(`download ${filePath}`);
+  await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+  await expect(page.locator('[data-slot="file-download-links"]')).toHaveCount(0);
+  const downloadLink = page
+    .locator('[data-slot="inline-file-download-link"]', { hasText: filePath })
+    .first();
+  await expect(downloadLink).toBeVisible({ timeout: 20_000 });
+  const downloadPromise = page.waitForEvent("download");
+  await downloadLink.click();
+  return downloadPromise;
 }
 
 test.describe("real clipboard image chain", () => {
@@ -413,7 +437,7 @@ test.describe("real clipboard image chain", () => {
       await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
 
       // setInputFiles 直接打到 hidden input,绕过 Radix Portal 在 e2e 下的 pointer 不稳定。
-      // 真实链路: input.change → fileToUploadPayload → relay.uploadFile → proxy 落盘 → "@<path> " sendRaw。
+      // 真实链路: input.change → relay.uploadFile → Relay HTTP PUT → proxy 落盘 → "@<path> " sendRaw。
       const fileBytes = Buffer.from("hello dev-anywhere\n", "utf-8");
       const fileName = `notes-${Date.now()}.txt`;
       const before = snapshotUploadRoot();
@@ -438,6 +462,34 @@ test.describe("real clipboard image chain", () => {
         cleanupSessionData(ptySessionId);
       }
       rmSync(ptyCwd, { recursive: true, force: true });
+    }
+  });
+
+  test("downloads JSON inline file paths through real relay/proxy HTTP streaming", async ({
+    page,
+  }) => {
+    const jsonCwd = join(smokeRoot, `json-download-${Date.now()}`);
+    mkdirSync(jsonCwd, { recursive: true });
+    writeFileSync(join(jsonCwd, ".gitignore"), "node_modules\n");
+    const fileBytes = Buffer.from("download through relay streaming\n", "utf-8");
+    const filePath = join(jsonCwd, `artifact-${Date.now()}.txt`);
+    writeFileSync(filePath, fileBytes);
+    let jsonSessionId: string | undefined;
+    try {
+      jsonSessionId = await createSession(page, { mode: "json", cwd: jsonCwd });
+      await expect(page.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
+        timeout: 20_000,
+      });
+
+      const download = await downloadJsonFilePath(page, filePath);
+      expect(download.suggestedFilename()).toBe(basename(filePath));
+      expect(await readDownload(download)).toEqual(fileBytes);
+    } finally {
+      if (jsonSessionId) {
+        await terminateSession(page, jsonSessionId).catch(() => undefined);
+        cleanupSessionData(jsonSessionId);
+      }
+      rmSync(jsonCwd, { recursive: true, force: true });
     }
   });
 });

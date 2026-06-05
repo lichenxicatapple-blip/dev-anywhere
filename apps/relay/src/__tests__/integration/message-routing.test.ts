@@ -45,8 +45,21 @@ describe("Message routing integration", () => {
     return ws;
   }
 
+  async function registerClient(client: WebSocket, clientId: string): Promise<void> {
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId,
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessage(client); // consume client_register_response
+  }
+
   // 注册 proxy + client 并绑定
-  // 匹配 server.test.ts 的模式：proxy_register + proxy_select + settle
+  // 匹配正式协议：proxy_register + client_register + proxy_select。
   async function setupBoundPair(): Promise<{ proxy: WebSocket; client: WebSocket }> {
     const proxy = connectProxy();
     await waitForOpen(proxy);
@@ -55,6 +68,7 @@ describe("Message routing integration", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "client-routing");
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -172,6 +186,7 @@ describe("Message routing integration", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "client-isolation");
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response
 

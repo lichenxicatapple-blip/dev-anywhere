@@ -146,8 +146,12 @@ export class RelayConnection extends EventEmitter {
         );
       });
 
-      this.ws.on("message", (data) => {
+      this.ws.on("message", (data, isBinary) => {
         const buf = data as Buffer;
+        if (isBinary) {
+          this.emit("binary", buf);
+          return;
+        }
         if (buf.length > MAX_JSON_MESSAGE_SIZE) {
           serviceLogger.warn(
             { size: buf.length },

@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { encodeBinaryFrame, decodeBinaryFrame, binaryFrameHeaderLength } from "../binary-frame.js";
+import {
+  encodeBinaryFrame,
+  decodeBinaryFrame,
+  binaryFrameHeaderLength,
+  encodeFileStreamFrame,
+  decodeFileStreamFrame,
+  fileStreamFrameHeaderLength,
+} from "../binary-frame.js";
 
 describe("binary-frame", () => {
   it("encode → decode round-trips simple ASCII payload", () => {
@@ -97,5 +104,27 @@ describe("binary-frame", () => {
     expect(decoded?.sessionId).toBe("sess-1");
     expect(decoded?.outputSeq).toBe(99);
     expect(new TextDecoder().decode(decoded!.data)).toBe("xyz");
+  });
+
+  it("file stream frames use marker 0 and do not decode as PTY frames", () => {
+    const data = new Uint8Array([0, 1, 2, 255]);
+    const frame = encodeFileStreamFrame("stream-1", 3, data);
+    const decoded = decodeFileStreamFrame(frame);
+    expect(decoded?.streamId).toBe("stream-1");
+    expect(decoded?.chunkSeq).toBe(3);
+    expect(decoded?.data).toEqual(data);
+    expect(decodeBinaryFrame(frame)).toBeNull();
+  });
+
+  it("file stream header length matches encoded frames", () => {
+    const streamId = "文件流";
+    const data = new Uint8Array(10);
+    const frame = encodeFileStreamFrame(streamId, 0, data);
+    expect(fileStreamFrameHeaderLength(streamId)).toBe(frame.length - data.length);
+  });
+
+  it("file stream decode returns null for non-file frames", () => {
+    const ptyFrame = encodeBinaryFrame("sess-1", 1, new Uint8Array([1]));
+    expect(decodeFileStreamFrame(ptyFrame)).toBeNull();
   });
 });

@@ -29,7 +29,7 @@ export function FileDownloadProvider({
       }
       const toastId = toast.loading(`下载 ${path} ...`);
       void triggerFileDownload({ relay, sessionId, path }).then((result) => {
-        if (result.ok) toast.success(`已下载 ${path}`, { id: toastId });
+        if (result.ok) toast.success(`已开始下载 ${path}`, { id: toastId });
         else toast.error(result.error, { id: toastId });
       });
     },

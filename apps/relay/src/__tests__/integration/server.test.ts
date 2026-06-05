@@ -1,8 +1,13 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
-import { WebSocket } from "ws";
+import { WebSocket, type RawData } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
-import { waitForOpen, waitForMessage, getPort } from "../helpers.js";
+import {
+  decodeFileStreamFrame,
+  encodeFileStreamFrame,
+  serializeControl,
+} from "@dev-anywhere/shared";
+import { waitForOpen, waitForMessage, waitForMessageType, getPort } from "../helpers.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -106,6 +111,16 @@ describe("Relay Server Integration", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "client-routing",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     // 消费 proxy_select_response ACK
     const ack = JSON.parse(await waitForMessage(client));
@@ -143,6 +158,222 @@ describe("Relay Server Integration", () => {
     const proxyReceived = JSON.parse(await proxyMsgPromise);
     expect(proxyReceived.type).toBe("user_input");
     expect(proxyReceived.payload.text).toBe("hello from client");
+  });
+
+  it("streams remote files from proxy binary frames to HTTP responses", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await waitForMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "session_sync",
+        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+      }),
+    );
+    await waitForCondition(
+      () => relay.registry.getProxyForSession("s1") === "p1",
+      "session not indexed",
+    );
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "client-remote-file",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessageType(client, "proxy_select_response");
+
+    const urlPromise = waitForMessageType(client, "remote_file_url_response");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_url_request",
+        requestId: "remote-url-1",
+        sessionId: "s1",
+        path: "build/out.txt",
+        disposition: "download",
+      }),
+    );
+    const urlResponse = JSON.parse(await urlPromise) as { url: string; success: boolean };
+    expect(urlResponse).toMatchObject({
+      success: true,
+      url: expect.stringMatching(/^\/api\/remote-files\//),
+    });
+
+    const streamRequestPromise = waitForMessageType(proxy, "remote_file_stream_request");
+    const fetchPromise = fetch(`http://127.0.0.1:${port}${urlResponse.url}`);
+    const streamRequest = JSON.parse(await streamRequestPromise) as {
+      streamId: string;
+      sessionId: string;
+      path: string;
+      disposition: string;
+    };
+    expect(streamRequest).toMatchObject({
+      sessionId: "s1",
+      path: "build/out.txt",
+      disposition: "download",
+    });
+
+    proxy.send(
+      serializeControl({
+        type: "remote_file_stream_response",
+        streamId: streamRequest.streamId,
+        sessionId: "s1",
+        success: true,
+        path: "build/out.txt",
+        mimeType: "text/plain",
+        size: 11,
+        fileName: "out.txt",
+      }),
+    );
+    proxy.send(
+      encodeFileStreamFrame(streamRequest.streamId, 0, new TextEncoder().encode("hello ")),
+    );
+    proxy.send(encodeFileStreamFrame(streamRequest.streamId, 1, new TextEncoder().encode("world")));
+    proxy.send(
+      serializeControl({
+        type: "remote_file_stream_complete",
+        streamId: streamRequest.streamId,
+        success: true,
+      }),
+    );
+
+    const res = await fetchPromise;
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(await res.text()).toBe("hello world");
+  });
+
+  it("streams HTTP uploads to proxy binary frames", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await waitForMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "session_sync",
+        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+      }),
+    );
+    await waitForCondition(
+      () => relay.registry.getProxyForSession("s1") === "p1",
+      "session not indexed",
+    );
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "client-upload",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessageType(client, "proxy_select_response");
+
+    const urlPromise = waitForMessageType(client, "remote_file_upload_url_response");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_upload_url_request",
+        requestId: "upload-url-1",
+        sessionId: "s1",
+        kind: "file",
+        fileName: "notes.txt",
+        mimeType: "text/plain",
+        size: 12,
+      }),
+    );
+    const urlResponse = JSON.parse(await urlPromise) as { uploadUrl: string; success: boolean };
+    expect(urlResponse).toMatchObject({
+      success: true,
+      uploadUrl: expect.stringMatching(/^\/api\/remote-uploads\//),
+    });
+
+    const receivedChunks: Buffer[] = [];
+    let uploadId = "";
+    const uploadCompletePromise = new Promise<void>((resolve, reject) => {
+      const onMessage = (data: RawData, isBinary: boolean) => {
+        try {
+          if (isBinary) {
+            const raw = Buffer.isBuffer(data)
+              ? data
+              : Array.isArray(data)
+                ? Buffer.concat(data)
+                : Buffer.from(data);
+            const frame = decodeFileStreamFrame(raw);
+            if (frame) {
+              uploadId = frame.streamId;
+              receivedChunks.push(Buffer.from(frame.data));
+            }
+            return;
+          }
+
+          const msg = JSON.parse(data.toString()) as { type?: string; uploadId?: string };
+          if (msg.type !== "remote_file_upload_stream_complete") return;
+          uploadId = msg.uploadId ?? uploadId;
+          proxy.off("message", onMessage);
+          proxy.send(
+            serializeControl({
+              type: "remote_file_upload_stream_response",
+              uploadId,
+              sessionId: "s1",
+              success: true,
+              path: "/tmp/dev-anywhere/up-test.txt",
+            }),
+          );
+          resolve();
+        } catch (err) {
+          proxy.off("message", onMessage);
+          reject(err);
+        }
+      };
+      proxy.on("message", onMessage);
+    });
+
+    const streamRequestPromise = waitForMessageType(proxy, "remote_file_upload_stream_request");
+    const fetchPromise = fetch(`http://127.0.0.1:${port}${urlResponse.uploadUrl}`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain" },
+      body: "hello upload",
+    });
+    const streamRequest = JSON.parse(await streamRequestPromise) as {
+      uploadId: string;
+      sessionId: string;
+      kind: string;
+      fileName: string;
+      mimeType: string;
+      size: number;
+    };
+    uploadId = streamRequest.uploadId;
+    expect(streamRequest).toMatchObject({
+      sessionId: "s1",
+      kind: "file",
+      fileName: "notes.txt",
+      mimeType: "text/plain",
+      size: 12,
+    });
+
+    await uploadCompletePromise;
+    expect(Buffer.concat(receivedChunks).toString("utf8")).toBe("hello upload");
+    const res = await fetchPromise;
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      sessionId: "s1",
+      success: true,
+      path: "/tmp/dev-anywhere/up-test.txt",
+    });
   });
 
   it("GET /health returns 200 with status ok", async () => {

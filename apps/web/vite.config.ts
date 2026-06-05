@@ -121,6 +121,10 @@ export default defineConfig({
         target: relayTarget.http,
         changeOrigin: true,
       },
+      "/api": {
+        target: relayTarget.http,
+        changeOrigin: true,
+      },
       "/auth": {
         target: relayTarget.http,
         changeOrigin: true,

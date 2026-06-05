@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { describeControlError } from "@/lib/control-error-message";
+import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
 
@@ -28,8 +29,7 @@ type ImagePreviewStatus = "idle" | "loading" | "ready" | "error";
 type ImagePreviewState = {
   status: ImagePreviewStatus;
   path: string;
-  mimeType?: string;
-  dataBase64?: string;
+  url?: string;
   size?: number;
   error?: string;
 };
@@ -72,10 +72,10 @@ export function ImagePreviewProvider({
       }
 
       void relay
-        .requestImagePreview(sessionId, path)
+        .requestRemoteFileUrl(sessionId, path, "inline")
         .then((result) => {
           if (requestSeqRef.current !== requestSeq) return;
-          if (!result.success || !result.mimeType || !result.dataBase64) {
+          if (!result.success || !result.url) {
             setState({
               status: "error",
               path,
@@ -90,9 +90,7 @@ export function ImagePreviewProvider({
           setState({
             status: "ready",
             path: result.path || path,
-            mimeType: result.mimeType,
-            dataBase64: result.dataBase64,
-            size: result.size,
+            url: result.url,
           });
         })
         .catch((err: unknown) => {
@@ -118,7 +116,7 @@ export function ImagePreviewProvider({
   return (
     <ImagePreviewContext.Provider value={value}>
       {children}
-      <ImagePreviewDialog open={open} onOpenChange={setOpen} state={state} />
+      <ImagePreviewDialog open={open} onOpenChange={setOpen} sessionId={sessionId} state={state} />
     </ImagePreviewContext.Provider>
   );
 }
@@ -126,18 +124,17 @@ export function ImagePreviewProvider({
 function ImagePreviewDialog({
   open,
   onOpenChange,
+  sessionId,
   state,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  sessionId: string;
   state: ImagePreviewState;
 }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
-  const src =
-    state.status === "ready" && state.mimeType && state.dataBase64
-      ? `data:${state.mimeType};base64,${state.dataBase64}`
-      : "";
+  const src = state.status === "ready" && state.url ? state.url : "";
   const imageLoaded = src !== "" && loadedSrc === src;
   const decodeErrorMessage = decodeError?.src === src ? decodeError.message : "";
   const showDecodeError = state.status === "ready" && decodeErrorMessage !== "";
@@ -157,16 +154,13 @@ function ImagePreviewDialog({
     }
   }
 
-  function downloadImage(): void {
-    if (!src) return;
-    const fileName = state.path.split(/[\\/]/).pop() || "image";
-    const a = document.createElement("a");
-    a.href = src;
-    a.download = fileName;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  async function downloadImage(): Promise<void> {
+    const relay = relayClientRef;
+    if (!relay || !state.path) return;
+    const toastId = toast.loading(`下载 ${state.path} ...`);
+    const result = await triggerFileDownload({ relay, sessionId, path: state.path });
+    if (result.ok) toast.success(`已开始下载 ${state.path}`, { id: toastId });
+    else toast.error(result.error, { id: toastId });
   }
 
   return (
@@ -222,7 +216,7 @@ function ImagePreviewDialog({
                   onError={() => {
                     setDecodeError({
                       src,
-                      message: "浏览器无法解码这张图片，请确认文件没有损坏",
+                      message: "浏览器无法读取或解码这张图片，请确认路径和文件内容",
                     });
                   }}
                 />
@@ -237,16 +231,18 @@ function ImagePreviewDialog({
             data-slot="image-preview-meta"
           >
             {state.status === "ready" && state.size !== undefined
-              ? `${state.mimeType} · ${formatBytes(state.size)}`
-              : state.status === "loading"
-                ? "正在从开发机读取图片..."
-                : " "}
+              ? formatBytes(state.size)
+              : state.status === "ready"
+                ? "图片已加载"
+                : state.status === "loading"
+                  ? "正在从开发机读取图片..."
+                  : " "}
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={downloadImage}
+              onClick={() => void downloadImage()}
               disabled={!src || showDecodeError}
               data-slot="image-preview-download"
             >

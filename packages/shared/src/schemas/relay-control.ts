@@ -101,7 +101,8 @@ const RequestErrorShape = {
   error: z.string().optional(),
   errorCode: ControlErrorCodeSchema.optional(),
 };
-const ClipboardImageMimeTypeSchema = z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const RemoteFileDispositionSchema = z.enum(["inline", "download"]);
+const RemoteFileUploadKindSchema = z.enum(["clipboard_image", "file"]);
 
 type ControlDefinition<T extends string, S extends z.ZodRawShape> = {
   type: T;
@@ -163,6 +164,82 @@ const relayControlDefinitions = [
   }),
   control("relay_client_kicked", {
     reason: z.string().optional(),
+  }),
+  control("remote_file_url_request", {
+    ...RequiredRequestIdShape,
+    sessionId: IdSchema,
+    path: z.string().min(1),
+    disposition: RemoteFileDispositionSchema,
+  }),
+  control("remote_file_url_response", {
+    ...RequiredRequestIdShape,
+    ...RequestErrorShape,
+    sessionId: IdSchema,
+    path: z.string().optional(),
+    success: z.boolean(),
+    url: z.string().optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
+  }),
+  control("remote_file_stream_request", {
+    streamId: IdSchema,
+    sessionId: IdSchema,
+    path: z.string().min(1),
+    disposition: RemoteFileDispositionSchema,
+  }),
+  control("remote_file_stream_response", {
+    ...RequestErrorShape,
+    streamId: IdSchema,
+    sessionId: IdSchema,
+    success: z.boolean(),
+    path: z.string().optional(),
+    mimeType: z.string().optional(),
+    size: z.number().int().nonnegative().optional(),
+    fileName: z.string().optional(),
+  }),
+  control("remote_file_stream_complete", {
+    ...RequestErrorShape,
+    streamId: IdSchema,
+    success: z.boolean(),
+  }),
+  control("remote_file_stream_cancel", {
+    streamId: IdSchema,
+  }),
+  control("remote_file_upload_url_request", {
+    ...RequiredRequestIdShape,
+    sessionId: IdSchema,
+    kind: RemoteFileUploadKindSchema,
+    fileName: z.string().optional(),
+    mimeType: z.string().min(1),
+    size: z.number().int().nonnegative().optional(),
+  }),
+  control("remote_file_upload_url_response", {
+    ...RequiredRequestIdShape,
+    ...RequestErrorShape,
+    sessionId: IdSchema,
+    success: z.boolean(),
+    uploadUrl: z.string().optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
+  }),
+  control("remote_file_upload_stream_request", {
+    uploadId: IdSchema,
+    sessionId: IdSchema,
+    kind: RemoteFileUploadKindSchema,
+    fileName: z.string().optional(),
+    mimeType: z.string().min(1),
+    size: z.number().int().nonnegative().optional(),
+  }),
+  control("remote_file_upload_stream_complete", {
+    uploadId: IdSchema,
+  }),
+  control("remote_file_upload_stream_cancel", {
+    uploadId: IdSchema,
+  }),
+  control("remote_file_upload_stream_response", {
+    ...RequestErrorShape,
+    uploadId: IdSchema,
+    sessionId: IdSchema,
+    success: z.boolean(),
+    path: z.string().optional(),
   }),
   control("proxy_select", { ...RequestIdShape, proxyId: IdSchema }),
   control("proxy_select_response", {
@@ -407,103 +484,6 @@ const relayControlDefinitions = [
     { sessionId: IdSchema, data: z.string(), traceId: IdSchema.optional() },
     "client_to_proxy",
   ),
-  control(
-    "clipboard_image_upload",
-    {
-      ...RequestIdShape,
-      sessionId: IdSchema,
-      mimeType: ClipboardImageMimeTypeSchema,
-      dataBase64: z.string().min(1),
-      fileName: z.string().optional(),
-    },
-    "client_to_proxy",
-  ),
-  control(
-    "clipboard_image_upload_response",
-    {
-      ...RequestIdShape,
-      ...RequestErrorShape,
-      sessionId: IdSchema,
-      success: z.boolean(),
-      // success=false 时 proxy 没有有效 path 可填；保持 optional 以避免占位空字符串通过校验。
-      path: z.string().optional(),
-    },
-    "proxy_to_client",
-  ),
-  control(
-    "image_preview_request",
-    {
-      ...RequestIdShape,
-      sessionId: IdSchema,
-      path: z.string().min(1),
-    },
-    "client_to_proxy",
-  ),
-  control(
-    "image_preview_response",
-    {
-      ...RequestIdShape,
-      ...RequestErrorShape,
-      sessionId: IdSchema,
-      success: z.boolean(),
-      // 同 clipboard_image_upload_response：失败时 proxy 不一定有路径。
-      path: z.string().optional(),
-      mimeType: ClipboardImageMimeTypeSchema.optional(),
-      dataBase64: z.string().optional(),
-      size: z.number().int().nonnegative().optional(),
-    },
-    "proxy_to_client",
-  ),
-  // 任意文件下载: 与 image_preview 形状对称, 只是 mimeType 不限定为图片;
-  // 单租户场景下 path 任意 (不受 previewRoots 限制), 由 proxy 端 size cap 兜底。
-  control(
-    "file_download_request",
-    {
-      ...RequestIdShape,
-      sessionId: IdSchema,
-      path: z.string().min(1),
-    },
-    "client_to_proxy",
-  ),
-  control(
-    "file_download_response",
-    {
-      ...RequestIdShape,
-      ...RequestErrorShape,
-      sessionId: IdSchema,
-      success: z.boolean(),
-      path: z.string().optional(),
-      mimeType: z.string().optional(),
-      dataBase64: z.string().optional(),
-      size: z.number().int().nonnegative().optional(),
-    },
-    "proxy_to_client",
-  ),
-  // 任意文件上传: 复用 clipboard_image_upload 的形状, mimeType 放开 + fileName 必填,
-  // 由 proxy 端写入 session cwd 的 .dev-anywhere/uploads/ 子目录, 返回相对路径供 web 拼成 @path。
-  control(
-    "file_upload_request",
-    {
-      ...RequestIdShape,
-      sessionId: IdSchema,
-      mimeType: z.string().min(1),
-      dataBase64: z.string().min(1),
-      fileName: z.string().min(1),
-    },
-    "client_to_proxy",
-  ),
-  control(
-    "file_upload_response",
-    {
-      ...RequestIdShape,
-      ...RequestErrorShape,
-      sessionId: IdSchema,
-      success: z.boolean(),
-      path: z.string().optional(),
-    },
-    "proxy_to_client",
-  ),
-
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
   control("proxy_info_request", RequestIdShape, "client_to_proxy"),

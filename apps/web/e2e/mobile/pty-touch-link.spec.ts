@@ -117,8 +117,12 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       (path) =>
         (window.__ptySmoke?.sent ?? []).some((raw) => {
           try {
-            const msg = JSON.parse(raw) as { type?: string; path?: string };
-            return msg.type === "file_download_request" && msg.path === path;
+            const msg = JSON.parse(raw) as { type?: string; path?: string; disposition?: string };
+            return (
+              msg.type === "remote_file_url_request" &&
+              msg.path === path &&
+              msg.disposition === "download"
+            );
           } catch {
             return false;
           }
@@ -142,7 +146,8 @@ test.describe("L4 mobile / PTY touch link activation", () => {
           page.evaluate(() =>
             (window.__ptySmoke?.sent ?? []).some((raw) => {
               try {
-                return (JSON.parse(raw) as { type?: string }).type === "image_preview_request";
+                const msg = JSON.parse(raw) as { type?: string; disposition?: string };
+                return msg.type === "remote_file_url_request" && msg.disposition === "inline";
               } catch {
                 return false;
               }
@@ -152,7 +157,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
         .toBe(true);
     } catch (err) {
       throw new Error(
-        `image_preview_request not sent\n${JSON.stringify(
+        `remote_file_url_request not sent\n${JSON.stringify(
           await readTouchDiagnostics(page),
           null,
           2,
@@ -162,7 +167,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }
   }
 
-  test("tap on an xterm-wrapped PTY document path does not trigger file_download", async ({
+  test("tap on an xterm-wrapped PTY document path does not trigger download", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -196,7 +201,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     await expectNoFileDownloadRequest(emuPage, path);
   });
 
-  test("tap on an indented hard-wrapped PTY document path does not trigger file_download", async ({
+  test("tap on an indented hard-wrapped PTY document path does not trigger download", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -242,7 +247,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       needle: "./tmp/preview.png",
     });
 
-    // 预览 dialog 应弹起, 由 image_preview_request 驱动.
+    // 预览 dialog 应弹起, 由 remote_file_url_request 驱动.
     await expectImagePreviewRequest(emuPage);
   });
 });

@@ -26,7 +26,6 @@ describe("RelayControlSchema", () => {
 
   it("derives client-to-proxy control routing from protocol metadata", () => {
     expect(isClientToProxyRelayControlType("agent_status_request")).toBe(true);
-    expect(isClientToProxyRelayControlType("clipboard_image_upload")).toBe(true);
     expect(isClientToProxyRelayControlType("permission_request_delivered")).toBe(true);
     expect(isClientToProxyRelayControlType("tool_approve")).toBe(true);
     expect(isClientToProxyRelayControlType("tool_deny")).toBe(true);
@@ -292,77 +291,136 @@ describe("RelayControlSchema", () => {
     expect(isProxyToClientRelayControlType("session_rename_response")).toBe(true);
   });
 
-  it("parses clipboard image upload request/response with requestId correlation", () => {
+  it("parses remote file URL and stream controls without exposing stream controls to client routing", () => {
     expect(
       RelayControlSchema.parse({
-        type: "clipboard_image_upload",
-        requestId: "clip-1",
+        type: "remote_file_url_request",
+        requestId: "file-url-1",
         sessionId: "sess-1",
-        mimeType: "image/png",
-        dataBase64: "AQID",
-        fileName: "shot.png",
+        path: "build/out.tar.gz",
+        disposition: "download",
       }),
     ).toEqual({
-      type: "clipboard_image_upload",
-      requestId: "clip-1",
+      type: "remote_file_url_request",
+      requestId: "file-url-1",
       sessionId: "sess-1",
-      mimeType: "image/png",
-      dataBase64: "AQID",
-      fileName: "shot.png",
+      path: "build/out.tar.gz",
+      disposition: "download",
     });
 
     expect(
       RelayControlSchema.parse({
-        type: "clipboard_image_upload_response",
-        requestId: "clip-1",
+        type: "remote_file_url_response",
+        requestId: "file-url-1",
         sessionId: "sess-1",
+        path: "build/out.tar.gz",
         success: true,
-        path: ".dev-anywhere/clipboard/sess-1/shot.png",
+        url: "/api/remote-files/token-1",
+        expiresAt: 123,
       }),
     ).toMatchObject({
-      type: "clipboard_image_upload_response",
-      requestId: "clip-1",
-      sessionId: "sess-1",
+      type: "remote_file_url_response",
+      success: true,
+      url: "/api/remote-files/token-1",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "remote_file_stream_response",
+        streamId: "stream-1",
+        sessionId: "sess-1",
+        success: true,
+        path: "build/out.tar.gz",
+        mimeType: "application/gzip",
+        size: 1024,
+        fileName: "out.tar.gz",
+      }),
+    ).toMatchObject({
+      type: "remote_file_stream_response",
+      streamId: "stream-1",
       success: true,
     });
-    expect(isProxyToClientRelayControlType("clipboard_image_upload_response")).toBe(true);
+
+    expect(
+      RelayControlSchema.parse({
+        type: "remote_file_stream_complete",
+        streamId: "stream-1",
+        success: true,
+      }),
+    ).toEqual({
+      type: "remote_file_stream_complete",
+      streamId: "stream-1",
+      success: true,
+    });
+
+    expect(isClientToProxyRelayControlType("remote_file_url_request")).toBe(false);
+    expect(isClientToProxyRelayControlType("remote_file_stream_request")).toBe(false);
+    expect(isProxyToClientRelayControlType("remote_file_stream_response")).toBe(false);
   });
 
-  it("parses image preview request/response with requestId correlation", () => {
+  it("parses remote upload URL and stream controls without exposing them to client routing", () => {
     expect(
       RelayControlSchema.parse({
-        type: "image_preview_request",
-        requestId: "preview-1",
+        type: "remote_file_upload_url_request",
+        requestId: "upload-url-1",
         sessionId: "sess-1",
-        path: ".dev-anywhere/clipboard/sess-1/shot.png",
+        kind: "clipboard_image",
+        fileName: "shot.png",
+        mimeType: "image/png",
+        size: 123,
       }),
-    ).toEqual({
-      type: "image_preview_request",
-      requestId: "preview-1",
-      sessionId: "sess-1",
-      path: ".dev-anywhere/clipboard/sess-1/shot.png",
+    ).toMatchObject({
+      type: "remote_file_upload_url_request",
+      requestId: "upload-url-1",
+      kind: "clipboard_image",
     });
 
     expect(
       RelayControlSchema.parse({
-        type: "image_preview_response",
-        requestId: "preview-1",
+        type: "remote_file_upload_url_response",
+        requestId: "upload-url-1",
         sessionId: "sess-1",
         success: true,
-        path: ".dev-anywhere/clipboard/sess-1/shot.png",
-        mimeType: "image/png",
-        dataBase64: "AQID",
-        size: 3,
+        uploadUrl: "/api/remote-uploads/token-1",
+        expiresAt: 123,
       }),
     ).toMatchObject({
-      type: "image_preview_response",
-      requestId: "preview-1",
-      sessionId: "sess-1",
+      type: "remote_file_upload_url_response",
       success: true,
-      mimeType: "image/png",
+      uploadUrl: "/api/remote-uploads/token-1",
     });
-    expect(isClientToProxyRelayControlType("image_preview_request")).toBe(true);
-    expect(isProxyToClientRelayControlType("image_preview_response")).toBe(true);
+
+    expect(
+      RelayControlSchema.parse({
+        type: "remote_file_upload_stream_request",
+        uploadId: "upload-1",
+        sessionId: "sess-1",
+        kind: "file",
+        fileName: "notes.txt",
+        mimeType: "text/plain",
+      }),
+    ).toMatchObject({
+      type: "remote_file_upload_stream_request",
+      uploadId: "upload-1",
+      kind: "file",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "remote_file_upload_stream_response",
+        uploadId: "upload-1",
+        sessionId: "sess-1",
+        success: true,
+        path: "/tmp/dev-anywhere/up-abc.txt",
+      }),
+    ).toMatchObject({
+      type: "remote_file_upload_stream_response",
+      success: true,
+    });
+
+    expect(isClientToProxyRelayControlType("remote_file_upload_url_request")).toBe(false);
+    expect(isClientToProxyRelayControlType("remote_file_upload_stream_request")).toBe(false);
+    expect(isProxyToClientRelayControlType("remote_file_upload_stream_response")).toBe(false);
   });
 
   it("rejects proxy_select with empty proxyId", () => {

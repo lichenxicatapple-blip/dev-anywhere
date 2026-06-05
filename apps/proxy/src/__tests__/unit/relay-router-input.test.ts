@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ControlErrorCode, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
+import type { RemoteFileUploadManager } from "#src/serve/remote-file-upload.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import { tildify } from "#src/common/paths.js";
@@ -20,6 +18,19 @@ import {
 
 function parseIpc(raw: string) {
   return IpcMessageSchema.parse(JSON.parse(raw.trim()));
+}
+
+function createRemoteFileStreamManagerFake() {
+  return { start: vi.fn(), cancel: vi.fn() } as never;
+}
+
+function createRemoteFileUploadManagerFake() {
+  return {
+    start: vi.fn(),
+    complete: vi.fn(),
+    cancel: vi.fn(),
+    handleBinary: vi.fn(),
+  } as unknown as RemoteFileUploadManager;
 }
 
 function createRouter(options: {
@@ -40,6 +51,7 @@ function createRouter(options: {
   sessionManager?: SessionManager;
   broadcastSessionList?: () => void;
   voiceSummaryRunner?: VoiceSummaryRunner;
+  remoteFileUploadManager?: ReturnType<typeof createRemoteFileUploadManagerFake>;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -107,6 +119,8 @@ function createRouter(options: {
     getProviderEnv: () => ({}),
     getAgentCliSuggestions: () => ({}),
     setAgentCliPath: () => {},
+    remoteFileStreamManager: createRemoteFileStreamManagerFake(),
+    remoteFileUploadManager: options.remoteFileUploadManager ?? createRemoteFileUploadManagerFake(),
     voiceSummaryRunner: options.voiceSummaryRunner,
   });
 }
@@ -142,6 +156,8 @@ describe("RelayRouter input routing", () => {
       } as never,
       jsonObserver: jsonObserver as never,
       relayConnection: relay.relayConnection,
+      remoteFileStreamManager: createRemoteFileStreamManagerFake(),
+      remoteFileUploadManager: createRemoteFileUploadManagerFake(),
     });
 
     handlers.onUserInput({
@@ -194,6 +210,8 @@ describe("RelayRouter input routing", () => {
       } as never,
       jsonObserver: jsonObserver as never,
       relayConnection: relay.relayConnection,
+      remoteFileStreamManager: createRemoteFileStreamManagerFake(),
+      remoteFileUploadManager: createRemoteFileUploadManagerFake(),
     });
 
     handlers.onUserInput({
@@ -873,77 +891,29 @@ describe("RelayRouter input routing", () => {
     expect(hostedWrite).toHaveBeenCalledWith("s1", "abc");
   });
 
-  it("rejects clipboard image uploads for missing sessions", () => {
-    const relay = createRelayConnectionFake();
-    const router = createRouter({ mode: "json", relayConnection: relay });
+  it("routes remote file upload stream controls to the upload manager", () => {
+    const remoteFileUploadManager = createRemoteFileUploadManagerFake();
+    const router = createRouter({ mode: "json", remoteFileUploadManager });
 
     router.handle({
-      type: "clipboard_image_upload",
-      requestId: "clip-1",
-      sessionId: "missing",
-      mimeType: "image/png",
-      dataBase64: "AQID",
+      type: "remote_file_upload_stream_request",
+      uploadId: "upload-1",
+      sessionId: "s1",
+      kind: "file",
+      mimeType: "text/plain",
+      fileName: "notes.txt",
     });
+    router.handle({ type: "remote_file_upload_stream_complete", uploadId: "upload-1" });
+    router.handle({ type: "remote_file_upload_stream_cancel", uploadId: "upload-2" });
 
-    expect(relay.raw).toHaveLength(1);
-    const msg = RelayControlSchema.parse(JSON.parse(relay.raw[0]!));
-    expect(msg.type).toBe("clipboard_image_upload_response");
-    if (msg.type === "clipboard_image_upload_response") {
-      expect(msg.requestId).toBe("clip-1");
-      expect(msg.sessionId).toBe("missing");
-      expect(msg.success).toBe(false);
-      expect(msg.path).toBeUndefined();
-      expect(msg.errorCode).toBe(ControlErrorCode.SESSION_NOT_FOUND);
-    }
-  });
-
-  it("returns image preview data for session cwd images", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "image-preview-router-"));
-    const relay = createRelayConnectionFake();
-    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-    writeFileSync(join(cwd, "shot.png"), png);
-    const handlers = new RelayInputHandlers({
-      sessionManager: {
-        getSession: (sessionId: string) =>
-          sessionId === "s1"
-            ? {
-                id: "s1",
-                mode: "json",
-                provider: "claude",
-                state: SessionState.IDLE,
-                cwd,
-                pid: 1,
-              }
-            : undefined,
-      } as never,
-      workerRegistry: createWorkerRegistryFake(),
-      terminalSockets: new Map(),
-      hostedPtyRegistry: {
-        write: vi.fn(() => false),
-      } as never,
-      jsonObserver: { onTurnStart: vi.fn() } as never,
-      relayConnection: relay.relayConnection,
-    });
-
-    try {
-      handlers.onImagePreviewRequest({
-        type: "image_preview_request",
-        requestId: "preview-1",
-        sessionId: "s1",
-        path: "shot.png",
-      });
-
-      expect(relay.raw).toHaveLength(1);
-      const msg = RelayControlSchema.parse(JSON.parse(relay.raw[0]!));
-      expect(msg.type).toBe("image_preview_response");
-      if (msg.type === "image_preview_response") {
-        expect(msg.requestId).toBe("preview-1");
-        expect(msg.success).toBe(true);
-        expect(msg.mimeType).toBe("image/png");
-        expect(msg.dataBase64).toBe(png.toString("base64"));
-      }
-    } finally {
-      rmSync(cwd, { recursive: true, force: true });
-    }
+    expect(remoteFileUploadManager.start).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadId: "upload-1" }),
+    );
+    expect(remoteFileUploadManager.complete).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadId: "upload-1" }),
+    );
+    expect(remoteFileUploadManager.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadId: "upload-2" }),
+    );
   });
 });

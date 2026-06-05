@@ -21,10 +21,6 @@ import { describeCurrentClientDevice } from "@/lib/client-device";
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
 const LATENCY_PROBE_TIMEOUT_MS = 3_000;
-const LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS = 60_000;
-const LARGE_PAYLOAD_REQUEST_TIMEOUT_CEILING_MS = 5 * 60_000;
-const LARGE_PAYLOAD_REQUEST_BYTES_PER_SECOND = 256 * 1024;
-const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
 export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
@@ -55,65 +51,31 @@ type SessionResourcesSnapshot = {
   commands: CommandEntry[];
   groups: FileTreeGroup[];
 } & RequestError;
-type ClipboardImageUploadResponse = Extract<
+type RemoteFileUrlResponse = Extract<RelayControlMessage, { type: "remote_file_url_response" }>;
+type RemoteFileDisposition = Extract<
   RelayControlMessage,
-  { type: "clipboard_image_upload_response" }
+  { type: "remote_file_url_request" }
+>["disposition"];
+type RemoteFileUploadUrlResponse = Extract<
+  RelayControlMessage,
+  { type: "remote_file_upload_url_response" }
 >;
-type ClipboardImageUploadResult = {
-  sessionId: string;
-  success: boolean;
-  // success=false 时 proxy 不返回 path（schema 已收紧为 optional）；调用方必须先看 success
-  path?: string;
-} & RequestError;
-type ClipboardImageUploadRequest = Omit<
-  Extract<RelayControlMessage, { type: "clipboard_image_upload" }>,
-  "type" | "requestId" | "sessionId"
->;
-type ImagePreviewResponse = Extract<RelayControlMessage, { type: "image_preview_response" }>;
-type ImagePreviewResult = {
+type RemoteFileUploadKind = Extract<
+  RelayControlMessage,
+  { type: "remote_file_upload_url_request" }
+>["kind"];
+type RemoteFileUrlResult = {
   sessionId: string;
   success: boolean;
   path?: string;
-  mimeType?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-  dataBase64?: string;
-  size?: number;
+  url?: string;
+  expiresAt?: number;
 } & RequestError;
-type FileDownloadResponse = Extract<RelayControlMessage, { type: "file_download_response" }>;
-type FileDownloadResult = {
-  sessionId: string;
-  success: boolean;
-  path?: string;
-  mimeType?: string;
-  dataBase64?: string;
-  size?: number;
-} & RequestError;
-type FileUploadResponse = Extract<RelayControlMessage, { type: "file_upload_response" }>;
 type FileUploadResult = {
   sessionId: string;
   success: boolean;
   path?: string;
 } & RequestError;
-type FileUploadRequest = Omit<
-  Extract<RelayControlMessage, { type: "file_upload_request" }>,
-  "type" | "requestId" | "sessionId"
->;
-
-function largePayloadRequestTimeoutMs(payloadBytes: number): number {
-  const transferMs = Math.ceil((payloadBytes / LARGE_PAYLOAD_REQUEST_BYTES_PER_SECOND) * 1000);
-  return Math.min(
-    LARGE_PAYLOAD_REQUEST_TIMEOUT_CEILING_MS,
-    Math.max(
-      LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS,
-      LARGE_PAYLOAD_REQUEST_TIMEOUT_FLOOR_MS + transferMs,
-    ),
-  );
-}
-
-function uploadRequestTimeoutMs(dataBase64: string): number {
-  return largePayloadRequestTimeoutMs(Math.ceil((dataBase64.length * 3) / 4));
-}
-
-const IMAGE_PREVIEW_REQUEST_TIMEOUT_MS = largePayloadRequestTimeoutMs(IMAGE_PREVIEW_MAX_BYTES);
 
 type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
@@ -348,138 +310,118 @@ export class RelayClient {
     }));
   }
 
-  uploadClipboardImage(
-    sessionId: string,
-    image: ClipboardImageUploadRequest,
-    timeoutMs = uploadRequestTimeoutMs(image.dataBase64),
-  ): Promise<ClipboardImageUploadResult> {
-    const requestId = nextRequestId("clipboard-image");
-    return this.waitForMessage(
-      (msg): msg is ClipboardImageUploadResponse =>
-        msg.type === "clipboard_image_upload_response" &&
-        msg.requestId === requestId &&
-        msg.sessionId === sessionId,
-      () =>
-        this.ws.send(
-          JSON.stringify({
-            type: "clipboard_image_upload",
-            requestId,
-            sessionId,
-            ...image,
-          }),
-        ),
-      "上传剪贴板图片超时",
-      timeoutMs,
-      requestId,
-    ).then((resp) => ({
-      sessionId: resp.sessionId,
-      success: resp.success,
-      path: resp.path,
-      error: resp.error,
-      errorCode: resp.errorCode,
-    }));
+  uploadClipboardImage(sessionId: string, file: File): Promise<FileUploadResult> {
+    return this.uploadRemoteFile(sessionId, file, "clipboard_image");
   }
 
-  requestImagePreview(
+  requestRemoteFileUrl(
     sessionId: string,
     path: string,
-    timeoutMs = IMAGE_PREVIEW_REQUEST_TIMEOUT_MS,
-  ): Promise<ImagePreviewResult> {
-    const requestId = nextRequestId("image-preview");
-    return this.waitForMessage(
-      (msg): msg is ImagePreviewResponse =>
-        msg.type === "image_preview_response" &&
-        msg.requestId === requestId &&
-        msg.sessionId === sessionId,
-      () =>
-        this.ws.send(
-          JSON.stringify({
-            type: "image_preview_request",
-            requestId,
-            sessionId,
-            path,
-          }),
-        ),
-      "读取图片超时",
-      timeoutMs,
-      requestId,
-    ).then((resp) => ({
-      sessionId: resp.sessionId,
-      success: resp.success,
-      path: resp.path,
-      mimeType: resp.mimeType,
-      dataBase64: resp.dataBase64,
-      size: resp.size,
-      error: resp.error,
-      errorCode: resp.errorCode,
-    }));
-  }
-
-  requestFileDownload(
-    sessionId: string,
-    path: string,
+    disposition: RemoteFileDisposition,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<FileDownloadResult> {
-    const requestId = nextRequestId("file-download");
+  ): Promise<RemoteFileUrlResult> {
+    const requestId = nextRequestId("remote-file-url");
     return this.waitForMessage(
-      (msg): msg is FileDownloadResponse =>
-        msg.type === "file_download_response" &&
+      (msg): msg is RemoteFileUrlResponse =>
+        msg.type === "remote_file_url_response" &&
         msg.requestId === requestId &&
         msg.sessionId === sessionId,
       () =>
         this.ws.send(
           JSON.stringify({
-            type: "file_download_request",
+            type: "remote_file_url_request",
             requestId,
             sessionId,
             path,
+            disposition,
           }),
         ),
-      "下载文件超时",
+      "读取文件地址超时",
       timeoutMs,
       requestId,
     ).then((resp) => ({
       sessionId: resp.sessionId,
       success: resp.success,
       path: resp.path,
-      mimeType: resp.mimeType,
-      dataBase64: resp.dataBase64,
-      size: resp.size,
+      url: resp.url,
+      expiresAt: resp.expiresAt,
       error: resp.error,
       errorCode: resp.errorCode,
     }));
   }
 
-  uploadFile(
+  uploadFile(sessionId: string, file: File): Promise<FileUploadResult> {
+    return this.uploadRemoteFile(sessionId, file, "file");
+  }
+
+  private requestRemoteFileUploadUrl(
     sessionId: string,
-    file: FileUploadRequest,
-    timeoutMs = uploadRequestTimeoutMs(file.dataBase64),
-  ): Promise<FileUploadResult> {
-    const requestId = nextRequestId("file-upload");
+    file: File,
+    kind: RemoteFileUploadKind,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<RemoteFileUploadUrlResponse> {
+    const requestId = nextRequestId("remote-file-upload-url");
     return this.waitForMessage(
-      (msg): msg is FileUploadResponse =>
-        msg.type === "file_upload_response" &&
+      (msg): msg is RemoteFileUploadUrlResponse =>
+        msg.type === "remote_file_upload_url_response" &&
         msg.requestId === requestId &&
         msg.sessionId === sessionId,
       () =>
         this.ws.send(
           JSON.stringify({
-            type: "file_upload_request",
+            type: "remote_file_upload_url_request",
             requestId,
             sessionId,
-            ...file,
+            kind,
+            fileName: file.name || "upload",
+            mimeType: file.type || "application/octet-stream",
+            size: file.size,
           }),
         ),
-      "上传文件超时",
+      "创建上传地址超时",
       timeoutMs,
       requestId,
-    ).then((resp) => ({
-      sessionId: resp.sessionId,
-      success: resp.success,
-      path: resp.path,
-      error: resp.error,
-      errorCode: resp.errorCode,
-    }));
+    );
+  }
+
+  private async uploadRemoteFile(
+    sessionId: string,
+    file: File,
+    kind: RemoteFileUploadKind,
+  ): Promise<FileUploadResult> {
+    const urlResp = await this.requestRemoteFileUploadUrl(sessionId, file, kind);
+    if (!urlResp.success || !urlResp.uploadUrl) {
+      return {
+        sessionId: urlResp.sessionId,
+        success: false,
+        error: urlResp.error ?? "创建上传地址失败",
+        errorCode: urlResp.errorCode,
+      };
+    }
+
+    const resp = await fetch(urlResp.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+    const body = (await resp.json().catch(() => ({}))) as FileUploadResult;
+    if (!resp.ok) {
+      return {
+        sessionId,
+        success: false,
+        error: body.error ?? "上传失败",
+        errorCode: body.errorCode,
+      };
+    }
+    return {
+      sessionId: body.sessionId ?? sessionId,
+      success: body.success,
+      path: body.path,
+      error: body.error,
+      errorCode: body.errorCode,
+    };
   }
 
   requestProxyInfo(

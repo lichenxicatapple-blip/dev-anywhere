@@ -122,14 +122,15 @@ describe("RelayControlSchema round-trip stability", () => {
     expect(b).toEqual(a);
   });
 
-  it("clipboard_image_upload binary-ish base64 payload preserved", () => {
+  it("remote_file_upload_url_request metadata preserved", () => {
     const original = {
-      type: "clipboard_image_upload",
-      requestId: "clip-1",
+      type: "remote_file_upload_url_request",
+      requestId: "upload-1",
       sessionId: "sess-rt",
+      kind: "clipboard_image",
       mimeType: "image/png",
-      dataBase64: "AQID/+8=",
       fileName: "shot.png",
+      size: 3,
     };
     const a = RelayControlSchema.parse(original);
     const b = roundTrip(RelayControlSchema, original);

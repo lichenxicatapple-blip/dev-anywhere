@@ -91,11 +91,7 @@ describe("InputBar clipboard image paste", () => {
 
     expect(event.defaultPrevented).toBe(true);
     await waitFor(() => {
-      expect(uploadClipboardImage).toHaveBeenCalledWith("s1", {
-        mimeType: "image/png",
-        dataBase64: "AQID",
-        fileName: "shot.png",
-      });
+      expect(uploadClipboardImage).toHaveBeenCalledWith("s1", file);
     });
     await waitFor(() => {
       expect(textarea.value).toBe("inspect @.dev-anywhere/clipboard/s1/shot.png ");
@@ -233,10 +229,7 @@ describe("InputBar attach file picker", () => {
     fireEvent.change(input);
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
-    expect(uploadFile).toHaveBeenCalledWith(
-      "s1",
-      expect.objectContaining({ fileName: "notes.txt", mimeType: "text/plain" }),
-    );
+    expect(uploadFile).toHaveBeenCalledWith("s1", file);
     await waitFor(() =>
       expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
         "see @.dev-anywhere/uploads/s1/notes.txt ",
@@ -279,10 +272,7 @@ describe("InputBar attach file picker", () => {
     fireEvent(textarea, event);
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
-    expect(uploadFile).toHaveBeenCalledWith(
-      "s1",
-      expect.objectContaining({ fileName: "log.txt", mimeType: "text/plain" }),
-    );
+    expect(uploadFile).toHaveBeenCalledWith("s1", file);
     await waitFor(() =>
       expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
         "see @.dev-anywhere/uploads/s1/notes.txt ",

@@ -65,6 +65,25 @@ declare global {
 // 安装一个协议级 Fake Relay。它不是 mock 组件树，而是在浏览器 WebSocket 层模拟
 // relay/proxy 的真实控制消息，让测试像用户一样点 UI，同时避免依赖本机真实 CLI。
 export async function installFakeRelay(page: Page): Promise<void> {
+  await page.route("**/api/remote-uploads/*", async (route) => {
+    const url = new URL(route.request().url());
+    const sessionId = url.searchParams.get("sessionId") ?? "unknown-session";
+    const kind = url.searchParams.get("kind") ?? "file";
+    const isClipboardImage = kind === "clipboard-image";
+    await route.request().postDataBuffer();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessionId,
+        success: true,
+        path: isClipboardImage
+          ? `.dev-anywhere/clipboard/${sessionId}/pasted-e2e.png`
+          : `.dev-anywhere/uploads/${sessionId}/uploaded-e2e.txt`,
+      }),
+    });
+  });
+
   await page.addInitScript(() => {
     if (window.__devAnywhereFakeRelayInstalled) return;
     Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
@@ -539,43 +558,40 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           }
-          case "clipboard_image_upload":
-            this.emitJson({
-              type: "clipboard_image_upload_response",
-              requestId: msg.requestId,
-              sessionId: String(msg.sessionId),
-              success: true,
-              path: `.dev-anywhere/clipboard/${String(msg.sessionId)}/pasted-e2e.png`,
-            });
-            break;
-          case "file_download_request": {
+          case "remote_file_upload_url_request": {
             const sid = String(msg.sessionId);
+            const kind = String(msg.kind).replace("_", "-");
             this.emitJson({
-              type: "file_download_response",
+              type: "remote_file_upload_url_response",
               requestId: msg.requestId,
               sessionId: sid,
               success: true,
-              path: String(msg.path),
-              mimeType: "text/plain",
-              dataBase64: "QUJD",
-              size: 3,
+              uploadUrl: `/api/remote-uploads/e2e-${kind}-${String(
+                msg.requestId,
+              )}?sessionId=${encodeURIComponent(sid)}&kind=${encodeURIComponent(kind)}`,
+              expiresAt: Date.now() + 60_000,
             });
             break;
           }
-          case "image_preview_request":
-            setTimeout(() => {
+          case "remote_file_url_request": {
+            const sid = String(msg.sessionId);
+            const emitResponse = () =>
               this.emitJson({
-                type: "image_preview_response",
+                type: "remote_file_url_response",
                 requestId: msg.requestId,
-                sessionId: String(msg.sessionId),
+                sessionId: sid,
                 success: true,
                 path: String(msg.path),
-                mimeType: "image/png",
-                dataBase64: imagePreviewDataBase64,
-                size: 68,
+                url:
+                  msg.disposition === "inline"
+                    ? `data:image/png;base64,${imagePreviewDataBase64}`
+                    : "data:text/plain;base64,QUJD",
+                expiresAt: Date.now() + 60_000,
               });
-            }, imagePreviewDelayMs);
+            if (msg.disposition === "inline") setTimeout(emitResponse, imagePreviewDelayMs);
+            else emitResponse();
             break;
+          }
           case "session_resources_request":
             this.emitResources(String(msg.sessionId ?? ""), String(msg.requestId ?? ""));
             break;

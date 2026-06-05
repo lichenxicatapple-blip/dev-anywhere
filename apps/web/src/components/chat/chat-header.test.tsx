@@ -153,10 +153,7 @@ describe("ChatHeader PTY upload menu", () => {
     fireEvent.change(input);
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
-    expect(uploadFile).toHaveBeenCalledWith(
-      "s1",
-      expect.objectContaining({ fileName: "notes.txt", mimeType: "text/plain" }),
-    );
+    expect(uploadFile).toHaveBeenCalledWith("s1", file);
     await waitFor(() =>
       expect(sendRawSpy).toHaveBeenCalledWith("s1", "@.dev-anywhere/uploads/s1/notes.txt "),
     );

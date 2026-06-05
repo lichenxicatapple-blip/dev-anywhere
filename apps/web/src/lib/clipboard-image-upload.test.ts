@@ -23,11 +23,7 @@ describe("clipboard image upload flow", () => {
       path: ".dev-anywhere/clipboard/s1/shot.png",
       pathMention: "@.dev-anywhere/clipboard/s1/shot.png ",
     });
-    expect(relay.uploadClipboardImage).toHaveBeenCalledWith("s1", {
-      mimeType: "image/png",
-      dataBase64: "AQID",
-      fileName: "shot.png",
-    });
+    expect(relay.uploadClipboardImage).toHaveBeenCalledWith("s1", imageFile);
   });
 
   it("returns null when the paste payload has no image", async () => {

@@ -19,6 +19,7 @@ import { createBailianVoiceProvider } from "./voice/bailian-provider.js";
 import type { VoiceCapabilitiesProvider } from "./voice/capabilities.js";
 import type { VoiceConfigTester } from "./voice/config-test.js";
 import { createVoiceProviderRegistry, type VoiceProviderRegistry } from "./voice/provider.js";
+import { RemoteFileBridge } from "./remote-file-bridge.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -93,6 +94,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
 
   const registry = new RelayRegistry();
+  const remoteFileBridge = new RemoteFileBridge({ registry, logger });
   const voiceConfigStore = createVoiceConfigStore({
     dataDir,
     defaults: options.voiceDefaults,
@@ -154,6 +156,12 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       getClientToken: () => clientToken ?? null,
     }),
   );
+  app.get("/api/remote-files/:token", (req, res) => {
+    remoteFileBridge.handleHttpRequest(req, res);
+  });
+  app.put("/api/remote-uploads/:token", (req, res) => {
+    remoteFileBridge.handleUploadHttpRequest(req, res);
+  });
 
   // 使用 createServer 而非 app.listen，确保 WebSocket upgrade 可在同一端口上处理
   const httpServer = createServer(app);
@@ -230,14 +238,23 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   proxyWss.on("connection", (ws) => {
-    handleProxyConnection(ws, registry, logger, relayChaos);
+    handleProxyConnection(ws, registry, logger, relayChaos, remoteFileBridge);
   });
 
   clientWss.on("connection", (ws, request) => {
-    handleClientConnection(ws, registry, logger, relayChaos, voiceConfigStore, voiceProviders, {
-      userAgent: firstHeaderValue(request.headers["user-agent"]),
-      remoteAddress: requestRemoteAddress(request),
-    });
+    handleClientConnection(
+      ws,
+      registry,
+      logger,
+      relayChaos,
+      voiceConfigStore,
+      voiceProviders,
+      remoteFileBridge,
+      {
+        userAgent: firstHeaderValue(request.headers["user-agent"]),
+        remoteAddress: requestRemoteAddress(request),
+      },
+    );
   });
 
   voiceAsrWss.on("connection", (ws) => {

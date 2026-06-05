@@ -716,9 +716,15 @@ test.describe("L4 mobile / PTY long press copy", () => {
         emuPage.evaluate(() =>
           (window.__ptySmoke?.sent ?? []).some((raw) => {
             try {
-              const message = JSON.parse(raw) as { type?: string; path?: string };
+              const message = JSON.parse(raw) as {
+                type?: string;
+                path?: string;
+                disposition?: string;
+              };
               return (
-                message.type === "file_download_request" && message.path === "./build/out.tar.gz"
+                message.type === "remote_file_url_request" &&
+                message.path === "./build/out.tar.gz" &&
+                message.disposition === "download"
               );
             } catch {
               return false;
@@ -755,8 +761,16 @@ test.describe("L4 mobile / PTY long press copy", () => {
         emuPage.evaluate(() =>
           (window.__ptySmoke?.sent ?? []).some((raw) => {
             try {
-              const message = JSON.parse(raw) as { type?: string; path?: string };
-              return message.type === "image_preview_request" && message.path === "b.jpg";
+              const message = JSON.parse(raw) as {
+                type?: string;
+                path?: string;
+                disposition?: string;
+              };
+              return (
+                message.type === "remote_file_url_request" &&
+                message.path === "b.jpg" &&
+                message.disposition === "inline"
+              );
             } catch {
               return false;
             }

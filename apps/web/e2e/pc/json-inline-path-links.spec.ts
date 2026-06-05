@@ -36,9 +36,10 @@ test.describe("JSON inline path links", () => {
       .poll(async () =>
         (await sentFakeRelayMessages(page)).some(
           (msg) =>
-            msg.type === "file_download_request" &&
+            msg.type === "remote_file_url_request" &&
             msg.sessionId === "test-sess" &&
-            msg.path === "README.md",
+            msg.path === "README.md" &&
+            msg.disposition === "download",
         ),
       )
       .toBe(true);
@@ -56,9 +57,10 @@ test.describe("JSON inline path links", () => {
       .poll(async () =>
         (await sentFakeRelayMessages(page)).some(
           (msg) =>
-            msg.type === "file_download_request" &&
+            msg.type === "remote_file_url_request" &&
             msg.sessionId === "test-sess" &&
-            msg.path === path,
+            msg.path === path &&
+            msg.disposition === "download",
         ),
       )
       .toBe(true);
@@ -79,9 +81,10 @@ test.describe("JSON inline path links", () => {
       .poll(async () =>
         (await sentFakeRelayMessages(page)).some(
           (msg) =>
-            msg.type === "image_preview_request" &&
+            msg.type === "remote_file_url_request" &&
             msg.sessionId === "test-sess" &&
-            msg.path === path,
+            msg.path === path &&
+            msg.disposition === "inline",
         ),
       )
       .toBe(true);
