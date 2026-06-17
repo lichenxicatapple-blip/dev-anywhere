@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -48,6 +49,19 @@ describe("scanSessionHistory", () => {
       join(sessionDir, `rollout-2026-05-06T12-00-00-${sessionId}.jsonl`),
       lines.join("\n") + "\n",
     );
+  }
+
+  function countOpenFileDescriptors(): number | null {
+    try {
+      if (existsSync("/proc/self/fd")) return readdirSync("/proc/self/fd").length;
+      return Number(
+        execFileSync("sh", ["-lc", `lsof -p ${process.pid} | wc -l`], {
+          encoding: "utf-8",
+        }).trim(),
+      );
+    } catch {
+      return null;
+    }
   }
 
   it("returns empty array when ~/.claude/projects/ does not exist", async () => {
@@ -430,6 +444,46 @@ describe("scanSessionHistory", () => {
       projectDir: "/home/dev/projects/dev-anywhere",
       title: "Use shell to run pwd, then answer DONE.",
     });
+  });
+
+  it("does not leak file descriptors when Codex history scan stops after metadata and title", async () => {
+    for (let i = 0; i < 20; i += 1) {
+      writeCodexSession(`codex-fd-${i}`, [
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: `codex-fd-${i}`,
+            cwd: `/home/dev/projects/fd-${i}`,
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: `fd title ${i}` }],
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "unused trailing history" }],
+          },
+        }),
+      ]);
+    }
+
+    const before = countOpenFileDescriptors();
+    for (let i = 0; i < 40; i += 1) {
+      await scanSessionHistory();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const after = countOpenFileDescriptors();
+
+    if (before === null || after === null) return;
+    expect(after - before).toBeLessThanOrEqual(2);
   });
 
   it("filters Codex environment context before using the next real user prompt", async () => {

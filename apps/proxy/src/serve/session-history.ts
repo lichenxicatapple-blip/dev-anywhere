@@ -600,13 +600,22 @@ async function extractTitleAndCwd(
   filePath: string,
 ): Promise<{ title: string | null; cwd: string | null }> {
   return new Promise((resolve) => {
+    const input = createReadStream(filePath, { encoding: "utf-8" });
     const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf-8" }),
+      input,
       crlfDelay: Infinity,
     });
     let resolved = false;
     let cwd: string | null = null;
     let title: string | null = null;
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      rl.close();
+      input.destroy();
+      resolve({ title, cwd });
+    };
 
     rl.on("line", (line) => {
       if (resolved) return;
@@ -622,19 +631,16 @@ async function extractTitleAndCwd(
           if (text) title = text;
         }
         if (cwd && title) {
-          resolved = true;
-          rl.close();
+          finish();
         }
       } catch {
         /* skip malformed lines */
       }
     });
 
-    rl.on("close", () => {
-      if (!resolved) resolve({ title, cwd });
-      else resolve({ title, cwd });
-    });
-    rl.on("error", () => resolve({ title, cwd }));
+    rl.on("close", finish);
+    rl.on("error", finish);
+    input.on("error", finish);
   });
 }
 
@@ -662,15 +668,26 @@ async function extractCodexTitleAndCwd(
   filePath: string,
 ): Promise<{ id: string | null; title: string | null; cwd: string | null }> {
   return new Promise((resolve) => {
+    const input = createReadStream(filePath, { encoding: "utf-8" });
     const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf-8" }),
+      input,
       crlfDelay: Infinity,
     });
+    let resolved = false;
     let id: string | null = null;
     let cwd: string | null = null;
     let title: string | null = null;
 
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      rl.close();
+      input.destroy();
+      resolve({ id, title, cwd });
+    };
+
     rl.on("line", (line) => {
+      if (resolved) return;
       if (!line.trim()) return;
       try {
         const obj = JSON.parse(line);
@@ -682,14 +699,15 @@ async function extractCodexTitleAndCwd(
           const text = extractCodexUserText(obj.payload);
           if (text) title = text;
         }
-        if (id && cwd && title) rl.close();
+        if (id && cwd && title) finish();
       } catch {
         /* skip malformed lines */
       }
     });
 
-    rl.on("close", () => resolve({ id, title, cwd }));
-    rl.on("error", () => resolve({ id, title, cwd }));
+    rl.on("close", finish);
+    rl.on("error", finish);
+    input.on("error", finish);
   });
 }
 
