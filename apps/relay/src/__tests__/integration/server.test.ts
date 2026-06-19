@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const logger = createLogger({ name: "test", silent: true });
+const MIN_REMOTE_FILE_TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
 async function waitForCondition(
   condition: () => boolean,
@@ -201,11 +202,19 @@ describe("Relay Server Integration", () => {
         disposition: "download",
       }),
     );
-    const urlResponse = JSON.parse(await urlPromise) as { url: string; success: boolean };
+    const urlRequestedAt = Date.now();
+    const urlResponse = JSON.parse(await urlPromise) as {
+      url: string;
+      expiresAt: number;
+      success: boolean;
+    };
     expect(urlResponse).toMatchObject({
       success: true,
       url: expect.stringMatching(/^\/api\/remote-files\//),
     });
+    expect(urlResponse.expiresAt - urlRequestedAt).toBeGreaterThanOrEqual(
+      MIN_REMOTE_FILE_TOKEN_TTL_MS,
+    );
 
     const streamRequestPromise = waitForMessageType(proxy, "remote_file_stream_request");
     const fetchPromise = fetch(`http://127.0.0.1:${port}${urlResponse.url}`);
@@ -295,11 +304,19 @@ describe("Relay Server Integration", () => {
         size: 12,
       }),
     );
-    const urlResponse = JSON.parse(await urlPromise) as { uploadUrl: string; success: boolean };
+    const urlRequestedAt = Date.now();
+    const urlResponse = JSON.parse(await urlPromise) as {
+      uploadUrl: string;
+      expiresAt: number;
+      success: boolean;
+    };
     expect(urlResponse).toMatchObject({
       success: true,
       uploadUrl: expect.stringMatching(/^\/api\/remote-uploads\//),
     });
+    expect(urlResponse.expiresAt - urlRequestedAt).toBeGreaterThanOrEqual(
+      MIN_REMOTE_FILE_TOKEN_TTL_MS,
+    );
 
     const receivedChunks: Buffer[] = [];
     let uploadId = "";

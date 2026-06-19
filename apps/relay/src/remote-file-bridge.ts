@@ -11,7 +11,7 @@ import {
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "./registry.js";
 
-const REMOTE_FILE_TOKEN_TTL_MS = 5 * 60 * 1000;
+const REMOTE_FILE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const REMOTE_FILE_METADATA_TIMEOUT_MS = 30 * 1000;
 const REMOTE_FILE_UPLOAD_RESPONSE_TIMEOUT_MS = 60 * 1000;
 
