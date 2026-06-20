@@ -34,6 +34,15 @@ type ImagePreviewState = {
   error?: string;
 };
 
+type ImagePreviewSize = {
+  width: number;
+  height: number;
+};
+
+type ImagePreviewNaturalSize = ImagePreviewSize & {
+  src: string;
+};
+
 type ImagePreviewContextValue = {
   openImagePreview: (path: string) => void;
 };
@@ -134,16 +143,58 @@ function ImagePreviewDialog({
 }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
+  const [stageSize, setStageSize] = useState<ImagePreviewSize | null>(null);
+  const [naturalSize, setNaturalSize] = useState<ImagePreviewNaturalSize | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const src = state.status === "ready" && state.url ? state.url : "";
   const imageLoaded = src !== "" && loadedSrc === src;
+  const currentNaturalSize = naturalSize?.src === src ? naturalSize : null;
+  const fitScale = getImagePreviewFitScale(stageSize, currentNaturalSize);
   const decodeErrorMessage = decodeError?.src === src ? decodeError.message : "";
   const showDecodeError = state.status === "ready" && decodeErrorMessage !== "";
   const showLoading =
     state.status === "loading" || (state.status === "ready" && !imageLoaded && !showDecodeError);
+  const loadingLabel = state.status === "ready" ? "正在加载图片..." : "正在从开发机读取图片...";
+  const metaText = getImagePreviewMetaText(state, imageLoaded, showDecodeError);
+  const transformKey = `${src}:${fitScale}`;
+  const imageContentStyle = currentNaturalSize
+    ? { width: currentNaturalSize.width, height: currentNaturalSize.height }
+    : undefined;
 
   useEffect(() => {
     setLoadedSrc((current) => (current === src ? current : ""));
   }, [src]);
+
+  useEffect(() => {
+    if (!open) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const measure = () => {
+      const rect = stage.getBoundingClientRect();
+      setStageSize((current) => {
+        const next = { width: rect.width, height: rect.height };
+        if (
+          current &&
+          Math.abs(current.width - next.width) < 0.5 &&
+          Math.abs(current.height - next.height) < 0.5
+        ) {
+          return current;
+        }
+        return next;
+      });
+    };
+
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(stage);
+    return () => resizeObserver.disconnect();
+  }, [open, state.status]);
 
   async function copyPath(): Promise<void> {
     try {
@@ -166,33 +217,41 @@ function ImagePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 !rounded-none !border-0 !p-3 sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-5xl sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!p-4"
+        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !p-3 sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!p-4"
         data-slot="image-preview-dialog"
       >
-        <DialogHeader className="pr-8 text-left">
-          <DialogTitle className="text-base">图片预览</DialogTitle>
-          <DialogDescription className="truncate font-mono text-xs" title={state.path}>
+        <DialogHeader className="min-w-0 max-w-full pr-10 text-left">
+          <DialogTitle className="min-w-0 text-base">图片预览</DialogTitle>
+          <DialogDescription
+            className="block min-w-0 max-w-full truncate font-mono text-xs leading-5"
+            title={state.path}
+          >
             {state.path || "等待图片路径"}
           </DialogDescription>
         </DialogHeader>
 
         <div
-          className="dev-image-preview-stage relative flex min-h-[18rem] min-w-0 items-center justify-center overflow-hidden rounded-md border border-border/70 max-sm:min-h-0"
+          className="dev-image-preview-stage relative flex min-h-[18rem] w-full min-w-0 max-w-full items-center justify-center overflow-hidden rounded-md border border-border/70 max-sm:min-h-0"
           data-slot="image-preview-stage"
           aria-busy={showLoading}
+          ref={stageRef}
         >
-          {showLoading && <ImagePreviewLoading dimmed={state.status === "ready"} />}
+          {showLoading && (
+            <ImagePreviewLoading dimmed={state.status === "ready"} label={loadingLabel} />
+          )}
           {state.status === "error" && <ImagePreviewError error={state.error ?? "图片预览失败"} />}
           {showDecodeError && <ImagePreviewError error={decodeErrorMessage} />}
           {state.status === "ready" && !showDecodeError && (
             // wheel / pinch / drag 一起承担缩放 + 平移; doubleClick reset 回 fit。
-            // wrapper 撑满 stage, content 内 img 保持 max-w/h + object-contain, 在
-            // initialScale=1 时即"fit-to-window", 用户上滚 / 双指捏开 / 双击放大都自然过渡。
+            // 初始 scale 按图片自然尺寸和 stage 尺寸计算，避免移动端宽图以 1:1
+            // 内容尺寸进入 transform 后被裁切且无法横向移动。
             <TransformWrapper
-              key={src}
-              minScale={1}
+              key={transformKey}
+              initialScale={fitScale}
+              minScale={fitScale}
               maxScale={8}
               centerOnInit
+              centerZoomedOut
               limitToBounds
               wheel={{ step: 0.15 }}
               pinch={{ step: 5 }}
@@ -200,16 +259,22 @@ function ImagePreviewDialog({
             >
               <TransformComponent
                 wrapperClass="!h-full !w-full"
-                contentClass="!h-full !w-full flex items-center justify-center"
+                contentClass="flex items-center justify-center"
+                contentStyle={imageContentStyle}
               >
                 <img
                   src={src}
                   alt={state.path}
-                  className="relative z-10 max-h-full max-w-full translate-y-1 object-contain opacity-0 transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] data-[loaded=true]:translate-y-0 data-[loaded=true]:opacity-100 motion-reduce:transition-none"
+                  className="relative z-10 block h-auto max-h-none max-w-none translate-y-1 object-contain opacity-0 transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] data-[loaded=true]:translate-y-0 data-[loaded=true]:opacity-100 motion-reduce:transition-none"
                   data-slot="image-preview-img"
                   data-loaded={imageLoaded ? "true" : "false"}
                   draggable={false}
                   onLoad={(event) => {
+                    setNaturalSize({
+                      src,
+                      width: event.currentTarget.naturalWidth,
+                      height: event.currentTarget.naturalHeight,
+                    });
                     event.currentTarget.dataset.loaded = "true";
                     setLoadedSrc(src);
                   }}
@@ -225,18 +290,15 @@ function ImagePreviewDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2">
+        <div
+          className="flex min-w-0 max-w-full items-center justify-between gap-2 overflow-hidden"
+          data-slot="image-preview-footer"
+        >
           <span
             className="min-w-0 truncate text-xs text-muted-foreground"
             data-slot="image-preview-meta"
           >
-            {state.status === "ready" && state.size !== undefined
-              ? formatBytes(state.size)
-              : state.status === "ready"
-                ? "图片已加载"
-                : state.status === "loading"
-                  ? "正在从开发机读取图片..."
-                  : " "}
+            {metaText}
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <Button
@@ -249,7 +311,13 @@ function ImagePreviewDialog({
               <Download aria-hidden="true" />
               下载
             </Button>
-            <Button variant="outline" size="sm" onClick={copyPath} disabled={!state.path}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copyPath}
+              disabled={!state.path}
+              data-slot="image-preview-copy-path"
+            >
               <Copy aria-hidden="true" />
               复制路径
             </Button>
@@ -260,7 +328,7 @@ function ImagePreviewDialog({
   );
 }
 
-function ImagePreviewLoading({ dimmed = false }: { dimmed?: boolean }) {
+function ImagePreviewLoading({ dimmed = false, label }: { dimmed?: boolean; label: string }) {
   return (
     <div
       className={cn(
@@ -278,7 +346,7 @@ function ImagePreviewLoading({ dimmed = false }: { dimmed?: boolean }) {
         <div className="h-2 w-44 rounded-full bg-muted-foreground/20">
           <div className="dev-image-preview-shimmer h-full w-full rounded-full bg-primary/20" />
         </div>
-        <span className="text-xs text-muted-foreground">正在从开发机读取图片...</span>
+        <span className="text-xs text-muted-foreground">{label}</span>
       </div>
     </div>
   );
@@ -297,4 +365,38 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getImagePreviewMetaText(
+  state: ImagePreviewState,
+  imageLoaded: boolean,
+  showDecodeError: boolean,
+): string {
+  if (state.status === "loading") return "正在从开发机读取图片...";
+  if (state.status !== "ready" || showDecodeError) return " ";
+  if (!imageLoaded) return "正在加载图片...";
+  if (state.size !== undefined) return `${formatBytes(state.size)} · 图片已加载`;
+  return "图片已加载";
+}
+
+function getImagePreviewFitScale(
+  stageSize: ImagePreviewSize | null,
+  naturalSize: ImagePreviewSize | null,
+): number {
+  if (
+    !stageSize ||
+    !naturalSize ||
+    stageSize.width <= 0 ||
+    stageSize.height <= 0 ||
+    naturalSize.width <= 0 ||
+    naturalSize.height <= 0
+  ) {
+    return 1;
+  }
+  const scale = Math.min(
+    1,
+    stageSize.width / naturalSize.width,
+    stageSize.height / naturalSize.height,
+  );
+  return Math.max(0.01, Number(scale.toFixed(4)));
 }

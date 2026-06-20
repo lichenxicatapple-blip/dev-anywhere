@@ -65,6 +65,25 @@ declare global {
 // 安装一个协议级 Fake Relay。它不是 mock 组件树，而是在浏览器 WebSocket 层模拟
 // relay/proxy 的真实控制消息，让测试像用户一样点 UI，同时避免依赖本机真实 CLI。
 export async function installFakeRelay(page: Page): Promise<void> {
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        auth: { clientTokenRequired: false },
+      }),
+    });
+  });
+
+  await page.route("**/api/auth/client", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+
   await page.route("**/api/remote-uploads/*", async (route) => {
     const url = new URL(route.request().url());
     const sessionId = url.searchParams.get("sessionId") ?? "unknown-session";

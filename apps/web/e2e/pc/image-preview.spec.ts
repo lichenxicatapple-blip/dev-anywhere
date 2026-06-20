@@ -32,6 +32,40 @@ async function closePreview(page: Page): Promise<void> {
   await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeHidden();
 }
 
+async function setWideImagePreviewData(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2400;
+    canvas.height = 320;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("2d canvas unavailable");
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#2563eb";
+    ctx.fillRect(0, 0, canvas.width, 48);
+    ctx.fillStyle = "#111827";
+    ctx.font = "64px sans-serif";
+    ctx.fillText("wide preview fixture", 64, 190);
+    const base64 = canvas.toDataURL("image/png").split(",")[1];
+    if (!base64) throw new Error("canvas export failed");
+    window.__devAnywhereE2E?.setImagePreviewDataBase64(base64);
+  });
+}
+
+async function expectInside(outer: Locator, inner: Locator, label: string): Promise<void> {
+  const [outerBox, innerBox] = await Promise.all([outer.boundingBox(), inner.boundingBox()]);
+  expect(outerBox, `${label} outer box`).not.toBeNull();
+  expect(innerBox, `${label} inner box`).not.toBeNull();
+  expect(innerBox!.x, `${label} left`).toBeGreaterThanOrEqual(outerBox!.x - 1);
+  expect(innerBox!.y, `${label} top`).toBeGreaterThanOrEqual(outerBox!.y - 1);
+  expect(innerBox!.x + innerBox!.width, `${label} right`).toBeLessThanOrEqual(
+    outerBox!.x + outerBox!.width + 1,
+  );
+  expect(innerBox!.y + innerBox!.height, `${label} bottom`).toBeLessThanOrEqual(
+    outerBox!.y + outerBox!.height + 1,
+  );
+}
+
 async function waitForTransformToSettle(transform: Locator): Promise<void> {
   await expect
     .poll(
@@ -54,6 +88,10 @@ async function waitForTransformToSettle(transform: Locator): Promise<void> {
       { timeout: 2_000 },
     )
     .toBe(true);
+}
+
+async function getTransformScale(transform: Locator): Promise<number> {
+  return transform.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a);
 }
 
 async function dragUntilTransformChanges(
@@ -102,6 +140,42 @@ test.describe("image preview", () => {
       await expectPreviewReady(page, path);
     });
 
+    test("keeps long image paths and footer actions inside the desktop dialog", async ({
+      page,
+    }) => {
+      const path =
+        "/Users/catli/MyApps/dev-anywhere/.dev-anywhere/clipboard/test-sess/a-very-long-directory-name/another-very-long-directory-name/third-very-long-directory-name/fourth-very-long-directory-name/fifth-very-long-directory-name/paste-ZLC5zm.png";
+      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await page.evaluate(() => window.__devAnywhereE2E?.setImagePreviewDelay(250));
+
+      await openJsonPreview(page, path);
+
+      const dialog = page.locator('[data-slot="image-preview-dialog"]');
+      await expect(dialog).toBeVisible();
+      await expect(page.locator('[data-slot="image-preview-loading"]')).toContainText(
+        "正在从开发机读取图片",
+      );
+      await expect(page.locator('[data-slot="image-preview-meta"]')).toHaveText(
+        "正在从开发机读取图片...",
+      );
+
+      await expectInside(dialog, page.locator('[data-slot="image-preview-stage"]'), "stage");
+      await expectInside(dialog, page.locator('[data-slot="image-preview-footer"]'), "footer");
+      await expectInside(
+        dialog,
+        page.locator('[data-slot="image-preview-download"]'),
+        "download button",
+      );
+      await expectInside(
+        dialog,
+        page.locator('[data-slot="image-preview-copy-path"]'),
+        "copy path button",
+      );
+
+      await expectPreviewReady(page, path);
+      await expect(page.locator('[data-slot="image-preview-meta"]')).toHaveText("图片已加载");
+    });
+
     test("shows an explicit error when the browser cannot decode the image", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/broken.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
@@ -119,6 +193,7 @@ test.describe("image preview", () => {
     test("wheel zooms, mouse drag pans, and double-click resets transform", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/zoom.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await setWideImagePreviewData(page);
       await openJsonPreview(page, path);
       await expectPreviewReady(page, path);
 
@@ -132,14 +207,13 @@ test.describe("image preview", () => {
       expect(stageBox).not.toBeNull();
       const cx = stageBox!.x + stageBox!.width / 2;
       const cy = stageBox!.y + stageBox!.height / 2;
+      const initialScale = await getTransformScale(transform);
 
-      // hover 在中心后 wheel up, 让 scale 走出 1 (cursor-anchored 缩放)。
+      // hover 在中心后 wheel up, 让 scale 走出初始 fit scale (cursor-anchored 缩放)。
       // 不打到 max scale, 否则后续拖拽可能落在边界上不改变 transform。
       await page.mouse.move(cx, cy);
-      await page.mouse.wheel(0, -20);
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
+      await page.mouse.wheel(0, -120);
+      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(initialScale);
       await waitForTransformToSettle(transform);
       const beforePan = await transform.evaluate((el) => getComputedStyle(el).transform);
 
@@ -158,9 +232,7 @@ test.describe("image preview", () => {
         },
         { x: cx, y: cy },
       );
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale, 3);
     });
 
     test("PTY mode links image paths from terminal output after CJK text", async ({ page }) => {
@@ -220,6 +292,7 @@ test.describe("image preview", () => {
       expect(stageBox).not.toBeNull();
       const cx = stageBox!.x + stageBox!.width / 2;
       const cy = stageBox!.y + stageBox!.height / 2;
+      const initialScale = await getTransformScale(transform);
 
       // Playwright touchscreen 只支持单指 tap; 两指 pinch 走 CDP Input.dispatchTouchEvent。
       // 两指从中心向两侧滑开几步, 模拟"捏开"; lib 的 onTouchPanning 在 touches.length===2
@@ -238,9 +311,7 @@ test.describe("image preview", () => {
       }
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .not.toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
+      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(initialScale);
       await waitForTransformToSettle(transform);
 
       // 双击 reset 复用桌面同思路, 直接 dispatch dblclick 不依赖 hit testing。
@@ -254,9 +325,7 @@ test.describe("image preview", () => {
         },
         { x: cx, y: cy },
       );
-      await expect
-        .poll(() => transform.evaluate((el) => getComputedStyle(el).transform))
-        .toMatch(/^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/);
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale, 3);
     });
 
     test("uses the full viewport instead of a cramped modal", async ({ page }) => {
@@ -273,6 +342,41 @@ test.describe("image preview", () => {
       expect(box!.y).toBeLessThanOrEqual(1);
       expect(box!.width).toBeGreaterThanOrEqual(388);
       expect(box!.height).toBeGreaterThanOrEqual(840);
+    });
+
+    test("fits a very wide image inside the mobile viewport on first render", async ({ page }) => {
+      const path = "./screenshots/wide-mobile-preview.png";
+      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await setWideImagePreviewData(page);
+
+      await openJsonPreview(page, path);
+      await expectPreviewReady(page, path);
+
+      const stageBox = await page.locator('[data-slot="image-preview-stage"]').boundingBox();
+      expect(stageBox).not.toBeNull();
+      const naturalWidth = await page
+        .locator('[data-slot="image-preview-img"]')
+        .evaluate((el) => (el as HTMLImageElement).naturalWidth);
+      expect(naturalWidth).toBeGreaterThan(stageBox!.width * 2);
+      await expect
+        .poll(() =>
+          page
+            .locator('[data-slot="image-preview-stage"] .react-transform-component')
+            .evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a),
+        )
+        .toBeLessThan(1);
+      const transformBox = await page
+        .locator('[data-slot="image-preview-stage"] .react-transform-component')
+        .boundingBox();
+      const imgBox = await page.locator('[data-slot="image-preview-img"]').boundingBox();
+      expect(transformBox).not.toBeNull();
+      expect(imgBox).not.toBeNull();
+      expect(transformBox!.x).toBeGreaterThanOrEqual(stageBox!.x - 1);
+      expect(transformBox!.x + transformBox!.width).toBeLessThanOrEqual(
+        stageBox!.x + stageBox!.width + 1,
+      );
+      expect(imgBox!.x).toBeGreaterThanOrEqual(stageBox!.x - 1);
+      expect(imgBox!.x + imgBox!.width).toBeLessThanOrEqual(stageBox!.x + stageBox!.width + 1);
     });
   });
 });
