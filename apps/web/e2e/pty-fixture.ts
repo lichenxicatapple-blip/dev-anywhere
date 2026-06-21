@@ -13,6 +13,25 @@ export type PtyFakeRelayOptions = {
 const PTY_FAKE_RELAY_ACTIVE_KEY = "__dev_anywhere_pty_fake_relay_active";
 
 export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptions): Promise<void> {
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "ok",
+        auth: { clientTokenRequired: false },
+      }),
+    });
+  });
+
+  await page.route("**/api/auth/client", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+
   await page
     .evaluate(
       ({ key, sessionId, provider }) => {
@@ -309,10 +328,14 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
   }
   const query = options.query ?? "";
   const baseUrl = options.baseUrl ?? BASE_URL;
-  const url = `${baseUrl}/#/chat/${options.sessionId}?mode=pty${query}`;
+  let navNonce = 0;
+  const url = () => {
+    navNonce += 1;
+    return `${baseUrl}/?ptyFakeRelay=${Date.now()}-${navNonce}#/chat/${options.sessionId}?mode=pty${query}`;
+  };
   await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
-  await page.goto(url);
+  await page.goto(url());
   await resetLocalState(page);
   await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
-  await page.goto(url);
+  await page.goto(url());
 }

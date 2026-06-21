@@ -234,7 +234,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const softKeyboardOpenOrUnknown = !hasSeenSoftKeyboard || keyboardOffset > 0;
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
-  const { ptyInputFocused, suppressPtyFocus, handleFocusCapture, handleBlurCapture } = focus;
+  const {
+    ptyInputFocused,
+    suppressPtyFocus,
+    focusPtyInput,
+    handleFocusCapture,
+    handleBlurCapture,
+  } = focus;
   const showMobilePtyControls =
     softKeyboardEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
   softKeyboardLayoutActiveRef.current =
@@ -407,6 +413,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
+    focusPtyInput,
     onTap: handlePtyTap,
     isTapCandidate: isPtyTapCandidate,
     onDownloadPath: downloadPtyPath,

@@ -64,7 +64,8 @@ interface UsePtySelectionControllerOptions {
   scrollState: { scrollLeft: number; scrollTop: number };
   keyboardOffset: number;
   ptyFontSize: number;
-  suppressPtyFocus: () => void;
+  suppressPtyFocus: (options?: { blur?: boolean }) => void;
+  focusPtyInput: () => void;
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
   onDownloadPath: (path: string) => void;
@@ -118,6 +119,7 @@ export function usePtySelectionController(
     keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
+    focusPtyInput,
     onTap,
     isTapCandidate,
     onDownloadPath,
@@ -250,11 +252,12 @@ export function usePtySelectionController(
     ({ clientX, clientY }: { clientX: number; clientY: number }): void => {
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
+      suppressPtyFocus({ blur: false });
       selectionLongPressClientStartRef.current = { clientX, clientY };
       selectionLongPressCandidateRef.current =
         terminal && host ? getTerminalPointAtClient({ terminal, host, clientX, clientY }) : null;
     },
-    [terminalRef, xtermHostRef],
+    [suppressPtyFocus, terminalRef, xtermHostRef],
   );
 
   const applyPtySelectionRange = useCallback(
@@ -663,6 +666,7 @@ export function usePtySelectionController(
     terminalRef,
     containerEl,
     suppressPtyFocus,
+    focusPtyInput,
     isSelectionActive,
     onTap,
     isTapCandidate,

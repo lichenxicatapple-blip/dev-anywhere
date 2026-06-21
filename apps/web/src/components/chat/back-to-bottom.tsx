@@ -25,7 +25,7 @@ export function BackToBottom({ visible, hasNewMessages, onClick, className }: Ba
       inert={!visible}
       data-slot="back-to-bottom"
       className={cn(
-        "dev-chat-rail-floating-right absolute bottom-4 rounded-full shadow-md z-20",
+        "dev-chat-rail-floating-right absolute top-4 rounded-full shadow-md z-20",
         "transition-opacity duration-150 ease-out motion-reduce:transition-none",
         visible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         className,

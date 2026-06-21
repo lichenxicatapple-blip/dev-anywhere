@@ -31,4 +31,25 @@ describe("usePtyFocusState", () => {
     expect(blur).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(input);
   });
+
+  it("can explicitly focus the PTY input after a temporary suppression guard", () => {
+    const container = document.createElement("div");
+    const host = document.createElement("div");
+    container.append(host);
+    document.body.append(container);
+    const terminalFocus = vi.fn();
+
+    const { result } = renderHook(() =>
+      usePtyFocusState({
+        containerEl: container,
+        xtermHostRef: { current: host },
+        terminalRef: { current: { focus: terminalFocus } as unknown as Terminal },
+      }),
+    );
+
+    result.current.suppressPtyFocus({ blur: false });
+    result.current.focusPtyInput();
+
+    expect(terminalFocus).toHaveBeenCalledTimes(1);
+  });
 });

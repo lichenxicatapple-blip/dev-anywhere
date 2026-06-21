@@ -30,7 +30,8 @@ interface PointerHandlers {
 interface UsePtySelectionGestureDriverOptions {
   terminalRef: RefObject<Terminal | null>;
   containerEl: HTMLDivElement | null;
-  suppressPtyFocus: () => void;
+  suppressPtyFocus: (options?: { blur?: boolean }) => void;
+  focusPtyInput?: () => void;
   isSelectionActive: () => boolean;
   onTap?: (point: PtySelectionClientPoint) => boolean;
   isTapCandidate?: (point: PtySelectionClientPoint) => boolean;
@@ -62,6 +63,7 @@ export function usePtySelectionGestureDriver({
   terminalRef,
   containerEl,
   suppressPtyFocus,
+  focusPtyInput,
   isSelectionActive,
   onTap,
   isTapCandidate,
@@ -186,6 +188,7 @@ export function usePtySelectionGestureDriver({
   const pointerHandlers = usePtyTouchGesture({
     terminalRef,
     suppressPtyFocus,
+    focusTerminal: focusPtyInput,
     onTap,
     isTapCandidate,
     onLongPressCandidateStart,

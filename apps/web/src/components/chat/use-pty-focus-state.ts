@@ -17,6 +17,7 @@ interface PtyFocusState {
   ptyInputFocused: boolean;
   // 进入抑制窗口：blur 当前焦点元素并屏蔽该时间窗内的所有 focus 重入。
   suppressPtyFocus: (options?: { blur?: boolean }) => void;
+  focusPtyInput: () => void;
   // 直接挂到容器上的 onFocusCapture / onBlurCapture
   handleFocusCapture: (event: FocusEvent<HTMLDivElement>) => void;
   handleBlurCapture: () => void;
@@ -74,13 +75,16 @@ export function usePtyFocusState(options: UsePtyFocusStateOptions): PtyFocusStat
     window.setTimeout(syncPtyInputFocus, 0);
   }, [syncPtyInputFocus]);
 
-  // terminalRef 暴露给调用方仅作为隐含依赖：一些消费者（如 touch gesture）需要在 suppressPtyFocus
-  // 之外的路径直接操作 terminal.focus()，hook 自身不直接用它。
-  void terminalRef;
+  const focusPtyInput = useCallback((): void => {
+    suppressPtyFocusUntilRef.current = 0;
+    terminalRef.current?.focus();
+    window.setTimeout(syncPtyInputFocus, 0);
+  }, [syncPtyInputFocus, terminalRef]);
 
   return {
     ptyInputFocused,
     suppressPtyFocus,
+    focusPtyInput,
     handleFocusCapture,
     handleBlurCapture,
   };

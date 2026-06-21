@@ -10,7 +10,6 @@ import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import type { SessionProvider } from "@/lib/session-provider";
 import { BackToBottom } from "./back-to-bottom";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
-import { getPtyBackToBottomClassName } from "./pty-back-to-bottom-layout";
 import { PtyMobileControls } from "./pty-mobile-controls";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 import { usePtyView } from "./use-pty-view";
@@ -97,11 +96,7 @@ export function ChatPtyView({
       <BackToBottom
         visible={!view.isAtBottom}
         hasNewMessages={view.hasNewFramesWhileAway}
-        className={getPtyBackToBottomClassName({
-          showMobilePtyControls: view.showMobilePtyControls,
-          touchEditingSurface: view.touchEditingSurface,
-          horizontalScrollable: view.scrollState.horizontalScrollable,
-        })}
+        className="top-10"
         onClick={() => {
           // 用户明示动作: 压过 intent (即便用户在回看, 点这个按钮就是要退出回看)。
           view.scrollToBottom("backToBottomBtn", { force: true });

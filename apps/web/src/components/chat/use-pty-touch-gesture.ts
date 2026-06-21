@@ -62,7 +62,8 @@ function recordTouchGestureDebug(event: string, details: Record<string, unknown>
 
 interface UsePtyTouchGestureOptions {
   terminalRef: RefObject<Terminal | null>;
-  suppressPtyFocus: () => void;
+  suppressPtyFocus: (options?: { blur?: boolean }) => void;
+  focusTerminal?: () => void;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
@@ -74,6 +75,7 @@ interface UsePtyTouchGestureOptions {
 export function usePtyTouchGesture({
   terminalRef,
   suppressPtyFocus,
+  focusTerminal,
   onLongPressCandidateStart,
   onTap,
   isTapCandidate,
@@ -295,7 +297,8 @@ export function usePtyTouchGesture({
         });
         return result;
       }
-      terminalRef.current?.focus();
+      if (focusTerminal) focusTerminal();
+      else terminalRef.current?.focus();
       result = "tap";
       recordTouchGestureDebug("finish", {
         pointerId,
@@ -307,7 +310,15 @@ export function usePtyTouchGesture({
       });
       return result;
     },
-    [clearLongPressTimer, deliverLongPress, onTap, startLongPress, suppressPtyFocus, terminalRef],
+    [
+      clearLongPressTimer,
+      deliverLongPress,
+      focusTerminal,
+      onTap,
+      startLongPress,
+      suppressPtyFocus,
+      terminalRef,
+    ],
   );
 
   const cancelGesture = useCallback(

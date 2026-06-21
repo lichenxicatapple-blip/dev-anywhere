@@ -38,6 +38,7 @@ function dispatchTouch(
 
 function Harness({
   focus,
+  focusTerminal,
   suppress,
   onLongPressCandidateStart,
   onTap,
@@ -47,7 +48,8 @@ function Harness({
   onLongPressEnd,
 }: {
   focus: () => void;
-  suppress: () => void;
+  focusTerminal?: () => void;
+  suppress: (options?: { blur?: boolean }) => void;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
@@ -59,6 +61,7 @@ function Harness({
   const handlers = usePtyTouchGesture({
     terminalRef,
     suppressPtyFocus: suppress,
+    focusTerminal,
     onLongPressCandidateStart,
     onTap,
     isTapCandidate,
@@ -103,6 +106,39 @@ describe("usePtyTouchGesture", () => {
 
     expect(onLongPressCandidateStart).toHaveBeenCalledWith({ clientX: 100, clientY: 100 });
     expect(onLongPressStart).not.toHaveBeenCalled();
+  });
+
+  it("lets callers guard touch-start focus and restore focus only for confirmed taps", () => {
+    const focus = vi.fn();
+    const focusTerminal = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressCandidateStart = vi.fn(() => suppress({ blur: false }));
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        focusTerminal={focusTerminal}
+        suppress={suppress}
+        onLongPressCandidateStart={onLongPressCandidateStart}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchPointer("pointerdown", xterm, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    dispatchPointer("pointerup", xterm, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(suppress).toHaveBeenCalledWith({ blur: false });
+    expect(focusTerminal).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
   });
 
   it("defers focus suppression until the touch scroll gesture ends", () => {

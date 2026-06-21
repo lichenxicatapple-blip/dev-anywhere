@@ -665,6 +665,78 @@ test.describe("L4 mobile / PTY long press copy", () => {
     expect(dotBox.width).toBeLessThanOrEqual(13);
   });
 
+  test("long press opens selection without focusing the PTY input", async ({ emuPage }) => {
+    const sessionId = `${SESSION_ID}-longpress-no-focus`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty("focus guard alpha beta gamma\r\n");
+    });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("focus guard alpha beta gamma");
+
+    const input = emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+    await expect(input).not.toBeFocused();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() =>
+          Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        ),
+      )
+      .toBe(0);
+
+    const box = await emuPage.locator('[data-slot="pty-host"] .xterm-screen').boundingBox();
+    if (!box) throw new Error("xterm screen missing");
+    const target = await emuPage.evaluate((sid) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!term || !screen) return null;
+      const buffer = term.buffer.active;
+      for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+        const text = buffer.getLine(row)?.translateToString(true) ?? "";
+        const column = text.indexOf("alpha");
+        if (column >= 0) {
+          return {
+            rowInViewport: row - buffer.viewportY,
+            column: column + 1,
+            cellWidth: screen.clientWidth / term.cols,
+            cellHeight: screen.clientHeight / term.rows,
+          };
+        }
+      }
+      return null;
+    }, sessionId);
+    if (!target) throw new Error("focus guard target is not visible");
+
+    await longPress(emuPage, {
+      x: box.x + (target.column + 0.5) * target.cellWidth,
+      y: box.y + (target.rowInViewport + 0.5) * target.cellHeight,
+    });
+
+    await expect(emuPage.getByRole("button", { name: "复制终端选区" })).toBeVisible();
+    await expect(input).not.toBeFocused();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() => ({
+          activeIsPtyInput: document.activeElement?.getAttribute("aria-label") === "Terminal input",
+          keyboardOffset: Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        })),
+      )
+      .toEqual({ activeIsPtyInput: false, keyboardOffset: 0 });
+  });
+
   test("long press on a file link selects the whole link and downloads from the toolbar", async ({
     emuPage,
   }) => {
