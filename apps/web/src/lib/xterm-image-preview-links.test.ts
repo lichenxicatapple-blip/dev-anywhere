@@ -37,6 +37,16 @@ describe("xterm image preview links", () => {
     ]);
   });
 
+  it("keeps a leading home shortcut inside the terminal link range", () => {
+    expect(findImagePreviewPathMatches("open ~/MyApps/project/comparison.jpg")).toEqual([
+      {
+        path: "~/MyApps/project/comparison.jpg",
+        startColumn: 6,
+        endColumn: 36,
+      },
+    ]);
+  });
+
   function provideAndActivate(
     onPreview: (path: string) => void,
     event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } & Partial<

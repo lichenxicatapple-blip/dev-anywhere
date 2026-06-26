@@ -12,7 +12,7 @@ import { isScpLikeRemotePath } from "./scp-like-remote";
 // 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 防止中文文本里夹杂 ASCII
 // 触发起点后 greedy 扩展把整段中文框成 link。
 const FILE_PATH_RE =
-  /(?<![A-Za-z0-9@:/.-])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
+  /(?<![A-Za-z0-9@:/.-])@?(?:~\/|[A-Za-z0-9_./])[A-Za-z0-9_./~%+,:=#-]*\.[A-Za-z0-9]{1,8}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
 const DOMAIN_TLD_RE =

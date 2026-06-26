@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { extname, isAbsolute, resolve } from "node:path";
 
 const EXT_MIME_MAP: Record<string, string> = {
@@ -36,6 +37,8 @@ export function guessMimeType(filePath: string): string {
 }
 
 export function resolveRemoteFilePath(rawPath: string, cwd: string): string {
-  const candidate = isAbsolute(rawPath) ? resolve(rawPath) : resolve(cwd, rawPath);
+  const expandedPath =
+    rawPath === "~" || rawPath.startsWith("~/") ? resolve(homedir(), rawPath.slice(2)) : rawPath;
+  const candidate = isAbsolute(expandedPath) ? resolve(expandedPath) : resolve(cwd, expandedPath);
   return realpathSync(candidate);
 }

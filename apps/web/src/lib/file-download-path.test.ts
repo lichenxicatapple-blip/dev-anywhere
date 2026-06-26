@@ -13,6 +13,12 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
+  it("keeps shell-style home paths intact instead of matching from the slash", () => {
+    expect(extractFileDownloadPaths("download ~/MyApps/project/out.tar.gz")).toEqual([
+      "~/MyApps/project/out.tar.gz",
+    ]);
+  });
+
   it("strips leading @ and trailing punctuation like image-preview-path", () => {
     expect(extractFileDownloadPaths("attached @/tmp/log.txt, see")).toEqual(["/tmp/log.txt"]);
     expect(extractFileDownloadPaths("read /var/data/notes.md.")).toEqual(["/var/data/notes.md"]);

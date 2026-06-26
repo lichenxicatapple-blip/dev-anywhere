@@ -24,6 +24,12 @@ describe("image preview path detection", () => {
     ]);
   });
 
+  it("keeps shell-style home paths intact instead of matching from the slash", () => {
+    expect(extractImagePreviewPaths("open ~/MyApps/project/comparison.jpg")).toEqual([
+      "~/MyApps/project/comparison.jpg",
+    ]);
+  });
+
   it("rejects version-shaped tokens even with image-looking suffix", () => {
     // `.0` 可以是合法扩展但 stem `5` 长度 1 -> reject
     expect(isImagePreviewPath("5.0")).toBe(false);
@@ -41,6 +47,7 @@ describe("image preview path detection", () => {
     expect(isImagePreviewPath("/a.png")).toBe(true);
     expect(isImagePreviewPath("./a.png")).toBe(true);
     expect(isImagePreviewPath("../a.png")).toBe(true);
+    expect(isImagePreviewPath("~/a.png")).toBe(true);
     expect(isImagePreviewPath(".dev-anywhere/x.png")).toBe(true);
   });
 

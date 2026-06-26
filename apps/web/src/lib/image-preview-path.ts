@@ -8,7 +8,7 @@ import { isScpLikeRemotePath } from "./scp-like-remote";
 // 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 否则
 // "中文@./...png" lazy 扩展会从中文 ASCII (logo) 起点啃到尾部 .png, 把整段框成 link。
 const IMAGE_PATH_RE =
-  /(?<![A-Za-z0-9@:/.-])@?[A-Za-z0-9_./][A-Za-z0-9_./~%+,:=#-]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/gi;
+  /(?<![A-Za-z0-9@:/.-])@?(?:~\/|[A-Za-z0-9_./])[A-Za-z0-9_./~%+,:=#-]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/gi;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 
 function trimPathToken(value: string): string {
@@ -24,6 +24,7 @@ function isPlausibleFileNameStem(path: string): boolean {
     path.startsWith("/") ||
     path.startsWith("./") ||
     path.startsWith("../") ||
+    path.startsWith("~/") ||
     path.startsWith(".dev-anywhere/")
   ) {
     return true;
