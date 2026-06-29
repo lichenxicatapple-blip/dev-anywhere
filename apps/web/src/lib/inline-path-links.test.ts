@@ -16,9 +16,11 @@ describe("inline path link detection", () => {
     ]);
   });
 
-  it("rejects URLs, version-shaped tokens, and display-truncated paths", () => {
+  it("rejects URLs, version-shaped tokens, display-truncated paths, and bare nested relatives", () => {
     expect(
-      findInlinePathLinks("https://example.com/file.txt Node 22.4.0 apps/web/.../x.test.ts"),
+      findInlinePathLinks(
+        "https://example.com/file.txt Node 22.4.0 apps/web/.../x.test.ts pa_break_analysis/SKILL.md",
+      ),
     ).toEqual([]);
   });
 

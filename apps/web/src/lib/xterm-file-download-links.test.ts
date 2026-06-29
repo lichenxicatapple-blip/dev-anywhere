@@ -24,6 +24,23 @@ describe("xterm file download links", () => {
     expect(matches[0]?.startColumn).toBe(7);
   });
 
+  it("does not link bare nested relative paths from explanatory text", () => {
+    expect(
+      findFileDownloadPathMatches("  - pa_break_analysis/SKILL.md 里的完整路径在哪里"),
+    ).toEqual([]);
+    expect(
+      findFileDownloadPathMatches(
+        "  - /Users/admin/workspace/MaoGe-PTS/python/analyzer/skills/pa_break_analysis/SKILL.md",
+      ),
+    ).toEqual([
+      {
+        path: "/Users/admin/workspace/MaoGe-PTS/python/analyzer/skills/pa_break_analysis/SKILL.md",
+        startColumn: 5,
+        endColumn: 86,
+      },
+    ]);
+  });
+
   function provideAndActivate(
     onDownload: (path: string) => void,
     event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } = {},
