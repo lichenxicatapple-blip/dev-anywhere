@@ -26,47 +26,57 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
   const location = useLocation();
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [selectingProxyId, setSelectingProxyId] = useState<string | null>(null);
 
   async function handleSelect(proxyId: string, proxyName: string | undefined): Promise<void> {
+    if (selectingProxyId) return;
     const relay = relayClientRef;
     if (!relay) {
       toast.error("请先连接开发机");
       return;
     }
     const displayName = proxyName ?? proxyId;
-    const result = await relay.selectProxy(proxyId);
-    if (!result.success) {
-      toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
-      return;
-    }
-    writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
-    useAppStore.getState().setProxy(proxyId, proxyName ?? null);
-    useAppStore.getState().setProxyOnline(true);
-    useAppStore.getState().transitionToPhase("session_browsing");
-    // 绑定成功后刷新会话列表，并用 request-scoped snapshot 拉取历史和 provider 状态。
-    relay.sendControl({ type: "session_list" });
-    void relay
-      .requestAgentStatuses()
-      .then((statuses) => {
-        const store = useSessionStore.getState();
-        for (const status of statuses) {
-          store.setAgentStatus(status.sessionId, status.payload);
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("[proxy-switcher] post-bind data fetch failed", err);
-      });
-    void relay
-      .requestSessionHistory()
-      .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
-      .catch((err: unknown) => {
-        console.error("[proxy-switcher] post-bind data fetch failed", err);
-      });
-    setDropdownOpen(false);
-    if (layout === "page") {
-      navigate("/sessions");
-    } else if (location.pathname.startsWith("/chat/")) {
-      navigate("/sessions");
+    setSelectingProxyId(proxyId);
+    try {
+      const result = await relay.selectProxy(proxyId);
+      if (!result.success) {
+        toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
+        return;
+      }
+      writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
+      useAppStore.getState().setProxy(proxyId, proxyName ?? null);
+      useAppStore.getState().setProxyOnline(true);
+      useAppStore.getState().transitionToPhase("session_browsing");
+      // 绑定成功后刷新会话列表，并用 request-scoped snapshot 拉取历史和 provider 状态。
+      relay.sendControl({ type: "session_list" });
+      void relay
+        .requestAgentStatuses()
+        .then((statuses) => {
+          const store = useSessionStore.getState();
+          for (const status of statuses) {
+            store.setAgentStatus(status.sessionId, status.payload);
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("[proxy-switcher] post-bind data fetch failed", err);
+        });
+      void relay
+        .requestSessionHistory()
+        .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
+        .catch((err: unknown) => {
+          console.error("[proxy-switcher] post-bind data fetch failed", err);
+        });
+      setDropdownOpen(false);
+      if (layout === "page") {
+        navigate("/sessions");
+      } else if (location.pathname.startsWith("/chat/")) {
+        navigate("/sessions");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      toast.error(`无法连接 ${displayName}：${message}`);
+    } finally {
+      setSelectingProxyId(null);
     }
   }
 
@@ -95,30 +105,53 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
           可连接开发机
         </h3>
         <ul role="list" className="flex flex-col gap-2">
-          {proxies.map((p) => (
-            <li key={p.proxyId}>
-              <button
-                type="button"
-                data-slot="proxy-item"
-                data-proxy-id={p.proxyId}
-                data-online={p.online}
-                disabled={!p.online}
-                onClick={() => handleSelect(p.proxyId, p.name)}
-                className="w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border border-border bg-card hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card"
-                aria-pressed={selectedProxyId === p.proxyId}
-                title={!p.online ? "这台开发机离线，暂时无法连接" : undefined}
-              >
-                <ProxyStatusDot status={p.online ? "online" : "offline"} />
-                <span className="text-sm font-normal flex-1 truncate min-w-0">
-                  {p.name ?? p.proxyId}
-                </span>
-                {selectedProxyId === p.proxyId && (
-                  <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
-                )}
-                {!p.online && <span className="text-xs text-muted-foreground shrink-0">离线</span>}
-              </button>
-            </li>
-          ))}
+          {proxies.map((p) => {
+            const isSelectingThis = selectingProxyId === p.proxyId;
+            const isSelectionPending = selectingProxyId !== null;
+            return (
+              <li key={p.proxyId}>
+                <button
+                  type="button"
+                  data-slot="proxy-item"
+                  data-proxy-id={p.proxyId}
+                  data-online={p.online}
+                  data-selecting={isSelectingThis || undefined}
+                  disabled={!p.online || isSelectionPending}
+                  aria-busy={isSelectingThis || undefined}
+                  onClick={() => handleSelect(p.proxyId, p.name)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 h-11 min-h-[44px] rounded-md border bg-card transition-colors text-left disabled:cursor-not-allowed disabled:hover:bg-card",
+                    isSelectingThis
+                      ? "border-primary/40 bg-accent text-accent-foreground"
+                      : "border-border hover:bg-accent",
+                    isSelectionPending && !isSelectingThis ? "opacity-50" : "",
+                    !p.online ? "opacity-50" : "",
+                  )}
+                  aria-pressed={selectedProxyId === p.proxyId}
+                  title={!p.online ? "这台开发机离线，暂时无法连接" : undefined}
+                >
+                  <ProxyStatusDot status={p.online ? "online" : "offline"} />
+                  <span className="text-sm font-normal flex-1 truncate min-w-0">
+                    {p.name ?? p.proxyId}
+                  </span>
+                  {isSelectingThis ? (
+                    <>
+                      <span className="text-xs text-muted-foreground shrink-0">正在连接</span>
+                      <Loader2
+                        className="h-4 w-4 animate-spin text-primary shrink-0"
+                        aria-hidden
+                      />
+                    </>
+                  ) : selectedProxyId === p.proxyId ? (
+                    <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
+                  ) : null}
+                  {!p.online && !isSelectingThis && (
+                    <span className="text-xs text-muted-foreground shrink-0">离线</span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
     );
@@ -163,32 +196,48 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
           <div className="text-xs text-muted-foreground p-2">暂无可连接开发机</div>
         ) : (
           <ul role="list" className="flex flex-col">
-            {proxies.map((p) => (
-              <li key={p.proxyId}>
-                <button
-                  type="button"
-                  data-slot="proxy-item"
-                  data-proxy-id={p.proxyId}
-                  data-online={p.online}
-                  disabled={!p.online}
-                  onClick={() => handleSelect(p.proxyId, p.name)}
-                  className="w-full flex items-center gap-2 px-2 h-9 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-pressed={selectedProxyId === p.proxyId}
-                  title={!p.online ? "这台开发机离线" : undefined}
-                >
-                  <ProxyStatusDot status={p.online ? "online" : "offline"} />
-                  <span className="text-sm font-normal flex-1 truncate min-w-0">
-                    {p.name ?? p.proxyId}
-                  </span>
-                  {selectedProxyId === p.proxyId && (
-                    <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
-                  )}
-                  {!p.online && selectedProxyId !== p.proxyId && (
-                    <span className="text-xs text-muted-foreground shrink-0">离线</span>
-                  )}
-                </button>
-              </li>
-            ))}
+            {proxies.map((p) => {
+              const isSelectingThis = selectingProxyId === p.proxyId;
+              const isSelectionPending = selectingProxyId !== null;
+              return (
+                <li key={p.proxyId}>
+                  <button
+                    type="button"
+                    data-slot="proxy-item"
+                    data-proxy-id={p.proxyId}
+                    data-online={p.online}
+                    data-selecting={isSelectingThis || undefined}
+                    disabled={!p.online || isSelectionPending}
+                    aria-busy={isSelectingThis || undefined}
+                    onClick={() => handleSelect(p.proxyId, p.name)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-2 h-9 rounded-md transition-colors text-left disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      isSelectingThis ? "bg-accent text-accent-foreground" : "hover:bg-accent",
+                      isSelectionPending && !isSelectingThis ? "opacity-50" : "",
+                      !p.online ? "opacity-50" : "",
+                    )}
+                    aria-pressed={selectedProxyId === p.proxyId}
+                    title={!p.online ? "这台开发机离线" : undefined}
+                  >
+                    <ProxyStatusDot status={p.online ? "online" : "offline"} />
+                    <span className="text-sm font-normal flex-1 truncate min-w-0">
+                      {p.name ?? p.proxyId}
+                    </span>
+                    {isSelectingThis ? (
+                      <Loader2
+                        className="h-4 w-4 animate-spin text-primary shrink-0"
+                        aria-label="正在连接"
+                      />
+                    ) : selectedProxyId === p.proxyId ? (
+                      <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
+                    ) : null}
+                    {!p.online && selectedProxyId !== p.proxyId && !isSelectingThis && (
+                      <span className="text-xs text-muted-foreground shrink-0">离线</span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </PopoverContent>

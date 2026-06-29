@@ -49,6 +49,7 @@ declare global {
       releaseConnections(): void;
       setImagePreviewDelay(ms: number): void;
       setImagePreviewDataBase64(value: string): void;
+      setProxySelectDelay(ms: number): void;
       setProxyOnline(online: boolean): void;
       voice: {
         asrSent: FakeVoiceSocketPayload[];
@@ -225,6 +226,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const events: string[] = [];
     let holdConnections = false;
     let proxyOnlineState = true;
+    let proxySelectDelayMs = 0;
     let imagePreviewDelayMs = 0;
     const ptyBuffers = new Map<string, string>();
     const voiceAsrSent: FakeVoiceSocketPayload[] = [];
@@ -458,12 +460,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
             this.emitProxyList(String(msg.requestId ?? ""));
             break;
           case "proxy_select":
-            this.emitJson({
-              type: "proxy_select_response",
-              requestId: msg.requestId,
-              success: true,
-              proxyId: "proxy-1",
-            });
+            setTimeout(() => {
+              this.emitJson({
+                type: "proxy_select_response",
+                requestId: msg.requestId,
+                success: true,
+                proxyId: "proxy-1",
+              });
+            }, proxySelectDelayMs);
             break;
           case "relay_client_list_request":
             this.emitJson({
@@ -959,6 +963,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       setImagePreviewDataBase64(value: string) {
         imagePreviewDataBase64 = value;
+      },
+      setProxySelectDelay(ms: number) {
+        proxySelectDelayMs = Math.max(0, ms);
       },
       setProxyOnline(online: boolean) {
         if (proxyOnlineState === online) return;
