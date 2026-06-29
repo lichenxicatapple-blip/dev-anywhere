@@ -67,16 +67,18 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
-  it("recognizes explicit paths and well-known top-level project filenames", () => {
+  it("recognizes paths and well-known top-level project filenames", () => {
     expect(extractFileDownloadPaths("see README.md")).toEqual(["README.md"]);
     expect(extractFileDownloadPaths("edit package.json next")).toEqual(["package.json"]);
-    expect(extractFileDownloadPaths("docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([]);
+    expect(extractFileDownloadPaths("docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([
+      "docs/superpowers/specs/2026-05-10-spec.md",
+    ]);
     expect(extractFileDownloadPaths("./docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([
       "./docs/superpowers/specs/2026-05-10-spec.md",
     ]);
     expect(
       extractFileDownloadPaths("- pa_break_analysis/SKILL.md 里的完整路径在哪里"),
-    ).toEqual([]);
+    ).toEqual(["pa_break_analysis/SKILL.md"]);
     expect(extractFileDownloadPaths("./pa_break_analysis/SKILL.md 里的完整路径在哪里")).toEqual([
       "./pa_break_analysis/SKILL.md",
     ]);
@@ -94,7 +96,7 @@ describe("file-download-path extraction", () => {
     expect(extractFileDownloadPaths("schema.json without a path signal")).toEqual([]);
     expect(isFileDownloadPath("json.loads")).toBe(false);
     expect(isFileDownloadPath("foo.bar")).toBe(false);
-    expect(isFileDownloadPath("docs/foo.bar")).toBe(false);
+    expect(isFileDownloadPath("docs/foo.bar")).toBe(true);
   });
 
   it("rejects version-number-shaped tokens that incidentally match path syntax", () => {

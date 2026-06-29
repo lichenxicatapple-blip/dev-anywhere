@@ -174,6 +174,9 @@ export class RelayRouter {
       case "latency_relay_proxy_ping":
         this.onRelayProxyLatencyPing(msg);
         return;
+      case "remote_file_metadata_request":
+        this.inputHandlers.onRemoteFileMetadataRequest(msg);
+        return;
       case "remote_file_stream_request":
         this.inputHandlers.onRemoteFileStreamRequest(msg);
         return;

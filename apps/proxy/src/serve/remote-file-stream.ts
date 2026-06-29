@@ -43,6 +43,66 @@ export class RemoteFileStreamManager {
 
   constructor(private readonly deps: RemoteFileStreamManagerDeps) {}
 
+  metadata(msg: ControlMessage<"remote_file_metadata_request">): void {
+    const { requestId, sessionId, path } = msg;
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.sendMetadataResponse({
+        requestId,
+        sessionId,
+        success: false,
+        path,
+        error: "会话不存在",
+        errorCode: ControlErrorCode.SESSION_NOT_FOUND,
+      });
+      serviceLogger.warn({ sessionId, requestId }, "Remote file metadata rejected: session not found");
+      return;
+    }
+
+    try {
+      const resolvedPath = resolveRemoteFilePath(path, session.cwd);
+      const stat = statSync(resolvedPath);
+      if (!stat.isFile()) {
+        this.sendMetadataResponse({
+          requestId,
+          sessionId,
+          success: false,
+          path,
+          error: "路径不是普通文件",
+          errorCode: ControlErrorCode.INVALID_PATH,
+        });
+        return;
+      }
+
+      this.sendMetadataResponse({
+        requestId,
+        sessionId,
+        success: true,
+        path,
+        mimeType: guessMimeType(resolvedPath),
+        size: stat.size,
+        fileName: basename(resolvedPath) || "download",
+      });
+      serviceLogger.info(
+        { sessionId, requestId, path, size: stat.size },
+        "Remote file metadata resolved",
+      );
+    } catch (err) {
+      this.sendMetadataResponse({
+        requestId,
+        sessionId,
+        success: false,
+        path,
+        error: err instanceof Error ? err.message : String(err),
+        errorCode: errorCode(err),
+      });
+      serviceLogger.warn(
+        { sessionId, requestId, path, errorCode: errorCode(err), error: String(err) },
+        "Remote file metadata failed",
+      );
+    }
+  }
+
   start(msg: ControlMessage<"remote_file_stream_request">): void {
     const { streamId, sessionId, path } = msg;
     if (this.activeStreams.has(streamId)) {
@@ -179,6 +239,17 @@ export class RemoteFileStreamManager {
     this.deps.relayConnection.sendRaw(
       serializeControl({
         type: "remote_file_stream_response",
+        ...payload,
+      }),
+    );
+  }
+
+  private sendMetadataResponse(
+    payload: Omit<ControlMessage<"remote_file_metadata_response">, "type">,
+  ): void {
+    this.deps.relayConnection.sendRaw(
+      serializeControl({
+        type: "remote_file_metadata_response",
         ...payload,
       }),
     );

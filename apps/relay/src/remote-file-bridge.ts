@@ -8,6 +8,7 @@ import {
   serializeControl,
   type ControlMessage,
 } from "@dev-anywhere/shared";
+import type { ControlErrorCode as ControlErrorCodeType } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "./registry.js";
 
@@ -26,6 +27,21 @@ interface RemoteFileToken {
   path: string;
   disposition: RemoteFileDisposition;
   expiresAt: number;
+}
+
+type RemoteFileUrlResult =
+  | { success: true; path: string; url: string; expiresAt: number }
+  | { success: false; path: string; error: string; errorCode?: ControlErrorCodeType };
+
+interface PendingUrlMetadata {
+  requestId: string;
+  clientId: string;
+  proxyId: string;
+  sessionId: string;
+  path: string;
+  disposition: RemoteFileDisposition;
+  timer: NodeJS.Timeout;
+  resolve: (result: RemoteFileUrlResult) => void;
 }
 
 interface PendingHttpStream {
@@ -73,8 +89,10 @@ function encodeContentDisposition(disposition: RemoteFileDisposition, fileName: 
 function statusForErrorCode(errorCode?: string): number {
   switch (errorCode) {
     case ControlErrorCode.SESSION_NOT_FOUND:
+    case ControlErrorCode.PATH_NOT_FOUND:
       return 404;
     case ControlErrorCode.INVALID_PATH:
+    case ControlErrorCode.PATH_NOT_DIRECTORY:
       return 400;
     case ControlErrorCode.PATH_ACCESS_DENIED:
       return 403;
@@ -86,6 +104,7 @@ function statusForErrorCode(errorCode?: string): number {
 export class RemoteFileBridge {
   private readonly tokens = new Map<string, RemoteFileToken>();
   private readonly uploadTokens = new Map<string, RemoteFileUploadToken>();
+  private readonly pendingUrlMetadata = new Map<string, PendingUrlMetadata>();
   private readonly pendingStreams = new Map<string, PendingHttpStream>();
   private readonly pendingUploads = new Map<string, PendingHttpUpload>();
 
@@ -97,20 +116,54 @@ export class RemoteFileBridge {
     sessionId: string;
     path: string;
     disposition: RemoteFileDisposition;
-  }): { url: string; expiresAt: number } {
+  }): Promise<RemoteFileUrlResult> {
     this.cleanupExpiredTokens();
-    const token = nanoid(32);
-    const expiresAt = Date.now() + REMOTE_FILE_TOKEN_TTL_MS;
-    this.tokens.set(token, {
-      token,
-      clientId: input.clientId,
-      proxyId: input.proxyId,
-      sessionId: input.sessionId,
-      path: input.path,
-      disposition: input.disposition,
-      expiresAt,
+    const proxyWs = this.deps.registry.getProxy(input.proxyId);
+    if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
+      return Promise.resolve({
+        success: false,
+        path: input.path,
+        error: "当前未连接开发机",
+        errorCode: ControlErrorCode.PROXY_OFFLINE,
+      });
+    }
+
+    const requestId = nanoid(21);
+    return new Promise<RemoteFileUrlResult>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingUrlMetadata.delete(requestId);
+        resolve({
+          success: false,
+          path: input.path,
+          error: "读取文件元数据超时",
+          errorCode: ControlErrorCode.UNKNOWN,
+        });
+      }, REMOTE_FILE_METADATA_TIMEOUT_MS);
+
+      this.pendingUrlMetadata.set(requestId, {
+        requestId,
+        clientId: input.clientId,
+        proxyId: input.proxyId,
+        sessionId: input.sessionId,
+        path: input.path,
+        disposition: input.disposition,
+        timer,
+        resolve,
+      });
+
+      proxyWs.send(
+        serializeControl({
+          type: "remote_file_metadata_request",
+          requestId,
+          sessionId: input.sessionId,
+          path: input.path,
+        }),
+      );
+      this.deps.logger.info(
+        { requestId, proxyId: input.proxyId, sessionId: input.sessionId, path: input.path },
+        "Remote file URL metadata requested",
+      );
     });
-    return { url: `/api/remote-files/${token}`, expiresAt };
   }
 
   createUploadUrl(input: {
@@ -273,6 +326,10 @@ export class RemoteFileBridge {
   handleProxyControl(proxyId: string, msg: ControlMessage<"remote_file_stream_complete">): boolean;
   handleProxyControl(
     proxyId: string,
+    msg: ControlMessage<"remote_file_metadata_response">,
+  ): boolean;
+  handleProxyControl(
+    proxyId: string,
     msg: ControlMessage<"remote_file_upload_stream_response">,
   ): boolean;
   handleProxyControl(
@@ -280,10 +337,15 @@ export class RemoteFileBridge {
     msg:
       | ControlMessage<"remote_file_stream_response">
       | ControlMessage<"remote_file_stream_complete">
+      | ControlMessage<"remote_file_metadata_response">
       | ControlMessage<"remote_file_upload_stream_response">,
   ): boolean {
     if (msg.type === "remote_file_upload_stream_response") {
       return this.handleUploadResponse(proxyId, msg);
+    }
+
+    if (msg.type === "remote_file_metadata_response") {
+      return this.handleUrlMetadataResponse(proxyId, msg);
     }
 
     const pending = this.pendingStreams.get(msg.streamId);
@@ -302,6 +364,64 @@ export class RemoteFileBridge {
     }
 
     this.handleStreamComplete(pending, msg);
+    return true;
+  }
+
+  private issueUrlToken(input: {
+    clientId: string;
+    proxyId: string;
+    sessionId: string;
+    path: string;
+    disposition: RemoteFileDisposition;
+  }): { url: string; expiresAt: number } {
+    const token = nanoid(32);
+    const expiresAt = Date.now() + REMOTE_FILE_TOKEN_TTL_MS;
+    this.tokens.set(token, {
+      token,
+      clientId: input.clientId,
+      proxyId: input.proxyId,
+      sessionId: input.sessionId,
+      path: input.path,
+      disposition: input.disposition,
+      expiresAt,
+    });
+    return { url: `/api/remote-files/${token}`, expiresAt };
+  }
+
+  private handleUrlMetadataResponse(
+    proxyId: string,
+    msg: ControlMessage<"remote_file_metadata_response">,
+  ): boolean {
+    const pending = this.pendingUrlMetadata.get(msg.requestId);
+    if (!pending) return true;
+    if (pending.proxyId !== proxyId) {
+      this.deps.logger.warn(
+        { requestId: msg.requestId, expectedProxyId: pending.proxyId, proxyId },
+        "Remote file metadata ignored: proxy mismatch",
+      );
+      return true;
+    }
+
+    this.pendingUrlMetadata.delete(msg.requestId);
+    clearTimeout(pending.timer);
+
+    if (!msg.success) {
+      pending.resolve({
+        success: false,
+        path: pending.path,
+        error: msg.error ?? "读取文件失败",
+        ...(msg.errorCode ? { errorCode: msg.errorCode } : {}),
+      });
+      return true;
+    }
+
+    const { url, expiresAt } = this.issueUrlToken(pending);
+    pending.resolve({
+      success: true,
+      path: pending.path,
+      url,
+      expiresAt,
+    });
     return true;
   }
 

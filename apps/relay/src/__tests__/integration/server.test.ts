@@ -192,7 +192,7 @@ describe("Relay Server Integration", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessageType(client, "proxy_select_response");
 
-    const urlPromise = waitForMessageType(client, "remote_file_url_response");
+    const metadataRequestPromise = waitForMessageType(proxy, "remote_file_metadata_request");
     client.send(
       JSON.stringify({
         type: "remote_file_url_request",
@@ -203,6 +203,29 @@ describe("Relay Server Integration", () => {
       }),
     );
     const urlRequestedAt = Date.now();
+    const metadataRequest = JSON.parse(await metadataRequestPromise) as {
+      requestId: string;
+      sessionId: string;
+      path: string;
+    };
+    expect(metadataRequest).toMatchObject({
+      sessionId: "s1",
+      path: "build/out.txt",
+    });
+
+    const urlPromise = waitForMessageType(client, "remote_file_url_response");
+    proxy.send(
+      serializeControl({
+        type: "remote_file_metadata_response",
+        requestId: metadataRequest.requestId,
+        sessionId: "s1",
+        success: true,
+        path: "build/out.txt",
+        mimeType: "text/plain",
+        size: 11,
+        fileName: "out.txt",
+      }),
+    );
     const urlResponse = JSON.parse(await urlPromise) as {
       url: string;
       expiresAt: number;
@@ -259,6 +282,87 @@ describe("Relay Server Integration", () => {
     expect(res.headers.get("content-type")).toContain("text/plain");
     expect(res.headers.get("content-disposition")).toContain("attachment");
     expect(await res.text()).toBe("hello world");
+  });
+
+  it("preflights remote file URLs and rejects missing files before issuing a URL", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await waitForMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "session_sync",
+        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+      }),
+    );
+    await waitForCondition(
+      () => relay.registry.getProxyForSession("s1") === "p1",
+      "session not indexed",
+    );
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "client-remote-file-missing",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessageType(client, "proxy_select_response");
+
+    const metadataRequestPromise = waitForMessageType(proxy, "remote_file_metadata_request");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_url_request",
+        requestId: "remote-url-missing",
+        sessionId: "s1",
+        path: "pa_break_analysis/SKILL.md",
+        disposition: "download",
+      }),
+    );
+
+    const metadataRequest = JSON.parse(await metadataRequestPromise) as {
+      requestId: string;
+      sessionId: string;
+      path: string;
+    };
+    expect(metadataRequest).toMatchObject({
+      sessionId: "s1",
+      path: "pa_break_analysis/SKILL.md",
+    });
+
+    const urlPromise = waitForMessageType(client, "remote_file_url_response");
+    proxy.send(
+      serializeControl({
+        type: "remote_file_metadata_response",
+        requestId: metadataRequest.requestId,
+        sessionId: "s1",
+        success: false,
+        path: "pa_break_analysis/SKILL.md",
+        error: "ENOENT: no such file or directory",
+        errorCode: "PATH_NOT_FOUND",
+      }),
+    );
+    const urlResponse = JSON.parse(await urlPromise) as {
+      success: boolean;
+      url?: string;
+      error?: string;
+      errorCode?: string;
+    };
+
+    expect(urlResponse).toMatchObject({
+      type: "remote_file_url_response",
+      requestId: "remote-url-missing",
+      sessionId: "s1",
+      success: false,
+      errorCode: "PATH_NOT_FOUND",
+    });
+    expect(urlResponse.url).toBeUndefined();
   });
 
   it("streams HTTP uploads to proxy binary frames", async () => {

@@ -217,15 +217,19 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .toBe(true);
   });
 
-  test("cmd+click on explicit relative paths and top-level filenames triggers download", async ({
+  test("cmd+click on relative paths and top-level filenames triggers download", async ({
     page,
   }) => {
     await gotoPty(page);
     const paths = [
+      "docs/superpowers/specs/2026-05-10-catos-mvk-tier1-acceptance.md",
       "./docs/superpowers/specs/2026-05-10-catos-mvk-tier1-acceptance.md",
       "README.md",
     ];
-    await emitPtyLine(page, `${paths[0]}: 验收说明\r\n${paths[1]}: 项目说明\r\n`);
+    await emitPtyLine(
+      page,
+      `${paths[0]}: 验收说明\r\n${paths[1]}: 显式路径\r\n${paths[2]}: 项目说明\r\n`,
+    );
     for (const path of paths) {
       await waitForBufferContains(page, path);
 
@@ -247,14 +251,15 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     }
   });
 
-  test("cmd+click ignores bare nested relative file paths", async ({ page }) => {
+  test("cmd+click on a bare nested relative file path asks relay for download", async ({ page }) => {
     await gotoPty(page);
     const path = "pa_break_analysis/SKILL.md";
     await emitPtyLine(page, `  - ${path} 里的完整路径在哪里\r\n`);
     await waitForBufferContains(page, path);
 
     const result = await activate(page, "file-download", path, "meta");
-    expect(result?.triggered).toBe(false);
+    expect(result?.triggered).toBe(true);
+    expect(result?.text).toBe(path);
     await expect
       .poll(async () => {
         const sent = await sentFakeRelayMessages(page);
@@ -265,7 +270,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
             m.disposition === "download",
         );
       })
-      .toBe(false);
+      .toBe(true);
   });
 
   test("hover on any wrapped file path segment underlines every real segment", async ({ page }) => {

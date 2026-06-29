@@ -387,24 +387,47 @@ export function handleClientConnection(
           );
           return;
         }
-        const { url, expiresAt } = remoteFileBridge.createUrl({
-          clientId: clientWs.clientId,
-          proxyId: targetProxyId,
-          sessionId: msg.sessionId,
-          path: msg.path,
-          disposition: msg.disposition,
-        });
-        clientWs.send(
-          serializeControl({
-            type: "remote_file_url_response",
-            requestId: msg.requestId,
+        void remoteFileBridge
+          .createUrl({
+            clientId: clientWs.clientId,
+            proxyId: targetProxyId,
             sessionId: msg.sessionId,
             path: msg.path,
-            success: true,
-            url,
-            expiresAt,
-          }),
-        );
+            disposition: msg.disposition,
+          })
+          .then((result) => {
+            if (clientWs.readyState !== WebSocket.OPEN) return;
+            if (!result.success) {
+              sendRemoteFileUrlFailure(
+                clientWs,
+                msg.requestId,
+                msg.sessionId,
+                result.error,
+                result.errorCode,
+              );
+              return;
+            }
+            clientWs.send(
+              serializeControl({
+                type: "remote_file_url_response",
+                requestId: msg.requestId,
+                sessionId: msg.sessionId,
+                path: result.path,
+                success: true,
+                url: result.url,
+                expiresAt: result.expiresAt,
+              }),
+            );
+          })
+          .catch((err: unknown) => {
+            if (clientWs.readyState !== WebSocket.OPEN) return;
+            sendRemoteFileUrlFailure(
+              clientWs,
+              msg.requestId,
+              msg.sessionId,
+              err instanceof Error ? err.message : String(err),
+            );
+          });
         return;
       }
 

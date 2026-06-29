@@ -212,6 +212,10 @@ export function handleProxyConnection(
         remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
         return;
       }
+      if (proxyWs.proxyId && result.message.type === "remote_file_metadata_response") {
+        remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
+        return;
+      }
       if (proxyWs.proxyId && result.message.type === "remote_file_stream_complete") {
         remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
         return;

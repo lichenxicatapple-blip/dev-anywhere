@@ -180,6 +180,21 @@ const relayControlDefinitions = [
     url: z.string().optional(),
     expiresAt: z.number().int().nonnegative().optional(),
   }),
+  control("remote_file_metadata_request", {
+    ...RequiredRequestIdShape,
+    sessionId: IdSchema,
+    path: z.string().min(1),
+  }),
+  control("remote_file_metadata_response", {
+    ...RequiredRequestIdShape,
+    ...RequestErrorShape,
+    sessionId: IdSchema,
+    path: z.string().optional(),
+    success: z.boolean(),
+    mimeType: z.string().optional(),
+    size: z.number().int().nonnegative().optional(),
+    fileName: z.string().optional(),
+  }),
   control("remote_file_stream_request", {
     streamId: IdSchema,
     sessionId: IdSchema,

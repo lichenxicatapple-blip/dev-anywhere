@@ -24,10 +24,16 @@ describe("xterm file download links", () => {
     expect(matches[0]?.startColumn).toBe(7);
   });
 
-  it("does not link bare nested relative paths from explanatory text", () => {
+  it("links bare nested relative paths as download candidates", () => {
     expect(
       findFileDownloadPathMatches("  - pa_break_analysis/SKILL.md 里的完整路径在哪里"),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        path: "pa_break_analysis/SKILL.md",
+        startColumn: 5,
+        endColumn: 30,
+      },
+    ]);
     expect(
       findFileDownloadPathMatches(
         "  - /Users/admin/workspace/MaoGe-PTS/python/analyzer/skills/pa_break_analysis/SKILL.md",

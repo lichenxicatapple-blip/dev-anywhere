@@ -119,6 +119,10 @@ export class RelayInputHandlers {
     this.deps.remoteFileStreamManager.start(msg);
   }
 
+  onRemoteFileMetadataRequest(msg: ControlMessage<"remote_file_metadata_request">): void {
+    this.deps.remoteFileStreamManager.metadata(msg);
+  }
+
   onRemoteFileStreamCancel(msg: ControlMessage<"remote_file_stream_cancel">): void {
     this.deps.remoteFileStreamManager.cancel(msg);
   }

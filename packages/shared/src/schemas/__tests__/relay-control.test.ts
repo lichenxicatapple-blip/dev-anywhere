@@ -343,6 +343,38 @@ describe("RelayControlSchema", () => {
 
     expect(
       RelayControlSchema.parse({
+        type: "remote_file_metadata_request",
+        requestId: "meta-1",
+        sessionId: "sess-1",
+        path: "build/out.tar.gz",
+      }),
+    ).toEqual({
+      type: "remote_file_metadata_request",
+      requestId: "meta-1",
+      sessionId: "sess-1",
+      path: "build/out.tar.gz",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "remote_file_metadata_response",
+        requestId: "meta-1",
+        sessionId: "sess-1",
+        path: "build/out.tar.gz",
+        success: true,
+        mimeType: "application/gzip",
+        size: 1024,
+        fileName: "out.tar.gz",
+      }),
+    ).toMatchObject({
+      type: "remote_file_metadata_response",
+      requestId: "meta-1",
+      success: true,
+      fileName: "out.tar.gz",
+    });
+
+    expect(
+      RelayControlSchema.parse({
         type: "remote_file_stream_complete",
         streamId: "stream-1",
         success: true,
@@ -354,7 +386,9 @@ describe("RelayControlSchema", () => {
     });
 
     expect(isClientToProxyRelayControlType("remote_file_url_request")).toBe(false);
+    expect(isClientToProxyRelayControlType("remote_file_metadata_request")).toBe(false);
     expect(isClientToProxyRelayControlType("remote_file_stream_request")).toBe(false);
+    expect(isProxyToClientRelayControlType("remote_file_metadata_response")).toBe(false);
     expect(isProxyToClientRelayControlType("remote_file_stream_response")).toBe(false);
   });
 
