@@ -74,10 +74,7 @@ test.describe("WebSocket reconnect chaos", () => {
       });
     });
     await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
-    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
-      "data-state",
-      "waiting_approval",
-    );
+    await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
 
     await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
@@ -86,12 +83,8 @@ test.describe("WebSocket reconnect chaos", () => {
     );
 
     await releaseHeldConnections(page);
-    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
-      "data-state",
-      "waiting_approval",
-      { timeout: 5_000 },
-    );
     await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
     await expect(
       page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
     ).toContainText("等待审批");
