@@ -1,6 +1,6 @@
 {
   "name": "@dev-anywhere/shared",
-  "version": "0.4.80",
+  "version": "0.4.81",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
