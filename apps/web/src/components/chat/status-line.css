@@ -37,24 +37,29 @@
 
 .dev-pty-approval-hint {
   pointer-events: none;
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  z-index: 20;
-  min-height: 28px;
+  position: relative;
+  min-height: 26px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border-bottom: 1px solid color-mix(in srgb, var(--color-status-warning) 70%, transparent);
+  background: color-mix(in srgb, var(--color-status-warning) 72%, var(--background));
   color: color-mix(in srgb, var(--background) 86%, black);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
 }
 
-.dev-pty-approval-hint .dev-status-line-sweep {
-  opacity: 0.85;
+.dev-pty-approval-hint::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--background) 24%, transparent);
+  opacity: 0.16;
+  animation: dev-pty-approval-breathe 3.2s ease-in-out infinite;
 }
 
 .dev-pty-approval-hint-label {
@@ -177,5 +182,22 @@
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes dev-pty-approval-breathe {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.36;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-pty-approval-hint::before {
+    animation: none;
+    opacity: 0.2;
   }
 }

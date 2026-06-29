@@ -12,9 +12,8 @@ export function PtyApprovalHint({ autoYesEnabled, onAutoYesChange }: PtyApproval
       aria-live="polite"
       aria-label="等待审批"
       data-slot="pty-approval-hint"
-      className="dev-pty-approval-hint dev-status-line-waiting_approval"
+      className="dev-pty-approval-hint"
     >
-      <div className="dev-status-line-sweep dev-status-line-sweep-waiting" aria-hidden="true" />
       <span className="dev-pty-approval-hint-label">等待审批</span>
       <button
         type="button"

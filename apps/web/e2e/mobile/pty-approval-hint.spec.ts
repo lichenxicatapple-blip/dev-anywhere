@@ -1,5 +1,5 @@
 // PTY 模式工具审批状态在移动端 UI: pty_state=approval_wait 应让 pty-approval-hint
-// 浮起且不水平溢出, 视图位置不被推到顶.
+// 出现在标题区下方且不水平溢出, 视图位置不被推到顶.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 import { expectNoHorizontalDocumentOverflow } from "../mobile-helpers";

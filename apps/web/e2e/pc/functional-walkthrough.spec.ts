@@ -220,13 +220,32 @@ test.describe("functional browser walkthrough", () => {
       });
     });
 
-    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    const approvalHint = page.locator('[data-slot="pty-approval-hint"]');
+    await expect(approvalHint).toBeVisible();
+    await expect(approvalHint).toHaveCSS("position", "relative");
+    await expect(approvalHint).toHaveCSS("animation-name", "none");
+    await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
+    await expect.poll(
+      async () => approvalHint.evaluate((el) => getComputedStyle(el, "::before").animationName),
+      {
+        message: "PTY approval banner should carry the breathing affordance",
+      },
+    ).toBe("dev-pty-approval-breathe");
+
+    const headerBox = await page.locator('[data-slot="chat-header"]').boundingBox();
+    const hintBox = await approvalHint.boundingBox();
+    const ptyBox = await page.locator('[data-slot="chat-pty-view"]').boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(hintBox).not.toBeNull();
+    expect(ptyBox).not.toBeNull();
+    expect(hintBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
+    expect(ptyBox!.y).toBeGreaterThanOrEqual(hintBox!.y + hintBox!.height - 1);
     await expect(
       page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
     ).toContainText("等待审批");
 
     await page.reload();
-    await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+    await expect(approvalHint).toBeVisible();
     await expect(
       page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
     ).toContainText("等待审批");

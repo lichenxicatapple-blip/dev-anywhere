@@ -169,16 +169,16 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         >
           <ChatHeader sessionId={id} mode={mode} />
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
-          {!isTerminalSession && <StatusLine state={statusState} />}
+          {!isTerminalSession && !showPtyApprovalHint && <StatusLine state={statusState} />}
+          {showPtyApprovalHint && (
+            <PtyApprovalHint
+              autoYesEnabled={ptyAutoYesEnabled}
+              onAutoYesChange={(enabled) => {
+                if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, enabled);
+              }}
+            />
+          )}
           <div className="flex-1 min-h-0 relative">
-            {showPtyApprovalHint && (
-              <PtyApprovalHint
-                autoYesEnabled={ptyAutoYesEnabled}
-                onAutoYesChange={(enabled) => {
-                  if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, enabled);
-                }}
-              />
-            )}
             {presentation === "session-ended" ? (
               // wasAutoRestored 时副作用马上跳走, 这里渲染空白避免一帧 TerminatedSessionPanel 闪烁
               wasAutoRestoredRef.current ? null : (
