@@ -26,7 +26,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     await page.keyboard.type("abc");
     await page.keyboard.press("Enter");
     const controls = page.locator('[data-slot="pty-mobile-controls"]');
-    await expect(controls).toBeVisible();
+    await expect(controls).toHaveCount(0);
 
     await page.evaluate(() =>
       window.__devAnywhereSetVisualViewport?.({
@@ -34,6 +34,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
         offsetTop: 0,
       }),
     );
+    await expect(controls).toBeVisible();
     await expect(page.locator("[data-keyboard-offset]").first()).toHaveAttribute(
       "data-keyboard-offset",
       /[1-9]\d*/,
