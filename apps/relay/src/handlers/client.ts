@@ -4,6 +4,7 @@ import {
   isClientToProxyRelayControlType,
   RelayCloseCode,
   RelayErrorCode,
+  RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
   type ControlErrorCodeType,
 } from "@dev-anywhere/shared";
@@ -16,9 +17,6 @@ import type { VoiceConfigStore } from "../voice/config-store.js";
 import type { VoiceProviderRegistry } from "../voice/provider.js";
 import { startRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
-
-// JSON 控制消息最大允许长度（1MB）。挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
-const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -317,7 +315,7 @@ export function handleClientConnection(
       return;
     }
 
-    if (data.length > MAX_JSON_MESSAGE_SIZE) {
+    if (data.length > RELAY_JSON_MESSAGE_MAX_BYTES) {
       logger.warn(
         { size: data.length, clientId: clientWs.clientId },
         "JSON message rejected: exceeds max size",

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
+import { RELAY_JSON_MESSAGE_MAX_BYTES, serializeControl } from "@dev-anywhere/shared";
 import { waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
@@ -226,6 +227,38 @@ describe("Message routing integration", () => {
     expect(received.type).toBe("pty_state");
     expect(received.payload.state).toBe("approval_wait");
     expect(received.payload.tool).toBe("Bash");
+  });
+
+  it("routes PTY snapshots larger than 1 MiB from proxy to client", async () => {
+    const { proxy, client } = await setupBoundPair();
+
+    const oneMiB = 1024 * 1024;
+    const snapshotData = "x".repeat(oneMiB + 128);
+    const raw = serializeControl({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: "snapshot-large",
+      cols: 270,
+      rows: 57,
+      data: snapshotData,
+      outputSeq: 1,
+    });
+    expect(Buffer.byteLength(raw)).toBeGreaterThan(oneMiB);
+    expect(Buffer.byteLength(raw)).toBeLessThan(RELAY_JSON_MESSAGE_MAX_BYTES);
+
+    const msgPromise = waitForMessage(client);
+    proxy.send(raw);
+
+    const received = JSON.parse(await msgPromise);
+    expect(received).toMatchObject({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: "snapshot-large",
+      cols: 270,
+      rows: 57,
+      outputSeq: 1,
+    });
+    expect(received.data).toHaveLength(snapshotData.length);
   });
 
   it("routes command_list_push from proxy to client", async () => {

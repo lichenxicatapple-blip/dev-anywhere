@@ -132,6 +132,10 @@ export {
 export type { ProviderId, PtyOwner, SessionMode } from "./constants/enums.js";
 export { PtySemanticState, ptySemanticStateValues } from "./constants/pty.js";
 export { RelayCloseCode } from "./constants/relay-close-codes.js";
+export {
+  RELAY_BINARY_FRAME_MAX_BYTES,
+  RELAY_JSON_MESSAGE_MAX_BYTES,
+} from "./constants/wire-limits.js";
 
 // logger 不在主入口导出: 它依赖 node:fs / node:os, 会被 vite 当作浏览器模块拉进 web bundle
 // 让整个 web 启动崩。Node 端从 "@dev-anywhere/shared/logger" 子路径导入。

@@ -1,7 +1,9 @@
 import { WebSocket } from "ws";
 import {
   isProxyToClientRelayControlType,
+  RELAY_BINARY_FRAME_MAX_BYTES,
   RelayErrorCode,
+  RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
@@ -10,13 +12,6 @@ import { parseMessage, routeProxyMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
 import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
-
-// binary 帧最大允许大小（10MB），超过的帧静默丢弃以防 DoS
-const MAX_BINARY_FRAME_SIZE = 10 * 1024 * 1024;
-
-// JSON 控制消息最大允许长度（1MB）。控制消息典型 < 64KB（含 session_history_response 等
-// 大消息），1MB 给协议演进留余量, 同时挡住 wire 上来的恶意超长 JSON 在 parse 前就 OOM。
-const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -99,7 +94,7 @@ export function handleProxyConnection(
   proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
     // Binary frames are pass-through; relay only reads the sessionId prefix for routing.
     if (isBinary) {
-      if (data.length < 2 || data.length > MAX_BINARY_FRAME_SIZE) {
+      if (data.length < 2 || data.length > RELAY_BINARY_FRAME_MAX_BYTES) {
         logger.warn({ size: data.length }, "Binary frame rejected: invalid size");
         return;
       }
@@ -129,7 +124,7 @@ export function handleProxyConnection(
       return;
     }
 
-    if (data.length > MAX_JSON_MESSAGE_SIZE) {
+    if (data.length > RELAY_JSON_MESSAGE_MAX_BYTES) {
       logger.warn(
         { size: data.length, proxyId: proxyWs.proxyId },
         "JSON message rejected: exceeds max size",

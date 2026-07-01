@@ -4,7 +4,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
-import { createFSM, serializeControl, type MessageEnvelope } from "@dev-anywhere/shared";
+import {
+  createFSM,
+  RELAY_JSON_MESSAGE_MAX_BYTES,
+  serializeControl,
+  type MessageEnvelope,
+} from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
 import { MemoryMessageQueue } from "./message-queue.js";
@@ -21,10 +26,6 @@ const MAX_QUEUE_SIZE = 10000;
 // proxy 侧主动心跳：网络切换时本机 TCP/WebSocket 可能保持半开，不能只等 close 事件。
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10000;
-// 来自 relay 的 JSON 控制消息最大长度（1MB）。挡住恶意/被攻陷的 relay 推超长 JSON 在
-// JSON.parse 前就 OOM proxy daemon。
-const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
-
 export const RelayConnectionState = {
   DISCONNECTED: "disconnected",
   CONNECTING: "connecting",
@@ -164,7 +165,7 @@ export class RelayConnection extends EventEmitter {
           this.emit("binary", buf);
           return;
         }
-        if (buf.length > MAX_JSON_MESSAGE_SIZE) {
+        if (buf.length > RELAY_JSON_MESSAGE_MAX_BYTES) {
           serviceLogger.warn(
             { size: buf.length },
             "JSON message from relay rejected: exceeds max size",
