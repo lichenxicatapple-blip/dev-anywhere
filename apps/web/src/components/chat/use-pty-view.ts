@@ -149,6 +149,7 @@ interface TerminalControllerHandle {
 interface MobilePtyControlsVisibilityInput {
   softKeyboardEditingSurface: boolean;
   ptyInputFocused: boolean;
+  keyboardOpen: boolean;
 }
 
 interface PtyKeyboardFollowInput {
@@ -163,8 +164,9 @@ interface PtyKeyboardFollowInput {
 export function shouldShowMobilePtyControlsForState({
   softKeyboardEditingSurface,
   ptyInputFocused,
+  keyboardOpen,
 }: MobilePtyControlsVisibilityInput): boolean {
-  return softKeyboardEditingSurface && ptyInputFocused;
+  return softKeyboardEditingSurface && ptyInputFocused && keyboardOpen;
 }
 
 export function shouldForcePtyKeyboardFollow({
@@ -245,6 +247,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const { bottomOffset: rawKeyboardOffset, layoutBottomInset: rawKeyboardLayoutInset } =
     useVisualViewportInsets();
   const keyboardOffset = desktopInteractionMode ? 0 : rawKeyboardOffset;
+  const keyboardOpen = keyboardOffset > 0;
   const mobileControlsBottomInset = desktopInteractionMode ? 0 : rawKeyboardLayoutInset;
 
   useEffect(() => {
@@ -273,6 +276,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const showMobilePtyControls = shouldShowMobilePtyControlsForState({
     softKeyboardEditingSurface,
     ptyInputFocused,
+    keyboardOpen,
   });
   softKeyboardLayoutActiveRef.current =
     softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
@@ -867,7 +871,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     if (ptySelectionActiveRef.current) scrollControllerRef.current?.relayout();
     else relayoutSchedulerRef.current?.schedule();
-    const keyboardOpen = keyboardOffset > 0;
     const previous = keyboardFollowStateRef.current;
     const shouldForceKeyboardFollow = shouldForcePtyKeyboardFollow({
       controlsVisible: showMobilePtyControls,

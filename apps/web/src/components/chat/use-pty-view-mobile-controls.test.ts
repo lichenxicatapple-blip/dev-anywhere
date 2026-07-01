@@ -5,11 +5,20 @@ import {
 } from "./use-pty-view";
 
 describe("shouldShowMobilePtyControlsForState", () => {
-  it("keeps mobile PTY controls visible when focused even if keyboard offset is unavailable", () => {
+  it("shows mobile PTY controls only after the soft keyboard is open", () => {
     expect(
       shouldShowMobilePtyControlsForState({
         softKeyboardEditingSurface: true,
         ptyInputFocused: true,
+        keyboardOpen: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldShowMobilePtyControlsForState({
+        softKeyboardEditingSurface: true,
+        ptyInputFocused: true,
+        keyboardOpen: true,
       }),
     ).toBe(true);
   });
@@ -19,12 +28,14 @@ describe("shouldShowMobilePtyControlsForState", () => {
       shouldShowMobilePtyControlsForState({
         softKeyboardEditingSurface: false,
         ptyInputFocused: true,
+        keyboardOpen: true,
       }),
     ).toBe(false);
     expect(
       shouldShowMobilePtyControlsForState({
         softKeyboardEditingSurface: true,
         ptyInputFocused: false,
+        keyboardOpen: true,
       }),
     ).toBe(false);
   });
