@@ -2,6 +2,7 @@
 // (实现节奏: 首发立即, 300ms hold 后, 之后 50ms 一次稳定 repeat).
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
+import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-repeat";
 
@@ -12,7 +13,9 @@ test.describe("L4 mobile / PTY soft controls long-press repeat", () => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    await emuPage.locator('[data-slot="pty-terminal"]').click();
+    if (!(await touchPtyTerminalAndWaitForSoftKeyboard(emuPage))) {
+      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
+    }
     const left = emuPage.locator('[data-slot="pty-mobile-key-left"]');
     await expect(left).toBeVisible();
 

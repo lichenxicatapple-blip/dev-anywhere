@@ -2,6 +2,7 @@
 // L2 mobile-contract pty test 只验证 terminal visible, L4 钉死全部按键的 raw 序列.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
+import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-controls";
 
@@ -20,8 +21,10 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     );
     expect(isTouchSurface).toBe(true);
 
-    // focus 终端让 mobile-controls 浮起.
-    await emuPage.locator('[data-slot="pty-terminal"]').click();
+    // 软控制区只在系统软键盘实际打开后出现。
+    if (!(await touchPtyTerminalAndWaitForSoftKeyboard(emuPage))) {
+      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
+    }
     const controls = emuPage.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
 
