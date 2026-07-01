@@ -265,10 +265,27 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     handleVoiceTtsConnection(ws, voiceConfigStore, logger, voiceProviders);
   });
 
-  const proxyHeartbeat = setupHeartbeat(proxyWss, heartbeatInterval);
-  const clientHeartbeat = setupHeartbeat(clientWss, heartbeatInterval);
-  const voiceAsrHeartbeat = setupHeartbeat(voiceAsrWss, heartbeatInterval);
-  const voiceTtsHeartbeat = setupHeartbeat(voiceTtsWss, heartbeatInterval);
+  const proxyHeartbeat = setupHeartbeat(proxyWss, heartbeatInterval, {
+    logger,
+    peerType: "proxy",
+    describePeer: (ws) => ({ proxyId: (ws as { proxyId?: string }).proxyId }),
+  });
+  const clientHeartbeat = setupHeartbeat(clientWss, heartbeatInterval, {
+    logger,
+    peerType: "client",
+    describePeer: (ws) => ({
+      clientId: (ws as { clientId?: string }).clientId,
+      boundProxyId: (ws as { boundProxyId?: string }).boundProxyId,
+    }),
+  });
+  const voiceAsrHeartbeat = setupHeartbeat(voiceAsrWss, heartbeatInterval, {
+    logger,
+    peerType: "voice-asr",
+  });
+  const voiceTtsHeartbeat = setupHeartbeat(voiceTtsWss, heartbeatInterval, {
+    logger,
+    peerType: "voice-tts",
+  });
 
   async function close(): Promise<void> {
     clearInterval(proxyHeartbeat);

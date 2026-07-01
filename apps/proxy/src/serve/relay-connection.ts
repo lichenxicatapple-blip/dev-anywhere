@@ -18,6 +18,9 @@ const MAX_BACKOFF_MS = 30000;
 const BASE_BACKOFF_MS = 1000;
 // 消息队列上限
 const MAX_QUEUE_SIZE = 10000;
+// proxy 侧主动心跳：网络切换时本机 TCP/WebSocket 可能保持半开，不能只等 close 事件。
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10000;
 // 来自 relay 的 JSON 控制消息最大长度（1MB）。挡住恶意/被攻陷的 relay 推超长 JSON 在
 // JSON.parse 前就 OOM proxy daemon。
 const MAX_JSON_MESSAGE_SIZE = 1 * 1024 * 1024;
@@ -69,6 +72,9 @@ interface RelayConnectionOptions {
   name?: string;
   // 公网 relay 的 /proxy 端点预共享 token, relay 侧 RELAY_PROXY_TOKEN 对应
   token?: string;
+  // 测试/特殊部署覆盖；生产默认值见 DEFAULT_HEARTBEAT_*。
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 }
 
 // 管理代理到中转服务器的出站 WebSocket 连接，支持自动重连和消息队列
@@ -79,6 +85,8 @@ export class RelayConnection extends EventEmitter {
   private queue: MemoryMessageQueue = new MemoryMessageQueue();
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private heartbeatTimeoutTimer: NodeJS.Timeout | null = null;
   private fsm = createFSM({
     initial: RelayConnectionState.DISCONNECTED as RelayConnectionState,
     transitions: RELAY_TRANSITIONS,
@@ -94,6 +102,8 @@ export class RelayConnection extends EventEmitter {
   });
   private name?: string;
   private token?: string;
+  private heartbeatIntervalMs: number;
+  private heartbeatTimeoutMs: number;
 
   constructor(relayUrl: string, options?: RelayConnectionOptions) {
     super();
@@ -101,6 +111,8 @@ export class RelayConnection extends EventEmitter {
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
     this.token = options?.token;
+    this.heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -171,6 +183,7 @@ export class RelayConnection extends EventEmitter {
           serviceLogger.info({ status: msg.status }, "Received register response");
           if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;
           this.reconnectAttempt = 0;
+          this.startHeartbeat();
           this.flushQueue();
           this.emit("connected");
           return;
@@ -179,6 +192,7 @@ export class RelayConnection extends EventEmitter {
       });
 
       this.ws.on("close", (code: number, reason: Buffer) => {
+        this.stopHeartbeat();
         this.ws = null;
         const closeMeta = { code, reason: reason.toString() || undefined };
         if (this.fsm.current() !== RelayConnectionState.CLOSED) {
@@ -194,6 +208,10 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("error", (err) => {
         serviceLogger.error({ error: String(err) }, "Relay connection error");
       });
+
+      this.ws.on("pong", () => {
+        this.clearHeartbeatTimeout();
+      });
     } catch (err) {
       serviceLogger.error({ error: String(err) }, "Failed to create relay connection");
       if (this.fsm.current() !== RelayConnectionState.CLOSED) {
@@ -201,6 +219,69 @@ export class RelayConnection extends EventEmitter {
         this.scheduleReconnect();
       }
     }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (this.heartbeatIntervalMs <= 0 || this.heartbeatTimeoutMs <= 0) return;
+
+    this.heartbeatTimer = setInterval(() => {
+      this.sendHeartbeat();
+    }, this.heartbeatIntervalMs);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.clearHeartbeatTimeout();
+  }
+
+  private clearHeartbeatTimeout(): void {
+    if (!this.heartbeatTimeoutTimer) return;
+    clearTimeout(this.heartbeatTimeoutTimer);
+    this.heartbeatTimeoutTimer = null;
+  }
+
+  private sendHeartbeat(): void {
+    const ws = this.ws;
+    if (!ws || this.fsm.current() !== RelayConnectionState.SYNCED) return;
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      this.terminateStaleSocket(ws, "heartbeat socket is not open");
+      return;
+    }
+
+    if (this.heartbeatTimeoutTimer) {
+      this.terminateStaleSocket(ws, "previous heartbeat did not receive pong");
+      return;
+    }
+
+    this.heartbeatTimeoutTimer = setTimeout(() => {
+      if (this.ws === ws && this.fsm.current() !== RelayConnectionState.CLOSED) {
+        this.terminateStaleSocket(ws, "relay heartbeat pong timeout");
+      }
+    }, this.heartbeatTimeoutMs);
+    this.heartbeatTimeoutTimer.unref?.();
+
+    try {
+      ws.ping((err?: Error) => {
+        if (err && this.ws === ws && this.fsm.current() !== RelayConnectionState.CLOSED) {
+          this.terminateStaleSocket(ws, `relay heartbeat ping failed: ${String(err)}`);
+        }
+      });
+    } catch (err) {
+      this.terminateStaleSocket(ws, `relay heartbeat ping threw: ${String(err)}`);
+    }
+  }
+
+  private terminateStaleSocket(ws: WebSocket, reason: string): void {
+    this.clearHeartbeatTimeout();
+    if (this.ws !== ws || this.fsm.current() === RelayConnectionState.CLOSED) return;
+    serviceLogger.warn({ reason }, "Relay connection heartbeat failed; terminating stale socket");
+    ws.terminate();
   }
 
   // 将队列中缓存的消息依次发送到 relay
@@ -280,6 +361,7 @@ export class RelayConnection extends EventEmitter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.stopHeartbeat();
     if (this.ws) {
       if (this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(serializeControl({ type: "proxy_disconnect", proxyId: this.proxyId }));

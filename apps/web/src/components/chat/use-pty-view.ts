@@ -146,6 +146,36 @@ interface TerminalControllerHandle {
   setOutputPaused: (value: boolean) => void;
 }
 
+interface MobilePtyControlsVisibilityInput {
+  softKeyboardEditingSurface: boolean;
+  ptyInputFocused: boolean;
+}
+
+interface PtyKeyboardFollowInput {
+  controlsVisible: boolean;
+  keyboardOpen: boolean;
+  previous: {
+    controlsVisible: boolean;
+    keyboardOpen: boolean;
+  };
+}
+
+export function shouldShowMobilePtyControlsForState({
+  softKeyboardEditingSurface,
+  ptyInputFocused,
+}: MobilePtyControlsVisibilityInput): boolean {
+  return softKeyboardEditingSurface && ptyInputFocused;
+}
+
+export function shouldForcePtyKeyboardFollow({
+  controlsVisible,
+  keyboardOpen,
+  previous,
+}: PtyKeyboardFollowInput): boolean {
+  if (!controlsVisible) return false;
+  return !previous.controlsVisible || (keyboardOpen && !previous.keyboardOpen);
+}
+
 export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const {
     sessionId,
@@ -231,7 +261,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
   }, [keyboardOffset]);
-  const softKeyboardOpenOrUnknown = !hasSeenSoftKeyboard || keyboardOffset > 0;
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const {
@@ -241,8 +270,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     handleFocusCapture,
     handleBlurCapture,
   } = focus;
-  const showMobilePtyControls =
-    softKeyboardEditingSurface && ptyInputFocused && softKeyboardOpenOrUnknown;
+  const showMobilePtyControls = shouldShowMobilePtyControlsForState({
+    softKeyboardEditingSurface,
+    ptyInputFocused,
+  });
   softKeyboardLayoutActiveRef.current =
     softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
 
@@ -838,10 +869,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     else relayoutSchedulerRef.current?.schedule();
     const keyboardOpen = keyboardOffset > 0;
     const previous = keyboardFollowStateRef.current;
-    const shouldForceKeyboardFollow =
-      showMobilePtyControls &&
-      keyboardOpen &&
-      (!previous.keyboardOpen || !previous.controlsVisible);
+    const shouldForceKeyboardFollow = shouldForcePtyKeyboardFollow({
+      controlsVisible: showMobilePtyControls,
+      keyboardOpen,
+      previous,
+    });
     keyboardFollowStateRef.current = {
       keyboardOpen,
       controlsVisible: showMobilePtyControls,

@@ -4,6 +4,22 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.4.82] - 2026-07-01
+
+### 修复
+
+- 修复移动端 PTY 在软键盘弹出但浏览器未报告 keyboard inset 时隐藏辅助输入栏的问题；终端输入聚焦后辅助栏会保持可见，并在首次出现时滚动到最新输出区域。
+- Proxy 到 Relay 的云连接增加应用层 ping/pong watchdog，避免半开连接长期显示在线但实际无法创建或恢复会话。
+
+### 改进
+
+- Relay 心跳和客户端断开日志补充 `clientId`、绑定开发机、close code/reason 等字段，便于定位手机网页反复断线是否由 heartbeat 超时触发。
+
+### 测试
+
+- 补充移动端 PTY 辅助输入栏显示与键盘跟随判定单测，并跑通 PTY 移动控制条布局 E2E。
+- 补充 Proxy Relay 连接 watchdog 回归测试，并跑通 Relay heartbeat 集成测试。
+
 ## [0.4.81] - 2026-06-29
 
 ### 修复

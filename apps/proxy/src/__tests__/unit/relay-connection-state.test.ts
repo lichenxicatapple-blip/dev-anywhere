@@ -9,22 +9,47 @@ vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   class MockWebSocket extends EventEmitter {
     send = vi.fn();
-    close = vi.fn();
+    ping = vi.fn((cb?: (err?: Error) => void) => {
+      cb?.();
+    });
+    close = vi.fn(() => {
+      this.readyState = MockWebSocket.CLOSED;
+      this.emit("close", 1000, Buffer.alloc(0));
+    });
+    terminate = vi.fn(() => {
+      this.readyState = MockWebSocket.CLOSED;
+      this.emit("close", 1006, Buffer.alloc(0));
+    });
     readyState = 0;
     static OPEN = 1;
     static CONNECTING = 0;
     static CLOSING = 2;
     static CLOSED = 3;
     static lastInstance: MockWebSocket | null = null;
+    static instances: MockWebSocket[] = [];
     constructor(_url: string) {
       super();
       MockWebSocket.lastInstance = this;
+      MockWebSocket.instances.push(this);
     }
   }
   return { default: MockWebSocket };
 });
 
-type MockWsModule = { default: { lastInstance: EventEmitter & { readyState: number } } };
+type MockWebSocketInstance = EventEmitter & {
+  readyState: number;
+  send: ReturnType<typeof vi.fn>;
+  ping: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  terminate: ReturnType<typeof vi.fn>;
+};
+type MockWsModule = {
+  default: {
+    lastInstance: MockWebSocketInstance | null;
+    instances: MockWebSocketInstance[];
+    OPEN: number;
+  };
+};
 
 // mock nanoid
 vi.mock("nanoid", () => ({
@@ -112,7 +137,7 @@ describe("RelayConnection state machine", () => {
 describe("RelayConnection: async ws events arriving after close()", () => {
   async function connectAndGrabWs(): Promise<{
     conn: RelayConnection;
-    fakeWs: EventEmitter & { readyState: number };
+    fakeWs: MockWebSocketInstance;
   }> {
     const conn = new RelayConnection("ws://test:1234", { proxyIdPath: "/tmp/test-proxy-id" });
     conn.connect();
@@ -124,6 +149,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
 
   it("baseline: fakeWs mock takes effect, open → REGISTERING", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
+    fakeWs.readyState = 1;
     fakeWs.emit("open");
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.REGISTERING);
   });
@@ -132,12 +158,14 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     conn.close();
     // 模拟 TCP 握手先于 close() 已完成，open 事件在 event loop 后到
+    fakeWs.readyState = 1;
     expect(() => fakeWs.emit("open")).not.toThrow();
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
   });
 
   it("ignores register_response received after close() (CLOSED state)", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
+    fakeWs.readyState = 1;
     fakeWs.emit("open"); // 先 open 进 REGISTERING
     conn.close(); // 然后外部 close
     const leaked: unknown[] = [];
@@ -147,5 +175,30 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     fakeWs.emit("message", Buffer.from(resp));
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
     expect(leaked).toEqual([]);
+  });
+
+  it("terminates a half-open synced socket when heartbeat pong is missing", async () => {
+    const conn = new RelayConnection("ws://test:1234", {
+      proxyIdPath: "/tmp/test-proxy-id",
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 5,
+    });
+    conn.connect();
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const fakeWs = mod.default.lastInstance;
+    if (!fakeWs) throw new Error("mock WebSocket did not capture instance");
+
+    fakeWs.readyState = mod.default.OPEN;
+    fakeWs.emit("open");
+    fakeWs.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
+    );
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+
+    await vi.waitFor(() => expect(fakeWs.ping).toHaveBeenCalled(), { timeout: 100 });
+    await vi.waitFor(() => expect(fakeWs.terminate).toHaveBeenCalled(), { timeout: 100 });
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
+    conn.close();
   });
 });
