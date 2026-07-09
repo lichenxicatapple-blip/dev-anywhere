@@ -155,7 +155,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   const setChatContentFontSize = useAppStore((s) => s.setChatContentFontSize);
   const resetPtyFontSize = useAppStore((s) => s.resetPtyFontSize);
   const resetChatContentFontSize = useAppStore((s) => s.resetChatContentFontSize);
-  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const forceHardwareInput = useAppStore((s) => s.inputModePreference === "hardware");
   const renameSession = useSessionStore((s) => s.renameSession);
   const ptyAutoYesKey = ptyAutoYesSessionKey(selectedProxyId, sessionId);
   const ptyAutoYesEnabled = useSessionStore((s) =>
@@ -163,7 +163,7 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
   );
   const setPtyAutoYes = useSessionStore((s) => s.setPtyAutoYes);
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
-  const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
+  const touchEditingSurface = nativeTouchEditingSurface && !forceHardwareInput;
   const isPty = mode === "pty" || session?.mode === "pty";
   const isTerminalSession = session?.kind === "terminal";
   const screenWakeLock = useScreenWakeLockScope(sessionId);

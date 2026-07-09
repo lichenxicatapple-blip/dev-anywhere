@@ -32,6 +32,7 @@ import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
 import { VoiceSummaryHandler, type VoiceSummaryRunner } from "./voice-summary-handler.js";
 import type { RemoteFileUploadManager } from "./remote-file-upload.js";
 import type { RemoteFileStreamManager } from "./remote-file-stream.js";
+import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -59,6 +60,7 @@ interface RelayRouterDeps {
   setAgentCliPath: (provider: ProviderHookContext["provider"], path: string) => void;
   remoteFileStreamManager: RemoteFileStreamManager;
   remoteFileUploadManager: RemoteFileUploadManager;
+  terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
   voiceSummaryRunner?: VoiceSummaryRunner;
 }
 
@@ -438,6 +440,7 @@ export class RelayRouter {
       ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid, requestId }));
       serviceLogger.info({ sessionId: sid, requestId }, "Subscribe forwarded to terminal");
     } else {
+      this.deps.terminalSubscriptionBacklog.add(sid, requestId);
       serviceLogger.warn({ sessionId: sid }, "Subscribe failed: terminal socket not available");
     }
   }

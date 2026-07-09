@@ -1,5 +1,6 @@
 import { spawnScript } from "../common/env.js";
 import { serviceLogger } from "../common/logger.js";
+import { PROFILE_NAME } from "../common/paths.js";
 
 export interface TerminalWorkerStartOptions {
   sessionId: string;
@@ -7,9 +8,16 @@ export interface TerminalWorkerStartOptions {
   name: string;
 }
 
+export function buildTerminalWorkerArgs(
+  options: TerminalWorkerStartOptions,
+  profileName = PROFILE_NAME,
+): string[] {
+  return ["--profile", profileName, options.sessionId, options.cwd, options.name];
+}
+
 export class TerminalWorkerSpawner {
   start(options: TerminalWorkerStartOptions): number {
-    const child = spawnScript("terminal-worker", [options.sessionId, options.cwd, options.name], {
+    const child = spawnScript("terminal-worker", buildTerminalWorkerArgs(options), {
       env: { ...process.env },
       logger: serviceLogger,
     });

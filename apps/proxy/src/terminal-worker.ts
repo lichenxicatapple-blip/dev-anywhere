@@ -16,6 +16,7 @@ import {
   serializeIpc,
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
+import { parseTerminalWorkerCliArgs } from "./terminal-worker-args.js";
 import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
 
@@ -143,7 +144,10 @@ class ShellTerminalWorker {
     );
     socket.on("close", () => {
       if (this.exiting) return;
-      log.info({ sessionId: this.sessionId }, "Serve socket closed; terminal worker will reconnect");
+      log.info(
+        { sessionId: this.sessionId },
+        "Serve socket closed; terminal worker will reconnect",
+      );
       void this.reconnectToServe();
     });
     socket.on("error", (err) => {
@@ -188,7 +192,9 @@ class ShellTerminalWorker {
     this.child?.resize(cols, rows);
     this.terminal.resize(cols, rows);
     if (this.socket?.writable) {
-      this.socket.write(serializeIpc({ type: "pty_resize", sessionId: this.sessionId, cols, rows }));
+      this.socket.write(
+        serializeIpc({ type: "pty_resize", sessionId: this.sessionId, cols, rows }),
+      );
     }
     log.info({ sessionId: this.sessionId, cols, rows }, "Terminal worker PTY resized");
   }
@@ -250,12 +256,13 @@ class ShellTerminalWorker {
   }
 }
 
-const [sessionId, cwd, name] = process.argv.slice(2);
-if (!sessionId || !cwd || !name) {
-  console.error("Usage: terminal-worker <sessionId> <cwd> <name>");
+const parsedArgs = parseTerminalWorkerCliArgs(process.argv.slice(2));
+if (!parsedArgs) {
+  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name>");
   process.exit(1);
 }
 
+const { sessionId, cwd, name } = parsedArgs;
 new ShellTerminalWorker(sessionId, cwd, name).run().catch((err) => {
   log.error({ err: err instanceof Error ? err.message : String(err) }, "Terminal worker failed");
   process.exit(1);

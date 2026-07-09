@@ -10,7 +10,7 @@ export const STORAGE_KEYS = {
   themePreference: "dev_anywhere_theme",
   latencyMonitorEnabled: "dev_anywhere_latencyMonitorEnabled",
   latencyMonitorPosition: "dev_anywhere_latencyMonitorPosition",
-  desktopInteractionMode: "dev_anywhere_desktopInteractionMode",
+  inputModePreference: "dev_anywhere_inputModePreference",
   ptyScrollTraceEnabled: "dev_anywhere_pty_scroll_trace",
   ptyAutoYesSessions: "dev_anywhere_pty_auto_yes_sessions",
 } as const;

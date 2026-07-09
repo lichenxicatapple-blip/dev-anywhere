@@ -644,6 +644,56 @@ describe("attachXtermRawInput", () => {
     expect(onRawInput).toHaveBeenCalledWith("\n");
   });
 
+  it("reads plain Enter behavior dynamically without reinstalling the terminal handler", () => {
+    const { terminal, emitKey } = createTerminal();
+    const onRawInput = vi.fn();
+    let behavior: "submit" | "linefeed" = "linefeed";
+    const firstEnter = new KeyboardEvent("keydown", { key: "Enter" });
+    const firstPreventDefault = vi.spyOn(firstEnter, "preventDefault");
+    const secondEnter = new KeyboardEvent("keydown", { key: "Enter" });
+    const secondPreventDefault = vi.spyOn(secondEnter, "preventDefault");
+
+    attachXtermRawInput(terminal, "sess-1", {
+      onRawInput,
+      getPlainEnterBehavior: () => behavior,
+    });
+
+    expect(emitKey(firstEnter)).toBe(false);
+    expect(firstPreventDefault).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "\n");
+
+    sendSpy.mockClear();
+    onRawInput.mockClear();
+    behavior = "submit";
+
+    expect(emitKey(secondEnter)).toBe(true);
+    expect(secondPreventDefault).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(onRawInput).not.toHaveBeenCalled();
+  });
+
+  it("reads physical keyboard mode dynamically for native text routing", () => {
+    vi.useFakeTimers();
+    const { terminal, emitKey, emitTextInput } = createTerminal();
+    let physicalKeyboardMode = false;
+
+    attachXtermRawInput(terminal, "sess-1", {
+      isPhysicalKeyboardMode: () => physicalKeyboardMode,
+    });
+
+    const firstDigit = new KeyboardEvent("keydown", { key: "1" });
+    expect(emitKey(firstDigit)).toBe(true);
+
+    physicalKeyboardMode = true;
+    const secondDigit = new KeyboardEvent("keydown", { key: "2" });
+    expect(emitKey(secondDigit)).toBe(false);
+    emitTextInput("2");
+    vi.runAllTimers();
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith("sess-1", "2");
+  });
+
   it("inverts Shift+Enter under linefeed mode so users can still submit (CR)", () => {
     // 移动端 plainEnterBehavior=linefeed：plain Enter 走 \n，Shift+Enter 必须翻转回 submit
     // 语义（落到 xterm 默认 \r）。否则 Shift 在该模式下退化成 no-op，用户没有办法显式提交。

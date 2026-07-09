@@ -144,7 +144,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     expect(averageRgbChannel(colors.enterKey)).toBeGreaterThan(210);
   });
 
-  test("global desktop interaction setting suppresses mobile controls and keyboard layout inset", async ({
+  test("forced hardware input preference suppresses mobile controls and keyboard layout inset", async ({
     page,
   }) => {
     await setupPtyChat(page, {
@@ -152,7 +152,7 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       withVisualViewportMock: true,
     });
     await page.evaluate(() => {
-      localStorage.setItem("dev_anywhere_desktopInteractionMode", "1");
+      localStorage.setItem("dev_anywhere_inputModePreference", "hardware");
     });
     await page.reload({ waitUntil: "domcontentloaded" });
     await expectPtyTerminalMounted(page);

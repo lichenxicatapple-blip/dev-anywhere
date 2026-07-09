@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   AudioLines,
   ChevronRight,
+  Keyboard,
   KeyRound,
   LogOut,
   Monitor,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import type { RelayClientInfo } from "@dev-anywhere/shared";
 import packageInfo from "../../../package.json" with { type: "json" };
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type InputModePreference } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
 import { reconnectRelayClient, relayClientRef } from "@/hooks/use-relay-setup";
@@ -52,6 +53,12 @@ const themePreferenceOptions: Array<{ value: ThemePreference; label: string }> =
   { value: "auto", label: "跟随系统" },
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
+];
+
+const inputModePreferenceOptions: Array<{ value: InputModePreference; label: string }> = [
+  { value: "auto", label: "自动" },
+  { value: "touch", label: "触控优先" },
+  { value: "hardware", label: "实体键盘优先" },
 ];
 
 const SETTINGS_SUBVIEW_BODY_CLASS =
@@ -99,8 +106,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const relayUrl = useAppStore((s) => s.relayUrl);
   const latencyMonitorEnabled = useAppStore((s) => s.latencyMonitorEnabled);
   const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
-  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
-  const setDesktopInteractionMode = useAppStore((s) => s.setDesktopInteractionMode);
+  const inputModePreference = useAppStore((s) => s.inputModePreference);
+  const setInputModePreference = useAppStore((s) => s.setInputModePreference);
   const themePreference = useAppStore((s) => s.themePreference);
   const setThemePreference = useAppStore((s) => s.setThemePreference);
   const ptyScrollTraceEnabled = useAppStore((s) => s.ptyScrollTraceEnabled);
@@ -254,8 +261,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             relayTokenSaved={relayTokenSaved}
             themePreference={themePreference}
             onThemePreferenceChange={setThemePreference}
-            desktopInteractionMode={desktopInteractionMode}
-            onDesktopInteractionModeChange={setDesktopInteractionMode}
+            inputModePreference={inputModePreference}
+            onInputModePreferenceChange={setInputModePreference}
             ptyScrollTraceEnabled={ptyScrollTraceEnabled}
             onPtyScrollTraceEnabledChange={setPtyScrollTraceEnabled}
             latencyMonitorEnabled={latencyMonitorEnabled}
@@ -303,8 +310,8 @@ function SettingsMainView({
   relayTokenSaved,
   themePreference,
   onThemePreferenceChange,
-  desktopInteractionMode,
-  onDesktopInteractionModeChange,
+  inputModePreference,
+  onInputModePreferenceChange,
   ptyScrollTraceEnabled,
   onPtyScrollTraceEnabledChange,
   latencyMonitorEnabled,
@@ -317,8 +324,8 @@ function SettingsMainView({
   relayTokenSaved: boolean;
   themePreference: ThemePreference;
   onThemePreferenceChange: (value: ThemePreference) => void;
-  desktopInteractionMode: boolean;
-  onDesktopInteractionModeChange: (checked: boolean) => void;
+  inputModePreference: InputModePreference;
+  onInputModePreferenceChange: (value: InputModePreference) => void;
   ptyScrollTraceEnabled: boolean;
   onPtyScrollTraceEnabledChange: (checked: boolean) => void;
   latencyMonitorEnabled: boolean;
@@ -363,12 +370,13 @@ function SettingsMainView({
         />
       </SettingsSection>
       <SettingsSection title="交互">
-        <SettingsToggleItem
-          icon={<Monitor className="size-4" aria-hidden="true" />}
-          label="桌面交互模式"
-          detail="适合平板外接键盘；保留触控，但按桌面输入处理"
-          checked={desktopInteractionMode}
-          onCheckedChange={onDesktopInteractionModeChange}
+        <SettingsSegmentedItem
+          icon={<Keyboard className="size-4" aria-hidden="true" />}
+          label="输入方式"
+          detail="默认自动识别软键盘和实体键盘；必要时可强制一种方式"
+          value={inputModePreference}
+          options={inputModePreferenceOptions}
+          onValueChange={onInputModePreferenceChange}
         />
       </SettingsSection>
       <SettingsSection title="诊断">
@@ -409,7 +417,7 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
   );
 }
 
-function SettingsSegmentedItem({
+function SettingsSegmentedItem<TValue extends string>({
   icon,
   label,
   detail,
@@ -420,9 +428,9 @@ function SettingsSegmentedItem({
   icon: ReactNode;
   label: string;
   detail?: string;
-  value: ThemePreference;
-  options: Array<{ value: ThemePreference; label: string }>;
-  onValueChange: (value: ThemePreference) => void;
+  value: TValue;
+  options: Array<{ value: TValue; label: string }>;
+  onValueChange: (value: TValue) => void;
 }) {
   const labelId = useId();
   const detailId = useId();
@@ -449,7 +457,7 @@ function SettingsSegmentedItem({
           aria-labelledby={labelId}
           aria-describedby={detail ? detailId : undefined}
           className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/70 p-1"
-          data-slot="settings-theme-choice"
+          data-slot="settings-segmented-choice"
         >
           {options.map((option) => {
             const selected = option.value === value;

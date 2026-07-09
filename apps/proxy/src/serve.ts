@@ -36,6 +36,7 @@ import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
 import { createServeShutdown } from "./serve/shutdown.js";
 import { RemoteFileUploadManager } from "./serve/remote-file-upload.js";
 import { RemoteFileStreamManager } from "./serve/remote-file-stream.js";
+import { TerminalSubscriptionBacklog } from "./serve/terminal-subscription-backlog.js";
 import type { ProviderId } from "./providers/types.js";
 
 function resolveInterruptedApprovals(
@@ -237,6 +238,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     onSessionClosed: eventBridge.cleanupSessionResources,
   });
   const terminalWorkerSpawner = new TerminalWorkerSpawner();
+  const terminalSubscriptionBacklog = new TerminalSubscriptionBacklog();
   const remoteFileStreamManager = new RemoteFileStreamManager({
     relayConnection,
     sessionManager,
@@ -281,6 +283,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     setAgentCliPath,
     remoteFileStreamManager,
     remoteFileUploadManager,
+    terminalSubscriptionBacklog,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -324,6 +327,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       sessionManager,
       workerRegistry,
       terminalSockets,
+      terminalSubscriptionBacklog,
       hostedPtyRegistry,
       relayConnection,
       controlHandlers,

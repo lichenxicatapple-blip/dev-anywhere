@@ -9,6 +9,8 @@ export type ThemePreference = "auto" | "light" | "dark";
 
 const LIGHT_THEME_COLOR = "#F6F7F8";
 const DARK_THEME_COLOR = "#1E1E1E";
+const LIGHT_COLOR_SCHEME = "light";
+const DARK_COLOR_SCHEME = "dark";
 
 function isThemePreference(value: string | null): value is ThemePreference {
   return value === "auto" || value === "light" || value === "dark";
@@ -39,6 +41,22 @@ function themeColorForPreference(value: ThemePreference): {
   return { light: LIGHT_THEME_COLOR, dark: DARK_THEME_COLOR };
 }
 
+function resolveEffectiveColorScheme(value: ThemePreference): "light" | "dark" {
+  if (value === "light" || value === "dark") return value;
+  if (typeof window === "undefined") return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function updateColorSchemeMeta(value: ThemePreference): void {
+  if (typeof document === "undefined") return;
+  const colorScheme = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  const resolvedScheme = resolveEffectiveColorScheme(value);
+  colorScheme?.setAttribute(
+    "content",
+    resolvedScheme === "dark" ? DARK_COLOR_SCHEME : LIGHT_COLOR_SCHEME,
+  );
+}
+
 function updateThemeColorMeta(value: ThemePreference): void {
   if (typeof document === "undefined") return;
   const colors = themeColorForPreference(value);
@@ -61,6 +79,7 @@ export function applyThemePreference(value: ThemePreference): void {
     root.dataset.theme = value;
   }
   updateThemeColorMeta(value);
+  updateColorSchemeMeta(value);
 }
 
 export function applyStoredThemePreference(): ThemePreference {

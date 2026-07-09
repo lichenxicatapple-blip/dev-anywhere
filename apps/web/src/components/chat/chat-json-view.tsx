@@ -53,9 +53,9 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
-  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const forceHardwareInput = useAppStore((s) => s.inputModePreference === "hardware");
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
-  const touchEditingSurface = nativeTouchEditingSurface && !desktopInteractionMode;
+  const touchEditingSurface = nativeTouchEditingSurface && !forceHardwareInput;
   const effectiveChatContentFontSize = getEffectiveChatContentFontSize(
     chatContentFontSize,
     touchEditingSurface,
@@ -97,7 +97,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   }, []);
   // 键盘弹起/收起会改变滚动容器 clientHeight, 若用户本来就在底部则自动继续贴底; 离底阅读旧消息时不打断
   const rawKbOffset = useVisualViewportBottomOffset();
-  const kbOffset = desktopInteractionMode ? 0 : rawKbOffset;
+  const kbOffset = forceHardwareInput ? 0 : rawKbOffset;
   const isAtBottomSnapshot = useRef(isAtBottom);
   useEffect(() => {
     isAtBottomSnapshot.current = isAtBottom;

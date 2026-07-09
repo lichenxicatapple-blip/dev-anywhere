@@ -4,15 +4,16 @@ This directory contains public documentation for operating and releasing DEV Any
 
 ## Main References
 
-| Document                                   | Purpose                                                 |
-| ------------------------------------------ | ------------------------------------------------------- |
-| [`../README.md`](../README.md)             | Project overview and quick start.                       |
-| [`../README.zh-CN.md`](../README.zh-CN.md) | Simplified Chinese project overview.                    |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md)           | Hosted relay/web deployment and operations guide.       |
-| [`PWA.md`](PWA.md)                         | iPhone, iPad, and desktop PWA installation guide.       |
-| [`../PUBLISHING.md`](../PUBLISHING.md)     | Versioning, npm, Docker, and VPS release process.       |
-| [`SCRIPTS.md`](SCRIPTS.md)                 | Development, deployment, and verification script guide. |
-| [`assets/`](assets/)                       | Public README images and logo assets.                   |
+| Document                                               | Purpose                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| [`../README.md`](../README.md)                         | Project overview and quick start.                       |
+| [`../README.zh-CN.md`](../README.zh-CN.md)             | Simplified Chinese project overview.                    |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md)                       | Hosted relay/web deployment and operations guide.       |
+| [`PWA.md`](PWA.md)                                     | iPhone, iPad, and desktop PWA installation guide.       |
+| [`RELEASE-0.5-READINESS.md`](RELEASE-0.5-READINESS.md) | 0.5 public-stable release readiness gates.              |
+| [`../PUBLISHING.md`](../PUBLISHING.md)                 | Versioning, npm, Docker, and VPS release process.       |
+| [`SCRIPTS.md`](SCRIPTS.md)                             | Development, deployment, and verification script guide. |
+| [`assets/`](assets/)                                   | Public README images and logo assets.                   |
 
 ## Known Issues
 

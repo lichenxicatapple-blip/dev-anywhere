@@ -35,29 +35,37 @@ describe("app-store font size persistence", () => {
   });
 });
 
-describe("app-store desktop interaction mode persistence", () => {
+describe("app-store input mode preference persistence", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
     vi.resetModules();
   });
 
-  it("defaults desktop interaction mode to off", async () => {
+  it("defaults input mode preference to auto", async () => {
     const { useAppStore } = await import("./app-store");
 
-    expect(useAppStore.getState().desktopInteractionMode).toBe(false);
+    expect(useAppStore.getState().inputModePreference).toBe("auto");
   });
 
-  it("loads and persists desktop interaction mode for the current browser", async () => {
-    localStorage.setItem("dev_anywhere_desktopInteractionMode", "1");
+  it("loads and persists input mode preference for the current browser", async () => {
+    localStorage.setItem("dev_anywhere_inputModePreference", "hardware");
 
     const { useAppStore } = await import("./app-store");
 
-    expect(useAppStore.getState().desktopInteractionMode).toBe(true);
-    useAppStore.getState().setDesktopInteractionMode(false);
+    expect(useAppStore.getState().inputModePreference).toBe("hardware");
+    useAppStore.getState().setInputModePreference("touch");
 
-    expect(useAppStore.getState().desktopInteractionMode).toBe(false);
-    expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("0");
+    expect(useAppStore.getState().inputModePreference).toBe("touch");
+    expect(localStorage.getItem("dev_anywhere_inputModePreference")).toBe("touch");
+  });
+
+  it("falls back to auto for invalid input mode preference", async () => {
+    localStorage.setItem("dev_anywhere_inputModePreference", "desktop");
+
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().inputModePreference).toBe("auto");
   });
 });
 

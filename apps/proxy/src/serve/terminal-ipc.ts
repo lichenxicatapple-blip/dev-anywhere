@@ -21,11 +21,13 @@ import type { SessionManager } from "./session-manager.js";
 import { terminateSessionByOwnership } from "./session-termination.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import { isProcessAlive } from "./service-files.js";
+import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
 
 interface TerminalConnectionDeps {
   sessionManager: SessionManager;
   workerRegistry: WorkerRegistry;
   terminalSockets: Map<string, Socket>;
+  terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
   hostedPtyRegistry: HostedPtyRegistry;
   relayConnection: RelayConnection;
   controlHandlers: ControlMessageHandlers;
@@ -47,6 +49,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     sessionManager,
     workerRegistry,
     terminalSockets,
+    terminalSubscriptionBacklog,
     hostedPtyRegistry,
     relayConnection,
     controlHandlers,
@@ -101,7 +104,8 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           if (existing) {
             sessionManager.setPid(session.id, msg.pid);
           }
-          const hook = msg.kind === "terminal" ? undefined : createHookContext(session.id, provider);
+          const hook =
+            msg.kind === "terminal" ? undefined : createHookContext(session.id, provider);
           socket.write(
             serializeIpc({
               type: "session_create_response",
@@ -241,11 +245,29 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
             broadcastSessionSync(relayConnection, session);
           }
           broadcastSessionList(relayConnection, sessionManager);
+          const pendingSubscribes = terminalSubscriptionBacklog.take(msg.sessionId);
+          for (const pending of pendingSubscribes) {
+            if (!socket.writable) break;
+            socket.write(
+              serializeIpc({
+                type: "pty_subscribe",
+                sessionId: msg.sessionId,
+                requestId: pending.requestId,
+              }),
+            );
+          }
+          if (pendingSubscribes.length > 0) {
+            serviceLogger.info(
+              { sessionId: msg.sessionId, count: pendingSubscribes.length },
+              "Pending PTY subscribes forwarded to terminal",
+            );
+          }
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session registered");
           break;
         }
 
         case "pty_deregister": {
+          terminalSubscriptionBacklog.delete(msg.sessionId);
           relayConnection.sendRaw(
             serializeControl({
               type: "pty_state",
@@ -340,6 +362,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     for (const [sessionId, terminalSocket] of terminalSockets) {
       if (terminalSocket === socket) {
         terminalSockets.delete(sessionId);
+        terminalSubscriptionBacklog.delete(sessionId);
         const session = sessionManager.getSession(sessionId);
         if (!session) {
           serviceLogger.info({ sessionId }, "Terminal socket closed, session already cleaned");

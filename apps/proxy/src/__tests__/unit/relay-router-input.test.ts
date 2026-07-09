@@ -9,6 +9,7 @@ import type { RemoteFileUploadManager } from "#src/serve/remote-file-upload.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import { tildify } from "#src/common/paths.js";
+import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import type { Socket } from "node:net";
 import {
   createRelayConnectionFake,
@@ -121,6 +122,7 @@ function createRouter(options: {
     setAgentCliPath: () => {},
     remoteFileStreamManager: createRemoteFileStreamManagerFake(),
     remoteFileUploadManager: options.remoteFileUploadManager ?? createRemoteFileUploadManagerFake(),
+    terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
     voiceSummaryRunner: options.voiceSummaryRunner,
   });
 }

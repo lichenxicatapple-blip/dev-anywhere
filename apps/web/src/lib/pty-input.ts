@@ -13,7 +13,9 @@ interface RawInputTerminal {
 interface XtermRawInputOptions {
   onRawInput?: (data: string) => void;
   plainEnterBehavior?: "submit" | "linefeed";
+  getPlainEnterBehavior?: () => "submit" | "linefeed";
   physicalKeyboardMode?: boolean;
+  isPhysicalKeyboardMode?: () => boolean;
   isInputEnabled?: () => boolean;
 }
 
@@ -151,8 +153,12 @@ export function attachXtermRawInput(
   let recentXtermText: RecentXtermText | undefined;
   let isComposing = false;
   let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
+  const isPhysicalKeyboardMode = (): boolean =>
+    options.isPhysicalKeyboardMode?.() ?? options.physicalKeyboardMode === true;
+  const getPlainEnterBehavior = (): "submit" | "linefeed" =>
+    options.getPlainEnterBehavior?.() ?? options.plainEnterBehavior ?? "submit";
   const restoreHelperTextareaHints =
-    options.physicalKeyboardMode && term.textarea
+    isPhysicalKeyboardMode() && term.textarea
       ? applyPhysicalKeyboardHints(term.textarea)
       : undefined;
 
@@ -294,7 +300,7 @@ export function attachXtermRawInput(
   const commitDirectNativeTextInput = (data: string): boolean => {
     if (
       !shouldAcceptDirectNativeTextCommit(data, {
-        physicalKeyboardMode: options.physicalKeyboardMode,
+        physicalKeyboardMode: isPhysicalKeyboardMode(),
       })
     ) {
       return false;
@@ -359,7 +365,7 @@ export function attachXtermRawInput(
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.attachCustomKeyEventHandler?.((event) => {
-    if (options.physicalKeyboardMode === true) {
+    if (isPhysicalKeyboardMode()) {
       if (
         shouldPreserveSystemInputSourceShortcut(event) ||
         shouldPreserveSystemMetaShortcut(event)
@@ -369,7 +375,7 @@ export function attachXtermRawInput(
     }
     if (
       shouldRouteKeyThroughNativeInput(event, {
-        physicalKeyboardMode: options.physicalKeyboardMode,
+        physicalKeyboardMode: isPhysicalKeyboardMode(),
         imeComposing: isComposing,
       })
     ) {
@@ -380,7 +386,7 @@ export function attachXtermRawInput(
     // Shift 与默认 Enter 行为互为反操作：submit 模式下 Enter→\r、Shift+Enter→\n；
     // linefeed 模式（移动键盘软回车）反过来——Enter→\n、Shift+Enter→\r。这样在两种模式
     // 下都能稳定地走出"提交"和"换行"两个语义，而不是让 Shift 在 linefeed 模式下变成 no-op。
-    const wantLinefeedDefault = options.plainEnterBehavior === "linefeed";
+    const wantLinefeedDefault = getPlainEnterBehavior() === "linefeed";
     const sendLinefeed = wantLinefeedDefault !== event.shiftKey;
     if (sendLinefeed) {
       sendRawInput("\n");

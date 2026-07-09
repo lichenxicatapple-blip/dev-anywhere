@@ -31,7 +31,7 @@ import { toast } from "@/components/toast";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type InputModePreference } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
@@ -161,6 +161,38 @@ interface PtyKeyboardFollowInput {
   };
 }
 
+interface PtyPhysicalKeyboardModeInput {
+  inputModePreference: InputModePreference;
+  detectedPhysicalKeyboard: boolean;
+  keyboardOffset: number;
+}
+
+interface PhysicalKeyboardActivityInput {
+  active: boolean;
+  touchEditingSurface: boolean;
+  keyboardOffset: number;
+  key: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  isComposing?: boolean;
+  targetAcceptsPtyInput?: boolean;
+}
+
+const HARDWARE_KEYBOARD_CONTROL_KEYS = new Set([
+  "Enter",
+  "Backspace",
+  "Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Delete",
+  "Home",
+  "End",
+]);
+
 export function shouldShowMobilePtyControlsForState({
   softKeyboardEditingSurface,
   ptyInputFocused,
@@ -176,6 +208,52 @@ export function shouldForcePtyKeyboardFollow({
 }: PtyKeyboardFollowInput): boolean {
   if (!controlsVisible) return false;
   return !previous.controlsVisible || (keyboardOpen && !previous.keyboardOpen);
+}
+
+export function resolvePtyPhysicalKeyboardMode({
+  inputModePreference,
+  detectedPhysicalKeyboard,
+  keyboardOffset,
+}: PtyPhysicalKeyboardModeInput): boolean {
+  if (inputModePreference === "hardware") return true;
+  if (inputModePreference === "touch") return false;
+  return detectedPhysicalKeyboard && keyboardOffset <= 0;
+}
+
+export function shouldTreatKeydownAsPhysicalKeyboardActivity({
+  active,
+  touchEditingSurface,
+  keyboardOffset,
+  key,
+  altKey = false,
+  ctrlKey = false,
+  metaKey = false,
+  isComposing = false,
+  targetAcceptsPtyInput = true,
+}: PhysicalKeyboardActivityInput): boolean {
+  if (!active || !touchEditingSurface || !targetAcceptsPtyInput) return false;
+  if (keyboardOffset > 0 || isComposing) return false;
+  if (altKey || ctrlKey || metaKey) return false;
+  if (key.length === 1) return true;
+  if (key === "Unidentified" || key === "Process" || key === "Dead") return false;
+  return HARDWARE_KEYBOARD_CONTROL_KEYS.has(key);
+}
+
+function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
+  if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return null;
+  if (event.key.length === 1) return event.key;
+  if (event.key === "Enter") return "\r";
+  if (event.key === "Backspace") return "\x7f";
+  if (event.key === "Tab") return event.shiftKey ? "\x1b[Z" : "\t";
+  if (event.key === "Escape") return "\x1b";
+  if (event.key === "ArrowUp") return "\x1b[A";
+  if (event.key === "ArrowDown") return "\x1b[B";
+  if (event.key === "ArrowRight") return "\x1b[C";
+  if (event.key === "ArrowLeft") return "\x1b[D";
+  if (event.key === "Delete") return "\x1b[3~";
+  if (event.key === "Home") return "\x1b[H";
+  if (event.key === "End") return "\x1b[F";
+  return null;
 }
 
 export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
@@ -211,6 +289,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
   const softKeyboardLayoutActiveRef = useRef(false);
+  const rawKeyboardOffsetRef = useRef(0);
+  const physicalKeyboardModeRef = useRef(false);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
@@ -235,20 +315,28 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     horizontalScrollable: false,
   });
   const [hasSeenSoftKeyboard, setHasSeenSoftKeyboard] = useState(false);
+  const [detectedPhysicalKeyboard, setDetectedPhysicalKeyboard] = useState(false);
 
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
-  const desktopInteractionMode = useAppStore((s) => s.desktopInteractionMode);
+  const inputModePreference = useAppStore((s) => s.inputModePreference);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted" || sessionKind === "terminal";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
-  const softKeyboardEditingSurface = touchEditingSurface && !desktopInteractionMode;
-  const ptyPlainEnterBehavior = softKeyboardEditingSurface ? "linefeed" : "submit";
   const { bottomOffset: rawKeyboardOffset, layoutBottomInset: rawKeyboardLayoutInset } =
     useVisualViewportInsets();
-  const keyboardOffset = desktopInteractionMode ? 0 : rawKeyboardOffset;
+  const forceHardwareInput = inputModePreference === "hardware";
+  const physicalKeyboardMode = resolvePtyPhysicalKeyboardMode({
+    inputModePreference,
+    detectedPhysicalKeyboard,
+    keyboardOffset: rawKeyboardOffset,
+  });
+  const softKeyboardEditingSurface = touchEditingSurface && !physicalKeyboardMode;
+  const keyboardOffset = forceHardwareInput ? 0 : rawKeyboardOffset;
   const keyboardOpen = keyboardOffset > 0;
-  const mobileControlsBottomInset = desktopInteractionMode ? 0 : rawKeyboardLayoutInset;
+  const mobileControlsBottomInset = forceHardwareInput ? 0 : rawKeyboardLayoutInset;
+  rawKeyboardOffsetRef.current = rawKeyboardOffset;
+  physicalKeyboardModeRef.current = physicalKeyboardMode;
 
   useEffect(() => {
     activeRef.current = active;
@@ -264,6 +352,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
   }, [keyboardOffset]);
+  useEffect(() => {
+    if (inputModePreference !== "auto" || rawKeyboardOffset <= 0) return;
+    setDetectedPhysicalKeyboard(false);
+  }, [inputModePreference, rawKeyboardOffset]);
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const {
@@ -405,6 +497,78 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     if (!data.includes("\r") && !data.includes("\n")) return;
     scrollControllerRef.current?.resetHorizontalScroll(reason);
   }, []);
+
+  const getPtyPlainEnterBehavior = useCallback((): "submit" | "linefeed" => {
+    return physicalKeyboardModeRef.current ? "submit" : "linefeed";
+  }, []);
+
+  const isPtyPhysicalKeyboardMode = useCallback((): boolean => {
+    return physicalKeyboardModeRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (!active || inputModePreference !== "auto" || !touchEditingSurface) return;
+
+    const targetAcceptsPtyInput = (target: EventTarget | null): boolean => {
+      const host = xtermHostRef.current;
+      const container = containerEl;
+      if (!(target instanceof Node)) return target === window;
+      if (host?.contains(target)) return true;
+      if (target === document.body || target === document.documentElement) return true;
+      if (!container?.contains(target)) return false;
+      if (!(target instanceof HTMLElement)) return true;
+      return (
+        target.closest(
+          'a,button,input,textarea,select,[contenteditable="true"],[role="button"],[role="textbox"]',
+        ) === null
+      );
+    };
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        !shouldTreatKeydownAsPhysicalKeyboardActivity({
+          active: activeRef.current,
+          touchEditingSurface,
+          keyboardOffset: rawKeyboardOffsetRef.current,
+          key: event.key,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          isComposing: event.isComposing,
+          targetAcceptsPtyInput: targetAcceptsPtyInput(event.target),
+        })
+      ) {
+        return;
+      }
+
+      setDetectedPhysicalKeyboard(true);
+      physicalKeyboardModeRef.current = true;
+      terminalRef.current?.focus();
+
+      const host = xtermHostRef.current;
+      if (event.target instanceof Node && host?.contains(event.target)) return;
+      const raw = rawInputForPhysicalKeyboardEvent(event);
+      if (!raw || !canAcceptInput()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      sendRemoteInputRaw(sessionId, raw);
+      scheduleRawInputFollow("physicalKeyboard", { force: true });
+      resetHorizontalScrollAfterLineSubmit(raw, "physicalKeyboardEnter");
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    active,
+    canAcceptInput,
+    containerEl,
+    inputModePreference,
+    resetHorizontalScrollAfterLineSubmit,
+    scheduleRawInputFollow,
+    sessionId,
+    touchEditingSurface,
+    xtermHostRef,
+  ]);
 
   const downloadPtyPath = useCallback(
     (path: string): void => {
@@ -564,7 +728,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       ws,
       relay,
       // 软键盘场景进入会话时不自动聚焦 xterm helper textarea, 否则 Android/iOS 立刻起
-      // IME 把视口压成一半, 用户还没看清当前 PTY 内容键盘已遮；桌面交互模式保留 RAF auto-focus。
+      // IME 把视口压成一半, 用户还没看清当前 PTY 内容键盘已遮；强制实体键盘时保留 RAF auto-focus。
       // 用户想敲字仍可点 PTY 区域 (handleTerminalContainerMouseDown / pointerdown 都挂了
       // terminal.focus)。
       scheduleAutoFocus: softKeyboardEditingSurface ? () => {} : undefined,
@@ -577,8 +741,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       attachRawInput: (term, rawSessionId, rawOptions) =>
         attachXtermRawInput(term, rawSessionId, {
           ...rawOptions,
-          plainEnterBehavior: ptyPlainEnterBehavior,
-          physicalKeyboardMode: desktopInteractionMode,
+          getPlainEnterBehavior: getPtyPlainEnterBehavior,
+          isPhysicalKeyboardMode: isPtyPhysicalKeyboardMode,
+          physicalKeyboardMode: forceHardwareInput,
         }),
       isInputEnabled: canAcceptInput,
       canFocus: canAcceptInput,
@@ -780,8 +945,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     follow.handleAtBottomChange,
     follow.hasNewFramesWhileAwayRef,
     follow.setHasNewFramesWhileAway,
-    ptyPlainEnterBehavior,
     canAcceptInput,
+    forceHardwareInput,
+    getPtyPlainEnterBehavior,
+    isPtyPhysicalKeyboardMode,
     downloadPtyPath,
     openImagePreview,
     suppressPtyFocus,
@@ -893,6 +1060,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     }
   }, [
     keyboardOffset,
+    keyboardOpen,
     showMobilePtyControls,
     containerPaddingBottom,
     clearNewFramesWhileAway,

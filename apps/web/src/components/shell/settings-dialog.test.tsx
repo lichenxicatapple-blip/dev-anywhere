@@ -59,8 +59,13 @@ describe("SettingsDialog", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
+    document.querySelector('meta[name="color-scheme"]')?.remove();
+    const colorSchemeMeta = document.createElement("meta");
+    colorSchemeMeta.setAttribute("name", "color-scheme");
+    colorSchemeMeta.setAttribute("content", "light");
+    document.head.append(colorSchemeMeta);
     useAppStore.setState({
-      desktopInteractionMode: false,
+      inputModePreference: "auto",
       latencyMonitorEnabled: false,
       proxies: [{ proxyId: "proxy-1", name: "Work Mac", online: true }],
       proxyListLoaded: true,
@@ -183,8 +188,8 @@ describe("SettingsDialog", () => {
     expect(screen.getByRole("button", { name: /版本/ })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Voice Pilot" })).not.toBeNull();
     expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
-    expect(screen.getByRole("switch", { name: "桌面交互模式" })).not.toBeNull();
-    expect(screen.getByText("适合平板外接键盘；保留触控，但按桌面输入处理")).not.toBeNull();
+    expect(screen.getByRole("radiogroup", { name: "输入方式" })).not.toBeNull();
+    expect(screen.getByText("默认自动识别软键盘和实体键盘；必要时可强制一种方式")).not.toBeNull();
     expect(screen.getByRole("radiogroup", { name: "主题" })).not.toBeNull();
     expect(screen.getByRole("radio", { name: "跟随系统" })).not.toBeNull();
     expect(screen.queryByText(/固定为浅色或深色/)).toBeNull();
@@ -271,6 +276,9 @@ describe("SettingsDialog", () => {
     expect(useAppStore.getState().themePreference).toBe("dark");
     expect(localStorage.getItem("dev_anywhere_theme")).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content")).toBe(
+      "dark",
+    );
     expect(dark.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(light);
@@ -278,6 +286,9 @@ describe("SettingsDialog", () => {
     expect(useAppStore.getState().themePreference).toBe("light");
     expect(localStorage.getItem("dev_anywhere_theme")).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content")).toBe(
+      "light",
+    );
     expect(light.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(auto);
@@ -285,20 +296,31 @@ describe("SettingsDialog", () => {
     expect(useAppStore.getState().themePreference).toBe("auto");
     expect(localStorage.getItem("dev_anywhere_theme")).toBeNull();
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content")).toBe(
+      "light",
+    );
     expect(auto.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("persists desktop interaction mode from global settings", () => {
+  it("persists input mode preference from global settings", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
-    const toggle = screen.getByRole("switch", { name: "桌面交互模式" });
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    const auto = screen.getByRole("radio", { name: "自动" });
+    const touch = screen.getByRole("radio", { name: "触控优先" });
+    const hardware = screen.getByRole("radio", { name: "实体键盘优先" });
+    expect(auto.getAttribute("aria-checked")).toBe("true");
 
-    fireEvent.click(toggle);
+    fireEvent.click(hardware);
 
-    expect(useAppStore.getState().desktopInteractionMode).toBe(true);
-    expect(localStorage.getItem("dev_anywhere_desktopInteractionMode")).toBe("1");
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(useAppStore.getState().inputModePreference).toBe("hardware");
+    expect(localStorage.getItem("dev_anywhere_inputModePreference")).toBe("hardware");
+    expect(hardware.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(touch);
+
+    expect(useAppStore.getState().inputModePreference).toBe("touch");
+    expect(localStorage.getItem("dev_anywhere_inputModePreference")).toBe("touch");
+    expect(touch.getAttribute("aria-checked")).toBe("true");
   });
 
   it("persists PTY scroll trace from global settings", () => {

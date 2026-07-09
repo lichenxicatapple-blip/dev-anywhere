@@ -3,13 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#F6F7F8" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#1E1E1E" media="(prefers-color-scheme: dark)" />
     <script>
       (() => {
         try {
           const theme = localStorage.getItem("dev_anywhere_theme");
+          const resolvedTheme =
+            theme === "dark" || theme === "light"
+              ? theme
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document
+            .querySelector('meta[name="color-scheme"]')
+            ?.setAttribute("content", resolvedTheme);
           if (theme === "light" || theme === "dark") {
             document.documentElement.dataset.theme = theme;
             const color = theme === "light" ? "#F6F7F8" : "#1E1E1E";

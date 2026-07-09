@@ -35,6 +35,8 @@ interface PendingToast {
   message: string;
 }
 
+export type InputModePreference = "auto" | "touch" | "hardware";
+
 interface AppStoreState {
   phase: AppPhase;
   phaseBeforeDisconnect: AppPhase | null;
@@ -53,7 +55,7 @@ interface AppStoreState {
   sidebarCollapsed: boolean;
   themePreference: ThemePreference;
   latencyMonitorEnabled: boolean;
-  desktopInteractionMode: boolean;
+  inputModePreference: InputModePreference;
   ptyScrollTraceEnabled: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
@@ -76,7 +78,7 @@ interface AppStoreState {
   toggleSidebarCollapsed: () => void;
   setThemePreference: (theme: ThemePreference) => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
-  setDesktopInteractionMode: (enabled: boolean) => void;
+  setInputModePreference: (preference: InputModePreference) => void;
   setPtyScrollTraceEnabled: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
@@ -125,8 +127,13 @@ function loadLatencyMonitorEnabled(): boolean {
   return readStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled) === "1";
 }
 
-function loadDesktopInteractionMode(): boolean {
-  return readStorageValue("local", STORAGE_KEYS.desktopInteractionMode) === "1";
+function isInputModePreference(value: string | null): value is InputModePreference {
+  return value === "auto" || value === "touch" || value === "hardware";
+}
+
+function loadInputModePreference(): InputModePreference {
+  const stored = readStorageValue("local", STORAGE_KEYS.inputModePreference);
+  return isInputModePreference(stored) ? stored : "auto";
 }
 
 function loadPtyScrollTraceEnabled(): boolean {
@@ -152,7 +159,7 @@ export const useAppStore = create<AppStoreState>()(
       sidebarCollapsed: loadSidebarCollapsed(),
       themePreference: readThemePreference(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
-      desktopInteractionMode: loadDesktopInteractionMode(),
+      inputModePreference: loadInputModePreference(),
       ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
       pendingToast: null,
 
@@ -213,9 +220,9 @@ export const useAppStore = create<AppStoreState>()(
         writeStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled, enabled ? "1" : "0");
         set({ latencyMonitorEnabled: enabled });
       },
-      setDesktopInteractionMode: (enabled) => {
-        writeStorageValue("local", STORAGE_KEYS.desktopInteractionMode, enabled ? "1" : "0");
-        set({ desktopInteractionMode: enabled });
+      setInputModePreference: (preference) => {
+        writeStorageValue("local", STORAGE_KEYS.inputModePreference, preference);
+        set({ inputModePreference: preference });
       },
       setPtyScrollTraceEnabled: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.ptyScrollTraceEnabled, enabled ? "1" : "0");

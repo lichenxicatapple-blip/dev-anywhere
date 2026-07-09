@@ -281,7 +281,7 @@ describe("ChatHeader PTY upload menu", () => {
 
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
-    expect(screen.queryByRole("menuitemcheckbox", { name: "桌面交互模式" })).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: "输入方式" })).toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
     expect(
