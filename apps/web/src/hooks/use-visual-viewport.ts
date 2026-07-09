@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const VISUAL_VIEWPORT_HEIGHT_VAR = "--dev-visual-viewport-height";
-const SOFT_KEYBOARD_VIEWPORT_RATIO = 0.78;
+const SOFT_KEYBOARD_MIN_OCCLUDED_VIEWPORT_SHARE = 0.3;
 const TOUCH_TABLET_MIN_SHORT_EDGE = 600;
 const TOUCH_TABLET_MIN_LONG_EDGE = 768;
 
@@ -12,11 +12,18 @@ interface VisualViewportBottomOffsetInput {
   visualViewportHeight: number;
   visualViewportOffsetTop: number;
   baselineViewportHeight: number;
+  allowBaselineFallback?: boolean;
 }
 
-interface VisualViewportInsets {
+export type VisualViewportOcclusionKind = "none" | "soft-keyboard" | "accessory-or-browser-ui";
+
+export interface VisualViewportInsets {
+  occlusionKind: VisualViewportOcclusionKind;
   bottomOffset: number;
   layoutBottomInset: number;
+  rawBottomOffset: number;
+  rawLayoutBottomInset: number;
+  occlusionReason: string;
 }
 
 interface TouchTabletViewportInput {
@@ -40,24 +47,84 @@ export function isTouchTabletViewport({
 }
 
 export function computeVisualViewportBottomOffset({
+  ...input
+}: VisualViewportBottomOffsetInput): number {
+  return classifyVisualViewportOcclusion(input).bottomOffset;
+}
+
+export function classifyVisualViewportOcclusion({
   layoutViewportHeight,
   visualViewportHeight,
   visualViewportOffsetTop,
   baselineViewportHeight,
-}: VisualViewportBottomOffsetInput): number {
+  allowBaselineFallback = true,
+}: VisualViewportBottomOffsetInput): VisualViewportInsets {
   const currentBottomInset = layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
   const baselineBottomInset =
     baselineViewportHeight - visualViewportHeight - visualViewportOffsetTop;
-  const currentRatio = visualViewportHeight / Math.max(layoutViewportHeight, 1);
-  const baselineRatio = visualViewportHeight / Math.max(baselineViewportHeight, 1);
 
-  const currentLooksLikeKeyboard =
-    currentBottomInset > 0 && currentRatio < SOFT_KEYBOARD_VIEWPORT_RATIO;
-  const baselineLooksLikeKeyboard =
-    baselineBottomInset > 0 && baselineRatio < SOFT_KEYBOARD_VIEWPORT_RATIO;
+  const currentCandidate = classifyOcclusionCandidate({
+    bottomInset: currentBottomInset,
+    visualViewportHeight,
+    referenceViewportHeight: layoutViewportHeight,
+    source: "current",
+  });
+  const baselineCandidate = allowBaselineFallback
+    ? classifyOcclusionCandidate({
+        bottomInset: baselineBottomInset,
+        visualViewportHeight,
+        referenceViewportHeight: baselineViewportHeight,
+        source: "baseline",
+      })
+    : { kind: "none" as const, bottomInset: 0, reason: "baseline-disabled" };
 
-  if (!currentLooksLikeKeyboard && !baselineLooksLikeKeyboard) return 0;
-  return Math.max(currentBottomInset, baselineBottomInset, 0);
+  const bottomOffset = Math.max(
+    currentCandidate.kind === "soft-keyboard" ? currentCandidate.bottomInset : 0,
+    baselineCandidate.kind === "soft-keyboard" ? baselineCandidate.bottomInset : 0,
+  );
+  const layoutBottomInset =
+    currentCandidate.kind === "soft-keyboard" ? Math.max(currentBottomInset, 0) : 0;
+  const rawBottomOffset = Math.max(
+    currentBottomInset,
+    allowBaselineFallback ? baselineBottomInset : 0,
+    0,
+  );
+  const rawLayoutBottomInset = Math.max(currentBottomInset, 0);
+
+  if (bottomOffset > 0) {
+    return {
+      occlusionKind: "soft-keyboard",
+      bottomOffset,
+      layoutBottomInset,
+      rawBottomOffset,
+      rawLayoutBottomInset,
+      occlusionReason:
+        currentCandidate.kind === "soft-keyboard"
+          ? currentCandidate.reason
+          : baselineCandidate.reason,
+    };
+  }
+
+  if (rawBottomOffset > 0 || rawLayoutBottomInset > 0) {
+    return {
+      occlusionKind: "accessory-or-browser-ui",
+      bottomOffset: 0,
+      layoutBottomInset: 0,
+      rawBottomOffset,
+      rawLayoutBottomInset,
+      occlusionReason:
+        currentCandidate.kind !== "none" ? currentCandidate.reason : baselineCandidate.reason,
+    };
+  }
+
+  return {
+    occlusionKind: "none",
+    bottomOffset: 0,
+    layoutBottomInset: 0,
+    rawBottomOffset: 0,
+    rawLayoutBottomInset: 0,
+    occlusionReason: "none",
+  };
 }
 
 export function computeVisualViewportLayoutBottomInset({
@@ -65,11 +132,44 @@ export function computeVisualViewportLayoutBottomInset({
   visualViewportHeight,
   visualViewportOffsetTop,
 }: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight">): number {
-  const currentBottomInset = layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
-  const currentRatio = visualViewportHeight / Math.max(layoutViewportHeight, 1);
-  const currentLooksLikeKeyboard =
-    currentBottomInset > 0 && currentRatio < SOFT_KEYBOARD_VIEWPORT_RATIO;
-  return currentLooksLikeKeyboard ? Math.max(currentBottomInset, 0) : 0;
+  return classifyVisualViewportOcclusion({
+    layoutViewportHeight,
+    visualViewportHeight,
+    visualViewportOffsetTop,
+    baselineViewportHeight: layoutViewportHeight,
+    allowBaselineFallback: false,
+  }).layoutBottomInset;
+}
+
+function classifyOcclusionCandidate({
+  bottomInset,
+  visualViewportHeight,
+  referenceViewportHeight,
+  source,
+}: {
+  bottomInset: number;
+  visualViewportHeight: number;
+  referenceViewportHeight: number;
+  source: "current" | "baseline";
+}):
+  | { kind: "none"; bottomInset: 0; reason: string }
+  | { kind: "soft-keyboard" | "accessory-or-browser-ui"; bottomInset: number; reason: string } {
+  const inset = Math.max(bottomInset, 0);
+  if (inset <= 0) return { kind: "none", bottomInset: 0, reason: `${source}:none` };
+
+  const occludedShare = inset / Math.max(referenceViewportHeight, 1);
+  const visibleShare = visualViewportHeight / Math.max(referenceViewportHeight, 1);
+  // Treat only substantial lower-screen occlusion as a soft keyboard. Smaller
+  // visualViewport deltas are still exposed as raw telemetry, but they must not
+  // move the PTY layout because iPad browser chrome, IME palettes, and autofill
+  // accessory bars all report as viewport changes too.
+  const keyboardSizedOcclusion = occludedShare >= SOFT_KEYBOARD_MIN_OCCLUDED_VIEWPORT_SHARE;
+
+  return {
+    kind: keyboardSizedOcclusion ? "soft-keyboard" : "accessory-or-browser-ui",
+    bottomInset: inset,
+    reason: `${source}:visible=${visibleShare.toFixed(2)} occluded=${occludedShare.toFixed(2)}`,
+  };
 }
 
 export function useVisualViewportHeightVar(): void {
@@ -106,8 +206,12 @@ export function useVisualViewportBottomOffset(): number {
 
 export function useVisualViewportInsets(): VisualViewportInsets {
   const [insets, setInsets] = useState<VisualViewportInsets>({
+    occlusionKind: "none",
     bottomOffset: 0,
     layoutBottomInset: 0,
+    rawBottomOffset: 0,
+    rawLayoutBottomInset: 0,
+    occlusionReason: "none",
   });
   const baselineHeightRef = useRef(0);
   const lastWidthRef = useRef(0);
@@ -115,6 +219,7 @@ export function useVisualViewportInsets(): VisualViewportInsets {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    const allowBaselineFallback = !isIosLikeTouchWebKit();
 
     const update = () => {
       const visualHeight = vv.height;
@@ -137,22 +242,20 @@ export function useVisualViewportInsets(): VisualViewportInsets {
       // Only treat large viewport compression as the soft keyboard; otherwise we add
       // padding that creates a visible dead zone above the Safari address bar.
       const layoutViewportHeight = window.innerHeight;
-      const next: VisualViewportInsets = {
-        bottomOffset: computeVisualViewportBottomOffset({
-          layoutViewportHeight,
-          visualViewportHeight: visualHeight,
-          visualViewportOffsetTop: visualTop,
-          baselineViewportHeight: baselineHeightRef.current,
-        }),
-        layoutBottomInset: computeVisualViewportLayoutBottomInset({
-          layoutViewportHeight,
-          visualViewportHeight: visualHeight,
-          visualViewportOffsetTop: visualTop,
-        }),
-      };
+      const next = classifyVisualViewportOcclusion({
+        layoutViewportHeight,
+        visualViewportHeight: visualHeight,
+        visualViewportOffsetTop: visualTop,
+        baselineViewportHeight: baselineHeightRef.current,
+        allowBaselineFallback,
+      });
       setInsets((previous) =>
+        previous.occlusionKind === next.occlusionKind &&
         previous.bottomOffset === next.bottomOffset &&
-        previous.layoutBottomInset === next.layoutBottomInset
+        previous.layoutBottomInset === next.layoutBottomInset &&
+        previous.rawBottomOffset === next.rawBottomOffset &&
+        previous.rawLayoutBottomInset === next.rawLayoutBottomInset &&
+        previous.occlusionReason === next.occlusionReason
           ? previous
           : next,
       );
@@ -176,4 +279,17 @@ export function useVisualViewportInsets(): VisualViewportInsets {
   }, []);
 
   return insets;
+}
+
+function isIosLikeTouchWebKit(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = navigator.userAgent ?? "";
+  const platform = navigator.platform ?? "";
+  const maxTouchPoints = navigator.maxTouchPoints ?? 0;
+  return (
+    /iPad|iPhone|iPod/.test(userAgent) ||
+    (platform === "MacIntel" &&
+      maxTouchPoints > 1 &&
+      (userAgent.includes("Mac OS X") || userAgent.includes("Macintosh")))
+  );
 }

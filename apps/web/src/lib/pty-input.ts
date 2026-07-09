@@ -108,38 +108,71 @@ type HelperTextareaSnapshot = {
   autocomplete: string | null;
   autocorrect: string | null;
   spellcheck: boolean;
+  colorScheme: string;
 };
 
-function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
-  const previous: HelperTextareaSnapshot = {
+function snapshotHelperTextarea(textarea: HTMLTextAreaElement): HelperTextareaSnapshot {
+  return {
     inputMode: textarea.getAttribute("inputmode"),
     enterKeyHint: textarea.getAttribute("enterkeyhint"),
     autocapitalize: textarea.getAttribute("autocapitalize"),
     autocomplete: textarea.getAttribute("autocomplete"),
     autocorrect: textarea.getAttribute("autocorrect"),
     spellcheck: textarea.spellcheck,
+    colorScheme: textarea.style.colorScheme,
   };
+}
 
-  // iPad hardware keyboards still need the helper textarea to remain a normal
-  // text input context so system input-source switching keeps working.
-  textarea.setAttribute("enterkeyhint", "send");
+function restoreHelperTextareaSnapshot(
+  textarea: HTMLTextAreaElement,
+  previous: HelperTextareaSnapshot,
+): void {
+  if (previous.inputMode === null) textarea.removeAttribute("inputmode");
+  else textarea.setAttribute("inputmode", previous.inputMode);
+  if (previous.enterKeyHint === null) textarea.removeAttribute("enterkeyhint");
+  else textarea.setAttribute("enterkeyhint", previous.enterKeyHint);
+  if (previous.autocapitalize === null) textarea.removeAttribute("autocapitalize");
+  else textarea.setAttribute("autocapitalize", previous.autocapitalize);
+  if (previous.autocomplete === null) textarea.removeAttribute("autocomplete");
+  else textarea.setAttribute("autocomplete", previous.autocomplete);
+  if (previous.autocorrect === null) textarea.removeAttribute("autocorrect");
+  else textarea.setAttribute("autocorrect", previous.autocorrect);
+  textarea.spellcheck = previous.spellcheck;
+  textarea.style.colorScheme = previous.colorScheme;
+}
+
+function getDocumentInputColorScheme(): "dark" | "light" | null {
+  if (typeof window === "undefined" || typeof document === "undefined") return null;
+  const colorScheme = window.getComputedStyle(document.documentElement).colorScheme;
+  if (colorScheme.includes("dark")) return "dark";
+  if (colorScheme.includes("light")) return "light";
+  return null;
+}
+
+function applyTerminalInputHints(textarea: HTMLTextAreaElement): () => void {
+  const previous = snapshotHelperTextarea(textarea);
+  const colorScheme = getDocumentInputColorScheme();
+
+  // PTY owns text input semantics, but the helper must remain a real text input
+  // context so hardware-keyboard IME switching and composition keep working.
   textarea.setAttribute("autocapitalize", "off");
   textarea.setAttribute("autocomplete", "off");
   textarea.setAttribute("autocorrect", "off");
   textarea.spellcheck = false;
+  if (colorScheme) textarea.style.colorScheme = colorScheme;
+
+  return () => restoreHelperTextareaSnapshot(textarea, previous);
+}
+
+function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
+  const previous = snapshotHelperTextarea(textarea);
+
+  // iPad hardware keyboards still need the helper textarea to remain a normal
+  // text input context so system input-source switching keeps working.
+  textarea.setAttribute("enterkeyhint", "send");
 
   return () => {
-    if (previous.inputMode === null) textarea.removeAttribute("inputmode");
-    else textarea.setAttribute("inputmode", previous.inputMode);
-    if (previous.enterKeyHint === null) textarea.removeAttribute("enterkeyhint");
-    else textarea.setAttribute("enterkeyhint", previous.enterKeyHint);
-    if (previous.autocapitalize === null) textarea.removeAttribute("autocapitalize");
-    else textarea.setAttribute("autocapitalize", previous.autocapitalize);
-    if (previous.autocomplete === null) textarea.removeAttribute("autocomplete");
-    else textarea.setAttribute("autocomplete", previous.autocomplete);
-    if (previous.autocorrect === null) textarea.removeAttribute("autocorrect");
-    else textarea.setAttribute("autocorrect", previous.autocorrect);
-    textarea.spellcheck = previous.spellcheck;
+    restoreHelperTextareaSnapshot(textarea, previous);
   };
 }
 
@@ -157,7 +190,10 @@ export function attachXtermRawInput(
     options.isPhysicalKeyboardMode?.() ?? options.physicalKeyboardMode === true;
   const getPlainEnterBehavior = (): "submit" | "linefeed" =>
     options.getPlainEnterBehavior?.() ?? options.plainEnterBehavior ?? "submit";
-  const restoreHelperTextareaHints =
+  const restoreTerminalInputHints = term.textarea
+    ? applyTerminalInputHints(term.textarea)
+    : undefined;
+  const restorePhysicalKeyboardHints =
     isPhysicalKeyboardMode() && term.textarea
       ? applyPhysicalKeyboardHints(term.textarea)
       : undefined;
@@ -410,7 +446,8 @@ export function attachXtermRawInput(
         clearTimeout(clearTextareaTimer);
         clearTextareaTimer = undefined;
       }
-      restoreHelperTextareaHints?.();
+      restorePhysicalKeyboardHints?.();
+      restoreTerminalInputHints?.();
       clearNativeEchoSuppression();
       clearRecentXtermText();
     },

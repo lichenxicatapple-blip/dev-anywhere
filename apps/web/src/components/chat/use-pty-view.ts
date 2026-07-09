@@ -34,6 +34,7 @@ import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore, type InputModePreference } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
+import type { VisualViewportOcclusionKind } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import {
@@ -93,6 +94,14 @@ interface UsePtyViewResult {
   ptyInputFocused: boolean;
   showMobilePtyControls: boolean;
   touchEditingSurface: boolean;
+  softKeyboardEditingSurface: boolean;
+  physicalKeyboardMode: boolean;
+  keyboardOffset: number;
+  rawKeyboardOffset: number;
+  rawKeyboardLayoutInset: number;
+  accessoryBottomInset: number;
+  viewportOcclusionKind: VisualViewportOcclusionKind;
+  viewportOcclusionReason: string;
   mobileControlsBottomInset: number;
   connectionOverlay: { connecting: boolean; subscribeDelayed: boolean };
   containerPaddingBottom: number;
@@ -164,7 +173,7 @@ interface PtyKeyboardFollowInput {
 interface PtyPhysicalKeyboardModeInput {
   inputModePreference: InputModePreference;
   detectedPhysicalKeyboard: boolean;
-  keyboardOffset: number;
+  viewportOcclusionKind: VisualViewportOcclusionKind;
 }
 
 interface PhysicalKeyboardActivityInput {
@@ -177,6 +186,18 @@ interface PhysicalKeyboardActivityInput {
   metaKey?: boolean;
   isComposing?: boolean;
   targetAcceptsPtyInput?: boolean;
+}
+
+interface PtyAccessoryInsetInput {
+  ptyInputFocused: boolean;
+  viewportOcclusionKind: VisualViewportOcclusionKind;
+  rawLayoutBottomInset: number;
+}
+
+interface PtyContainerPaddingInput {
+  showMobilePtyControls: boolean;
+  horizontalScrollable: boolean;
+  accessoryBottomInset: number;
 }
 
 const HARDWARE_KEYBOARD_CONTROL_KEYS = new Set([
@@ -213,11 +234,11 @@ export function shouldForcePtyKeyboardFollow({
 export function resolvePtyPhysicalKeyboardMode({
   inputModePreference,
   detectedPhysicalKeyboard,
-  keyboardOffset,
+  viewportOcclusionKind,
 }: PtyPhysicalKeyboardModeInput): boolean {
   if (inputModePreference === "hardware") return true;
   if (inputModePreference === "touch") return false;
-  return detectedPhysicalKeyboard && keyboardOffset <= 0;
+  return detectedPhysicalKeyboard && viewportOcclusionKind !== "soft-keyboard";
 }
 
 export function shouldTreatKeydownAsPhysicalKeyboardActivity({
@@ -237,6 +258,26 @@ export function shouldTreatKeydownAsPhysicalKeyboardActivity({
   if (key.length === 1) return true;
   if (key === "Unidentified" || key === "Process" || key === "Dead") return false;
   return HARDWARE_KEYBOARD_CONTROL_KEYS.has(key);
+}
+
+export function resolvePtyAccessoryBottomInset({
+  ptyInputFocused,
+  viewportOcclusionKind,
+  rawLayoutBottomInset,
+}: PtyAccessoryInsetInput): number {
+  if (!ptyInputFocused) return 0;
+  if (viewportOcclusionKind !== "accessory-or-browser-ui") return 0;
+  return Math.max(Math.round(rawLayoutBottomInset), 0);
+}
+
+export function resolvePtyContainerPaddingBottom({
+  showMobilePtyControls,
+  horizontalScrollable,
+  accessoryBottomInset,
+}: PtyContainerPaddingInput): number {
+  const basePadding = showMobilePtyControls ? 112 : horizontalScrollable ? 32 : 8;
+  if (accessoryBottomInset <= 0) return basePadding;
+  return Math.max(basePadding, accessoryBottomInset + 8);
 }
 
 function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
@@ -323,18 +364,19 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const inputModePreference = useAppStore((s) => s.inputModePreference);
   const webOwnsPtyGeometry = ptyOwner === "proxy-hosted" || sessionKind === "terminal";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
-  const { bottomOffset: rawKeyboardOffset, layoutBottomInset: rawKeyboardLayoutInset } =
-    useVisualViewportInsets();
+  const viewportOcclusion = useVisualViewportInsets();
+  const rawKeyboardOffset = viewportOcclusion.rawBottomOffset;
+  const rawKeyboardLayoutInset = viewportOcclusion.rawLayoutBottomInset;
   const forceHardwareInput = inputModePreference === "hardware";
   const physicalKeyboardMode = resolvePtyPhysicalKeyboardMode({
     inputModePreference,
     detectedPhysicalKeyboard,
-    keyboardOffset: rawKeyboardOffset,
+    viewportOcclusionKind: viewportOcclusion.occlusionKind,
   });
   const softKeyboardEditingSurface = touchEditingSurface && !physicalKeyboardMode;
-  const keyboardOffset = forceHardwareInput ? 0 : rawKeyboardOffset;
+  const keyboardOffset = forceHardwareInput ? 0 : viewportOcclusion.bottomOffset;
   const keyboardOpen = keyboardOffset > 0;
-  const mobileControlsBottomInset = forceHardwareInput ? 0 : rawKeyboardLayoutInset;
+  const mobileControlsBottomInset = forceHardwareInput ? 0 : viewportOcclusion.layoutBottomInset;
   rawKeyboardOffsetRef.current = rawKeyboardOffset;
   physicalKeyboardModeRef.current = physicalKeyboardMode;
 
@@ -353,9 +395,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
   }, [keyboardOffset]);
   useEffect(() => {
-    if (inputModePreference !== "auto" || rawKeyboardOffset <= 0) return;
+    if (inputModePreference !== "auto" || viewportOcclusion.occlusionKind !== "soft-keyboard") {
+      return;
+    }
     setDetectedPhysicalKeyboard(false);
-  }, [inputModePreference, rawKeyboardOffset]);
+  }, [inputModePreference, viewportOcclusion.occlusionKind]);
 
   const focus = usePtyFocusState({ containerEl, xtermHostRef, terminalRef });
   const {
@@ -369,6 +413,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     softKeyboardEditingSurface,
     ptyInputFocused,
     keyboardOpen,
+  });
+  const accessoryBottomInset = resolvePtyAccessoryBottomInset({
+    ptyInputFocused,
+    viewportOcclusionKind: viewportOcclusion.occlusionKind,
+    rawLayoutBottomInset: rawKeyboardLayoutInset,
   });
   softKeyboardLayoutActiveRef.current =
     softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
@@ -1028,11 +1077,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
   // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
-  const containerPaddingBottom = showMobilePtyControls
-    ? 112
-    : scrollState.horizontalScrollable
-      ? 32
-      : 8;
+  const containerPaddingBottom = resolvePtyContainerPaddingBottom({
+    showMobilePtyControls,
+    horizontalScrollable: scrollState.horizontalScrollable,
+    accessoryBottomInset,
+  });
   mobileLayoutDebugRef.current.containerPaddingBottom = containerPaddingBottom;
 
   useEffect(() => {
@@ -1057,8 +1106,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       } else if (!keyboardOpen) {
         scheduleRawInputFollow("keyboardOffset");
       }
+    } else if (accessoryBottomInset > 0 && !ptySelectionActiveRef.current) {
+      scrollControllerRef.current?.scrollToBottom("accessoryInset");
     }
   }, [
+    accessoryBottomInset,
     keyboardOffset,
     keyboardOpen,
     showMobilePtyControls,
@@ -1082,6 +1134,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     ptyInputFocused,
     showMobilePtyControls,
     touchEditingSurface,
+    keyboardOffset,
+    rawKeyboardOffset,
+    rawKeyboardLayoutInset,
+    accessoryBottomInset,
+    viewportOcclusionKind: viewportOcclusion.occlusionKind,
+    viewportOcclusionReason: viewportOcclusion.occlusionReason,
+    physicalKeyboardMode,
+    softKeyboardEditingSurface,
     mobileControlsBottomInset,
     connectionOverlay: connection.overlay,
     containerPaddingBottom,

@@ -352,7 +352,27 @@ describe("attachXtermRawInput", () => {
     expect(textarea.getAttribute("enterkeyhint")).toBeNull();
   });
 
-  it("preserves a pre-existing helper textarea input mode in physical keyboard mode", () => {
+  it("turns off browser autofill and text assistance without disabling IME input context", () => {
+    const { terminal, textarea } = createTerminal();
+
+    const disposable = attachXtermRawInput(terminal, "sess-1");
+
+    expect(textarea.getAttribute("inputmode")).toBeNull();
+    expect(textarea.getAttribute("enterkeyhint")).toBeNull();
+    expect(textarea.getAttribute("autocapitalize")).toBe("off");
+    expect(textarea.getAttribute("autocomplete")).toBe("off");
+    expect(textarea.getAttribute("autocorrect")).toBe("off");
+    expect(textarea.getAttribute("virtualkeyboardpolicy")).toBeNull();
+    expect(textarea.spellcheck).toBe(false);
+
+    disposable.dispose();
+    expect(textarea.getAttribute("inputmode")).toBeNull();
+    expect(textarea.getAttribute("autocapitalize")).toBeNull();
+    expect(textarea.getAttribute("autocomplete")).toBeNull();
+    expect(textarea.getAttribute("autocorrect")).toBeNull();
+  });
+
+  it("restores a pre-existing helper textarea input mode after disposal", () => {
     const { terminal, textarea } = createTerminal();
     textarea.setAttribute("inputmode", "text");
 
@@ -364,6 +384,20 @@ describe("attachXtermRawInput", () => {
 
     disposable.dispose();
     expect(textarea.getAttribute("inputmode")).toBe("text");
+  });
+
+  it("pins and restores the helper textarea color scheme for system IME UI", () => {
+    const { terminal, textarea } = createTerminal();
+    document.documentElement.style.colorScheme = "dark";
+    textarea.style.colorScheme = "light";
+
+    const disposable = attachXtermRawInput(terminal, "sess-1");
+
+    expect(textarea.style.colorScheme).toBe("dark");
+
+    disposable.dispose();
+    expect(textarea.style.colorScheme).toBe("light");
+    document.documentElement.style.colorScheme = "";
   });
 
   it("lets system input-source switching bypass xterm in physical keyboard mode", () => {

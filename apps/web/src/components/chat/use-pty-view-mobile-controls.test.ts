@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolvePtyAccessoryBottomInset,
+  resolvePtyContainerPaddingBottom,
   resolvePtyPhysicalKeyboardMode,
   shouldForcePtyKeyboardFollow,
   shouldShowMobilePtyControlsForState,
@@ -49,40 +51,47 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "hardware",
         detectedPhysicalKeyboard: false,
-        keyboardOffset: 320,
+        viewportOcclusionKind: "soft-keyboard",
       }),
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "touch",
         detectedPhysicalKeyboard: true,
-        keyboardOffset: 0,
+        viewportOcclusionKind: "none",
       }),
     ).toBe(false);
   });
 
-  it("keeps auto mode in touch behavior until a hardware key arrives without a soft keyboard", () => {
+  it("keeps auto mode in touch behavior until a hardware key arrives outside a soft keyboard", () => {
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: false,
-        keyboardOffset: 0,
+        viewportOcclusionKind: "none",
       }),
     ).toBe(false);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
-        keyboardOffset: 0,
+        viewportOcclusionKind: "none",
       }),
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
-        keyboardOffset: 280,
+        viewportOcclusionKind: "soft-keyboard",
       }),
     ).toBe(false);
+    expect(
+      resolvePtyPhysicalKeyboardMode({
+        inputModePreference: "auto",
+        detectedPhysicalKeyboard: true,
+        viewportOcclusionKind: "accessory-or-browser-ui",
+      }),
+    ).toBe(true);
   });
 });
 
@@ -133,6 +142,77 @@ describe("shouldTreatKeydownAsPhysicalKeyboardActivity", () => {
         targetAcceptsPtyInput: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolvePtyAccessoryBottomInset", () => {
+  it("uses measured accessory viewport occlusion only while the PTY input is focused", () => {
+    expect(
+      resolvePtyAccessoryBottomInset({
+        ptyInputFocused: true,
+        viewportOcclusionKind: "accessory-or-browser-ui",
+        rawLayoutBottomInset: 79,
+      }),
+    ).toBe(79);
+
+    expect(
+      resolvePtyAccessoryBottomInset({
+        ptyInputFocused: true,
+        viewportOcclusionKind: "soft-keyboard",
+        rawLayoutBottomInset: 320,
+      }),
+    ).toBe(0);
+
+    expect(
+      resolvePtyAccessoryBottomInset({
+        ptyInputFocused: false,
+        viewportOcclusionKind: "accessory-or-browser-ui",
+        rawLayoutBottomInset: 79,
+      }),
+    ).toBe(0);
+  });
+});
+
+describe("resolvePtyContainerPaddingBottom", () => {
+  it("keeps existing base padding when no accessory bar is reported", () => {
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: false,
+        horizontalScrollable: false,
+        accessoryBottomInset: 0,
+      }),
+    ).toBe(8);
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: false,
+        horizontalScrollable: true,
+        accessoryBottomInset: 0,
+      }),
+    ).toBe(32);
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: true,
+        horizontalScrollable: false,
+        accessoryBottomInset: 0,
+      }),
+    ).toBe(112);
+  });
+
+  it("adds only the measured accessory inset plus the normal terminal breathing room", () => {
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: false,
+        horizontalScrollable: false,
+        accessoryBottomInset: 79,
+      }),
+    ).toBe(87);
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: false,
+        horizontalScrollable: true,
+        accessoryBottomInset: 16,
+      }),
+    ).toBe(32);
   });
 });
 
