@@ -1,9 +1,13 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+const BROWSER_STATE_DUMP_ENDPOINT = "/__dev_anywhere_debug/browser-state-dumps";
+const BROWSER_STATE_DUMP_LIMIT_BYTES = 20 * 1024 * 1024;
 
 function normalizeRelayTarget(target: string | undefined): { http: string; ws: string } {
   const raw = (target || "http://localhost:3100").trim().replace(/\/$/, "");
@@ -30,8 +34,66 @@ function loadHttpsConfig() {
   };
 }
 
+function browserStateDumpPlugin(): Plugin {
+  return {
+    name: "dev-anywhere-browser-state-dump",
+    configureServer(server) {
+      server.middlewares.use(BROWSER_STATE_DUMP_ENDPOINT, (req, res, next) => {
+        if (req.method !== "POST") {
+          next();
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let closed = false;
+        const reply = (status: number, body: unknown) => {
+          if (closed) return;
+          closed = true;
+          res.statusCode = status;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify(body));
+        };
+
+        req.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > BROWSER_STATE_DUMP_LIMIT_BYTES) {
+            reply(413, { ok: false, error: "browser state dump is too large" });
+            req.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
+        req.on("error", (error) => {
+          reply(500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+        });
+        req.on("end", () => {
+          if (closed) return;
+          const payload = Buffer.concat(chunks).toString("utf8");
+          try {
+            JSON.parse(payload);
+          } catch {
+            reply(400, { ok: false, error: "invalid JSON payload" });
+            return;
+          }
+
+          const dir =
+            process.env.DEV_ANYWHERE_BROWSER_DUMP_DIR ??
+            path.join(os.tmpdir(), "dev-anywhere", "browser-state-dumps");
+          fs.mkdirSync(dir, { recursive: true });
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const filePath = path.join(dir, `browser-state-${stamp}-${process.pid}.json`);
+          fs.writeFileSync(filePath, payload);
+          reply(200, { ok: true, path: filePath, bytes: Buffer.byteLength(payload) });
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
+    browserStateDumpPlugin(),
     react(),
     tailwindcss(),
     VitePWA({

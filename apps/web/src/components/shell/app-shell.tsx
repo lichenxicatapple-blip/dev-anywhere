@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { SettingsDialog } from "./settings-dialog";
 import { MobileBrandHero } from "@/components/brand/mobile-brand-hero";
 import { LatencyMonitor } from "@/components/diagnostics/latency-monitor";
+import { BrowserStateDumpController } from "@/components/diagnostics/browser-state-dump-controller";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { PtyAutoYesController } from "@/components/chat/pty-auto-yes-controller";
@@ -195,6 +196,7 @@ export function AppShell() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <BrowserStateDumpController />
       <LatencyMonitor />
       <Toaster />
     </div>
