@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolvePtyAccessoryBottomInset,
+  resolvePtyBottomOverscrollPadding,
   resolvePtyContainerPaddingBottom,
   resolvePtyPhysicalKeyboardMode,
   shouldForcePtyKeyboardFollow,
@@ -145,74 +145,62 @@ describe("shouldTreatKeydownAsPhysicalKeyboardActivity", () => {
   });
 });
 
-describe("resolvePtyAccessoryBottomInset", () => {
-  it("uses measured accessory viewport occlusion only while the PTY input is focused", () => {
+describe("resolvePtyBottomOverscrollPadding", () => {
+  it("adds bottom scroll room only for focused touch PTY input without the soft-keyboard controls", () => {
     expect(
-      resolvePtyAccessoryBottomInset({
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
         ptyInputFocused: true,
-        viewportOcclusionKind: "accessory-or-browser-ui",
-        rawLayoutBottomInset: 79,
+        showMobilePtyControls: false,
       }),
-    ).toBe(79);
+    ).toBe(120);
 
     expect(
-      resolvePtyAccessoryBottomInset({
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: false,
         ptyInputFocused: true,
-        viewportOcclusionKind: "soft-keyboard",
-        rawLayoutBottomInset: 320,
+        showMobilePtyControls: false,
       }),
     ).toBe(0);
 
     expect(
-      resolvePtyAccessoryBottomInset({
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
         ptyInputFocused: false,
-        viewportOcclusionKind: "accessory-or-browser-ui",
-        rawLayoutBottomInset: 79,
+        showMobilePtyControls: false,
+      }),
+    ).toBe(0);
+
+    expect(
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
+        ptyInputFocused: true,
+        showMobilePtyControls: true,
       }),
     ).toBe(0);
   });
 });
 
 describe("resolvePtyContainerPaddingBottom", () => {
-  it("keeps existing base padding when no accessory bar is reported", () => {
+  it("keeps existing base padding independent from bottom scroll room", () => {
     expect(
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: false,
         horizontalScrollable: false,
-        accessoryBottomInset: 0,
       }),
     ).toBe(8);
     expect(
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: false,
         horizontalScrollable: true,
-        accessoryBottomInset: 0,
       }),
     ).toBe(32);
     expect(
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: true,
         horizontalScrollable: false,
-        accessoryBottomInset: 0,
       }),
     ).toBe(112);
-  });
-
-  it("adds only the measured accessory inset plus the normal terminal breathing room", () => {
-    expect(
-      resolvePtyContainerPaddingBottom({
-        showMobilePtyControls: false,
-        horizontalScrollable: false,
-        accessoryBottomInset: 79,
-      }),
-    ).toBe(87);
-    expect(
-      resolvePtyContainerPaddingBottom({
-        showMobilePtyControls: false,
-        horizontalScrollable: true,
-        accessoryBottomInset: 16,
-      }),
-    ).toBe(32);
   });
 });
 

@@ -37,6 +37,7 @@ interface PtyTouchScrollHandlerOptions {
   getVerticalIntent: () => PtyVerticalIntentState;
   dispatchVerticalIntent: (event: PtyVerticalIntentEvent) => PtyVerticalIntentResult;
   getCurrentAnchor: () => TouchAnchorSnapshot;
+  getBottomOverscrollPx?: () => number;
   getLastSeenScrollTop: () => number;
   hasHorizontalOverflow: () => boolean;
   clearHorizontalIntentIfUnscrollable: (site: string) => boolean;
@@ -74,6 +75,7 @@ export function createPtyTouchScrollHandler({
   getVerticalIntent,
   dispatchVerticalIntent,
   getCurrentAnchor,
+  getBottomOverscrollPx = () => 0,
   getLastSeenScrollTop,
   hasHorizontalOverflow,
   clearHorizontalIntentIfUnscrollable,
@@ -95,7 +97,7 @@ export function createPtyTouchScrollHandler({
       touchStartY: verticalIntent.touchStartY,
       currentY,
       touchStartedAtCursorAwareBottom: state.startedAtCursorAwareBottom,
-      bottomScrollTop: anchor.bottomScrollTop,
+      bottomScrollTop: anchor.bottomScrollTop + Math.max(0, getBottomOverscrollPx()),
       domMaxScrollTop,
     });
   };

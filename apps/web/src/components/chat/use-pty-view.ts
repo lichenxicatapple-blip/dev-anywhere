@@ -99,7 +99,7 @@ interface UsePtyViewResult {
   keyboardOffset: number;
   rawKeyboardOffset: number;
   rawKeyboardLayoutInset: number;
-  accessoryBottomInset: number;
+  bottomOverscrollPadding: number;
   viewportOcclusionKind: VisualViewportOcclusionKind;
   viewportOcclusionReason: string;
   mobileControlsBottomInset: number;
@@ -188,16 +188,9 @@ interface PhysicalKeyboardActivityInput {
   targetAcceptsPtyInput?: boolean;
 }
 
-interface PtyAccessoryInsetInput {
-  ptyInputFocused: boolean;
-  viewportOcclusionKind: VisualViewportOcclusionKind;
-  rawLayoutBottomInset: number;
-}
-
 interface PtyContainerPaddingInput {
   showMobilePtyControls: boolean;
   horizontalScrollable: boolean;
-  accessoryBottomInset: number;
 }
 
 const HARDWARE_KEYBOARD_CONTROL_KEYS = new Set([
@@ -260,24 +253,28 @@ export function shouldTreatKeydownAsPhysicalKeyboardActivity({
   return HARDWARE_KEYBOARD_CONTROL_KEYS.has(key);
 }
 
-export function resolvePtyAccessoryBottomInset({
+const MOBILE_PTY_CONTROLS_PADDING_PX = 112;
+const TOUCH_PTY_BOTTOM_OVERSCROLL_PX = MOBILE_PTY_CONTROLS_PADDING_PX + 8;
+
+export function resolvePtyBottomOverscrollPadding({
+  touchEditingSurface,
   ptyInputFocused,
-  viewportOcclusionKind,
-  rawLayoutBottomInset,
-}: PtyAccessoryInsetInput): number {
-  if (!ptyInputFocused) return 0;
-  if (viewportOcclusionKind !== "accessory-or-browser-ui") return 0;
-  return Math.max(Math.round(rawLayoutBottomInset), 0);
+  showMobilePtyControls,
+}: {
+  touchEditingSurface: boolean;
+  ptyInputFocused: boolean;
+  showMobilePtyControls: boolean;
+}): number {
+  if (!touchEditingSurface || !ptyInputFocused || showMobilePtyControls) return 0;
+  return TOUCH_PTY_BOTTOM_OVERSCROLL_PX;
 }
 
 export function resolvePtyContainerPaddingBottom({
   showMobilePtyControls,
   horizontalScrollable,
-  accessoryBottomInset,
 }: PtyContainerPaddingInput): number {
-  const basePadding = showMobilePtyControls ? 112 : horizontalScrollable ? 32 : 8;
-  if (accessoryBottomInset <= 0) return basePadding;
-  return Math.max(basePadding, accessoryBottomInset + 8);
+  if (showMobilePtyControls) return MOBILE_PTY_CONTROLS_PADDING_PX;
+  return horizontalScrollable ? 32 : 8;
 }
 
 function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
@@ -332,6 +329,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const softKeyboardLayoutActiveRef = useRef(false);
   const rawKeyboardOffsetRef = useRef(0);
   const physicalKeyboardModeRef = useRef(false);
+  const bottomOverscrollPaddingRef = useRef(0);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
@@ -413,11 +411,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     softKeyboardEditingSurface,
     ptyInputFocused,
     keyboardOpen,
-  });
-  const accessoryBottomInset = resolvePtyAccessoryBottomInset({
-    ptyInputFocused,
-    viewportOcclusionKind: viewportOcclusion.occlusionKind,
-    rawLayoutBottomInset: rawKeyboardLayoutInset,
   });
   softKeyboardLayoutActiveRef.current =
     softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
@@ -844,6 +837,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           },
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
+          getBottomOverscrollPx: () => bottomOverscrollPaddingRef.current,
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
@@ -1077,10 +1071,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
   // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
+  const bottomOverscrollPadding = resolvePtyBottomOverscrollPadding({
+    touchEditingSurface,
+    ptyInputFocused,
+    showMobilePtyControls,
+  });
+  bottomOverscrollPaddingRef.current = bottomOverscrollPadding;
   const containerPaddingBottom = resolvePtyContainerPaddingBottom({
     showMobilePtyControls,
     horizontalScrollable: scrollState.horizontalScrollable,
-    accessoryBottomInset,
   });
   mobileLayoutDebugRef.current.containerPaddingBottom = containerPaddingBottom;
 
@@ -1106,14 +1105,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       } else if (!keyboardOpen) {
         scheduleRawInputFollow("keyboardOffset");
       }
-    } else if (accessoryBottomInset > 0 && !ptySelectionActiveRef.current) {
-      scrollControllerRef.current?.scrollToBottom("accessoryInset");
     }
   }, [
-    accessoryBottomInset,
     keyboardOffset,
     keyboardOpen,
     showMobilePtyControls,
+    bottomOverscrollPadding,
     containerPaddingBottom,
     clearNewFramesWhileAway,
     scheduleRawInputFollow,
@@ -1137,7 +1134,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     keyboardOffset,
     rawKeyboardOffset,
     rawKeyboardLayoutInset,
-    accessoryBottomInset,
+    bottomOverscrollPadding,
     viewportOcclusionKind: viewportOcclusion.occlusionKind,
     viewportOcclusionReason: viewportOcclusion.occlusionReason,
     physicalKeyboardMode,

@@ -4,7 +4,7 @@
 //
 // 编排（4 个 controller 的生命周期 + 调度器 + debug 注册）全部下沉到 usePtyView，
 // 本组件仅负责 DOM 结构与 JSX 接线。
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import type { SessionProvider } from "@/lib/session-provider";
@@ -45,10 +45,6 @@ export function ChatPtyView({
     xtermHostRef,
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
-  const accessoryMotionShift = usePtyAccessoryMotionShift(
-    view.accessoryBottomInset,
-    Boolean(view.ptySelectionHandles),
-  );
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
@@ -86,7 +82,6 @@ export function ChatPtyView({
         >
           <div
             ref={xtermHostRef}
-            className="transition-transform duration-200 ease-out motion-reduce:transition-none"
             style={{
               position: "absolute",
               left: 0,
@@ -94,9 +89,6 @@ export function ChatPtyView({
               overflow: "hidden",
               overflowAnchor: "none",
               boxSizing: "border-box",
-              transform:
-                accessoryMotionShift === 0 ? undefined : `translateY(${accessoryMotionShift}px)`,
-              willChange: accessoryMotionShift === 0 ? undefined : "transform",
             }}
             data-slot="pty-host"
           />
@@ -184,7 +176,7 @@ export function ChatPtyView({
         keyboardOffset={view.keyboardOffset}
         rawKeyboardOffset={view.rawKeyboardOffset}
         rawKeyboardLayoutInset={view.rawKeyboardLayoutInset}
-        accessoryBottomInset={view.accessoryBottomInset}
+        bottomOverscrollPadding={view.bottomOverscrollPadding}
         viewportOcclusionKind={view.viewportOcclusionKind}
         viewportOcclusionReason={view.viewportOcclusionReason}
         showMobilePtyControls={view.showMobilePtyControls}
@@ -275,43 +267,6 @@ function PtySelectionHandle({
       />
     </button>
   );
-}
-
-function usePtyAccessoryMotionShift(accessoryBottomInset: number, disabled: boolean): number {
-  const previousInsetRef = useRef(accessoryBottomInset);
-  const frameIdsRef = useRef<number[]>([]);
-  const [shift, setShift] = useState(0);
-
-  useLayoutEffect(() => {
-    frameIdsRef.current.forEach((frameId) => window.cancelAnimationFrame(frameId));
-    frameIdsRef.current = [];
-
-    const previousInset = previousInsetRef.current;
-    previousInsetRef.current = accessoryBottomInset;
-    const delta = accessoryBottomInset - previousInset;
-
-    if (disabled || Math.abs(delta) < 1) {
-      setShift(0);
-      return;
-    }
-
-    setShift(delta);
-    const firstFrame = window.requestAnimationFrame(() => {
-      const secondFrame = window.requestAnimationFrame(() => {
-        frameIdsRef.current = [];
-        setShift(0);
-      });
-      frameIdsRef.current.push(secondFrame);
-    });
-    frameIdsRef.current.push(firstFrame);
-
-    return () => {
-      frameIdsRef.current.forEach((frameId) => window.cancelAnimationFrame(frameId));
-      frameIdsRef.current = [];
-    };
-  }, [accessoryBottomInset, disabled]);
-
-  return shift;
 }
 
 function PtyScrollTraceButton() {

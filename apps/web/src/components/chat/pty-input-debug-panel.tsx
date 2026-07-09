@@ -8,7 +8,7 @@ export interface PtyInputDebugPanelProps {
   keyboardOffset: number;
   rawKeyboardOffset: number;
   rawKeyboardLayoutInset: number;
-  accessoryBottomInset: number;
+  bottomOverscrollPadding: number;
   viewportOcclusionKind: string;
   viewportOcclusionReason: string;
   showMobilePtyControls: boolean;
@@ -85,7 +85,7 @@ export function PtyInputDebugPanel(props: PtyInputDebugPanelProps) {
         )}`,
         controls: `controls=${props.showMobilePtyControls} inset=${Math.round(
           props.mobileControlsBottomInset,
-        )} accessory=${Math.round(props.accessoryBottomInset)}`,
+        )} overscroll=${Math.round(props.bottomOverscrollPadding)}`,
         activeDetails,
         textareaDetails,
         textareaRect,
@@ -133,7 +133,7 @@ export function PtyInputDebugPanel(props: PtyInputDebugPanelProps) {
     };
   }, [
     enabled,
-    props.accessoryBottomInset,
+    props.bottomOverscrollPadding,
     props.keyboardOffset,
     props.mobileControlsBottomInset,
     props.physicalKeyboardMode,
