@@ -200,6 +200,56 @@ export function useVisualViewportHeightVar(): void {
   }, []);
 }
 
+export function resetDocumentScrollIfNeeded(): boolean {
+  const root = document.documentElement;
+  const body = document.body;
+  const needsReset =
+    window.scrollX !== 0 ||
+    window.scrollY !== 0 ||
+    root.scrollLeft !== 0 ||
+    root.scrollTop !== 0 ||
+    body.scrollLeft !== 0 ||
+    body.scrollTop !== 0;
+  if (!needsReset) return false;
+
+  window.scrollTo(0, 0);
+  root.scrollLeft = 0;
+  root.scrollTop = 0;
+  body.scrollLeft = 0;
+  body.scrollTop = 0;
+  return true;
+}
+
+export function useDocumentScrollLock(): void {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    let raf = 0;
+
+    const scheduleReset = () => {
+      resetDocumentScrollIfNeeded();
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        resetDocumentScrollIfNeeded();
+      });
+    };
+
+    scheduleReset();
+    window.addEventListener("scroll", scheduleReset, { passive: true });
+    window.addEventListener("resize", scheduleReset);
+    vv?.addEventListener("scroll", scheduleReset, { passive: true });
+    vv?.addEventListener("resize", scheduleReset);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", scheduleReset);
+      window.removeEventListener("resize", scheduleReset);
+      vv?.removeEventListener("scroll", scheduleReset);
+      vv?.removeEventListener("resize", scheduleReset);
+    };
+  }, []);
+}
+
 export function useVisualViewportBottomOffset(): number {
   return useVisualViewportInsets().bottomOffset;
 }

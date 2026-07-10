@@ -146,11 +146,34 @@ describe("shouldTreatKeydownAsPhysicalKeyboardActivity", () => {
 });
 
 describe("resolvePtyBottomOverscrollPadding", () => {
-  it("adds bottom scroll room only for focused touch PTY input without the soft-keyboard controls", () => {
+  it("keeps bottom scroll room stable on touch PTY without the soft-keyboard controls", () => {
     expect(
       resolvePtyBottomOverscrollPadding({
         touchEditingSurface: true,
-        ptyInputFocused: true,
+        showMobilePtyControls: false,
+        browserAccessoryBottomOffset: 156,
+      }),
+    ).toBe(156);
+
+    expect(
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
+        showMobilePtyControls: false,
+        browserAccessoryBottomOffset: 79,
+      }),
+    ).toBe(120);
+
+    expect(
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
+        showMobilePtyControls: true,
+        browserAccessoryBottomOffset: 156,
+      }),
+    ).toBe(0);
+
+    expect(
+      resolvePtyBottomOverscrollPadding({
+        touchEditingSurface: true,
         showMobilePtyControls: false,
       }),
     ).toBe(120);
@@ -158,7 +181,6 @@ describe("resolvePtyBottomOverscrollPadding", () => {
     expect(
       resolvePtyBottomOverscrollPadding({
         touchEditingSurface: false,
-        ptyInputFocused: true,
         showMobilePtyControls: false,
       }),
     ).toBe(0);
@@ -166,15 +188,13 @@ describe("resolvePtyBottomOverscrollPadding", () => {
     expect(
       resolvePtyBottomOverscrollPadding({
         touchEditingSurface: true,
-        ptyInputFocused: false,
         showMobilePtyControls: false,
       }),
-    ).toBe(0);
+    ).toBe(120);
 
     expect(
       resolvePtyBottomOverscrollPadding({
         touchEditingSurface: true,
-        ptyInputFocused: true,
         showMobilePtyControls: true,
       }),
     ).toBe(0);

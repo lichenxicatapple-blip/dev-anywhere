@@ -1775,6 +1775,34 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("scrollToBottom without force preserves bottom overscroll used to avoid browser UI", () => {
+    const { container, spacer, host } = createDom();
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => parseFloat(spacer.style.height || "0") || 2000,
+    });
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      getBottomOverscrollPx: () => 120,
+    });
+
+    container.scrollTop = 1700;
+    terminal.scrollToLine.mockClear();
+
+    controller.scrollToBottom("rawInput");
+
+    expect(container.scrollTop).toBe(1700);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
   it("restores page resume to bottom when the page was hidden while following", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();

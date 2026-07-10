@@ -258,15 +258,15 @@ const TOUCH_PTY_BOTTOM_OVERSCROLL_PX = MOBILE_PTY_CONTROLS_PADDING_PX + 8;
 
 export function resolvePtyBottomOverscrollPadding({
   touchEditingSurface,
-  ptyInputFocused,
   showMobilePtyControls,
+  browserAccessoryBottomOffset = 0,
 }: {
   touchEditingSurface: boolean;
-  ptyInputFocused: boolean;
   showMobilePtyControls: boolean;
+  browserAccessoryBottomOffset?: number;
 }): number {
-  if (!touchEditingSurface || !ptyInputFocused || showMobilePtyControls) return 0;
-  return TOUCH_PTY_BOTTOM_OVERSCROLL_PX;
+  if (!touchEditingSurface || showMobilePtyControls) return 0;
+  return Math.max(TOUCH_PTY_BOTTOM_OVERSCROLL_PX, Math.ceil(browserAccessoryBottomOffset));
 }
 
 export function resolvePtyContainerPaddingBottom({
@@ -535,6 +535,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
+  const resumePtyOutputForLocalInput = useCallback((): void => {
+    terminalControllerRef.current?.setOutputPaused(false);
+    terminalControllerRef.current?.flushOutput();
+  }, []);
+
   const resetHorizontalScrollAfterLineSubmit = useCallback((data: string, reason: string): void => {
     if (!data.includes("\r") && !data.includes("\n")) return;
     scrollControllerRef.current?.resetHorizontalScroll(reason);
@@ -594,7 +599,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       event.preventDefault();
       event.stopPropagation();
       sendRemoteInputRaw(sessionId, raw);
-      scheduleRawInputFollow("physicalKeyboard", { force: true });
+      resumePtyOutputForLocalInput();
+      scheduleRawInputFollow("physicalKeyboard");
       resetHorizontalScrollAfterLineSubmit(raw, "physicalKeyboardEnter");
     };
 
@@ -606,6 +612,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     containerEl,
     inputModePreference,
     resetHorizontalScrollAfterLineSubmit,
+    resumePtyOutputForLocalInput,
     scheduleRawInputFollow,
     sessionId,
     touchEditingSurface,
@@ -665,7 +672,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
     terminalRef,
-    onAfterPaste: () => scheduleRawInputFollow("paste"),
+    onAfterPaste: () => {
+      resumePtyOutputForLocalInput();
+      scheduleRawInputFollow("paste");
+    },
   });
   const handlePasteCapture = useCallback(
     (event: ClipboardEvent<HTMLDivElement>): void => {
@@ -703,9 +713,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         return;
       }
       const path = await uploadFileAndShowToast({ relay, sessionId, file });
-      if (path) sendRemoteInputRaw(sessionId, `@${path} `);
+      if (path) {
+        sendRemoteInputRaw(sessionId, `@${path} `);
+        resumePtyOutputForLocalInput();
+        scheduleRawInputFollow("dropUpload");
+      }
     },
-    [canAcceptInput, sessionId],
+    [canAcceptInput, resumePtyOutputForLocalInput, scheduleRawInputFollow, sessionId],
   );
 
   const handleTerminalContainerMouseDown = useCallback(
@@ -760,6 +774,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (data: string): void => {
+      resumePtyOutputForLocalInput();
       scheduleRawInputFollow("rawInput");
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
@@ -997,6 +1012,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
+    resumePtyOutputForLocalInput,
     webOwnsPtyGeometry,
   ]);
 
@@ -1059,6 +1075,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           return;
         }
         sendRemoteInputRaw(sessionId, text);
+        resumePtyOutputForLocalInput();
         scheduleRawInputFollow("paste");
         resetHorizontalScrollAfterLineSubmit(text, "pasteEnter");
       })
@@ -1067,14 +1084,20 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         toast.error(message);
       })
       .finally(() => terminalRef.current?.focus());
-  }, [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId]);
+  }, [
+    canAcceptInput,
+    resetHorizontalScrollAfterLineSubmit,
+    resumePtyOutputForLocalInput,
+    scheduleRawInputFollow,
+    sessionId,
+  ]);
 
   // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
   // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
   const bottomOverscrollPadding = resolvePtyBottomOverscrollPadding({
     touchEditingSurface,
-    ptyInputFocused,
     showMobilePtyControls,
+    browserAccessoryBottomOffset: rawKeyboardOffset,
   });
   bottomOverscrollPaddingRef.current = bottomOverscrollPadding;
   const containerPaddingBottom = resolvePtyContainerPaddingBottom({

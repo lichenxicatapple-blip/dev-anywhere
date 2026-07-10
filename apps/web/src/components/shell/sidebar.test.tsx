@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./sidebar";
 import { useAppStore } from "@/stores/app-store";
@@ -63,5 +63,24 @@ describe("Sidebar", () => {
     expect(screen.getByLabelText("侧边栏").className).toContain(
       "pb-[calc(var(--dev-safe-area-bottom,env(safe-area-inset-bottom))+0.5rem)]",
     );
+  });
+
+  it("blurs the PTY helper textarea before sidebar interactions", () => {
+    useAppStore.setState({ sidebarCollapsed: false });
+    const textarea = document.createElement("textarea");
+    textarea.className = "xterm-helper-textarea";
+    document.body.appendChild(textarea);
+    textarea.focus();
+
+    render(
+      <TooltipProvider>
+        <Sidebar />
+      </TooltipProvider>,
+    );
+
+    fireEvent.pointerDown(screen.getByLabelText("侧边栏"));
+
+    expect(document.activeElement).not.toBe(textarea);
+    textarea.remove();
   });
 });

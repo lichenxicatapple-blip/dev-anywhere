@@ -1,10 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyVisualViewportOcclusion,
   computeVisualViewportBottomOffset,
   computeVisualViewportLayoutBottomInset,
   isTouchTabletViewport,
+  resetDocumentScrollIfNeeded,
 } from "./use-visual-viewport";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+  Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+  document.documentElement.scrollLeft = 0;
+  document.documentElement.scrollTop = 0;
+  document.body.scrollLeft = 0;
+  document.body.scrollTop = 0;
+});
 
 describe("classifyVisualViewportOcclusion", () => {
   it("classifies dominant viewport compression as the soft keyboard", () => {
@@ -185,5 +196,31 @@ describe("isTouchTabletViewport", () => {
   it("does not treat phones or non-touch desktop viewports as touch tablets", () => {
     expect(isTouchTabletViewport({ width: 844, height: 390, maxTouchPoints: 5 })).toBe(false);
     expect(isTouchTabletViewport({ width: 1280, height: 800, maxTouchPoints: 0 })).toBe(false);
+  });
+});
+
+describe("resetDocumentScrollIfNeeded", () => {
+  it("locks app-level document scroll back to the origin", () => {
+    Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 156 });
+    document.documentElement.scrollTop = 42;
+    document.body.scrollTop = 24;
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    expect(resetDocumentScrollIfNeeded()).toBe(true);
+
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    expect(document.documentElement.scrollTop).toBe(0);
+    expect(document.body.scrollTop).toBe(0);
+  });
+
+  it("does nothing when the document is already locked at the origin", () => {
+    Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    expect(resetDocumentScrollIfNeeded()).toBe(false);
+
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 });

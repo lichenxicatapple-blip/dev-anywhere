@@ -14,7 +14,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
 import { cn } from "@/lib/utils";
-import { useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
+import { useDocumentScrollLock, useVisualViewportHeightVar } from "@/hooks/use-visual-viewport";
 import {
   clearLastChatRoute,
   hasRestoredThisSession,
@@ -40,6 +40,7 @@ function isStandaloneDisplay() {
 
 export function AppShell() {
   useVisualViewportHeightVar();
+  useDocumentScrollLock();
   const location = useLocation();
   const navigate = useNavigate();
   const isChatRoute = location.pathname.startsWith("/chat/");
