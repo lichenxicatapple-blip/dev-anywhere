@@ -1,5 +1,4 @@
-import { useRef, useState } from "react";
-import type { TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
+import { useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
 import { BrandMark } from "@/components/brand/brand-mark";
 import { useAppStore } from "@/stores/app-store";
@@ -7,6 +6,7 @@ import { ProxySwitcher } from "@/components/proxy/proxy-switcher";
 import { SessionList, CreateSessionButton } from "@/components/session/session-list";
 import { SettingsDialog } from "@/components/shell/settings-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useScrollBoundaryGuard } from "@/hooks/use-scroll-boundary-guard";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -17,34 +17,7 @@ export function Sidebar({ className }: SidebarProps) {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const lastTouchYRef = useRef<number | null>(null);
-
-  const handleInteractionStart = () => {
-    blurFocusedPtyInput();
-  };
-
-  const handleTouchStartCapture = (event: ReactTouchEvent<HTMLElement>) => {
-    lastTouchYRef.current = event.touches[0]?.clientY ?? null;
-    handleInteractionStart();
-  };
-
-  const handleTouchMoveCapture = (event: ReactTouchEvent<HTMLElement>) => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    const previousY = lastTouchYRef.current ?? touch.clientY;
-    const deltaY = previousY - touch.clientY;
-    lastTouchYRef.current = touch.clientY;
-    if (!canScrollInside(event.target, event.currentTarget, deltaY)) {
-      event.preventDefault();
-    }
-  };
-
-  const handleWheelCapture = (event: ReactWheelEvent<HTMLElement>) => {
-    handleInteractionStart();
-    if (!canScrollInside(event.target, event.currentTarget, event.deltaY)) {
-      event.preventDefault();
-    }
-  };
+  const scrollBoundaryGuard = useScrollBoundaryGuard();
 
   if (collapsed) {
     return (
@@ -57,10 +30,7 @@ export function Sidebar({ className }: SidebarProps) {
           aria-label="侧边栏"
           data-slot="sidebar-rail"
           data-collapsed="true"
-          onPointerDownCapture={handleInteractionStart}
-          onTouchStartCapture={handleTouchStartCapture}
-          onTouchMoveCapture={handleTouchMoveCapture}
-          onWheelCapture={handleWheelCapture}
+          {...scrollBoundaryGuard}
         >
           <SidebarToggle collapsed onClick={toggleSidebarCollapsed} />
           <div className="mt-3 h-px w-5 bg-border/70" aria-hidden="true" />
@@ -88,10 +58,7 @@ export function Sidebar({ className }: SidebarProps) {
         aria-label="侧边栏"
         data-slot="sidebar"
         data-collapsed="false"
-        onPointerDownCapture={handleInteractionStart}
-        onTouchStartCapture={handleTouchStartCapture}
-        onTouchMoveCapture={handleTouchMoveCapture}
-        onWheelCapture={handleWheelCapture}
+        {...scrollBoundaryGuard}
       >
         <div className="dev-sidebar-fade p-2.5" data-slot="sidebar-proxy-switcher">
           <div className="dev-sidebar-chrome rounded-lg border p-3">
@@ -129,32 +96,6 @@ export function Sidebar({ className }: SidebarProps) {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </>
   );
-}
-
-function blurFocusedPtyInput(): void {
-  const active = document.activeElement;
-  if (!(active instanceof HTMLElement)) return;
-  if (!active.classList.contains("xterm-helper-textarea")) return;
-  active.blur();
-}
-
-function canScrollInside(target: EventTarget | null, boundary: HTMLElement, deltaY: number): boolean {
-  if (!target || Math.abs(deltaY) < 1) return false;
-  let element = target instanceof Element ? target : null;
-  while (element && boundary.contains(element)) {
-    if (element instanceof HTMLElement && canElementScrollY(element, deltaY)) return true;
-    if (element === boundary) break;
-    element = element.parentElement;
-  }
-  return false;
-}
-
-function canElementScrollY(element: HTMLElement, deltaY: number): boolean {
-  if (element.scrollHeight <= element.clientHeight + 1) return false;
-  const overflowY = window.getComputedStyle(element).overflowY;
-  if (overflowY !== "auto" && overflowY !== "scroll" && overflowY !== "overlay") return false;
-  if (deltaY < 0) return element.scrollTop > 0;
-  return element.scrollTop + element.clientHeight < element.scrollHeight - 1;
 }
 
 function SidebarSettingsButton({
