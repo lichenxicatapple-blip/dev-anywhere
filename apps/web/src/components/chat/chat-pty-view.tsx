@@ -174,11 +174,6 @@ export function ChatPtyView({
         softKeyboardEditingSurface={view.softKeyboardEditingSurface}
         physicalKeyboardMode={view.physicalKeyboardMode}
         keyboardOffset={view.keyboardOffset}
-        rawKeyboardOffset={view.rawKeyboardOffset}
-        rawKeyboardLayoutInset={view.rawKeyboardLayoutInset}
-        bottomOverscrollPadding={view.bottomOverscrollPadding}
-        viewportOcclusionKind={view.viewportOcclusionKind}
-        viewportOcclusionReason={view.viewportOcclusionReason}
         showMobilePtyControls={view.showMobilePtyControls}
         mobileControlsBottomInset={view.mobileControlsBottomInset}
       />

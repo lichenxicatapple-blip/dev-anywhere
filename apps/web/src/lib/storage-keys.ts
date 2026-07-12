@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   latencyMonitorEnabled: "dev_anywhere_latencyMonitorEnabled",
   latencyMonitorPosition: "dev_anywhere_latencyMonitorPosition",
   inputModePreference: "dev_anywhere_inputModePreference",
+  adaptiveInputModality: "dev_anywhere_adaptiveInputModality",
   ptyScrollTraceEnabled: "dev_anywhere_pty_scroll_trace",
   ptyAutoYesSessions: "dev_anywhere_pty_auto_yes_sessions",
 } as const;

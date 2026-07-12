@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolvePtyBottomOverscrollPadding,
   resolvePtyContainerPaddingBottom,
   resolvePtyPhysicalKeyboardMode,
   shouldForcePtyKeyboardFollow,
@@ -51,85 +50,67 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "hardware",
         detectedPhysicalKeyboard: false,
-        viewportOcclusionKind: "soft-keyboard",
       }),
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "touch",
         detectedPhysicalKeyboard: true,
-        viewportOcclusionKind: "none",
       }),
     ).toBe(false);
   });
 
-  it("keeps auto mode in touch behavior until a hardware key arrives outside a soft keyboard", () => {
+  it("keeps auto mode in touch behavior until a hardware key arrives", () => {
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: false,
-        viewportOcclusionKind: "none",
       }),
     ).toBe(false);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
-        viewportOcclusionKind: "none",
-      }),
-    ).toBe(true);
-    expect(
-      resolvePtyPhysicalKeyboardMode({
-        inputModePreference: "auto",
-        detectedPhysicalKeyboard: true,
-        viewportOcclusionKind: "soft-keyboard",
-      }),
-    ).toBe(false);
-    expect(
-      resolvePtyPhysicalKeyboardMode({
-        inputModePreference: "auto",
-        detectedPhysicalKeyboard: true,
-        viewportOcclusionKind: "accessory-or-browser-ui",
       }),
     ).toBe(true);
   });
 });
 
 describe("shouldTreatKeydownAsPhysicalKeyboardActivity", () => {
-  it("recognizes useful hardware keydown events on a touch surface without a soft keyboard", () => {
+  it("recognizes coded hardware keydown events on a touch-capable device", () => {
     expect(
       shouldTreatKeydownAsPhysicalKeyboardActivity({
         active: true,
         touchEditingSurface: true,
-        keyboardOffset: 0,
         key: "a",
+        code: "KeyA",
       }),
     ).toBe(true);
     expect(
       shouldTreatKeydownAsPhysicalKeyboardActivity({
         active: true,
         touchEditingSurface: true,
-        keyboardOffset: 0,
         key: "Enter",
+        code: "Enter",
       }),
     ).toBe(true);
   });
 
-  it("ignores soft-keyboard, shortcut, and unrelated target keydown events", () => {
+  it("ignores uncoded virtual-keyboard, shortcut, and unrelated target keydown events", () => {
     expect(
       shouldTreatKeydownAsPhysicalKeyboardActivity({
         active: true,
         touchEditingSurface: true,
-        keyboardOffset: 320,
         key: "a",
+        code: "",
       }),
     ).toBe(false);
     expect(
       shouldTreatKeydownAsPhysicalKeyboardActivity({
         active: true,
         touchEditingSurface: true,
-        keyboardOffset: 0,
         key: "a",
+        code: "KeyA",
         metaKey: true,
       }),
     ).toBe(false);
@@ -137,67 +118,11 @@ describe("shouldTreatKeydownAsPhysicalKeyboardActivity", () => {
       shouldTreatKeydownAsPhysicalKeyboardActivity({
         active: true,
         touchEditingSurface: true,
-        keyboardOffset: 0,
         key: "a",
+        code: "KeyA",
         targetAcceptsPtyInput: false,
       }),
     ).toBe(false);
-  });
-});
-
-describe("resolvePtyBottomOverscrollPadding", () => {
-  it("keeps bottom scroll room stable on touch PTY without the soft-keyboard controls", () => {
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: false,
-        browserAccessoryBottomOffset: 156,
-      }),
-    ).toBe(156);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: false,
-        browserAccessoryBottomOffset: 79,
-      }),
-    ).toBe(120);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: true,
-        browserAccessoryBottomOffset: 156,
-      }),
-    ).toBe(0);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: false,
-      }),
-    ).toBe(120);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: false,
-        showMobilePtyControls: false,
-      }),
-    ).toBe(0);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: false,
-      }),
-    ).toBe(120);
-
-    expect(
-      resolvePtyBottomOverscrollPadding({
-        touchEditingSurface: true,
-        showMobilePtyControls: true,
-      }),
-    ).toBe(0);
   });
 });
 

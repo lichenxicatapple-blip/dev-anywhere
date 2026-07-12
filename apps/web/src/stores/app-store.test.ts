@@ -67,6 +67,18 @@ describe("app-store input mode preference persistence", () => {
 
     expect(useAppStore.getState().inputModePreference).toBe("auto");
   });
+
+  it("shares adaptive input evidence across sessions in the current tab", async () => {
+    sessionStorage.setItem("dev_anywhere_adaptiveInputModality", "hardware");
+
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().adaptiveInputModality).toBe("hardware");
+    useAppStore.getState().setAdaptiveInputModality("touch");
+
+    expect(useAppStore.getState().adaptiveInputModality).toBe("touch");
+    expect(sessionStorage.getItem("dev_anywhere_adaptiveInputModality")).toBe("touch");
+  });
 });
 
 describe("app-store PTY scroll trace persistence", () => {

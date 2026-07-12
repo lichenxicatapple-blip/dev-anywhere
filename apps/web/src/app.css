@@ -862,6 +862,12 @@ code.hljs,
   background-color: #1e1e1e !important;
 }
 
+[data-slot="pty-terminal"] .xterm-helper-textarea {
+  color: #f5f5f5 !important;
+  caret-color: #f5f5f5 !important;
+  -webkit-text-fill-color: #f5f5f5 !important;
+}
+
 /* 用户开启“减少动态效果”时，关掉循环动画和过渡。 */
 @media (prefers-reduced-motion: reduce) {
   *,

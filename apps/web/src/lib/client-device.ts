@@ -15,10 +15,12 @@ export interface ClientDeviceDescriptor extends ClientDeviceHints {
 type ClientDeviceDescriptorInput = ClientDeviceHints & Partial<ClientDeviceDescriptor>;
 
 function browserNameFromUserAgent(userAgent: string): string | undefined {
-  if (userAgent.includes("Edg/")) return "Edge";
+  if (userAgent.includes("Edg/") || userAgent.includes("EdgiOS/")) return "Edge";
   if (userAgent.includes("CriOS/") || userAgent.includes("Chrome/")) return "Chrome";
   if (userAgent.includes("FxiOS/") || userAgent.includes("Firefox/")) return "Firefox";
-  if (userAgent.includes("Safari/")) return "Safari";
+  if (userAgent.includes("OPiOS/")) return "Opera";
+  if (userAgent.includes("DuckDuckGo/")) return "DuckDuckGo";
+  if (userAgent.includes("Version/") && userAgent.includes("Safari/")) return "Safari";
   return undefined;
 }
 

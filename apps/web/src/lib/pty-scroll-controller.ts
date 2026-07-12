@@ -50,7 +50,6 @@ interface PtyScrollControllerOptions {
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
   atBottomThreshold?: number;
-  getBottomOverscrollPx?: () => number;
 }
 
 interface PtyScrollController {
@@ -108,7 +107,6 @@ export function attachPtyScrollController(
     onTouchReviewStart,
     onTouchBoundaryPrevent,
     atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
-    getBottomOverscrollPx = () => 0,
   } = options;
 
   const getDims = (): { cellH: number; cellW: number } =>
@@ -121,8 +119,6 @@ export function attachPtyScrollController(
       paddingBottom: parsePx(style.paddingBottom),
     };
   };
-  const getBottomOverscroll = (): number => Math.max(0, getBottomOverscrollPx());
-
   const styleWriter = createPtyStyleWriter();
   const setStyle = (el: HTMLElement, prop: string, value: string): void => {
     styleWriter.set(el, prop, value);
@@ -273,7 +269,7 @@ export function attachPtyScrollController(
       paddingTop,
       paddingBottom,
       containerScrollTop: container.scrollTop,
-      containerScrollHeight: Math.max(0, container.scrollHeight - getBottomOverscroll()),
+      containerScrollHeight: container.scrollHeight,
       containerClientHeight: container.clientHeight,
       atBottomThreshold,
     });
@@ -480,10 +476,7 @@ export function attachPtyScrollController(
     // In long-host mode the real pinned bottom is cursor-aware, and can sit above
     // the DOM geometric bottom. Wheel scrolling must use that same boundary;
     // otherwise wheel-down at bottom overshoots, then pending output snaps back.
-    const maxScrollTop = Math.min(
-      domMaxScrollTop,
-      getCurrentAnchor().bottomScrollTop + getBottomOverscroll(),
-    );
+    const maxScrollTop = Math.min(domMaxScrollTop, getCurrentAnchor().bottomScrollTop);
     if (maxScrollTop <= 0) {
       trace("wheel:max-zero");
       return;
@@ -586,7 +579,7 @@ export function attachPtyScrollController(
     );
     if (!layout) return;
     setStyle(spacer, "overflow", "hidden");
-    setStyle(spacer, "height", `${layout.spacerHeight + getBottomOverscroll()}px`);
+    setStyle(spacer, "height", `${layout.spacerHeight}px`);
     setStyle(spacer, "width", `${layout.spacerWidth}px`);
     setStyle(host, "width", `${layout.hostWidth}px`);
     setStyle(host, "height", `${layout.hostHeight}px`);
@@ -692,7 +685,7 @@ export function attachPtyScrollController(
     const anchor = getCurrentAnchor();
     const decision = decideCursorAwareClamp({
       rawScrollTop,
-      bottomScrollTop: anchor.bottomScrollTop + getBottomOverscroll(),
+      bottomScrollTop: anchor.bottomScrollTop,
       domMaxScrollTop,
     });
     if (decision.action === "keep") {
@@ -715,7 +708,6 @@ export function attachPtyScrollController(
     getVerticalIntent: () => verticalIntent,
     dispatchVerticalIntent,
     getCurrentAnchor,
-    getBottomOverscrollPx: getBottomOverscroll,
     getLastSeenScrollTop: () => lastSeenScrollTop,
     hasHorizontalOverflow,
     clearHorizontalIntentIfUnscrollable,

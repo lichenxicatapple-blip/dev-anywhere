@@ -6,11 +6,6 @@ export interface PtyInputDebugPanelProps {
   softKeyboardEditingSurface: boolean;
   physicalKeyboardMode: boolean;
   keyboardOffset: number;
-  rawKeyboardOffset: number;
-  rawKeyboardLayoutInset: number;
-  bottomOverscrollPadding: number;
-  viewportOcclusionKind: string;
-  viewportOcclusionReason: string;
   showMobilePtyControls: boolean;
   mobileControlsBottomInset: number;
 }
@@ -28,8 +23,7 @@ interface PtyInputDebugSnapshot {
   visualViewport: string;
   window: string;
   state: string;
-  occlusion: string;
-  offsets: string;
+  keyboard: string;
   controls: string;
   activeDetails: string[];
   textareaDetails: string[];
@@ -79,13 +73,10 @@ export function PtyInputDebugPanel(props: PtyInputDebugPanelProps) {
         )}`,
         window: `${window.innerWidth}x${window.innerHeight}`,
         state: `focused=${props.ptyInputFocused} touch=${props.touchEditingSurface} soft=${props.softKeyboardEditingSurface} physical=${props.physicalKeyboardMode}`,
-        occlusion: `${props.viewportOcclusionKind} ${props.viewportOcclusionReason}`,
-        offsets: `offset=${Math.round(props.keyboardOffset)} raw=${Math.round(props.rawKeyboardOffset)} layout=${Math.round(
-          props.rawKeyboardLayoutInset,
-        )}`,
+        keyboard: `offset=${Math.round(props.keyboardOffset)}`,
         controls: `controls=${props.showMobilePtyControls} inset=${Math.round(
           props.mobileControlsBottomInset,
-        )} overscroll=${Math.round(props.bottomOverscrollPadding)}`,
+        )}`,
         activeDetails,
         textareaDetails,
         textareaRect,
@@ -133,18 +124,13 @@ export function PtyInputDebugPanel(props: PtyInputDebugPanelProps) {
     };
   }, [
     enabled,
-    props.bottomOverscrollPadding,
     props.keyboardOffset,
     props.mobileControlsBottomInset,
     props.physicalKeyboardMode,
     props.ptyInputFocused,
-    props.rawKeyboardLayoutInset,
-    props.rawKeyboardOffset,
     props.showMobilePtyControls,
     props.softKeyboardEditingSurface,
     props.touchEditingSurface,
-    props.viewportOcclusionKind,
-    props.viewportOcclusionReason,
   ]);
 
   if (!enabled) return null;
@@ -162,8 +148,7 @@ function formatDebugSnapshot(snapshot: PtyInputDebugSnapshot): string[] {
     `vv=${snapshot.visualViewport}`,
     `win=${snapshot.window}`,
     snapshot.state,
-    `occ=${snapshot.occlusion}`,
-    snapshot.offsets,
+    snapshot.keyboard,
     snapshot.controls,
     "events:",
     ...indent(snapshot.recentEvents),

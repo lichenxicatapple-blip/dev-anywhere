@@ -36,6 +36,7 @@ interface PendingToast {
 }
 
 export type InputModePreference = "auto" | "touch" | "hardware";
+export type AdaptiveInputModality = "unknown" | "touch" | "hardware";
 
 interface AppStoreState {
   phase: AppPhase;
@@ -56,6 +57,7 @@ interface AppStoreState {
   themePreference: ThemePreference;
   latencyMonitorEnabled: boolean;
   inputModePreference: InputModePreference;
+  adaptiveInputModality: AdaptiveInputModality;
   ptyScrollTraceEnabled: boolean;
   // 启动早期产生的通知先进入队列，等通知容器就绪后再展示。
   pendingToast: PendingToast | null;
@@ -79,6 +81,7 @@ interface AppStoreState {
   setThemePreference: (theme: ThemePreference) => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
   setInputModePreference: (preference: InputModePreference) => void;
+  setAdaptiveInputModality: (modality: AdaptiveInputModality) => void;
   setPtyScrollTraceEnabled: (enabled: boolean) => void;
   setPendingToast: (toast: PendingToast | null) => void;
   transitionToPhase: (next: AppPhase) => void;
@@ -136,6 +139,11 @@ function loadInputModePreference(): InputModePreference {
   return isInputModePreference(stored) ? stored : "auto";
 }
 
+function loadAdaptiveInputModality(): AdaptiveInputModality {
+  const stored = readStorageValue("session", STORAGE_KEYS.adaptiveInputModality);
+  return stored === "touch" || stored === "hardware" ? stored : "unknown";
+}
+
 function loadPtyScrollTraceEnabled(): boolean {
   return readStorageValue("local", STORAGE_KEYS.ptyScrollTraceEnabled) === "1";
 }
@@ -160,6 +168,7 @@ export const useAppStore = create<AppStoreState>()(
       themePreference: readThemePreference(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
       inputModePreference: loadInputModePreference(),
+      adaptiveInputModality: loadAdaptiveInputModality(),
       ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
       pendingToast: null,
 
@@ -223,6 +232,10 @@ export const useAppStore = create<AppStoreState>()(
       setInputModePreference: (preference) => {
         writeStorageValue("local", STORAGE_KEYS.inputModePreference, preference);
         set({ inputModePreference: preference });
+      },
+      setAdaptiveInputModality: (modality) => {
+        writeStorageValue("session", STORAGE_KEYS.adaptiveInputModality, modality);
+        set({ adaptiveInputModality: modality });
       },
       setPtyScrollTraceEnabled: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.ptyScrollTraceEnabled, enabled ? "1" : "0");

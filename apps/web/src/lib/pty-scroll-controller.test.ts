@@ -60,31 +60,6 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1600);
   });
 
-  it("adds bottom overscroll room without moving the normal pinned bottom into it", () => {
-    const { container, spacer, host } = createDom();
-    Object.defineProperty(container, "scrollHeight", {
-      configurable: true,
-      get: () => parseFloat(spacer.style.height || "0") || 2000,
-    });
-    const { terminal } = createTerminal({ 19: "prompt" });
-
-    attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      getBottomOverscrollPx: () => 120,
-    });
-
-    expect(spacer.style.height).toBe("2120px");
-    expect(container.scrollHeight).toBe(2120);
-    expect(container.scrollTop).toBe(1600);
-  });
-
   it("maps container scroll to a row-aligned xterm ydisp", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -1773,34 +1748,6 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
-  });
-
-  it("scrollToBottom without force preserves bottom overscroll used to avoid browser UI", () => {
-    const { container, spacer, host } = createDom();
-    Object.defineProperty(container, "scrollHeight", {
-      configurable: true,
-      get: () => parseFloat(spacer.style.height || "0") || 2000,
-    });
-    const { terminal } = createTerminal({ 19: "prompt" });
-    const controller = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      getBottomOverscrollPx: () => 120,
-    });
-
-    container.scrollTop = 1700;
-    terminal.scrollToLine.mockClear();
-
-    controller.scrollToBottom("rawInput");
-
-    expect(container.scrollTop).toBe(1700);
-    expect(terminal.scrollToLine).not.toHaveBeenCalled();
   });
 
   it("restores page resume to bottom when the page was hidden while following", () => {

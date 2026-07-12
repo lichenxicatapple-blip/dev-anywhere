@@ -24,19 +24,7 @@ import {
   readLastChatRoute,
   writeLastChatRoute,
 } from "@/lib/route-restore";
-
-function isStandaloneDisplay() {
-  if (typeof window === "undefined") return false;
-  const mediaStandalone =
-    typeof window.matchMedia === "function" &&
-    (window.matchMedia("(display-mode: standalone)").matches ||
-      window.matchMedia("(display-mode: fullscreen)").matches);
-  const navigatorStandalone =
-    typeof navigator !== "undefined" &&
-    "standalone" in navigator &&
-    Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-  return mediaStandalone || navigatorStandalone;
-}
+import { isStandaloneDisplayMode } from "@/lib/browser-support";
 
 export function AppShell() {
   useVisualViewportHeightVar();
@@ -46,7 +34,7 @@ export function AppShell() {
   const isChatRoute = location.pathname.startsWith("/chat/");
   const isTopLevelRoute = location.pathname === "/" || location.pathname === "/sessions";
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [standaloneDisplay, setStandaloneDisplay] = useState(() => isStandaloneDisplay());
+  const [standaloneDisplay, setStandaloneDisplay] = useState(() => isStandaloneDisplayMode());
   const proxiesLength = useAppStore((s) => s.proxies.length);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
@@ -96,12 +84,12 @@ export function AppShell() {
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
-      setStandaloneDisplay(isStandaloneDisplay());
+      setStandaloneDisplay(isStandaloneDisplayMode());
       return;
     }
     const standaloneQuery = window.matchMedia("(display-mode: standalone)");
     const fullscreenQuery = window.matchMedia("(display-mode: fullscreen)");
-    const update = () => setStandaloneDisplay(isStandaloneDisplay());
+    const update = () => setStandaloneDisplay(isStandaloneDisplayMode());
     update();
     standaloneQuery.addEventListener("change", update);
     fullscreenQuery.addEventListener("change", update);

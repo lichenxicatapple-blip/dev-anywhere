@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  classifyVisualViewportOcclusion,
   computeVisualViewportBottomOffset,
   computeVisualViewportLayoutBottomInset,
   isTouchTabletViewport,
@@ -15,41 +14,6 @@ afterEach(() => {
   document.documentElement.scrollTop = 0;
   document.body.scrollLeft = 0;
   document.body.scrollTop = 0;
-});
-
-describe("classifyVisualViewportOcclusion", () => {
-  it("classifies dominant viewport compression as the soft keyboard", () => {
-    expect(
-      classifyVisualViewportOcclusion({
-        layoutViewportHeight: 800,
-        visualViewportHeight: 460,
-        visualViewportOffsetTop: 0,
-        baselineViewportHeight: 800,
-      }),
-    ).toMatchObject({
-      occlusionKind: "soft-keyboard",
-      bottomOffset: 340,
-      layoutBottomInset: 340,
-    });
-  });
-
-  it("classifies iPad Chrome hardware-keyboard accessory bars as non-keyboard occlusion", () => {
-    expect(
-      classifyVisualViewportOcclusion({
-        layoutViewportHeight: 702,
-        visualViewportHeight: 546,
-        visualViewportOffsetTop: 0,
-        baselineViewportHeight: 702,
-        allowBaselineFallback: false,
-      }),
-    ).toMatchObject({
-      occlusionKind: "accessory-or-browser-ui",
-      bottomOffset: 0,
-      layoutBottomInset: 0,
-      rawBottomOffset: 156,
-      rawLayoutBottomInset: 156,
-    });
-  });
 });
 
 describe("computeVisualViewportBottomOffset", () => {
@@ -86,18 +50,6 @@ describe("computeVisualViewportBottomOffset", () => {
     ).toBe(0);
   });
 
-  it("ignores iPad Chrome hardware-keyboard IME and autofill accessory bars", () => {
-    expect(
-      computeVisualViewportBottomOffset({
-        layoutViewportHeight: 702,
-        visualViewportHeight: 546,
-        visualViewportOffsetTop: 0,
-        baselineViewportHeight: 702,
-        allowBaselineFallback: false,
-      }),
-    ).toBe(0);
-  });
-
   it("uses the pre-keyboard baseline when Android also shrinks innerHeight", () => {
     expect(
       computeVisualViewportBottomOffset({
@@ -109,7 +61,7 @@ describe("computeVisualViewportBottomOffset", () => {
     ).toBe(320);
   });
 
-  it("can disable baseline fallback for iOS WebKit accessory bars", () => {
+  it("can disable baseline fallback for iOS browser UI changes", () => {
     expect(
       computeVisualViewportBottomOffset({
         layoutViewportHeight: 480,
@@ -171,16 +123,6 @@ describe("computeVisualViewportLayoutBottomInset", () => {
       computeVisualViewportLayoutBottomInset({
         layoutViewportHeight: 800,
         visualViewportHeight: 688,
-        visualViewportOffsetTop: 0,
-      }),
-    ).toBe(0);
-  });
-
-  it("ignores iPad Chrome hardware-keyboard IME and autofill accessory layout inset", () => {
-    expect(
-      computeVisualViewportLayoutBottomInset({
-        layoutViewportHeight: 702,
-        visualViewportHeight: 546,
         visualViewportOffsetTop: 0,
       }),
     ).toBe(0);

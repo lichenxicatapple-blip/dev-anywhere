@@ -50,6 +50,43 @@ describe("copyText", () => {
     expect(execCommand).not.toHaveBeenCalled();
   });
 
+  it("can copy from an active user gesture when the page is not a secure context", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: false,
+    });
+    const execCommand = vi.fn(() => true);
+    document.execCommand = execCommand;
+
+    await expect(
+      copyText("http://192.168.1.2:5174/#/", { allowLegacyFallback: true }),
+    ).resolves.toBe("legacy");
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(document.querySelector('textarea[aria-hidden="true"]')).toBeNull();
+  });
+
+  it("falls back after Clipboard API permission is denied", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("blocked"));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    });
+    const execCommand = vi.fn(() => true);
+    document.execCommand = execCommand;
+
+    await expect(copyText("blocked", { allowLegacyFallback: true })).resolves.toBe("legacy");
+    expect(writeText).toHaveBeenCalledWith("blocked");
+    expect(execCommand).toHaveBeenCalledWith("copy");
+  });
+
   it("reports failure instead of opening a prompt when Clipboard API is blocked", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("blocked"));
     Object.defineProperty(navigator, "clipboard", {
