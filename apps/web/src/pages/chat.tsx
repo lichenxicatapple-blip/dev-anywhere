@@ -69,9 +69,22 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const { bottomOffset: kbOffset, layoutBottomInset: layoutKbInset } = useVisualViewportInsets();
   const inputModePreference = useAppStore((s) => s.inputModePreference);
   const adaptiveInputModality = useAppStore((s) => s.adaptiveInputModality);
+  const setAdaptiveInputModality = useAppStore((s) => s.setAdaptiveInputModality);
+  const softKeyboardDetected = kbOffset > 0;
   const hardwareInputActive =
     inputModePreference === "hardware" ||
-    (inputModePreference === "auto" && adaptiveInputModality === "hardware");
+    (inputModePreference === "auto" &&
+      adaptiveInputModality === "hardware" &&
+      !softKeyboardDetected);
+  useEffect(() => {
+    if (
+      inputModePreference === "auto" &&
+      adaptiveInputModality === "hardware" &&
+      softKeyboardDetected
+    ) {
+      setAdaptiveInputModality("touch");
+    }
+  }, [adaptiveInputModality, inputModePreference, setAdaptiveInputModality, softKeyboardDetected]);
   const touchTabletViewport = useTouchTabletViewport();
   const effectiveKbOffset = hardwareInputActive ? 0 : kbOffset;
   // iPad/PWA 这类触摸平板通常会自己把聚焦输入框上推。这里再给根节点补整段

@@ -50,12 +50,14 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "hardware",
         detectedPhysicalKeyboard: false,
+        softKeyboardDetected: true,
       }),
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "touch",
         detectedPhysicalKeyboard: true,
+        softKeyboardDetected: false,
       }),
     ).toBe(false);
   });
@@ -65,14 +67,23 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: false,
+        softKeyboardDetected: false,
       }),
     ).toBe(false);
     expect(
       resolvePtyPhysicalKeyboardMode({
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
+        softKeyboardDetected: false,
       }),
     ).toBe(true);
+    expect(
+      resolvePtyPhysicalKeyboardMode({
+        inputModePreference: "auto",
+        detectedPhysicalKeyboard: true,
+        softKeyboardDetected: true,
+      }),
+    ).toBe(false);
   });
 });
 

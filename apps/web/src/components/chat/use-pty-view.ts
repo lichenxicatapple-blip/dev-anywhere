@@ -167,6 +167,7 @@ interface PtyKeyboardFollowInput {
 interface PtyPhysicalKeyboardModeInput {
   inputModePreference: InputModePreference;
   detectedPhysicalKeyboard: boolean;
+  softKeyboardDetected: boolean;
 }
 
 interface PhysicalKeyboardActivityInput {
@@ -220,10 +221,11 @@ export function shouldForcePtyKeyboardFollow({
 export function resolvePtyPhysicalKeyboardMode({
   inputModePreference,
   detectedPhysicalKeyboard,
+  softKeyboardDetected,
 }: PtyPhysicalKeyboardModeInput): boolean {
   if (inputModePreference === "hardware") return true;
   if (inputModePreference === "touch") return false;
-  return detectedPhysicalKeyboard;
+  return detectedPhysicalKeyboard && !softKeyboardDetected;
 }
 
 export function shouldTreatKeydownAsPhysicalKeyboardActivity({
@@ -247,7 +249,6 @@ export function shouldTreatKeydownAsPhysicalKeyboardActivity({
 }
 
 const MOBILE_PTY_CONTROLS_PADDING_PX = 112;
-const PHYSICAL_KEY_EVENT_CORRELATION_MS = 750;
 
 export function resolvePtyContainerPaddingBottom({
   showMobilePtyControls,
@@ -307,9 +308,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
   const softKeyboardLayoutActiveRef = useRef(false);
-  const softKeyboardOffsetRef = useRef(0);
   const physicalKeyboardModeRef = useRef(false);
-  const lastPhysicalKeydownAtRef = useRef<number | null>(null);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
@@ -348,12 +347,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const physicalKeyboardMode = resolvePtyPhysicalKeyboardMode({
     inputModePreference,
     detectedPhysicalKeyboard,
+    softKeyboardDetected: detectedKeyboardOffset > 0,
   });
   const softKeyboardEditingSurface = touchEditingSurface && !physicalKeyboardMode;
   const keyboardOffset = physicalKeyboardMode ? 0 : detectedKeyboardOffset;
   const keyboardOpen = keyboardOffset > 0;
   const mobileControlsBottomInset = physicalKeyboardMode ? 0 : layoutBottomInset;
-  softKeyboardOffsetRef.current = detectedKeyboardOffset;
   physicalKeyboardModeRef.current = physicalKeyboardMode;
 
   useEffect(() => {
@@ -559,7 +558,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         return;
       }
 
-      lastPhysicalKeydownAtRef.current = performance.now();
       setAdaptiveInputModality("hardware");
       physicalKeyboardModeRef.current = true;
       terminalRef.current?.focus();
@@ -576,29 +574,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       resetHorizontalScrollAfterLineSubmit(raw, "physicalKeyboardEnter");
     };
 
-    const onBeforeInput = (event: InputEvent): void => {
-      if (adaptiveInputModality !== "hardware") return;
-      if (!targetAcceptsPtyInput(event.target) || softKeyboardOffsetRef.current <= 0) return;
-      const lastPhysicalKeydownAt = lastPhysicalKeydownAtRef.current;
-      if (
-        lastPhysicalKeydownAt !== null &&
-        performance.now() - lastPhysicalKeydownAt <= PHYSICAL_KEY_EVENT_CORRELATION_MS
-      ) {
-        return;
-      }
-      setAdaptiveInputModality("touch");
-      physicalKeyboardModeRef.current = false;
-    };
-
     window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("beforeinput", onBeforeInput, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("beforeinput", onBeforeInput, true);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
     active,
-    adaptiveInputModality,
     canAcceptInput,
     containerEl,
     inputModePreference,
