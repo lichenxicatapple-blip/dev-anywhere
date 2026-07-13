@@ -88,6 +88,17 @@ export function changeSessionState(
   return changed;
 }
 
+export function changeTerminalCwd(
+  sessionManager: SessionManager,
+  relay: RelayConnection,
+  sessionId: string,
+  cwd: string,
+): boolean {
+  const changed = sessionManager.updateTerminalCwd(sessionId, cwd);
+  if (changed) broadcastSessionList(relay, sessionManager);
+  return changed;
+}
+
 export function touchSessionActivity(
   sessionManager: SessionManager,
   relay: RelayConnection,

@@ -46,6 +46,34 @@ vi.mock("@/voice/pcm-stream-player", () => ({
 import { SettingsDialog } from "./settings-dialog";
 import { useAppStore } from "@/stores/app-store";
 
+const SAFARI_MACINTOSH_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15";
+
+let currentMaxTouchPoints = 5;
+
+function installCurrentDeviceHints() {
+  Object.defineProperties(window.navigator, {
+    userAgent: {
+      configurable: true,
+      get: () => SAFARI_MACINTOSH_USER_AGENT,
+    },
+    platform: {
+      configurable: true,
+      get: () => "MacIntel",
+    },
+    maxTouchPoints: {
+      configurable: true,
+      get: () => currentMaxTouchPoints,
+    },
+  });
+}
+
+function restoreCurrentDeviceHints() {
+  Reflect.deleteProperty(window.navigator, "userAgent");
+  Reflect.deleteProperty(window.navigator, "platform");
+  Reflect.deleteProperty(window.navigator, "maxTouchPoints");
+}
+
 function chooseVoiceSetting(label: string, optionName: string) {
   fireEvent.click(screen.getByRole("button", { name: label }));
   fireEvent.click(screen.getByRole("option", { name: optionName }));
@@ -54,9 +82,13 @@ function chooseVoiceSetting(label: string, optionName: string) {
 describe("SettingsDialog", () => {
   afterEach(() => {
     cleanup();
+    restoreCurrentDeviceHints();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
   beforeEach(() => {
+    currentMaxTouchPoints = 5;
+    installCurrentDeviceHints();
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
     document.querySelector('meta[name="color-scheme"]')?.remove();
@@ -190,6 +222,8 @@ describe("SettingsDialog", () => {
     expect(screen.getByText("用语音输入、听取回复和处理审批")).not.toBeNull();
     expect(screen.getByRole("radiogroup", { name: "输入方式" })).not.toBeNull();
     expect(screen.getByText("默认自动识别软键盘和实体键盘；必要时可强制一种方式")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "高级诊断" })).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "诊断" })).toBeNull();
     expect(screen.getByRole("radiogroup", { name: "主题" })).not.toBeNull();
     expect(screen.getByRole("radio", { name: "跟随系统" })).not.toBeNull();
     expect(screen.queryByText(/固定为浅色或深色/)).toBeNull();
@@ -207,6 +241,24 @@ describe("SettingsDialog", () => {
       "客户端管理已连接的浏览器页面和设备",
       "版本",
     ]);
+  });
+
+  it("focuses the settings surface instead of highlighting the first menu item", async () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    const dialog = screen.getByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Voice Pilot" }));
+  });
+
+  it("only shows the input mode setting on iPad", () => {
+    currentMaxTouchPoints = 0;
+
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.queryByRole("radiogroup", { name: "输入方式" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "交互" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "高级诊断" })).not.toBeNull();
   });
 
   it("keeps settings subview headers left-aligned consistently", () => {

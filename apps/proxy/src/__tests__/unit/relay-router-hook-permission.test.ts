@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
+import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter hook permission decisions", () => {
@@ -45,6 +46,7 @@ describe("RelayRouter hook permission decisions", () => {
       setAgentCliPath: () => {},
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
       remoteFileUploadManager: createRemoteFileUploadManagerFake(),
+      terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
     });
   }
 

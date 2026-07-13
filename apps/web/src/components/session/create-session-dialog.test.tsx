@@ -132,6 +132,14 @@ describe("CreateSessionDialog", () => {
     });
   });
 
+  it("keeps initial focus inside the dialog without focusing a form field", async () => {
+    const { getByRole } = renderDialog();
+
+    const dialog = getByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(document.activeElement).not.toBe(getByRole("textbox", { name: "工作目录" }));
+  });
+
   it("requests proxy_info when opened without a cached homePath", async () => {
     renderDialog();
 

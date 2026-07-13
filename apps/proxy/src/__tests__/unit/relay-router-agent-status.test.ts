@@ -3,6 +3,7 @@ import { RelayControlSchema, SessionState } from "@dev-anywhere/shared";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
+import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import { createRelayConnectionFake, createWorkerRegistryFake } from "./test-fakes.js";
 
 describe("RelayRouter agent_status_request", () => {
@@ -55,6 +56,7 @@ describe("RelayRouter agent_status_request", () => {
       setAgentCliPath: () => {},
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
       remoteFileUploadManager: createRemoteFileUploadManagerFake(),
+      terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
     });
   }
 

@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -15,6 +22,7 @@ interface PtyMobileControlsProps {
   bottomInset?: number;
   onInput: (data: string) => void;
   onPaste: () => void;
+  onHeightChange?: (height: number) => void;
 }
 
 // 长按重复触发节奏: 首发立即, 然后 300ms 延迟内单击退出, 之后 50ms 一次稳定 repeat。
@@ -31,10 +39,11 @@ function clearInputSequence(
   return provider === "codex" ? "\x03" : "\x1b\x1b";
 }
 
-// 移动端浮层按键 (2 行):
+// 移动端浮层按键。竖屏保持 2 行倒 T 方向键，横屏利用可用宽度压成 1 行：
 //   Row1: [Esc ][Tab ][⇧Tab][^T  ][ ↑ ][ ^S ]
 //   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
-//   Paste / Enter 在最右, 各占一行
+//   横屏: [Esc][Tab][⇧Tab][^T][^S][清空][^C][^B][←][↑][↓][→][粘贴][回车]
+//   Paste / Enter 在竖屏最右, 各占一行
 // 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
 // onPointerDown preventDefault 防把焦点抢走 xterm。
 export function PtyMobileControls({
@@ -43,16 +52,37 @@ export function PtyMobileControls({
   bottomInset = 0,
   onInput,
   onPaste,
+  onHeightChange,
 }: PtyMobileControlsProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!onHeightChange) return;
+    const element = rootRef.current;
+    if (!element) return;
+
+    const measure = () => onHeightChange(Math.ceil(element.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onHeightChange]);
+
   return (
     <div
-      className="dev-pty-mobile-controls fixed inset-x-0 z-40 flex items-stretch gap-1 border-t px-1 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.375rem)]"
+      ref={rootRef}
+      className="dev-pty-mobile-controls fixed inset-x-0 z-40 flex items-stretch gap-1 border-t px-1 py-1.5"
       style={{ bottom: bottomInset }}
       data-slot="pty-mobile-controls"
       aria-label="终端移动端控制"
     >
       <div
-        className="grid min-w-0 flex-1 grid-cols-6 grid-rows-2 gap-1"
+        className="dev-pty-mobile-key-grid grid min-w-0 flex-1 grid-cols-6 grid-rows-2 gap-1"
         role="group"
         aria-label="辅助按键"
       >
@@ -80,12 +110,6 @@ export function PtyMobileControls({
         >
           ^T
         </SinglePressKey>
-        <RepeatableKey
-          label="光标上移"
-          slot="pty-mobile-key-up"
-          icon={ArrowUp}
-          onPress={() => onInput("\x1b[A")}
-        />
         <SinglePressKey
           label="发送 Ctrl+S"
           slot="pty-mobile-key-ctrl-s"
@@ -122,6 +146,12 @@ export function PtyMobileControls({
           onPress={() => onInput("\x1b[D")}
         />
         <RepeatableKey
+          label="光标上移"
+          slot="pty-mobile-key-up"
+          icon={ArrowUp}
+          onPress={() => onInput("\x1b[A")}
+        />
+        <RepeatableKey
           label="光标下移"
           slot="pty-mobile-key-down"
           icon={ArrowDown}
@@ -134,7 +164,7 @@ export function PtyMobileControls({
           onPress={() => onInput("\x1b[C")}
         />
       </div>
-      <div className="grid w-[4.375rem] shrink-0 grid-rows-2 gap-1">
+      <div className="dev-pty-mobile-action-grid grid w-[4.375rem] shrink-0 grid-rows-2 gap-1">
         <button
           type="button"
           className={KEY_BUTTON_OUTER_CLASS}

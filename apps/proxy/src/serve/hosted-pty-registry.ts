@@ -12,6 +12,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
 import {
   appendPtySemanticTextTail,
+  extractOscWorkingDirectory,
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
@@ -52,6 +53,7 @@ interface HostedPtyRegistryDeps {
   relayConnection: RelayConnection;
   getProviderEnv: () => NodeJS.ProcessEnv;
   touchSessionActivity: (sessionId: string) => boolean;
+  updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   // PTY → Session FSM 的翻译副作用（changeSessionState、清理 interrupted approvals、推
   // agent status 等）由 bridge 收口；hosted 与 terminal-ipc 共用同一实现。
   applyPtyStateToSession: (sessionId: string, ptyState: PtySemanticState) => void;
@@ -316,10 +318,14 @@ export class HostedPtyRegistry {
     this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
 
     const oscSequences = extractOscSequences(data);
+    const cwd = extractOscWorkingDirectory(data);
     const session = this.deps.sessionManager.getSession(sessionId);
     const oscSignal = extractOscSignals(data, session?.provider);
     if (oscSignal?.title) {
       this.sendTerminalTitle(sessionId, oscSignal.title);
+    }
+    if (hosted.kind === "terminal" && cwd) {
+      this.deps.updateTerminalCwd(sessionId, cwd);
     }
     if (hosted.kind === "terminal") return;
 

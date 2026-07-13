@@ -1,6 +1,8 @@
 import type { Terminal } from "@xterm/xterm";
 import { measureXtermCellSize } from "./pty-xterm-metrics";
+import type { PtySelectionPathAction } from "./pty-selection-path-action";
 import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
+import { findImagePreviewPathMatchesInWrappedBuffer } from "./xterm-image-preview-links";
 
 export interface TerminalSelectionPoint {
   row: number;
@@ -13,8 +15,8 @@ interface TerminalSelectionResult {
   text: string;
 }
 
-interface TerminalFileDownloadSelectionResult extends TerminalSelectionResult {
-  downloadPath: string;
+interface TerminalPathSelectionResult extends TerminalSelectionResult {
+  pathAction: PtySelectionPathAction;
 }
 
 interface TerminalPointAtClientOptions {
@@ -37,8 +39,7 @@ interface SelectTerminalInitialRangeAtBufferPointOptions {
   point: TerminalSelectionPoint;
 }
 
-type SelectTerminalFileDownloadLinkAtBufferPointOptions =
-  SelectTerminalInitialRangeAtBufferPointOptions;
+type SelectTerminalPathLinkAtBufferPointOptions = SelectTerminalInitialRangeAtBufferPointOptions;
 
 interface SelectTerminalRangeOptions {
   terminal: Terminal;
@@ -389,32 +390,45 @@ export function selectTerminalInitialRangeAtBufferPoint({
   });
 }
 
-export function selectTerminalFileDownloadLinkAtBufferPoint({
+export function selectTerminalPathLinkAtBufferPoint({
   terminal,
   point,
-}: SelectTerminalFileDownloadLinkAtBufferPointOptions): TerminalFileDownloadSelectionResult | null {
+}: SelectTerminalPathLinkAtBufferPointOptions): TerminalPathSelectionResult | null {
   const lineNumber = point.row + 1;
   const column = point.column + 1;
-  const match = findFileDownloadPathMatchesInWrappedBuffer(terminal, lineNumber).find(
-    (candidate) => {
-      if (lineNumber < candidate.startLineNumber || lineNumber > candidate.endLineNumber) {
-        return false;
-      }
-      if (lineNumber === candidate.startLineNumber && column < candidate.startColumn) {
-        return false;
-      }
-      if (lineNumber === candidate.endLineNumber && column > candidate.endColumn) {
-        return false;
-      }
-      return true;
-    },
-  );
-  if (!match) return null;
+  const candidate = [
+    ...findImagePreviewPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
+      match,
+      pathAction: { kind: "image-preview", path: match.path } as const,
+    })),
+    ...findFileDownloadPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
+      match,
+      pathAction: { kind: "file-download", path: match.path } as const,
+    })),
+  ].find(({ match }) => {
+    if (lineNumber < match.startLineNumber || lineNumber > match.endLineNumber) {
+      return false;
+    }
+    if (lineNumber === match.startLineNumber && column < match.startColumn) {
+      return false;
+    }
+    if (lineNumber === match.endLineNumber && column > match.endColumn) {
+      return false;
+    }
+    return true;
+  });
+  if (!candidate) return null;
 
   const selected = selectTerminalRange({
     terminal,
-    anchor: { row: match.startLineNumber - 1, column: match.startColumn - 1 },
-    focus: { row: match.endLineNumber - 1, column: match.endColumn - 1 },
+    anchor: {
+      row: candidate.match.startLineNumber - 1,
+      column: candidate.match.startColumn - 1,
+    },
+    focus: {
+      row: candidate.match.endLineNumber - 1,
+      column: candidate.match.endColumn - 1,
+    },
   });
-  return selected ? { ...selected, downloadPath: match.path } : null;
+  return selected ? { ...selected, pathAction: candidate.pathAction } : null;
 }

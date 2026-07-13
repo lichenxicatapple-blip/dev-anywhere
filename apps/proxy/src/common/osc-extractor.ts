@@ -48,6 +48,20 @@ function lastSequence(matches: OscSequence[], code: number): OscSequence | undef
   return undefined;
 }
 
+export function extractOscWorkingDirectory(rawData: string): string | null {
+  const osc7 = lastSequence(extractOscSequences(rawData), 7);
+  if (!osc7) return null;
+
+  try {
+    const uri = new URL(osc7.text);
+    if (uri.protocol !== "file:") return null;
+    const pathname = decodeURIComponent(uri.pathname);
+    return pathname.startsWith("/") ? pathname : null;
+  } catch {
+    return null;
+  }
+}
+
 function isCodexActionRequiredTitle(title: string): boolean {
   return /\bAction Required\b/i.test(title);
 }

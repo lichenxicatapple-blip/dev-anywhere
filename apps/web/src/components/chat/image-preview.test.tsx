@@ -62,6 +62,24 @@ describe("ImagePreviewProvider", () => {
     toastError.mockReset();
   });
 
+  it("focuses the preview surface instead of highlighting an action on open", async () => {
+    requestRemoteFileUrl.mockResolvedValueOnce({
+      success: false,
+      error: "missing",
+    });
+
+    render(
+      <ImagePreviewProvider sessionId="s1">
+        <PreviewProbe path="docs/assets/readme-mobile-create.png" />
+      </ImagePreviewProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "open preview" }));
+
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "复制路径" }));
+  });
+
   it("does not report the image as loaded until the browser image load event fires", async () => {
     const path =
       "/Users/catli/MyApps/dev-anywhere/.dev-anywhere/clipboard/a-very-long-directory-name/another-very-long-directory-name/pasted-image-with-a-long-name.png";

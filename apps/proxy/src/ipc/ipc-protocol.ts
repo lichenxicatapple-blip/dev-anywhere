@@ -159,6 +159,13 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     title: z.string(),
   }),
 
+  // terminal → serve：shell 通过 OSC 7 报告的当前工作目录
+  z.object({
+    type: z.literal("pty_cwd_change"),
+    sessionId: z.string(),
+    cwd: z.string().min(1),
+  }),
+
   // terminal → serve：local runtime 观察到的 PTY 语义事件。
   z.object({
     type: z.literal("pty_semantic_event"),

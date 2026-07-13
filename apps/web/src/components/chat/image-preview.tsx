@@ -219,6 +219,7 @@ function ImagePreviewDialog({
       <DialogContent
         className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !p-3 sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!p-4"
         data-slot="image-preview-dialog"
+        focusSurfaceOnOpen
       >
         <DialogHeader className="min-w-0 max-w-full pr-10 text-left">
           <DialogTitle className="min-w-0 text-base">图片预览</DialogTitle>
@@ -300,10 +301,11 @@ function ImagePreviewDialog({
           >
             {metaText}
           </span>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="grid w-52 shrink-0 grid-cols-2 gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="w-full"
               onClick={() => void downloadImage()}
               disabled={!src || showDecodeError}
               data-slot="image-preview-download"
@@ -314,6 +316,7 @@ function ImagePreviewDialog({
             <Button
               variant="outline"
               size="sm"
+              className="w-full"
               onClick={copyPath}
               disabled={!state.path}
               data-slot="image-preview-copy-path"

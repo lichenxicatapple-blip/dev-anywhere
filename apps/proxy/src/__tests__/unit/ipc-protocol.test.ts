@@ -100,6 +100,18 @@ describe("IPC Protocol", () => {
       ).toBe(true);
     });
 
+    it("accepts PTY current-directory changes", async () => {
+      const { IpcMessageSchema } = await importIpc();
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_cwd_change",
+          sessionId: "sess-1",
+          cwd: "/Users/dev/My Project",
+        }).success,
+      ).toBe(true);
+    });
+
     it("requires a PTY semantic event sequence number", async () => {
       const { IpcMessageSchema } = await importIpc();
 

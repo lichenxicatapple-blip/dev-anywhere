@@ -504,6 +504,26 @@ async function installClipboardProbe(page: Page): Promise<void> {
   });
 }
 
+async function installInsecureContextClipboardProbe(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: false,
+    });
+    document.execCommand = (command: string) => {
+      if (command !== "copy") return false;
+      const source = document.querySelector<HTMLTextAreaElement>('textarea[aria-hidden="true"]');
+      if (!source) return false;
+      window.__mobilePtyCopiedText = source.value;
+      return true;
+    };
+  });
+}
+
 async function waitForSoftKeyboard(page: Page): Promise<boolean> {
   try {
     await expect
@@ -590,11 +610,12 @@ test.describe("L4 mobile / PTY long press copy", () => {
     await expect(emuPage.getByRole("button", { name: "调整选区起点" })).toBeVisible();
     await expect(emuPage.getByRole("button", { name: "调整选区终点" })).toBeVisible();
 
-    await installClipboardProbe(emuPage);
+    await installInsecureContextClipboardProbe(emuPage);
     await copyButton.click();
     await expect
       .poll(() => emuPage.evaluate(() => window.__mobilePtyCopiedText ?? ""))
       .toContain(target.startText);
+    await expect(emuPage.getByText("已复制", { exact: true })).toBeVisible();
     await expect(copyButton).toBeHidden();
   });
 

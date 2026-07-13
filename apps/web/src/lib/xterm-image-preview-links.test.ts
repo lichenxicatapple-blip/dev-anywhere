@@ -47,6 +47,66 @@ describe("xterm image preview links", () => {
     ]);
   });
 
+  it("provides every segment of an image path wrapped at the terminal edge", () => {
+    const providerRef: {
+      current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
+    } = {};
+    const first = "/Users/catli/MyApps/dev-anywhere/docs/assets/readme-mobile-create.";
+    const lines = [
+      { isWrapped: false, text: first },
+      { isWrapped: true, text: "png" },
+    ];
+    const term = {
+      buffer: {
+        active: {
+          getLine: (index: number) => {
+            const line = lines[index];
+            if (!line) return undefined;
+            return {
+              isWrapped: line.isWrapped,
+              translateToString: () => line.text,
+            };
+          },
+        },
+      },
+      registerLinkProvider: vi.fn((provider) => {
+        providerRef.current = provider;
+        return { dispose: vi.fn() };
+      }),
+    };
+    registerImagePreviewLinkProvider(term as never, vi.fn());
+
+    providerRef.current?.provideLinks(1, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+          }>
+        | undefined;
+      expect(arr).toHaveLength(1);
+      expect(arr?.[0]?.text).toBe(`${first}png`);
+      expect(arr?.[0]?.range).toEqual({
+        start: { x: 1, y: 1 },
+        end: { x: 66, y: 1 },
+      });
+    });
+
+    providerRef.current?.provideLinks(2, (links) => {
+      const arr = links as
+        | Array<{
+            text: string;
+            range: { start: { x: number; y: number }; end: { x: number; y: number } };
+          }>
+        | undefined;
+      expect(arr).toHaveLength(1);
+      expect(arr?.[0]?.text).toBe(`${first}png`);
+      expect(arr?.[0]?.range).toEqual({
+        start: { x: 1, y: 2 },
+        end: { x: 3, y: 2 },
+      });
+    });
+  });
+
   function provideAndActivate(
     onPreview: (path: string) => void,
     event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } & Partial<

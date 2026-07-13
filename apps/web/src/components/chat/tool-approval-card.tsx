@@ -133,7 +133,7 @@ export function ToolApprovalCard({
       data-slot="tool-approval-card"
       data-status="pending"
       className={cn(
-        "rounded-md border border-border bg-card p-3 flex flex-col gap-3 ring-2 ring-ring/40",
+        "rounded-md border border-border bg-card p-3 flex flex-col gap-3 ring-2 ring-[var(--color-status-warning)]/40",
         container === "inline" && "w-full min-w-0 max-w-full",
         container === "floating" && "fixed bottom-4 right-4 w-[360px] max-w-[90vw] shadow-lg z-20",
       )}

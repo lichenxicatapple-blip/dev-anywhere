@@ -36,7 +36,11 @@ function withExecutable(name: string, test: (path: string) => void): void {
   }
 }
 
-function createRegistry(provider: "claude" | "codex", commandPath: string) {
+function createRegistry(
+  provider: "claude" | "codex",
+  commandPath: string,
+  updateTerminalCwd = vi.fn(() => true),
+) {
   return new HostedPtyRegistry({
     sessionManager: {
       getSession: vi.fn(() => ({
@@ -56,6 +60,7 @@ function createRegistry(provider: "claude" | "codex", commandPath: string) {
     getProviderEnv: () =>
       provider === "claude" ? { CLAUDE_BIN: commandPath } : { CODEX_BIN: commandPath },
     touchSessionActivity: vi.fn(() => true),
+    updateTerminalCwd,
     applyPtyStateToSession: vi.fn(),
     onSessionClosed: vi.fn(),
   });
@@ -173,6 +178,28 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("reports a pure shell terminal working-directory change from OSC 7", () => {
+    withExecutable("zsh", (shellPath) => {
+      const updateTerminalCwd = vi.fn(() => true);
+      const registry = createRegistry("claude", shellPath, updateTerminalCwd);
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const child = ptySpawnMock.mock.results.at(-1)?.value;
+      const onData = child?.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
+      expect(onData).toBeTypeOf("function");
+
+      onData?.("\x1b]7;file://host/Users/dev/My%20Project\x1b\\");
+
+      expect(updateTerminalCwd).toHaveBeenCalledWith("terminal-1", "/Users/dev/My Project");
+      registry.destroyAll();
+    });
+  });
+
   it("emits monotonic PTY semantic sequence numbers", () => {
     withExecutable("codex", (codexBin) => {
       const relayConnection = {
@@ -194,6 +221,7 @@ describe("Hosted PTY registry", () => {
         relayConnection: relayConnection as never,
         getProviderEnv: () => ({ CODEX_BIN: codexBin }),
         touchSessionActivity: vi.fn(() => true),
+        updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession: vi.fn(),
         onSessionClosed: vi.fn(),
       });
@@ -248,6 +276,7 @@ describe("Hosted PTY registry", () => {
         } as never,
         getProviderEnv: () => ({ CODEX_BIN: codexBin }),
         touchSessionActivity: vi.fn(() => true),
+        updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession,
         onSessionClosed: vi.fn(),
       });
@@ -297,6 +326,7 @@ describe("Hosted PTY registry", () => {
         } as never,
         getProviderEnv: () => ({ SHELL: shellPath }),
         touchSessionActivity: vi.fn(() => true),
+        updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession,
         onSessionClosed: vi.fn(),
       });

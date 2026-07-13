@@ -7,6 +7,7 @@ import { SessionManager } from "#src/serve/session-manager.js";
 import {
   broadcastSessionList,
   changeSessionState,
+  changeTerminalCwd,
   touchSessionActivity,
 } from "#src/serve/session-broadcast.js";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
@@ -80,6 +81,34 @@ describe("session broadcast state source", () => {
           state: "waiting_approval",
         }),
       }),
+    );
+  });
+
+  it("broadcasts a pure terminal OSC 7 working-directory change", () => {
+    manager = makeSessionManager();
+    const session = manager.createSession(
+      "pty",
+      "/Users/dev",
+      process.pid,
+      undefined,
+      undefined,
+      "claude",
+      "proxy-hosted",
+      undefined,
+      "terminal",
+    );
+    const envelopes: Array<{
+      type: string;
+      payload: { sessions: Array<{ sessionId: string; cwd: string }> };
+    }> = [];
+    const relay = {
+      sendEnvelope: (envelope: (typeof envelopes)[number]) => envelopes.push(envelope),
+    } as unknown as RelayConnection;
+
+    expect(changeTerminalCwd(manager, relay, session.id, "/Users/dev/repo")).toBe(true);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0].payload.sessions).toContainEqual(
+      expect.objectContaining({ sessionId: session.id, cwd: "/Users/dev/repo" }),
     );
   });
 

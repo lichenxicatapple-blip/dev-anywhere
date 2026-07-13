@@ -169,9 +169,7 @@ test.describe("mobile UX contract", () => {
     await selectFakeProxy(page);
 
     const hero = page.locator('[data-slot="mobile-brand-hero"]');
-    const subtitle = hero.locator(".dev-mobile-brand-subtitle");
     const switchProxy = page.locator('[data-slot="mobile-switch-proxy"]');
-    const createButton = page.locator('[data-slot="create-session-mobile-trigger"]');
 
     await expect(hero).toBeVisible();
     await expect(switchProxy).toBeVisible();
@@ -427,6 +425,7 @@ test.describe("mobile UX contract", () => {
     await selectFakeProxy(page);
     const sheet = await openMobileCreateTypeSheet(page);
     await expectMobileInsetSurface(page, sheet);
+    await expect(sheet).toBeFocused();
     await expectTouchTarget(sheet.locator('[data-slot="create-agent-session-sheet-item"]'));
     await expectTouchTarget(sheet.locator('[data-slot="create-terminal-session-sheet-item"]'));
     await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
@@ -435,6 +434,7 @@ test.describe("mobile UX contract", () => {
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible();
     await expectMobileInsetSurface(page, dialog);
+    await expect(dialog).toBeFocused();
     await expectTouchTarget(dialog.locator('[data-slot="sheet-close"]'));
     await expect
       .poll(() =>

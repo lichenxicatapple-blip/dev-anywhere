@@ -8,6 +8,7 @@ import type { SessionManager } from "./session-manager.js";
 import {
   broadcastSessionList,
   changeSessionState,
+  changeTerminalCwd,
   touchSessionActivity,
 } from "./session-broadcast.js";
 
@@ -24,6 +25,8 @@ interface EventBridge {
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
   // 节流式 lastActive 更新；与 changeSessionState 共用底层 push 逻辑。
   touchSessionActivity: (sessionId: string) => boolean;
+  // 纯终端通过 OSC 7 上报 cd 后的目录；更新文件解析基准并广播会话标题。
+  updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   // 把 agent_status 推到 relay 并写到 registry，用于 client 重连后查询。
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   // session 关闭时三件套清理：取消 control handlers 周期任务 / 删 agent_status / 广播会话列表。
@@ -37,6 +40,9 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
 
   const touchActivity = (sessionId: string): boolean =>
     touchSessionActivity(deps.sessionManager, deps.relayConnection, sessionId);
+
+  const updateTerminalCwd = (sessionId: string, cwd: string): boolean =>
+    changeTerminalCwd(deps.sessionManager, deps.relayConnection, sessionId, cwd);
 
   const emitAgentStatus = (sessionId: string, phase: AgentStatusPayload["phase"]): void => {
     const session = deps.sessionManager.getSession(sessionId);
@@ -89,6 +95,7 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
   return {
     changeSessionState: changeState,
     touchSessionActivity: touchActivity,
+    updateTerminalCwd,
     emitAgentStatus,
     cleanupSessionResources,
   };

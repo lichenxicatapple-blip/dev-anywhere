@@ -1,4 +1,4 @@
-// PTY 移动端控制条 2 行布局几何: 高度 ~105px, 按键尺寸统一。
+// PTY 移动端控制条布局几何: 竖屏 2 行、横屏 1 行，按键尺寸统一。
 // L2 层用 mobile viewport + hasTouch 触发 controls 浮起, L4 emu 由
 // e2e/mobile/pty-mobile-controls.spec.ts 覆盖真触屏交互。
 import { expect, test } from "@playwright/test";
@@ -14,7 +14,7 @@ function averageRgbChannel(color: string): number {
   return normalized.reduce((sum, value) => sum + value, 0) / normalized.length;
 }
 
-test.describe("PTY mobile controls — 2-row layout geometry", () => {
+test.describe("PTY mobile controls — portrait layout geometry", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
   test("two rows render at ~105px height with uniform key sizes", async ({ page }) => {
@@ -93,6 +93,29 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
     );
     expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual(visualViewportHeight + 1);
     expect(visualViewportHeight - (controlsBox.y + controlsBox.height)).toBeLessThanOrEqual(24);
+
+    const arrowGeometry = await page.evaluate(() => {
+      const rect = (slot: string) =>
+        document.querySelector<HTMLElement>(`[data-slot="${slot}"]`)?.getBoundingClientRect();
+      const up = rect("pty-mobile-key-up");
+      const left = rect("pty-mobile-key-left");
+      const down = rect("pty-mobile-key-down");
+      const right = rect("pty-mobile-key-right");
+      return {
+        up: up ? { x: up.x, y: up.y, width: up.width } : null,
+        left: left ? { x: left.x, y: left.y, width: left.width } : null,
+        down: down ? { x: down.x, y: down.y, width: down.width } : null,
+        right: right ? { x: right.x, y: right.y, width: right.width } : null,
+      };
+    });
+    expect(arrowGeometry.up).not.toBeNull();
+    expect(arrowGeometry.left).not.toBeNull();
+    expect(arrowGeometry.down).not.toBeNull();
+    expect(arrowGeometry.right).not.toBeNull();
+    expect(arrowGeometry.up!.y).toBeLessThan(arrowGeometry.down!.y);
+    expect(arrowGeometry.left!.y).toBe(arrowGeometry.down!.y);
+    expect(arrowGeometry.right!.y).toBe(arrowGeometry.down!.y);
+    expect(arrowGeometry.up!.x).toBe(arrowGeometry.down!.x);
   });
 
   test("uses light theme tokens instead of hard-coded dark controls", async ({ page }) => {
@@ -177,6 +200,142 @@ test.describe("PTY mobile controls — 2-row layout geometry", () => {
       "data-keyboard-layout-inset",
       "0",
     );
+  });
+});
+
+test.describe("PTY mobile controls — iPad landscape keyboard", () => {
+  test.use({
+    viewport: MOBILE_VIEWPORTS.landscape,
+    hasTouch: true,
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
+  });
+
+  test("uses one control row and persists explicit floating-keyboard hint opt-out", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        get: () => "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        get: () => 5,
+      });
+      localStorage.removeItem("dev_anywhere_ipadFloatingKeyboardHintDismissed");
+    });
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-ipad-landscape`,
+      withVisualViewportMock: true,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await page.locator('[data-slot="pty-terminal"]').click();
+    await page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]').focus();
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+
+    const controls = page.locator('[data-slot="pty-mobile-controls"]');
+    await expect(controls).toBeVisible();
+    const geometry = await page.evaluate(() => {
+      const controlRoot = document.querySelector<HTMLElement>('[data-slot="pty-mobile-controls"]');
+      const terminal = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      const keys = Array.from(
+        controlRoot?.querySelectorAll<HTMLElement>("button[data-slot]") ?? [],
+      );
+      const rootRect = controlRoot?.getBoundingClientRect();
+      return {
+        controlHeight: rootRect?.height ?? 0,
+        bottomPadding:
+          rootRect && keys.length > 0
+            ? rootRect.bottom - Math.max(...keys.map((key) => key.getBoundingClientRect().bottom))
+            : 0,
+        keyCount: keys.length,
+        keyRows: new Set(keys.map((key) => Math.round(key.getBoundingClientRect().top))).size,
+        keyHeights: keys.map((key) => key.getBoundingClientRect().height),
+        slotsByPosition: keys
+          .map((key) => ({ slot: key.dataset.slot ?? "", x: key.getBoundingClientRect().x }))
+          .sort((a, b) => a.x - b.x)
+          .map(({ slot }) => slot),
+        terminalPaddingBottom: terminal
+          ? Number.parseFloat(getComputedStyle(terminal).paddingBottom)
+          : 0,
+      };
+    });
+    expect(geometry.keyCount).toBe(14);
+    expect(geometry.keyRows).toBe(1);
+    expect(geometry.controlHeight).toBeGreaterThanOrEqual(50);
+    expect(geometry.controlHeight).toBeLessThanOrEqual(70);
+    expect(geometry.bottomPadding).toBeGreaterThanOrEqual(5);
+    expect(geometry.bottomPadding).toBeLessThanOrEqual(8);
+    expect(geometry.slotsByPosition.slice(8, 12)).toEqual([
+      "pty-mobile-key-left",
+      "pty-mobile-key-up",
+      "pty-mobile-key-down",
+      "pty-mobile-key-right",
+    ]);
+    for (const height of geometry.keyHeights) {
+      expect(height).toBeGreaterThanOrEqual(40);
+      expect(height).toBeLessThanOrEqual(48);
+    }
+    expect(
+      Math.abs(geometry.terminalPaddingBottom - (geometry.controlHeight + 8)),
+    ).toBeLessThanOrEqual(1);
+
+    const hint = page.getByTestId("ipad-floating-keyboard-hint");
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText("可以缩小软键盘");
+    await expect(hint).toContainText("双指向内捏合");
+    const dismiss = hint.getByRole("button", { name: "不再显示" });
+    await expect(dismiss).toBeVisible();
+    const hintLayout = await hint.evaluate((element) => {
+      const content = element.querySelector<HTMLElement>("[data-content]");
+      const action = element.querySelector<HTMLElement>("[data-action]");
+      const contentRect = content?.getBoundingClientRect();
+      const actionRect = action?.getBoundingClientRect();
+      return {
+        contentRight: contentRect?.right ?? 0,
+        actionLeft: actionRect?.left ?? 0,
+        actionHeight: actionRect?.height ?? 0,
+      };
+    });
+    expect(hintLayout.actionLeft).toBeGreaterThanOrEqual(hintLayout.contentRight);
+    expect(hintLayout.actionHeight).toBeGreaterThanOrEqual(44);
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.5),
+        offsetTop: 0,
+      }),
+    );
+    await expect(page.getByTestId("ipad-floating-keyboard-hint")).toHaveCount(1);
+
+    await dismiss.click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => localStorage.getItem("dev_anywhere_ipadFloatingKeyboardHintDismissed")),
+      )
+      .toBe("1");
+    await expect(hint).toHaveCount(0);
+
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: window.innerHeight,
+        offsetTop: 0,
+      }),
+    );
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({
+        height: Math.floor(window.innerHeight * 0.55),
+        offsetTop: 0,
+      }),
+    );
+    await expect(page.getByTestId("ipad-floating-keyboard-hint")).toHaveCount(0);
   });
 });
 

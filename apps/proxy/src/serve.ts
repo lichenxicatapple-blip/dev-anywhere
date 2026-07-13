@@ -233,6 +233,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     getProviderEnv,
     touchSessionActivity: eventBridge.touchSessionActivity,
+    updateTerminalCwd: eventBridge.updateTerminalCwd,
     applyPtyStateToSession: (sessionId, ptyState) =>
       applyPtyStateToSession(ptyBridgeDeps, sessionId, ptyState),
     onSessionClosed: eventBridge.cleanupSessionResources,
@@ -336,6 +337,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       hookEventRouter: hookRuntime.hookEventRouter,
       createHookContext: hookRuntime.createHookContext,
       emitAgentStatus: eventBridge.emitAgentStatus,
+      updateTerminalCwd: eventBridge.updateTerminalCwd,
       cleanupSessionResources: eventBridge.cleanupSessionResources,
       config: statusConfig,
       resolveInterruptedApprovals: (sessionId) =>

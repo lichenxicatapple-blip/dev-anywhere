@@ -22,6 +22,13 @@ import { useAppStore } from "@/stores/app-store";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { isTouchTabletViewport, useVisualViewportInsets } from "@/hooks/use-visual-viewport";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { describeCurrentClientDevice } from "@/lib/client-device";
+import {
+  dismissFloatingKeyboardHint,
+  isFloatingKeyboardHintDismissed,
+  shouldShowFloatingKeyboardHint,
+} from "@/lib/ipad-floating-keyboard-hint";
 import {
   isRouteSessionEnded,
   resolveChatPresentation,
@@ -86,11 +93,49 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     }
   }, [adaptiveInputModality, inputModePreference, setAdaptiveInputModality, softKeyboardDetected]);
   const touchTabletViewport = useTouchTabletViewport();
+  const isLandscape = useMediaQuery("(orientation: landscape)");
+  const [isIpadClient] = useState(() => describeCurrentClientDevice().osName === "iPad");
+  const floatingKeyboardHintShownRef = useRef(false);
   const effectiveKbOffset = hardwareInputActive ? 0 : kbOffset;
   // iPad/PWA 这类触摸平板通常会自己把聚焦输入框上推。这里再给根节点补整段
   // keyboard padding，会变成可见的底部空白横条。
   const effectiveLayoutKbInset =
     hardwareInputActive || (mode === "json" && touchTabletViewport) ? 0 : layoutKbInset;
+
+  useEffect(() => {
+    const keyboardOpen = effectiveKbOffset > 0;
+    if (!keyboardOpen) {
+      floatingKeyboardHintShownRef.current = false;
+      return;
+    }
+    if (
+      !shouldShowFloatingKeyboardHint({
+        isIpad: isIpadClient,
+        isLandscape,
+        isPty: mode === "pty",
+        keyboardOpen,
+        shownForCurrentKeyboardOpen: floatingKeyboardHintShownRef.current,
+        dismissed: isFloatingKeyboardHintDismissed(),
+      })
+    ) {
+      return;
+    }
+
+    floatingKeyboardHintShownRef.current = true;
+    toast.info("可以缩小软键盘", {
+      id: "ipad-floating-keyboard-hint",
+      testId: "ipad-floating-keyboard-hint",
+      description: "在键盘上双指向内捏合，即可切换为浮动键盘并扩大终端显示区域。",
+      duration: 8000,
+      classNames: {
+        actionButton: "!h-11 !px-3",
+      },
+      action: {
+        label: "不再显示",
+        onClick: () => dismissFloatingKeyboardHint(),
+      },
+    });
+  }, [effectiveKbOffset, isIpadClient, isLandscape, mode]);
 
   // 区分 "用户主动敲 chat URL / refresh" vs "AppShell auto-restore 把我拽来"。
   // 仅当当前 URL 等于 RESTORED_TARGET 时算后者, 一次性消费, 避免后续手动回访被重定向。

@@ -9,9 +9,9 @@ import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
 import {
   getTerminalPointAtClient,
-  selectTerminalFileDownloadLinkAtBufferPoint,
   selectTerminalInitialRangeAtBufferPoint,
   selectTerminalInitialRangeAtPoint,
+  selectTerminalPathLinkAtBufferPoint,
   selectTerminalRange,
   type TerminalSelectionPoint,
 } from "@/lib/pty-line-selection";
@@ -179,10 +179,11 @@ export function usePtySelectionController(
   );
 
   const setSelectedPathAction = useCallback(
-    (selectedText: string, explicitDownloadPath?: string | null): PtySelectionPathAction | null => {
-      const action =
-        resolvePtySelectionPathAction(selectedText) ??
-        (explicitDownloadPath ? { kind: "file-download", path: explicitDownloadPath } : null);
+    (
+      selectedText: string,
+      explicitPathAction?: PtySelectionPathAction | null,
+    ): PtySelectionPathAction | null => {
+      const action = explicitPathAction ?? resolvePtySelectionPathAction(selectedText);
       selectedPathActionRef.current = action;
       setPtySelectionPathAction(action);
       return action;
@@ -307,11 +308,9 @@ export function usePtySelectionController(
       const host = xtermHostRef.current;
       if (!terminal || !host) return false;
 
-      const linkSelection = point
-        ? selectTerminalFileDownloadLinkAtBufferPoint({ terminal, point })
-        : null;
+      const pathSelection = point ? selectTerminalPathLinkAtBufferPoint({ terminal, point }) : null;
       const selected =
-        linkSelection ??
+        pathSelection ??
         (point
           ? selectTerminalInitialRangeAtBufferPoint({
               terminal,
@@ -323,7 +322,7 @@ export function usePtySelectionController(
       selectionAnchorRef.current = selected.anchor;
       selectionFocusRef.current = selected.focus;
       selectedPtyTextRef.current = selected.text;
-      setSelectedPathAction(selected.text, linkSelection?.downloadPath);
+      setSelectedPathAction(selected.text, pathSelection?.pathAction);
       const handles = getSelectionHandles(selected.anchor, selected.focus);
       setPtySelectionHandles(handles);
       if (showToolbar) {
@@ -531,15 +530,15 @@ export function usePtySelectionController(
         selectionLongPressClientStartRef.current = null;
         return;
       }
-      const linkSelection =
+      const pathSelection =
         !selectionDraggedRef.current && !clientMoved && linkPoint
-          ? selectTerminalFileDownloadLinkAtBufferPoint({ terminal, point: linkPoint })
+          ? selectTerminalPathLinkAtBufferPoint({ terminal, point: linkPoint })
           : null;
       const rangeFocus = clientMoved ? (endPoint ?? focus) : focus;
       const selected =
         (selectionDraggedRef.current || clientMoved) && anchor && rangeFocus
           ? selectTerminalRange({ terminal, anchor, focus: rangeFocus })
-          : (linkSelection ??
+          : (pathSelection ??
             selectTerminalInitialRangeAtPoint({ terminal, host, clientX, clientY }) ??
             (candidate
               ? selectTerminalInitialRangeAtBufferPoint({
@@ -557,7 +556,7 @@ export function usePtySelectionController(
       selectionAnchorRef.current = selected.anchor;
       selectionFocusRef.current = selected.focus;
       selectedPtyTextRef.current = selected.text;
-      setSelectedPathAction(selected.text, linkSelection?.downloadPath);
+      setSelectedPathAction(selected.text, pathSelection?.pathAction);
       const handles = getSelectionHandles(selected.anchor, selected.focus);
       setPtySelectionHandles(handles);
       setPtySelectionToolbar(
@@ -583,9 +582,10 @@ export function usePtySelectionController(
     const selected = terminal?.getSelection?.() || selectedPtyTextRef.current;
     if (!selected) return;
 
-    void copyText(selected).then((result) => {
+    void copyText(selected, { allowLegacyFallback: true }).then((result) => {
       clearPtySelection();
       if (result === "failed") toast.error("复制失败");
+      else toast.success("已复制");
     });
   }, [clearPtySelection, terminalRef]);
 

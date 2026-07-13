@@ -11,6 +11,7 @@ const surfaceColors = [
 
 const accentColors = [
   { name: "primary", cssVar: "--primary", className: "bg-primary" },
+  { name: "focus ring", cssVar: "--ring", className: "bg-ring" },
   {
     name: "primary-foreground",
     cssVar: "--primary-foreground",

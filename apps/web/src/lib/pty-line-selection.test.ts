@@ -3,9 +3,9 @@ import type { IBufferCell, IBufferLine, Terminal } from "@xterm/xterm";
 import {
   getClientPositionForTerminalPoint,
   getTerminalPointAtClient,
-  selectTerminalFileDownloadLinkAtBufferPoint,
   selectTerminalLineAtPoint,
   selectTerminalInitialRangeAtPoint,
+  selectTerminalPathLinkAtBufferPoint,
   selectTerminalRange,
   selectTerminalTokenAtPoint,
 } from "./pty-line-selection";
@@ -284,7 +284,7 @@ describe("selectTerminalInitialRangeAtPoint", () => {
   });
 });
 
-describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
+describe("selectTerminalPathLinkAtBufferPoint", () => {
   it("selects the whole file download link and returns the download path", () => {
     const select = vi.fn();
     const terminal = {
@@ -306,13 +306,16 @@ describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
       select,
     } as unknown as Terminal;
 
-    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+    const selected = selectTerminalPathLinkAtBufferPoint({
       terminal,
       point: { row: 32, column: 13 },
     });
 
     expect(selected?.text).toBe("@./build/out.tar.gz");
-    expect(selected?.downloadPath).toBe("./build/out.tar.gz");
+    expect(selected?.pathAction).toEqual({
+      kind: "file-download",
+      path: "./build/out.tar.gz",
+    });
     expect(select).toHaveBeenCalledWith(4, 32, 19);
   });
 
@@ -339,12 +342,12 @@ describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
       select,
     } as unknown as Terminal;
 
-    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+    const selected = selectTerminalPathLinkAtBufferPoint({
       terminal,
       point: { row: 34, column: 12 },
     });
 
-    expect(selected?.downloadPath).toBe(path);
+    expect(selected?.pathAction).toEqual({ kind: "file-download", path });
     expect(selected?.text).toBe(`${path.slice(0, first.length - 4)}\n${second}\n${third}`);
     expect(select).toHaveBeenCalledWith(4, 32, 129);
   });
@@ -370,13 +373,46 @@ describe("selectTerminalFileDownloadLinkAtBufferPoint", () => {
       select,
     } as unknown as Terminal;
 
-    const selected = selectTerminalFileDownloadLinkAtBufferPoint({
+    const selected = selectTerminalPathLinkAtBufferPoint({
       terminal,
       point: { row: 32, column: 25 },
     });
 
     expect(selected).toBeNull();
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it("selects an image path whose extension wraps onto the next xterm row", () => {
+    const select = vi.fn();
+    const first = "/Users/catli/MyApps/dev-anywhere/docs/assets/readme-mobile-create.";
+    const second = "png";
+    expect(first).toHaveLength(66);
+    const terminal = {
+      rows: 10,
+      cols: 66,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) => {
+            if (row === 32) return line(first.split(""));
+            if (row === 33) return line(second.split(""), { isWrapped: true });
+            return undefined;
+          },
+        },
+      },
+      select,
+    } as unknown as Terminal;
+
+    const selected = selectTerminalPathLinkAtBufferPoint({
+      terminal,
+      point: { row: 32, column: 10 },
+    });
+
+    expect(selected?.pathAction).toEqual({
+      kind: "image-preview",
+      path: `${first}${second}`,
+    });
+    expect(select).toHaveBeenCalledWith(0, 32, 69);
   });
 });
 

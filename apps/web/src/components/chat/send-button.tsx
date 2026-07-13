@@ -58,7 +58,7 @@ export function StopButton({ isStopping, onStop, className }: StopButtonProps) {
       size="icon-sm"
       variant="ghost"
       className={cn(
-        "relative overflow-visible rounded-md border border-transparent text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/25 disabled:opacity-100",
+        "relative overflow-visible rounded-md border border-transparent text-destructive hover:bg-destructive/10 hover:text-destructive disabled:opacity-100",
         isStopping ? "bg-destructive/10 text-destructive" : "",
         className,
       )}

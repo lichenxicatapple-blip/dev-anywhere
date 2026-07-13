@@ -26,7 +26,7 @@ import {
   hasStoredRelayClientToken,
   persistRelayClientToken,
 } from "@/lib/relay-client-token";
-import { formatClientDeviceLabel } from "@/lib/client-device";
+import { describeCurrentClientDevice, formatClientDeviceLabel } from "@/lib/client-device";
 import type { ThemePreference } from "@/lib/theme-preference";
 import {
   Dialog,
@@ -117,6 +117,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const subviewBackButtonRef = useRef<HTMLButtonElement>(null);
   const voiceScrollRef = useRef<HTMLDivElement>(null);
   const relayTokenSaved = hasStoredRelayClientToken();
+  const showInputModeSetting = useMemo(() => describeCurrentClientDevice().osName === "iPad", []);
 
   const loadRelayHealth = useCallback(
     async (signal?: AbortSignal) => {
@@ -198,6 +199,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         )}
         data-slot="settings-dialog"
         data-view={view}
+        focusSurfaceOnOpen
         showCloseButton={view === "menu"}
       >
         <DialogHeader
@@ -239,7 +241,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           ) : (
             <>
               <DialogTitle>设置</DialogTitle>
-              <DialogDescription>连接、交互和诊断选项。</DialogDescription>
+              <DialogDescription>连接、外观和高级诊断选项。</DialogDescription>
             </>
           )}
         </DialogHeader>
@@ -263,6 +265,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             onThemePreferenceChange={setThemePreference}
             inputModePreference={inputModePreference}
             onInputModePreferenceChange={setInputModePreference}
+            showInputModeSetting={showInputModeSetting}
             ptyScrollTraceEnabled={ptyScrollTraceEnabled}
             onPtyScrollTraceEnabledChange={setPtyScrollTraceEnabled}
             latencyMonitorEnabled={latencyMonitorEnabled}
@@ -312,6 +315,7 @@ function SettingsMainView({
   onThemePreferenceChange,
   inputModePreference,
   onInputModePreferenceChange,
+  showInputModeSetting,
   ptyScrollTraceEnabled,
   onPtyScrollTraceEnabledChange,
   latencyMonitorEnabled,
@@ -326,6 +330,7 @@ function SettingsMainView({
   onThemePreferenceChange: (value: ThemePreference) => void;
   inputModePreference: InputModePreference;
   onInputModePreferenceChange: (value: InputModePreference) => void;
+  showInputModeSetting: boolean;
   ptyScrollTraceEnabled: boolean;
   onPtyScrollTraceEnabledChange: (checked: boolean) => void;
   latencyMonitorEnabled: boolean;
@@ -369,17 +374,19 @@ function SettingsMainView({
           onValueChange={onThemePreferenceChange}
         />
       </SettingsSection>
-      <SettingsSection title="交互">
-        <SettingsSegmentedItem
-          icon={<Keyboard className="size-4" aria-hidden="true" />}
-          label="输入方式"
-          detail="默认自动识别软键盘和实体键盘；必要时可强制一种方式"
-          value={inputModePreference}
-          options={inputModePreferenceOptions}
-          onValueChange={onInputModePreferenceChange}
-        />
-      </SettingsSection>
-      <SettingsSection title="诊断">
+      {showInputModeSetting ? (
+        <SettingsSection title="交互">
+          <SettingsSegmentedItem
+            icon={<Keyboard className="size-4" aria-hidden="true" />}
+            label="输入方式"
+            detail="默认自动识别软键盘和实体键盘；必要时可强制一种方式"
+            value={inputModePreference}
+            options={inputModePreferenceOptions}
+            onValueChange={onInputModePreferenceChange}
+          />
+        </SettingsSection>
+      ) : null}
+      <SettingsSection title="高级诊断">
         <SettingsToggleItem
           icon={<Terminal className="size-4" aria-hidden="true" />}
           label="PTY 滚动追踪"
@@ -536,7 +543,7 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
           autoComplete="off"
           spellCheck={false}
           aria-describedby={error ? errorId : undefined}
-          className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/55 focus:ring-2 focus:ring-ring/45"
+          className="mt-2 h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/75"
           placeholder="粘贴 token"
         />
         {error ? (

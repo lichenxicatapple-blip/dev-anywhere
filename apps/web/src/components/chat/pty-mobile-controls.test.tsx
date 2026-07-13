@@ -5,7 +5,29 @@ import { PtyMobileControls } from "./pty-mobile-controls";
 describe("PtyMobileControls", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("reports its rendered height so PTY spacing follows the actual layout", () => {
+    const onHeightChange = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      bottom: 57,
+      height: 57,
+      left: 0,
+      right: 844,
+      top: 0,
+      width: 844,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    render(
+      <PtyMobileControls onInput={vi.fn()} onPaste={vi.fn()} onHeightChange={onHeightChange} />,
+    );
+
+    expect(onHeightChange).toHaveBeenCalledWith(57);
   });
 
   it("exposes a mobile paste action without removing enter", () => {

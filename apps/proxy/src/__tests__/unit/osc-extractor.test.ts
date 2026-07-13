@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   appendPtySemanticTextTail,
+  extractOscWorkingDirectory,
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
@@ -8,6 +9,19 @@ import {
 } from "#src/common/osc-extractor.js";
 
 describe("extractOscSignals", () => {
+  it("extracts the current directory from the last OSC 7 file URI", () => {
+    const data =
+      "\x1b]7;file://host/Users/dev/old\x1b\\" +
+      "\x1b]7;file://192.168.1.2/Users/dev/My%20Project\x1b\\";
+
+    expect(extractOscWorkingDirectory(data)).toBe("/Users/dev/My Project");
+  });
+
+  it("rejects malformed or non-file OSC 7 values", () => {
+    expect(extractOscWorkingDirectory("\x1b]7;https://example.test/tmp\x07")).toBeNull();
+    expect(extractOscWorkingDirectory("\x1b]7;not-a-uri\x07")).toBeNull();
+  });
+
   it("extracts OSC sequences in frame order", () => {
     const data = "\x1b]0;old title\x07text\x1b]9;waiting for your input\x07";
     expect(extractOscSequences(data)).toEqual([

@@ -406,7 +406,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           side="bottom"
           className="inset-x-2 max-h-[calc(100dvh-0.75rem)] w-auto overflow-x-hidden overflow-y-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
           data-slot="create-session-dialog"
-          onOpenAutoFocus={(event) => event.preventDefault()}
+          focusSurfaceOnOpen
         >
           <SheetHeader className="px-0 pb-1 pt-0 text-left">
             <SheetTitle>新建会话</SheetTitle>
@@ -422,11 +422,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       <DialogContent
         className="!w-[calc(100vw-2rem)] !max-w-none max-h-[calc(100dvh-2rem)] overflow-y-auto sm:!w-[44rem]"
         data-slot="create-session-dialog"
-        // 阻止 Radix 默认 focus 第一个 input ("名称"). mobile 上自动 focus 立刻弹软键盘,
-        // visual viewport 高度被键盘吃掉 ~300px, dialog 下半部分 (Agent CLI / 权限模式 /
-        // 创建按钮) 整体落在键盘下方, 用户即便 force tap 也命中不到。Radix 阻止
-        // autofocus 后 focus 留在 trigger; ESC 仍能关闭 dialog, dialog 内 Tab 链路也仍然正常。
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        focusSurfaceOnOpen
       >
         <DialogHeader>
           <DialogTitle>新建会话</DialogTitle>

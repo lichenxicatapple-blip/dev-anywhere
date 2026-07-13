@@ -39,6 +39,7 @@ interface TerminalConnectionDeps {
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext;
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
+  updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   resolveInterruptedApprovals: (sessionId: string) => void;
   cleanupSessionResources: (sessionId: string) => void;
   config: Extract<IpcMessage, { type: "service_status_response" }>["config"];
@@ -57,6 +58,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     permissionBroker,
     createHookContext,
     emitAgentStatus,
+    updateTerminalCwd,
     resolveInterruptedApprovals,
     cleanupSessionResources,
     config,
@@ -151,6 +153,11 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               title: msg.title,
             }),
           );
+          break;
+        }
+
+        case "pty_cwd_change": {
+          updateTerminalCwd(msg.sessionId, msg.cwd);
           break;
         }
 

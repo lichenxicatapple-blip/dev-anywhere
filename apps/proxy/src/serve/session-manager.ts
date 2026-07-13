@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { isAbsolute, normalize } from "node:path";
 import { nanoid } from "nanoid";
 import { defineFSM, SessionState } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
@@ -319,6 +320,24 @@ export class SessionManager {
     }
     session.pid = pid;
     this.save();
+  }
+
+  updateTerminalCwd(id: string, cwd: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session || session.mode !== "pty" || session.kind !== "terminal") return false;
+
+    const nextCwd = normalize(cwd);
+    if (!isAbsolute(nextCwd) || nextCwd === session.cwd) return false;
+
+    const previousCwd = session.cwd;
+    session.cwd = nextCwd;
+    session.updatedAt = Date.now();
+    this.save();
+    serviceLogger.info(
+      { sessionId: id, previousCwd, cwd: nextCwd },
+      "Terminal working directory changed",
+    );
+    return true;
   }
 
   renameSession(id: string, name: string): { success: boolean; name?: string; error?: string } {

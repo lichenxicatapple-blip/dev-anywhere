@@ -7,7 +7,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync } from "node:fs";
-import { extractOscSignals } from "./common/osc-extractor.js";
+import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extractor.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { SOCK_PATH, STOPPED_PATH } from "./common/paths.js";
 import {
@@ -51,12 +51,14 @@ class ShellTerminalWorker {
   private outputSeq = 0;
   private exiting = false;
   private reconnecting = false;
+  private currentCwd: string;
 
   constructor(
     private readonly sessionId: string,
     private readonly cwd: string,
     private readonly name: string,
   ) {
+    this.currentCwd = cwd;
     this.terminal.loadAddon(this.serializeAddon);
     this.terminal.loadAddon(new UnicodeGraphemesAddon());
   }
@@ -79,7 +81,7 @@ class ShellTerminalWorker {
         type: "session_create_request",
         mode: "pty",
         provider: "claude",
-        cwd: this.cwd,
+        cwd: this.currentCwd,
         pid: process.pid,
         sessionId: this.sessionId,
         name: this.name,
@@ -121,6 +123,13 @@ class ShellTerminalWorker {
     this.outputSeq += 1;
     this.terminal.write(data);
     const signal = extractOscSignals(data);
+    const cwd = extractOscWorkingDirectory(data);
+    if (cwd && cwd !== this.currentCwd) {
+      this.currentCwd = cwd;
+      if (this.socket?.writable) {
+        this.socket.write(serializeIpc({ type: "pty_cwd_change", sessionId: this.sessionId, cwd }));
+      }
+    }
     if (signal?.title && this.socket?.writable) {
       this.socket.write(
         serializeIpc({ type: "pty_title_change", sessionId: this.sessionId, title: signal.title }),

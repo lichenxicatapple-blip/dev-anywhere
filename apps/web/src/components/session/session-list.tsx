@@ -8,7 +8,7 @@
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
-import { Bot, ChevronDown, ChevronRight, Loader2, PlusCircle, Terminal } from "lucide-react";
+import { Bot, ChevronRight, Loader2, PlusCircle, Terminal } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -423,6 +423,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
       showMissingProxyTip();
       return;
     }
+    suppressMenuRestoreFocusRef.current = true;
     void createTerminal();
   }
 
@@ -517,6 +518,13 @@ function CreateSessionTypeSheet({
   onCreateAgent: () => void;
   onCreateTerminal: () => void;
 }) {
+  const suppressRestoreFocusRef = useRef(false);
+
+  function chooseSessionType(create: () => void) {
+    suppressRestoreFocusRef.current = true;
+    create();
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -524,6 +532,12 @@ function CreateSessionTypeSheet({
         overlayClassName="bg-black/10 dark:bg-black/30"
         className="inset-x-2 w-auto rounded-t-xl border border-border/80 bg-background px-3 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3 shadow-2xl"
         data-slot="create-session-type-sheet"
+        focusSurfaceOnOpen
+        onCloseAutoFocus={(event) => {
+          if (!suppressRestoreFocusRef.current) return;
+          suppressRestoreFocusRef.current = false;
+          event.preventDefault();
+        }}
       >
         <SheetHeader className="px-1 pb-1 pt-0 text-left">
           <SheetTitle>新建</SheetTitle>
@@ -534,7 +548,7 @@ function CreateSessionTypeSheet({
             variant="ghost"
             className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
             data-slot="create-agent-session-sheet-item"
-            onClick={onCreateAgent}
+            onClick={() => chooseSessionType(onCreateAgent)}
           >
             <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
             Agent 会话
@@ -545,7 +559,7 @@ function CreateSessionTypeSheet({
             className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
             data-slot="create-terminal-session-sheet-item"
             disabled={creatingTerminal}
-            onClick={onCreateTerminal}
+            onClick={() => chooseSessionType(onCreateTerminal)}
           >
             <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
             {creatingTerminal ? "正在创建终端会话..." : "终端会话"}

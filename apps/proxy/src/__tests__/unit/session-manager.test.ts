@@ -463,6 +463,49 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("updateTerminalCwd", () => {
+    it("updates and persists an absolute working directory for a pure terminal", () => {
+      const session = manager.createSession(
+        "pty",
+        "/Users/dev",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "claude",
+        "local-terminal",
+        undefined,
+        "terminal",
+      );
+
+      expect(manager.updateTerminalCwd(session.id, "/Users/dev/My Project/../repo")).toBe(true);
+      expect(manager.getSession(session.id)?.cwd).toBe("/Users/dev/repo");
+
+      const persisted = JSON.parse(readFileSync(persistPath, "utf-8"));
+      expect(persisted).toContainEqual(expect.objectContaining({ cwd: "/Users/dev/repo" }));
+    });
+
+    it("ignores relative paths, unchanged paths, and agent sessions", () => {
+      const terminal = manager.createSession(
+        "pty",
+        "/Users/dev",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "claude",
+        "local-terminal",
+        undefined,
+        "terminal",
+      );
+      const agent = manager.createSession("pty", "/Users/dev", ALIVE_PID);
+
+      expect(manager.updateTerminalCwd(terminal.id, "relative/path")).toBe(false);
+      expect(manager.updateTerminalCwd(terminal.id, "/Users/dev")).toBe(false);
+      expect(manager.updateTerminalCwd(agent.id, "/tmp")).toBe(false);
+      expect(manager.getSession(terminal.id)?.cwd).toBe("/Users/dev");
+      expect(manager.getSession(agent.id)?.cwd).toBe("/Users/dev");
+    });
+  });
+
   describe("renameSession", () => {
     it("stores a user locked display name and persists it", () => {
       const s = manager.createSession("json", "/tmp/project", ALIVE_PID, "~/project");

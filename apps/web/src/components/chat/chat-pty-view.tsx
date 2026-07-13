@@ -32,6 +32,7 @@ export function ChatPtyView({
 }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
+  const [mobileControlsHeight, setMobileControlsHeight] = useState(0);
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
 
@@ -43,6 +44,7 @@ export function ChatPtyView({
     containerEl,
     spacerRef,
     xtermHostRef,
+    mobileControlsHeight,
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
 
@@ -111,6 +113,7 @@ export function ChatPtyView({
           bottomInset={view.mobileControlsBottomInset}
           onInput={view.sendMobileInput}
           onPaste={view.pasteMobileClipboard}
+          onHeightChange={setMobileControlsHeight}
         />
       ) : null}
       {view.ptySelectionHandles ? (
@@ -225,7 +228,7 @@ function PtySelectionHandle({
   return (
     <button
       type="button"
-      className="fixed z-50 touch-none rounded-full bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
+      className="fixed z-50 touch-none rounded-full bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
       style={{
         left: position.left,
         top: position.top,

@@ -143,20 +143,31 @@ describe("resolvePtyContainerPaddingBottom", () => {
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: false,
         horizontalScrollable: false,
+        mobileControlsHeight: 0,
       }),
     ).toBe(8);
     expect(
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: false,
         horizontalScrollable: true,
+        mobileControlsHeight: 0,
       }),
     ).toBe(32);
     expect(
       resolvePtyContainerPaddingBottom({
         showMobilePtyControls: true,
         horizontalScrollable: false,
+        mobileControlsHeight: 104,
       }),
     ).toBe(112);
+
+    expect(
+      resolvePtyContainerPaddingBottom({
+        showMobilePtyControls: true,
+        horizontalScrollable: false,
+        mobileControlsHeight: 56,
+      }),
+    ).toBe(64);
   });
 });
 

@@ -435,7 +435,7 @@ export function InputBar({ sessionId }: InputBarProps) {
         }}
         data-slot="input-card"
         data-drag-over={isDragOver ? "true" : undefined}
-        className="flex flex-col w-full rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 data-[drag-over=true]:border-primary data-[drag-over=true]:ring-[3px] data-[drag-over=true]:ring-primary/50 dark:bg-input/30"
+        className="flex flex-col w-full rounded-md border border-input bg-transparent shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/75 data-[drag-over=true]:border-primary data-[drag-over=true]:ring-[3px] data-[drag-over=true]:ring-primary/50 dark:bg-input/30"
       >
         {argumentHint && (
           <div
@@ -555,6 +555,8 @@ function AttachMenu({ open, onOpenChange, isDesktop, onPickImage, onPickFile }: 
         side="bottom"
         showCloseButton={false}
         className="h-auto gap-0 rounded-t-xl bg-popover pt-2 pb-[max(theme(spacing.2),env(safe-area-inset-bottom))] border-t-0"
+        data-slot="attach-menu-sheet"
+        focusSurfaceOnOpen
       >
         <VisuallyHidden.Root>
           <SheetTitle>附加内容</SheetTitle>

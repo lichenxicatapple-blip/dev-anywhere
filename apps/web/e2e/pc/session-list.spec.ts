@@ -57,6 +57,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.locator('[data-slot="chat-session-title"]')).toContainText("~/workspace");
     await expect(page.locator('[data-slot="pty-terminal"]')).toBeVisible();
     await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="create-session-trigger"]:visible')).not.toBeFocused();
 
     const row = page.locator('[data-slot="session-row"]').filter({ hasText: "~/workspace" });
     await expect(row.locator('[data-slot="session-mode-icon"][data-mode="pty"]')).toBeVisible();

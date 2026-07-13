@@ -32,7 +32,7 @@ const DEFAULT_CONFIG: VoiceProviderConfig = {
 };
 
 const inputClassName =
-  "min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none transition-colors placeholder:text-muted-foreground/65 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm";
+  "min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none transition-colors placeholder:text-muted-foreground/65 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm";
 const MIN_TEST_PLAYBACK_MS = 800;
 const MIN_SAVE_PENDING_MS = 300;
 const SAVE_SUCCESS_HOLD_MS = 1600;
@@ -59,7 +59,7 @@ function FieldBlock({
   help?: string | null;
 }) {
   return (
-    <div className="block min-w-0 rounded-lg border border-border/75 bg-card/55 p-3.5 transition-colors focus-within:border-primary/45 focus-within:bg-card/75 sm:p-3">
+    <div className="block min-w-0 rounded-lg border border-border/75 bg-card/55 p-3.5 transition-colors focus-within:border-ring/55 focus-within:bg-card/75 sm:p-3">
       <span className="block text-[13px] font-medium leading-none text-muted-foreground">
         {label}
       </span>
@@ -111,7 +111,7 @@ function ChoiceField({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={enabledOptions.length === 0}
-        className={`mt-2 flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-input px-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 ${selectedHasDetail ? "min-h-[60px] py-2" : "min-h-11"}`}
+        className={`mt-2 flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-input px-3 text-left outline-none transition-colors hover:border-primary/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 ${selectedHasDetail ? "min-h-[60px] py-2" : "min-h-11"}`}
         onClick={() => setOpen((current) => !current)}
         data-slot="voice-settings-choice-trigger"
       >

@@ -67,6 +67,7 @@ interface UsePtyViewOptions {
   containerEl: HTMLDivElement | null;
   spacerRef: RefObject<HTMLDivElement | null>;
   xtermHostRef: RefObject<HTMLDivElement | null>;
+  mobileControlsHeight: number;
 }
 
 interface PointerHandlers {
@@ -185,6 +186,7 @@ interface PhysicalKeyboardActivityInput {
 interface PtyContainerPaddingInput {
   showMobilePtyControls: boolean;
   horizontalScrollable: boolean;
+  mobileControlsHeight: number;
 }
 
 const HARDWARE_KEYBOARD_CONTROL_KEYS = new Set([
@@ -248,14 +250,20 @@ export function shouldTreatKeydownAsPhysicalKeyboardActivity({
   return HARDWARE_KEYBOARD_CONTROL_KEYS.has(key);
 }
 
-const MOBILE_PTY_CONTROLS_PADDING_PX = 112;
+const PTY_CONTAINER_BASE_PADDING_PX = 8;
+const PTY_CONTAINER_HORIZONTAL_SCROLL_PADDING_PX = 32;
 
 export function resolvePtyContainerPaddingBottom({
   showMobilePtyControls,
   horizontalScrollable,
+  mobileControlsHeight,
 }: PtyContainerPaddingInput): number {
-  if (showMobilePtyControls) return MOBILE_PTY_CONTROLS_PADDING_PX;
-  return horizontalScrollable ? 32 : 8;
+  if (showMobilePtyControls) {
+    return Math.ceil(Math.max(0, mobileControlsHeight)) + PTY_CONTAINER_BASE_PADDING_PX;
+  }
+  return horizontalScrollable
+    ? PTY_CONTAINER_HORIZONTAL_SCROLL_PADDING_PX
+    : PTY_CONTAINER_BASE_PADDING_PX;
 }
 
 function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
@@ -284,6 +292,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     containerEl,
     spacerRef,
     xtermHostRef,
+    mobileControlsHeight,
   } = options;
 
   // === sub-hooks (各自管自己的 state，互不依赖) ===
@@ -1062,11 +1071,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     sessionId,
   ]);
 
-  // 移动端 PTY 控制条 2 行高: container py-1.5 (12) + 2 × h-11 (88) + grid gap-1 (4)
-  // + border-t (1) ≈ 105px, 留 7px buffer 对齐 BackToBottom 7rem 偏移。
+  // 控制条会随横竖屏在一行/两行之间切换，PTY 留白直接跟随实测高度。
   const containerPaddingBottom = resolvePtyContainerPaddingBottom({
     showMobilePtyControls,
     horizontalScrollable: scrollState.horizontalScrollable,
+    mobileControlsHeight,
   });
   mobileLayoutDebugRef.current.containerPaddingBottom = containerPaddingBottom;
 
