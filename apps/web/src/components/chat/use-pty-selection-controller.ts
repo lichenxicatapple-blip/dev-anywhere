@@ -422,6 +422,13 @@ export function usePtySelectionController(
     };
   }, [clearPtySelection, ptySelectionHandles, ptySelectionToolbar]);
 
+  useEffect(() => {
+    if (!containerEl || !ptySelectionToolbar) return;
+    const dismissSelection = (): void => clearPtySelection();
+    containerEl.addEventListener("scroll", dismissSelection, { passive: true });
+    return () => containerEl.removeEventListener("scroll", dismissSelection);
+  }, [clearPtySelection, containerEl, ptySelectionToolbar]);
+
   const hasPtySelectionHandles = ptySelectionHandles !== null;
   useLayoutEffect(() => {
     if (!hasPtySelectionHandles) return;

@@ -217,6 +217,38 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .toBe(true);
   });
 
+  test("scrolling dismisses a file path selection toolbar anchored to old content", async ({
+    page,
+  }) => {
+    await gotoPty(page);
+    const path = "./build/archive.tar.gz";
+    const scrollback = Array.from(
+      { length: 120 },
+      (_, index) => `terminal history ${String(index).padStart(3, "0")}`,
+    );
+    await emitPtyLine(page, `${scrollback.join("\r\n")}\r\nartifact ${path} ready\r\n`);
+    await waitForBufferContains(page, path);
+
+    await selectTerminalTextAndRelease(page, path);
+
+    const toolbar = page.locator('[data-slot="pty-selection-toolbar"]');
+    await expect(toolbar).toBeVisible();
+    const terminalScroller = page.locator('[data-slot="pty-terminal"]');
+    const initialScrollTop = await terminalScroller.evaluate((element) => element.scrollTop);
+    expect(initialScrollTop).toBeGreaterThan(200);
+
+    await terminalScroller.evaluate((element) => {
+      element.scrollTop = Math.max(0, element.scrollTop - 200);
+    });
+
+    await expect(toolbar).toBeHidden();
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.__ccTest?.pty.getSelection("claude-pty") ?? "missing"),
+      )
+      .toBe("");
+  });
+
   test("cmd+click on relative paths and top-level filenames triggers download", async ({
     page,
   }) => {
