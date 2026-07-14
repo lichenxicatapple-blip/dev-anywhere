@@ -9,12 +9,14 @@ interface MessageBubbleProps {
   message: ChatMessage;
   contentFontSize?: number;
   turnControl?: ReactNode;
+  findState?: "match" | "active";
 }
 
 export const MessageBubble = memo(function MessageBubble({
   message,
   contentFontSize,
   turnControl,
+  findState,
 }: MessageBubbleProps) {
   const role = message.role;
   const contentStyle = contentFontSize ? { fontSize: contentFontSize } : undefined;
@@ -34,6 +36,8 @@ export const MessageBubble = memo(function MessageBubble({
         <div
           data-slot="message-row"
           data-align="center"
+          data-find-match={findState ? "true" : undefined}
+          data-find-active={findState === "active" ? "true" : undefined}
           className="dev-message-rail mx-auto flex w-full items-center"
         >
           <div className="h-px flex-1 bg-border" />
@@ -63,6 +67,8 @@ export const MessageBubble = memo(function MessageBubble({
         <div
           data-slot="message-row"
           data-align="start"
+          data-find-match={findState ? "true" : undefined}
+          data-find-active={findState === "active" ? "true" : undefined}
           className="dev-message-rail mx-auto flex w-full justify-start"
         >
           <div
@@ -155,6 +161,8 @@ export const MessageBubble = memo(function MessageBubble({
         <div
           data-slot="message-row"
           data-align="end"
+          data-find-match={findState ? "true" : undefined}
+          data-find-active={findState === "active" ? "true" : undefined}
           className="dev-message-rail mx-auto flex w-full justify-end"
         >
           <div
@@ -189,6 +197,8 @@ export const MessageBubble = memo(function MessageBubble({
       <div
         data-slot="message-row"
         data-align="start"
+        data-find-match={findState ? "true" : undefined}
+        data-find-active={findState === "active" ? "true" : undefined}
         className="dev-message-rail mx-auto flex w-full justify-start"
       >
         <div

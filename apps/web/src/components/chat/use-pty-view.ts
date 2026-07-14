@@ -15,7 +15,9 @@ import type {
   TouchEvent as ReactTouchEvent,
 } from "react";
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
+import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { createXtermTerminal } from "@/lib/create-xterm";
+import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
@@ -101,6 +103,12 @@ interface UsePtyViewResult {
   connectionOverlay: { connecting: boolean; subscribeDelayed: boolean };
   containerPaddingBottom: number;
   traceEnabled: boolean;
+  findReady: boolean;
+  findResultIndex: number;
+  findResultCount: number;
+  findNext: (query: string, incremental?: boolean) => boolean;
+  findPrevious: (query: string) => boolean;
+  clearFind: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -203,6 +211,13 @@ const HARDWARE_KEYBOARD_CONTROL_KEYS = new Set([
   "End",
 ]);
 
+const PTY_SEARCH_OPTIONS: ISearchOptions = {
+  caseSensitive: false,
+  regex: false,
+  wholeWord: false,
+  decorations: xtermFixedDarkSearchDecorations,
+};
+
 export function shouldShowMobilePtyControlsForState({
   softKeyboardEditingSurface,
   ptyInputFocused,
@@ -303,6 +318,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const ptyTouchLinkProvidersRef = useRef<ILinkProvider[]>([]);
   const terminalControllerRef = useRef<TerminalControllerHandle | null>(null);
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
@@ -342,6 +358,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     horizontalScrollable: false,
   });
   const [hasSeenSoftKeyboard, setHasSeenSoftKeyboard] = useState(false);
+  const [findReady, setFindReady] = useState(false);
+  const [findResult, setFindResult] = useState({ resultIndex: -1, resultCount: 0 });
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
@@ -740,6 +758,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let scrollDispose: (() => void) | null = null;
     let resizeDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
+    let searchResultsRegistration: { dispose(): void } | null = null;
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
@@ -787,6 +806,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       onTerminalReady: (term) => {
         const xterm = term as Terminal;
         terminalRef.current = xterm;
+        const searchAddon = new SearchAddon({ highlightLimit: 1000 });
+        xterm.loadAddon(searchAddon);
+        searchAddonRef.current = searchAddon;
+        searchResultsRegistration = searchAddon.onDidChangeResults((result) => {
+          setFindResult(result);
+        });
+        setFindReady(true);
         const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openImagePreview);
         imageLinkDispose = imageLinkRegistration.dispose;
         registerPtyLinkProvider(sessionId, "image-preview", imageLinkRegistration.provider);
@@ -945,6 +971,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       resizeDispose?.();
       dragSelectDispose?.();
       scrollDispose?.();
+      searchResultsRegistration?.dispose();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
       fileDownloadLinkDispose?.();
@@ -954,6 +981,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       registerPtySerializer(sessionId, null);
       registerPtyTerminal(sessionId, null);
       unregisterPtyTerminalWindowAccessor();
+      searchAddonRef.current = null;
+      setFindReady(false);
+      setFindResult({ resultIndex: -1, resultCount: 0 });
       termCtrl.dispose();
       terminalRef.current = null;
       scrollControllerRef.current = null;
@@ -1022,6 +1052,61 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, []);
   const scrollToXRatio = useCallback((ratio: number): void => {
     scrollControllerRef.current?.scrollToXRatio(ratio);
+  }, []);
+
+  const revealFindSelection = useCallback((previousViewportY: number): void => {
+    const term = terminalRef.current;
+    const selection = term?.getSelectionPosition();
+    if (!term || !selection) return;
+    const resultRow = selection.start.y;
+    if (resultRow >= previousViewportY && resultRow < previousViewportY + term.rows) return;
+
+    const maxViewportY = Math.max(0, term.buffer.active.length - term.rows);
+    if (maxViewportY === 0) return;
+    const targetViewportY = Math.max(
+      0,
+      Math.min(maxViewportY, resultRow - Math.floor(term.rows / 2)),
+    );
+    scrollControllerRef.current?.scrollToRatio(targetViewportY / maxViewportY);
+  }, []);
+
+  const findNext = useCallback(
+    (query: string, incremental = false): boolean => {
+      const term = terminalRef.current;
+      const searchAddon = searchAddonRef.current;
+      if (!term || !searchAddon || !query) {
+        if (!query) {
+          searchAddon?.clearDecorations();
+          term?.clearSelection();
+          setFindResult({ resultIndex: -1, resultCount: 0 });
+        }
+        return false;
+      }
+      const previousViewportY = term.buffer.active.viewportY;
+      const found = searchAddon.findNext(query, { ...PTY_SEARCH_OPTIONS, incremental });
+      if (found) revealFindSelection(previousViewportY);
+      return found;
+    },
+    [revealFindSelection],
+  );
+
+  const findPrevious = useCallback(
+    (query: string): boolean => {
+      const term = terminalRef.current;
+      const searchAddon = searchAddonRef.current;
+      if (!term || !searchAddon || !query) return false;
+      const previousViewportY = term.buffer.active.viewportY;
+      const found = searchAddon.findPrevious(query, PTY_SEARCH_OPTIONS);
+      if (found) revealFindSelection(previousViewportY);
+      return found;
+    },
+    [revealFindSelection],
+  );
+
+  const clearFind = useCallback((): void => {
+    searchAddonRef.current?.clearDecorations();
+    terminalRef.current?.clearSelection();
+    setFindResult({ resultIndex: -1, resultCount: 0 });
   }, []);
 
   const sendMobileInput = useCallback(
@@ -1133,6 +1218,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     connectionOverlay: connection.overlay,
     containerPaddingBottom,
     traceEnabled,
+    findReady,
+    findResultIndex: findResult.resultIndex,
+    findResultCount: findResult.resultCount,
+    findNext,
+    findPrevious,
+    clearFind,
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,

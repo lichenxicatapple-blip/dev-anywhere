@@ -50,6 +50,11 @@ export function ChatPage() {
 }
 
 function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
+  const findRequestSequenceRef = useRef(0);
+  const [findRequest, setFindRequest] = useState<{
+    sessionId: string;
+    sequence: number;
+  } | null>(null);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
@@ -219,6 +224,12 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     ptyWaitingApproval,
     ptyAutoYesEnabled,
   });
+  const activeFindRequest = findRequest?.sessionId === id ? findRequest.sequence : undefined;
+
+  function requestFind(): void {
+    findRequestSequenceRef.current += 1;
+    setFindRequest({ sessionId: id, sequence: findRequestSequenceRef.current });
+  }
 
   return (
     <ImagePreviewProvider sessionId={id}>
@@ -229,7 +240,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           data-keyboard-offset={effectiveKbOffset}
           data-keyboard-layout-inset={effectiveLayoutKbInset}
         >
-          <ChatHeader sessionId={id} mode={mode} />
+          <ChatHeader sessionId={id} mode={mode} onFind={requestFind} />
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
           {!isTerminalSession && !showPtyApprovalHint && <StatusLine state={statusState} />}
           {showPtyApprovalHint && (
@@ -252,9 +263,10 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 sessionKind={session?.kind}
                 provider={session?.provider}
                 ptyOwner={session?.ptyOwner}
+                findRequest={activeFindRequest}
               />
             ) : (
-              <ChatJsonView sessionId={id} />
+              <ChatJsonView sessionId={id} findRequest={activeFindRequest} />
             )}
             {(presentation === "relay-disconnected" || presentation === "proxy-offline") && (
               // Overlay 不替代 chat 主体: PTY 视图 unmount 会销毁 xterm 实例, BackToBottom

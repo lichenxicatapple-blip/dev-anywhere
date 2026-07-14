@@ -1,6 +1,6 @@
 // JSON 模式主视图: 虚拟滚动消息列表 + 内联 ToolApprovalCard
 // StatusLine / QuotePreviewBar / InputBar 由 chat.tsx 统一承载，此文件只负责消息区
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -10,6 +10,8 @@ import { ToolApprovalCard } from "./tool-approval-card";
 import { BackToBottom } from "./back-to-bottom";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { StopButton } from "./send-button";
+import { ChatFindBar } from "./chat-find-bar";
+import { useChatFindShortcuts } from "./use-chat-find-shortcuts";
 import { useFollowOutput } from "@/hooks/use-follow-output";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportBottomOffset } from "@/hooks/use-visual-viewport";
@@ -18,6 +20,8 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 import { estimateChatMessageHeight } from "@/lib/chat-message-size-estimate";
 import { getTurnControlTarget } from "./turn-control-target";
+import { findChatMessageIndexes } from "@/lib/chat-message-search";
+import { toast } from "@/components/toast";
 import {
   appendJsonScrollTrace,
   formatJsonScrollTraceReport,
@@ -26,12 +30,19 @@ import {
 
 interface ChatJsonViewProps {
   sessionId: string;
+  findRequest?: number;
 }
 
 const HISTORY_PAGE_SIZE = 50;
 const HISTORY_LOAD_TOP_THRESHOLD = 96;
+type SearchHistoryMessage = {
+  role: "user" | "assistant" | "system";
+  text: string;
+  timestamp?: number;
+  cursor?: string;
+};
 
-export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
+export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const messages = useChatStore((s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages);
   const historyHasMore = useChatStore(
     (s) => s.bySessionId[sessionId]?.historyHasMore ?? EMPTY_SLICE.historyHasMore,
@@ -66,6 +77,13 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(() => isJsonScrollTraceEnabled());
   const [stopPending, setStopPending] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [activeFindMessageId, setActiveFindMessageId] = useState<string | null>(null);
+  const [findHistoryLoading, setFindHistoryLoading] = useState(false);
+  const [findHistoryFailed, setFindHistoryFailed] = useState(false);
+  const findHistoryLoadGenerationRef = useRef(0);
+  const findHistoryLoadingRef = useRef(false);
   const preservePrependRef = useRef<{ previousScrollHeight: number } | null>(null);
   const lastTraceGeometryRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const traceJsonScrollRef = useRef<
@@ -170,6 +188,107 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
       });
   }, [connected, proxyOnline, scrollEl, sessionId, setHistoryLoading]);
 
+  const loadAllHistoryForFind = useCallback(async (): Promise<void> => {
+    const relay = relayClientRef;
+    const currentSlice = useChatStore.getState().bySessionId[sessionId];
+    if (!relay || !connected || !proxyOnline || !currentSlice?.historyHasMore) return;
+    if (!currentSlice.historyNextBefore || findHistoryLoadingRef.current) return;
+
+    const generation = ++findHistoryLoadGenerationRef.current;
+    findHistoryLoadingRef.current = true;
+    setFindHistoryLoading(true);
+    setFindHistoryFailed(false);
+    setHistoryLoading(sessionId, true);
+    historyStateRef.current = {
+      hasMore: currentSlice.historyHasMore,
+      nextBefore: currentSlice.historyNextBefore,
+      loading: true,
+    };
+
+    let before: string | undefined = currentSlice.historyNextBefore;
+    let hasMore: boolean = currentSlice.historyHasMore;
+    const seenCursors = new Set<string>();
+    const collectedPages: SearchHistoryMessage[][] = [];
+
+    try {
+      while (hasMore && before) {
+        if (seenCursors.has(before)) {
+          throw new Error(`History pagination repeated cursor: ${before}`);
+        }
+        seenCursors.add(before);
+        const page = await relay.requestSessionMessagesPage(sessionId, {
+          limit: 200,
+          before,
+        });
+        if (generation !== findHistoryLoadGenerationRef.current) return;
+        collectedPages.push(page.messages);
+        hasMore = page.hasMore;
+        if (hasMore && !page.nextBefore) {
+          throw new Error("History pagination omitted nextBefore while hasMore is true");
+        }
+        before = page.nextBefore;
+      }
+
+      if (generation !== findHistoryLoadGenerationRef.current) return;
+      const collected = collectedPages.reverse().flat();
+      historyStateRef.current = {
+        hasMore,
+        nextBefore: before ?? null,
+        loading: false,
+      };
+      useChatStore.getState().loadHistoryPage(sessionId, {
+        mode: "prepend",
+        messages: collected,
+        hasMore,
+        ...(before !== undefined ? { nextBefore: before } : {}),
+      });
+    } catch (error) {
+      if (generation !== findHistoryLoadGenerationRef.current) return;
+      console.error("[chat-find] failed to load complete history", { sessionId }, error);
+      useChatStore.getState().setHistoryLoading(sessionId, false);
+      historyStateRef.current = { ...historyStateRef.current, loading: false };
+      setFindHistoryFailed(true);
+      toast.error("搜索历史消息失败");
+    } finally {
+      if (generation === findHistoryLoadGenerationRef.current) {
+        findHistoryLoadingRef.current = false;
+        setFindHistoryLoading(false);
+      }
+    }
+  }, [connected, proxyOnline, sessionId, setHistoryLoading]);
+
+  const cancelFindHistoryLoad = useCallback((): void => {
+    findHistoryLoadGenerationRef.current += 1;
+    if (!findHistoryLoadingRef.current) return;
+    findHistoryLoadingRef.current = false;
+    setFindHistoryLoading(false);
+    historyStateRef.current = { ...historyStateRef.current, loading: false };
+    useChatStore.getState().setHistoryLoading(sessionId, false);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!findOpen || !findQuery || findHistoryFailed) return;
+    if (!historyHasMore || historyLoading || findHistoryLoading) return;
+    void loadAllHistoryForFind();
+  }, [
+    findHistoryFailed,
+    findHistoryLoading,
+    findOpen,
+    findQuery,
+    historyHasMore,
+    historyLoading,
+    loadAllHistoryForFind,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      findHistoryLoadGenerationRef.current += 1;
+      if (findHistoryLoadingRef.current) {
+        useChatStore.getState().setHistoryLoading(sessionId, false);
+      }
+    };
+  }, [sessionId]);
+
   const handleMessageListScroll = useCallback(() => {
     if (!scrollEl) return;
     traceJsonScrollRef.current("scroll");
@@ -199,6 +318,91 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
     overscan: touchEditingSurface ? 8 : 5,
     getItemKey: getMessageItemKey,
   });
+
+  const findMatchIndexes = useMemo(
+    () => findChatMessageIndexes(messages, findQuery),
+    [findQuery, messages],
+  );
+  const findMatchIds = useMemo(
+    () => findMatchIndexes.map((index) => messages[index].id),
+    [findMatchIndexes, messages],
+  );
+  const findMatchIdSet = useMemo(() => new Set(findMatchIds), [findMatchIds]);
+  const activeFindResultIndex = activeFindMessageId
+    ? findMatchIds.indexOf(activeFindMessageId)
+    : -1;
+
+  useEffect(() => {
+    if (!findOpen || !findQuery || findMatchIndexes.length === 0) {
+      setActiveFindMessageId(null);
+      return;
+    }
+
+    setActiveFindMessageId((current) => {
+      if (current && findMatchIdSet.has(current)) return current;
+      const firstVisibleIndex = virtualizer.getVirtualItems()[0]?.index ?? 0;
+      const visibleResultPosition = findMatchIndexes.findIndex(
+        (messageIndex) => messageIndex >= firstVisibleIndex,
+      );
+      const resultPosition = visibleResultPosition >= 0 ? visibleResultPosition : 0;
+      return messages[findMatchIndexes[resultPosition]]?.id ?? null;
+    });
+  }, [findMatchIdSet, findMatchIndexes, findOpen, findQuery, messages, virtualizer]);
+
+  useLayoutEffect(() => {
+    if (!activeFindMessageId) return;
+    const messageIndex = messages.findIndex((message) => message.id === activeFindMessageId);
+    if (messageIndex < 0) return;
+    virtualizer.scrollToIndex(messageIndex, { align: "center", behavior: "auto" });
+  }, [activeFindMessageId, messages, virtualizer]);
+
+  const navigateFindResult = useCallback(
+    (direction: "previous" | "next"): void => {
+      if (findMatchIds.length === 0) return;
+      const currentIndex = activeFindMessageId ? findMatchIds.indexOf(activeFindMessageId) : -1;
+      const nextIndex =
+        direction === "next"
+          ? (currentIndex + 1 + findMatchIds.length) % findMatchIds.length
+          : (currentIndex - 1 + findMatchIds.length) % findMatchIds.length;
+      setActiveFindMessageId(findMatchIds[nextIndex]);
+    },
+    [activeFindMessageId, findMatchIds],
+  );
+
+  const openFind = useCallback(() => {
+    setFindHistoryFailed(false);
+    setFindOpen(true);
+  }, []);
+  const closeFind = useCallback(() => {
+    cancelFindHistoryLoad();
+    setFindOpen(false);
+    setActiveFindMessageId(null);
+  }, [cancelFindHistoryLoad]);
+  const previousFindResult = useCallback(
+    () => navigateFindResult("previous"),
+    [navigateFindResult],
+  );
+  const nextFindResult = useCallback(() => navigateFindResult("next"), [navigateFindResult]);
+  const findShortcuts = useChatFindShortcuts({
+    open: findOpen,
+    openRequest: findRequest,
+    onOpen: openFind,
+    onClose: closeFind,
+    onPrevious: previousFindResult,
+    onNext: nextFindResult,
+  });
+
+  const handleFindQueryChange = useCallback(
+    (query: string): void => {
+      setFindQuery(query);
+      setFindHistoryFailed(false);
+      if (!query) {
+        cancelFindHistoryLoad();
+        setActiveFindMessageId(null);
+      }
+    },
+    [cancelFindHistoryLoad],
+  );
 
   const traceJsonScroll = useCallback(
     (event: string, extra: Partial<Parameters<typeof appendJsonScrollTrace>[0]> = {}) => {
@@ -302,6 +506,12 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   useEffect(() => {
     initialScrollDoneRef.current = false;
     setStopPending(false);
+    setFindOpen(false);
+    setFindQuery("");
+    setActiveFindMessageId(null);
+    setFindHistoryLoading(false);
+    setFindHistoryFailed(false);
+    findHistoryLoadingRef.current = false;
   }, [sessionId]);
   useLayoutEffect(() => {
     if (!scrollEl || messages.length === 0 || initialScrollDoneRef.current) return;
@@ -330,6 +540,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   // 新消息/streaming delta 到达: 若当前在底则追随, 否则记 "有新消息" (amber)
   useEffect(() => {
     if (!initialScrollDoneRef.current || messages.length === 0) return;
+    if (findOpen && findQuery) return;
     if (preservePrependRef.current) return;
     if (isAtBottomRef.current) {
       traceJsonScrollRef.current("follow-output");
@@ -343,7 +554,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
     }
     // lastMsg?.text 让 streaming delta 每次追加也能触发 scrollToIndex
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, lastMsg?.text]);
+  }, [findOpen, findQuery, messages.length, lastMsg?.text]);
 
   const pendingApprovalQueue = pendingApprovals.filter((a) => a.status === "pending");
   const hasPendingApprovals = pendingApprovalQueue.length > 0;
@@ -372,11 +583,25 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   const hasHistoryMessages = messages.some((message) =>
     message.id.startsWith(`history-${sessionId}-`),
   );
+  const findLoading = Boolean(findQuery) && (findHistoryLoading || historyLoading);
 
   if (messages.length === 0 && !hasPendingApprovals) {
     return (
-      <div className="h-full">
+      <div className="relative h-full">
         <EmptyState variant="no-messages" />
+        {findOpen ? (
+          <ChatFindBar
+            query={findQuery}
+            resultIndex={activeFindResultIndex}
+            resultCount={findMatchIds.length}
+            focusRequest={findShortcuts.focusRequest}
+            loading={findLoading}
+            onQueryChange={handleFindQueryChange}
+            onPrevious={previousFindResult}
+            onNext={nextFindResult}
+            onClose={findShortcuts.closeFind}
+          />
+        ) : null}
       </div>
     );
   }
@@ -384,6 +609,19 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 relative min-h-0">
+        {findOpen ? (
+          <ChatFindBar
+            query={findQuery}
+            resultIndex={activeFindResultIndex}
+            resultCount={findMatchIds.length}
+            focusRequest={findShortcuts.focusRequest}
+            loading={findLoading}
+            onQueryChange={handleFindQueryChange}
+            onPrevious={previousFindResult}
+            onNext={nextFindResult}
+            onClose={findShortcuts.closeFind}
+          />
+        ) : null}
         <div
           ref={setScrollEl}
           className="dev-render-scroll absolute inset-0 overflow-auto"
@@ -432,6 +670,13 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
                       <MessageBubble
                         message={message}
                         contentFontSize={effectiveChatContentFontSize}
+                        findState={
+                          message?.id === activeFindMessageId
+                            ? "active"
+                            : message && findMatchIdSet.has(message.id)
+                              ? "match"
+                              : undefined
+                        }
                         turnControl={
                           message?.id === turnControlTarget.messageId ? turnStopControl : undefined
                         }
@@ -447,6 +692,7 @@ export function ChatJsonView({ sessionId }: ChatJsonViewProps) {
         <BackToBottom
           visible={!isAtBottom}
           hasNewMessages={newMsgsWhileAway}
+          className={findOpen ? "top-14" : undefined}
           onClick={() => {
             // 用户点击 -> smooth
             virtualizer.scrollToIndex(Math.max(messages.length - 1, 0), {

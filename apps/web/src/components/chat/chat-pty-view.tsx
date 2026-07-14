@@ -4,15 +4,17 @@
 //
 // 编排（4 个 controller 的生命周期 + 调度器 + debug 注册）全部下沉到 usePtyView，
 // 本组件仅负责 DOM 结构与 JSX 接线。
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import type { SessionProvider } from "@/lib/session-provider";
 import { BackToBottom } from "./back-to-bottom";
+import { ChatFindBar } from "./chat-find-bar";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
 import { PtyInputDebugPanel } from "./pty-input-debug-panel";
 import { PtyMobileControls } from "./pty-mobile-controls";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
+import { useChatFindShortcuts } from "./use-chat-find-shortcuts";
 import { usePtyView } from "./use-pty-view";
 
 interface ChatPtyViewProps {
@@ -21,6 +23,7 @@ interface ChatPtyViewProps {
   provider?: SessionProvider;
   ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
+  findRequest?: number;
 }
 
 export function ChatPtyView({
@@ -29,10 +32,13 @@ export function ChatPtyView({
   provider,
   ptyOwner,
   active = true,
+  findRequest,
 }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const [mobileControlsHeight, setMobileControlsHeight] = useState(0);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
 
@@ -47,9 +53,50 @@ export function ChatPtyView({
     mobileControlsHeight,
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
+  const { clearFind, findNext, findPrevious, findReady, findResultCount, findResultIndex } = view;
+
+  const previousFindResult = useCallback(() => {
+    findPrevious(findQuery);
+  }, [findPrevious, findQuery]);
+  const nextFindResult = useCallback(() => {
+    findNext(findQuery);
+  }, [findNext, findQuery]);
+  const openFind = useCallback(() => setFindOpen(true), []);
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    clearFind();
+  }, [clearFind]);
+  const findShortcuts = useChatFindShortcuts({
+    enabled: active,
+    open: findOpen,
+    openRequest: findRequest,
+    onOpen: openFind,
+    onClose: closeFind,
+    onPrevious: previousFindResult,
+    onNext: nextFindResult,
+  });
+
+  useEffect(() => {
+    if (!findOpen || !findReady) return;
+    if (findQuery) findNext(findQuery, true);
+    else clearFind();
+  }, [clearFind, findNext, findOpen, findQuery, findReady]);
 
   return (
     <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
+      {findOpen ? (
+        <ChatFindBar
+          query={findQuery}
+          resultIndex={findResultIndex}
+          resultCount={findResultCount}
+          focusRequest={findShortcuts.focusRequest}
+          loading={Boolean(findQuery) && !findReady}
+          onQueryChange={setFindQuery}
+          onPrevious={previousFindResult}
+          onNext={nextFindResult}
+          onClose={findShortcuts.closeFind}
+        />
+      ) : null}
       <div
         ref={setContainerEl}
         className="flex-1 min-h-0 overflow-auto overscroll-contain bg-background px-3 pt-2"
@@ -99,7 +146,7 @@ export function ChatPtyView({
       <BackToBottom
         visible={!view.isAtBottom}
         hasNewMessages={view.hasNewFramesWhileAway}
-        className="top-10"
+        className={findOpen ? "top-14" : "top-10"}
         onClick={() => {
           // 用户明示动作: 压过 intent (即便用户在回看, 点这个按钮就是要退出回看)。
           view.scrollToBottom("backToBottomBtn", { force: true });

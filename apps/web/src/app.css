@@ -260,6 +260,20 @@ body {
   }
 }
 
+[data-slot="message-row"][data-find-match="true"] > [data-slot="message-body"],
+[data-slot="message-row"][data-find-match="true"] > [data-slot="activity-bubble"],
+[data-slot="message-row"][data-find-match="true"] > [data-slot="message-system-marker"] {
+  outline: 1px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 2px;
+}
+
+[data-slot="message-row"][data-find-active="true"] > [data-slot="message-body"],
+[data-slot="message-row"][data-find-active="true"] > [data-slot="activity-bubble"],
+[data-slot="message-row"][data-find-active="true"] > [data-slot="message-system-marker"] {
+  outline-width: 2px;
+  outline-color: var(--color-primary);
+}
+
 /* 流式光标: 方波闪烁, 节奏向真终端靠拢 (pulse 的渐变对"打字中"语义偏弱) */
 .dev-cursor-blink {
   animation: dev-cursor-blink 1s steps(2) infinite;

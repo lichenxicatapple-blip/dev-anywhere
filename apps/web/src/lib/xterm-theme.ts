@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import type { ISearchOptions } from "@xterm/addon-search";
 
 export const XTERM_TERMINAL_PROFILE = "fixed-dark";
 export const XTERM_ANSI16_COLOR_PROFILE = "vscode-dark-plus";
@@ -31,4 +32,13 @@ export const xtermFixedDarkTheme: ITheme = {
   brightMagenta: "#D670D6",
   brightCyan: "#29B8DB",
   brightWhite: "#E5E5E5",
+};
+
+export const xtermFixedDarkSearchDecorations: NonNullable<ISearchOptions["decorations"]> = {
+  matchBackground: "#264F78",
+  matchBorder: "#3B8EEA",
+  matchOverviewRuler: "#3B8EEA",
+  activeMatchBackground: "#7A4E00",
+  activeMatchBorder: "#F5F543",
+  activeMatchColorOverviewRuler: "#F5F543",
 };

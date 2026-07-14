@@ -8,16 +8,19 @@ vi.mock("./chat-pty-view", () => ({
     sessionId,
     provider,
     active,
+    findRequest,
   }: {
     sessionId: string;
     provider?: "claude" | "codex";
     active?: boolean;
+    findRequest?: number;
   }) => (
     <div
       data-slot="mock-chat-pty-view"
       data-session-id={sessionId}
       data-provider={provider}
       data-active={String(active)}
+      data-find-request={findRequest}
     />
   ),
 }));
@@ -83,6 +86,33 @@ describe("PtyKeepAliveProvider", () => {
     await waitFor(() => {
       const view = container.querySelector('[data-slot="mock-chat-pty-view"]');
       expect(view?.getAttribute("data-provider")).toBe("codex");
+    });
+  });
+
+  it("forwards a find request without deactivating the PTY entry", async () => {
+    const { container, rerender } = render(
+      <PtyKeepAliveProvider>
+        <div style={{ height: 200, width: 300 }}>
+          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" />
+        </div>
+      </PtyKeepAliveProvider>,
+    );
+
+    rerender(
+      <PtyKeepAliveProvider>
+        <div style={{ height: 200, width: 300 }}>
+          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" findRequest={1} />
+        </div>
+      </PtyKeepAliveProvider>,
+    );
+
+    await waitFor(() => {
+      const entry = container.querySelector(
+        '[data-slot="pty-keepalive-entry"][data-session-id="pty-1"]',
+      );
+      const view = container.querySelector('[data-slot="mock-chat-pty-view"]');
+      expect(entry?.getAttribute("data-active")).toBe("true");
+      expect(view?.getAttribute("data-find-request")).toBe("1");
     });
   });
 

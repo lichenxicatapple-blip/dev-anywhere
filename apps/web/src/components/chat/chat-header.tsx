@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   Type,
   Upload,
 } from "lucide-react";
@@ -56,6 +57,7 @@ import {
 interface ChatHeaderProps {
   sessionId: string;
   mode?: "json" | "pty";
+  onFind: () => void;
 }
 
 function splitPtyTitle(title: string): { indicator?: string; label: string } {
@@ -141,7 +143,7 @@ function ShortcutKeyIcon({ label }: { label: string }) {
   );
 }
 
-export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
   const navigate = useNavigate();
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
@@ -333,6 +335,16 @@ export function ChatHeader({ sessionId, mode }: ChatHeaderProps) {
               data-slot="chat-overflow-menu"
             >
               <DropdownMenuLabel className={menuLabelClass}>会话</DropdownMenuLabel>
+              <DropdownMenuItem
+                className={menuItemClass}
+                data-slot="chat-menu-find"
+                onSelect={onFind}
+              >
+                <ChatMenuIcon>
+                  <Search aria-hidden="true" />
+                </ChatMenuIcon>
+                在会话中查找
+              </DropdownMenuItem>
               <DropdownMenuItem
                 className={menuItemClass}
                 data-slot="chat-menu-rename"

@@ -131,7 +131,7 @@ describe("ChatHeader PTY upload menu", () => {
   it("lets PTY agent sessions toggle Always yes from the overflow menu", async () => {
     const key = ptyAutoYesSessionKey("proxy-1", "s1");
     if (!key) throw new Error("missing PTY auto yes key");
-    render(<ChatHeader sessionId="s1" mode="pty" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -143,7 +143,7 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   it("uploads picked file and writes the @<path> token into the terminal", async () => {
-    const { container } = render(<ChatHeader sessionId="s1" mode="pty" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     const input = getUploadInput(container);
     const file = new File([new Uint8Array([0x41, 0x42, 0x43])], "notes.txt", {
@@ -168,7 +168,7 @@ describe("ChatHeader PTY upload menu", () => {
       error: "磁盘满了",
     });
 
-    const { container } = render(<ChatHeader sessionId="s1" mode="pty" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
     const input = getUploadInput(container);
     const file = new File([new Uint8Array([1])], "x.bin", { type: "application/octet-stream" });
     Object.defineProperty(input, "files", { value: [file] });
@@ -182,7 +182,7 @@ describe("ChatHeader PTY upload menu", () => {
     useSessionStore.setState({
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
-    const { container } = render(<ChatHeader sessionId="s1" mode="json" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
     expect(container.querySelector('input[data-slot="chat-menu-upload-file-input"]')).toBeNull();
   });
 
@@ -202,7 +202,7 @@ describe("ChatHeader PTY upload menu", () => {
       ptyTitles: { s1: "✻ Working" },
     });
 
-    const { container } = render(<ChatHeader sessionId="s1" mode="pty" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
       "Release checklist",
@@ -226,7 +226,7 @@ describe("ChatHeader PTY upload menu", () => {
       ptyTitles: { "term-1": "Claude Code" },
     });
 
-    const { container } = render(<ChatHeader sessionId="term-1" mode="pty" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="term-1" mode="pty" />);
 
     expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
       "~/MyApps/dev-anywhere",
@@ -251,7 +251,7 @@ describe("ChatHeader PTY upload menu", () => {
       ptyTitles: { "term-1": "Claude Code" },
     });
 
-    const { container } = render(<ChatHeader sessionId="term-1" mode="pty" />);
+    const { container } = render(<ChatHeader onFind={() => {}} sessionId="term-1" mode="pty" />);
 
     expect(container.querySelector('[data-slot="chat-session-title"]')?.textContent).toBe(
       "Release shell",
@@ -259,7 +259,7 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   it("keeps the overflow menu visually consistent with icons and grouped controls", async () => {
-    render(<ChatHeader sessionId="s1" mode="pty" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     menuTrigger.focus();
@@ -272,7 +272,14 @@ describe("ChatHeader PTY upload menu", () => {
       }
       return element;
     });
-    const menuItemNames = ["重命名", "发送 Ctrl+O", "上传图片", "上传文件", "恢复默认"];
+    const menuItemNames = [
+      "在会话中查找",
+      "重命名",
+      "发送 Ctrl+O",
+      "上传图片",
+      "上传文件",
+      "恢复默认",
+    ];
 
     for (const name of menuItemNames) {
       const item = screen.getByRole("menuitem", { name });
@@ -294,11 +301,21 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("显示")).toBeNull();
   });
 
+  it("opens session search from the overflow menu", async () => {
+    const onFind = vi.fn();
+    render(<ChatHeader onFind={onFind} sessionId="s1" mode="json" />);
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "在会话中查找" }));
+
+    expect(onFind).toHaveBeenCalledTimes(1);
+  });
+
   it("lets JSON sessions toggle Voice Pilot from the overflow menu", async () => {
     useSessionStore.setState({
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -337,7 +354,7 @@ describe("ChatHeader PTY upload menu", () => {
     useSessionStore.setState({
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -364,7 +381,7 @@ describe("ChatHeader PTY upload menu", () => {
     useSessionStore.setState({
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -393,7 +410,7 @@ describe("ChatHeader PTY upload menu", () => {
     useSessionStore.setState({
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -416,7 +433,7 @@ describe("ChatHeader PTY upload menu", () => {
     });
     useVoicePilotStore.getState().enable("s1");
     requestVoiceConfig.mockClear();
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -433,7 +450,7 @@ describe("ChatHeader PTY upload menu", () => {
       sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
     });
     useVoicePilotStore.getState().enable("s1");
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -446,7 +463,7 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   it("does not show Voice Pilot for PTY sessions", async () => {
-    render(<ChatHeader sessionId="s1" mode="pty" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
@@ -461,7 +478,7 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   it("keeps the page interactive while the overflow menu is open so mobile outside taps can dismiss it", async () => {
-    render(<ChatHeader sessionId="s1" mode="json" />);
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
