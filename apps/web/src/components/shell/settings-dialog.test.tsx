@@ -5,22 +5,39 @@ const {
   playerEnqueue,
   playerStop,
   kickRelayClient,
+  requestBrowserNotificationPermission,
   requestRelayClients,
   requestVoiceCapabilities,
   requestVoiceConfig,
   reconnectRelayClient,
   testVoiceConfig,
+  toastError,
+  toastInfo,
   updateVoiceConfig,
 } = vi.hoisted(() => ({
   playerEnqueue: vi.fn(),
   playerStop: vi.fn(),
   kickRelayClient: vi.fn(),
+  requestBrowserNotificationPermission: vi.fn(),
   requestRelayClients: vi.fn(),
   requestVoiceCapabilities: vi.fn(),
   requestVoiceConfig: vi.fn(),
   reconnectRelayClient: vi.fn(),
   testVoiceConfig: vi.fn(),
+  toastError: vi.fn(),
+  toastInfo: vi.fn(),
   updateVoiceConfig: vi.fn(),
+}));
+
+vi.mock("@/lib/browser-notifications", () => ({
+  requestBrowserNotificationPermission,
+}));
+
+vi.mock("@/components/toast", () => ({
+  toast: {
+    error: toastError,
+    info: toastInfo,
+  },
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
@@ -102,6 +119,7 @@ describe("SettingsDialog", () => {
       proxies: [{ proxyId: "proxy-1", name: "Work Mac", online: true }],
       proxyListLoaded: true,
       ptyScrollTraceEnabled: false,
+      sessionIdleNotificationsEnabled: false,
       themePreference: "auto",
     });
     playerEnqueue.mockReset();
@@ -135,6 +153,10 @@ describe("SettingsDialog", () => {
     ]);
     kickRelayClient.mockReset();
     kickRelayClient.mockResolvedValue({ clientId: "other-client", success: true });
+    requestBrowserNotificationPermission.mockReset();
+    requestBrowserNotificationPermission.mockResolvedValue("granted");
+    toastError.mockReset();
+    toastInfo.mockReset();
     requestVoiceCapabilities.mockReset();
     requestVoiceCapabilities.mockResolvedValue({
       capabilities: {
@@ -227,6 +249,9 @@ describe("SettingsDialog", () => {
     expect(screen.getByRole("radiogroup", { name: "主题" })).not.toBeNull();
     expect(screen.getByRole("radio", { name: "跟随系统" })).not.toBeNull();
     expect(screen.queryByText(/固定为浅色或深色/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "通知" })).not.toBeNull();
+    expect(screen.getByRole("switch", { name: "会话空闲通知" })).not.toBeNull();
+    expect(screen.getByText("会话从工作中转为空闲时发送浏览器通知")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "PTY 滚动追踪" })).not.toBeNull();
     expect(screen.getByText("记录终端滚动和视口同步现场，方便复制诊断报告")).not.toBeNull();
     const scrollArea = document.querySelector<HTMLElement>('[data-slot="settings-dialog-body"]');
@@ -352,6 +377,42 @@ describe("SettingsDialog", () => {
       "light",
     );
     expect(auto.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("requests permission before enabling session idle notifications", async () => {
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    const toggle = screen.getByRole("switch", { name: "会话空闲通知" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(requestBrowserNotificationPermission).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(true);
+    expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBe("1");
+
+    fireEvent.click(toggle);
+
+    expect(requestBrowserNotificationPermission).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBe("0");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("keeps session idle notifications off when permission is denied", async () => {
+    requestBrowserNotificationPermission.mockResolvedValueOnce("denied");
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    const toggle = screen.getByRole("switch", { name: "会话空闲通知" });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(requestBrowserNotificationPermission).toHaveBeenCalledTimes(1));
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBeNull();
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toastError).toHaveBeenCalledWith("浏览器未授予通知权限，请在浏览器设置中允许通知");
   });
 
   it("persists input mode preference from global settings", () => {

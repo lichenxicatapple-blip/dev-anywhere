@@ -56,6 +56,7 @@ interface AppStoreState {
   sidebarCollapsed: boolean;
   themePreference: ThemePreference;
   latencyMonitorEnabled: boolean;
+  sessionIdleNotificationsEnabled: boolean;
   inputModePreference: InputModePreference;
   adaptiveInputModality: AdaptiveInputModality;
   ptyScrollTraceEnabled: boolean;
@@ -80,6 +81,7 @@ interface AppStoreState {
   toggleSidebarCollapsed: () => void;
   setThemePreference: (theme: ThemePreference) => void;
   setLatencyMonitorEnabled: (enabled: boolean) => void;
+  setSessionIdleNotificationsEnabled: (enabled: boolean) => void;
   setInputModePreference: (preference: InputModePreference) => void;
   setAdaptiveInputModality: (modality: AdaptiveInputModality) => void;
   setPtyScrollTraceEnabled: (enabled: boolean) => void;
@@ -130,6 +132,10 @@ function loadLatencyMonitorEnabled(): boolean {
   return readStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled) === "1";
 }
 
+function loadSessionIdleNotificationsEnabled(): boolean {
+  return readStorageValue("local", STORAGE_KEYS.sessionIdleNotificationsEnabled) === "1";
+}
+
 function isInputModePreference(value: string | null): value is InputModePreference {
   return value === "auto" || value === "touch" || value === "hardware";
 }
@@ -167,6 +173,7 @@ export const useAppStore = create<AppStoreState>()(
       sidebarCollapsed: loadSidebarCollapsed(),
       themePreference: readThemePreference(),
       latencyMonitorEnabled: loadLatencyMonitorEnabled(),
+      sessionIdleNotificationsEnabled: loadSessionIdleNotificationsEnabled(),
       inputModePreference: loadInputModePreference(),
       adaptiveInputModality: loadAdaptiveInputModality(),
       ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
@@ -228,6 +235,14 @@ export const useAppStore = create<AppStoreState>()(
       setLatencyMonitorEnabled: (enabled) => {
         writeStorageValue("local", STORAGE_KEYS.latencyMonitorEnabled, enabled ? "1" : "0");
         set({ latencyMonitorEnabled: enabled });
+      },
+      setSessionIdleNotificationsEnabled: (enabled) => {
+        writeStorageValue(
+          "local",
+          STORAGE_KEYS.sessionIdleNotificationsEnabled,
+          enabled ? "1" : "0",
+        );
+        set({ sessionIdleNotificationsEnabled: enabled });
       },
       setInputModePreference: (preference) => {
         writeStorageValue("local", STORAGE_KEYS.inputModePreference, preference);

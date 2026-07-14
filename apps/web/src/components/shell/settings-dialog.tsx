@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowLeft,
   AudioLines,
+  BellRing,
   ChevronRight,
   Keyboard,
   KeyRound,
@@ -19,6 +20,7 @@ import type { RelayClientInfo } from "@dev-anywhere/shared";
 import packageInfo from "../../../package.json" with { type: "json" };
 import { useAppStore, type InputModePreference } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/toast";
 import { VoiceSettingsPanel } from "@/components/shell/voice-settings-panel";
 import { reconnectRelayClient, relayClientRef } from "@/hooks/use-relay-setup";
 import {
@@ -27,6 +29,7 @@ import {
   persistRelayClientToken,
 } from "@/lib/relay-client-token";
 import { describeCurrentClientDevice, formatClientDeviceLabel } from "@/lib/client-device";
+import { requestBrowserNotificationPermission } from "@/lib/browser-notifications";
 import type { ThemePreference } from "@/lib/theme-preference";
 import {
   Dialog,
@@ -106,6 +109,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const relayUrl = useAppStore((s) => s.relayUrl);
   const latencyMonitorEnabled = useAppStore((s) => s.latencyMonitorEnabled);
   const setLatencyMonitorEnabled = useAppStore((s) => s.setLatencyMonitorEnabled);
+  const sessionIdleNotificationsEnabled = useAppStore((s) => s.sessionIdleNotificationsEnabled);
+  const setSessionIdleNotificationsEnabled = useAppStore(
+    (s) => s.setSessionIdleNotificationsEnabled,
+  );
   const inputModePreference = useAppStore((s) => s.inputModePreference);
   const setInputModePreference = useAppStore((s) => s.setInputModePreference);
   const themePreference = useAppStore((s) => s.themePreference);
@@ -118,6 +125,31 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const voiceScrollRef = useRef<HTMLDivElement>(null);
   const relayTokenSaved = hasStoredRelayClientToken();
   const showInputModeSetting = useMemo(() => describeCurrentClientDevice().osName === "iPad", []);
+
+  const handleSessionIdleNotificationsChange = useCallback(
+    async (enabled: boolean): Promise<void> => {
+      if (!enabled) {
+        setSessionIdleNotificationsEnabled(false);
+        return;
+      }
+
+      const permission = await requestBrowserNotificationPermission();
+      if (permission === "granted") {
+        setSessionIdleNotificationsEnabled(true);
+        return;
+      }
+      if (permission === "denied") {
+        toast.error("浏览器未授予通知权限，请在浏览器设置中允许通知");
+        return;
+      }
+      if (permission === "default") {
+        toast.info("未授予通知权限，会话通知保持关闭");
+        return;
+      }
+      toast.error("当前浏览器不支持系统通知");
+    },
+    [setSessionIdleNotificationsEnabled],
+  );
 
   const loadRelayHealth = useCallback(
     async (signal?: AbortSignal) => {
@@ -241,7 +273,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           ) : (
             <>
               <DialogTitle>设置</DialogTitle>
-              <DialogDescription>连接、外观和高级诊断选项。</DialogDescription>
+              <DialogDescription>连接、外观、通知和高级诊断选项。</DialogDescription>
             </>
           )}
         </DialogHeader>
@@ -266,6 +298,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             inputModePreference={inputModePreference}
             onInputModePreferenceChange={setInputModePreference}
             showInputModeSetting={showInputModeSetting}
+            sessionIdleNotificationsEnabled={sessionIdleNotificationsEnabled}
+            onSessionIdleNotificationsEnabledChange={handleSessionIdleNotificationsChange}
             ptyScrollTraceEnabled={ptyScrollTraceEnabled}
             onPtyScrollTraceEnabledChange={setPtyScrollTraceEnabled}
             latencyMonitorEnabled={latencyMonitorEnabled}
@@ -316,6 +350,8 @@ function SettingsMainView({
   inputModePreference,
   onInputModePreferenceChange,
   showInputModeSetting,
+  sessionIdleNotificationsEnabled,
+  onSessionIdleNotificationsEnabledChange,
   ptyScrollTraceEnabled,
   onPtyScrollTraceEnabledChange,
   latencyMonitorEnabled,
@@ -331,6 +367,8 @@ function SettingsMainView({
   inputModePreference: InputModePreference;
   onInputModePreferenceChange: (value: InputModePreference) => void;
   showInputModeSetting: boolean;
+  sessionIdleNotificationsEnabled: boolean;
+  onSessionIdleNotificationsEnabledChange: (checked: boolean) => void;
   ptyScrollTraceEnabled: boolean;
   onPtyScrollTraceEnabledChange: (checked: boolean) => void;
   latencyMonitorEnabled: boolean;
@@ -372,6 +410,15 @@ function SettingsMainView({
           value={themePreference}
           options={themePreferenceOptions}
           onValueChange={onThemePreferenceChange}
+        />
+      </SettingsSection>
+      <SettingsSection title="通知">
+        <SettingsToggleItem
+          icon={<BellRing className="size-4" aria-hidden="true" />}
+          label="会话空闲通知"
+          detail="会话从工作中转为空闲时发送浏览器通知"
+          checked={sessionIdleNotificationsEnabled}
+          onCheckedChange={onSessionIdleNotificationsEnabledChange}
         />
       </SettingsSection>
       {showInputModeSetting ? (

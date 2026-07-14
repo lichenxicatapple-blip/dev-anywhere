@@ -7,6 +7,7 @@ import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared"
 import { useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
 import { registerDispatcher } from "./dispatcher-registry";
+import { notifySessionIdleTransition } from "./session-idle-notification";
 
 function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" }>): void {
   if (!useAppStore.getState().selectedProxyId) return;
@@ -14,9 +15,12 @@ function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" 
 }
 
 function handleSessionStatus(env: Extract<MessageEnvelope, { type: "session_status" }>): void {
-  useSessionStore
-    .getState()
-    .updateSessionState(env.payload.sessionId, env.payload.state, env.payload.lastActive);
+  const store = useSessionStore.getState();
+  const previous = store.sessions.find((session) => session.sessionId === env.payload.sessionId);
+  store.updateSessionState(env.payload.sessionId, env.payload.state, env.payload.lastActive);
+  if (previous) {
+    void notifySessionIdleTransition(previous, env.payload.state, env.payload.lastActive);
+  }
 }
 
 function handleAgentStatus(msg: Extract<RelayControlMessage, { type: "agent_status" }>): void {

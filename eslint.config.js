@@ -55,6 +55,12 @@ export default tseslint.config(
       "no-empty": "off",
     },
   },
+  {
+    files: ["apps/web/public/notification-sw.js"],
+    languageOptions: {
+      globals: { ...globals.serviceworker },
+    },
+  },
   // proxy 进程边界：terminal/serve/worker 三进程的私有代码不可互相导入。
   // common/ 和 ipc/ 是共享层，任意进程都可以用。
   // 下面四组规则覆盖了四种情形：三个进程各自的私有代码目录，以及共享层自身。

@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   themePreference: "dev_anywhere_theme",
   latencyMonitorEnabled: "dev_anywhere_latencyMonitorEnabled",
   latencyMonitorPosition: "dev_anywhere_latencyMonitorPosition",
+  sessionIdleNotificationsEnabled: "dev_anywhere_sessionIdleNotificationsEnabled",
   inputModePreference: "dev_anywhere_inputModePreference",
   adaptiveInputModality: "dev_anywhere_adaptiveInputModality",
   ipadFloatingKeyboardHintDismissed: "dev_anywhere_ipadFloatingKeyboardHintDismissed",

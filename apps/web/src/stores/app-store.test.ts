@@ -106,3 +106,29 @@ describe("app-store PTY scroll trace persistence", () => {
     expect(localStorage.getItem("dev_anywhere_pty_scroll_trace")).toBe("0");
   });
 });
+
+describe("app-store session idle notification persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    vi.resetModules();
+  });
+
+  it("defaults session idle notifications to off", async () => {
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(false);
+  });
+
+  it("loads and persists session idle notifications for the current browser", async () => {
+    localStorage.setItem("dev_anywhere_sessionIdleNotificationsEnabled", "1");
+
+    const { useAppStore } = await import("./app-store");
+
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(true);
+    useAppStore.getState().setSessionIdleNotificationsEnabled(false);
+
+    expect(useAppStore.getState().sessionIdleNotificationsEnabled).toBe(false);
+    expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBe("0");
+  });
+});
