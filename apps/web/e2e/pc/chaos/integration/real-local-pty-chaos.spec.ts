@@ -100,7 +100,7 @@ async function openLocalRuntimeSession(page: Page, uniqueName: string): Promise<
   const row = page
     .locator('[data-slot="session-row"]:visible')
     .filter({ hasText: uniqueName })
-    .filter({ hasText: provider === "codex" ? "Codex" : "Claude" })
+    .filter({ hasText: provider === "codex" ? "Codex" : "Claude Code" })
     .filter({ has: page.locator('[data-slot="session-mode-icon"][data-mode="pty"]') });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.locator("button").first().click();

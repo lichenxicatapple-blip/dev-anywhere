@@ -165,10 +165,15 @@ describe("HistoryList", () => {
       container.querySelector('[data-slot="history-mode-tag"]')?.getAttribute("aria-label"),
     ).toBe("聊天视图");
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：恢复 JSON 会话" }));
-    expect(screen.getByRole("dialog", { name: "恢复会话" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "恢复聊天" })).toBeTruthy();
-    expect(screen.queryByText("权限模式")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "恢复聊天" }));
+    const dialog = screen.getByRole("dialog", { name: "恢复会话" });
+    expect(dialog).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(screen.getByRole("button", { name: "恢复" })).toBeTruthy();
+    expect(screen.getByText("权限模式")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "严格审批" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -176,12 +181,13 @@ describe("HistoryList", () => {
         mode: "json",
         provider: "claude",
         resumeSessionId: "claude-history-json",
+        permissionMode: "default",
       });
     });
     expect(navigateMock).toHaveBeenCalledWith("/chat/restored-session?mode=json");
   });
 
-  it("lets Codex JSON history restore as chat by default", async () => {
+  it("lets Codex JSON history restore as chat with the selected permission mode", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       sessionId: "codex-json-session",
@@ -203,7 +209,8 @@ describe("HistoryList", () => {
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：Codex JSON 会话" }));
     expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "终端" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "恢复聊天" }));
+    fireEvent.click(screen.getByRole("radio", { name: "自动判定" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -211,12 +218,13 @@ describe("HistoryList", () => {
         mode: "json",
         provider: "codex",
         resumeSessionId: "codex-history-json",
+        permissionMode: "auto",
       });
     });
     expect(navigateMock).toHaveBeenCalledWith("/chat/codex-json-session?mode=json");
   });
 
-  it("shows terminal permission choices only after Terminal is selected and restores bypass mode", async () => {
+  it("keeps permission choices visible when switching from Chat to Terminal", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       sessionId: "pty-bypass-session",
@@ -241,11 +249,18 @@ describe("HistoryList", () => {
     ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：未知 Claude 历史" }));
-    expect(screen.queryByText("权限模式")).toBeNull();
+    expect(screen.getByText("权限模式")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: "终端" }));
     expect(screen.getByText("权限模式")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: "跳过全部审批" }));
-    fireEvent.click(screen.getByRole("button", { name: "恢复终端" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "跳过全部审批？" })).toBeTruthy();
+    expect(screen.getByText("Claude Code 将不再请求工具审批。")).toBeTruthy();
+    const confirmButton = screen.getByRole("button", { name: "确认" });
+    expect(confirmButton.getAttribute("data-variant")).toBe("destructive");
+    fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -253,6 +268,37 @@ describe("HistoryList", () => {
         mode: "pty",
         provider: "claude",
         resumeSessionId: "claude-history-unknown",
+        permissionMode: "bypassPermissions",
+      });
+    });
+  });
+
+  it("requires confirmation when restoring Chat with Bypass", async () => {
+    const { container } = renderHistoryList([
+      {
+        id: "claude-history-chat-bypass",
+        title: "聊天跳过审批",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "claude",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：聊天跳过审批" }));
+    fireEvent.click(screen.getByRole("radio", { name: "跳过全部审批" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        cwd: "/Users/dev/project",
+        mode: "json",
+        provider: "claude",
+        resumeSessionId: "claude-history-chat-bypass",
         permissionMode: "bypassPermissions",
       });
     });

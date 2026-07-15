@@ -117,6 +117,38 @@ describe("AppShell PTY Always yes controller", () => {
     await waitFor(() => expect(sendRawSpy).toHaveBeenCalledWith("s1", "\r"));
   });
 
+  it("does not inherit PTY auto-enter in another session", async () => {
+    renderAppShell("/chat/s1?mode=pty");
+
+    setSessionState("s2", "waiting_approval");
+    useSessionStore.getState().setPtyState("s2", {
+      state: "approval_wait",
+      seq: 1,
+      tool: "Write",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendRawSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not inherit PTY auto-enter in another proxy scope", async () => {
+    renderAppShell("/chat/s1?mode=pty");
+
+    useAppStore.setState({
+      selectedProxyId: "proxy-2",
+      selectedProxyName: "Other Mac",
+    });
+    setSessionState("s1", "waiting_approval");
+    useSessionStore.getState().setPtyState("s1", {
+      state: "approval_wait",
+      seq: 1,
+      tool: "Write",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendRawSpy).not.toHaveBeenCalled();
+  });
+
   it("does not auto-enter stale PTY approval state after the server marks the session idle", async () => {
     renderAppShell("/chat/s2?mode=pty");
 

@@ -255,7 +255,7 @@ describe("Hosted PTY registry", () => {
     });
   });
 
-  it("promotes an idle session to working when PTY bytes arrive without a semantic state", () => {
+  it("keeps completion latched across PTY redraws and starts work on submitted input", () => {
     withExecutable("codex", (codexBin) => {
       const applyPtyStateToSession = vi.fn();
       const registry = new HostedPtyRegistry({
@@ -298,9 +298,71 @@ describe("Hosted PTY registry", () => {
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
 
       onData("\x1b]0;⠧ dev-anywhere\x07");
+      expect(applyPtyStateToSession).not.toHaveBeenCalled();
+
+      onData("agent response\r\n");
+      expect(applyPtyStateToSession).not.toHaveBeenCalled();
+
+      registry.write("s1", "next prompt");
+      expect(applyPtyStateToSession).not.toHaveBeenCalled();
+
+      registry.write("s1", "\r");
       registry.destroyAll();
 
-      expect(applyPtyStateToSession).toHaveBeenCalledWith("s1", "working");
+      expect(applyPtyStateToSession.mock.calls).toEqual([["s1", "working"]]);
+    });
+  });
+
+  it("keeps Codex approval state stable across action-required spinner frames", () => {
+    withExecutable("codex", (codexBin) => {
+      const applyPtyStateToSession = vi.fn();
+      const registry = new HostedPtyRegistry({
+        sessionManager: {
+          getSession: vi.fn(() => ({
+            id: "s1",
+            mode: "pty",
+            provider: "codex",
+            state: SessionState.WAITING_APPROVAL,
+            cwd: "/tmp/project",
+            pid: 2468,
+          })),
+          terminateSession: vi.fn(() => ({ success: true })),
+        } as never,
+        relayConnection: {
+          sendRaw: vi.fn(),
+          sendBinary: vi.fn(),
+        } as never,
+        getProviderEnv: () => ({ CODEX_BIN: codexBin }),
+        touchSessionActivity: vi.fn(() => true),
+        updateTerminalCwd: vi.fn(() => true),
+        applyPtyStateToSession,
+        onSessionClosed: vi.fn(),
+      });
+
+      registry.start({
+        sessionId: "s1",
+        provider: "codex",
+        cwd: "/tmp/project",
+        args: [],
+        hook: {
+          provider: "codex",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("\x1b]0;[ ! ] Action Required | sample-app\x07");
+      onData("\x1b]0;[ . ] Action Required | sample-app\x07");
+      registry.destroyAll();
+
+      expect(applyPtyStateToSession.mock.calls).toEqual([
+        ["s1", "approval_wait"],
+        ["s1", "approval_wait"],
+      ]);
     });
   });
 

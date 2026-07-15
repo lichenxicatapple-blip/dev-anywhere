@@ -57,7 +57,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: color-mix(in srgb, var(--background) 24%, transparent);
+  background: var(--background);
   opacity: 0.16;
   animation: dev-pty-approval-breathe 3.2s ease-in-out infinite;
 }

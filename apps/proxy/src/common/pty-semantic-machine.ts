@@ -25,9 +25,6 @@ interface PtyTransitionInput {
   // Codex 的审批取消依赖 title-only OSC 释放；Claude hook 文本审批期间也会继续发普通
   // title-only spinner，此时不能把它当成审批结束。
   allowTitleOnlyApprovalRelease?: boolean;
-  // 本帧去掉 OSC/CSI 控制序列后仍有可见文本。title-only OSC 可能和真实输出同帧到达；
-  // 这种帧不能被当成“只有标题刷新”，否则会压掉 turn_complete -> working。
-  hasTextActivity?: boolean;
 }
 
 interface PtyTransitionResult {
@@ -52,7 +49,6 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
     signal,
     sessionStateIsWaitingApproval,
     allowTitleOnlyApprovalRelease = true,
-    hasTextActivity = false,
   } = input;
 
   // 1. 显式 approval_wait 信号：进入 / 维持审批等待。
@@ -86,8 +82,8 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
   }
 
   // 4. title-only signal（state=null，且不在审批上下文）：纯标题刷新不参与 FSM 决策，title 由调用方
-  //    单独经 sendTerminalTitle 推。若同帧还有可见文本且当前不在 working，则继续走隐式 working。
-  if (signal !== null && signal.state === null && (currentState === "working" || !hasTextActivity)) {
+  //    单独经 sendTerminalTitle 推。
+  if (signal !== null && signal.state === null) {
     return { nextState: currentState, emit: false };
   }
 
@@ -96,11 +92,17 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
     return { nextState: signal.state, emit: true, meta: withMeta(signal) };
   }
 
-  // 6. 隐式 working：当前不在 working 且本帧没有显式信号或信号 state=working，则推到 working。
-  if (currentState !== "working") {
+  // 6. 进入 working：输出侧只接受 provider 的显式 working 信号。turn_complete 是锁存态，
+  //    TUI 在空闲提示符上的可见重绘不能开启新一轮；新一轮由用户提交输入或
+  //    provider hook 明确启动。
+  if (currentState !== "working" && signal?.state === "working") {
     return { nextState: "working", emit: true };
   }
 
-  // 7. 无变化：current==working 且没有有效信号。不产生事件。
+  // 7. 没有有效信号，维持当前状态。
   return { nextState: currentState, emit: false };
+}
+
+export function shouldStartPtyTurnOnInput(currentState: PtySemanticState, data: string): boolean {
+  return currentState === "turn_complete" && (data.includes("\r") || data.includes("\n"));
 }

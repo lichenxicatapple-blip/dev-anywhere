@@ -48,6 +48,7 @@ describe("PtyManager", () => {
       providerArgs?: string[];
       cwd?: string;
       tap?: (data: string) => void;
+      onInput?: (data: string) => void;
       isTTY?: boolean;
       cols?: number;
       rows?: number;
@@ -82,6 +83,7 @@ describe("PtyManager", () => {
       providerArgs: overrides.providerArgs ?? [],
       cwd: overrides.cwd ?? "/tmp/project",
       tap,
+      onInput: overrides.onInput,
       stdin,
       stdout,
       onSessionExit: overrides.onSessionExit,
@@ -126,6 +128,17 @@ describe("PtyManager", () => {
     stdin.emit("data", Buffer.from("hello"));
 
     expect(mockPty.write).toHaveBeenCalledWith("hello");
+  });
+
+  it("reports local and remote input through the same callback", async () => {
+    const onInput = vi.fn();
+    const { manager, stdin } = await createManager({ onInput });
+
+    manager.start();
+    stdin.emit("data", Buffer.from("local\r"));
+    manager.write("remote\r");
+
+    expect(onInput.mock.calls).toEqual([["local\r"], ["remote\r"]]);
   });
 
   it("writes remote byte samples to the child PTY unchanged", async () => {

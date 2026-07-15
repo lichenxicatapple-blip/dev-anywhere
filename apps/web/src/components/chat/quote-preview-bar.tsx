@@ -21,7 +21,7 @@ export function QuotePreviewBar({ sessionId }: QuotePreviewBarProps) {
       <div className="dev-message-rail mx-auto flex w-full items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="text-xs text-muted-foreground mb-1">
-            {quote.from === "assistant" ? "Claude:" : "You:"}
+            {quote.from === "assistant" ? "Agent:" : "You:"}
           </div>
           <div className="text-xs line-clamp-2">{quote.text}</div>
         </div>

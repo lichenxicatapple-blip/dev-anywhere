@@ -130,7 +130,7 @@ export class HookServer {
         { sessionId: binding.sessionId, provider: binding.provider, event: parsed.event },
         "Provider hook ignored for inactive session",
       );
-      this.writeProviderResponse(res, this.toNeutralProviderResponse(provider, parsed.event));
+      this.writeNeutralProviderResponse(res);
       return;
     }
 
@@ -155,7 +155,7 @@ export class HookServer {
     }
 
     this.options.onEvent?.(event);
-    this.writeProviderResponse(res, this.toNeutralProviderResponse(event.provider, event.event));
+    this.writeNeutralProviderResponse(res);
   }
 
   private async handlePermissionRequest(
@@ -202,37 +202,11 @@ export class HookServer {
     };
   }
 
-  private toNeutralProviderResponse(provider: HookProviderId, eventName: string): object | null {
-    if (eventName === "PreToolUse") {
-      if (provider === "codex") {
-        return null;
-      }
-      // claude CLI 2.1.140 stream-json + non-interactive 下:
-      //   - "defer" 让 claude 把 tool 标为 deferred 直接结束 turn (stop_reason="tool_deferred"),
-      //     不会再 fallback 到 --permission-prompt-tool stdio 路径, UI 看到 thinking 后无回复;
-      //   - "ask" 让 claude 通过 stdio 发 control_request (subtype=can_use_tool), 走 worker
-      //     handleControlRequest → approvalStrategy → forwardToRelay → web 审批面板。
-      // PreToolUse hook 主要承担观察通道 (forward agent_status phase=tool_use), 决策权交给
-      // stdio control 流; 选 "ask" 显式授权 stdio 路径接管。
-      return {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "ask",
-        },
-      };
-    }
-
-    return null;
-  }
-
-  private writeProviderResponse(res: ServerResponse, payload: object | null): void {
+  private writeNeutralProviderResponse(res: ServerResponse): void {
     if (res.headersSent) return;
-    if (payload === null) {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    this.writeJson(res, 200, payload);
+    // Observation hooks must not override native provider permission modes.
+    res.writeHead(200);
+    res.end();
   }
 
   private readBody(req: IncomingMessage): Promise<string> {

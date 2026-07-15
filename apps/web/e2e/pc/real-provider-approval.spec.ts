@@ -52,6 +52,13 @@ async function choosePermissionMode(page: Page, label: string): Promise<void> {
   await page.getByRole("option", { name: label }).click();
 }
 
+async function confirmBypassCreation(page: Page, permissionModeLabel?: string): Promise<void> {
+  if (permissionModeLabel !== "跳过全部审批") return;
+  const confirmation = page.locator('[data-slot="bypass-permission-confirmation"]');
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "确认" }).click();
+}
+
 async function createHostedPtySession(
   page: Page,
   provider: Provider,
@@ -79,6 +86,7 @@ async function createHostedPtySession(
     .getByRole("dialog", { name: "新建会话" })
     .getByRole("button", { name: "创建" })
     .click();
+  await confirmBypassCreation(page, permissionModeLabel);
 
   await expect(page).toHaveURL(/\/chat\/[^?]+\?mode=pty/, { timeout: 20_000 });
   const sessionId = new URL(page.url()).hash.match(/\/chat\/([^?]+)/)?.[1];
@@ -115,6 +123,7 @@ async function createJsonSession(
     .getByRole("dialog", { name: "新建会话" })
     .getByRole("button", { name: "创建" })
     .click();
+  await confirmBypassCreation(page, permissionModeLabel);
 
   await expect(page).toHaveURL(/\/chat\/[^?]+\?mode=json/, { timeout: 20_000 });
   const sessionId = new URL(page.url()).hash.match(/\/chat\/([^?]+)/)?.[1];
@@ -581,7 +590,7 @@ test("real Claude JSON plan mode denies tool execution without approval", async 
   }
 });
 
-test("real Claude JSON auto mode reaches a concrete provider decision", async ({
+test("real Claude JSON auto mode executes ordinary in-scope work without approval", async ({
   page,
 }, testInfo) => {
   let sessionId: string | null = null;
@@ -591,38 +600,7 @@ test("real Claude JSON auto mode reaches a concrete provider decision", async ({
     sessionId = await createJsonSession(page, "claude", "自动判定");
     await sendJsonFileCreatePrompt(page, filePath, "DEV Anywhere JSON auto approval smoke.");
 
-    const outcome = await expect
-      .poll(
-        async () => {
-          if (existsSync(filePath)) return "created";
-          if (
-            (await page
-              .locator('[data-slot="tool-approval-card"][data-status="pending"]')
-              .count()) > 0
-          ) {
-            return "approval";
-          }
-          return "pending";
-        },
-        { timeout: approvalTimeoutMs },
-      )
-      .toMatch(/^(created|approval)$/)
-      .then(async () => {
-        if (existsSync(filePath)) return "created";
-        return (await page
-          .locator('[data-slot="tool-approval-card"][data-status="pending"]')
-          .count()) > 0
-          ? "approval"
-          : "pending";
-      });
-
-    if (outcome === "created") {
-      await expect(sessionRow(page, sessionId)).not.toContainText("等待审批");
-    } else {
-      await expect(sessionRow(page, sessionId)).toContainText("等待审批", {
-        timeout: 15_000,
-      });
-    }
+    await expectJsonFileCreatedWithoutApproval(page, sessionId, filePath);
   } catch (error) {
     await tryAttachPageDiagnostics(testInfo, page, "claude-json-auto-failure");
     throw error;

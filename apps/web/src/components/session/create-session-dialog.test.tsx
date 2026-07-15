@@ -278,6 +278,12 @@ describe("CreateSessionDialog", () => {
       fireEvent.click(getByRole("option", { name: permissionLabel }));
       fireEvent.click(getByRole("button", { name: "创建" }));
 
+      if (permissionMode === "bypassPermissions") {
+        expect(createSession, caseLabel).not.toHaveBeenCalled();
+        getByRole("heading", { name: "跳过全部审批？" });
+        fireEvent.click(getByRole("button", { name: "确认" }));
+      }
+
       await waitFor(() => {
         expect(createSession, caseLabel).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -292,6 +298,34 @@ describe("CreateSessionDialog", () => {
       cleanup();
       createSession.mockReset();
     }
+  });
+
+  it("requires a second destructive action before creating a bypass session", async () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, getByText } = renderDialog();
+
+    fireEvent.click(getByRole("combobox", { name: "权限模式" }));
+    fireEvent.click(getByRole("option", { name: "跳过全部审批" }));
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    const confirmButton = getByRole("button", { name: "确认" });
+    expect(createSession).not.toHaveBeenCalled();
+    expect(confirmButton.getAttribute("data-variant")).toBe("destructive");
+    expect(document.activeElement).not.toBe(confirmButton);
+    getByText("Claude Code 将不再请求工具审批。");
+    getByText(/Agent 可以直接执行命令/);
+
+    fireEvent.click(getByRole("button", { name: "返回" }));
+
+    expect(createSession).not.toHaveBeenCalled();
+    getByRole("button", { name: "创建" });
+    expect(getByRole("combobox", { name: "权限模式" })).toHaveTextContent("跳过全部审批");
   });
 
   it("unblocks the create button when session creation times out", async () => {

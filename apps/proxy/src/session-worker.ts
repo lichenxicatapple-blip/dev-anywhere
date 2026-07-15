@@ -3,7 +3,6 @@ import { mkdirSync, unlinkSync, existsSync, chmodSync } from "node:fs";
 import {
   JsonSession,
   ToolWhitelist,
-  createPermissionModeApprovalStrategy,
   createRelayApprovalStrategy,
   type StreamJsonEvent,
   type ClaudePermissionMode,
@@ -112,10 +111,9 @@ const forwardToRelay = async (
   });
 };
 
-const approvalStrategy = createPermissionModeApprovalStrategy(
-  workerPermissionMode,
-  createRelayApprovalStrategy(whitelist, forwardToRelay),
-);
+// Claude/Codex own the permission-mode semantics. This strategy only resolves
+// approval requests that the provider actually chose to surface.
+const approvalStrategy = createRelayApprovalStrategy(whitelist, forwardToRelay);
 
 function handleProviderEvent(event: StreamJsonEvent): void {
   // 从 system 事件中捕获 Claude 会话 ID 并通知 serve

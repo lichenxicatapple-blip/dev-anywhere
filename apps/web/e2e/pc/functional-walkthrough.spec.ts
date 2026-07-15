@@ -35,13 +35,13 @@ test.describe("functional browser walkthrough", () => {
 
     await page.locator('[data-slot="history-section-header"]:visible').click();
     const providerHeaders = page.locator('[data-slot="history-provider-header"]:visible');
-    await expect(providerHeaders.filter({ hasText: "Claude" })).toBeVisible();
+    await expect(providerHeaders.filter({ hasText: "Claude Code" })).toBeVisible();
     await expect(providerHeaders.filter({ hasText: "Codex" })).toBeVisible();
-    await providerHeaders.filter({ hasText: "Claude" }).click();
+    await providerHeaders.filter({ hasText: "Claude Code" }).click();
     await expect(
       page.locator('[data-slot="history-group-header"]:visible').filter({ hasText: "sample-app" }),
     ).toHaveCount(0);
-    await providerHeaders.filter({ hasText: "Claude" }).click();
+    await providerHeaders.filter({ hasText: "Claude Code" }).click();
     await page
       .locator('[data-slot="history-group-header"]:visible')
       .filter({ hasText: "sample-app" })
@@ -96,12 +96,11 @@ test.describe("functional browser walkthrough", () => {
       .toBe("Terminal input");
     await page.keyboard.type("hello");
     await expect
-      .poll(
-        async () =>
-          (await sentFakeRelayMessages(page))
-            .filter((msg) => msg.type === "remote_input_raw")
-            .map((msg) => String(msg.data ?? ""))
-            .join(""),
+      .poll(async () =>
+        (await sentFakeRelayMessages(page))
+          .filter((msg) => msg.type === "remote_input_raw")
+          .map((msg) => String(msg.data ?? ""))
+          .join(""),
       )
       .toContain("hello");
     await page.keyboard.press("Shift+Enter");
@@ -225,12 +224,14 @@ test.describe("functional browser walkthrough", () => {
     await expect(approvalHint).toHaveCSS("position", "relative");
     await expect(approvalHint).toHaveCSS("animation-name", "none");
     await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
-    await expect.poll(
-      async () => approvalHint.evaluate((el) => getComputedStyle(el, "::before").animationName),
-      {
-        message: "PTY approval banner should carry the breathing affordance",
-      },
-    ).toBe("dev-pty-approval-breathe");
+    await expect
+      .poll(
+        async () => approvalHint.evaluate((el) => getComputedStyle(el, "::before").animationName),
+        {
+          message: "PTY approval banner should carry the breathing affordance",
+        },
+      )
+      .toBe("dev-pty-approval-breathe");
 
     const headerBox = await page.locator('[data-slot="chat-header"]').boundingBox();
     const hintBox = await approvalHint.boundingBox();

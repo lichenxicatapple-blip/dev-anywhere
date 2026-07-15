@@ -564,7 +564,7 @@ test.describe("mobile UX contract", () => {
     await expect(footer).toBeVisible();
     await expectMobileInsetSurface(page, sheet);
     await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
-    await expectTouchTarget(footer.getByRole("button", { name: "恢复终端" }));
+    await expectTouchTarget(footer.getByRole("button", { name: "恢复" }));
     await expectTouchTarget(footer.getByRole("button", { name: "取消" }));
 
     await expect

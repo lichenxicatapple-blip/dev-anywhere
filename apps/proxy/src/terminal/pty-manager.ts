@@ -9,6 +9,7 @@ interface PtyManagerOptions {
   cwd: string;
   hook?: ProviderHookContext;
   tap: (data: string) => void;
+  onInput?: (data: string) => void;
   stdin: NodeJS.ReadStream;
   stdout: NodeJS.WriteStream;
   onSessionExit?: (code: number) => void | Promise<void>;
@@ -23,6 +24,7 @@ export class PtyManager {
   private readonly cwd: string;
   private readonly hook?: ProviderHookContext;
   private readonly tap: (data: string) => void;
+  private readonly onInput?: (data: string) => void;
   private readonly stdin: NodeJS.ReadStream;
   private readonly stdout: NodeJS.WriteStream;
   private readonly onSessionExit?: (code: number) => void;
@@ -34,6 +36,7 @@ export class PtyManager {
     this.cwd = options.cwd;
     this.hook = options.hook;
     this.tap = options.tap;
+    this.onInput = options.onInput;
     this.stdin = options.stdin;
     this.stdout = options.stdout;
     this.onSessionExit = options.onSessionExit;
@@ -65,7 +68,9 @@ export class PtyManager {
 
     // stdin -> PTY
     this.stdin.on("data", (data: Buffer) => {
-      child.write(data.toString());
+      const input = data.toString();
+      this.onInput?.(input);
+      child.write(input);
     });
 
     // PTY -> stdout + tap
@@ -114,6 +119,7 @@ export class PtyManager {
 
   // 向 PTY 子进程写入数据，用于远程输入注入
   write(data: string): void {
+    this.onInput?.(data);
     this.child?.write(data);
   }
 

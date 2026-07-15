@@ -4,7 +4,7 @@
 // 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞。
 // 刷新按钮: 通过 RelayClient 请求历史会话, proxy 会重新扫 ~/.claude/projects/
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Check, ChevronRight, MessageSquare, RefreshCw, TerminalSquare } from "lucide-react";
 import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
@@ -37,6 +37,7 @@ import {
 } from "@/lib/session-provider";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { HistoryRow } from "./history-row";
+import { BypassPermissionWarning } from "./bypass-permission-warning";
 
 interface HistoryListProps {
   now?: number;
@@ -114,7 +115,7 @@ export function HistoryList({ now }: HistoryListProps) {
         mode,
         provider,
         resumeSessionId: h.id,
-        ...(mode === "pty" && permissionMode ? { permissionMode } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
       });
       if (ctrl.error || !ctrl.sessionId) {
         toast.error(`恢复失败：${ctrl.error ?? "未知错误"}`);
@@ -383,11 +384,19 @@ function HistoryRestoreDialog({
   onPermissionModeChange: (mode: RestorePermissionMode) => void;
   onConfirm: () => void;
 }) {
-  const terminalSelected = mode === "pty";
-  const confirmLabel = terminalSelected ? "恢复终端" : "恢复聊天";
-  const destructiveConfirm = permissionMode === "bypassPermissions" && terminalSelected;
+  const [confirmingBypass, setConfirmingBypass] = useState(false);
+  const destructiveConfirm = permissionMode === "bypassPermissions";
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const controls = (
+
+  useEffect(() => {
+    if (!open) setConfirmingBypass(false);
+  }, [open]);
+
+  const controls = confirmingBypass ? (
+    <BypassPermissionWarning
+      providerLabel={session ? providerLabel(historySessionProvider(session)) : "Agent"}
+    />
+  ) : (
     <div className="grid min-w-0 gap-4">
       <div className="grid min-w-0 gap-2">
         <span className="text-sm font-medium">模式</span>
@@ -412,35 +421,33 @@ function HistoryRestoreDialog({
           )}
         </div>
       </div>
-      {terminalSelected && (
-        <div className="grid min-w-0 gap-2">
-          <span className="text-sm font-medium">权限模式</span>
-          <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
-            <PermissionChoiceButton
-              checked={permissionMode === "default"}
-              label="严格审批"
-              description="所有需要权限的操作都要确认。"
-              disabled={submitting}
-              onClick={() => onPermissionModeChange("default")}
-            />
-            <PermissionChoiceButton
-              checked={permissionMode === "auto"}
-              label="自动判定"
-              description="交给 Agent CLI 的原生策略判断。"
-              disabled={submitting}
-              onClick={() => onPermissionModeChange("auto")}
-            />
-            <PermissionChoiceButton
-              checked={permissionMode === "bypassPermissions"}
-              label="跳过全部审批"
-              description="危险模式，会跳过工具审批和部分沙箱保护。"
-              destructive
-              disabled={submitting}
-              onClick={() => onPermissionModeChange("bypassPermissions")}
-            />
-          </div>
+      <div className="grid min-w-0 gap-2">
+        <span className="text-sm font-medium">权限模式</span>
+        <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
+          <PermissionChoiceButton
+            checked={permissionMode === "default"}
+            label="严格审批"
+            description="所有需要权限的操作都要确认。"
+            disabled={submitting}
+            onClick={() => onPermissionModeChange("default")}
+          />
+          <PermissionChoiceButton
+            checked={permissionMode === "auto"}
+            label="自动判定"
+            description="交给 Agent CLI 的原生策略判断。"
+            disabled={submitting}
+            onClick={() => onPermissionModeChange("auto")}
+          />
+          <PermissionChoiceButton
+            checked={permissionMode === "bypassPermissions"}
+            label="跳过全部审批"
+            description="危险模式，会跳过工具审批和部分沙箱保护。"
+            destructive
+            disabled={submitting}
+            onClick={() => onPermissionModeChange("bypassPermissions")}
+          />
         </div>
-      )}
+      </div>
     </div>
   );
   const actions = (
@@ -449,25 +456,27 @@ function HistoryRestoreDialog({
         type="button"
         variant="ghost"
         disabled={submitting}
-        onClick={() => onOpenChange(false)}
+        onClick={() => {
+          if (confirmingBypass) setConfirmingBypass(false);
+          else onOpenChange(false);
+        }}
       >
-        取消
+        {confirmingBypass ? "返回" : "取消"}
       </Button>
       <Button
         type="button"
-        variant={destructiveConfirm ? "destructive" : "default"}
-        className={
-          destructiveConfirm
-            ? "!bg-destructive !text-white hover:!bg-destructive/90 hover:!text-white"
-            : undefined
-        }
-        style={
-          destructiveConfirm ? { backgroundColor: "var(--destructive)", color: "#fff" } : undefined
-        }
+        variant={confirmingBypass ? "destructive" : "default"}
         disabled={submitting}
-        onClick={onConfirm}
+        onClick={() => {
+          if (destructiveConfirm && !confirmingBypass) {
+            setConfirmingBypass(true);
+            return;
+          }
+          onConfirm();
+        }}
+        data-slot={confirmingBypass ? "bypass-permission-confirm" : undefined}
       >
-        {submitting ? "恢复中..." : confirmLabel}
+        {submitting ? "恢复中..." : confirmingBypass ? "确认" : "恢复"}
       </Button>
     </>
   );
@@ -477,11 +486,12 @@ function HistoryRestoreDialog({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
+          focusSurfaceOnOpen
           className="inset-x-2 w-auto max-h-[calc(100dvh-0.75rem)] min-w-0 overflow-hidden rounded-t-xl border bg-background p-0"
           data-slot="history-restore-dialog"
         >
           <SheetHeader className="min-w-0 shrink-0 px-4 pb-2 pt-4 text-left">
-            <SheetTitle>恢复会话</SheetTitle>
+            <SheetTitle>{confirmingBypass ? "跳过全部审批？" : "恢复会话"}</SheetTitle>
             <SheetDescription className="min-w-0 truncate pr-10" title={session?.title}>
               {session?.title ?? ""}
             </SheetDescription>
@@ -504,9 +514,13 @@ function HistoryRestoreDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="min-w-0 sm:max-w-md" data-slot="history-restore-dialog">
+      <DialogContent
+        focusSurfaceOnOpen
+        className="min-w-0 sm:max-w-md"
+        data-slot="history-restore-dialog"
+      >
         <DialogHeader className="min-w-0">
-          <DialogTitle>恢复会话</DialogTitle>
+          <DialogTitle>{confirmingBypass ? "跳过全部审批？" : "恢复会话"}</DialogTitle>
           <DialogDescription className="min-w-0 truncate pr-10 sm:pr-0" title={session?.title}>
             {session?.title ?? ""}
           </DialogDescription>

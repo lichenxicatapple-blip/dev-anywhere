@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-// Claude 正在思考的三点跳动。
+// Agent 正在思考的三点跳动。
 // 只在当前 turn 没有 activity / assistant partial 可承载控制区时挂载。
 export function ThinkingIndicator({ turnControl }: { turnControl?: ReactNode }) {
   return (
@@ -8,7 +8,7 @@ export function ThinkingIndicator({ turnControl }: { turnControl?: ReactNode }) 
       className="dev-chat-rail-inset py-2 animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
       data-slot="thinking-indicator"
       role="status"
-      aria-label="Claude 正在思考"
+      aria-label="Agent 正在思考"
     >
       <div className="dev-message-rail mx-auto flex w-full justify-start">
         <div className="flex w-fit items-center gap-2 rounded-[8px_24px_24px_24px] bg-foreground/8 px-4 py-2.5">

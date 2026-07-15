@@ -15,11 +15,13 @@ import {
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
-  normalizePtySemanticText,
 } from "./common/osc-extractor.js";
 import { createFSM, type PtySemanticState } from "@dev-anywhere/shared";
 import { shouldReleaseTextApprovalOnInput } from "./common/pty-approval-state.js";
-import { decidePtySemanticTransition } from "./common/pty-semantic-machine.js";
+import {
+  decidePtySemanticTransition,
+  shouldStartPtyTurnOnInput,
+} from "./common/pty-semantic-machine.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
 import { SOCK_PATH, STOPPED_PATH, tildify } from "./common/paths.js";
@@ -169,6 +171,7 @@ class TerminalSession {
       cwd: this.sessionCwd,
       hook: this.hookContext ?? undefined,
       tap: (data) => this.handlePtyData(data),
+      onInput: (data) => this.updateSemanticStateOnInput(data),
       stdin: process.stdin,
       stdout: process.stdout,
       onResize: (newCols, newRows) => {
@@ -208,7 +211,6 @@ class TerminalSession {
 
     const oscSequences = extractOscSequences(data);
     const oscSignal = extractOscSignals(data, this.provider.id);
-    const hasTextActivity = normalizePtySemanticText(data).length > 0;
     this.semanticTextTail = appendPtySemanticTextTail(this.semanticTextTail, data);
     const textSignal = oscSignal
       ? null
@@ -238,7 +240,6 @@ class TerminalSession {
       currentState: this.currentPtyState,
       signal: signal ?? null,
       allowTitleOnlyApprovalRelease: !this.textApprovalWaitActive,
-      hasTextActivity,
     });
     this.currentPtyState = decision.nextState;
     if (decision.nextState !== "approval_wait") {
@@ -284,11 +285,19 @@ class TerminalSession {
     );
   }
 
-  private releaseTextApprovalOnInput(data: string): void {
-    if (!this.textApprovalWaitActive || this.currentPtyState !== "approval_wait") return;
-    if (!shouldReleaseTextApprovalOnInput(data)) return;
+  private updateSemanticStateOnInput(data: string): void {
+    if (
+      this.textApprovalWaitActive &&
+      this.currentPtyState === "approval_wait" &&
+      shouldReleaseTextApprovalOnInput(data)
+    ) {
+      this.textApprovalWaitActive = false;
+      this.currentPtyState = "working";
+      this.sendPtyState("working");
+      return;
+    }
 
-    this.textApprovalWaitActive = false;
+    if (!shouldStartPtyTurnOnInput(this.currentPtyState, data)) return;
     this.currentPtyState = "working";
     this.sendPtyState("working");
   }
@@ -315,7 +324,6 @@ class TerminalSession {
             { sessionId: this.sessionId, traceId: msg.traceId, bytes: msg.data.length },
             "Remote input received",
           );
-          this.releaseTextApprovalOnInput(msg.data);
           this.ptyManager?.write(msg.data);
         } else if (msg.type === "pty_detach" && msg.sessionId === this.sessionId) {
           this.detachRemoteView();

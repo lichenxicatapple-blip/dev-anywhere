@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { decidePtySemanticTransition } from "#src/common/pty-semantic-machine.js";
+import {
+  decidePtySemanticTransition,
+  shouldStartPtyTurnOnInput,
+} from "#src/common/pty-semantic-machine.js";
 
 // 状态机契约：七条规则的边界与组合
 // 规则 1: signal=approval_wait → approval_wait, emit=true
@@ -8,7 +11,7 @@ import { decidePtySemanticTransition } from "#src/common/pty-semantic-machine.js
 // 规则 3: 审批上下文 + signal.state!=turn_complete → 维持 approval_wait, emit=true
 // 规则 4: 纯 title-only signal（非审批上下文）→ 维持 currentState, emit=false
 // 规则 5: signal.state ∈ {turn_complete} → signal.state, emit=true
-// 规则 6: currentState!=working + 无显式 working signal → 推到 working, emit=true
+// 规则 6: currentState!=working + 显式 working signal → 推到 working, emit=true
 // 规则 7: currentState=working + 无信号 → 不变，emit=false
 
 describe("decidePtySemanticTransition", () => {
@@ -126,20 +129,18 @@ describe("decidePtySemanticTransition", () => {
       expect(r).toEqual({ nextState: "turn_complete", emit: false });
     });
 
-    it("turn_complete + title-only signal + 可见文本 → working", () => {
+    it("turn_complete + title-only signal 不会被同帧可见重绘重新打开", () => {
       const r = decidePtySemanticTransition({
         currentState: "turn_complete",
         signal: { state: null, title: "codex" },
-        hasTextActivity: true,
       });
-      expect(r).toEqual({ nextState: "working", emit: true });
+      expect(r).toEqual({ nextState: "turn_complete", emit: false });
     });
 
-    it("working + title-only signal + 可见文本 → 不重复 emit", () => {
+    it("working + title-only signal → 不重复 emit", () => {
       const r = decidePtySemanticTransition({
         currentState: "working",
         signal: { state: null, title: "codex" },
-        hasTextActivity: true,
       });
       expect(r).toEqual({ nextState: "working", emit: false });
     });
@@ -156,14 +157,21 @@ describe("decidePtySemanticTransition", () => {
     });
   });
 
-  describe("规则 6: 隐式回到 working", () => {
-    it("turn_complete + 无 signal → working", () => {
+  describe("规则 6: 显式回到 working", () => {
+    it("turn_complete + 无 signal → 维持 turn_complete", () => {
       const r = decidePtySemanticTransition({
         currentState: "turn_complete",
         signal: null,
       });
-      expect(r.nextState).toBe("working");
-      expect(r.emit).toBe(true);
+      expect(r).toEqual({ nextState: "turn_complete", emit: false });
+    });
+
+    it("turn_complete + 显式 working signal → working", () => {
+      const r = decidePtySemanticTransition({
+        currentState: "turn_complete",
+        signal: { state: "working" },
+      });
+      expect(r).toEqual({ nextState: "working", emit: true });
     });
   });
 
@@ -202,6 +210,19 @@ describe("decidePtySemanticTransition", () => {
       });
       expect(r.meta).toEqual({ tool: "Read" });
       expect("title" in (r.meta ?? {})).toBe(false);
+    });
+  });
+
+  describe("用户输入启动新一轮", () => {
+    it("只有在 turn_complete 中提交输入才启动", () => {
+      expect(shouldStartPtyTurnOnInput("turn_complete", "prompt")).toBe(false);
+      expect(shouldStartPtyTurnOnInput("turn_complete", "\r")).toBe(true);
+      expect(shouldStartPtyTurnOnInput("turn_complete", "prompt\n")).toBe(true);
+    });
+
+    it("已在 working 或 approval_wait 时不重复启动", () => {
+      expect(shouldStartPtyTurnOnInput("working", "\r")).toBe(false);
+      expect(shouldStartPtyTurnOnInput("approval_wait", "\r")).toBe(false);
     });
   });
 });

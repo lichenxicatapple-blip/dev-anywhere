@@ -3,7 +3,7 @@ import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
 export type SessionProvider = SessionInfo["provider"];
 
 const PROVIDER_LABEL: Record<SessionProvider, string> = {
-  claude: "Claude",
+  claude: "Claude Code",
   codex: "Codex",
 };
 

@@ -16,10 +16,12 @@ import {
   extractOscSequences,
   extractOscSignals,
   extractTextSignals,
-  normalizePtySemanticText,
 } from "../common/osc-extractor.js";
 import { shouldReleaseTextApprovalOnInput } from "../common/pty-approval-state.js";
-import { decidePtySemanticTransition } from "../common/pty-semantic-machine.js";
+import {
+  decidePtySemanticTransition,
+  shouldStartPtyTurnOnInput,
+} from "../common/pty-semantic-machine.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -253,7 +255,7 @@ export class HostedPtyRegistry {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
     if (hosted.kind === "agent") {
-      this.releaseTextApprovalOnInput(sessionId, hosted, data);
+      this.updateSemanticStateOnInput(sessionId, hosted, data);
     }
     hosted.child.write(data);
     serviceLogger.debug(
@@ -329,8 +331,6 @@ export class HostedPtyRegistry {
     }
     if (hosted.kind === "terminal") return;
 
-    this.deps.applyPtyStateToSession(sessionId, "working");
-    const hasTextActivity = normalizePtySemanticText(data).length > 0;
     hosted.semanticTextTail = appendPtySemanticTextTail(hosted.semanticTextTail, data);
     const textSignal = oscSignal
       ? null
@@ -361,7 +361,6 @@ export class HostedPtyRegistry {
       signal: signal ?? null,
       sessionStateIsWaitingApproval: session?.state === SessionState.WAITING_APPROVAL,
       allowTitleOnlyApprovalRelease: !hosted.textApprovalWaitActive,
-      hasTextActivity,
     });
     hosted.currentState = decision.nextState;
     if (decision.nextState !== "approval_wait") {
@@ -373,15 +372,24 @@ export class HostedPtyRegistry {
     this.deps.applyPtyStateToSession(sessionId, decision.nextState);
   }
 
-  private releaseTextApprovalOnInput(
+  private updateSemanticStateOnInput(
     sessionId: string,
     hosted: HostedPtySession,
     data: string,
   ): void {
-    if (!hosted.textApprovalWaitActive || hosted.currentState !== "approval_wait") return;
-    if (!shouldReleaseTextApprovalOnInput(data)) return;
+    if (
+      hosted.textApprovalWaitActive &&
+      hosted.currentState === "approval_wait" &&
+      shouldReleaseTextApprovalOnInput(data)
+    ) {
+      hosted.textApprovalWaitActive = false;
+      hosted.currentState = "working";
+      this.sendPtyState(sessionId, "working", undefined, hosted);
+      this.deps.applyPtyStateToSession(sessionId, "working");
+      return;
+    }
 
-    hosted.textApprovalWaitActive = false;
+    if (!shouldStartPtyTurnOnInput(hosted.currentState, data)) return;
     hosted.currentState = "working";
     this.sendPtyState(sessionId, "working", undefined, hosted);
     this.deps.applyPtyStateToSession(sessionId, "working");

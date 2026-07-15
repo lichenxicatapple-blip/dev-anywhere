@@ -38,7 +38,6 @@ async function readStdinWhenReady(child = mockChild): Promise<Buffer> {
 
 describe("JsonSession", () => {
   let JsonSession: typeof import("#src/worker/json-session.js").JsonSession;
-  let createPermissionModeApprovalStrategy: typeof import("#src/worker/json-session.js").createPermissionModeApprovalStrategy;
 
   beforeEach(async () => {
     mockChild = createChildProcessFake();
@@ -46,7 +45,6 @@ describe("JsonSession", () => {
     vi.mocked(spawn).mockClear();
     const mod = await import("#src/worker/json-session.js");
     JsonSession = mod.JsonSession;
-    createPermissionModeApprovalStrategy = mod.createPermissionModeApprovalStrategy;
   });
 
   afterEach(() => {
@@ -198,57 +196,6 @@ describe("JsonSession", () => {
   });
 
   describe("tool approval", () => {
-    it("auto-allows every control request in bypass mode", async () => {
-      const fallback = vi.fn<ApprovalStrategy>();
-      const strategy = createPermissionModeApprovalStrategy("bypassPermissions", fallback);
-
-      await expect(strategy("Bash", { command: "touch x" })).resolves.toEqual({
-        behavior: "allow",
-        message: "Auto-approved by permission mode",
-      });
-      expect(fallback).not.toHaveBeenCalled();
-    });
-
-    it("auto-allows edit tools in acceptEdits mode and forwards non-edit tools", async () => {
-      const fallback = vi.fn<ApprovalStrategy>(async () => ({
-        behavior: "deny",
-        message: "manual approval required",
-      }));
-      const strategy = createPermissionModeApprovalStrategy("acceptEdits", fallback);
-
-      await expect(strategy("Write", { file_path: "/tmp/x" })).resolves.toEqual({
-        behavior: "allow",
-        message: "Auto-approved edit by permission mode",
-      });
-      await expect(strategy("Bash", { command: "rm -rf x" })).resolves.toEqual({
-        behavior: "deny",
-        message: "manual approval required",
-      });
-      expect(fallback).toHaveBeenCalledTimes(1);
-      expect(fallback).toHaveBeenCalledWith("Bash", { command: "rm -rf x" });
-    });
-
-    it("denies tool use in plan mode without opening remote approval", async () => {
-      const fallback = vi.fn<ApprovalStrategy>();
-      const strategy = createPermissionModeApprovalStrategy("plan", fallback);
-
-      await expect(strategy("Write", { file_path: "/tmp/x" })).resolves.toEqual({
-        behavior: "deny",
-        message: "Tool use denied by plan mode.",
-      });
-      expect(fallback).not.toHaveBeenCalled();
-    });
-
-    it("forwards control requests in strict and auto modes", async () => {
-      const fallback = vi.fn<ApprovalStrategy>(async () => ({ behavior: "allow" }));
-
-      await createPermissionModeApprovalStrategy("default", fallback)("Read", {});
-      await createPermissionModeApprovalStrategy("auto", fallback)("Bash", { command: "ls" });
-
-      expect(fallback).toHaveBeenNthCalledWith(1, "Read", {});
-      expect(fallback).toHaveBeenNthCalledWith(2, "Bash", { command: "ls" });
-    });
-
     it("sends deny response by default for control_request", async () => {
       const events: StreamJsonEvent[] = [];
       const session = new JsonSession({

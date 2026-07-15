@@ -34,7 +34,7 @@ export function sessionTerminationCopy(session: SessionInfo | null): {
     return {
       title: "断开远程连接？",
       description:
-        "这只会断开当前页面和本地终端的连接，本地终端里的 Claude/Codex 会继续运行。重新接入前，页面不能继续查看或输入这个会话。",
+        "这只会断开当前页面和本地终端的连接，本地终端里的 Claude Code/Codex 会继续运行。重新接入前，页面不能继续查看或输入这个会话。",
       confirmLabel: "断开远程连接",
       destructive: false,
     };

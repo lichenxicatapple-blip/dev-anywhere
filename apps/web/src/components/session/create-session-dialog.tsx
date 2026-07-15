@@ -26,6 +26,7 @@ import {
 import { FilePathPicker } from "@/components/chat/file-path-picker";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AgentCliPicker } from "./agent-cli-picker";
+import { BypassPermissionWarning } from "./bypass-permission-warning";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
@@ -49,6 +50,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [provider, setProvider] = useState<ProviderId>("claude");
   const [mode, setMode] = useState<SessionMode>("pty");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [confirmingBypass, setConfirmingBypass] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [missingCwd, setMissingCwd] = useState<string | null>(null);
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
@@ -108,6 +110,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     setProvider("claude");
     setMode("pty");
     setPermissionMode("default");
+    setConfirmingBypass(false);
     setMissingCwd(null);
     setEditingCliProvider(null);
     setCliPathInput("");
@@ -115,7 +118,16 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }
 
   function handleSubmit() {
+    if (permissionMode === "bypassPermissions") {
+      setConfirmingBypass(true);
+      return;
+    }
     void handleSubmitSessionCreate();
+  }
+
+  async function handleConfirmBypass() {
+    await handleSubmitSessionCreate();
+    if (latestOpen.current) setConfirmingBypass(false);
   }
 
   const permissionOptions =
@@ -237,7 +249,32 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     window.setTimeout(() => setCwdPickerOpen(false), 0);
   }
 
-  const form = (
+  const form = confirmingBypass ? (
+    <div className="grid min-w-0 gap-5" data-slot="bypass-permission-confirmation">
+      <BypassPermissionWarning providerLabel={PROVIDER_LABEL[provider]} />
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11 md:min-h-0"
+          onClick={() => setConfirmingBypass(false)}
+          disabled={submitting}
+        >
+          返回
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
+          className="min-h-11 md:min-h-0"
+          onClick={() => void handleConfirmBypass()}
+          disabled={submitting}
+          data-slot="bypass-permission-confirm"
+        >
+          {submitting ? "创建中..." : "确认"}
+        </Button>
+      </DialogFooter>
+    </div>
+  ) : (
     <form
       className="flex min-w-0 flex-col gap-4"
       data-slot="create-session-form"
@@ -409,7 +446,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           focusSurfaceOnOpen
         >
           <SheetHeader className="px-0 pb-1 pt-0 text-left">
-            <SheetTitle>新建会话</SheetTitle>
+            <SheetTitle>{confirmingBypass ? "跳过全部审批？" : "新建会话"}</SheetTitle>
           </SheetHeader>
           {form}
         </SheetContent>
@@ -425,7 +462,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         focusSurfaceOnOpen
       >
         <DialogHeader>
-          <DialogTitle>新建会话</DialogTitle>
+          <DialogTitle>{confirmingBypass ? "跳过全部审批？" : "新建会话"}</DialogTitle>
         </DialogHeader>
         {form}
       </DialogContent>
