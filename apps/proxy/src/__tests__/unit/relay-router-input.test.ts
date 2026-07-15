@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlErrorCode, RelayControlSchema, SessionState } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  RelayControlSchema,
+  SESSION_CREATE_SERVER_DEADLINE_MS,
+  SessionState,
+} from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
 import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
@@ -8,9 +13,10 @@ import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { RemoteFileUploadManager } from "#src/serve/remote-file-upload.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
-import { tildify } from "#src/common/paths.js";
+import { sessionPaths, tildify } from "#src/common/paths.js";
 import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import type { Socket } from "node:net";
+import { existsSync, mkdirSync } from "node:fs";
 import {
   createRelayConnectionFake,
   createWorkerRegistryFake,
@@ -44,10 +50,15 @@ function createRouter(options: {
   relayConnection?: ReturnType<typeof createRelayConnectionFake>;
   workerSpawn?: (sessionId: string, options?: unknown) => number;
   workerConnect?: () => Promise<Socket | null>;
+  workerHas?: (sessionId: string) => boolean;
+  workerHasProcess?: (sessionId: string) => boolean;
   workerWaitForReady?: (sessionId: string, timeoutMs?: number) => Promise<void>;
   workerTerminateProcess?: (sessionId: string) => boolean;
+  permissionBroker?: PermissionBroker;
+  agentStatusRegistry?: AgentStatusRegistry;
   cleanupHookContext?: (sessionId: string) => void;
   hostedStart?: (options: unknown) => number;
+  hostedAbortStartup?: (sessionId: string) => boolean;
   terminalWorkerStart?: (options: unknown) => number;
   sessionManager?: SessionManager;
   broadcastSessionList?: () => void;
@@ -79,6 +90,8 @@ function createRouter(options: {
       send: options.workerSend,
       spawn: options.workerSpawn,
       connect: options.workerConnect ? vi.fn(options.workerConnect) : undefined,
+      has: options.workerHas ? vi.fn(options.workerHas) : undefined,
+      hasProcess: options.workerHasProcess ? vi.fn(options.workerHasProcess) : undefined,
       waitForReady: options.workerWaitForReady ? vi.fn(options.workerWaitForReady) : undefined,
       terminateProcess: options.workerTerminateProcess
         ? vi.fn(options.workerTerminateProcess)
@@ -97,6 +110,7 @@ function createRouter(options: {
       snapshot: vi.fn(() => false),
       resize: vi.fn(() => false),
       terminate: vi.fn(() => false),
+      abortStartup: options.hostedAbortStartup ?? vi.fn(() => false),
     } as never,
     terminalWorkerSpawner: {
       start: options.terminalWorkerStart ?? vi.fn(() => 5678),
@@ -114,9 +128,9 @@ function createRouter(options: {
       token: "token",
     }),
     cleanupHookContext: options.cleanupHookContext ?? vi.fn(),
-    permissionBroker: new PermissionBroker(),
+    permissionBroker: options.permissionBroker ?? new PermissionBroker(),
     hookEventRouter: {} as never,
-    agentStatusRegistry: new AgentStatusRegistry(),
+    agentStatusRegistry: options.agentStatusRegistry ?? new AgentStatusRegistry(),
     getProviderEnv: () => ({}),
     getAgentCliSuggestions: () => ({}),
     setAgentCliPath: () => {},
@@ -339,13 +353,38 @@ describe("RelayRouter input routing", () => {
     const relaySend = vi.fn();
     const workerTerminateProcess = vi.fn(() => true);
     const cleanupHookContext = vi.fn();
+    const permissionBroker = new PermissionBroker();
+    const agentStatusRegistry = new AgentStatusRegistry();
+    let pendingId = "";
     const router = createRouter({
       mode: "json",
       relaySend,
-      workerSpawn: vi.fn(() => 1234),
+      workerSpawn: vi.fn((sessionId: string) => {
+        pendingId = sessionId;
+        mkdirSync(sessionPaths(sessionId).dir, { recursive: true });
+        permissionBroker.registerWorkerRequest(
+          {
+            requestId: "pending-startup-approval",
+            sessionId,
+            provider: "claude",
+            toolName: "Bash",
+            input: {},
+          },
+          vi.fn(),
+        );
+        agentStatusRegistry.set(sessionId, {
+          provider: "claude",
+          phase: "thinking",
+          seq: 1,
+          updatedAt: 1,
+        });
+        return 1234;
+      }),
       workerConnect: vi.fn(async () => null),
       workerTerminateProcess,
       cleanupHookContext,
+      permissionBroker,
+      agentStatusRegistry,
     });
 
     router.handle({
@@ -362,10 +401,77 @@ describe("RelayRouter input routing", () => {
     const msg = RelayControlSchema.parse(JSON.parse(lastRaw));
     expect(msg.type).toBe("session_create_response");
     if (msg.type === "session_create_response") {
-      expect(msg.error).toBe("Worker failed to start");
+      expect(msg.error).toBe("Agent 启动超时，请检查 Agent CLI 配置与开发机负载后重试");
     }
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+    expect(permissionBroker.listSession(pendingId)).toEqual([]);
+    expect(agentStatusRegistry.get(pendingId)).toBeNull();
+    expect(existsSync(sessionPaths(pendingId).dir)).toBe(false);
+  });
+
+  it("returns an actionable response when JSON worker spawn fails synchronously", () => {
+    const relaySend = vi.fn();
+    const cleanupHookContext = vi.fn();
+    const workerTerminateProcess = vi.fn(() => false);
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn: vi.fn(() => {
+        throw new Error("spawn EMFILE");
+      }),
+      workerTerminateProcess,
+      cleanupHookContext,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-spawn-failed",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "json",
+    });
+
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-spawn-failed",
+      errorCode: ControlErrorCode.WORKER_START_FAILED,
+      error: "Agent 进程启动失败，请检查 Agent CLI 配置后重试",
+    });
+    expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
+    expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails immediately when a JSON worker exits before opening its socket", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const workerTerminateProcess = vi.fn(() => false);
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerConnect: async () => null,
+      workerHasProcess: () => false,
+      workerTerminateProcess,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-exited-before-connect",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "json",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-exited-before-connect",
+      errorCode: ControlErrorCode.WORKER_START_FAILED,
+      error: "Agent 进程启动失败，请检查 Agent CLI 配置后重试",
+    });
+    expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
   });
 
   it("passes permissionMode to JSON worker spawn during session_create", () => {
@@ -436,12 +542,13 @@ describe("RelayRouter input routing", () => {
     const ready = new Promise<void>((resolve) => {
       resolveReady = resolve;
     });
+    const workerWaitForReady = vi.fn(async (_sessionId: string, _timeoutMs?: number) => ready);
     const router = createRouter({
       mode: "json",
       relaySend,
       workerSpawn,
       workerConnect: async () => workerSocket,
-      workerWaitForReady: async () => ready,
+      workerWaitForReady,
       sessionManager: {
         createSession,
         setHistorySessionId: vi.fn(),
@@ -459,6 +566,10 @@ describe("RelayRouter input routing", () => {
 
     expect(createSession).not.toHaveBeenCalled();
     expect(relaySend).not.toHaveBeenCalled();
+    expect(workerWaitForReady).toHaveBeenCalledWith(expect.any(String), expect.any(Number));
+    const readyBudgetMs = workerWaitForReady.mock.calls[0][1];
+    expect(readyBudgetMs).toBeGreaterThan(0);
+    expect(readyBudgetMs).toBeLessThanOrEqual(SESSION_CREATE_SERVER_DEADLINE_MS);
 
     resolveReady();
     await vi.runAllTimersAsync();
@@ -507,10 +618,44 @@ describe("RelayRouter input routing", () => {
       type: "session_create_response",
       requestId: "create-json-fail-ready",
       errorCode: ControlErrorCode.WORKER_START_FAILED,
-      error: "Codex initialize timed out",
+      error: "Agent 进程启动失败，请检查 Agent CLI 配置后重试",
     });
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not publish a session if the worker exits after ready", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const createSession = vi.fn();
+    const workerTerminateProcess = vi.fn(() => false);
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerConnect: async () => createWritableSocketFake().socket,
+      workerWaitForReady: async () => {},
+      workerHas: () => false,
+      workerTerminateProcess,
+      sessionManager: { createSession } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-exited-after-ready",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "json",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(createSession).not.toHaveBeenCalled();
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-exited-after-ready",
+      errorCode: ControlErrorCode.WORKER_START_FAILED,
+    });
+    expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
   });
 
   it("passes permissionMode to hosted PTY start during session_create", () => {
@@ -646,10 +791,17 @@ describe("RelayRouter input routing", () => {
 
   it("returns a session_create_response when hosted PTY startup fails", () => {
     const relaySend = vi.fn();
+    const cleanupHookContext = vi.fn();
+    const hostedAbortStartup = vi.fn(() => false);
+    let pendingId = "";
     const router = createRouter({
       mode: "pty",
       relaySend,
-      hostedStart: vi.fn(() => {
+      cleanupHookContext,
+      hostedAbortStartup,
+      hostedStart: vi.fn((options: unknown) => {
+        pendingId = (options as { sessionId: string }).sessionId;
+        mkdirSync(sessionPaths(pendingId).dir, { recursive: true });
         throw new Error("spawn EBADF");
       }),
     });
@@ -669,6 +821,49 @@ describe("RelayRouter input routing", () => {
       requestId: "create-fail-1",
       errorCode: ControlErrorCode.PROCESS_START_FAILED,
       error: "spawn EBADF",
+    });
+    expect(hostedAbortStartup).toHaveBeenCalledWith(pendingId);
+    expect(cleanupHookContext).toHaveBeenCalledWith(pendingId);
+    expect(existsSync(sessionPaths(pendingId).dir)).toBe(false);
+  });
+
+  it("aborts a hosted PTY if session publication fails after spawn", () => {
+    const relaySend = vi.fn();
+    const cleanupHookContext = vi.fn();
+    const hostedAbortStartup = vi.fn(() => true);
+    let pendingId = "";
+    const router = createRouter({
+      mode: "pty",
+      relaySend,
+      cleanupHookContext,
+      hostedAbortStartup,
+      hostedStart: vi.fn((options: unknown) => {
+        pendingId = (options as { sessionId: string }).sessionId;
+        return 1234;
+      }),
+      sessionManager: {
+        createSession: vi.fn(() => {
+          throw new Error("session persistence failed");
+        }),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-fail-after-spawn",
+      cwd: "/tmp",
+      provider: "claude",
+      mode: "pty",
+    });
+
+    expect(hostedAbortStartup).toHaveBeenCalledWith(pendingId);
+    expect(cleanupHookContext).toHaveBeenCalledWith(pendingId);
+    const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
+    expect(msg).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-fail-after-spawn",
+      errorCode: ControlErrorCode.PROCESS_START_FAILED,
+      error: "session persistence failed",
     });
   });
 

@@ -72,7 +72,7 @@ describe("chat-dispatcher permission flow", () => {
     expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0].status).toBe("approved");
   });
 
-  it("ignores failed permission decision results", () => {
+  it("removes a stale approval when the proxy can no longer deliver the decision", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
     handle(envelope({}));
 
@@ -85,7 +85,8 @@ describe("chat-dispatcher permission flow", () => {
       message: "Permission request is no longer pending.",
     } as RelayControlMessage);
 
-    expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0].status).toBe("pending");
+    expect(useChatStore.getState().bySessionId.s1.pendingApprovals).toEqual([]);
+    expect(toastError).toHaveBeenCalledWith("审批请求已失效，已刷新状态");
   });
 
   it("replaces stale local approvals with the pending queue replayed after refresh", () => {

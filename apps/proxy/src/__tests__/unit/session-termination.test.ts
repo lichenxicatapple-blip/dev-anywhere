@@ -17,18 +17,12 @@ function createDeps(session: unknown, options?: { terminalWrite?: ReturnType<typ
     workerRegistry: {
       send: vi.fn(() => true),
       delete: vi.fn(),
-    },
-    controlHandlers: {
-      cleanup: vi.fn(),
+      terminateProcess: vi.fn(() => true),
     },
     terminalSockets,
     hostedPtyRegistry: {
       terminate: vi.fn(() => false),
     },
-    agentStatusRegistry: {
-      delete: vi.fn(),
-    },
-    broadcastSessionList: vi.fn(),
   };
 }
 
@@ -52,13 +46,11 @@ describe("terminateSessionByOwnership", () => {
     });
     expect(deps.workerRegistry.send).not.toHaveBeenCalled();
     expect(deps.hostedPtyRegistry.terminate).not.toHaveBeenCalled();
-    expect(deps.controlHandlers.cleanup).toHaveBeenCalledWith("s1");
     expect(deps.terminalSockets.has("s1")).toBe(false);
     expect(IpcMessageSchema.parse(JSON.parse(terminalWrite.mock.calls[0][0].trim()))).toEqual({
       type: "pty_detach",
       sessionId: "s1",
     });
-    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
   });
 
   it("terminates pure terminal workers instead of detaching their remote view", () => {
@@ -77,13 +69,11 @@ describe("terminateSessionByOwnership", () => {
 
     expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
     expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
-    expect(deps.controlHandlers.cleanup).toHaveBeenCalledWith("s1");
     expect(deps.terminalSockets.has("s1")).toBe(false);
     expect(IpcMessageSchema.parse(JSON.parse(terminalWrite.mock.calls[0][0].trim()))).toEqual({
       type: "pty_terminate",
       sessionId: "s1",
     });
-    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
   });
 
   it("terminates hosted PTY through HostedPtyRegistry", () => {
@@ -100,9 +90,6 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.hostedPtyRegistry.terminate).toHaveBeenCalledWith("s1");
     expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
     expect(deps.workerRegistry.send).not.toHaveBeenCalled();
-    // hosted PTY 终止异步走 child.onExit → cleanupSessionResources 内部已广播，
-    // 同步路径不重复广播。
-    expect(deps.broadcastSessionList).not.toHaveBeenCalled();
   });
 
   it("terminates JSON workers through worker_stop", () => {
@@ -116,7 +103,23 @@ describe("terminateSessionByOwnership", () => {
     expect(result).toEqual({ success: true, action: "terminate_json_worker" });
     expect(deps.workerRegistry.send).toHaveBeenCalledWith("s1", { type: "worker_stop" });
     expect(deps.workerRegistry.delete).toHaveBeenCalledWith("s1");
+    expect(deps.workerRegistry.terminateProcess).not.toHaveBeenCalled();
     expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
-    expect(deps.broadcastSessionList).toHaveBeenCalledTimes(1);
+  });
+
+  it("kills a JSON worker when its control channel is already unavailable", () => {
+    const deps = createDeps({
+      id: "s1",
+      mode: "json",
+    });
+    deps.workerRegistry.send.mockReturnValue(false);
+
+    const result = terminateSessionByOwnership(deps as never, "s1");
+
+    expect(result).toEqual({ success: true, action: "terminate_json_worker" });
+    expect(deps.workerRegistry.send).toHaveBeenCalledWith("s1", { type: "worker_stop" });
+    expect(deps.workerRegistry.delete).not.toHaveBeenCalled();
+    expect(deps.workerRegistry.terminateProcess).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
   });
 });

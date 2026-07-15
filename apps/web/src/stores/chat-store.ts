@@ -90,6 +90,7 @@ interface ChatStoreState {
   upsertUserMessage: (sessionId: string, message: ChatMessage) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   markTurnComplete: (sessionId: string) => void;
+  markTurnFailed: (sessionId: string) => void;
   addToolCall: (sessionId: string, messageId: string, toolCall: ToolCallInfo) => void;
   updateToolResult: (
     sessionId: string,
@@ -224,6 +225,18 @@ function completeRunningActivities(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
+function failRunningActivities(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) =>
+    m.role === "activity" && m.activity?.status === "running"
+      ? {
+          ...m,
+          isPartial: false,
+          activity: { ...m.activity, status: "error" },
+        }
+      : m,
+  );
+}
+
 export const useChatStore = create<ChatStoreState>()(
   devtools(
     (set) => ({
@@ -334,6 +347,16 @@ export const useChatStore = create<ChatStoreState>()(
           updateSlice(state, sessionId, (slice) => ({
             ...slice,
             messages: completeRunningActivities(closeAssistantPartials(slice.messages)),
+            workingToolName: "",
+            pendingApprovals: [],
+          })),
+        ),
+
+      markTurnFailed: (sessionId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            messages: failRunningActivities(closeAssistantPartials(slice.messages)),
             workingToolName: "",
             pendingApprovals: [],
           })),

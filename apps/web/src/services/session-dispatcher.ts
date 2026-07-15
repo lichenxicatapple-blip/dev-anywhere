@@ -5,12 +5,18 @@
 // 未选 proxy 时短路, 避免跨 proxy 残留. 去重: chat-dispatcher 不消费这些类型, 无 race.
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
 import { useSessionStore } from "@/stores/session-store";
+import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
 import { registerDispatcher } from "./dispatcher-registry";
 import { notifySessionIdleTransition } from "./session-idle-notification";
 
 function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" }>): void {
   if (!useAppStore.getState().selectedProxyId) return;
+  const activeSessionIds = new Set(env.payload.sessions.map((session) => session.sessionId));
+  const chatStore = useChatStore.getState();
+  for (const sessionId of Object.keys(chatStore.bySessionId)) {
+    if (!activeSessionIds.has(sessionId)) chatStore.clearSession(sessionId);
+  }
   useSessionStore.getState().setSessions(env.payload.sessions);
 }
 
@@ -18,6 +24,9 @@ function handleSessionStatus(env: Extract<MessageEnvelope, { type: "session_stat
   const store = useSessionStore.getState();
   const previous = store.sessions.find((session) => session.sessionId === env.payload.sessionId);
   store.updateSessionState(env.payload.sessionId, env.payload.state, env.payload.lastActive);
+  if (env.payload.state === "error" && useChatStore.getState().bySessionId[env.payload.sessionId]) {
+    useChatStore.getState().markTurnFailed(env.payload.sessionId);
+  }
   if (previous) {
     void notifySessionIdleTransition(previous, env.payload.state, env.payload.lastActive);
   }
@@ -47,7 +56,13 @@ function handleSessionHistoryResponse(
 }
 
 export function registerSessionDispatcher(): () => void {
-  return registerDispatcher("registerSessionDispatcher", () => (msg) => {
+  return registerDispatcher("registerSessionDispatcher", () => createSessionMessageHandler());
+}
+
+export function createSessionMessageHandler(): (
+  msg: MessageEnvelope | RelayControlMessage,
+) => void {
+  return (msg) => {
     switch (msg.type) {
       case "session_list":
         // Control 层的 session_list 是请求 (无 payload), 这里只处理 envelope 响应
@@ -72,5 +87,5 @@ export function registerSessionDispatcher(): () => void {
       default:
         break;
     }
-  });
+  };
 }

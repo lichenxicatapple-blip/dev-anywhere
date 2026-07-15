@@ -102,6 +102,10 @@
   background-color: var(--muted-foreground);
 }
 
+.dev-status-line-error {
+  background-color: var(--destructive);
+}
+
 .dev-status-line-disconnected {
   background-color: var(--destructive);
   animation: dev-status-breathe 1.5s ease-in-out infinite;

@@ -3,8 +3,6 @@ import { encodeBinaryFrame, serializeControl, type AgentStatusPayload } from "@d
 import { serviceLogger } from "../common/logger.js";
 import { createIpcReader, serializeIpc, type IpcMessage } from "../ipc/ipc-protocol.js";
 import type { ProviderHookContext } from "../providers/index.js";
-import type { AgentStatusRegistry } from "./agent-status-registry.js";
-import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { PermissionBroker } from "./permission-broker.js";
@@ -30,8 +28,6 @@ interface TerminalConnectionDeps {
   terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
   hostedPtyRegistry: HostedPtyRegistry;
   relayConnection: RelayConnection;
-  controlHandlers: ControlMessageHandlers;
-  agentStatusRegistry: AgentStatusRegistry;
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   createHookContext: (
@@ -41,7 +37,6 @@ interface TerminalConnectionDeps {
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   resolveInterruptedApprovals: (sessionId: string) => void;
-  cleanupSessionResources: (sessionId: string) => void;
   config: Extract<IpcMessage, { type: "service_status_response" }>["config"];
 }
 
@@ -53,14 +48,11 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     terminalSubscriptionBacklog,
     hostedPtyRegistry,
     relayConnection,
-    controlHandlers,
-    agentStatusRegistry,
     permissionBroker,
     createHookContext,
     emitAgentStatus,
     updateTerminalCwd,
     resolveInterruptedApprovals,
-    cleanupSessionResources,
     config,
   } = deps;
 
@@ -209,11 +201,8 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
             {
               sessionManager,
               workerRegistry,
-              controlHandlers,
               terminalSockets,
               hostedPtyRegistry,
-              agentStatusRegistry,
-              broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
             },
             msg.sessionId,
           );
@@ -284,7 +273,6 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           );
           sessionManager.terminateSession(msg.sessionId);
           terminalSockets.delete(msg.sessionId);
-          cleanupSessionResources(msg.sessionId);
           serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
           break;
         }
@@ -390,7 +378,6 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           }),
         );
         sessionManager.terminateSession(sessionId);
-        cleanupSessionResources(sessionId);
         serviceLogger.info(
           { sessionId },
           "PTY session cleaned up on socket close (crash fallback)",

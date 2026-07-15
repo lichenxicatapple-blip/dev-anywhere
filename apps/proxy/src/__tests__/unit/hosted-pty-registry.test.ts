@@ -62,7 +62,6 @@ function createRegistry(
     touchSessionActivity: vi.fn(() => true),
     updateTerminalCwd,
     applyPtyStateToSession: vi.fn(),
-    onSessionClosed: vi.fn(),
   });
 }
 
@@ -125,6 +124,30 @@ describe("Hosted PTY registry", () => {
         expect.arrayContaining(["--permission-mode", "plan", "--resume", "claude-session"]),
         expect.objectContaining({ cwd: "/tmp/project" }),
       );
+    });
+  });
+
+  it("aborts an unpublished PTY without emitting session lifecycle events", () => {
+    withExecutable("claude", (claudeBin) => {
+      const registry = createRegistry("claude", claudeBin);
+
+      registry.start({
+        sessionId: "pending-pty",
+        provider: "claude",
+        cwd: "/tmp/project",
+        args: [],
+        hook: {
+          provider: "claude",
+          sessionId: "pending-pty",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+
+      expect(registry.abortStartup("pending-pty")).toBe(true);
+      expect(ptySpawnMock.mock.results.at(-1)?.value.kill).toHaveBeenCalledTimes(1);
+      expect(registry.has("pending-pty")).toBe(false);
     });
   });
 
@@ -223,7 +246,6 @@ describe("Hosted PTY registry", () => {
         touchSessionActivity: vi.fn(() => true),
         updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession: vi.fn(),
-        onSessionClosed: vi.fn(),
       });
 
       registry.start({
@@ -278,7 +300,6 @@ describe("Hosted PTY registry", () => {
         touchSessionActivity: vi.fn(() => true),
         updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession,
-        onSessionClosed: vi.fn(),
       });
 
       registry.start({
@@ -336,7 +357,6 @@ describe("Hosted PTY registry", () => {
         touchSessionActivity: vi.fn(() => true),
         updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession,
-        onSessionClosed: vi.fn(),
       });
 
       registry.start({
@@ -390,7 +410,6 @@ describe("Hosted PTY registry", () => {
         touchSessionActivity: vi.fn(() => true),
         updateTerminalCwd: vi.fn(() => true),
         applyPtyStateToSession,
-        onSessionClosed: vi.fn(),
       });
 
       registry.start({

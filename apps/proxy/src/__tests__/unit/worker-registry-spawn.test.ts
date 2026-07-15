@@ -1,17 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import {
   createJsonObserverFake,
+  createChildProcessFake,
   createRelayConnectionFake,
   createSessionManagerFake,
 } from "./test-fakes.js";
 
-const spawnScriptMock = vi.hoisted(() =>
-  vi.fn((_entry: string, _args: string[], _options?: unknown) => ({
-    pid: 4321,
-  })),
-);
+const spawnScriptMock = vi.hoisted(() => vi.fn());
 
 vi.mock("#src/common/env.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#src/common/env.js")>();
@@ -22,6 +19,11 @@ vi.mock("#src/common/env.js", async (importOriginal) => {
 });
 
 describe("WorkerRegistry spawn", () => {
+  beforeEach(() => {
+    spawnScriptMock.mockReset();
+    spawnScriptMock.mockReturnValue(createChildProcessFake());
+  });
+
   it("launches the JSON worker process with the requested permission mode", () => {
     const relay = createRelayConnectionFake();
     const registry = new WorkerRegistry({
@@ -44,7 +46,7 @@ describe("WorkerRegistry spawn", () => {
       },
     });
 
-    expect(pid).toBe(4321);
+    expect(pid).toBe(12345);
     expect(spawnScriptMock).toHaveBeenCalledTimes(1);
     expect(spawnScriptMock.mock.calls[0][0]).toBe("session-worker");
     expect(spawnScriptMock.mock.calls[0][1]).toEqual(
@@ -76,5 +78,23 @@ describe("WorkerRegistry spawn", () => {
     expect(spawnScriptMock.mock.calls.at(-1)?.[1]).toEqual(
       expect.arrayContaining(["--provider", "codex"]),
     );
+  });
+
+  it("removes an active session when the worker exits without worker_exit IPC", () => {
+    const child = createChildProcessFake();
+    spawnScriptMock.mockReturnValue(child);
+    const sessionManager = createSessionManagerFake([{ id: "s1", mode: "json" }]);
+    const registry = new WorkerRegistry({
+      sessionManager,
+      permissionBroker: new PermissionBroker(),
+      relayConnection: createRelayConnectionFake().relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+
+    registry.spawn("s1");
+    child.emit("exit", null, "SIGKILL");
+
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
   });
 });

@@ -13,6 +13,7 @@ import {
   summarizeClaudeToolActivity,
 } from "@/lib/claude-activity-summary";
 import { showCompactEndToast } from "@/lib/compact-toast";
+import { toast } from "@/components/toast";
 import { registerDispatcher } from "./dispatcher-registry";
 
 type InboundMessage = MessageEnvelope | RelayControlMessage;
@@ -149,14 +150,21 @@ function handlePendingApprovalsPush(
 function handlePermissionDecisionResult(
   msg: Extract<RelayControlMessage, { type: "permission_decision_result" }>,
 ) {
-  if (!msg.delivered) return;
-  useChatStore
-    .getState()
-    .updateApprovalStatus(
+  const store = useChatStore.getState();
+  if (!msg.delivered) {
+    const approvals = store.bySessionId[msg.sessionId]?.pendingApprovals ?? [];
+    store.replacePendingApprovals(
       msg.sessionId,
-      msg.requestId,
-      msg.outcome === "allow" ? "approved" : "denied",
+      approvals.filter((approval) => approval.requestId !== msg.requestId),
     );
+    toast.error("审批请求已失效，已刷新状态");
+    return;
+  }
+  store.updateApprovalStatus(
+    msg.sessionId,
+    msg.requestId,
+    msg.outcome === "allow" ? "approved" : "denied",
+  );
 }
 
 function handleSessionHistoryMessages(

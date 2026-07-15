@@ -1,4 +1,4 @@
-import { ControlErrorCode } from "@dev-anywhere/shared";
+import { ControlErrorCode, SESSION_CREATE_CLIENT_TIMEOUT_MS } from "@dev-anywhere/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
@@ -183,7 +183,7 @@ describe("create-session submit model", () => {
         provider: "claude",
         permissionMode: "default",
       },
-      expect.any(Number),
+      SESSION_CREATE_CLIENT_TIMEOUT_MS,
     );
   });
 
@@ -218,7 +218,7 @@ describe("create-session submit model", () => {
         kind: "terminal",
         mode: "pty",
       },
-      expect.any(Number),
+      SESSION_CREATE_CLIENT_TIMEOUT_MS,
     );
   });
 });

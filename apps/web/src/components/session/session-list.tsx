@@ -86,6 +86,7 @@ export function SessionList({ layout }: SessionListProps) {
     }
     relay.sendControl({ type: "session_terminate", sessionId });
     useSessionStore.getState().removeSession(sessionId);
+    useChatStore.getState().clearSession(sessionId);
     if (sessionId === activeSessionId) navigate("/sessions");
     if (session?.mode === "pty" && session.ptyOwner === "local-terminal") {
       // local-terminal "页面断开" 是行为说明, 给用户读完整句的时间

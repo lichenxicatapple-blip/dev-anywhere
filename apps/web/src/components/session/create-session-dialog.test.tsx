@@ -173,9 +173,12 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { getByText } = renderDialog();
+    const { getByRole, getByText, queryByText } = renderDialog();
 
     getByText("气泡式对话，支持 Voice Pilot");
+    expect(queryByText("完整终端")).not.toBeInTheDocument();
+    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+    expect(queryByText("聊天消息")).not.toBeInTheDocument();
   });
 
   it("lets the user create a Codex chat session", async () => {

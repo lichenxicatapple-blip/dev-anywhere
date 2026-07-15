@@ -59,7 +59,6 @@ interface HostedPtyRegistryDeps {
   // PTY → Session FSM 的翻译副作用（changeSessionState、清理 interrupted approvals、推
   // agent status 等）由 bridge 收口；hosted 与 terminal-ipc 共用同一实现。
   applyPtyStateToSession: (sessionId: string, ptyState: PtySemanticState) => void;
-  onSessionClosed: (sessionId: string) => void;
 }
 
 interface HostedPtyStartOptions {
@@ -303,6 +302,10 @@ export class HostedPtyRegistry {
     return this.close(sessionId, { kill: true, notify: true });
   }
 
+  abortStartup(sessionId: string): boolean {
+    return this.close(sessionId, { kill: true, notify: false });
+  }
+
   destroyAll(): void {
     for (const sessionId of Array.from(this.sessions.keys())) {
       this.close(sessionId, { kill: true, notify: false });
@@ -466,7 +469,6 @@ export class HostedPtyRegistry {
     if (options.notify) {
       this.sendPtyState(sessionId, "turn_complete", undefined, hosted);
       this.deps.sessionManager.terminateSession(sessionId);
-      this.deps.onSessionClosed(sessionId);
     }
     this.sessions.delete(sessionId);
     return true;

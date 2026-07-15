@@ -1,5 +1,6 @@
 import {
   ControlErrorCode,
+  SESSION_CREATE_CLIENT_TIMEOUT_MS,
   type AgentCliStatus,
   type ControlErrorCodeType,
   type RelayControlMessage,
@@ -10,7 +11,6 @@ export type SessionMode = "pty" | "json";
 export type ProviderId = "claude" | "codex";
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
-const SESSION_CREATE_TIMEOUT_MS = 15_000;
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
 
 export const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
@@ -130,7 +130,7 @@ export async function submitSessionCreate({
   relay,
   agentCli,
   form,
-  timeoutMs = SESSION_CREATE_TIMEOUT_MS,
+  timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
 }: {
   relay: CreateSessionRelay | null | undefined;
   agentCli: AgentCliStatus | null;
@@ -201,7 +201,7 @@ export async function submitSessionCreate({
 
 export async function submitTerminalCreate({
   relay,
-  timeoutMs = SESSION_CREATE_TIMEOUT_MS,
+  timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
 }: {
   relay: CreateTerminalRelay | null | undefined;
   timeoutMs?: number;

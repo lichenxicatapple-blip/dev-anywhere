@@ -17,6 +17,8 @@ import { PtyApprovalHint } from "@/components/chat/pty-approval-hint";
 import { VoicePilotController } from "@/components/chat/voice-pilot-controller";
 import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft } from "lucide-react";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
@@ -72,7 +74,12 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     (s) => s.bySessionId[id]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
   const routeSessionEnded = isRouteSessionEnded(session, sessionListLoaded);
-  const presentation = resolveChatPresentation({ connected, proxyOnline, routeSessionEnded });
+  const presentation = resolveChatPresentation({
+    connected,
+    proxyOnline,
+    routeSessionEnded,
+    sessionState: session?.state,
+  });
   const navigate = useNavigate();
   const location = useLocation();
   // keyboardOffset 表示键盘是否打开/大概高度；layoutKbInset 才是当前 layout viewport 仍被
@@ -257,6 +264,8 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
               wasAutoRestoredRef.current ? null : (
                 <TerminatedSessionPanel mode={mode} />
               )
+            ) : presentation === "session-error" ? (
+              <FailedSessionPanel mode={mode} onBack={() => navigate("/sessions")} />
             ) : mode === "pty" ? (
               <PtyKeepAliveViewport
                 sessionId={id}
@@ -293,6 +302,29 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         </div>
       </FileDownloadProvider>
     </ImagePreviewProvider>
+  );
+}
+
+function FailedSessionPanel({ mode, onBack }: { mode: "json" | "pty"; onBack: () => void }) {
+  return (
+    <div
+      className="flex h-full w-full flex-col items-center justify-center gap-3 bg-background px-6 text-center"
+      data-slot="failed-session-panel"
+      role="alert"
+    >
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">
+          {mode === "pty" ? "终端连接异常" : "会话连接异常"}
+        </h2>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          与开发机上的进程通道已中断。请返回会话列表，终止后重新创建。
+        </p>
+      </div>
+      <Button type="button" variant="outline" onClick={onBack}>
+        <ArrowLeft aria-hidden="true" />
+        返回会话列表
+      </Button>
+    </div>
   );
 }
 

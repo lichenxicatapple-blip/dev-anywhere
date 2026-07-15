@@ -120,6 +120,11 @@ export type Envelope<T extends _MessageEnvelope["type"]> = Extract<_MessageEnvel
 
 // constants
 export { SessionState } from "./constants/session.js";
+export {
+  SESSION_CREATE_CLIENT_TIMEOUT_MS,
+  SESSION_CREATE_RESPONSE_GRACE_MS,
+  SESSION_CREATE_SERVER_DEADLINE_MS,
+} from "./constants/session-create.js";
 export { RelayErrorCode } from "./constants/relay-errors.js";
 export { ControlErrorCode } from "./constants/control-errors.js";
 export type { ControlErrorCode as ControlErrorCodeType } from "./constants/control-errors.js";

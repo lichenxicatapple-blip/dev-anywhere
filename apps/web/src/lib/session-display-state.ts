@@ -5,6 +5,7 @@ type SessionDisplayState =
   | "working"
   | "compacting"
   | "waiting_approval"
+  | "error"
   | "terminated"
   | "disconnected";
 
@@ -19,6 +20,7 @@ export function resolveSessionDisplayState(options: {
 }): SessionDisplayState {
   if (options.connected === false || options.proxyOnline === false) return "disconnected";
   if (options.routeSessionEnded || options.session?.state === "terminated") return "terminated";
+  if (options.session?.state === "error") return "error";
   if (options.hasPendingApproval || options.session?.state === "waiting_approval") {
     return "waiting_approval";
   }

@@ -533,8 +533,17 @@ const cmds = {
         el.scrollIntoView({ block: 'center', inline: 'center' });
         el.focus();
         const previous = el.value;
-        el.value = ${jsString(value)};
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${jsString(value)} }));
+        const prototype = el instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : el instanceof HTMLSelectElement
+            ? HTMLSelectElement.prototype
+            : HTMLInputElement.prototype;
+        const valueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (valueSetter) valueSetter.call(el, ${jsString(value)});
+        else el.value = ${jsString(value)};
+        if (!(el instanceof HTMLSelectElement)) {
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${jsString(value)} }));
+        }
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return { ok: true, label: ${jsString(label)}, previous, value: el.value, active: support.textOf(document.activeElement) };
       `),

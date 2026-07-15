@@ -2,7 +2,12 @@ import { rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
-import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  SESSION_CREATE_SERVER_DEADLINE_MS,
+  serializeControl,
+  type ControlMessage,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
@@ -16,8 +21,14 @@ import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { classifyPathError } from "./path-errors.js";
+import { JsonWorkerStartupTimeoutError, waitForJsonWorkerStartup } from "./json-worker-startup.js";
 
-const JSON_WORKER_READY_TIMEOUT_MS = 15_000;
+const WORKER_START_FAILED_MESSAGE = "Agent 进程启动失败，请检查 Agent CLI 配置后重试";
+const WORKER_START_TIMEOUT_MESSAGE = "Agent 启动超时，请检查 Agent CLI 配置与开发机负载后重试";
+
+interface PendingJsonCreate {
+  controller: AbortController;
+}
 
 interface RelaySessionCreateHandlerDeps {
   relaySend: RelaySend;
@@ -82,19 +93,18 @@ function resolveTerminalCwd(): string {
 }
 
 export class RelaySessionCreateHandler {
-  // 跟踪每个 pendingId 当前挂起的 retry timer。SIGTERM 抵达时 destroy() 会 clear
-  // 这些 timer 并执行 cleanupPendingJsonSession，否则 worker 子进程在窗口期内可能成为孤儿
-  // （setTimeout 回调命中时 workerRegistry 已经 destroyAll，但 worker 进程并未被 kill）。
-  private readonly pendingTimers = new Map<string, NodeJS.Timeout>();
+  // spawn/connect/ready 共享一个绝对截止时间。pending 在 publish 前不进入
+  // SessionManager，所以失败或 shutdown 都可以作为一个未发布事务统一回收。
+  private readonly pendingJsonCreates = new Map<string, PendingJsonCreate>();
 
   constructor(private readonly deps: RelaySessionCreateHandlerDeps) {}
 
   destroy(): void {
-    for (const [pendingId, timer] of this.pendingTimers) {
-      clearTimeout(timer);
+    for (const [pendingId, pending] of this.pendingJsonCreates) {
+      this.pendingJsonCreates.delete(pendingId);
+      pending.controller.abort(new Error("Relay session create handler destroyed"));
       this.cleanupPendingJsonSession(pendingId);
     }
-    this.pendingTimers.clear();
   }
 
   onSessionCreate(msg: ControlMessage<"session_create">): void {
@@ -148,101 +158,145 @@ export class RelaySessionCreateHandler {
     const name = requestedName ?? tildify(sessionCwd);
     const nameLocked = requestedName !== undefined;
     const pendingId = nanoid();
-    const hook = this.deps.createHookContext(pendingId, provider);
-    const workerPid = this.deps.workerRegistry.spawn(pendingId, {
-      cwd: sessionCwd,
-      resumeSessionId,
-      permissionMode,
-      provider,
-      streamDelta,
-      hook,
-    });
-
-    const paths = sessionPaths(pendingId);
-    let attempt = 0;
-    const maxRetries = 20;
-    const scheduleAttempt = (delayMs: number): void => {
-      const timer = setTimeout(tryConnect, delayMs);
-      this.pendingTimers.set(pendingId, timer);
-    };
-    const tryConnect = () => {
-      this.pendingTimers.delete(pendingId);
-      attempt++;
-      this.deps.workerRegistry.connect(pendingId, paths.workerSock).then((sock) => {
-        if (sock) {
-          this.deps.workerRegistry
-            .waitForReady(pendingId, JSON_WORKER_READY_TIMEOUT_MS)
-            .then(() => {
-              const session = this.deps.sessionManager.createSession(
-                "json",
-                sessionCwd,
-                workerPid,
-                name,
-                pendingId,
-                provider,
-                undefined,
-                nameLocked,
-              );
-              if (resumeSessionId) {
-                this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
-              }
-              this.deps.relaySend(
-                serializeControl({
-                  type: "session_create_response",
-                  requestId,
-                  sessionId: session.id,
-                  name: session.name,
-                  nameLocked: session.nameLocked,
-                  mode: "json",
-                  provider,
-                }),
-              );
-              if (resumeSessionId) {
-                this.pushHistoryMessages(session.id, resumeSessionId);
-              }
-              serviceLogger.info(
-                { sessionId: session.id, cwd: sessionCwd },
-                "JSON session created via relay",
-              );
-              this.deps.controlHandlers.pushCommandList(session.id, sessionCwd);
-              this.deps.broadcastSessionSync(session);
-              this.deps.broadcastSessionList();
-            })
-            .catch((err: unknown) => {
-              const error = err instanceof Error ? err.message : String(err);
-              this.cleanupPendingJsonSession(pendingId);
-              this.deps.relaySend(
-                serializeControl({
-                  type: "session_create_response",
-                  requestId,
-                  sessionId: pendingId,
-                  errorCode: ControlErrorCode.WORKER_START_FAILED,
-                  error,
-                }),
-              );
-              serviceLogger.error(
-                { sessionId: pendingId, error },
-                "Worker failed to report ready via relay",
-              );
-            });
-        } else if (attempt < maxRetries) {
-          scheduleAttempt(Math.min(100 * attempt, 2000));
-        } else {
-          this.cleanupPendingJsonSession(pendingId);
-          this.deps.relaySend(
-            serializeControl({
-              type: "session_create_response",
-              requestId,
-              sessionId: pendingId,
-              errorCode: ControlErrorCode.WORKER_START_FAILED,
-              error: "Worker failed to start",
-            }),
-          );
-          serviceLogger.error({ sessionId: pendingId }, "Worker connection timeout via relay");
-        }
+    const deadlineAt = Date.now() + SESSION_CREATE_SERVER_DEADLINE_MS;
+    let workerPid: number;
+    try {
+      const hook = this.deps.createHookContext(pendingId, provider);
+      workerPid = this.deps.workerRegistry.spawn(pendingId, {
+        cwd: sessionCwd,
+        resumeSessionId,
+        permissionMode,
+        provider,
+        streamDelta,
+        hook,
       });
-    };
-    scheduleAttempt(100);
+    } catch (err) {
+      this.reportJsonStartupFailure(requestId, pendingId, WORKER_START_FAILED_MESSAGE, err);
+      return;
+    }
+
+    const controller = new AbortController();
+    this.pendingJsonCreates.set(pendingId, { controller });
+    void waitForJsonWorkerStartup({
+      workerRegistry: this.deps.workerRegistry,
+      sessionId: pendingId,
+      socketPath: sessionPaths(pendingId).workerSock,
+      deadlineAt,
+      signal: controller.signal,
+    })
+      .then(() =>
+        this.publishJsonSession({
+          requestId,
+          pendingId,
+          workerPid,
+          sessionCwd,
+          name,
+          nameLocked,
+          provider,
+          resumeSessionId,
+        }),
+      )
+      .catch((err: unknown) => {
+        if (!this.takePendingJsonCreate(pendingId)) return;
+        this.reportJsonStartupFailure(
+          requestId,
+          pendingId,
+          err instanceof JsonWorkerStartupTimeoutError
+            ? WORKER_START_TIMEOUT_MESSAGE
+            : WORKER_START_FAILED_MESSAGE,
+          err,
+        );
+      });
+  }
+
+  private takePendingJsonCreate(sessionId: string): boolean {
+    if (!this.pendingJsonCreates.has(sessionId)) return false;
+    this.pendingJsonCreates.delete(sessionId);
+    return true;
+  }
+
+  private publishJsonSession(options: {
+    requestId?: string;
+    pendingId: string;
+    workerPid: number;
+    sessionCwd: string;
+    name: string;
+    nameLocked: boolean;
+    provider: ProviderId;
+    resumeSessionId?: string;
+  }): void {
+    if (!this.takePendingJsonCreate(options.pendingId)) return;
+    let session: SessionInfo;
+    try {
+      session = this.deps.sessionManager.createSession(
+        "json",
+        options.sessionCwd,
+        options.workerPid,
+        options.name,
+        options.pendingId,
+        options.provider,
+        undefined,
+        options.nameLocked,
+      );
+    } catch (err) {
+      this.reportJsonStartupFailure(
+        options.requestId,
+        options.pendingId,
+        WORKER_START_FAILED_MESSAGE,
+        err,
+      );
+      return;
+    }
+    if (options.resumeSessionId) {
+      this.deps.sessionManager.setHistorySessionId(session.id, options.resumeSessionId);
+    }
+    this.deps.relaySend(
+      serializeControl({
+        type: "session_create_response",
+        requestId: options.requestId,
+        sessionId: session.id,
+        name: session.name,
+        nameLocked: session.nameLocked,
+        mode: "json",
+        provider: options.provider,
+      }),
+    );
+    if (options.resumeSessionId) {
+      this.pushHistoryMessages(session.id, options.resumeSessionId);
+    }
+    serviceLogger.info(
+      { sessionId: session.id, cwd: options.sessionCwd },
+      "JSON session created via relay",
+    );
+    this.deps.controlHandlers.pushCommandList(session.id, options.sessionCwd);
+    this.deps.broadcastSessionSync(session);
+    this.deps.broadcastSessionList();
+  }
+
+  private reportJsonStartupFailure(
+    requestId: string | undefined,
+    sessionId: string,
+    message: string,
+    reason: unknown,
+  ): void {
+    this.cleanupPendingJsonSession(sessionId);
+    this.deps.relaySend(
+      serializeControl({
+        type: "session_create_response",
+        requestId,
+        sessionId,
+        errorCode: ControlErrorCode.WORKER_START_FAILED,
+        error: message,
+      }),
+    );
+    serviceLogger.error(
+      {
+        sessionId,
+        error: reason instanceof Error ? reason.message : String(reason),
+        timedOut: message === WORKER_START_TIMEOUT_MESSAGE,
+      },
+      "JSON worker startup failed via relay",
+    );
   }
 
   private cleanupPendingJsonSession(sessionId: string): void {
@@ -281,8 +335,9 @@ export class RelaySessionCreateHandler {
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
-    const hook = this.deps.createHookContext(pendingId, provider);
+    let session: SessionInfo;
     try {
+      const hook = this.deps.createHookContext(pendingId, provider);
       const pid = this.deps.hostedPtyRegistry.start({
         sessionId: pendingId,
         provider,
@@ -291,7 +346,7 @@ export class RelaySessionCreateHandler {
         permissionMode,
         hook,
       });
-      const session = this.deps.sessionManager.createSession(
+      session = this.deps.sessionManager.createSession(
         "pty",
         cwd,
         pid,
@@ -301,31 +356,8 @@ export class RelaySessionCreateHandler {
         "proxy-hosted",
         nameLocked,
       );
-      if (resumeSessionId) {
-        if (provider === "claude") {
-          this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
-        } else {
-          this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
-        }
-      }
-      this.deps.relaySend(
-        serializeControl({
-          type: "session_create_response",
-          requestId: msg.requestId,
-          sessionId: session.id,
-          name: session.name,
-          nameLocked: session.nameLocked,
-          mode: "pty",
-          provider,
-          ptyOwner: "proxy-hosted",
-        }),
-      );
-      this.deps.controlHandlers.pushCommandList(session.id, cwd);
-      this.deps.controlHandlers.pushFileTree(session.id, cwd);
-      this.deps.broadcastSessionSync(session);
-      this.deps.broadcastSessionList();
-      serviceLogger.info({ sessionId: session.id, provider, cwd }, "Hosted PTY session created");
     } catch (err) {
+      this.cleanupPendingHostedPtySession(pendingId);
       const error = err instanceof Error ? err.message : String(err);
       this.deps.relaySend(
         serializeControl({
@@ -347,7 +379,45 @@ export class RelaySessionCreateHandler {
         },
         "Hosted PTY session create failed",
       );
+      return;
     }
+
+    if (resumeSessionId) {
+      if (provider === "claude") {
+        this.deps.sessionManager.setClaudeSessionId(session.id, resumeSessionId);
+      } else {
+        this.deps.sessionManager.setHistorySessionId(session.id, resumeSessionId);
+      }
+    }
+    this.deps.relaySend(
+      serializeControl({
+        type: "session_create_response",
+        requestId: msg.requestId,
+        sessionId: session.id,
+        name: session.name,
+        nameLocked: session.nameLocked,
+        mode: "pty",
+        provider,
+        ptyOwner: "proxy-hosted",
+      }),
+    );
+    this.deps.controlHandlers.pushCommandList(session.id, cwd);
+    this.deps.controlHandlers.pushFileTree(session.id, cwd);
+    this.deps.broadcastSessionSync(session);
+    this.deps.broadcastSessionList();
+    serviceLogger.info({ sessionId: session.id, provider, cwd }, "Hosted PTY session created");
+  }
+
+  private cleanupPendingHostedPtySession(sessionId: string): void {
+    const killed = this.deps.hostedPtyRegistry.abortStartup(sessionId);
+    rmSync(sessionPaths(sessionId).dir, { recursive: true, force: true });
+    this.deps.cleanupHookContext(sessionId);
+    this.deps.permissionBroker.cleanupSession(sessionId, "Hosted PTY failed to start");
+    this.deps.agentStatusRegistry.delete(sessionId);
+    serviceLogger.warn(
+      { sessionId, killed },
+      "Cleaned up pending hosted PTY session after startup failure",
+    );
   }
 
   private createShellTerminalSession(msg: ControlMessage<"session_create">): void {

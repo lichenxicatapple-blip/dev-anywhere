@@ -194,6 +194,19 @@ export class WorkerRegistry {
     });
     const workerPid = child.pid!;
     this.children.set(sessionId, child);
+    // 正常退出会先通过 worker_exit IPC 删除 session；SIGKILL/OOM 等路径来不及发 IPC，
+    // 只能依赖父进程的 child exit。两条路径都落到 SessionManager.onSessionRemoved，
+    // 由统一出口清审批、临时目录并广播会话列表。
+    child.once("exit", (code, signal) => {
+      const activeSession = this.deps.sessionManager.getSession(sessionId);
+      this.delete(sessionId);
+      if (!activeSession) return;
+      const result = this.deps.sessionManager.terminateSession(sessionId);
+      serviceLogger.warn(
+        { sessionId, workerPid, code, signal, removed: result.success },
+        "JSON worker process exited without worker_exit IPC",
+      );
+    });
     serviceLogger.info(
       { sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId },
       "Worker process spawned",
@@ -201,10 +214,21 @@ export class WorkerRegistry {
     return workerPid;
   }
 
-  connect(sessionId: string, sockPath: string): Promise<Socket | null> {
+  connect(sessionId: string, sockPath: string, timeoutMs?: number): Promise<Socket | null> {
     return new Promise((resolve) => {
       const sock = connect(sockPath);
-      sock.on("connect", () => {
+      let settled = false;
+      let timeout: NodeJS.Timeout | undefined;
+      const finish = (result: Socket | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        resolve(result);
+      };
+      const onConnectError = (): void => finish(null);
+      sock.once("error", onConnectError);
+      sock.once("connect", () => {
+        sock.off("error", onConnectError);
         this.sockets.set(sessionId, sock);
         createWorkerReader(
           sock,
@@ -220,9 +244,18 @@ export class WorkerRegistry {
         );
         sock.on("close", () => this.onDisconnect(sessionId));
         sock.on("error", () => this.onDisconnect(sessionId));
-        resolve(sock);
+        finish(sock);
       });
-      sock.on("error", () => resolve(null));
+      if (timeoutMs !== undefined) {
+        timeout = setTimeout(
+          () => {
+            sock.destroy();
+            finish(null);
+          },
+          Math.max(1, timeoutMs),
+        );
+        timeout.unref?.();
+      }
     });
   }
 
@@ -264,6 +297,10 @@ export class WorkerRegistry {
 
   has(sessionId: string): boolean {
     return this.sockets.has(sessionId);
+  }
+
+  hasProcess(sessionId: string): boolean {
+    return this.children.has(sessionId);
   }
 
   delete(sessionId: string): void {

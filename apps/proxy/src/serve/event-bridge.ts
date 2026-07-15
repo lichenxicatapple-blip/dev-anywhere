@@ -29,8 +29,8 @@ interface EventBridge {
   updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   // 把 agent_status 推到 relay 并写到 registry，用于 client 重连后查询。
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
-  // session 关闭时三件套清理：取消 control handlers 周期任务 / 删 agent_status / 广播会话列表。
-  // session 本身的 manager.delete 由调用方负责（不同路径删的时机不同）。
+  // SessionManager.onSessionRemoved 的 runtime 清理出口：取消周期任务、清理观察状态与审批，
+  // 最后广播权威会话列表。session 本身已由 SessionManager 删除。
   cleanupSessionResources: (sessionId: string) => void;
 }
 
@@ -79,9 +79,8 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
     safe(() => deps.controlHandlers.cleanup(sessionId), "controlHandlers.cleanup");
     safe(() => deps.agentStatusRegistry.delete(sessionId), "agentStatusRegistry.delete");
     safe(() => disposeSeqCounter(sessionId), "disposeSeqCounter");
-    // hosted PTY 走的是 onSessionClosed = cleanupSessionResources, 不经过 worker socket
-    // close → onDisconnect → permissionBroker.cleanupSession 那条链, 否则 hosted 模式下
-    // 待审批工具会在 child 退出后留在 broker 永不释放, 客户端的 approval card 永远卡住。
+    // 所有 ownership 都通过 SessionManager.onSessionRemoved 到达这里，不能依赖某一种
+    // worker/socket close 事件，否则另一种会话形态会漏掉 pending approval。
     safe(
       () => deps.permissionBroker.cleanupSession(sessionId, "Session closed"),
       "permissionBroker.cleanupSession",

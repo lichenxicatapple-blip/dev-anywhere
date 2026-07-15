@@ -148,6 +148,17 @@ describe("resolveChatPresentation", () => {
       resolveChatPresentation({ connected: true, proxyOnline: true, routeSessionEnded: true }),
     ).toBe("session-ended");
   });
+
+  it("shows an error presentation for a live session whose worker channel failed", () => {
+    expect(
+      resolveChatPresentation({
+        connected: true,
+        proxyOnline: true,
+        routeSessionEnded: false,
+        sessionState: "error",
+      }),
+    ).toBe("session-error");
+  });
 });
 
 describe("shouldShowPtyApprovalHint", () => {

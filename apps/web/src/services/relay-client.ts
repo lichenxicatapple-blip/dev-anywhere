@@ -16,6 +16,7 @@ import type {
   VoiceProviderConfig,
   VoiceSummaryReason,
 } from "@dev-anywhere/shared";
+import { SESSION_CREATE_CLIENT_TIMEOUT_MS } from "@dev-anywhere/shared";
 import { describeCurrentClientDevice } from "@/lib/client-device";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
@@ -757,7 +758,7 @@ export class RelayClient {
 
   createSession(
     request: Omit<SessionCreateRequest, "type" | "requestId">,
-    timeoutMs = 15_000,
+    timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
   ): Promise<SessionCreateResponse> {
     const requestId = nextRequestId("session-create");
     return this.waitForMessage(

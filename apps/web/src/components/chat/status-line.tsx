@@ -7,6 +7,7 @@ export type StatusLineState =
   | "working"
   | "compacting"
   | "waiting_approval"
+  | "error"
   | "terminated"
   | "disconnected";
 
@@ -19,6 +20,7 @@ const ARIA_LABEL: Record<StatusLineState, string> = {
   working: "正在响应",
   compacting: "正在压缩上下文",
   waiting_approval: "等待工具审批",
+  error: "会话连接异常",
   terminated: "会话已终止",
   disconnected: "连接已断开",
 };

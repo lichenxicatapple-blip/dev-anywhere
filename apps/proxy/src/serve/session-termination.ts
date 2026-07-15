@@ -1,8 +1,6 @@
 import type { Socket } from "node:net";
 import { serviceLogger } from "../common/logger.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
-import type { AgentStatusRegistry } from "./agent-status-registry.js";
-import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
@@ -17,16 +15,8 @@ type SessionTerminationAction =
 interface TerminateSessionDeps {
   sessionManager: SessionManager;
   workerRegistry: WorkerRegistry;
-  controlHandlers: ControlMessageHandlers;
   terminalSockets: Map<string, Socket>;
   hostedPtyRegistry: HostedPtyRegistry;
-  agentStatusRegistry: AgentStatusRegistry;
-  // 同步终止路径必须广播 session list，否则 web 看到幽灵 row。hosted PTY 终止异步走
-  // child.onExit → onSessionClosed → cleanupSessionResources 内部已广播，因此 hosted
-  // 路径不在此处调用。所有同步路径（detach_local_terminal /
-  // terminate_terminal_worker / terminate_json_worker）由本函数收口调用，
-  // 调用方不必手动补。
-  broadcastSessionList: () => void;
 }
 
 export function terminateSessionByOwnership(
@@ -55,9 +45,6 @@ export function terminateSessionByOwnership(
     }
     deps.terminalSockets.delete(sessionId);
     const result = deps.sessionManager.terminateSession(sessionId);
-    deps.controlHandlers.cleanup(sessionId);
-    deps.agentStatusRegistry.delete(sessionId);
-    deps.broadcastSessionList();
     serviceLogger.info(
       { sessionId, success: result.success },
       "Terminal worker session terminated",
@@ -74,9 +61,6 @@ export function terminateSessionByOwnership(
     const result = deps.sessionManager.terminateSession(sessionId, {
       preserveProviderHooks: true,
     });
-    deps.controlHandlers.cleanup(sessionId);
-    deps.agentStatusRegistry.delete(sessionId);
-    deps.broadcastSessionList();
     serviceLogger.info(
       { sessionId, success: result.success },
       "Local terminal session detached from remote view",
@@ -91,13 +75,17 @@ export function terminateSessionByOwnership(
   }
 
   if (session?.mode === "json") {
-    deps.workerRegistry.send(sessionId, { type: "worker_stop" });
-    deps.workerRegistry.delete(sessionId);
+    const stopDelivered = deps.workerRegistry.send(sessionId, { type: "worker_stop" });
+    if (stopDelivered) {
+      deps.workerRegistry.delete(sessionId);
+    } else {
+      deps.workerRegistry.terminateProcess(sessionId);
+    }
     const result = deps.sessionManager.terminateSession(sessionId);
-    deps.controlHandlers.cleanup(sessionId);
-    deps.agentStatusRegistry.delete(sessionId);
-    deps.broadcastSessionList();
-    serviceLogger.info({ sessionId, success: result.success }, "JSON worker session terminated");
+    serviceLogger.info(
+      { sessionId, success: result.success, stopDelivered },
+      "JSON worker session terminated",
+    );
     return { success: result.success, action: "terminate_json_worker" };
   }
 

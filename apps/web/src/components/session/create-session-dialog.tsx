@@ -349,12 +349,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         </section>
       ) : null}
       <section aria-label="交互方式" className="flex min-w-0 flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-sm">交互方式</span>
-          <span className="text-xs text-muted-foreground">
-            {mode === "pty" ? "完整终端" : "聊天消息"}
-          </span>
-        </div>
+        <span className="text-sm">交互方式</span>
         <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
           <button
             type="button"

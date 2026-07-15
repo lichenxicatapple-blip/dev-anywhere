@@ -30,6 +30,8 @@ import {
 
 const E2E_TIMEOUT = 30_000;
 const RELAY_ENTRY = pathResolve(import.meta.dirname, "../..", "index.ts");
+const RELAY_OUTPUT_LIMIT = 8_192;
+const relayOutput = new WeakMap<ChildProcess, { stdout: string; stderr: string }>();
 
 // ── 工具函数 ─────────────────────────────────────────────
 
@@ -58,8 +60,23 @@ function spawnRelay(opts: SpawnRelayOptions): ChildProcess {
   // 显式设置 DATA_DIR：传了 dataDir 用指定路径，没传则禁用持久化防止加载残留数据
   env.DATA_DIR = opts.dataDir || "";
   if (opts.heartbeatInterval) env.HEARTBEAT_INTERVAL = String(opts.heartbeatInterval);
-  // detached: true 创建新进程组，方便 killRelay 一次杀掉整个进程树
-  const proc = spawn("npx", ["tsx", RELAY_ENTRY], { env, stdio: "pipe", detached: true });
+  // 直接复用 Vitest 当前 Node，避免完整套件并发时 npx -> tsx -> node 的多层启动抖动。
+  // detached: true 创建新进程组，方便 killRelay 一次终止整个 Relay 进程。
+  const proc = spawn(process.execPath, ["--import", "tsx", RELAY_ENTRY], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  const output = { stdout: "", stderr: "" };
+  relayOutput.set(proc, output);
+  proc.stdout?.setEncoding("utf8");
+  proc.stderr?.setEncoding("utf8");
+  proc.stdout?.on("data", (chunk: string) => {
+    output.stdout = (output.stdout + chunk).slice(-RELAY_OUTPUT_LIMIT);
+  });
+  proc.stderr?.on("data", (chunk: string) => {
+    output.stderr = (output.stderr + chunk).slice(-RELAY_OUTPUT_LIMIT);
+  });
   proc.unref();
   return proc;
 }
@@ -75,9 +92,23 @@ function killRelay(proc: ChildProcess, signal: NodeJS.Signals = "SIGKILL"): void
   }
 }
 
-async function waitForReady(port: number, timeoutMs = 20_000): Promise<void> {
+function formatRelayFailure(proc: ChildProcess): string {
+  const output = relayOutput.get(proc);
+  const details = [
+    `exitCode=${String(proc.exitCode)}`,
+    `signal=${String(proc.signalCode)}`,
+    output?.stdout.trim() ? `stdout:\n${output.stdout.trim()}` : "",
+    output?.stderr.trim() ? `stderr:\n${output.stderr.trim()}` : "",
+  ].filter(Boolean);
+  return details.join("\n");
+}
+
+async function waitForReady(port: number, proc: ChildProcess, timeoutMs = 20_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      throw new Error(`Relay exited before listening on port ${port}\n${formatRelayFailure(proc)}`);
+    }
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
       if (res.ok) return;
@@ -86,7 +117,9 @@ async function waitForReady(port: number, timeoutMs = 20_000): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`Relay not ready on port ${port} after ${timeoutMs}ms`);
+  throw new Error(
+    `Relay not ready on port ${port} after ${timeoutMs}ms\n${formatRelayFailure(proc)}`,
+  );
 }
 
 function waitForExit(proc: ChildProcess, timeoutMs = 5000): Promise<number | null> {
@@ -174,7 +207,7 @@ describe("proxy lifecycle", () => {
   beforeAll(async () => {
     port = await findFreePort();
     relay = spawnRelay({ port });
-    await waitForReady(port);
+    await waitForReady(port, relay);
   }, E2E_TIMEOUT);
 
   afterAll(async () => {
@@ -512,7 +545,7 @@ describe("client lifecycle", () => {
   beforeAll(async () => {
     port = await findFreePort();
     relay = spawnRelay({ port });
-    await waitForReady(port);
+    await waitForReady(port, relay);
   }, E2E_TIMEOUT);
 
   afterAll(async () => {
@@ -843,7 +876,7 @@ describe("disk persistence and relay restart", () => {
       const dataDir = mkdtempSync(join(tmpdir(), "relay-e2e-"));
       const relay = spawnRelay({ port, dataDir });
       procs.push(relay);
-      await waitForReady(port);
+      await waitForReady(port, relay);
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
@@ -869,7 +902,7 @@ describe("disk persistence and relay restart", () => {
 
       const relay1 = spawnRelay({ port });
       procs.push(relay1);
-      await waitForReady(port);
+      await waitForReady(port, relay1);
 
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
@@ -883,7 +916,7 @@ describe("disk persistence and relay restart", () => {
 
       const relay2 = spawnRelay({ port });
       procs.push(relay2);
-      await waitForReady(port);
+      await waitForReady(port, relay2);
 
       const proxy2 = ws.proxy(port);
       await waitForOpen(proxy2);
@@ -901,7 +934,7 @@ describe("disk persistence and relay restart", () => {
       const port = await findFreePort();
       const relay = spawnRelay({ port });
       procs.push(relay);
-      await waitForReady(port);
+      await waitForReady(port, relay);
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
@@ -927,7 +960,7 @@ describe("heartbeat dead connection detection", () => {
     port = await findFreePort();
     // 500ms 心跳间隔加速测试
     relay = spawnRelay({ port, heartbeatInterval: 500 });
-    await waitForReady(port);
+    await waitForReady(port, relay);
   }, E2E_TIMEOUT);
 
   afterAll(async () => {
@@ -1029,7 +1062,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const port = await findFreePort();
       const relay = spawnRelay({ port, heartbeatInterval: 500 });
       procs.push(relay);
-      await waitForReady(port);
+      await waitForReady(port, relay);
 
       // -- 阶段 1: 正常工作 --
       const proxy1 = ws.proxy(port);
@@ -1092,7 +1125,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const port = await findFreePort();
       const relay = spawnRelay({ port });
       procs.push(relay);
-      await waitForReady(port);
+      await waitForReady(port, relay);
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);

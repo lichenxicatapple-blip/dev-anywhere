@@ -114,6 +114,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const permissionBroker = new PermissionBroker();
   const agentStatusRegistry = new AgentStatusRegistry();
   let unregisterHookSession: (sessionId: string) => void = () => {};
+  // SessionManager 在构造期会清理磁盘中的失效记录；此时 relay/control runtime 尚未建立。
+  // runtime 就绪后再接入统一清理出口，让手动终止、worker 退出、reaper 和 PTY 关闭
+  // 都通过同一条 onSessionRemoved 生命周期完成资源回收与 session_list 广播。
+  let cleanupRemovedSessionRuntime: (sessionId: string) => void = () => {};
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     historyMetadataPath: HISTORY_METADATA_PATH,
@@ -121,14 +125,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       if (!context?.preserveProviderHooks) {
         unregisterHookSession(id);
       }
-      permissionBroker.cleanupSession(id, "session removed");
-      agentStatusRegistry.delete(id);
       const paths = sessionPaths(id);
       try {
         rmSync(paths.dir, { recursive: true, force: true });
       } catch {
         // 会话目录清理失败不影响主流程
       }
+      cleanupRemovedSessionRuntime(id);
     },
   });
   sessionManager.startReaper();
@@ -192,6 +195,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     controlHandlers,
     permissionBroker,
   });
+  cleanupRemovedSessionRuntime = eventBridge.cleanupSessionResources;
   const jsonObserver = new JsonObserver({
     changeSessionState: eventBridge.changeSessionState,
     emitAgentStatus: eventBridge.emitAgentStatus,
@@ -236,7 +240,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     updateTerminalCwd: eventBridge.updateTerminalCwd,
     applyPtyStateToSession: (sessionId, ptyState) =>
       applyPtyStateToSession(ptyBridgeDeps, sessionId, ptyState),
-    onSessionClosed: eventBridge.cleanupSessionResources,
   });
   const terminalWorkerSpawner = new TerminalWorkerSpawner();
   const terminalSubscriptionBacklog = new TerminalSubscriptionBacklog();
@@ -331,14 +334,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       terminalSubscriptionBacklog,
       hostedPtyRegistry,
       relayConnection,
-      controlHandlers,
-      agentStatusRegistry,
       permissionBroker,
       hookEventRouter: hookRuntime.hookEventRouter,
       createHookContext: hookRuntime.createHookContext,
       emitAgentStatus: eventBridge.emitAgentStatus,
       updateTerminalCwd: eventBridge.updateTerminalCwd,
-      cleanupSessionResources: eventBridge.cleanupSessionResources,
       config: statusConfig,
       resolveInterruptedApprovals: (sessionId) =>
         resolveInterruptedApprovals(
