@@ -3,11 +3,12 @@ import os from "node:os";
 import path from "path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type PreviewServer, type ViteDevServer } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 const BROWSER_STATE_DUMP_ENDPOINT = "/__dev_anywhere_debug/browser-state-dumps";
 const BROWSER_STATE_DUMP_LIMIT_BYTES = 20 * 1024 * 1024;
+const VOICE_FIXTURE_ENDPOINT = "/__dev_anywhere_debug/voice-fixture";
 
 function normalizeRelayTarget(target: string | undefined): { http: string; ws: string } {
   const raw = (target || "http://localhost:3100").trim().replace(/\/$/, "");
@@ -91,9 +92,50 @@ function browserStateDumpPlugin(): Plugin {
   };
 }
 
+function voiceFixturePlugin(): Plugin {
+  const registerMiddleware = (server: ViteDevServer | PreviewServer): void => {
+    server.middlewares.use(VOICE_FIXTURE_ENDPOINT, (req, res, next) => {
+      if (req.method !== "GET") {
+        next();
+        return;
+      }
+      const fixturePath =
+        process.env.DEV_ANYWHERE_VOICE_FIXTURE ??
+        path.resolve(__dirname, "../../artifacts/voice-pilot-uat/vp_test-16k.wav");
+      if (!fs.existsSync(fixturePath)) {
+        res.statusCode = 404;
+        res.end("Voice fixture not found");
+        return;
+      }
+      res.statusCode = 200;
+      const extension = path.extname(fixturePath).toLowerCase();
+      const contentType =
+        extension === ".wav"
+          ? "audio/wav"
+          : extension === ".m4a" || extension === ".mp4"
+            ? "audio/mp4"
+            : "application/octet-stream";
+      res.setHeader("content-type", contentType);
+      res.setHeader("cache-control", "no-store");
+      fs.createReadStream(fixturePath).pipe(res);
+    });
+  };
+
+  return {
+    name: "dev-anywhere-voice-fixture",
+    configureServer: registerMiddleware,
+    configurePreviewServer(server) {
+      if (process.env.VITE_DEV_ANYWHERE_VOICE_FIXTURE === "1") {
+        registerMiddleware(server);
+      }
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     browserStateDumpPlugin(),
+    voiceFixturePlugin(),
     react(),
     tailwindcss(),
     VitePWA({

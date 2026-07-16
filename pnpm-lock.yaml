@@ -106,6 +106,9 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      wave-resampler:
+        specifier: 1.0.0
+        version: 1.0.0
       ws:
         specifier: ^8.20.0
         version: 8.20.0
@@ -131,6 +134,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@echogarden/fvad-wasm':
+        specifier: 0.2.0
+        version: 0.2.0
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@4.2.2)
@@ -820,6 +826,9 @@ packages:
   '@csstools/css-tokenizer@3.0.4':
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
+
+  '@echogarden/fvad-wasm@0.2.0':
+    resolution: {integrity: sha512-jPPzN6uV23dsOkKnGxajBDw81Xx3ICecw72sIzI+m4PzFWpSf/QOLvlgf7mySfqCngD54LRC1aDgD5haB45dbg==}
 
   '@emnapi/core@1.9.2':
     resolution: {integrity: sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA==}
@@ -5669,6 +5678,10 @@ packages:
     resolution: {integrity: sha512-3hu+tD8YzSLGuFYtPRb48vdhKMi0KQV5sn+uWr8+7dMEq/2G/dtLrdDinkLjqq5TIbIBjYJ4Ax/n3YiaW7QM8A==}
     engines: {node: 20 || >=22}
 
+  wave-resampler@1.0.0:
+    resolution: {integrity: sha512-bE3rbpZXuKAV52Cd8/BeJvy82ZqEHK8pPWHrZ9JioaVVTBlmWbDC+u4p9blhFcf0Skepb4hlOAHc25XfqLC48g==}
+    engines: {node: '>=8'}
+
   webidl-conversions@4.0.2:
     resolution: {integrity: sha512-YQ+BmxuTgd6UXZW3+ICGfyqRyHXVlD5GtQr5+qjiNW7bF0cqrzX500HVXPBOvgXb5YnzDd+h0zqyv61KUD7+Sg==}
 
@@ -6550,6 +6563,8 @@ snapshots:
       '@csstools/css-tokenizer': 3.0.4
 
   '@csstools/css-tokenizer@3.0.4': {}
+
+  '@echogarden/fvad-wasm@0.2.0': {}
 
   '@emnapi/core@1.9.2':
     dependencies:
@@ -11758,6 +11773,8 @@ snapshots:
       xml-name-validator: 5.0.0
 
   walk-up-path@4.0.0: {}
+
+  wave-resampler@1.0.0: {}
 
   webidl-conversions@4.0.2: {}
 

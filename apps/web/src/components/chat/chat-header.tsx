@@ -43,8 +43,14 @@ import { toast } from "@/components/toast";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
+import { screenWakeLockManager } from "@/lib/screen-wake-lock-manager";
 import { cn } from "@/lib/utils";
 import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
+import { voiceAudioSession, type VoiceAudioSessionLease } from "@/voice/browser-audio-session";
+import { voicePlaybackContext } from "@/voice/voice-playback-context";
+import { recordVoicePilotDiagnostic } from "@/voice/voice-pilot-diagnostics";
+import { voicePilotWakeLockScopeKey } from "@/voice/voice-pilot-wake-lock";
+import { resolveVoiceSpeechSource } from "@/voice/speech-capture";
 import {
   Dialog,
   DialogContent,
@@ -242,13 +248,76 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
 
   async function confirmVoicePilotStart(): Promise<void> {
     setVoicePilotStarting(true);
+    let audioSessionLease: VoiceAudioSessionLease | null = null;
+    let wakeLockHandedOff = false;
+    const wakeLockScopeKey = voicePilotWakeLockScopeKey(sessionId);
     try {
-      await ensureMicrophoneReady();
+      recordVoicePilotDiagnostic({
+        sessionId,
+        scope: "runtime",
+        event: "wake-lock-requested",
+        details: {
+          userActivationActive: navigator.userActivation?.isActive ?? false,
+          visibilityState: document.visibilityState,
+          secureContext: window.isSecureContext,
+        },
+      });
+      const wakeLockReady = screenWakeLockManager.enable(wakeLockScopeKey).then(
+        () => {
+          recordVoicePilotDiagnostic({
+            sessionId,
+            scope: "runtime",
+            event: "wake-lock-acquired",
+          });
+        },
+        (error: unknown) => {
+          recordVoicePilotDiagnostic({
+            sessionId,
+            scope: "runtime",
+            event: "wake-lock-failed",
+            details: {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+          throw new Error("屏幕常亮请求被浏览器拒绝，Voice Pilot 未开启。", {
+            cause: error,
+          });
+        },
+      );
+      // Browser-gated capabilities must be requested directly from this click.
+      // iPadOS otherwise loses user activation before React effects are flushed.
+      audioSessionLease = voiceAudioSession.acquire("capture");
+      const playbackReady = voicePlaybackContext.prepare();
+      const speechSource = resolveVoiceSpeechSource();
+      const speechSourceReady =
+        speechSource.kind === "microphone" ? ensureMicrophoneReady() : Promise.resolve();
+      const startupResults = await Promise.allSettled([
+        wakeLockReady,
+        playbackReady,
+        speechSourceReady,
+      ]);
+      const startupFailure = startupResults.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (startupFailure) throw startupFailure.reason;
       enableVoicePilot(sessionId);
+      wakeLockHandedOff = true;
       setVoicePilotConfirmOpen(false);
     } catch (err) {
+      recordVoicePilotDiagnostic({
+        sessionId,
+        scope: "runtime",
+        event: "startup-failed",
+        details: {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
+      audioSessionLease?.release();
+      if (!wakeLockHandedOff) {
+        await screenWakeLockManager.disable(wakeLockScopeKey).catch(() => undefined);
+      }
       setVoicePilotStarting(false);
     }
   }
@@ -367,7 +436,9 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
                 </ChatMenuIcon>
                 <span className="min-w-0 flex-1">
                   {!screenWakeLock.supported
-                    ? "屏幕常亮（浏览器不支持）"
+                    ? screenWakeLock.unavailableReason === "insecure-context"
+                      ? "屏幕常亮（需要 HTTPS）"
+                      : "屏幕常亮（浏览器不支持）"
                     : voicePilotControlsWakeLock
                       ? "屏幕常亮（Voice Pilot 控制）"
                       : "屏幕常亮"}
@@ -518,17 +589,15 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
           if (!voicePilotStarting) setVoicePilotConfirmOpen(open);
         }}
       >
-        <DialogContent className="sm:max-w-md" data-slot="voice-pilot-wake-lock-dialog">
+        <DialogContent
+          className="sm:max-w-md"
+          data-slot="voice-pilot-wake-lock-dialog"
+          focusSurfaceOnOpen
+        >
           <DialogHeader>
             <DialogTitle>开启 Voice Pilot？</DialogTitle>
-            <DialogDescription>
-              开启后会自动保持屏幕常亮，直到你停止 Voice Pilot。
-            </DialogDescription>
+            <DialogDescription>开启后会持续聆听并保持屏幕常亮，停止后自动恢复。</DialogDescription>
           </DialogHeader>
-          <div className="rounded-md border border-border bg-muted/35 p-3 text-sm leading-6 text-muted-foreground">
-            <p>运行期间不能单独关闭这个常亮状态。</p>
-            <p>长时间使用可能会显著增加电量消耗和设备发热。</p>
-          </div>
           <DialogFooter>
             <Button
               type="button"
@@ -540,6 +609,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
             </Button>
             <Button
               type="button"
+              data-slot="voice-pilot-confirm-start"
               disabled={voicePilotStarting}
               onClick={() => {
                 void confirmVoicePilotStart();

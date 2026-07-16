@@ -187,6 +187,20 @@ describe("RelayRegistry", () => {
       expect(registry.getClientBinding("c1")?.ws).toBe(ws2);
     });
 
+    it("only lets the current client socket clear its binding", () => {
+      const oldWs = createMockWs();
+      const currentWs = createMockWs();
+      registry.registerProxy("p1", createMockWs());
+      registry.bindClientById("c1", "p1", oldWs);
+      registry.updateClientSocket("c1", currentWs);
+
+      expect(registry.unbindClientSocket("c1", oldWs)).toBe(false);
+      expect(registry.getClientBinding("c1")?.ws).toBe(currentWs);
+
+      expect(registry.unbindClientSocket("c1", currentWs)).toBe(true);
+      expect(registry.getClientBinding("c1")?.ws).toBeNull();
+    });
+
     it("getClientsForProxy includes clientId-bound clients", () => {
       const proxyWs = createMockWs();
       const clientWs = createMockWs();

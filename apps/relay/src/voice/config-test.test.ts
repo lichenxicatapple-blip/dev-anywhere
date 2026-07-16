@@ -81,7 +81,7 @@ describe("Voice config tester", () => {
     expect(asrClientFactory).not.toHaveBeenCalled();
   });
 
-  it("uses fixed TTS audio to verify both synthesis and recognition, then returns playable audio", async () => {
+  it("returns formal-quality TTS audio and resamples a copy for recognition", async () => {
     let tts: MockTtsClient | undefined;
     let asr: MockAsrClient | undefined;
     const ttsConfigs: BailianTtsConfig[] = [];
@@ -102,24 +102,26 @@ describe("Voice config tester", () => {
 
     const promise = tester.test(baseConfig({ apiKey: "sk-unsaved", region: "intl" }));
     expect(tts?.spoken).toEqual(["语音助手测试"]);
-    const firstAudioChunk = Buffer.alloc(3200, 1);
-    const secondAudioChunk = Buffer.from([2]);
+    const firstAudioChunk = Buffer.alloc(4800, 1);
+    const secondAudioChunk = Buffer.alloc(4800, 2);
     tts?.emit("audio", firstAudioChunk);
     tts?.emit("audio", secondAudioChunk);
     tts?.emit("finished");
     await vi.waitFor(() => expect(asr).toBeDefined());
     asr?.emit("ready");
-    expect(asr?.pcm).toEqual([firstAudioChunk]);
+    expect(asr?.pcm).toHaveLength(1);
+    expect(asr?.pcm[0]).toHaveLength(3200);
     expect(asr?.stopped).toBe(false);
     await vi.waitFor(() => {
-      expect(asr?.pcm).toEqual([firstAudioChunk, secondAudioChunk]);
+      expect(asr?.pcm).toHaveLength(2);
+      expect(Buffer.concat(asr?.pcm ?? [])).toHaveLength(6400);
       expect(asr?.stopped).toBe(true);
     });
     asr?.emit("final", "语音助手测试");
 
     await expect(promise).resolves.toEqual({
       audio: Buffer.concat([firstAudioChunk, secondAudioChunk]),
-      sampleRate: 16000,
+      sampleRate: 24000,
       transcript: "语音助手测试",
     });
     expect(ttsConfigs).toEqual([
@@ -128,7 +130,7 @@ describe("Voice config tester", () => {
         region: "intl",
         model: "cosyvoice-v3-flash",
         voice: "longanyang",
-        sampleRate: 16000,
+        sampleRate: 24000,
       },
     ]);
     expect(asrConfigs).toEqual([

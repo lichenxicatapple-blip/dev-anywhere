@@ -1,5 +1,4 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,10 +7,15 @@ import {
   useVoicePilotStore,
   type VoicePilotPhase,
 } from "@/voice/voice-pilot-store";
+import {
+  pcmWaveformDisplayValue,
+  VOICE_WAVEFORM_BIN_CAPACITY,
+  type PcmWaveformBin,
+} from "@/voice/pcm-waveform";
 
 const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
   idle: "离线",
-  starting: "启动",
+  starting: "准备中",
   listening: "聆听",
   submitting: "发送",
   waiting: "等待",
@@ -36,64 +40,23 @@ const PHASE_TONE: Record<VoicePilotPhase, string> = {
 };
 
 const WAVE_VIEWBOX = { width: 120, height: 28 };
-const WAVE_HISTORY_LEN = 32;
-const WAVE_FRAME_MS = 60;
 
-function audioDrivenActivity(level: number, floor: number): number {
-  if (level <= 0) return floor;
-  if (level >= 0.34) return Math.min(1, level);
-  return Math.max(floor, Math.min(1, level * 2.4));
-}
-
-function activityForPhase(phase: VoicePilotPhase, level: number): number {
-  if (phase === "paused" || phase === "idle" || phase === "error") return 0.08;
-  if (phase === "waiting") return 0.18;
-  if (phase === "approval") return audioDrivenActivity(level, 0.16);
-  if (phase === "summarizing" || phase === "submitting" || phase === "starting") {
-    return Math.max(0.42, level);
-  }
-  if (phase === "speaking") {
-    return audioDrivenActivity(level, 0.16);
-  }
-  if (phase === "listening") {
-    return Math.max(0.12, level);
-  }
-  return level;
-}
-
-function shouldPulseWave(phase: VoicePilotPhase): boolean {
-  return phase !== "idle" && phase !== "paused" && phase !== "error";
-}
-
-function buildWavePath(history: number[]): string {
+function buildWavePath(waveform: PcmWaveformBin[]): string {
   const width = WAVE_VIEWBOX.width;
   const height = WAVE_VIEWBOX.height;
-  const centerY = height / 2;
-  const len = history.length;
-  if (len === 0) {
-    return `M 0 ${centerY.toFixed(1)} H ${width.toFixed(1)}`;
-  }
-  // 基于实时音量历史绘制对称波形: 上下镜像, 振幅与每帧音量正相关
-  const points: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < len; i += 1) {
-    const value = Math.max(0, Math.min(1, history[i] ?? 0));
-    const x = (i / Math.max(1, len - 1)) * width;
-    const sign = i % 2 === 0 ? 1 : -1;
-    // 0.5 是基础静态高度防止纯静音时是平线
-    const y = centerY - sign * (value * (height / 2 - 1) + 0.5);
-    points.push({ x, y });
-  }
-  let path = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const current = points[i];
-    const next = points[i + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    path += ` Q ${current.x.toFixed(1)} ${current.y.toFixed(1)} ${midX.toFixed(1)} ${midY.toFixed(1)}`;
-  }
-  const last = points[points.length - 1];
-  path += ` T ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
-  return path;
+  if (waveform.length === 0) return "";
+  const offset = VOICE_WAVEFORM_BIN_CAPACITY - waveform.length;
+
+  return waveform
+    .map((bin, index) => {
+      const x = ((offset + index + 0.5) / VOICE_WAVEFORM_BIN_CAPACITY) * width;
+      const max = pcmWaveformDisplayValue(bin.max);
+      const min = pcmWaveformDisplayValue(bin.min);
+      const top = ((1 - max) * height) / 2;
+      const bottom = ((1 - min) * height) / 2;
+      return `M ${x.toFixed(2)} ${top.toFixed(2)} L ${x.toFixed(2)} ${bottom.toFixed(2)}`;
+    })
+    .join(" ");
 }
 
 export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
@@ -103,45 +66,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   const phase = pilot.phase;
   const level = pilot.activityLevel;
 
-  // 当前帧音量(派生): 受 phase 调制后的目标振幅; 用于实时显示和填入历史
-  const currentActivity = activityForPhase(phase, level);
-  // 用 ref + tick 节流维护最近 N 帧, 避免每个 PCM chunk 都重渲染
-  const phaseRef = useRef(phase);
-  const levelRef = useRef(level);
-  const frameRef = useRef(0);
-  phaseRef.current = phase;
-  levelRef.current = level;
-  const [history, setHistory] = useState<number[]>(() =>
-    new Array(WAVE_HISTORY_LEN).fill(currentActivity),
-  );
-
-  useEffect(() => {
-    if (!enabled) return;
-    const timer = setInterval(() => {
-      frameRef.current += 1;
-      const phase = phaseRef.current;
-      const base = activityForPhase(phase, levelRef.current);
-      const pulse = shouldPulseWave(phase)
-        ? Math.sin(frameRef.current * 0.62) * 0.045 + Math.sin(frameRef.current * 0.19) * 0.025
-        : 0;
-      const value = Math.max(0.04, Math.min(1, base + pulse));
-      setHistory((prev) => {
-        const next = prev.length >= WAVE_HISTORY_LEN ? prev.slice(1) : prev.slice();
-        next.push(value);
-        return next;
-      });
-    }, WAVE_FRAME_MS);
-    return () => clearInterval(timer);
-  }, [enabled]);
-
   if (!enabled) return null;
 
   const tone = PHASE_TONE[phase];
   const active = phase !== "paused" && phase !== "error";
-  const wavePath = buildWavePath(history);
-  const waveOpacity = 0.34 + currentActivity * 0.5;
-  const waveOpacityLow = 0.3 + currentActivity * 0.42;
-  const waveOpacityHigh = 0.46 + currentActivity * 0.5;
+  const wavePath = buildWavePath(pilot.waveform);
   const detailText = pilot.error?.trim() || null;
 
   return (
@@ -188,16 +117,9 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
       </Tooltip>
       <div
         data-slot="voice-pilot-waveform"
-        data-activity-level={Math.round(currentActivity * 100)}
+        data-activity-level={Math.round(level * 100)}
+        data-waveform-bins={pilot.waveform.length}
         className="dev-voice-waveform mt-2"
-        style={
-          {
-            "--voice-level": currentActivity,
-            "--voice-opacity": waveOpacity.toFixed(3),
-            "--voice-opacity-low": waveOpacityLow.toFixed(3),
-            "--voice-opacity-high": waveOpacityHigh.toFixed(3),
-          } as CSSProperties
-        }
       >
         <svg
           aria-hidden="true"

@@ -11,7 +11,9 @@ describe("parseVoiceCommand", () => {
     expect(parseVoiceCommand("状态")).toEqual({ type: "status" });
     expect(parseVoiceCommand("退出语音助手")).toEqual({ type: "exit" });
     expect(parseVoiceCommand("关闭语音助手")).toEqual({ type: "exit" });
-    expect(parseVoiceCommand("停止语音模式")).toEqual({ type: "exit" });
+    expect(parseVoiceCommand("停止语音助手")).toEqual({ type: "exit" });
+    expect(parseVoiceCommand("嗯关闭语音助手吧")).toEqual({ type: "exit" });
+    expect(parseVoiceCommand("退出 VoicePilot")).toEqual({ type: "exit" });
   });
 
   it("requires explicit approval and denial phrases", () => {

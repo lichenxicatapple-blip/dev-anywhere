@@ -10,6 +10,7 @@ import {
   type BailianTtsConfig,
 } from "./bailian-tts.js";
 import type { StoredVoiceConfig } from "./config-store.js";
+import { resampleMonoPcmS16le } from "./pcm-resample.js";
 
 export interface VoiceConfigTestResult {
   audio?: Buffer;
@@ -28,7 +29,8 @@ interface BailianVoiceConfigTesterOptions {
   timeoutMs?: number;
 }
 
-const TEST_SAMPLE_RATE = 16000;
+const TTS_TEST_SAMPLE_RATE = 24000;
+const ASR_TEST_SAMPLE_RATE = 16000;
 const ASR_TEST_CHUNK_BYTES = 3200;
 const ASR_TEST_CHUNK_INTERVAL_MS = 100;
 
@@ -68,14 +70,19 @@ export function createBailianVoiceConfigTester(
         timeoutMs,
         clientFactory: ttsClientFactory,
       });
+      const recognitionAudio = resampleMonoPcmS16le(
+        audio,
+        TTS_TEST_SAMPLE_RATE,
+        ASR_TEST_SAMPLE_RATE,
+      );
       const transcript = await recognizeTestAudio({
         config,
-        audio,
+        audio: recognitionAudio,
         sampleText,
         timeoutMs,
         clientFactory: asrClientFactory,
       });
-      return { audio, sampleRate: TEST_SAMPLE_RATE, transcript };
+      return { audio, sampleRate: TTS_TEST_SAMPLE_RATE, transcript };
     },
   };
 }
@@ -92,7 +99,7 @@ function synthesizeTestAudio(options: {
     region: config.region,
     model: config.ttsModel,
     voice: config.ttsVoice,
-    sampleRate: TEST_SAMPLE_RATE,
+    sampleRate: TTS_TEST_SAMPLE_RATE,
   });
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -146,7 +153,7 @@ function recognizeTestAudio(options: {
     apiKey: config.apiKey!,
     region: config.region,
     model: config.asrModel,
-    sampleRate: TEST_SAMPLE_RATE,
+    sampleRate: ASR_TEST_SAMPLE_RATE,
     language: "zh",
   });
 

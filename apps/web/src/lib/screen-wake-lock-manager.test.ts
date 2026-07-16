@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ScreenWakeLockManager, type WakeLockSentinelLike } from "./screen-wake-lock-manager";
+import {
+  detectScreenWakeLockUnavailableReason,
+  ScreenWakeLockManager,
+  type WakeLockSentinelLike,
+} from "./screen-wake-lock-manager";
 
 class FakeSentinel extends EventTarget implements WakeLockSentinelLike {
   released = false;
@@ -15,10 +19,21 @@ class FakeDocument extends EventTarget {
 }
 
 describe("ScreenWakeLockManager", () => {
+  it("distinguishes insecure pages from browsers without the API", () => {
+    expect(detectScreenWakeLockUnavailableReason(false, false)).toBe("insecure-context");
+    expect(detectScreenWakeLockUnavailableReason(true, false)).toBe("unsupported");
+    expect(detectScreenWakeLockUnavailableReason(true, true)).toBeNull();
+  });
+
   it("keeps the browser wake lock while any scope remains active", async () => {
     const sentinels = [new FakeSentinel()];
     const request = vi.fn(async () => sentinels.shift()!);
     const manager = new ScreenWakeLockManager({ request, document: new FakeDocument() });
+
+    expect(manager.getSnapshot("chat:s1")).toMatchObject({
+      supported: true,
+      unavailableReason: null,
+    });
 
     await manager.enable("chat:s1");
     await manager.enable("voice-pilot:s1");

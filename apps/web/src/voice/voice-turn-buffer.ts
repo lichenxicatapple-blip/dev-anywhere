@@ -61,9 +61,9 @@ export class VoiceTurnBuffer {
     this.clearIdleTimer();
   }
 
-  flushNow(): void {
+  flushNow(): boolean {
     this.clearIdleTimer();
-    this.emitIfReady();
+    return this.emitIfReady();
   }
 
   dispose(): void {
@@ -89,14 +89,15 @@ export class VoiceTurnBuffer {
     this.idleTimer = null;
   }
 
-  private emitIfReady(): void {
+  private emitIfReady(): boolean {
     this.clearIdleTimer();
     const segments = [...this.finalSegments];
     if (this.partialText) segments.push(this.partialText);
     const text = segments.join("\n").trim();
     this.finalSegments = [];
     this.partialText = "";
-    if (!text) return;
+    if (!text) return false;
     this.onTurnReady(text);
+    return true;
   }
 }

@@ -20,10 +20,7 @@ describe("VoicePilotSessionMachine", () => {
     const result = machine.send({ type: "ttsReady" });
 
     expect(result.phase).toBe("listening");
-    expect(result.effects).toEqual([
-      { type: "playCue", cue: "listening-start" },
-      { type: "startCapture" },
-    ]);
+    expect(result.effects).toEqual([{ type: "beginListening" }]);
   });
 
   it("buffers ASR final text without leaving listening", () => {
@@ -87,7 +84,7 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "agentBecameIdle" })).toEqual({
       phase: "listening",
-      effects: [{ type: "startCapture" }],
+      effects: [{ type: "beginListening" }],
     });
   });
 
@@ -113,7 +110,7 @@ describe("VoicePilotSessionMachine", () => {
 
     expect(machine.send({ type: "resumeRequested" })).toEqual({
       phase: "listening",
-      effects: [{ type: "playCue", cue: "listening-start" }, { type: "startCapture" }],
+      effects: [{ type: "beginListening" }],
     });
   });
 
@@ -125,8 +122,9 @@ describe("VoicePilotSessionMachine", () => {
       phase: "listening",
       effects: [
         { type: "cancelTurnBuffer" },
+        { type: "stopCapture" },
         { type: "playCue", cue: "user-end" },
-        { type: "startCapture" },
+        { type: "beginListening" },
       ],
     });
   });

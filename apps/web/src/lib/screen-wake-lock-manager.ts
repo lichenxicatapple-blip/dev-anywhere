@@ -15,7 +15,10 @@ export interface ScreenWakeLockSnapshot {
   active: boolean;
   pending: boolean;
   supported: boolean;
+  unavailableReason: ScreenWakeLockUnavailableReason;
 }
+
+export type ScreenWakeLockUnavailableReason = "insecure-context" | "unsupported" | null;
 
 interface ScreenWakeLockManagerOptions {
   request?: () => Promise<WakeLockSentinelLike>;
@@ -30,10 +33,30 @@ function wakeLockApi(): WakeLockLike | undefined {
   return (navigator as NavigatorWithWakeLock).wakeLock;
 }
 
+export function detectScreenWakeLockUnavailableReason(
+  secureContext: boolean | undefined,
+  hasWakeLockApi: boolean,
+): ScreenWakeLockUnavailableReason {
+  if (secureContext === false) return "insecure-context";
+  return hasWakeLockApi ? null : "unsupported";
+}
+
+function currentUnavailableReason(): ScreenWakeLockUnavailableReason {
+  const secureContext = typeof window === "undefined" ? undefined : window.isSecureContext;
+  return detectScreenWakeLockUnavailableReason(
+    secureContext,
+    typeof wakeLockApi()?.request === "function",
+  );
+}
+
+function unavailableMessage(reason: ScreenWakeLockUnavailableReason): string {
+  return reason === "insecure-context" ? "屏幕常亮需要 HTTPS" : "当前浏览器不支持屏幕常亮";
+}
+
 function defaultRequest(): Promise<WakeLockSentinelLike> {
   const api = wakeLockApi();
   if (typeof api?.request !== "function") {
-    throw new Error("当前浏览器不支持屏幕常亮");
+    throw new Error(unavailableMessage(currentUnavailableReason()));
   }
   return api.request("screen");
 }
@@ -52,12 +75,12 @@ export class ScreenWakeLockManager {
   private requestWakeLock: () => Promise<WakeLockSentinelLike>;
   private documentRef: ScreenWakeLockManagerOptions["document"];
   private windowRef: ScreenWakeLockManagerOptions["window"];
-  private supported: boolean;
+  private unavailableReason: ScreenWakeLockUnavailableReason;
 
   constructor(options: ScreenWakeLockManagerOptions = {}) {
     this.requestWakeLock = options.request ?? defaultRequest;
-    this.supported =
-      typeof options.request === "function" || typeof wakeLockApi()?.request === "function";
+    this.unavailableReason =
+      typeof options.request === "function" ? null : currentUnavailableReason();
     this.documentRef = options.document ?? (typeof document === "undefined" ? undefined : document);
     this.windowRef = options.window ?? (typeof window === "undefined" ? undefined : window);
     this.documentRef?.addEventListener("visibilitychange", this.handleVisibilityChange);
@@ -65,7 +88,7 @@ export class ScreenWakeLockManager {
   }
 
   isSupported(): boolean {
-    return this.supported;
+    return this.unavailableReason === null;
   }
 
   getSnapshot(scopeKey: string): ScreenWakeLockSnapshot {
@@ -73,6 +96,7 @@ export class ScreenWakeLockManager {
       active: this.activeScopes.has(scopeKey),
       pending: this.pendingScopes.has(scopeKey),
       supported: this.isSupported(),
+      unavailableReason: this.unavailableReason,
     };
   }
 

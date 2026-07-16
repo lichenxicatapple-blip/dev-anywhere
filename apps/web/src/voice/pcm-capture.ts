@@ -8,7 +8,7 @@ export function floatToInt16Pcm(samples: Float32Array): Uint8Array {
 }
 
 export interface PcmCapture {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 export async function createPcmCapture(
@@ -34,12 +34,19 @@ export async function createPcmCapture(
   if (audioContext.state === "suspended") {
     await audioContext.resume();
   }
+  let stopPromise: Promise<void> | null = null;
   return {
     stop() {
-      processor.disconnect();
-      source.disconnect();
-      stream.getTracks().forEach((track) => track.stop());
-      void audioContext.close();
+      stopPromise ??= (async () => {
+        processor.onaudioprocess = null;
+        processor.disconnect();
+        source.disconnect();
+        stream.getTracks().forEach((track) => track.stop());
+        if (audioContext.state !== "closed") {
+          await audioContext.close();
+        }
+      })();
+      return stopPromise;
     },
   };
 }

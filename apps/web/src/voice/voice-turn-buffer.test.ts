@@ -105,4 +105,15 @@ describe("VoiceTurnBuffer", () => {
     expect(onTurnReady).not.toHaveBeenCalled();
     expect(buffer.getSnapshot()).toMatchObject({ draft: "", hasDraft: false });
   });
+
+  it("reports whether an immediate flush preserved recognized text", () => {
+    const onTurnReady = vi.fn();
+    const buffer = new VoiceTurnBuffer({ idleTimeoutMs: 3000, onTurnReady });
+
+    expect(buffer.flushNow()).toBe(false);
+    buffer.appendPartial("连接断开前已识别的内容");
+    expect(buffer.flushNow()).toBe(true);
+    expect(onTurnReady).toHaveBeenCalledWith("连接断开前已识别的内容");
+    expect(buffer.flushNow()).toBe(false);
+  });
 });

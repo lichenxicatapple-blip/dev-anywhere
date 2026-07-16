@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { VoiceSummaryReason } from "@dev-anywhere/shared";
+import { encodePcm16ToMuLaw, type VoiceSummaryReason } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getRelayClientToken } from "@/lib/relay-client-token";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
@@ -11,12 +11,29 @@ import {
 } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { fallbackSpeechSummary } from "@/voice/fallback-summary";
-import { createPcmCapture, type PcmCapture } from "@/voice/pcm-capture";
-import { PcmStreamPlayer } from "@/voice/pcm-stream-player";
+import {
+  voiceAudioSession,
+  type VoiceAudioSessionLease,
+  type VoiceAudioSessionMode,
+} from "@/voice/browser-audio-session";
+import { int16PcmEnvelope } from "@/voice/pcm-waveform";
+import { PcmStreamPlayer, type PcmStreamPlayerEvent } from "@/voice/pcm-stream-player";
+import {
+  createSpeechCapture,
+  resolveVoiceSpeechSource,
+  type VoiceSpeechCapture,
+} from "@/voice/speech-capture";
+import { SpeechInputPipeline } from "@/voice/speech-input-pipeline";
+import { VoiceAsrTransport } from "@/voice/voice-asr-transport";
+import { voicePlaybackContext } from "@/voice/voice-playback-context";
 import { decideSpeechPolicy } from "@/voice/speech-policy";
 import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
 import { routeVoiceText, type VoiceCommand } from "@/voice/voice-command-router";
 import { isVoicePilotAgentBusy } from "@/voice/voice-pilot-agent-state";
+import {
+  createVoicePilotEarcon,
+  type VoicePilotEarcon,
+} from "@/voice/voice-pilot-earcon";
 import {
   createVoicePilotSessionMachine,
   type VoicePilotEffect,
@@ -25,18 +42,25 @@ import {
 } from "@/voice/voice-pilot-session-machine";
 import { VoiceTurnBuffer } from "@/voice/voice-turn-buffer";
 import {
+  recordVoicePilotDiagnostic,
+  type VoicePilotDiagnosticInput,
+  type VoicePilotDiagnosticScope,
+} from "@/voice/voice-pilot-diagnostics";
+import {
   DEFAULT_VOICE_PILOT_STATE,
   useVoicePilotStore,
   type VoicePilotState,
 } from "@/voice/voice-pilot-store";
+import { voicePilotWakeLockScopeKey } from "@/voice/voice-pilot-wake-lock";
 
 const ASR_SAMPLE_RATE = 16000;
 const TTS_SAMPLE_RATE = 24000;
-const USER_END_EARCON_MS = 90;
-const ASSISTANT_END_EARCON_MS = 110;
-const LISTENING_START_EARCON_MS = 60;
 const VOICE_TURN_IDLE_MS = 3000;
 const SYSTEM_AUDIO_CAPTURE_GUARD_MS = 180;
+const WAVEFORM_BINS_PER_PCM_CHUNK = 8;
+// Keep enough audio to cover local VAD confirmation and provider startup.
+const SPEECH_PRE_ROLL_MS = 1200;
+const MU_LAW_BYTES_PER_SECOND = ASR_SAMPLE_RATE;
 
 declare global {
   interface Window {
@@ -44,9 +68,33 @@ declare global {
   }
 }
 
-type VoicePilotEarcon = "listening-start" | "user-end" | "assistant-end";
+interface TtsClientStats {
+  requestId: string;
+  requestedAt: number;
+  startedAt: number | null;
+  firstPcmAt: number | null;
+  pcmBytes: number;
+  pcmChunks: number;
+}
 
-const VOICE_ACTIVITY_LEVEL_THRESHOLD = 0.035;
+type VoiceTraceOptions = Omit<VoicePilotDiagnosticInput, "sessionId" | "scope" | "event">;
+
+function toVoiceTraceDetails(
+  details: Record<string, unknown>,
+): NonNullable<VoiceTraceOptions["details"]> {
+  const normalized: NonNullable<VoiceTraceOptions["details"]> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
 
 type SpeechQueueItem =
   | {
@@ -64,13 +112,29 @@ type SpeechQueueItem =
     };
 
 type VoiceSocketMessage =
-  | { type: "ready" }
-  | { type: "partial"; text: string }
-  | { type: "final"; text: string }
+  | { type: "ready"; attemptId?: string }
+  | { type: "partial"; attemptId?: string; text: string }
+  | { type: "final"; attemptId?: string; text: string }
   | { type: "started"; requestId?: string | null }
   | { type: "finished"; requestId?: string | null }
-  | { type: "closed"; code?: number; reason?: string }
-  | { type: "error"; error?: string; errorCode?: string; requestId?: string | null };
+  | { type: "closed"; attemptId?: string; code?: number; reason?: string }
+  | {
+      type: "error";
+      attemptId?: string;
+      error?: string;
+      errorCode?: string;
+      requestId?: string | null;
+    };
+
+function browserAudioSessionType(): string | null {
+  return (
+    (
+      navigator as Navigator & {
+        audioSession?: { type?: string };
+      }
+    ).audioSession?.type ?? null
+  );
+}
 
 function toVoiceWsUrl(path: "/voice/asr" | "/voice/tts"): string {
   const base = new URL(path, window.location.origin);
@@ -89,42 +153,6 @@ function parseSocketMessage(data: unknown): VoiceSocketMessage | null {
   } catch {
     return null;
   }
-}
-
-function runWhenOpen(socket: WebSocket, callback: () => void): void {
-  if (socket.readyState === WebSocket.OPEN) {
-    callback();
-    return;
-  }
-  socket.addEventListener("open", callback, { once: true });
-}
-
-function waitForSocketOpen(socket: WebSocket, timeoutMs = 3000): Promise<void> {
-  if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
-  if (socket.readyState !== WebSocket.CONNECTING) {
-    return Promise.reject(new Error("语音识别连接不可用"));
-  }
-  return new Promise((resolve, reject) => {
-    let timeoutId: number | null = null;
-    const cleanup = () => {
-      socket.removeEventListener("open", handleOpen);
-      socket.removeEventListener("error", handleUnavailable);
-      socket.removeEventListener("close", handleUnavailable);
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-    };
-    const handleOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const handleUnavailable = () => {
-      cleanup();
-      reject(new Error("语音识别连接不可用"));
-    };
-    timeoutId = window.setTimeout(handleUnavailable, timeoutMs);
-    socket.addEventListener("open", handleOpen, { once: true });
-    socket.addEventListener("error", handleUnavailable, { once: true });
-    socket.addEventListener("close", handleUnavailable, { once: true });
-  });
 }
 
 function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalRequest | null {
@@ -147,22 +175,6 @@ function approvalQueueContext(
   };
 }
 
-function pcmActivityLevel(chunk: Uint8Array): number {
-  if (chunk.byteLength < 2) return 0;
-  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-  const sampleCount = Math.floor(chunk.byteLength / 2);
-  const stride = Math.max(1, Math.floor(sampleCount / 512));
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < sampleCount; i += stride) {
-    const sample = view.getInt16(i * 2, true) / 32768;
-    sum += sample * sample;
-    count += 1;
-  }
-  if (count === 0) return 0;
-  return Math.min(1, Math.sqrt(sum / count) * 10);
-}
-
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -170,25 +182,6 @@ function sleep(ms: number): Promise<void> {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
-}
-
-function createTonePcm(
-  sampleRate: number,
-  frequency: number,
-  durationMs: number,
-  gain: number,
-): Uint8Array {
-  const sampleCount = Math.max(1, Math.ceil((sampleRate * durationMs) / 1000));
-  const fadeSamples = Math.max(1, Math.floor(sampleRate * 0.006));
-  const samples = new Int16Array(sampleCount);
-  for (let i = 0; i < sampleCount; i += 1) {
-    const attack = Math.min(1, i / fadeSamples);
-    const release = Math.min(1, (sampleCount - i - 1) / fadeSamples);
-    const envelope = Math.max(0, Math.min(attack, release));
-    const wave = Math.sin((2 * Math.PI * frequency * i) / sampleRate);
-    samples[i] = Math.round(wave * envelope * gain * 32767);
-  }
-  return new Uint8Array(samples.buffer);
 }
 
 function renderTurnBufferText(
@@ -272,11 +265,17 @@ export function VoicePilotController({
       ptyState: ptyState?.state,
     });
   });
-  const wakeLock = useScreenWakeLockScope(`voice-pilot:${sessionId}`);
-  const asrRef = useRef<WebSocket | null>(null);
+  const wakeLock = useScreenWakeLockScope(voicePilotWakeLockScopeKey(sessionId));
+  const asrTransportRef = useRef<VoiceAsrTransport | null>(null);
   const ttsRef = useRef<WebSocket | null>(null);
-  const captureRef = useRef<PcmCapture | null>(null);
+  const captureRef = useRef<VoiceSpeechCapture | null>(null);
+  const speechInputRef = useRef<SpeechInputPipeline | null>(null);
+  const asrAttemptIdRef = useRef<string | null>(null);
+  const listeningStartRef = useRef<{ generation: number; promise: Promise<void> } | null>(null);
+  const captureShutdownRef = useRef<Promise<void>>(Promise.resolve());
+  const playbackRefreshRequiredRef = useRef(false);
   const playerRef = useRef<PcmStreamPlayer | null>(null);
+  const audioSessionLeaseRef = useRef<VoiceAudioSessionLease | null>(null);
   const pilotRef = useRef<VoicePilotState>(pilot);
   const messagesRef = useRef<ChatMessage[]>(messages);
   const approvalsRef = useRef<ToolApprovalRequest[]>(pendingApprovals);
@@ -291,13 +290,57 @@ export function VoicePilotController({
   const spokenApprovalRequestIdRef = useRef<string | null>(null);
   const scheduledApprovalRequestIdsRef = useRef<Set<string>>(new Set());
   const captureGenerationRef = useRef(0);
-  const voiceActivitySeenRef = useRef(false);
   const captureMutedUntilRef = useRef(0);
   const ttsPlaybackEndAtRef = useRef(0);
+  const activeTtsRequestIdRef = useRef<string | null>(null);
+  const ttsStatsRef = useRef<Map<string, TtsClientStats>>(new Map());
   // 当前轮的语音 partial 气泡 id; 提交/取消/cleanup 时清空
   const voicePartialIdRef = useRef<string | null>(null);
   const sessionMachineRef = useRef<VoicePilotSessionMachine | null>(null);
   agentBusyRef.current = agentBusy;
+
+  const traceVoice = useCallback(
+    (scope: VoicePilotDiagnosticScope, event: string, options: VoiceTraceOptions = {}): void => {
+      recordVoicePilotDiagnostic({ sessionId, scope, event, ...options });
+    },
+    [sessionId],
+  );
+
+  const setAudioSessionMode = useCallback(
+    (mode: VoiceAudioSessionMode): void => {
+      const previousType = browserAudioSessionType();
+      try {
+        if (!audioSessionLeaseRef.current) {
+          audioSessionLeaseRef.current = voiceAudioSession.acquire(mode);
+        } else {
+          audioSessionLeaseRef.current.setMode(mode);
+        }
+        traceVoice("audio-session", "mode-applied", {
+          details: { mode, previousType, currentType: browserAudioSessionType() },
+        });
+      } catch (error) {
+        traceVoice("audio-session", "mode-failed", {
+          details: {
+            mode,
+            previousType,
+            currentType: browserAudioSessionType(),
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+        throw error;
+      }
+    },
+    [traceVoice],
+  );
+
+  const releaseAudioSession = useCallback((): void => {
+    const previousType = browserAudioSessionType();
+    audioSessionLeaseRef.current?.release();
+    audioSessionLeaseRef.current = null;
+    traceVoice("audio-session", "released", {
+      details: { previousType, currentType: browserAudioSessionType() },
+    });
+  }, [traceVoice]);
 
   function ensureSessionMachine(): VoicePilotSessionMachine {
     if (!sessionMachineRef.current) {
@@ -324,17 +367,18 @@ export function VoicePilotController({
           void wakeLock.disable().catch(() => undefined);
           break;
         case "stopCapture":
-          stopCapture();
+          await stopCapture();
           break;
-        case "startCapture":
+        case "beginListening":
           if (shouldCaptureNow()) {
-            await beginListening();
+            await beginListening(true);
           } else {
-            stopCapture();
+            await stopCapture();
             syncCapturePhaseWithAgentState();
           }
           break;
         case "playCue":
+          await preparePlayback();
           await playEarcon(effect.cue);
           break;
         case "appendFinalToTurnBuffer":
@@ -346,6 +390,7 @@ export function VoicePilotController({
           break;
         case "speakText":
         case "speakStatic": {
+          await preparePlayback();
           const socket = ttsRef.current;
           if (!socket || socket.readyState !== WebSocket.OPEN) {
             pendingSpeechRef.current.push(effect.text);
@@ -368,6 +413,9 @@ export function VoicePilotController({
             timestamp: Date.now(),
             source: "client",
             version: "1",
+          });
+          traceVoice("runtime", "user-text-submitted", {
+            details: { chars: effect.text.length, messageId: effect.messageId },
           });
           break;
         }
@@ -392,6 +440,7 @@ export function VoicePilotController({
           cleanupRuntime();
           break;
         case "setError":
+          releaseAudioSession();
           useVoicePilotStore.getState().setError(sessionId, effect.error);
           break;
         default: {
@@ -479,9 +528,27 @@ export function VoicePilotController({
 
   const sendMachineEvent = useEventCallback(async (event: VoicePilotEvent): Promise<void> => {
     const machine = ensureSessionMachine();
+    const previousPhase = machine.getPhase();
     const transition = machine.send(event);
-    useVoicePilotStore.getState().setPhase(sessionId, machine.getPhase());
-    return dispatchEffects(transition.effects);
+    const nextPhase = machine.getPhase();
+    traceVoice("state-machine", "transition", {
+      details: {
+        input: event.type,
+        previousPhase,
+        nextPhase,
+        effectCount: transition.effects.length,
+      },
+    });
+    const defersListeningPhase = transition.effects.some(
+      (effect) => effect.type === "beginListening",
+    );
+    if (!defersListeningPhase) {
+      useVoicePilotStore.getState().setPhase(sessionId, nextPhase);
+    }
+    await dispatchEffects(transition.effects);
+    if (defersListeningPhase && voicePilotEnabled() && machine.getPhase() === nextPhase) {
+      useVoicePilotStore.getState().setPhase(sessionId, nextPhase);
+    }
   });
 
   const voicePilotEnabled = useEventCallback((): boolean => {
@@ -588,17 +655,91 @@ export function VoicePilotController({
     approvalsRef.current = pendingApprovals;
   }, [pendingApprovals]);
 
-  const stopCapture = useCallback(() => {
-    captureGenerationRef.current += 1;
-    captureRef.current?.stop();
-    captureRef.current = null;
-    voiceActivitySeenRef.current = false;
-    useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
-  }, [sessionId]);
+  const stopCapture = useCallback(
+    async (originatingStartGeneration?: number): Promise<void> => {
+      const attemptId = asrAttemptIdRef.current;
+      const generation = captureGenerationRef.current + 1;
+      captureGenerationRef.current = generation;
+      const speechInput = speechInputRef.current;
+      speechInputRef.current = null;
+      speechInput?.cancel();
+      if (attemptId) {
+        traceVoice("capture", "stopped", {
+          attemptId,
+          details: speechInput ? { ...speechInput.snapshot() } : undefined,
+        });
+      }
+      asrAttemptIdRef.current = null;
+      const store = useVoicePilotStore.getState();
+      store.setActivityLevel(sessionId, 0);
+      store.clearWaveform(sessionId);
+      const inFlightStart = listeningStartRef.current;
+      if (inFlightStart && inFlightStart.generation !== originatingStartGeneration) {
+        traceVoice("capture", "startup-cancelled", {
+          details: { generation: inFlightStart.generation },
+        });
+        await inFlightStart.promise.catch(() => undefined);
+        traceVoice("capture", "startup-settled", {
+          details: { generation: inFlightStart.generation },
+        });
+      }
+      const capture = captureRef.current;
+      captureRef.current = null;
+      if (capture) {
+        traceVoice("capture", "release-started", { attemptId });
+        const previousShutdown = captureShutdownRef.current;
+        const shutdown = (async () => {
+          await previousShutdown.catch(() => undefined);
+          await capture.stop();
+        })();
+        captureShutdownRef.current = shutdown;
+        try {
+          await shutdown;
+          traceVoice("capture", "release-finished", { attemptId });
+        } catch (error) {
+          traceVoice("capture", "release-failed", {
+            attemptId,
+            details: { error: error instanceof Error ? error.message : String(error) },
+          });
+          throw error;
+        }
+      } else {
+        await captureShutdownRef.current;
+      }
+      if (
+        audioSessionLeaseRef.current &&
+        captureGenerationRef.current === generation &&
+        !captureRef.current
+      ) {
+        setAudioSessionMode("playback");
+      }
+    },
+    [sessionId, setAudioSessionMode, traceVoice],
+  );
 
-  const resetVoiceActivityGate = useCallback(() => {
-    voiceActivitySeenRef.current = false;
-  }, []);
+  const preparePlayback = useCallback(async (): Promise<void> => {
+    await captureShutdownRef.current;
+    setAudioSessionMode("playback");
+    const refreshRequired = playbackRefreshRequiredRef.current;
+    traceVoice("playback", "prepare-started", {
+      details: {
+        refreshAfterCapture: refreshRequired,
+        ...playerRef.current?.snapshot(),
+      },
+    });
+    if (refreshRequired) {
+      await voicePlaybackContext.reactivateAfterCapture();
+      playbackRefreshRequiredRef.current = false;
+    } else {
+      await voicePlaybackContext.prepare();
+    }
+    traceVoice("playback", "prepare-finished", {
+      details: {
+        refreshedAfterCapture: refreshRequired,
+        ...playerRef.current?.snapshot(),
+      },
+    });
+  }, [setAudioSessionMode, traceVoice]);
 
   const muteCaptureFor = useCallback((durationMs: number) => {
     if (!Number.isFinite(durationMs) || durationMs <= 0) return;
@@ -611,16 +752,6 @@ export function VoicePilotController({
   const captureMuted = useCallback(() => {
     return performance.now() < captureMutedUntilRef.current;
   }, []);
-
-  const noteVoiceActivity = useCallback((level: number) => {
-    if (level >= VOICE_ACTIVITY_LEVEL_THRESHOLD) {
-      voiceActivitySeenRef.current = true;
-    }
-  }, []);
-
-  const acceptsAsrText = useCallback((): boolean => {
-    return acceptsAsrInput() && voiceActivitySeenRef.current;
-  }, [acceptsAsrInput]);
 
   const discardVoicePartialBubble = useCallback(() => {
     const id = voicePartialIdRef.current;
@@ -648,55 +779,162 @@ export function VoicePilotController({
     });
   }, [discardVoicePartialBubble, sessionId]);
 
-  const startCapture = useCallback(async () => {
-    if (captureRef.current) return;
+  const beginListening = useEventCallback((playStartCue: boolean): Promise<void> => {
+    if (captureRef.current) return Promise.resolve();
+    const inFlightStart = listeningStartRef.current;
+    if (inFlightStart) {
+      if (inFlightStart.generation === captureGenerationRef.current) {
+        return inFlightStart.promise;
+      }
+      return inFlightStart.promise
+        .catch(() => undefined)
+        .then(() => {
+          if (!voicePilotEnabled() || !shouldCaptureNow()) return;
+          return beginListening(playStartCue);
+        });
+    }
+
     const generation = captureGenerationRef.current + 1;
     captureGenerationRef.current = generation;
-    resetVoiceActivityGate();
-    const capture = await createPcmCapture(
-      (chunk) => {
-        const socket = asrRef.current;
-        if (!socket || socket.readyState !== WebSocket.OPEN) return;
-        if (!acceptsAsrInput()) return;
-        if (captureMuted()) {
-          useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
-          return;
-        }
-        const level = pcmActivityLevel(chunk);
-        noteVoiceActivity(level);
-        useVoicePilotStore.getState().setActivityLevel(sessionId, level);
-        socket.send(chunk);
-      },
-      { sampleRate: ASR_SAMPLE_RATE },
-    );
-    if (captureGenerationRef.current !== generation || !acceptsAsrInput()) {
-      capture.stop();
-      if (captureRef.current === capture) captureRef.current = null;
-      return;
-    }
-    captureRef.current = capture;
-  }, [acceptsAsrInput, captureMuted, noteVoiceActivity, resetVoiceActivityGate, sessionId]);
+    traceVoice("capture", "preparing", {
+      details: { generation, playStartCue },
+    });
+    const store = useVoicePilotStore.getState();
+    store.setActivityLevel(sessionId, 0);
+    store.clearWaveform(sessionId);
 
-  const beginListening = useCallback(async () => {
-    if (captureRef.current) return;
-    const socket = asrRef.current;
-    if (!socket) {
-      throw new Error("语音识别连接不可用");
-    }
-    await waitForSocketOpen(socket);
-    if (!voicePilotEnabled() || asrRef.current !== socket) return;
-    socket.send(JSON.stringify({ type: "start", sessionId, sampleRate: ASR_SAMPLE_RATE }));
-    await startCapture();
-  }, [sessionId, startCapture, voicePilotEnabled]);
+    const startPromise = (async () => {
+      await captureShutdownRef.current;
+      if (captureGenerationRef.current !== generation || !shouldCaptureNow()) return;
+      const transport = asrTransportRef.current;
+      if (!transport) throw new Error("语音识别连接不可用");
+      setAudioSessionMode("capture");
+      playbackRefreshRequiredRef.current = true;
+
+      const speechInput = new SpeechInputPipeline({
+        preRollBytes: Math.ceil((SPEECH_PRE_ROLL_MS * MU_LAW_BYTES_PER_SECOND) / 1000),
+        openStream: async () => {
+          if (captureGenerationRef.current !== generation || !shouldCaptureNow()) {
+            throw new Error("语音识别已取消");
+          }
+          const attemptId = `${sessionId}-asr-${Date.now()}-${generation}`;
+          asrAttemptIdRef.current = attemptId;
+          traceVoice("asr", "speech-attempt-starting", { attemptId });
+          const attempt = await transport.startAttempt({
+            sessionId,
+            attemptId,
+            sampleRate: ASR_SAMPLE_RATE,
+            encoding: "mulaw",
+          });
+          if (captureGenerationRef.current !== generation || !shouldCaptureNow()) {
+            attempt.abort();
+            throw new Error("语音识别已取消");
+          }
+          traceVoice("asr", "provider-ready", { attemptId });
+          return attempt;
+        },
+        onError: (error) => {
+          traceVoice("asr", "speech-attempt-failed", {
+            attemptId: asrAttemptIdRef.current,
+            details: { error: errorMessage(error, "语音识别失败") },
+          });
+          reportProviderError(errorMessage(error, "语音识别失败"));
+        },
+      });
+      speechInputRef.current = speechInput;
+
+      const source = resolveVoiceSpeechSource();
+      const capture = await createSpeechCapture({
+        source,
+        onFrame: ({ pcm, activityLevel }) => {
+          if (captureGenerationRef.current !== generation || !acceptsAsrInput()) return;
+          if (captureMuted()) {
+            useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
+            return;
+          }
+          const currentStore = useVoicePilotStore.getState();
+          currentStore.setActivityLevel(sessionId, activityLevel);
+          currentStore.appendWaveform(
+            sessionId,
+            int16PcmEnvelope(pcm, WAVEFORM_BINS_PER_PCM_CHUNK),
+          );
+          speechInput.pushFrame(encodePcm16ToMuLaw(pcm));
+        },
+        onSpeechStart: () => {
+          traceVoice("capture", "speech-start", {
+            details: { ...speechInput.snapshot() },
+          });
+          speechInput.speechStarted();
+        },
+        onSpeechEnd: () => {
+          traceVoice("capture", "speech-end", {
+            attemptId: asrAttemptIdRef.current,
+            details: { ...speechInput.snapshot() },
+          });
+          speechInput.speechFinished();
+        },
+      });
+      if (captureGenerationRef.current !== generation || !shouldCaptureNow()) {
+        speechInput.cancel();
+        if (speechInputRef.current === speechInput) speechInputRef.current = null;
+        await capture.stop();
+        return;
+      }
+      captureRef.current = capture;
+      traceVoice("capture", "source-ready", {
+        details: { source: capture.source, sampleRate: ASR_SAMPLE_RATE },
+      });
+
+      if (playStartCue) {
+        await preparePlayback();
+        await playEarcon("listening-start");
+      }
+      if (
+        captureGenerationRef.current !== generation ||
+        captureRef.current !== capture ||
+        !shouldCaptureNow()
+      ) {
+        if (captureGenerationRef.current === generation) await stopCapture(generation);
+        return;
+      }
+      if (playStartCue) {
+        setAudioSessionMode("capture");
+        playbackRefreshRequiredRef.current = true;
+      }
+      await capture.start();
+      traceVoice("capture", "listening", {
+        details: { source: capture.source },
+      });
+    })().catch(async (error: unknown) => {
+      traceVoice("capture", "start-failed", {
+        attemptId: asrAttemptIdRef.current,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      });
+      if (captureGenerationRef.current === generation) await stopCapture(generation);
+      throw error;
+    });
+
+    const trackedPromise = startPromise.finally(() => {
+      if (listeningStartRef.current?.promise === trackedPromise) {
+        listeningStartRef.current = null;
+      }
+    });
+    listeningStartRef.current = { generation, promise: trackedPromise };
+    return trackedPromise;
+  });
 
   useEffect(() => {
-    if (!enabled || !asrRef.current) return;
+    if (!enabled || !asrTransportRef.current) return;
     if (!shouldCaptureNow()) {
-      stopCapture();
-      syncCapturePhaseWithAgentState();
+      void stopCapture()
+        .then(() => syncCapturePhaseWithAgentState())
+        .catch((err: unknown) => {
+          if (!voicePilotEnabled()) return;
+          useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "停止语音采集失败"));
+        });
       return;
     }
-    void beginListening().catch((err: unknown) => {
+    void beginListening(false).catch((err: unknown) => {
       if (!voicePilotEnabled()) return;
       useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "语音识别连接不可用"));
     });
@@ -713,69 +951,89 @@ export function VoicePilotController({
 
   const playEarcon = useCallback(
     async (kind: VoicePilotEarcon) => {
-      const durationMs =
-        kind === "user-end"
-          ? USER_END_EARCON_MS
-          : kind === "assistant-end"
-            ? ASSISTANT_END_EARCON_MS
-            : LISTENING_START_EARCON_MS;
-      const frequency = kind === "user-end" ? 880 : kind === "assistant-end" ? 660 : 1100;
-      const gain = kind === "user-end" ? 0.12 : kind === "assistant-end" ? 0.09 : 0.1;
       const player = playerRef.current;
-      const queuedMs = player
-        ? player.enqueue(createTonePcm(TTS_SAMPLE_RATE, frequency, durationMs, gain))
-        : durationMs;
-      const waitMs = Number.isFinite(queuedMs) ? queuedMs : durationMs;
+      if (!player) throw new Error("Voice Pilot 音频尚未准备好");
+      const earcon = createVoicePilotEarcon(kind, TTS_SAMPLE_RATE);
+      traceVoice("playback", "earcon-starting", {
+        details: { kind, durationMs: earcon.durationMs, ...player.snapshot() },
+      });
+      await player.resume();
+      const queuedMs = player.enqueue(earcon.pcm);
+      const waitMs = Number.isFinite(queuedMs) ? queuedMs : earcon.durationMs;
       const guardedWaitMs = Math.max(0, waitMs) + SYSTEM_AUDIO_CAPTURE_GUARD_MS;
       muteCaptureFor(guardedWaitMs);
       await sleep(guardedWaitMs);
+      traceVoice("playback", "earcon-finished", {
+        details: { kind, ...player.snapshot() },
+      });
     },
-    [muteCaptureFor],
+    [muteCaptureFor, traceVoice],
   );
 
   const cleanupRuntime = useCallback(() => {
-    stopCapture();
+    traceVoice("runtime", "cleanup-started");
+    const captureShutdown = stopCapture();
     turnBufferRef.current?.dispose();
     playerRef.current?.stop();
     captureMutedUntilRef.current = 0;
     ttsPlaybackEndAtRef.current = 0;
-    const asr = asrRef.current;
+    const asrTransport = asrTransportRef.current;
     const tts = ttsRef.current;
-    asrRef.current = null;
+    asrTransportRef.current = null;
     ttsRef.current = null;
-    asr?.close();
+    asrTransport?.dispose();
     tts?.close();
     turnBufferRef.current = null;
     playerRef.current = null;
     pendingSpeechRef.current = [];
     speechQueueRef.current = [];
     activeSpeechRef.current = null;
+    activeTtsRequestIdRef.current = null;
+    ttsStatsRef.current.clear();
     scheduledApprovalRequestIdsRef.current.clear();
     discardVoicePartialBubble();
     sessionMachineRef.current = null;
-  }, [discardVoicePartialBubble, stopCapture]);
+    void captureShutdown.finally(releaseAudioSession);
+    traceVoice("runtime", "cleanup-finished");
+  }, [discardVoicePartialBubble, releaseAudioSession, stopCapture, traceVoice]);
 
   const sendSpeechNow = useCallback(
     (socket: WebSocket, text: string) => {
+      const requestId = `${sessionId}-tts-${Date.now()}`;
+      ttsStatsRef.current.set(requestId, {
+        requestId,
+        requestedAt: performance.now(),
+        startedAt: null,
+        firstPcmAt: null,
+        pcmBytes: 0,
+        pcmChunks: 0,
+      });
+      traceVoice("tts", "request-sent", {
+        requestId,
+        details: { textChars: text.length, socketState: socket.readyState },
+      });
       socket.send(
         JSON.stringify({
           type: "speak",
-          requestId: `${sessionId}-tts-${Date.now()}`,
+          requestId,
           text,
         }),
       );
     },
-    [sessionId],
+    [sessionId, traceVoice],
   );
 
-  const flushPendingSpeech = useCallback(() => {
+  const flushPendingSpeech = useCallback(async (): Promise<void> => {
     const socket = ttsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    if (pendingSpeechRef.current.length === 0) return;
+    await preparePlayback();
+    if (!voicePilotEnabled() || ttsRef.current !== socket) return;
     const pending = pendingSpeechRef.current.splice(0);
     for (const text of pending) {
       sendSpeechNow(socket, text);
     }
-  }, [sendSpeechNow]);
+  }, [preparePlayback, sendSpeechNow, voicePilotEnabled]);
 
   function enqueueSpeechItem(item: SpeechQueueItem): void {
     if (!voicePilotEnabled()) return;
@@ -821,6 +1079,9 @@ export function VoicePilotController({
   const enqueueAssistantText = useEventCallback((text: string, messageId = ""): void => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    traceVoice("runtime", "assistant-text-queued", {
+      details: { chars: trimmed.length, messageId: messageId || null },
+    });
     const key = messageId
       ? `assistant:${messageId}:${speechTextFingerprint(trimmed)}`
       : `assistant:${Date.now()}:${Math.random().toString(36).slice(2)}`;
@@ -926,7 +1187,6 @@ export function VoicePilotController({
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      resetVoiceActivityGate();
       const approval = firstPendingApproval(approvalsRef.current);
       const route = routeVoiceText(trimmed, {
         phase: useVoicePilotStore.getState().bySessionId[sessionId]?.phase ?? "listening",
@@ -952,7 +1212,6 @@ export function VoicePilotController({
       commitRecognizedInput,
       discardVoicePartialBubble,
       handleCommand,
-      resetVoiceActivityGate,
       scheduleApprovalSpeech,
       sendMachineEvent,
       sessionId,
@@ -968,8 +1227,21 @@ export function VoicePilotController({
     [sendMachineEvent],
   );
 
+  const handleAsrAttemptError = useEventCallback((error: string, attemptId: string): void => {
+    const preservedRecognizedText = turnBufferRef.current?.flushNow() ?? false;
+    traceVoice("asr", "attempt-error", {
+      attemptId,
+      details: { error, preservedRecognizedText },
+    });
+    if (!preservedRecognizedText) reportProviderError(error);
+  });
+
   function ensureVoiceRuntime(): void {
-    if (turnBufferRef.current || asrRef.current || ttsRef.current || playerRef.current) return;
+    if (turnBufferRef.current || asrTransportRef.current || ttsRef.current || playerRef.current) {
+      return;
+    }
+
+    traceVoice("runtime", "creating");
 
     turnBufferRef.current = new VoiceTurnBuffer({
       idleTimeoutMs: configuredTurnIdleMsRef.current,
@@ -977,39 +1249,107 @@ export function VoicePilotController({
         void handleCompletedVoiceTurn(text);
       },
     });
-    const asr = new WebSocket(toVoiceWsUrl("/voice/asr"));
+    const asrTransport = new VoiceAsrTransport({
+      url: toVoiceWsUrl("/voice/asr"),
+      onPartial: (text, attemptId) => {
+        if (!acceptsAsrInput()) return;
+        traceVoice("asr", "partial-received", {
+          attemptId,
+          details: { chars: text.length },
+        });
+        turnBufferRef.current?.appendPartial(text);
+        upsertVoicePartialBubble();
+      },
+      onFinal: (text, attemptId) => {
+        traceVoice("asr", "final-received", {
+          attemptId,
+          details: { chars: text.length },
+        });
+        if (!acceptsAsrInput()) return;
+        handleFinalAsrText(text);
+      },
+      onAttemptError: (error, attemptId) => {
+        handleAsrAttemptError(error, attemptId);
+      },
+      onTransportError: (error) => {
+        traceVoice("asr", "transport-error", {
+          attemptId: asrAttemptIdRef.current,
+          details: { error },
+        });
+        reportProviderError(error);
+      },
+      onTrace: (event, details) => {
+        traceVoice("asr", event, {
+          attemptId: asrAttemptIdRef.current,
+          details: toVoiceTraceDetails(details),
+        });
+      },
+    });
     const tts = new WebSocket(toVoiceWsUrl("/voice/tts"));
-    asr.binaryType = "arraybuffer";
     tts.binaryType = "arraybuffer";
-    asrRef.current = asr;
+    asrTransportRef.current = asrTransport;
     ttsRef.current = tts;
-    const player = new PcmStreamPlayer(new AudioContext(), TTS_SAMPLE_RATE, {
+    const player = new PcmStreamPlayer(voicePlaybackContext.get(), TTS_SAMPLE_RATE, {
       onActivityLevel: (level) => {
         if (playerRef.current !== player) return;
         useVoicePilotStore.getState().setActivityLevel(sessionId, level);
       },
+      onPlaybackChunk: (chunk) => {
+        if (playerRef.current !== player) return;
+        useVoicePilotStore
+          .getState()
+          .appendWaveform(sessionId, int16PcmEnvelope(chunk, WAVEFORM_BINS_PER_PCM_CHUNK));
+      },
+      onPlaybackEvent: (playbackEvent: PcmStreamPlayerEvent) => {
+        const details = {
+          contextState: playbackEvent.contextState,
+          contextTime: playbackEvent.contextTime,
+          nextStartTime: playbackEvent.nextStartTime,
+          queuedMs: playbackEvent.queuedMs,
+          ...(typeof playbackEvent.bytes === "number" ? { bytes: playbackEvent.bytes } : {}),
+          ...(typeof playbackEvent.durationMs === "number"
+            ? { durationMs: playbackEvent.durationMs }
+            : {}),
+          ...(playbackEvent.error ? { error: playbackEvent.error } : {}),
+        };
+        traceVoice("playback", playbackEvent.event, {
+          requestId: activeTtsRequestIdRef.current,
+          details,
+        });
+      },
     });
     playerRef.current = player;
-
-    asr.addEventListener("message", (event) => {
-      const msg = parseSocketMessage(event.data);
-      if (!msg) return;
-      if (msg.type === "partial") {
-        if (!acceptsAsrText()) return;
-        turnBufferRef.current?.appendPartial(msg.text);
-        upsertVoicePartialBubble();
-      }
-      if (msg.type === "final") {
-        if (!acceptsAsrText()) return;
-        void handleFinalAsrText(msg.text);
-      }
-      if (msg.type === "error") {
-        reportProviderError(msg.error ?? "语音识别失败");
-      }
-    });
+    void asrTransport
+      .connect()
+      .then(() => {
+        if (asrTransportRef.current !== asrTransport || !voicePilotEnabled()) return;
+        traceVoice("asr", "websocket-open");
+        return sendMachineEvent({ type: "asrReady" });
+      })
+      .catch((error: unknown) => {
+        if (asrTransportRef.current !== asrTransport || !voicePilotEnabled()) return;
+        reportProviderError(errorMessage(error, "语音识别连接不可用"));
+      });
     tts.addEventListener("message", (event) => {
       if (event.data instanceof ArrayBuffer) {
         const chunk = new Uint8Array(event.data);
+        const requestId = activeTtsRequestIdRef.current;
+        const stats = requestId ? ttsStatsRef.current.get(requestId) : null;
+        if (stats) {
+          if (stats.firstPcmAt === null) {
+            stats.firstPcmAt = performance.now();
+            traceVoice("tts", "first-pcm-received", {
+              requestId,
+              details: {
+                firstPcmMs: stats.firstPcmAt - stats.requestedAt,
+                bytes: chunk.byteLength,
+                ...player.snapshot(),
+              },
+            });
+          }
+          stats.pcmBytes += chunk.byteLength;
+          stats.pcmChunks += 1;
+        }
         const queuedMs = playerRef.current?.enqueue(chunk) ?? 0;
         if (Number.isFinite(queuedMs) && queuedMs > 0) {
           ttsPlaybackEndAtRef.current = Math.max(
@@ -1022,15 +1362,43 @@ export function VoicePilotController({
       }
       const msg = parseSocketMessage(event.data);
       if (!msg) return;
+      if (msg.type === "started") {
+        const requestId = msg.requestId ?? null;
+        activeTtsRequestIdRef.current = requestId;
+        const stats = requestId ? ttsStatsRef.current.get(requestId) : null;
+        if (stats) stats.startedAt = performance.now();
+        traceVoice("tts", "provider-started", {
+          requestId,
+          details: { startedMs: stats ? performance.now() - stats.requestedAt : 0 },
+        });
+        return;
+      }
       if (msg.type === "finished") {
+        const requestId = msg.requestId ?? activeTtsRequestIdRef.current;
+        const stats = requestId ? ttsStatsRef.current.get(requestId) : null;
+        traceVoice("tts", "provider-finished", {
+          requestId,
+          details: {
+            durationMs: stats ? performance.now() - stats.requestedAt : 0,
+            pcmBytes: stats?.pcmBytes ?? 0,
+            pcmChunks: stats?.pcmChunks ?? 0,
+            ...player.snapshot(),
+          },
+        });
         void (async () => {
           const queuedPlaybackMs = Math.max(0, ttsPlaybackEndAtRef.current - performance.now());
           if (queuedPlaybackMs > 0) {
             await sleep(queuedPlaybackMs);
           }
           ttsPlaybackEndAtRef.current = 0;
-          useVoicePilotStore.getState().setActivityLevel(sessionId, 0);
+          const store = useVoicePilotStore.getState();
+          store.setActivityLevel(sessionId, 0);
+          store.clearWaveform(sessionId);
           await sendMachineEvent({ type: "ttsFinished" });
+          if (requestId) ttsStatsRef.current.delete(requestId);
+          if (activeTtsRequestIdRef.current === requestId) {
+            activeTtsRequestIdRef.current = null;
+          }
           activeSpeechRef.current = null;
           if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
           if (speechQueueRef.current.length > 0) {
@@ -1046,6 +1414,14 @@ export function VoicePilotController({
         });
       }
       if (msg.type === "error") {
+        traceVoice("tts", "provider-error", {
+          requestId: msg.requestId ?? activeTtsRequestIdRef.current,
+          details: {
+            errorCode: msg.errorCode ?? null,
+            error: msg.error ?? "语音播报失败",
+            ...player.snapshot(),
+          },
+        });
         reportProviderError(msg.error ?? "语音播报失败");
       }
       // `closed` is a provider-socket lifecycle notification. Bailian may close the
@@ -1053,24 +1429,33 @@ export function VoicePilotController({
       // reported through `error` above, while browser websocket failures still hit
       // the native `close` listener below.
     });
-    tts.addEventListener("close", () => {
+    tts.addEventListener("close", (event) => {
       if (ttsRef.current !== tts || !voicePilotEnabled()) return;
+      traceVoice("tts", "websocket-closed", {
+        requestId: activeTtsRequestIdRef.current,
+        details: { code: event.code, reason: event.reason, wasClean: event.wasClean },
+      });
       reportProviderError("语音播报连接已断开");
     });
     tts.addEventListener("error", () => {
       if (ttsRef.current !== tts || !voicePilotEnabled()) return;
+      traceVoice("tts", "websocket-error", {
+        requestId: activeTtsRequestIdRef.current,
+      });
       reportProviderError("语音播报连接不可用");
     });
     tts.addEventListener("open", () => {
+      traceVoice("tts", "websocket-open");
       void sendMachineEvent({ type: "ttsReady" }).catch((err: unknown) => {
         useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "语音播报连接不可用"));
       });
-      flushPendingSpeech();
-    });
-    runWhenOpen(asr, () => {
-      void sendMachineEvent({ type: "asrReady" }).catch((err: unknown) => {
-        useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "语音识别连接不可用"));
+      void flushPendingSpeech().catch((err: unknown) => {
+        if (!voicePilotEnabled()) return;
+        useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "准备语音播报失败"));
       });
+    });
+    traceVoice("runtime", "created", {
+      details: { playbackContextState: player.snapshot().contextState },
     });
   }
 

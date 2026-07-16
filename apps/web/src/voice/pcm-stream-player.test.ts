@@ -161,4 +161,93 @@ describe("PcmStreamPlayer", () => {
     await vi.advanceTimersByTimeAsync(2);
     expect(activity.at(-1)).toBe(0);
   });
+
+  it("reports fixed-cadence PCM frames on the scheduled playback timeline", async () => {
+    vi.useFakeTimers();
+    const { PcmStreamPlayer } = await import("./pcm-stream-player");
+    const played: Uint8Array[] = [];
+    const context = {
+      currentTime: 10,
+      destination: {},
+      createBuffer(_channels: number, length: number, sampleRate: number) {
+        return {
+          duration: length / sampleRate,
+          getChannelData: () => new Float32Array(length),
+        };
+      },
+      createBufferSource() {
+        return {
+          buffer: null,
+          connect() {},
+          start() {},
+        };
+      },
+    } as unknown as AudioContext;
+    const player = new PcmStreamPlayer(context, 1000, {
+      onPlaybackChunk: (chunk) => played.push(chunk),
+    });
+    const first = new Uint8Array(96 * Int16Array.BYTES_PER_ELEMENT);
+
+    player.enqueue(first);
+    expect(played).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(played.map((chunk) => chunk.byteLength)).toEqual([64]);
+
+    await vi.advanceTimersByTimeAsync(31);
+    expect(played.map((chunk) => chunk.byteLength)).toEqual([64]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(played.map((chunk) => chunk.byteLength)).toEqual([64, 64]);
+    await vi.advanceTimersByTimeAsync(32);
+    expect(played.map((chunk) => chunk.byteLength)).toEqual([64, 64, 64]);
+  });
+
+  it("reports AudioContext state across resume, scheduling, and source completion", async () => {
+    const { PcmStreamPlayer } = await import("./pcm-stream-player");
+    const playbackEvents: Array<{ event: string; contextState: string; bytes?: number }> = [];
+    let state = "interrupted";
+    let ended: (() => void) | null = null;
+    const context = {
+      get state() {
+        return state;
+      },
+      currentTime: 4,
+      destination: {},
+      async resume() {
+        state = "running";
+      },
+      createBuffer(_channels: number, length: number, sampleRate: number) {
+        return {
+          duration: length / sampleRate,
+          getChannelData: () => new Float32Array(length),
+        };
+      },
+      createBufferSource() {
+        return {
+          buffer: null,
+          connect() {},
+          start() {},
+          addEventListener(_event: string, listener: () => void) {
+            ended = listener;
+          },
+        };
+      },
+    } as unknown as AudioContext;
+    const player = new PcmStreamPlayer(context, 1000, {
+      onPlaybackEvent: (event) => playbackEvents.push(event),
+    });
+
+    await player.resume();
+    player.enqueue(new Uint8Array(200));
+    (ended as (() => void) | null)?.();
+
+    expect(playbackEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "resume-start", contextState: "interrupted" }),
+        expect.objectContaining({ event: "resume-finished", contextState: "running" }),
+        expect.objectContaining({ event: "pcm-scheduled", contextState: "running", bytes: 200 }),
+        expect.objectContaining({ event: "source-ended", contextState: "running", bytes: 200 }),
+      ]),
+    );
+  });
 });

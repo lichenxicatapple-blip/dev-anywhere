@@ -268,6 +268,51 @@ describe("client_register protocol", () => {
     expect(restored.status).toBe("restored");
   });
 
+  it("keeps the replacement socket bound when the previous socket closes late", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await settle();
+
+    const previousClient = connectClient();
+    await waitForOpen(previousClient);
+    previousClient.send(JSON.stringify(clientRegister("c1")));
+    await waitForMessageType(previousClient, "client_register_response");
+    previousClient.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessageType(previousClient, "proxy_select_response");
+
+    const replacementClient = connectClient();
+    await waitForOpen(replacementClient);
+    replacementClient.send(JSON.stringify(clientRegister("c1")));
+    expect(
+      JSON.parse(await waitForMessageType(replacementClient, "client_register_response")),
+    ).toMatchObject({ status: "restored", proxyId: "p1" });
+
+    const previousClosed = new Promise<void>((resolve) =>
+      previousClient.once("close", () => resolve()),
+    );
+    previousClient.close();
+    await previousClosed;
+
+    const forwarded = waitForMessage(replacementClient);
+    proxy.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "s1",
+        timestamp: Date.now(),
+        source: "proxy",
+        version: "1.0",
+        type: "assistant_message",
+        payload: { text: "still connected", isPartial: false },
+      }),
+    );
+
+    expect(JSON.parse(await forwarded)).toMatchObject({
+      type: "assistant_message",
+      payload: { text: "still connected" },
+    });
+  });
+
   it("returns status 'proxy_offline' when proxy is in grace period", async () => {
     // 注册 proxy
     const proxy = connectProxy();

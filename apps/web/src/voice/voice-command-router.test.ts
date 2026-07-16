@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import { routeVoiceText } from "./voice-command-router";
 
 describe("routeVoiceText", () => {
-  it("routes explicit exit commands", () => {
+  it("routes exit phrases even when ASR adds surrounding speech", () => {
     expect(routeVoiceText("退出语音助手", { phase: "listening" })).toEqual({
       kind: "command",
       command: { type: "exit" },
     });
+    expect(routeVoiceText("嗯，帮我关闭语音助手吧。", { phase: "listening" })).toEqual({
+      kind: "command",
+      command: { type: "exit" },
+    });
+    expect(routeVoiceText("有一点杂音停止语音助手谢谢", { phase: "listening" })).toEqual({
+      kind: "command",
+      command: { type: "exit" },
+    });
+    for (const text of ["退出 VoicePilot", "请关闭 voice pilot 吧", "停止 VOICE PILOT 谢谢"]) {
+      expect(routeVoiceText(text, { phase: "listening" })).toEqual({
+        kind: "command",
+        command: { type: "exit" },
+      });
+    }
   });
 
   it("routes repeat, cancel, and redo commands", () => {

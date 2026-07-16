@@ -237,6 +237,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     };
     const voiceAsrSockets = new Set<FakeVoiceSocketRef>();
     const voiceAsrActiveSockets = new Set<FakeVoiceSocketRef>();
+    const voiceAsrAttemptIds = new Map<FakeVoiceSocketRef, string>();
     let voiceAsrSocket: FakeVoiceSocketRef | null = null;
     let voiceTtsSocket: { emitJson(payload: FakeRelayMessage): void } | null = null;
 
@@ -420,7 +421,13 @@ export async function installFakeRelay(page: Page): Promise<void> {
               const voiceMsg = JSON.parse(raw) as FakeRelayMessage;
               events.push(`voice-asr:send:${String(voiceMsg.type ?? "unknown")}`);
               if (voiceMsg.type === "start") {
+                const attemptId = String(voiceMsg.attemptId ?? "");
+                voiceAsrAttemptIds.set(this, attemptId);
                 voiceAsrActiveSockets.add(this);
+                this.emitJson({ type: "ready", attemptId });
+              }
+              if (voiceMsg.type === "stop") {
+                voiceAsrActiveSockets.delete(this);
               }
             } catch {
               // Non-control text on the voice ASR socket is still recorded above.
@@ -807,6 +814,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
         if (this.kind === "voice-asr") {
           voiceAsrSockets.delete(this);
           voiceAsrActiveSockets.delete(this);
+          voiceAsrAttemptIds.delete(this);
           if (voiceAsrSocket === this) voiceAsrSocket = null;
         }
         this.dispatchEvent(new Event("close"));
@@ -1002,7 +1010,11 @@ export async function installFakeRelay(page: Page): Promise<void> {
                   : [];
           events.push(`voice-asr:emit-final:${targets.length}:${text}`);
           for (const socket of targets) {
-            socket.emitJson({ type: "final", text });
+            socket.emitJson({
+              type: "final",
+              attemptId: voiceAsrAttemptIds.get(socket) ?? "",
+              text,
+            });
           }
           return targets.length;
         },

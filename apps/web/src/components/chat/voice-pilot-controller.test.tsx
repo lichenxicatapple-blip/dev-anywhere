@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
-  createPcmCapture,
+  createSpeechCapture,
   sendEnvelope,
   sendControl,
   requestVoiceConfig,
@@ -10,13 +10,23 @@ const {
   wakeEnable,
   wakeDisable,
   playerEnqueue,
+  playerResume,
   playerStop,
   setPlayerActivityHandler,
+  setPlayerChunkHandler,
   emitPlayerActivity,
+  emitPlayerChunk,
+  voiceAudioSessionAcquire,
+  voiceAudioSessionSetMode,
+  voiceAudioSessionRelease,
+  voicePlaybackContextGet,
+  voicePlaybackContextPrepare,
+  voicePlaybackContextReactivate,
 } = vi.hoisted(() => {
   const activity = { handler: null as ((level: number) => void) | null };
+  const playbackChunk = { handler: null as ((chunk: Uint8Array) => void) | null };
   return {
-    createPcmCapture: vi.fn(),
+    createSpeechCapture: vi.fn(),
     sendEnvelope: vi.fn(),
     sendControl: vi.fn(),
     requestVoiceConfig: vi.fn(),
@@ -24,13 +34,26 @@ const {
     wakeEnable: vi.fn(),
     wakeDisable: vi.fn(),
     playerEnqueue: vi.fn(),
+    playerResume: vi.fn(),
     playerStop: vi.fn(),
     setPlayerActivityHandler: (next: ((level: number) => void) | null) => {
       activity.handler = next;
     },
+    setPlayerChunkHandler: (next: ((chunk: Uint8Array) => void) | null) => {
+      playbackChunk.handler = next;
+    },
     emitPlayerActivity: (level: number) => {
       activity.handler?.(level);
     },
+    emitPlayerChunk: (chunk: Uint8Array) => {
+      playbackChunk.handler?.(chunk);
+    },
+    voiceAudioSessionAcquire: vi.fn(),
+    voiceAudioSessionSetMode: vi.fn(),
+    voiceAudioSessionRelease: vi.fn(),
+    voicePlaybackContextGet: vi.fn(),
+    voicePlaybackContextPrepare: vi.fn(),
+    voicePlaybackContextReactivate: vi.fn(),
   };
 });
 
@@ -55,8 +78,23 @@ vi.mock("@/hooks/use-screen-wake-lock", () => ({
   }),
 }));
 
-vi.mock("@/voice/pcm-capture", () => ({
-  createPcmCapture,
+vi.mock("@/voice/speech-capture", () => ({
+  createSpeechCapture,
+  resolveVoiceSpeechSource: () => ({ kind: "microphone" }),
+}));
+
+vi.mock("@/voice/browser-audio-session", () => ({
+  voiceAudioSession: {
+    acquire: voiceAudioSessionAcquire,
+  },
+}));
+
+vi.mock("@/voice/voice-playback-context", () => ({
+  voicePlaybackContext: {
+    get: voicePlaybackContextGet,
+    prepare: voicePlaybackContextPrepare,
+    reactivateAfterCapture: voicePlaybackContextReactivate,
+  },
 }));
 
 vi.mock("@/voice/pcm-stream-player", () => ({
@@ -64,18 +102,31 @@ vi.mock("@/voice/pcm-stream-player", () => ({
     constructor(
       _context: AudioContext,
       _sampleRate?: number,
-      options?: { onActivityLevel?: (level: number) => void },
+      options?: {
+        onActivityLevel?: (level: number) => void;
+        onPlaybackChunk?: (chunk: Uint8Array) => void;
+        onPlaybackEvent?: (event: unknown) => void;
+      },
     ) {
       setPlayerActivityHandler(options?.onActivityLevel ?? null);
+      setPlayerChunkHandler(options?.onPlaybackChunk ?? null);
     }
 
     enqueue = playerEnqueue;
+    resume = playerResume;
     stop = playerStop;
+    snapshot = () => ({
+      contextState: "running",
+      contextTime: 0,
+      nextStartTime: 0,
+      queuedMs: 0,
+    });
   },
 }));
 
 class FakeWebSocket extends EventTarget {
   static instances: FakeWebSocket[] = [];
+  static autoAsrReady = true;
   static CONNECTING = 0;
   static OPEN = 1;
   static CLOSED = 3;
@@ -83,6 +134,8 @@ class FakeWebSocket extends EventTarget {
   readyState = FakeWebSocket.CONNECTING;
   binaryType: BinaryType = "blob";
   sent: Array<string | ArrayBufferLike | Blob | ArrayBufferView> = [];
+  asrAttemptId: string | null = null;
+  pendingAsrMessages: unknown[] = [];
 
   constructor(readonly url: string) {
     super();
@@ -94,6 +147,18 @@ class FakeWebSocket extends EventTarget {
       throw new Error("WebSocket is not open");
     }
     this.sent.push(data);
+    const parsed = typeof data === "string" ? JSON.parse(data) : null;
+    if (FakeWebSocket.autoAsrReady && this.url.includes("/voice/asr") && parsed?.type === "start") {
+      this.asrAttemptId = parsed.attemptId as string;
+      queueMicrotask(() => {
+        if (this.readyState === FakeWebSocket.OPEN) {
+          this.emitJson({ type: "ready", attemptId: this.asrAttemptId });
+          for (const payload of this.pendingAsrMessages.splice(0)) this.emitJson(payload);
+        }
+      });
+    } else if (this.url.includes("/voice/asr") && parsed?.type === "start") {
+      this.asrAttemptId = parsed.attemptId as string;
+    }
   }
 
   open(): void {
@@ -107,7 +172,19 @@ class FakeWebSocket extends EventTarget {
   }
 
   emitJson(payload: unknown): void {
-    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(payload) }));
+    if (this.url.includes("/voice/asr") && !this.asrAttemptId) {
+      this.pendingAsrMessages.push(payload);
+      return;
+    }
+    const message =
+      this.url.includes("/voice/asr") &&
+      payload &&
+      typeof payload === "object" &&
+      !("attemptId" in payload) &&
+      this.asrAttemptId
+        ? { ...payload, attemptId: this.asrAttemptId }
+        : payload;
+    this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
   }
 }
 
@@ -123,17 +200,57 @@ function ttsSocket(): FakeWebSocket {
   return socket;
 }
 
-function emitMicSpeechChunk(callIndex = createPcmCapture.mock.calls.length - 1): void {
-  const onChunk = createPcmCapture.mock.calls[callIndex]?.[0] as
-    | ((chunk: Uint8Array) => void)
+function socketControlTypes(socket: FakeWebSocket): string[] {
+  return socket.sent
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => JSON.parse(item).type as string);
+}
+
+interface SpeechCaptureCallbacks {
+  onFrame: (frame: { pcm: Uint8Array; speechProbability: number; activityLevel: number }) => void;
+  onSpeechStart: () => void;
+  onSpeechEnd: () => void;
+}
+
+function speechCaptureCallbacks(callIndex = createSpeechCapture.mock.calls.length - 1) {
+  const callbacks = createSpeechCapture.mock.calls[callIndex]?.[0] as
+    | SpeechCaptureCallbacks
     | undefined;
-  if (!onChunk) throw new Error("PCM capture callback was not created");
-  onChunk(new Uint8Array([0xff, 0x7f, 0xff, 0x7f, 0x00, 0x40, 0x00, 0x40]));
+  if (!callbacks) throw new Error("Speech capture callbacks were not created");
+  return callbacks;
+}
+
+function emitMicFrame(callIndex = createSpeechCapture.mock.calls.length - 1): void {
+  speechCaptureCallbacks(callIndex).onFrame({
+    pcm: new Uint8Array([0xff, 0x7f, 0xff, 0x7f, 0x00, 0x40, 0x00, 0x40]),
+    speechProbability: 0.9,
+    activityLevel: 0.8,
+  });
+}
+
+function emitMicSpeechChunk(callIndex = createSpeechCapture.mock.calls.length - 1): void {
+  emitMicFrame(callIndex);
+  speechCaptureCallbacks(callIndex).onSpeechStart();
+}
+
+function speechCaptureResult(stop = vi.fn().mockResolvedValue(undefined)) {
+  return {
+    source: "microphone" as const,
+    start: vi.fn().mockResolvedValue(undefined),
+    stop,
+  };
 }
 
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function waitForListeningReady(): Promise<void> {
+  await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
+  );
 }
 
 import { VoicePilotController } from "./voice-pilot-controller";
@@ -145,6 +262,7 @@ describe("VoicePilotController", () => {
   beforeEach(() => {
     cleanup();
     FakeWebSocket.instances = [];
+    FakeWebSocket.autoAsrReady = true;
     vi.stubGlobal("WebSocket", FakeWebSocket);
     vi.stubGlobal(
       "AudioContext",
@@ -152,8 +270,8 @@ describe("VoicePilotController", () => {
         currentTime = 0;
       },
     );
-    createPcmCapture.mockReset();
-    createPcmCapture.mockResolvedValue({ stop: vi.fn() });
+    createSpeechCapture.mockReset();
+    createSpeechCapture.mockImplementation(async () => speechCaptureResult());
     sendEnvelope.mockReset();
     sendEnvelope.mockReturnValue(true);
     sendControl.mockReset();
@@ -175,8 +293,24 @@ describe("VoicePilotController", () => {
     wakeDisable.mockResolvedValue(undefined);
     playerEnqueue.mockReset();
     playerEnqueue.mockReturnValue(0);
+    playerResume.mockReset();
+    playerResume.mockResolvedValue(undefined);
     playerStop.mockReset();
     setPlayerActivityHandler(null);
+    setPlayerChunkHandler(null);
+    voiceAudioSessionAcquire.mockReset();
+    voiceAudioSessionSetMode.mockReset();
+    voiceAudioSessionRelease.mockReset();
+    voicePlaybackContextGet.mockReset();
+    voicePlaybackContextGet.mockReturnValue({});
+    voicePlaybackContextPrepare.mockReset();
+    voicePlaybackContextPrepare.mockResolvedValue({});
+    voicePlaybackContextReactivate.mockReset();
+    voicePlaybackContextReactivate.mockResolvedValue({});
+    voiceAudioSessionAcquire.mockReturnValue({
+      setMode: voiceAudioSessionSetMode,
+      release: voiceAudioSessionRelease,
+    });
     useVoicePilotStore.getState().resetAll();
     useChatStore.setState({ bySessionId: { s1: { ...EMPTY_SLICE, inputDraft: "typed draft" } } });
     useSessionStore.setState({
@@ -192,9 +326,11 @@ describe("VoicePilotController", () => {
   });
 
   it("opens ASR/TTS sockets and enables wake lock when Voice Pilot starts", async () => {
+    const capture = speechCaptureResult();
+    createSpeechCapture.mockResolvedValueOnce(capture);
     useVoicePilotStore.getState().enable("s1");
 
-    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    const view = render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
 
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
     expect(wakeEnable).toHaveBeenCalledTimes(1);
@@ -202,13 +338,61 @@ describe("VoicePilotController", () => {
     expect(ttsSocket().url).toContain("/voice/tts");
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
+    expect(asrSocket().sent).toHaveLength(0);
+
+    emitMicSpeechChunk();
+    await waitFor(() => expect(socketControlTypes(asrSocket())).toContain("start"));
     expect(JSON.parse(asrSocket().sent[0] as string)).toMatchObject({
       type: "start",
       sessionId: "s1",
       sampleRate: 16000,
+      encoding: "mulaw",
     });
-    expect(createPcmCapture).toHaveBeenCalledTimes(1);
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
+    );
+    expect(voiceAudioSessionAcquire).toHaveBeenCalledWith("capture");
+    expect(voiceAudioSessionSetMode.mock.calls.slice(0, 2)).toEqual([
+      ["playback"],
+      ["capture"],
+    ]);
+    expect(playerEnqueue.mock.invocationCallOrder[0]).toBeLessThan(
+      capture.start.mock.invocationCallOrder[0],
+    );
+
+    view.unmount();
+    await waitFor(() => expect(voiceAudioSessionRelease).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps silence local and flushes speech only after the ASR provider is ready", async () => {
+    FakeWebSocket.autoAsrReady = false;
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const asr = asrSocket();
+    asr.open();
+    ttsSocket().open();
+    await waitForListeningReady();
+
+    emitMicFrame(0);
+    expect(socketControlTypes(asr)).toEqual([]);
+    expect(asr.sent.filter((item) => item instanceof Uint8Array)).toHaveLength(0);
+    speechCaptureCallbacks(0).onSpeechStart();
+    emitMicFrame(0);
+    await waitFor(() => expect(socketControlTypes(asr)).toEqual(["start"]));
+    expect(asr.sent.filter((item) => item instanceof Uint8Array)).toHaveLength(0);
+
+    asr.emitJson({ type: "ready" });
+    await waitFor(() =>
+      expect(asr.sent.filter((item) => item instanceof Uint8Array).length).toBeGreaterThanOrEqual(
+        2,
+      ),
+    );
+    expect(playerResume).toHaveBeenCalledTimes(1);
+    expect(useVoicePilotStore.getState().bySessionId.s1?.waveform.length).toBeGreaterThan(0);
   });
 
   it("drives the Voice Pilot activity meter from microphone and speech PCM", async () => {
@@ -219,10 +403,9 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
-    const onMicChunk = createPcmCapture.mock.calls[0][0] as (chunk: Uint8Array) => void;
-    onMicChunk(new Uint8Array([0xff, 0x7f, 0x00, 0x40]));
+    emitMicFrame(0);
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.activityLevel).toBeGreaterThan(0),
     );
@@ -241,9 +424,27 @@ describe("VoicePilotController", () => {
     );
   });
 
+  it("adds speech waveform data only when its PCM chunk reaches playback", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    useVoicePilotStore.getState().clearWaveform("s1");
+    const chunk = new Uint8Array([0xff, 0x7f, 0x00, 0x40]);
+
+    ttsSocket().dispatchEvent(new MessageEvent("message", { data: chunk.buffer }));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.waveform).toEqual([]);
+
+    emitPlayerChunk(chunk);
+    expect(useVoicePilotStore.getState().bySessionId.s1?.waveform.length).toBeGreaterThan(0);
+  });
+
   it("stops microphone capture when the ASR provider reports an error", async () => {
     const stopCapture = vi.fn();
-    createPcmCapture.mockResolvedValueOnce({ stop: stopCapture });
+    createSpeechCapture.mockResolvedValueOnce(speechCaptureResult(stopCapture));
     useVoicePilotStore.getState().enable("s1");
 
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -251,8 +452,9 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
+    emitMicSpeechChunk();
     asrSocket().emitJson({ type: "error", error: "ASR disconnected" });
 
     await waitFor(() =>
@@ -262,6 +464,31 @@ describe("VoicePilotController", () => {
       }),
     );
     expect(stopCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits Provider text already recognized before an active ASR attempt fails", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={10_000} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const asr = asrSocket();
+    asr.open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    emitMicSpeechChunk();
+    await waitFor(() => expect(socketControlTypes(asr)).toContain("start"));
+    asr.emitJson({ type: "partial", text: "请检查项目状态" });
+    asr.emitJson({ type: "error", error: "ASR disconnected" });
+
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    expect(sendEnvelope.mock.calls[0]?.[0]).toMatchObject({
+      type: "user_input",
+      payload: { text: "请检查项目状态" },
+    });
+    expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+      phase: "waiting",
+      error: null,
+    });
   });
 
   it("ignores late startup failures after Voice Pilot is disabled", async () => {
@@ -293,9 +520,9 @@ describe("VoicePilotController", () => {
   it("starts a fresh ASR session after each spoken reply so a second utterance is captured", async () => {
     const firstStop = vi.fn();
     const secondStop = vi.fn();
-    createPcmCapture
-      .mockResolvedValueOnce({ stop: firstStop })
-      .mockResolvedValueOnce({ stop: secondStop });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockResolvedValueOnce(speechCaptureResult(secondStop));
     useVoicePilotStore.getState().enable("s1");
 
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -305,12 +532,13 @@ describe("VoicePilotController", () => {
     const tts = ttsSocket();
     asr.open();
     tts.open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     emitMicSpeechChunk();
     asr.emitJson({ type: "final", text: "第一轮" });
 
     await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
     expect(firstStop).toHaveBeenCalledTimes(1);
+    expect(socketControlTypes(asr)).toEqual(["start", "stop"]);
 
     useChatStore.getState().appendAssistantText("s1", "收到。");
     useChatStore.getState().markTurnComplete("s1");
@@ -325,21 +553,26 @@ describe("VoicePilotController", () => {
 
     tts.emitJson({ type: "finished", requestId: "reply-1" });
 
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
-    const asrStartMessages = asr.sent.filter(
-      (item) => typeof item === "string" && JSON.parse(item).type === "start",
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
     );
-    expect(asrStartMessages).toHaveLength(2);
+    expect(createSpeechCapture).toHaveBeenCalledTimes(2);
+    expect(socketControlTypes(asr)).toEqual(["start", "stop"]);
 
-    const onSecondMicChunk = createPcmCapture.mock.calls[1][0] as (chunk: Uint8Array) => void;
-    onSecondMicChunk(new Uint8Array([0xff, 0x7f, 0x00, 0x40]));
-    expect(asr.sent.some((item) => item instanceof Uint8Array)).toBe(true);
+    const binaryMessageCount = asr.sent.filter((item) => item instanceof Uint8Array).length;
+    emitMicSpeechChunk();
+    await waitFor(() =>
+      expect(asr.sent.filter((item) => item instanceof Uint8Array).length).toBeGreaterThan(
+        binaryMessageCount,
+      ),
+    );
+    expect(socketControlTypes(asr)).toEqual(["start", "stop", "start"]);
   });
 
   it("does not resume microphone capture while the agent session is still working", async () => {
-    createPcmCapture
-      .mockResolvedValueOnce({ stop: vi.fn() })
-      .mockResolvedValueOnce({ stop: vi.fn() });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(vi.fn()))
+      .mockResolvedValueOnce(speechCaptureResult(vi.fn()));
     useVoicePilotStore.getState().enable("s1");
 
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -349,7 +582,7 @@ describe("VoicePilotController", () => {
     const tts = ttsSocket();
     asr.open();
     tts.open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     emitMicSpeechChunk();
     asr.emitJson({ type: "final", text: "查一下项目状态" });
     await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
@@ -368,20 +601,20 @@ describe("VoicePilotController", () => {
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
     );
-    expect(createPcmCapture).toHaveBeenCalledTimes(1);
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
 
     act(() => {
       useSessionStore.getState().updateSessionState("s1", "idle");
     });
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
   });
 
   it("waits when agent status is thinking even if the session state has not flipped yet", async () => {
     const firstStop = vi.fn();
     const secondStop = vi.fn();
-    createPcmCapture
-      .mockResolvedValueOnce({ stop: firstStop })
-      .mockResolvedValueOnce({ stop: secondStop });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockResolvedValueOnce(speechCaptureResult(secondStop));
     useVoicePilotStore.getState().enable("s1");
 
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -389,7 +622,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
     );
@@ -407,7 +640,7 @@ describe("VoicePilotController", () => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting");
       expect(firstStop).toHaveBeenCalled();
     });
-    expect(createPcmCapture).toHaveBeenCalledTimes(1);
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
 
     act(() => {
       useSessionStore.getState().setAgentStatus("s1", {
@@ -420,7 +653,7 @@ describe("VoicePilotController", () => {
 
     await waitFor(() => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
-      expect(createPcmCapture).toHaveBeenCalledTimes(2);
+      expect(createSpeechCapture).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -431,7 +664,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "请实现语音助手" });
 
@@ -453,31 +686,29 @@ describe("VoicePilotController", () => {
     const asr = asrSocket();
     asr.open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     emitMicSpeechChunk();
     asr.emitJson({ type: "final", text: "嗯。" });
 
     expect(sendEnvelope).not.toHaveBeenCalled();
   });
 
-  it("ignores ASR text when the microphone has not detected user speech", async () => {
+  it("accepts provider text without applying a second local volume threshold", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
 
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
-    asrSocket().emitJson({ type: "partial", text: "嗯。" });
-    asrSocket().emitJson({ type: "final", text: "嗯。" });
+    speechCaptureCallbacks().onSpeechStart();
+    asrSocket().emitJson({ type: "final", text: "请继续" });
 
-    await flushMicrotasks();
-    expect(sendEnvelope).not.toHaveBeenCalled();
-    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
-    const userMessages =
-      useChatStore.getState().bySessionId.s1?.messages.filter((m) => m.role === "user") ?? [];
-    expect(userMessages).toHaveLength(0);
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    expect(sendEnvelope.mock.calls[0]?.[0]).toMatchObject({
+      payload: { text: "请继续" },
+    });
   });
 
   it("plays a local earcon before sending recognized speech to the agent", async () => {
@@ -487,7 +718,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "执行下一步" });
 
@@ -498,13 +729,45 @@ describe("VoicePilotController", () => {
     );
   });
 
+  it("waits for microphone teardown before reactivating playback", async () => {
+    const finishStop: Array<() => void> = [];
+    const stop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStop.push(resolve);
+        }),
+    );
+    createSpeechCapture.mockResolvedValueOnce(speechCaptureResult(stop));
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    playerEnqueue.mockClear();
+    voicePlaybackContextReactivate.mockClear();
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "执行下一步" });
+    await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+
+    expect(voicePlaybackContextReactivate).not.toHaveBeenCalled();
+    expect(playerEnqueue).not.toHaveBeenCalled();
+
+    finishStop[0]?.();
+    await waitFor(() => expect(voicePlaybackContextReactivate).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(playerEnqueue).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+  });
+
   it("speaks completed assistant prose through TTS", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().appendAssistantText("s1", "可以，我来处理。");
     useChatStore.getState().markTurnComplete("s1");
@@ -529,7 +792,7 @@ describe("VoicePilotController", () => {
     asrSocket().open();
     const tts = ttsSocket();
     tts.open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().appendAssistantText("s1", "我会继续处理。");
     useChatStore.getState().markTurnComplete("s1");
@@ -549,8 +812,8 @@ describe("VoicePilotController", () => {
     tts.emitJson({ type: "finished" });
     await Promise.resolve();
 
-    expect(createPcmCapture).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
   });
 
   it("surfaces active TTS provider errors instead of remaining in speaking", async () => {
@@ -559,7 +822,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().appendAssistantText("s1", "第二句回复。");
     useChatStore.getState().markTurnComplete("s1");
@@ -592,7 +855,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().appendAssistantText("s1", "第二句回复。");
     useChatStore.getState().markTurnComplete("s1");
@@ -637,7 +900,7 @@ describe("VoicePilotController", () => {
         expect.objectContaining({ type: "speak", text: "这是打开前的历史回复。" }),
       ]),
     );
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().appendAssistantText("s1", "这是打开后的新回复。");
     useChatStore.getState().markTurnComplete("s1");
@@ -678,11 +941,11 @@ describe("VoicePilotController", () => {
     await flushMicrotasks();
     expect(useVoicePilotStore.getState().bySessionId.s1?.phase).not.toBe("error");
     expect(useVoicePilotStore.getState().bySessionId.s1?.error).toBeNull();
-    expect(createPcmCapture).not.toHaveBeenCalled();
+    expect(createSpeechCapture).not.toHaveBeenCalled();
 
     asrSocket().open();
 
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
   });
 
@@ -790,7 +1053,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     useChatStore.getState().addApprovalRequest("s1", {
       requestId: "toolu_1",
@@ -835,7 +1098,7 @@ describe("VoicePilotController", () => {
     ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
 
     await waitFor(() => {
-      expect(createPcmCapture).toHaveBeenCalledTimes(2);
+      expect(createSpeechCapture).toHaveBeenCalledTimes(2);
       expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
         phase: "approval",
         approvalRequestId: "toolu_1",
@@ -862,7 +1125,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     act(() => {
       useChatStore.getState().addApprovalRequest("s1", {
@@ -919,7 +1182,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     act(() => {
       useChatStore.getState().addApprovalRequest("s1", {
@@ -955,7 +1218,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     const assistantText = "我直接用网络搜索查最近几年顶会的 OS 论文与思潮。";
     act(() => {
@@ -1009,7 +1272,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     const assistantText = "我用网络搜索查一下近年操作系统领域的论文和研究方向。";
     act(() => {
@@ -1074,7 +1337,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     useChatStore.getState().addApprovalRequest("s1", {
       requestId: "toolu_1",
       toolName: "Bash",
@@ -1101,7 +1364,7 @@ describe("VoicePilotController", () => {
       ).toBe(true),
     );
     ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
 
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "允许" });
@@ -1127,7 +1390,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     useChatStore.getState().addApprovalRequest("s1", {
       requestId: "toolu_1",
       toolName: "Write",
@@ -1138,7 +1401,7 @@ describe("VoicePilotController", () => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("approval"),
     );
     ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
 
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "始终允许" });
@@ -1156,10 +1419,10 @@ describe("VoicePilotController", () => {
     const firstStop = vi.fn();
     const secondStop = vi.fn();
     const thirdStop = vi.fn();
-    createPcmCapture
-      .mockResolvedValueOnce({ stop: firstStop })
-      .mockResolvedValueOnce({ stop: secondStop })
-      .mockResolvedValueOnce({ stop: thirdStop });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockResolvedValueOnce(speechCaptureResult(secondStop))
+      .mockResolvedValueOnce(speechCaptureResult(thirdStop));
     requestVoiceSummary.mockResolvedValueOnce({
       sessionId: "s1",
       messageId: "toolu_1",
@@ -1171,7 +1434,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     act(() => {
       useChatStore.getState().addApprovalRequest("s1", {
@@ -1188,7 +1451,7 @@ describe("VoicePilotController", () => {
       }),
     );
     ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
 
     act(() => {
       useSessionStore.getState().updateSessionState("s1", "working");
@@ -1201,8 +1464,8 @@ describe("VoicePilotController", () => {
         approvalRequestId: null,
       }),
     );
-    expect(secondStop).toHaveBeenCalled();
-    expect(createPcmCapture).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(secondStop).toHaveBeenCalledTimes(1));
+    expect(createSpeechCapture).toHaveBeenCalledTimes(2);
 
     act(() => {
       useSessionStore.getState().updateSessionState("s1", "idle");
@@ -1210,7 +1473,7 @@ describe("VoicePilotController", () => {
 
     await waitFor(() => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
-      expect(createPcmCapture).toHaveBeenCalledTimes(3);
+      expect(createSpeechCapture).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1221,7 +1484,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "partial", text: "你好" });
@@ -1247,12 +1510,11 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "partial", text: "请检查" });
-    const messages = useChatStore.getState().bySessionId.s1?.messages ?? [];
-    expect(messages.some((m) => m.isPartial && m.role === "user")).toBe(true);
+    await flushMicrotasks();
     const partialBefore = useChatStore
       .getState()
       .bySessionId.s1?.messages.find((m) => m.isPartial && m.role === "user");
@@ -1283,7 +1545,7 @@ describe("VoicePilotController", () => {
     const asr = asrSocket();
     asr.open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     emitMicSpeechChunk();
     asr.emitJson({ type: "final", text: "嗯。" });
@@ -1307,7 +1569,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
 
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "暂停" });
@@ -1319,6 +1581,125 @@ describe("VoicePilotController", () => {
     expect(sendEnvelope).not.toHaveBeenCalled();
   });
 
+  it("starts a fresh capture after an in-flight listening startup was cancelled", async () => {
+    const firstStop = vi.fn().mockResolvedValue(undefined);
+    const staleStop = vi.fn().mockResolvedValue(undefined);
+    const resumedStop = vi.fn().mockResolvedValue(undefined);
+    let resolveStaleCapture!: (capture: ReturnType<typeof speechCaptureResult>) => void;
+    const staleCapture = new Promise<ReturnType<typeof speechCaptureResult>>((resolve) => {
+      resolveStaleCapture = resolve;
+    });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockReturnValueOnce(staleCapture)
+      .mockResolvedValueOnce(speechCaptureResult(resumedStop));
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "请告诉我当前目录" });
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    act(() => useSessionStore.getState().updateSessionState("s1", "working"));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
+    );
+
+    act(() => useSessionStore.getState().updateSessionState("s1", "idle"));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      useChatStore.getState().appendAssistantText("s1", "当前目录是 /tmp。");
+      useChatStore.getState().markTurnComplete("s1");
+    });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
+    );
+
+    ttsSocket().emitJson({ type: "finished" });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
+    );
+    expect(createSpeechCapture).toHaveBeenCalledTimes(2);
+
+    resolveStaleCapture(speechCaptureResult(staleStop));
+
+    await waitFor(() => {
+      expect(staleStop).toHaveBeenCalledTimes(1);
+      expect(createSpeechCapture).toHaveBeenCalledTimes(3);
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
+    });
+  });
+
+  it("closes an in-flight microphone startup before preparing assistant playback", async () => {
+    const initialStop = vi.fn().mockResolvedValue(undefined);
+    const pendingStop = vi.fn().mockResolvedValue(undefined);
+    let resolvePendingCapture!: (capture: ReturnType<typeof speechCaptureResult>) => void;
+    const pendingCapture = new Promise<ReturnType<typeof speechCaptureResult>>((resolve) => {
+      resolvePendingCapture = resolve;
+    });
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(initialStop))
+      .mockReturnValueOnce(pendingCapture);
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    const tts = ttsSocket();
+    tts.open();
+    await waitForListeningReady();
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "请告诉我当前目录" });
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    act(() => useSessionStore.getState().updateSessionState("s1", "working"));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
+    );
+
+    act(() => useSessionStore.getState().updateSessionState("s1", "idle"));
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+    voicePlaybackContextReactivate.mockClear();
+
+    act(() => {
+      useChatStore.getState().appendAssistantText("s1", "当前目录是 /tmp。");
+      useChatStore.getState().markTurnComplete("s1");
+    });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
+    );
+    await flushMicrotasks();
+
+    expect(pendingStop).not.toHaveBeenCalled();
+    expect(voicePlaybackContextReactivate).not.toHaveBeenCalled();
+    expect(
+      tts.sent.some((item) => typeof item === "string" && JSON.parse(item).type === "speak"),
+    ).toBe(false);
+
+    resolvePendingCapture(speechCaptureResult(pendingStop));
+
+    await waitFor(() => expect(pendingStop).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(voicePlaybackContextReactivate).toHaveBeenCalledTimes(1));
+    expect(pendingStop.mock.invocationCallOrder[0]!).toBeLessThan(
+      voicePlaybackContextReactivate.mock.invocationCallOrder[0]!,
+    );
+    await waitFor(() =>
+      expect(
+        tts.sent.some(
+          (item) =>
+            typeof item === "string" &&
+            JSON.parse(item).type === "speak" &&
+            JSON.parse(item).text === "当前目录是 /tmp。",
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("mirrors machine phase through listening → waiting → speaking → waiting → listening", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -1326,7 +1707,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     asrSocket().open();
     ttsSocket().open();
-    await waitFor(() => expect(createPcmCapture).toHaveBeenCalledTimes(1));
+    await waitForListeningReady();
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
     );

@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { captureBrowserStateDump, getBrowserStateDumpMode } from "./browser-state-dump";
+import {
+  clearVoicePilotDiagnostics,
+  recordVoicePilotDiagnostic,
+} from "@/voice/voice-pilot-diagnostics";
 
 describe("browser-state-dump", () => {
   afterEach(() => {
     document.body.innerHTML = "";
     window.history.replaceState(null, "", "/");
     delete window.__devAnywhereLastBrowserStateDump;
+    clearVoicePilotDiagnostics();
   });
 
   it("enables automatic mode from the debugDump hash query", () => {
@@ -41,5 +46,27 @@ describe("browser-state-dump", () => {
     expect(dump.document.root.kind).toBe("element");
     expect(dump.document.nodeCount).toBeGreaterThan(1);
     expect(window.__devAnywhereLastBrowserStateDump).toBe(dump);
+  });
+
+  it("includes the bounded Voice Pilot trace", () => {
+    recordVoicePilotDiagnostic({
+      sessionId: "s1",
+      scope: "playback",
+      event: "pcm-scheduled",
+      requestId: "tts-1",
+      details: { bytes: 4800, contextState: "running" },
+    });
+
+    const dump = captureBrowserStateDump("voice-test");
+
+    expect(dump.devAnywhere.voicePilotDiagnostics).toEqual([
+      expect.objectContaining({
+        sessionId: "s1",
+        scope: "playback",
+        event: "pcm-scheduled",
+        requestId: "tts-1",
+        details: { bytes: 4800, contextState: "running" },
+      }),
+    ]);
   });
 });

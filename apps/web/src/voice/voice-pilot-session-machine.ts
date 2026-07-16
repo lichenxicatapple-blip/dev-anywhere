@@ -6,7 +6,7 @@ export type VoicePilotEffect =
   | { type: "requestMicPermission" }
   | { type: "requestWakeLock" }
   | { type: "releaseWakeLock" }
-  | { type: "startCapture" }
+  | { type: "beginListening" }
   | { type: "stopCapture" }
   | { type: "appendFinalToTurnBuffer"; text: string }
   | { type: "cancelTurnBuffer" }
@@ -119,7 +119,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
     if (!fsm.is("starting")) return result();
     if (!readiness.config || !readiness.mic || !readiness.asr || !readiness.tts) return result();
     transitionTo("listening");
-    return result([{ type: "playCue", cue: "listening-start" }, { type: "startCapture" }]);
+    return result([{ type: "beginListening" }]);
   }
 
   return {
@@ -215,7 +215,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       }
 
       if (event.type === "assistantEndCueDone" && fsm.is("approval")) {
-        return result([{ type: "startCapture" }]);
+        return result([{ type: "beginListening" }]);
       }
 
       if (event.type === "assistantEndCueDone" && fsm.is("paused")) {
@@ -229,7 +229,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
       if (event.type === "agentBecameIdle" && fsm.is("waiting")) {
         transitionTo("listening");
-        return result([{ type: "startCapture" }]);
+        return result([{ type: "beginListening" }]);
       }
 
       if (event.type === "pauseRequested" && fsm.is("listening")) {
@@ -239,14 +239,15 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
 
       if (event.type === "resumeRequested" && fsm.is("paused")) {
         transitionTo("listening");
-        return result([{ type: "playCue", cue: "listening-start" }, { type: "startCapture" }]);
+        return result([{ type: "beginListening" }]);
       }
 
       if (event.type === "cancelTurnRequested" && fsm.is("listening")) {
         return result([
           { type: "cancelTurnBuffer" },
+          { type: "stopCapture" },
           { type: "playCue", cue: "user-end" },
-          { type: "startCapture" },
+          { type: "beginListening" },
         ]);
       }
 

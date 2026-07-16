@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import { VOICE_WAVEFORM_BIN_CAPACITY, type PcmWaveformBin } from "./pcm-waveform";
 
 export type VoicePilotPhase =
   | "idle"
@@ -20,6 +21,7 @@ export interface VoicePilotState {
   lastSpokenText: string;
   approvalRequestId: string | null;
   activityLevel: number;
+  waveform: PcmWaveformBin[];
 }
 
 interface VoicePilotStoreState {
@@ -32,6 +34,8 @@ interface VoicePilotStoreState {
   setLastSpokenText: (sessionId: string, text: string) => void;
   setApproval: (sessionId: string, requestId: string | null) => void;
   setActivityLevel: (sessionId: string, level: number) => void;
+  appendWaveform: (sessionId: string, bins: PcmWaveformBin[]) => void;
+  clearWaveform: (sessionId: string) => void;
   resetAll: () => void;
 }
 
@@ -42,6 +46,7 @@ export const DEFAULT_VOICE_PILOT_STATE: VoicePilotState = {
   lastSpokenText: "",
   approvalRequestId: null,
   activityLevel: 0,
+  waveform: [],
 };
 
 function clampActivityLevel(level: number): number {
@@ -75,6 +80,7 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
             enabled: true,
             phase: "starting",
             error: null,
+            waveform: [],
           })),
         ),
 
@@ -87,6 +93,7 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
             error: null,
             approvalRequestId: null,
             activityLevel: 0,
+            waveform: [],
           })),
         ),
 
@@ -106,6 +113,7 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
             phase: "error",
             error,
             activityLevel: 0,
+            waveform: [],
           })),
         ),
 
@@ -139,6 +147,24 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
           ensureSession(state, sessionId, (current) => ({
             ...current,
             activityLevel: clampActivityLevel(level),
+          })),
+        ),
+
+      appendWaveform: (sessionId, bins) => {
+        if (bins.length === 0) return;
+        set((state) =>
+          ensureSession(state, sessionId, (current) => ({
+            ...current,
+            waveform: [...current.waveform, ...bins].slice(-VOICE_WAVEFORM_BIN_CAPACITY),
+          })),
+        );
+      },
+
+      clearWaveform: (sessionId) =>
+        set((state) =>
+          ensureSession(state, sessionId, (current) => ({
+            ...current,
+            waveform: [],
           })),
         ),
 

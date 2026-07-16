@@ -70,6 +70,20 @@ export type {
   VoiceProviderConfig,
   VoiceSummaryReason,
 } from "./schemas/voice.js";
+export {
+  VoiceAsrAudioEncodingSchema,
+  VoiceAsrClientMessageSchema,
+  VoiceAsrServerMessageSchema,
+  VoiceAsrStartMessageSchema,
+  VoiceAsrStopMessageSchema,
+} from "./schemas/voice-stream.js";
+export type {
+  VoiceAsrAudioEncoding,
+  VoiceAsrClientMessage,
+  VoiceAsrServerMessage,
+  VoiceAsrStartMessage,
+  VoiceAsrStopMessage,
+} from "./schemas/voice-stream.js";
 
 // types
 export * from "./types/index.js";
@@ -155,6 +169,8 @@ export {
   fileStreamFrameHeaderLength,
 } from "./binary-frame.js";
 export type { DecodedBinaryFrame, DecodedFileStreamFrame } from "./binary-frame.js";
+
+export { decodeMuLawToPcm16, encodePcm16ToMuLaw } from "./voice-audio-codec.js";
 
 // FSM helper (createFSM / defineFSM)
 export { createFSM, defineFSM } from "./state-machine.js";

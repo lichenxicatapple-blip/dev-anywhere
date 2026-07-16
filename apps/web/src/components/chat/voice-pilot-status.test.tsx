@@ -20,6 +20,10 @@ describe("VoicePilotStatus", () => {
   it("shows the current state and can stop Voice Pilot", () => {
     useVoicePilotStore.getState().enable("s1");
     useVoicePilotStore.getState().setActivityLevel("s1", 0.72);
+    useVoicePilotStore.getState().appendWaveform("s1", [
+      { min: -0.25, max: 0.5 },
+      { min: -0.5, max: 0.25 },
+    ]);
     useVoicePilotStore.getState().setPhase("s1", "speaking");
 
     const { container } = render(
@@ -36,6 +40,14 @@ describe("VoicePilotStatus", () => {
         .querySelector('[data-slot="voice-pilot-waveform"]')
         ?.getAttribute("data-activity-level"),
     ).toBe("72");
+    expect(
+      container
+        .querySelector('[data-slot="voice-pilot-waveform"]')
+        ?.getAttribute("data-waveform-bins"),
+    ).toBe("2");
+    expect(
+      container.querySelector('[data-slot="voice-pilot-waveform-curve"]')?.getAttribute("d"),
+    ).toContain("L");
     expect(
       container.querySelector('[data-slot="voice-pilot-status"]')?.getAttribute("data-tone"),
     ).toBe("speak");

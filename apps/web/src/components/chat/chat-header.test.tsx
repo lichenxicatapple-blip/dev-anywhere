@@ -9,6 +9,12 @@ const {
   toastLoading,
   toastSuccess,
   sendRawSpy,
+  prepareVoicePlayback,
+  voiceAudioSessionAcquire,
+  voiceAudioSessionRelease,
+  voicePilotWakeLockEnable,
+  voicePilotWakeLockDisable,
+  wakeLockState,
 } = vi.hoisted(() => ({
   requestVoiceConfig: vi.fn(),
   uploadFile: vi.fn(),
@@ -17,6 +23,18 @@ const {
   toastLoading: vi.fn(() => "loading-id"),
   toastSuccess: vi.fn(),
   sendRawSpy: vi.fn(),
+  prepareVoicePlayback: vi.fn(),
+  voiceAudioSessionAcquire: vi.fn(),
+  voiceAudioSessionRelease: vi.fn(),
+  voicePilotWakeLockEnable: vi.fn(),
+  voicePilotWakeLockDisable: vi.fn(),
+  wakeLockState: {
+    active: false,
+    pending: false,
+    supported: true,
+    unavailableReason: null as "insecure-context" | "unsupported" | null,
+    toggle: vi.fn(async () => undefined),
+  },
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
@@ -46,12 +64,23 @@ vi.mock("@/hooks/use-media-query", () => ({
   useMediaQuery: () => false,
 }));
 vi.mock("@/hooks/use-screen-wake-lock", () => ({
-  useScreenWakeLockScope: () => ({
-    active: false,
-    pending: false,
-    supported: true,
-    toggle: () => Promise.resolve(),
-  }),
+  useScreenWakeLockScope: () => wakeLockState,
+}));
+vi.mock("@/voice/voice-playback-context", () => ({
+  voicePlaybackContext: {
+    prepare: prepareVoicePlayback,
+  },
+}));
+vi.mock("@/voice/browser-audio-session", () => ({
+  voiceAudioSession: {
+    acquire: voiceAudioSessionAcquire,
+  },
+}));
+vi.mock("@/lib/screen-wake-lock-manager", () => ({
+  screenWakeLockManager: {
+    enable: voicePilotWakeLockEnable,
+    disable: voicePilotWakeLockDisable,
+  },
 }));
 
 import { ChatHeader } from "./chat-header";
@@ -64,6 +93,7 @@ describe("ChatHeader PTY upload menu", () => {
 
   beforeEach(() => {
     sessionStorage.clear();
+    window.history.replaceState({}, "", "/");
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
@@ -96,6 +126,25 @@ describe("ChatHeader PTY upload menu", () => {
     toastLoading.mockReset();
     toastLoading.mockReturnValue("loading-id");
     sendRawSpy.mockReset();
+    prepareVoicePlayback.mockReset();
+    prepareVoicePlayback.mockResolvedValue({});
+    voiceAudioSessionAcquire.mockReset();
+    voiceAudioSessionRelease.mockReset();
+    voiceAudioSessionAcquire.mockReturnValue({
+      setMode: vi.fn(),
+      release: voiceAudioSessionRelease,
+    });
+    voicePilotWakeLockEnable.mockReset();
+    voicePilotWakeLockEnable.mockResolvedValue(undefined);
+    voicePilotWakeLockDisable.mockReset();
+    voicePilotWakeLockDisable.mockResolvedValue(undefined);
+    Object.assign(wakeLockState, {
+      active: false,
+      pending: false,
+      supported: true,
+      unavailableReason: null,
+    });
+    wakeLockState.toggle.mockClear();
     useVoicePilotStore.getState().resetAll();
     useSessionStore.setState({
       sessions: [
@@ -301,6 +350,22 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("显示")).toBeNull();
   });
 
+  it.each([
+    ["insecure-context", "屏幕常亮（需要 HTTPS）"],
+    ["unsupported", "屏幕常亮（浏览器不支持）"],
+  ] as const)("explains why screen wake lock is unavailable: %s", async (reason, label) => {
+    wakeLockState.supported = false;
+    wakeLockState.unavailableReason = reason;
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    menuTrigger.focus();
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+
+    const item = await screen.findByRole("menuitemcheckbox", { name: label });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("opens session search from the overflow menu", async () => {
     const onFind = vi.fn();
     render(<ChatHeader onFind={onFind} sessionId="s1" mode="json" />);
@@ -323,10 +388,9 @@ describe("ChatHeader PTY upload menu", () => {
     const item = await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" });
     fireEvent.click(item);
 
-    expect(await screen.findByRole("dialog")).not.toBeNull();
-    expect(screen.getByText("开启后会自动保持屏幕常亮，直到你停止 Voice Pilot。")).not.toBeNull();
-    expect(screen.getByText("运行期间不能单独关闭这个常亮状态。")).not.toBeNull();
-    expect(screen.getByText("长时间使用可能会显著增加电量消耗和设备发热。")).not.toBeNull();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(screen.getByText("开启后会持续聆听并保持屏幕常亮，停止后自动恢复。")).not.toBeNull();
     expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "开启 Voice Pilot" }));
@@ -337,6 +401,11 @@ describe("ChatHeader PTY upload menu", () => {
         phase: "starting",
       }),
     );
+    expect(prepareVoicePlayback).toHaveBeenCalledTimes(1);
+    expect(voiceAudioSessionAcquire).toHaveBeenCalledWith("capture");
+    expect(voiceAudioSessionRelease).toHaveBeenCalledTimes(1);
+    expect(voicePilotWakeLockEnable).toHaveBeenCalledWith("voice-pilot:s1");
+    expect(voicePilotWakeLockDisable).not.toHaveBeenCalled();
   });
 
   it("shows a toast and keeps Voice Pilot disabled when voice settings are missing", async () => {
@@ -394,6 +463,57 @@ describe("ChatHeader PTY upload menu", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("未检测到可用麦克风。"));
     expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+    expect(voiceAudioSessionRelease).toHaveBeenCalledTimes(1);
+    expect(voicePilotWakeLockDisable).toHaveBeenCalledWith("voice-pilot:s1");
+  });
+
+  it("does not request microphone permission when the development voice fixture is selected", async () => {
+    const getUserMedia = vi.fn(async () => {
+      throw new Error("fixture startup must not access the microphone");
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    window.history.replaceState({}, "", "/?voice-fixture=default");
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" }));
+    fireEvent.click(await screen.findByRole("button", { name: "开启 Voice Pilot" }));
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+        enabled: true,
+        phase: "starting",
+      }),
+    );
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("requests Voice Pilot wake lock from the confirmation click and rolls back denial", async () => {
+    voicePilotWakeLockEnable.mockRejectedValueOnce(
+      new DOMException("Permission was denied", "NotAllowedError"),
+    );
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" }));
+    fireEvent.click(await screen.findByRole("button", { name: "开启 Voice Pilot" }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("屏幕常亮请求被浏览器拒绝，Voice Pilot 未开启。"),
+    );
+    expect(useVoicePilotStore.getState().bySessionId.s1?.enabled).not.toBe(true);
+    expect(voicePilotWakeLockDisable).toHaveBeenCalledWith("voice-pilot:s1");
   });
 
   it("shows a toast and keeps Voice Pilot disabled when microphone permission is denied", async () => {

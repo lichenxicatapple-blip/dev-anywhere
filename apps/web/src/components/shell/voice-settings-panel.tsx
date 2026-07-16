@@ -9,6 +9,7 @@ import { createBundledBailianVoiceCapabilities } from "@dev-anywhere/shared";
 import { Check, ChevronDown, KeyRound, Play, Save as SaveIcon, Trash2 } from "lucide-react";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { Button } from "@/components/ui/button";
+import { voiceAudioSession, type VoiceAudioSessionLease } from "@/voice/browser-audio-session";
 import { PcmStreamPlayer } from "@/voice/pcm-stream-player";
 
 type SaveState =
@@ -36,6 +37,11 @@ const inputClassName =
 const MIN_TEST_PLAYBACK_MS = 800;
 const MIN_SAVE_PENDING_MS = 300;
 const SAVE_SUCCESS_HOLD_MS = 1600;
+
+interface PreparedTestPlayback {
+  context: AudioContext;
+  ready: Promise<void>;
+}
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext;
 
@@ -191,6 +197,7 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
   const [configLoaded, setConfigLoaded] = useState(false);
   const [state, setState] = useState<SaveState>({ kind: "idle" });
   const testAudioContextRef = useRef<AudioContext | null>(null);
+  const testAudioSessionLeaseRef = useRef<VoiceAudioSessionLease | null>(null);
   const testPlayerRef = useRef<PcmStreamPlayer | null>(null);
   const testPlaybackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -391,25 +398,54 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
       setState({ kind: "error", message: "请先连接 Relay 服务器" });
       return;
     }
+    let playback: PreparedTestPlayback;
+    try {
+      playback = prepareTestPlayback();
+    } catch (err) {
+      setState({ kind: "error", message: audioPlaybackErrorMessage(err) });
+      return;
+    }
     setState({ kind: "testing" });
     try {
-      const result = await relay.testVoiceConfig(buildVoiceConfigUpdate());
+      const [result] = await Promise.all([
+        relay.testVoiceConfig(buildVoiceConfigUpdate()),
+        playback.ready,
+      ]);
       if (!result.success || result.error) {
+        stopTestPlayback();
         setState({ kind: "error", message: result.error ?? "语音配置测试失败" });
         return;
       }
-      const playbackMs = playTestAudio(result);
-      if (playbackMs > 0) {
-        setState({ kind: "playingTest", transcript: result.transcript });
-        testPlaybackTimerRef.current = setTimeout(() => {
-          testPlaybackTimerRef.current = null;
-          setState({ kind: "testPassed", transcript: result.transcript });
-        }, playbackMs);
-        return;
-      }
-      setState({ kind: "testPassed", transcript: result.transcript });
+      const playbackMs = await playTestAudio(result, playback.context);
+      setState({ kind: "playingTest", transcript: result.transcript });
+      testPlaybackTimerRef.current = setTimeout(() => {
+        testPlaybackTimerRef.current = null;
+        stopTestPlayback();
+        setState({ kind: "testPassed", transcript: result.transcript });
+      }, playbackMs);
     } catch (err) {
-      setState({ kind: "error", message: err instanceof Error ? err.message : "语音配置测试失败" });
+      stopTestPlayback();
+      setState({ kind: "error", message: audioPlaybackErrorMessage(err) });
+    }
+  }
+
+  function prepareTestPlayback(): PreparedTestPlayback {
+    stopTestPlayback();
+    const audioSessionLease = voiceAudioSession.acquire("playback");
+    testAudioSessionLeaseRef.current = audioSessionLease;
+    try {
+      const context = createAudioContext();
+      testAudioContextRef.current = context;
+      return {
+        context,
+        // Safari requires resume in the original user-activation task, before
+        // the Relay request has been awaited.
+        ready: ensureAudioContextRunning(context),
+      };
+    } catch (error) {
+      audioSessionLease.release();
+      testAudioSessionLeaseRef.current = null;
+      throw error;
     }
   }
 
@@ -422,6 +458,8 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
     testPlayerRef.current = null;
     void testAudioContextRef.current?.close();
     testAudioContextRef.current = null;
+    testAudioSessionLeaseRef.current?.release();
+    testAudioSessionLeaseRef.current = null;
   }
 
   function clearSaveFeedbackTimer(): void {
@@ -430,22 +468,27 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
     saveFeedbackTimerRef.current = null;
   }
 
-  function playTestAudio(result: {
-    audioBase64?: string;
-    audioSampleRate?: number;
-    audioEncoding?: string;
-  }): number {
-    stopTestPlayback();
-    if (!result.audioBase64) return 0;
+  async function playTestAudio(
+    result: {
+      audioBase64?: string;
+      audioSampleRate?: number;
+      audioEncoding?: string;
+    },
+    context: AudioContext,
+  ): Promise<number> {
+    if (!result.audioBase64) {
+      throw new Error("语音测试未返回可播放音频");
+    }
     if (result.audioEncoding && result.audioEncoding !== "pcm_s16le") {
       throw new Error("测试音频格式暂不支持");
     }
     const sampleRate = result.audioSampleRate ?? 24000;
     const audio = decodeBase64Audio(result.audioBase64);
-    if (audio.byteLength === 0) return 0;
-    const context = createAudioContext(sampleRate);
+    if (audio.byteLength === 0 || audio.byteLength % 2 !== 0) {
+      throw new Error("测试音频数据无效");
+    }
+    await ensureAudioContextRunning(context);
     const player = new PcmStreamPlayer(context, sampleRate);
-    testAudioContextRef.current = context;
     testPlayerRef.current = player;
     player.enqueue(audio);
     const durationMs = Math.ceil((audio.byteLength / 2 / sampleRate) * 1000);
@@ -643,14 +686,31 @@ function decodeBase64Audio(base64: string): Uint8Array {
   return bytes;
 }
 
-function createAudioContext(sampleRate: number): AudioContext {
+function createAudioContext(): AudioContext {
   const audioWindow = window as Window &
     typeof globalThis & { webkitAudioContext?: AudioContextConstructor };
   const Constructor = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
   if (!Constructor) {
     throw new Error("当前浏览器不支持音频播放");
   }
-  return new Constructor({ sampleRate });
+  return new Constructor();
+}
+
+async function ensureAudioContextRunning(context: AudioContext): Promise<void> {
+  if (context.state !== "running") {
+    try {
+      await context.resume();
+    } catch {
+      throw new Error("浏览器阻止了测试音频播放，请再次点击测试");
+    }
+  }
+  if (context.state !== "running") {
+    throw new Error("浏览器阻止了测试音频播放，请再次点击测试");
+  }
+}
+
+function audioPlaybackErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "语音配置测试失败";
 }
 
 function sleep(ms: number): Promise<void> {

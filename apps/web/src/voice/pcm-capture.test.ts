@@ -19,7 +19,7 @@ describe("createPcmCapture", () => {
     const stopTrack = vi.fn();
     const disconnectSource = vi.fn();
     const disconnectProcessor = vi.fn();
-    const closeContext = vi.fn();
+    const closeContext = vi.fn().mockResolvedValue(undefined);
     const resumeContext = vi.fn().mockResolvedValue(undefined);
 
     Object.defineProperty(navigator, "mediaDevices", {
@@ -52,10 +52,13 @@ describe("createPcmCapture", () => {
     const capture = await createPcmCapture(vi.fn(), { sampleRate: 16000 });
 
     expect(resumeContext).toHaveBeenCalledTimes(1);
-    capture.stop();
+    await capture.stop();
     expect(disconnectProcessor).toHaveBeenCalledTimes(1);
     expect(disconnectSource).toHaveBeenCalledTimes(1);
     expect(stopTrack).toHaveBeenCalledTimes(1);
+    expect(closeContext).toHaveBeenCalledTimes(1);
+
+    await capture.stop();
     expect(closeContext).toHaveBeenCalledTimes(1);
   });
 });

@@ -28,10 +28,10 @@ const EXACT_COMMANDS = new Map<string, VoiceCommand>([
   ["取消", { type: "cancel" }],
   ["重说", { type: "redo" }],
   ["状态", { type: "status" }],
-  ["退出语音助手", { type: "exit" }],
-  ["关闭语音助手", { type: "exit" }],
-  ["停止语音模式", { type: "exit" }],
 ]);
+
+const EXIT_COMMAND_PHRASES = ["退出语音助手", "关闭语音助手", "停止语音助手"] as const;
+const VOICE_PILOT_EXIT_COMMAND_PATTERN = /(?:退出|关闭|停止)\s*voice\s*pilot/iu;
 
 const APPROVAL_COMMANDS = new Map<string, VoiceCommand>([
   ["允许", { type: "approve_once" }],
@@ -61,6 +61,12 @@ export function routeVoiceText(text: string, context: VoiceRouteContext): VoiceR
       : undefined;
   if (approvalCommand) {
     return { kind: "command", command: approvalCommand };
+  }
+  if (
+    EXIT_COMMAND_PHRASES.some((phrase) => normalized.includes(phrase)) ||
+    VOICE_PILOT_EXIT_COMMAND_PATTERN.test(normalized)
+  ) {
+    return { kind: "command", command: { type: "exit" } };
   }
   const exactCommand = EXACT_COMMANDS.get(normalized);
   if (exactCommand) return { kind: "command", command: exactCommand };

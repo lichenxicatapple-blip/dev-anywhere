@@ -130,7 +130,7 @@ async function openJsonVoicePilot(page: Page, sessionId = "test-sess"): Promise<
   await page.locator('[data-slot="chat-menu-voice-pilot-item"]').click();
   const confirmDialog = page.locator('[data-slot="voice-pilot-wake-lock-dialog"]');
   await expect(confirmDialog).toBeVisible();
-  await expect(confirmDialog).toContainText("开启后会自动保持屏幕常亮");
+  await expect(confirmDialog).toContainText("开启后会持续聆听并保持屏幕常亮");
   await confirmDialog.getByRole("button", { name: "开启 Voice Pilot" }).click();
   await expect
     .poll(() =>

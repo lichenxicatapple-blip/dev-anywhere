@@ -185,11 +185,20 @@ describe("voice websocket endpoints", () => {
     const asr = await connect("/voice/asr");
     const errorPromise = waitForMessageType(asr, "error");
 
-    asr.send(JSON.stringify({ type: "start", sessionId: "s1", sampleRate: 16000 }));
+    asr.send(
+      JSON.stringify({
+        type: "start",
+        sessionId: "s1",
+        attemptId: "attempt-1",
+        sampleRate: 16000,
+        encoding: "pcm_s16le",
+      }),
+    );
 
     await expect(errorPromise).resolves.toEqual(
       JSON.stringify({
         type: "error",
+        attemptId: "attempt-1",
         errorCode: "not_configured",
         error: "Voice provider is not configured",
       }),
@@ -200,10 +209,19 @@ describe("voice websocket endpoints", () => {
     await configureVoice();
     const asr = await connect("/voice/asr");
     const readyPromise = waitForMessageType(asr, "ready");
+    const audioAckPromise = waitForMessageType(asr, "audio_ack");
     const partialPromise = waitForMessageType(asr, "partial");
     const finalPromise = waitForMessageType(asr, "final");
 
-    asr.send(JSON.stringify({ type: "start", sessionId: "s1", sampleRate: 16000 }));
+    asr.send(
+      JSON.stringify({
+        type: "start",
+        sessionId: "s1",
+        attemptId: "attempt-1",
+        sampleRate: 16000,
+        encoding: "pcm_s16le",
+      }),
+    );
     await waitForCondition(() => lastAsrConfig !== null);
     expect(lastAsrConfig).toMatchObject({
       apiKey: "sk-test",
@@ -217,14 +235,75 @@ describe("voice websocket endpoints", () => {
     provider.emit("partial", "打开");
     provider.emit("final", "打开项目");
     asr.send(Buffer.from([1, 2, 3]));
-    asr.send(JSON.stringify({ type: "stop" }));
+    asr.send(JSON.stringify({ type: "stop", attemptId: "attempt-1" }));
 
-    await expect(readyPromise).resolves.toBe(JSON.stringify({ type: "ready" }));
-    await expect(partialPromise).resolves.toBe(JSON.stringify({ type: "partial", text: "打开" }));
-    await expect(finalPromise).resolves.toBe(JSON.stringify({ type: "final", text: "打开项目" }));
+    await expect(readyPromise).resolves.toBe(
+      JSON.stringify({ type: "ready", attemptId: "attempt-1" }),
+    );
+    await expect(partialPromise).resolves.toBe(
+      JSON.stringify({ type: "partial", attemptId: "attempt-1", text: "打开" }),
+    );
+    await expect(finalPromise).resolves.toBe(
+      JSON.stringify({ type: "final", attemptId: "attempt-1", text: "打开项目" }),
+    );
+    await expect(audioAckPromise).resolves.toBe(
+      JSON.stringify({
+        type: "audio_ack",
+        attemptId: "attempt-1",
+        encodedBytes: 3,
+        pcmBytes: 3,
+        chunks: 1,
+      }),
+    );
     await waitForCondition(() => provider.chunks.length === 1 && provider.stopped);
     expect(provider.chunks).toEqual([Buffer.from([1, 2, 3])]);
     expect(provider.stopped).toBe(true);
+  });
+
+  it("ignores callbacks from an ASR provider replaced by a newer turn", async () => {
+    await configureVoice();
+    const asr = await connect("/voice/asr");
+
+    asr.send(
+      JSON.stringify({
+        type: "start",
+        sessionId: "s1",
+        attemptId: "attempt-1",
+        sampleRate: 16000,
+        encoding: "pcm_s16le",
+      }),
+    );
+    await waitForCondition(() => asrInstances.length === 1);
+    const staleProvider = asrInstances[0]!;
+
+    asr.send(
+      JSON.stringify({
+        type: "start",
+        sessionId: "s1",
+        attemptId: "attempt-2",
+        sampleRate: 16000,
+        encoding: "pcm_s16le",
+      }),
+    );
+    await waitForCondition(() => asrInstances.length === 2);
+    const activeProvider = asrInstances[1]!;
+    const readyPromise = waitForMessageType(asr, "ready");
+    const partialPromise = waitForMessageType(asr, "partial");
+
+    staleProvider.emit("ready");
+    staleProvider.emit("partial", "旧会话");
+    staleProvider.emit("error", new Error("stale error"));
+    staleProvider.emit("closed", 1000, "stale close");
+    activeProvider.emit("ready");
+    activeProvider.emit("partial", "新会话");
+
+    await expect(readyPromise).resolves.toBe(
+      JSON.stringify({ type: "ready", attemptId: "attempt-2" }),
+    );
+    await expect(partialPromise).resolves.toBe(
+      JSON.stringify({ type: "partial", attemptId: "attempt-2", text: "新会话" }),
+    );
+    expect(staleProvider.closed).toBe(true);
   });
 
   it("bridges TTS websocket messages and binary PCM chunks", async () => {

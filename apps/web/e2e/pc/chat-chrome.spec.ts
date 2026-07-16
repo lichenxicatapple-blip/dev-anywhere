@@ -1,68 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
-
-async function installWakeLockMock(page: import("@playwright/test").Page): Promise<void> {
-  await page.addInitScript(() => {
-    const state = {
-      delayRequest: false,
-      requests: 0,
-      releases: 0,
-      resolveRequest: null as (() => void) | null,
-      sentinel: null as
-        | (EventTarget & {
-            released: boolean;
-            release: () => Promise<void>;
-          })
-        | null,
-    };
-    Object.defineProperty(window, "__devAnywhereWakeLockTest", {
-      configurable: true,
-      value: state,
-    });
-    Object.defineProperty(navigator, "wakeLock", {
-      configurable: true,
-      value: {
-        async request(type: "screen") {
-          if (type !== "screen") throw new Error(`unexpected wake lock type: ${type}`);
-          state.requests += 1;
-          if (state.delayRequest) {
-            await new Promise<void>((resolve) => {
-              state.resolveRequest = resolve;
-            });
-          }
-          const sentinel = new EventTarget() as EventTarget & {
-            released: boolean;
-            release: () => Promise<void>;
-          };
-          sentinel.released = false;
-          sentinel.release = async () => {
-            if (sentinel.released) return;
-            sentinel.released = true;
-            state.releases += 1;
-            sentinel.dispatchEvent(new Event("release"));
-          };
-          state.sentinel = sentinel;
-          return sentinel;
-        },
-      },
-    });
-  });
-}
-
-async function wakeLockTestCount(
-  page: import("@playwright/test").Page,
-  key: "requests" | "releases",
-): Promise<number> {
-  return page.evaluate(
-    (stateKey) =>
-      (
-        window as Window & {
-          __devAnywhereWakeLockTest?: Record<"requests" | "releases", number>;
-        }
-      ).__devAnywhereWakeLockTest?.[stateKey] ?? 0,
-    key,
-  );
-}
+import { installWakeLockMock, wakeLockTestCount } from "../wake-lock-test-helper";
 
 test.describe("ChatHeader compact navigation controls", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -186,7 +124,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-send-ctrl-b"]')).toHaveCount(0);
-    await expect(menu.getByText("会话")).toBeVisible();
+    await expect(menu.getByText("会话", { exact: true })).toBeVisible();
     await expect(menu.getByText("显示")).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();

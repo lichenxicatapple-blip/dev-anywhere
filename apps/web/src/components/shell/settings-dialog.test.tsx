@@ -67,6 +67,10 @@ const SAFARI_MACINTOSH_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15";
 
 let currentMaxTouchPoints = 5;
+let audioContextState: AudioContextState = "suspended";
+let audioSessionType = "auto";
+const audioContextResume = vi.fn();
+const audioContextClose = vi.fn();
 
 function installCurrentDeviceHints() {
   Object.defineProperties(window.navigator, {
@@ -82,6 +86,17 @@ function installCurrentDeviceHints() {
       configurable: true,
       get: () => currentMaxTouchPoints,
     },
+    audioSession: {
+      configurable: true,
+      get: () => ({
+        get type() {
+          return audioSessionType;
+        },
+        set type(next: string) {
+          audioSessionType = next;
+        },
+      }),
+    },
   });
 }
 
@@ -89,6 +104,7 @@ function restoreCurrentDeviceHints() {
   Reflect.deleteProperty(window.navigator, "userAgent");
   Reflect.deleteProperty(window.navigator, "platform");
   Reflect.deleteProperty(window.navigator, "maxTouchPoints");
+  Reflect.deleteProperty(window.navigator, "audioSession");
 }
 
 function chooseVoiceSetting(label: string, optionName: string) {
@@ -105,6 +121,7 @@ describe("SettingsDialog", () => {
   });
   beforeEach(() => {
     currentMaxTouchPoints = 5;
+    audioSessionType = "auto";
     installCurrentDeviceHints();
     localStorage.clear();
     document.documentElement.removeAttribute("data-theme");
@@ -224,12 +241,25 @@ describe("SettingsDialog", () => {
         turnIdleSeconds: 6,
       },
     });
+    audioContextState = "suspended";
+    audioContextResume.mockReset();
+    audioContextResume.mockImplementation(async () => {
+      audioContextState = "running";
+    });
+    audioContextClose.mockReset();
+    audioContextClose.mockImplementation(async () => {
+      audioContextState = "closed";
+    });
     vi.stubGlobal(
       "AudioContext",
       vi.fn().mockImplementation(function MockAudioContext() {
         return {
-          close: vi.fn(),
+          close: audioContextClose,
           currentTime: 0,
+          resume: audioContextResume,
+          get state() {
+            return audioContextState;
+          },
         };
       }),
     );
@@ -268,12 +298,16 @@ describe("SettingsDialog", () => {
     ]);
   });
 
-  it("focuses the settings surface instead of highlighting the first menu item", async () => {
+  it("focuses the settings surface instead of highlighting the first action", async () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     const dialog = screen.getByRole("dialog");
     await waitFor(() => expect(document.activeElement).toBe(dialog));
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Voice Pilot" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "返回设置" }));
   });
 
   it("only shows the input mode setting on iPad", () => {
@@ -604,13 +638,13 @@ describe("SettingsDialog", () => {
   });
 
   it("tests TTS and STT with current form values, plays the returned audio, and blocks saving while playing", async () => {
-    testVoiceConfig.mockResolvedValueOnce({
-      success: true,
-      audioBase64: "AQI=",
-      audioSampleRate: 16000,
-      audioEncoding: "pcm_s16le",
-      transcript: "语音助手测试",
-    });
+    let resolveTest: ((value: Awaited<ReturnType<typeof testVoiceConfig>>) => void) | undefined;
+    testVoiceConfig.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveTest = resolve;
+        }),
+    );
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
@@ -624,6 +658,19 @@ describe("SettingsDialog", () => {
     const testButton = screen.getByRole("button", { name: "测试" });
     expect(testButton.querySelector("svg")).not.toBeNull();
     fireEvent.click(testButton);
+
+    expect(audioSessionType).toBe("playback");
+    expect(window.AudioContext).toHaveBeenCalledTimes(1);
+    expect(audioContextResume).toHaveBeenCalledTimes(1);
+    expect(playerEnqueue).not.toHaveBeenCalled();
+
+    resolveTest?.({
+      success: true,
+      audioBase64: "AQI=",
+      audioSampleRate: 16000,
+      audioEncoding: "pcm_s16le",
+      transcript: "语音助手测试",
+    });
 
     await waitFor(() => {
       expect(testVoiceConfig).toHaveBeenCalledWith({
@@ -644,6 +691,50 @@ describe("SettingsDialog", () => {
     expect(updateVoiceConfig).not.toHaveBeenCalled();
     expect(await screen.findByText("测试通过")).not.toBeNull();
     await waitFor(() => expect(testButton).toHaveProperty("disabled", false));
+    expect(audioSessionType).toBe("auto");
+  });
+
+  it("does not report a successful voice test when no playable audio is returned", async () => {
+    testVoiceConfig.mockResolvedValueOnce({
+      success: true,
+      transcript: "语音助手测试",
+    });
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "测试" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("语音测试未返回可播放音频");
+    expect(screen.queryByText("测试通过")).toBeNull();
+    expect(playerEnqueue).not.toHaveBeenCalled();
+    expect(audioContextClose).toHaveBeenCalledTimes(1);
+    expect(audioSessionType).toBe("auto");
+  });
+
+  it("reports when the browser refuses to unlock test audio", async () => {
+    audioContextResume.mockRejectedValueOnce(new Error("NotAllowedError"));
+    testVoiceConfig.mockResolvedValueOnce({
+      success: true,
+      audioBase64: "AQI=",
+      audioSampleRate: 16000,
+      audioEncoding: "pcm_s16le",
+    });
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "测试" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "浏览器阻止了测试音频播放，请再次点击测试",
+    );
+    expect(screen.queryByText("测试通过")).toBeNull();
+    expect(playerEnqueue).not.toHaveBeenCalled();
+    expect(audioContextClose).toHaveBeenCalledTimes(1);
+    expect(audioSessionType).toBe("auto");
   });
 
   it("shows masked API key state and can clear the saved key", async () => {

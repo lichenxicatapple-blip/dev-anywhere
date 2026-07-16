@@ -121,7 +121,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const setPtyScrollTraceEnabled = useAppStore((s) => s.setPtyScrollTraceEnabled);
   const [view, setView] = useState<SettingsView>("menu");
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
-  const subviewBackButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogSurfaceRef = useRef<HTMLDivElement>(null);
   const voiceScrollRef = useRef<HTMLDivElement>(null);
   const relayTokenSaved = hasStoredRelayClientToken();
   const showInputModeSetting = useMemo(() => describeCurrentClientDevice().osName === "iPad", []);
@@ -199,7 +199,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   useEffect(() => {
     if (!open || view !== "voice") return;
     const frame = window.requestAnimationFrame(() => {
-      subviewBackButtonRef.current?.focus({ preventScroll: true });
+      dialogSurfaceRef.current?.focus({ preventScroll: true });
       if (voiceScrollRef.current) voiceScrollRef.current.scrollTop = 0;
     });
     return () => window.cancelAnimationFrame(frame);
@@ -232,6 +232,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         data-slot="settings-dialog"
         data-view={view}
         focusSurfaceOnOpen
+        ref={dialogSurfaceRef}
         showCloseButton={view === "menu"}
       >
         <DialogHeader
@@ -251,7 +252,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   className="-ml-2 mt-0.5 size-11 sm:size-9"
                   aria-label="返回设置"
                   data-slot="voice-settings-back"
-                  ref={subviewBackButtonRef}
                   onClick={() => setView("menu")}
                 >
                   <ArrowLeft className="size-4" aria-hidden="true" />

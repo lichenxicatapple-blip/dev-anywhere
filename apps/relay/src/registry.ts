@@ -211,6 +211,15 @@ export class RelayRegistry {
     }
   }
 
+  // 连接关闭只能释放自己持有的绑定。旧连接的 close 可能晚于新连接注册，
+  // 此时不能把已经切换到新 WebSocket 的绑定清空。
+  unbindClientSocket(clientId: string, ws: WebSocket): boolean {
+    const binding = this.clientBindings.get(clientId);
+    if (!binding || binding.ws !== ws) return false;
+    binding.ws = null;
+    return true;
+  }
+
   getClientBinding(clientId: string): ClientBinding | undefined {
     return this.clientBindings.get(clientId);
   }

@@ -1,10 +1,4 @@
-type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 interface SerializedRect {
   x: number;
@@ -108,6 +102,7 @@ export interface BrowserStateDump {
     ptyInputDebugEvents: JsonValue | null;
     ptyScrollTraceTail: JsonValue | null;
     jsonScrollTraceTail: JsonValue | null;
+    voicePilotDiagnostics: JsonValue | null;
   };
 }
 
@@ -143,6 +138,7 @@ type DevAnywhereDebugWindow = Window & {
   __devAnywherePtyInputDebugText?: string;
   __devAnywherePtyScrollTrace?: unknown[];
   __devAnywhereJsonScrollTrace?: unknown[];
+  __devAnywhereVoicePilotDiagnostics?: { snapshot: () => unknown };
 };
 
 const DEBUG_DUMP_ENDPOINT = "/__dev_anywhere_debug/browser-state-dumps";
@@ -263,6 +259,9 @@ export function captureBrowserStateDump(trigger: string = "manual"): BrowserStat
       ptyInputDebugEvents: safeJson(() => debugWindow.__devAnywherePtyInputDebugEvents ?? null),
       ptyScrollTraceTail: safeJson(() => tail(debugWindow.__devAnywherePtyScrollTrace)),
       jsonScrollTraceTail: safeJson(() => tail(debugWindow.__devAnywhereJsonScrollTrace)),
+      voicePilotDiagnostics: safeJson(
+        () => debugWindow.__devAnywhereVoicePilotDiagnostics?.snapshot() ?? null,
+      ),
     },
   };
   window.__devAnywhereLastBrowserStateDump = dump;
