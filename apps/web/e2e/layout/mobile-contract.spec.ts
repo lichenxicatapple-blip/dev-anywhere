@@ -684,7 +684,7 @@ test.describe("mobile UX contract", () => {
     await expectTouchTarget(page.locator('[data-slot="file-entry"]').first());
   });
 
-  test("json input on touch tablet does not add a visible bottom layout gutter", async ({
+  test("json input on touch tablet stays above an overlay keyboard without document overflow", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
@@ -711,14 +711,37 @@ test.describe("mobile UX contract", () => {
 
     const root = page.locator("[data-keyboard-offset]").first();
     await expect(root).toHaveAttribute("data-keyboard-offset", /[1-9]\d*/);
-    await expect(root).toHaveAttribute("data-keyboard-layout-inset", "0");
     await expect
       .poll(() =>
         root.evaluate((node) => {
-          return getComputedStyle(node).paddingBottom;
+          const offset = Number(node.getAttribute("data-keyboard-offset"));
+          const inset = Number(node.getAttribute("data-keyboard-layout-inset"));
+          const padding = Number.parseFloat(getComputedStyle(node).paddingBottom);
+          return offset > 0 && inset === offset && padding === inset;
         }),
       )
-      .toBe("0px");
+      .toBe(true);
+    await expect
+      .poll(() =>
+        input.evaluate((node) => {
+          const inputBottom = node.getBoundingClientRect().bottom;
+          const visualBottom =
+            (window.visualViewport?.offsetTop ?? 0) +
+            (window.visualViewport?.height ?? window.innerHeight);
+          const gap = visualBottom - inputBottom;
+          return gap >= 0 && gap <= 16;
+        }),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.body.scrollHeight <= window.innerHeight &&
+            document.documentElement.scrollHeight <= window.innerHeight,
+        ),
+      )
+      .toBe(true);
     await expectNoHorizontalDocumentOverflow(page);
   });
 
