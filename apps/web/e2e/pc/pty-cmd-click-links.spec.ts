@@ -54,42 +54,22 @@ async function activate(
   );
 }
 
-async function selectTerminalTextAndRelease(page: Page, text: string): Promise<void> {
+async function selectTerminalText(page: Page, text: string): Promise<void> {
   const selected = await page.evaluate((target) => {
     const term = window.__ccTestPtyTerminals?.get("claude-pty");
-    const element = term?.element;
-    const screen = element?.querySelector<HTMLElement>(".xterm-screen");
-    if (!term || !element || !screen) return false;
+    const controller = window.__ccTestPtySelectionControllers?.get("claude-pty");
+    if (!term || !controller) return false;
     const buffer = term.buffer.active;
-    const rect = screen.getBoundingClientRect();
-    const cellWidth = screen.clientWidth / term.cols;
-    const cellHeight = screen.clientHeight / term.rows;
     for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
       const line = buffer.getLine(row)?.translateToString(true) ?? "";
       const column = line.indexOf(target);
       if (column < 0) continue;
-      term.select(column, row, target.length);
-      const clientX = rect.left + (column + target.length) * cellWidth;
-      const clientY = rect.top + (row - buffer.viewportY + 0.5) * cellHeight;
-      element.dispatchEvent(
-        new PointerEvent("pointerdown", {
-          pointerType: "mouse",
-          button: 0,
-          bubbles: true,
-          clientX,
-          clientY,
-        }),
-      );
-      window.dispatchEvent(
-        new PointerEvent("pointerup", {
-          pointerType: "mouse",
-          button: 0,
-          bubbles: true,
-          clientX,
-          clientY,
-        }),
-      );
-      return true;
+      return controller.selectRange({
+        anchorRow: row,
+        focusRow: row,
+        anchorColumn: column,
+        focusColumn: Math.min(column + target.length - 1, term.cols - 1),
+      });
     }
     return false;
   }, text);
@@ -196,7 +176,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     await emitPtyLine(page, "artifact a=b.jpg ready\r\n");
     await waitForBufferContains(page, "a=b.jpg");
 
-    await selectTerminalTextAndRelease(page, "b.jpg");
+    await selectTerminalText(page, "b.jpg");
 
     const previewButton = page.getByRole("button", { name: "预览终端选区图片" });
     await expect(previewButton).toBeVisible();
@@ -229,7 +209,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     await emitPtyLine(page, `${scrollback.join("\r\n")}\r\nartifact ${path} ready\r\n`);
     await waitForBufferContains(page, path);
 
-    await selectTerminalTextAndRelease(page, path);
+    await selectTerminalText(page, path);
 
     const toolbar = page.locator('[data-slot="pty-selection-toolbar"]');
     await expect(toolbar).toBeVisible();
