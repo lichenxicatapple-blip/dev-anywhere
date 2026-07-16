@@ -9,17 +9,21 @@ WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/relay/package.json apps/relay/
+COPY apps/web/package.json apps/web/
 
 RUN pnpm install --frozen-lockfile \
   --filter @dev-anywhere/shared \
+  --filter @dev-anywhere/web \
   --filter @dev-anywhere/relay
 
 # Sources
 COPY packages/shared/ packages/shared/
 COPY apps/relay/ apps/relay/
+COPY apps/web/ apps/web/
 COPY apps/proxy/assets/fonts/ apps/relay/assets/fonts/
 
 RUN pnpm --filter @dev-anywhere/shared build
+RUN pnpm --filter @dev-anywhere/web build
 RUN pnpm --filter @dev-anywhere/relay build
 
 # Produce a self-contained prod-only deployment directory.

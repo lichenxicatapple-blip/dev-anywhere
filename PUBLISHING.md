@@ -2,14 +2,13 @@
 
 ## Release artifacts
 
-A single `vX.Y.Z` git tag produces four public artifacts:
+A single `vX.Y.Z` git tag produces three public artifacts:
 
-| Kind   | Name                                                                                                         | What it's for                                         |
-| ------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| npm    | `@dev-anywhere/proxy`                                                                                        | Local proxy CLI end-users install on their laptop     |
-| npm    | `@dev-anywhere/relay`                                                                                        | Standalone relay binary for local/dev use             |
-| Docker | `crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip/dev-anywhere-relay:<tag>` | Production relay container                            |
-| Docker | `crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip/dev-anywhere-web:<tag>`   | Nginx + web SPA container, reverse-proxying the relay |
+| Kind   | Name                                                                                                         | What it's for                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| npm    | `@dev-anywhere/proxy`                                                                                        | Local proxy CLI, including the account-free Quick Tunnel command |
+| npm    | `@dev-anywhere/relay`                                                                                        | Combined Relay and Web server                                    |
+| Docker | `crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip/dev-anywhere-relay:<tag>` | Production combined Relay and Web container                      |
 
 `@dev-anywhere/shared` stays `private: true` and is bundled into the published npm packages via tsup `noExternal`.
 
@@ -17,8 +16,8 @@ A single `vX.Y.Z` git tag produces four public artifacts:
 
 `.github/workflows/release.yml` triggers on `v*.*.*` tag pushes and runs two jobs:
 
-1. `publish-images`: builds `dev-anywhere-relay` and `dev-anywhere-web`, then pushes `latest`, `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `X` tags to GHCR and, when Aliyun ACR secrets are configured, Aliyun ACR. The VPS installer defaults to the Aliyun ACR path.
-2. `publish-npm`: builds the workspace and publishes `@dev-anywhere/proxy` and `@dev-anywhere/relay`. This requires the `NPM_TOKEN` repo secret.
+1. `publish-images`: builds `dev-anywhere-relay`, then pushes `latest`, `vX.Y.Z`, `X.Y.Z`, `X.Y`, and `X` tags to GHCR and, when Aliyun ACR secrets are configured, Aliyun ACR. The VPS installer defaults to the Aliyun ACR path.
+2. `publish-npm`: builds the workspace, publishes `@dev-anywhere/relay`, then publishes `@dev-anywhere/proxy`, which depends on the matching Relay version. This requires the `NPM_TOKEN` repo secret.
 
 GHCR auth uses the workflow `GITHUB_TOKEN`; the workflow requests `packages: write`. Aliyun ACR publishing uses `ACR_REGISTRY`, `ACR_NAMESPACE`, `ACR_USERNAME`, and `ACR_PASSWORD`.
 
@@ -68,7 +67,7 @@ If a release workflow fails before publishing completes, fix the failure, commit
 
 ## Version policy
 
-- Bump both npm packages and both Docker images together. The shared protocol lives in `@dev-anywhere/shared`; version skew can otherwise create silent envelope drift between proxy, relay, and web.
+- Bump the Proxy, Relay, and Web package versions together. The Relay package and Docker image contain the Web build, and the Proxy package depends on the matching Relay package for Quick Tunnel support.
 - Pre-`1.0.0`: minor bumps may include breaking changes. Document user-facing breakage in release notes or the changelog.
 
 ## VPS deploy
@@ -119,7 +118,7 @@ dev-anywhere init
 dev-anywhere serve start --relay cloud
 ```
 
-## Standalone relay without TLS
+## Standalone Relay And Web Without TLS
 
 For local development only:
 

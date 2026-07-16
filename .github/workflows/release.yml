@@ -15,15 +15,8 @@ permissions:
 
 jobs:
   publish-images:
-    name: Publish Docker images
+    name: Publish Docker image
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - name: dev-anywhere-relay
-            dockerfile: apps/relay/Dockerfile
-          - name: dev-anywhere-web
-            dockerfile: apps/web/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -59,8 +52,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            name=ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
-            name=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/${{ matrix.name }},enable=${{ steps.acr.outputs.enabled == 'true' }}
+            name=ghcr.io/${{ github.repository_owner }}/dev-anywhere-relay
+            name=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/dev-anywhere-relay,enable=${{ steps.acr.outputs.enabled == 'true' }}
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -72,12 +65,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: apps/relay/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          cache-from: type=gha,scope=dev-anywhere-relay
+          cache-to: type=gha,mode=max,scope=dev-anywhere-relay
 
   publish-npm:
     name: Publish npm packages
@@ -103,22 +96,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm -r build
+      - run: pnpm build
 
       - name: Verify npm auth
         run: |
           npm whoami
           npm owner ls @dev-anywhere/proxy
           npm owner ls @dev-anywhere/relay
-
-      - name: Publish @dev-anywhere/proxy
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if npm view "@dev-anywhere/proxy@$VERSION" version >/dev/null 2>&1; then
-            echo "@dev-anywhere/proxy@$VERSION is already published"
-          else
-            pnpm --filter @dev-anywhere/proxy publish --no-git-checks --access public
-          fi
 
       - name: Publish @dev-anywhere/relay
         run: |
@@ -127,6 +111,15 @@ jobs:
             echo "@dev-anywhere/relay@$VERSION is already published"
           else
             pnpm --filter @dev-anywhere/relay publish --no-git-checks --access public
+          fi
+
+      - name: Publish @dev-anywhere/proxy
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if npm view "@dev-anywhere/proxy@$VERSION" version >/dev/null 2>&1; then
+            echo "@dev-anywhere/proxy@$VERSION is already published"
+          else
+            pnpm --filter @dev-anywhere/proxy publish --no-git-checks --access public
           fi
 
       - name: Verify npm packages are published

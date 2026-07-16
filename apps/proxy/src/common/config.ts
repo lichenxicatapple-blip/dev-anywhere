@@ -20,7 +20,7 @@ export interface ProxyConfig {
   codexBin?: string;
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
-    relayName: "cli" | "profile";
+    relayName: "cli" | "profile" | "env";
     relayUrl: "env" | "file" | "none";
     relayToken: "env" | "file" | "none";
     hookPort: "env" | "default";
@@ -125,12 +125,20 @@ function uniqueAbsolutePaths(paths: Array<string | undefined>): string[] {
 function resolveRelayConfig(
   fromFile: ProxyConfigFile,
   requestedRelayName?: string,
+  envRelayUrl?: string,
 ): {
   relayName: string;
   relayNameSource: ProxyConfig["sources"]["relayName"];
   relay: RelayTargetConfig;
 } {
   const profile = fromFile.profiles[PROFILE_NAME];
+  if (!requestedRelayName && envRelayUrl && !profile?.relay?.trim()) {
+    return {
+      relayName: "environment",
+      relayNameSource: "env",
+      relay: {},
+    };
+  }
   if (!profile) {
     const available = Object.keys(fromFile.profiles).sort();
     throw new Error(
@@ -162,7 +170,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
   const env = loadProxyRuntimeEnv();
   const fromFile = readConfigFile();
   const agentCli = fromFile.agentCli ?? {};
-  const resolved = resolveRelayConfig(fromFile, options?.relayName);
+  const resolved = resolveRelayConfig(fromFile, options?.relayName, env.relayUrl);
   const claudeBin = env.claudeBin ?? agentCli.claudeBin;
   const codexBin = env.codexBin ?? agentCli.codexBin;
   const config: ProxyConfig = {

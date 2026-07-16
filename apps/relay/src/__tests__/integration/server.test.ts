@@ -38,12 +38,18 @@ describe("Relay Server Integration", () => {
     const packagedFontDir = join(tempRoot, "packaged-fonts");
     mkdirSync(join(packagedFontDir, "sarasa-fixed-sc"), { recursive: true });
     writeFileSync(join(packagedFontDir, "sarasa-fixed-sc", "result.css"), "/* packaged font */");
+    const webAssetDir = join(tempRoot, "web");
+    mkdirSync(join(webAssetDir, "assets"), { recursive: true });
+    writeFileSync(join(webAssetDir, "index.html"), "<!doctype html><main>DEV Anywhere</main>");
+    writeFileSync(join(webAssetDir, "assets", "app-abc123.js"), "console.log('app');");
+    writeFileSync(join(webAssetDir, "sw.js"), "self.addEventListener('fetch', () => {});");
     relay = createRelayServer({
       port: 0,
       heartbeatInterval: 60000,
       logger,
       dataDir: join(tempRoot, "data"),
       fontAssetDir: packagedFontDir,
+      webAssetDir,
     });
     await new Promise<void>((resolve) => {
       relay.httpServer.listen(0, resolve);
@@ -511,6 +517,44 @@ describe("Relay Server Integration", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/css");
     await expect(res.text()).resolves.toBe("/* packaged font */");
+  });
+
+  it("serves the Web UI and falls back to index.html for client-side routes", async () => {
+    const root = await fetch(`http://127.0.0.1:${port}/`);
+    expect(root.status).toBe(200);
+    expect(root.headers.get("content-type")).toContain("text/html");
+    expect(root.headers.get("cache-control")).toBe("no-cache, no-store, must-revalidate");
+    expect(root.headers.get("x-powered-by")).toBeNull();
+    await expect(root.text()).resolves.toContain("DEV Anywhere");
+
+    const clientRoute = await fetch(`http://127.0.0.1:${port}/chat/session-1`, {
+      headers: { accept: "text/html" },
+    });
+    expect(clientRoute.status).toBe(200);
+    expect(clientRoute.headers.get("cache-control")).toBe("no-cache, no-store, must-revalidate");
+    await expect(clientRoute.text()).resolves.toContain("DEV Anywhere");
+  });
+
+  it("uses immutable caching for hashed Web assets", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/assets/app-abc123.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    await expect(res.text()).resolves.toBe("console.log('app');");
+  });
+
+  it("does not cache the service worker", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/sw.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-cache, no-store, must-revalidate");
+  });
+
+  it("does not route unknown Relay endpoints to the Web SPA", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
+      headers: { accept: "text/html" },
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    await expect(res.json()).resolves.toEqual({ error: "not_found" });
   });
 
   it("GET /status returns proxy and client counts", async () => {

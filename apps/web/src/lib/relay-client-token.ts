@@ -28,6 +28,28 @@ export function clearRelayClientToken(): void {
   removeStorageValue("session", RELAY_CLIENT_TOKEN_KEY);
 }
 
+export function consumeRelayClientTokenFromFragment(): string | null {
+  const hash = window.location.hash;
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex < 0) return null;
+
+  const route = hash.slice(0, queryIndex);
+  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  const token = params.get("relayToken")?.trim();
+  if (!token) return null;
+
+  persistRelayClientToken(token);
+  params.delete("relayToken");
+  const remaining = params.toString();
+  const nextHash = `${route || "#/"}${remaining ? `?${remaining}` : ""}`;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  );
+  return token;
+}
+
 export function getRelayClientToken(): string | null {
   return readStoredRelayClientToken();
 }

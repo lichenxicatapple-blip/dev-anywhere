@@ -125,7 +125,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     config: z.object({
       profile: z.string().optional(),
       relayName: z.string(),
-      relayNameSource: z.enum(["cli", "profile"]),
+      relayNameSource: z.enum(["cli", "profile", "env"]),
       relayUrl: z.string().optional(),
       relayUrlSource: z.enum(["env", "file", "none"]),
       relayTokenSource: z.enum(["env", "file", "none"]),

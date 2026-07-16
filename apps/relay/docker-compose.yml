@@ -22,17 +22,5 @@ services:
       timeout: 5s
       retries: 3
 
-  web:
-    build:
-      context: ../..
-      dockerfile: apps/web/Dockerfile
-    container_name: dev-anywhere-web
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:80"
-    depends_on:
-      relay:
-        condition: service_healthy
-
 volumes:
   relay-data:

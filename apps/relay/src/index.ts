@@ -4,10 +4,12 @@ import { loadRelayRuntimeEnv } from "./runtime-env.js";
 import { RELAY_VERSION } from "./version.js";
 
 function printHelp(): void {
-  console.log(`DEV Anywhere Relay
+  console.log(`DEV Anywhere Relay and Web Server
 
 Usage:
   dev-anywhere-relay [options]
+
+The bundled Web client, HTTP API, and WebSocket endpoints share the same port.
 
 Options:
   -h, --help       Show this help message

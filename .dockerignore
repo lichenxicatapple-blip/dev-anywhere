@@ -1,0 +1,17 @@
+.git
+.gitignore
+.dev-anywhere
+.playwright-mcp
+.planning
+.claude
+node_modules
+**/node_modules
+**/dist
+apps/relay/assets/web
+artifacts
+coverage
+reference
+test-results
+docs/sketches
+docs/superpowers
+*.tsbuildinfo

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy dev-anywhere (relay + web) on a VPS using pre-built images from Aliyun ACR.
+# Deploy dev-anywhere on a VPS using the pre-built Relay image from Aliyun ACR.
 #
 # Two modes:
 #
@@ -16,23 +16,22 @@
 #   client_token — optional; a fresh RELAY_CLIENT_TOKEN is generated when omitted.
 #
 # Environment overrides:
-#   REGISTRY_BASE — registry + namespace prefix for the images
+#   REGISTRY_BASE — registry + namespace prefix for the image
 #                   (default: Aliyun ACR personal instance bound to this project):
 #                   crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip
 #                   To deploy from GHCR explicitly:
 #                   REGISTRY_BASE=ghcr.io/lichenxicatapple-blip
 #   IMAGE_TAG     — image tag to pull (default: latest).
 #   DEV_ANYWHERE_RELAY_PORT — loopback relay port on the VPS (default: 3100).
-#   DEV_ANYWHERE_WEB_PORT   — loopback web port on the VPS (default: 8080).
 #
 # Layout created on the VPS:
 #   /opt/dev-anywhere/
 #     ├─ docker-compose.yml
 #     └─ .env                # RELAY_PROXY_TOKEN + RELAY_CLIENT_TOKEN, chmod 600
 #
-# Docker starts two loopback-only services: `relay` (Node WebSocket server) and
-# `web` (static SPA container). Host nginx owns public 80/443 and routes this
-# domain to those loopback ports, leaving the VPS free to host more services.
+# Docker starts one loopback-only Relay service that serves the Web UI, HTTP API,
+# files, voice endpoints, and WebSockets. Host nginx owns public 80/443 and
+# terminates TLS, leaving the VPS free to host more services.
 # TLS certs live under /etc/letsencrypt/live/relay/ and are auto-renewed by the
 # host's certbot cron job.
 #
@@ -71,7 +70,7 @@ if [ "${1:-}" = "--ssh" ]; then
     cat "$RENDER_LIB"
     printf '\n'
     cat "$SELF_PATH"
-  } | ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' DEV_ANYWHERE_RELAY_PORT='${DEV_ANYWHERE_RELAY_PORT:-}' DEV_ANYWHERE_WEB_PORT='${DEV_ANYWHERE_WEB_PORT:-}' bash -s -- '$DOMAIN_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'"
+  } | ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' DEV_ANYWHERE_RELAY_PORT='${DEV_ANYWHERE_RELAY_PORT:-}' bash -s -- '$DOMAIN_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'"
   exit $?
 fi
 
@@ -84,13 +83,11 @@ NGINX_SITE_NAME="${NGINX_SITE_NAME:-dev-anywhere}"
 NGINX_SITE_PATH="/etc/nginx/conf.d/${NGINX_SITE_NAME}.conf"
 CERTBOT_WEBROOT="/var/www/certbot"
 DEV_ANYWHERE_RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
-DEV_ANYWHERE_WEB_PORT="${DEV_ANYWHERE_WEB_PORT:-8080}"
 # REGISTRY_BASE is the "registry/namespace" prefix. Production defaults to the
 # public Aliyun ACR image mirror used by the China VPS deployment path.
 REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 RELAY_IMAGE="${REGISTRY_BASE}/dev-anywhere-relay:${IMAGE_TAG}"
-WEB_IMAGE="${REGISTRY_BASE}/dev-anywhere-web:${IMAGE_TAG}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: must run as root (use sudo)" >&2
@@ -100,9 +97,7 @@ fi
 echo "==> domain:       $DOMAIN"
 echo "==> install dir:  $INSTALL_DIR"
 echo "==> relay image:  $RELAY_IMAGE"
-echo "==> web image:    $WEB_IMAGE"
 echo "==> relay port:   127.0.0.1:$DEV_ANYWHERE_RELAY_PORT"
-echo "==> web port:     127.0.0.1:$DEV_ANYWHERE_WEB_PORT"
 echo "==> nginx site:   $NGINX_SITE_PATH"
 
 if ! declare -F render_dev_anywhere_compose >/dev/null 2>&1; then
@@ -146,7 +141,6 @@ if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
   (cd "$INSTALL_DIR" && docker compose down 2>/dev/null || true)
 fi
 docker rm -f dev-anywhere-nginx 2>/dev/null || true
-docker rm -f dev-anywhere-web 2>/dev/null || true
 
 mkdir -p "$CERTBOT_WEBROOT" "$(dirname "$NGINX_SITE_PATH")"
 
@@ -180,7 +174,7 @@ fi
 
 # Step 4: write host nginx route and docker deployment manifest. No build, no Dockerfile.
 echo "==> writing nginx reverse-proxy route"
-render_dev_anywhere_nginx_conf "$DOMAIN" "$CERT_NAME" "$DEV_ANYWHERE_RELAY_PORT" "$DEV_ANYWHERE_WEB_PORT" > "$NGINX_SITE_PATH"
+render_dev_anywhere_nginx_conf "$DOMAIN" "$CERT_NAME" "$DEV_ANYWHERE_RELAY_PORT" > "$NGINX_SITE_PATH"
 nginx -t
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable nginx >/dev/null 2>&1 || true
@@ -192,7 +186,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-render_dev_anywhere_compose "$RELAY_IMAGE" "$WEB_IMAGE" "$DEV_ANYWHERE_RELAY_PORT" "$DEV_ANYWHERE_WEB_PORT" > docker-compose.yml
+render_dev_anywhere_compose "$RELAY_IMAGE" "$DEV_ANYWHERE_RELAY_PORT" > docker-compose.yml
 
 # Step 5: reuse or generate relay tokens.
 if [ -z "$PROXY_TOKEN" ]; then
@@ -228,7 +222,7 @@ chmod 600 .env
 # Remove pre-existing dev-anywhere containers.
 # `docker compose down` alone only sees the compose project in the current dir.
 docker compose down --remove-orphans 2>/dev/null || true
-docker rm -f dev-anywhere-relay dev-anywhere-nginx dev-anywhere-web 2>/dev/null || true
+docker rm -f dev-anywhere-relay dev-anywhere-nginx 2>/dev/null || true
 
 echo "==> pulling images"
 docker compose pull
@@ -239,7 +233,7 @@ cleanup_old_images() {
   echo "==> cleaning old DEV Anywhere images"
 
   local keep_ids
-  keep_ids="$(docker inspect -f '{{.Image}}' dev-anywhere-relay dev-anywhere-web 2>/dev/null | sort -u)"
+  keep_ids="$(docker inspect -f '{{.Image}}' dev-anywhere-relay 2>/dev/null | sort -u)"
   if [ -z "$keep_ids" ]; then
     echo "    skip: running images not found"
     return

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   clearRelayClientToken,
+  consumeRelayClientTokenFromFragment,
   getRelayClientToken,
   hasStoredRelayClientToken,
   persistRelayClientToken,
@@ -22,6 +23,24 @@ describe("relay client token handling", () => {
     expect(hasStoredRelayClientToken()).toBe(false);
     expect(localStorage.getItem(RELAY_CLIENT_TOKEN_KEY)).toBeNull();
     expect(sessionStorage.getItem(RELAY_CLIENT_TOKEN_KEY)).toBeNull();
+  });
+
+  it("imports a relay token from the URL fragment and removes it from the address", () => {
+    window.history.replaceState(null, "", "/#/chat/session-1?mode=pty&relayToken=quick-secret");
+
+    expect(consumeRelayClientTokenFromFragment()).toBe("quick-secret");
+    expect(getRelayClientToken()).toBe("quick-secret");
+    expect(window.location.hash).toBe("#/chat/session-1?mode=pty");
+  });
+
+  it("lets a Quick Tunnel fragment replace a stale stored token", () => {
+    persistRelayClientToken("stale-token");
+    window.history.replaceState(null, "", "/#/?relayToken=fresh-token");
+
+    consumeRelayClientTokenFromFragment();
+
+    expect(getRelayClientToken()).toBe("fresh-token");
+    expect(window.location.hash).toBe("#/");
   });
 
   it("persists explicitly via persistRelayClientToken and survives URL strip", () => {

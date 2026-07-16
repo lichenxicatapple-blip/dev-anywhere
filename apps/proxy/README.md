@@ -43,6 +43,7 @@ dev-anywhere serve restart    # restart daemon using the selected profile's rela
 dev-anywhere serve restart --relay cloud
 dev-anywhere serve status     # show daemon status
 dev-anywhere init             # create default config at ~/.dev-anywhere/config.json
+dev-anywhere tunnel           # temporary account-free Cloudflare Quick Tunnel
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
 dev-anywhere codex [...args]  # start/attach a Codex terminal session
 dev-anywhere --help
@@ -59,7 +60,15 @@ dev-anywhere codex --model gpt-5.5
 
 ## Relay server
 
-You need a relay server reachable from both your local machine and your mobile/web client. Deploy your own with [`@dev-anywhere/relay`](https://www.npmjs.com/package/@dev-anywhere/relay):
+For a temporary evaluation without a VPS, install `cloudflared` and run:
+
+```bash
+dev-anywhere tunnel
+```
+
+The command starts an isolated local Relay, Web client, and Proxy profile, then prints a random `trycloudflare.com` URL. Keep it running while testing. Quick Tunnels are not intended for production.
+
+For regular use, deploy a Relay reachable from both your local machine and your mobile/web client:
 
 ```bash
 # On any VPS with ports 80/443 reachable:
@@ -67,7 +76,7 @@ npm install -g @dev-anywhere/relay
 PORT=3100 dev-anywhere-relay
 ```
 
-For a turnkey setup with TLS and nginx, see the `install-relay.sh` script in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
+The Relay package includes the Web client. For a turnkey VPS setup with TLS and nginx, see the `install-relay.sh` script in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
 
 ## Configuration
 
@@ -115,7 +124,7 @@ Environment variables are reserved for temporary overrides:
 - Local daemon wraps Claude Code and Codex CLI sessions with `node-pty` for transparent terminal control. Claude Code also supports a structured chat-message mode.
 - IPC socket at `~/.dev-anywhere/run/dev-anywhere.sock` for terminal attachment.
 - Terminal bytes + structured control messages are forwarded to relay over WebSocket.
-- Relay is a pure passthrough; state lives on the proxy side.
+- Relay serves the Web client and routes live traffic; session state remains on the proxy side.
 
 ## License
 

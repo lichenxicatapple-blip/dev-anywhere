@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter @dev-anywhere/shared build && pnpm --filter @dev-anywhere/web build && pnpm --filter @dev-anywhere/relay build && pnpm --filter @dev-anywhere/proxy build",
     "lint": "eslint . && pnpm run lint:source-refs",
     "lint:source-refs": "node scripts/quality/check-source-comment-refs.mjs",
     "format": "prettier --write .",

@@ -90,12 +90,37 @@ DEV Anywhere supports practical file paths instead of directory browsing:
 
 ## Quick Start
 
+### Try It Without A VPS
+
+For a temporary evaluation, install
+[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+and the DEV Anywhere CLI:
+
+```bash
+npm install -g @dev-anywhere/proxy
+dev-anywhere tunnel
+```
+
+The command:
+
+- starts an isolated local Relay, Web client, and Proxy profile;
+- creates a random `trycloudflare.com` HTTPS address without a Cloudflare account;
+- verifies the public Web page, health endpoint, and WebSocket connection;
+- prints a URL that securely imports the temporary Client Token from its fragment.
+
+Keep the command running while you evaluate DEV Anywhere. Press `Ctrl+C` to stop
+the tunnel and temporary Proxy. Cloudflare Quick Tunnels have no uptime SLA, are
+limited to 200 in-flight requests, and are intended only for testing and
+development. Use the VPS deployment below for regular use.
+
+### Recommended VPS Deployment
+
 The hosted setup has two parts:
 
-1. a VPS that serves the relay and web client;
+1. a VPS that runs the combined Relay and Web service;
 2. the developer machine that runs the local proxy daemon and agent CLIs.
 
-### 1. Deploy The Relay And Web Client
+#### 1. Deploy Relay And Web
 
 From a checkout of this repository:
 
@@ -103,13 +128,13 @@ From a checkout of this repository:
 IMAGE_TAG=latest ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
-The installer configures Docker, nginx, TLS, the relay container, and the web container. It prints:
+The installer configures Docker, nginx, TLS, and the combined Relay container. It prints:
 
 - `RELAY_PROXY_TOKEN` for local proxy daemons;
 - `RELAY_CLIENT_TOKEN` for browsers and PWAs;
 - the web URL, such as `https://dev-anywhere.example.com/`.
 
-### 2. Configure The Developer Machine
+#### 2. Configure The Developer Machine
 
 Install the proxy on the developer machine where your repositories are checked out and Claude Code or Codex is installed:
 
@@ -145,13 +170,13 @@ dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-### 3. Open The Web Client
+#### 3. Open The Web Client
 
 Open the web URL printed by the installer. In **Settings -> Relay Token**, paste `RELAY_CLIENT_TOKEN`, reconnect, then choose your developer machine.
 
 On iPhone or iPad, add the site to the home screen if you want the PWA experience.
 
-### 4. Start Working
+#### 4. Start Working
 
 Create an agent session or terminal session from the web client, or start an agent session from the local CLI:
 
@@ -171,7 +196,7 @@ RELAY_CLIENT_TOKEN="$(openssl rand -hex 24)" \
 PORT=3100 dev-anywhere-relay
 ```
 
-The npm relay package serves the relay API. For the production web/PWA client, use the Docker installer or run the web app from this repository.
+The npm Relay package serves the Web/PWA client, HTTP API, files, voice endpoints, and WebSockets from the same port. Public deployments should still use the Docker installer so nginx can terminate TLS and manage certificates.
 
 ## Security Model
 

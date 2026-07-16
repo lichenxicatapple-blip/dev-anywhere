@@ -13,6 +13,7 @@ import { checkRelayClientAuth } from "@/lib/relay-client-auth";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
 import {
   clearRelayClientToken,
+  consumeRelayClientTokenFromFragment,
   getRelayClientToken,
   toClientWsUrl,
 } from "@/lib/relay-client-token";
@@ -85,6 +86,7 @@ export function useRelaySetup(): void {
     const relayUrl = window.location.origin;
     useAppStore.getState().setRelayUrl(relayUrl);
     loadFontCSS(relayUrl);
+    consumeRelayClientTokenFromFragment();
 
     const ws = new WebSocketManager();
     wsRef.current = ws;

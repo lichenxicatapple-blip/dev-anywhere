@@ -363,6 +363,26 @@ relay
 program.addCommand(relay);
 
 program
+  .command("tunnel")
+  .description("Start a temporary account-free Cloudflare Quick Tunnel")
+  .option("--cloudflared <path>", "Path to the cloudflared executable", "cloudflared")
+  .action(async (opts) => {
+    if (!isInitialized()) {
+      initWorkspace();
+      console.log(`Initialized ${CONFIG_PATH}`);
+    }
+    const { runQuickTunnel } = await import("./quick-tunnel.js");
+    try {
+      await runQuickTunnel({ cloudflaredBin: opts.cloudflared });
+    } catch (error) {
+      console.error(
+        `Quick Tunnel failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("init")
   .description("Initialize dev-anywhere workspace (~/.dev-anywhere)")
   .action(() => {

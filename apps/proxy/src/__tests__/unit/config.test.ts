@@ -120,6 +120,24 @@ describe("proxy config relay selection", () => {
     expect(config.sources.relayToken).toBe("file");
   });
 
+  it("supports an isolated env-only profile when RELAY_URL is explicit", async () => {
+    writeConfig(currentConfig);
+    process.argv = ["node", "dev-anywhere", "--profile", "quick-tunnel", "serve", "start"];
+    process.env.RELAY_URL = "ws://127.0.0.1:43100";
+    process.env.RELAY_PROXY_TOKEN = "quick-secret";
+
+    const { loadConfig } = await importConfig();
+    const config = loadConfig();
+
+    expect(config.profileName).toBe("quick-tunnel");
+    expect(config.relayName).toBe("environment");
+    expect(config.relayUrl).toBe("ws://127.0.0.1:43100");
+    expect(config.relayToken).toBe("quick-secret");
+    expect(config.sources.relayName).toBe("env");
+    expect(config.sources.relayUrl).toBe("env");
+    expect(config.sources.relayToken).toBe("env");
+  });
+
   it("loads Agent CLI paths from top-level agentCli and lets env vars override them", async () => {
     writeConfig({
       ...currentConfig,

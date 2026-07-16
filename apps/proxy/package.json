@@ -49,6 +49,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
+    "@dev-anywhere/relay": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode-graphemes": "^0.4.0",
     "@xterm/headless": "^6.0.0",
@@ -61,7 +62,6 @@
   },
   "devDependencies": {
     "@dev-anywhere/shared": "workspace:*",
-    "@dev-anywhere/relay": "workspace:*",
     "@types/node": "^25.5.2",
     "@types/ws": "^8.18.1",
     "vitest": "^4.1.2"

@@ -154,6 +154,27 @@ describe("IPC Protocol", () => {
 
       expect(result.success).toBe(true);
     });
+
+    it("accepts service status responses for env-only profiles", async () => {
+      const { IpcMessageSchema } = await importIpc();
+      const result = IpcMessageSchema.safeParse({
+        type: "service_status_response",
+        config: {
+          profile: "quick-tunnel",
+          relayName: "environment",
+          relayNameSource: "env",
+          relayUrl: "ws://127.0.0.1:43100",
+          relayUrlSource: "env",
+          relayTokenSource: "env",
+          hookPort: 17978,
+          hookPortSource: "default",
+        },
+        relay: null,
+        sessions: [],
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe("createIpcReader", () => {

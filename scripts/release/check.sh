@@ -9,7 +9,6 @@ bash -n scripts/deploy/install-relay.sh
 bash -n scripts/lib/install-relay-render.sh
 bash -n scripts/deploy/check-prerequisite.sh
 bash scripts/deploy/install-relay-render.test.sh
-bash scripts/deploy/web-nginx-config.test.sh
 bash -n scripts/dev/restart.sh
 bash -n scripts/dev/health.sh
 bash -n scripts/dev/relay-restart.sh
@@ -83,10 +82,22 @@ function requireFile(path) {
 
 requireFile("dist/index.js");
 requireFile("dist/server.js");
+requireFile("assets/web/index.html");
+requireFile("assets/web/sw.js");
+requireFile("assets/web/manifest.webmanifest");
 requireFile("README.md");
 requireFile("LICENSE");
 
-console.log(`relay files=${pack.files.length}, size=${pack.size}`);
+const webAssetCount = [...files].filter((file) => file.startsWith("assets/web/")).length;
+const hashedAssetCount = [...files].filter((file) => file.startsWith("assets/web/assets/")).length;
+if (hashedAssetCount === 0) {
+  console.error("Missing bundled Web asset files");
+  process.exit(1);
+}
+
+console.log(
+  `relay files=${pack.files.length}, size=${pack.size}, webAssets=${webAssetCount}`,
+);
 NODE
 
 echo ""

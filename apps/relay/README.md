@@ -1,6 +1,6 @@
 # @dev-anywhere/relay
 
-Relay server for [`@dev-anywhere/proxy`](https://www.npmjs.com/package/@dev-anywhere/proxy) — bridges local AI CLI proxies to remote web clients via WebSocket.
+Combined Relay and Web server for [`@dev-anywhere/proxy`](https://www.npmjs.com/package/@dev-anywhere/proxy). It serves the DEV Anywhere Web/PWA client and bridges local AI CLI proxies to remote clients over WebSocket.
 
 ## Install
 
@@ -24,14 +24,19 @@ RELAY_CLIENT_TOKEN="$(openssl rand -hex 24)" \
 PORT=3100 dev-anywhere-relay
 ```
 
+Open `http://localhost:3100/` to load the bundled Web client.
+
 ## Endpoints
 
-| Path      | Purpose                                 |
-| --------- | --------------------------------------- |
-| `/health` | HTTP GET — health probe                 |
-| `/status` | HTTP GET — proxy/client counts          |
-| `/proxy`  | WS — proxy daemon connection            |
-| `/client` | WS — web SPA / mobile client connection |
+| Path       | Purpose                                     |
+| ---------- | ------------------------------------------- |
+| `/`        | Bundled Web/PWA client and SPA routes       |
+| `/health`  | HTTP GET — health probe                     |
+| `/status`  | HTTP GET — proxy/client counts              |
+| `/api/*`   | HTTP API, remote files, and uploads         |
+| `/proxy`   | WS — proxy daemon connection                |
+| `/client`  | WS — Web/PWA client connection              |
+| `/voice/*` | WS — voice recognition and speech synthesis |
 
 ## Environment variables
 
@@ -50,7 +55,7 @@ For the bundled web client, open the app URL, then paste `RELAY_CLIENT_TOKEN` in
 
 ## TLS
 
-This package serves plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare with a TLS termination. One-liner turnkey setup (docker compose + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
+This package serves the complete application over plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare for TLS termination. The turnkey VPS setup (one Docker container + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
 
 ## Using the embedded server programmatically
 

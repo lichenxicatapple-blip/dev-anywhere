@@ -43,13 +43,14 @@
     "#src/*": "./src/*"
   },
   "scripts": {
-    "build": "tsup && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "tsup && node scripts/copy-web-assets.mjs && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "dev": "tsx src/index.ts",
     "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "express": "^5.1.0",
     "nanoid": "^5.1.7",
     "pino": "^10.3.1",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@dev-anywhere/shared": "workspace:*",
+    "@types/compression": "^1.8.1",
     "@types/express": "^5.0.2",
     "@types/node": "^22.15.30",
     "@types/ws": "^8.18.1",

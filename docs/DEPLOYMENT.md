@@ -1,6 +1,34 @@
 # Deploy DEV Anywhere
 
-This guide covers the hosted path: a VPS runs the relay and web client, while each developer runs the local proxy on their own machine.
+This guide covers both the temporary account-free trial path and the recommended hosted path. The Relay serves the Web client, HTTP API, files, voice endpoints, and WebSockets from one process.
+
+## Temporary Trial Without A VPS
+
+Install
+[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+and the DEV Anywhere CLI on the developer machine:
+
+```bash
+npm install -g @dev-anywhere/proxy
+dev-anywhere tunnel
+```
+
+`dev-anywhere tunnel` creates fresh Proxy and Client tokens, starts an isolated
+`quick-tunnel` Proxy profile, starts the bundled Relay and Web client on
+loopback, and opens an account-free Cloudflare Quick Tunnel. It verifies the
+public Web page, `/health`, and `/client` WebSocket before printing the access
+URL. The Client Token is carried in the URL fragment, which is not sent in the
+HTTP request, and is removed from the address after the Web client stores it.
+
+Keep the command running while testing. Press `Ctrl+C` to stop the temporary
+Proxy, Relay, and Tunnel. This does not change or restart the default Proxy
+profile.
+
+Quick Tunnels use a random `trycloudflare.com` hostname and are suitable only
+for evaluation. Cloudflare provides no uptime SLA, limits them to 200 in-flight
+requests, and does not support SSE. DEV Anywhere does not depend on SSE, but the
+uptime and request limits still make the VPS deployment below the recommended
+path.
 
 ## Prerequisites
 
@@ -46,7 +74,7 @@ The installer can install Docker, nginx, and certbot on apt/yum based distributi
 
 The default image registry is the public Aliyun ACR mirror used by this project. If you want GHCR instead, pass `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip` when running the installer.
 
-## 1. Deploy Relay and Web
+## 1. Deploy Relay And Web
 
 From your laptop:
 
@@ -60,17 +88,15 @@ Or run directly on the VPS:
 sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
-The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/etc/nginx/conf.d/dev-anywhere.conf`, writes `/opt/dev-anywhere/.env`, pulls the published images, and starts:
+The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/etc/nginx/conf.d/dev-anywhere.conf`, writes `/opt/dev-anywhere/.env`, pulls the published image, and starts:
 
 - `dev-anywhere-relay`
-- `dev-anywhere-web`
 
-The Docker containers bind only to loopback ports on the VPS:
+The container binds only to a loopback port on the VPS:
 
-- `127.0.0.1:3100` → relay
-- `127.0.0.1:8080` → web
+- `127.0.0.1:3100` → combined Relay and Web service
 
-Host nginx owns public `80/443` and routes only this domain to those loopback ports. This keeps the VPS ready for more services: add another nginx server block for the next domain or path instead of letting another container bind `80/443`.
+Host nginx owns public `80/443`, terminates TLS, and forwards this domain to the Relay. This keeps the VPS ready for more services: add another nginx server block for the next domain or path instead of letting another container bind `80/443`.
 
 The final output includes:
 
@@ -162,7 +188,7 @@ sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example
 If another local service already uses the default loopback ports, override them:
 
 ```bash
-sudo env DEV_ANYWHERE_RELAY_PORT=13100 DEV_ANYWHERE_WEB_PORT=18080 IMAGE_TAG=latest \
+sudo env DEV_ANYWHERE_RELAY_PORT=13100 IMAGE_TAG=latest \
   ./scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 

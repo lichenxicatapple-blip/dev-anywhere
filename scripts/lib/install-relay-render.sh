@@ -2,9 +2,7 @@
 
 render_dev_anywhere_compose() {
   local relay_image="$1"
-  local web_image="$2"
-  local relay_port="$3"
-  local web_port="$4"
+  local relay_port="$2"
 
   cat <<EOF
 services:
@@ -22,16 +20,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  web:
-    image: $web_image
-    container_name: dev-anywhere-web
-    restart: unless-stopped
-    depends_on:
-      relay:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:$web_port:80"
 
 volumes:
   relay-data:
@@ -61,7 +49,6 @@ render_dev_anywhere_nginx_conf() {
   local domain="$1"
   local cert_name="$2"
   local relay_port="$3"
-  local web_port="$4"
 
   cat <<EOF
 server {
@@ -102,17 +89,8 @@ server {
         proxy_buffering off;
     }
 
-    location ~ ^/(fonts|health|status|api)(/.*)?$ {
-        proxy_pass http://127.0.0.1:$relay_port;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
     location / {
-        proxy_pass http://127.0.0.1:$web_port;
+        proxy_pass http://127.0.0.1:$relay_port;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;

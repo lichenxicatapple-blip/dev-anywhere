@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/dist-h5/**",
       "**/test-results/**",
       "**/node_modules/**",
+      "apps/relay/assets/web/**",
       "**/*.config.ts",
       "**/*.config.js",
       "**/*.config.cjs",

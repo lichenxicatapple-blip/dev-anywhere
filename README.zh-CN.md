@@ -90,12 +90,35 @@ DEV Anywhere 处理的是具体文件路径，而不是目录浏览：
 
 ## 快速开始
 
+### 无需 VPS 临时体验
+
+临时体验时，先安装
+[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
+和 DEV Anywhere CLI：
+
+```bash
+npm install -g @dev-anywhere/proxy
+dev-anywhere tunnel
+```
+
+这个命令会：
+
+- 启动相互隔离的本地 Relay、Web 客户端和 Proxy profile；
+- 无需 Cloudflare 账号，创建随机的 `trycloudflare.com` HTTPS 地址；
+- 自动验证公网 Web 页面、健康检查和 WebSocket 连接；
+- 输出一个通过 URL fragment 安全导入临时 Client Token 的访问地址。
+
+体验期间需要保持命令运行，按 `Ctrl+C` 会关闭 Tunnel 和临时 Proxy。Cloudflare Quick
+Tunnel 不提供可用性保证，同时最多处理 200 个进行中的请求，仅适合测试和开发。日常使用请采用下面的 VPS 部署。
+
+### 推荐的 VPS 部署
+
 托管部署由两部分组成：
 
-1. VPS 运行 Relay 和 Web 客户端；
+1. VPS 运行合并后的 Relay 和 Web 服务；
 2. 开发机运行本地 Proxy daemon 和 Agent CLI。
 
-### 1. 部署 Relay 和 Web 客户端
+#### 1. 部署 Relay 和 Web
 
 在本仓库 checkout 中运行：
 
@@ -103,13 +126,13 @@ DEV Anywhere 处理的是具体文件路径，而不是目录浏览：
 IMAGE_TAG=latest ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
 ```
 
-安装脚本会配置 Docker、nginx、TLS、Relay 容器和 Web 容器，并输出：
+安装脚本会配置 Docker、nginx、TLS 和合并后的 Relay 容器，并输出：
 
 - 给本地 Proxy daemon 使用的 `RELAY_PROXY_TOKEN`；
 - 给浏览器和 PWA 使用的 `RELAY_CLIENT_TOKEN`；
 - Web 地址，例如 `https://dev-anywhere.example.com/`。
 
-### 2. 配置开发机
+#### 2. 配置开发机
 
 在已经放着项目仓库、Claude Code 和 Codex 的开发机上安装 Proxy：
 
@@ -145,13 +168,13 @@ dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-### 3. 打开 Web 客户端
+#### 3. 打开 Web 客户端
 
 打开安装脚本输出的 Web 地址。在 **设置 -> Relay Token** 中粘贴 `RELAY_CLIENT_TOKEN`，重新连接，然后选择你的开发机。
 
 如果想在 iPhone 或 iPad 上像 App 一样使用，可以把站点添加到主屏幕。
 
-### 4. 开始工作
+#### 4. 开始工作
 
 可以在 Web 客户端里创建 Agent 会话或终端会话，也可以从本地 CLI 启动 Agent 会话：
 
@@ -171,7 +194,7 @@ RELAY_CLIENT_TOKEN="$(openssl rand -hex 24)" \
 PORT=3100 dev-anywhere-relay
 ```
 
-npm Relay 包提供 Relay API。生产 Web/PWA 客户端请使用 Docker 安装脚本，或在本仓库中运行 Web 应用。
+npm Relay 包会从同一个端口提供 Web/PWA 客户端、HTTP API、文件、语音端点和 WebSocket。公开部署仍建议使用 Docker 安装脚本，由 nginx 终止 TLS 并管理证书。
 
 ## 安全模型
 

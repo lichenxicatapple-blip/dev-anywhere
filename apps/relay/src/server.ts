@@ -20,6 +20,7 @@ import type { VoiceCapabilitiesProvider } from "./voice/capabilities.js";
 import type { VoiceConfigTester } from "./voice/config-test.js";
 import { createVoiceProviderRegistry, type VoiceProviderRegistry } from "./voice/provider.js";
 import { RemoteFileBridge } from "./remote-file-bridge.js";
+import { mountWebApp } from "./web-app.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -36,6 +37,7 @@ export interface RelayServerOptions {
   allowedOrigins?: readonly string[];
   chaos?: RelayChaosOptions;
   fontAssetDir?: string;
+  webAssetDir?: string | false;
   voiceDefaults?: {
     region?: "cn" | "intl";
     asrModel?: string;
@@ -57,6 +59,7 @@ export interface RelayServer {
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGED_FONTS_DIR = resolve(MODULE_DIR, "../assets/fonts");
+const PACKAGED_WEB_DIR = resolve(MODULE_DIR, "../assets/web");
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
@@ -122,6 +125,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     );
   }
   const app = express();
+  app.disable("x-powered-by");
 
   // 字体优先读持久化目录；Docker 镜像再回退到随包内置字体，避免空 volume 让 Web 字体 404。
   const fontsDir = dataDir ? `${dataDir}/fonts` : `${homedir()}/.dev-anywhere/relay-data/fonts`;
@@ -162,6 +166,11 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   app.put("/api/remote-uploads/:token", (req, res) => {
     remoteFileBridge.handleUploadHttpRequest(req, res);
   });
+  const webAssetDir =
+    options.webAssetDir === false ? undefined : (options.webAssetDir ?? PACKAGED_WEB_DIR);
+  if (webAssetDir) {
+    mountWebApp(app, { webAssetDir, logger });
+  }
 
   // 使用 createServer 而非 app.listen，确保 WebSocket upgrade 可在同一端口上处理
   const httpServer = createServer(app);

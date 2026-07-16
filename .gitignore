@@ -19,3 +19,4 @@ artifacts/
 !docs/assets/*.png
 .dev-anywhere/
 apps/web/e2e/fixtures/sessions/.runtime/
+apps/relay/assets/web/
