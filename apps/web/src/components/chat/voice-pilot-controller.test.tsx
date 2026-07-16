@@ -832,6 +832,37 @@ describe("VoicePilotController", () => {
     expect(useVoicePilotStore.getState().bySessionId.s1?.lastSpokenText).toBe("可以，我来处理。");
   });
 
+  it("does not speak URLs from completed assistant messages", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+
+    useChatStore
+      .getState()
+      .appendAssistantText(
+        "s1",
+        "来源：[国务院通知](https://www.gov.cn/zhengce/content/2025-11/04/content_7047098.htm)",
+      );
+    useChatStore.getState().markTurnComplete("s1");
+
+    await waitFor(() => {
+      const sent = ttsSocket().sent.map((item) =>
+        typeof item === "string" ? JSON.parse(item) : null,
+      );
+      expect(sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "speak", text: "来源：国务院通知" }),
+        ]),
+      );
+    });
+    expect(useVoicePilotStore.getState().bySessionId.s1?.lastSpokenText).toBe(
+      "来源：国务院通知",
+    );
+  });
+
   it("waits for queued TTS playback before resuming microphone capture", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);

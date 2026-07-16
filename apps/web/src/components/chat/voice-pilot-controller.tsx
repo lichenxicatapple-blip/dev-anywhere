@@ -30,6 +30,7 @@ import {
 } from "@/voice/voice-asr-transport";
 import { voicePlaybackContext } from "@/voice/voice-playback-context";
 import { decideSpeechPolicy } from "@/voice/speech-policy";
+import { prepareSpeechText } from "@/voice/speech-text";
 import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
 import { routeVoiceText, type VoiceCommand } from "@/voice/voice-command-router";
 import { isVoicePilotAgentBusy } from "@/voice/voice-pilot-agent-state";
@@ -1081,24 +1082,28 @@ export function VoicePilotController({
   }
 
   const enqueueAssistantText = useEventCallback((text: string, messageId = ""): void => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+    const spokenText = prepareSpeechText(text);
+    if (!spokenText) return;
     traceVoice("runtime", "assistant-text-queued", {
-      details: { chars: trimmed.length, messageId: messageId || null },
+      details: {
+        chars: spokenText.length,
+        sourceChars: text.trim().length,
+        messageId: messageId || null,
+      },
     });
     const key = messageId
-      ? `assistant:${messageId}:${speechTextFingerprint(trimmed)}`
+      ? `assistant:${messageId}:${speechTextFingerprint(spokenText)}`
       : `assistant:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    enqueueSpeechItem({ kind: "assistant", key, text: trimmed, messageId });
+    enqueueSpeechItem({ kind: "assistant", key, text: spokenText, messageId });
   });
 
   function enqueueApprovalText(approval: ToolApprovalRequest, text: string): void {
-    const trimmed = text.trim();
-    if (!trimmed) return;
+    const spokenText = prepareSpeechText(text);
+    if (!spokenText) return;
     enqueueSpeechItem({
       kind: "approval",
       key: `approval:${approval.requestId}`,
-      text: trimmed,
+      text: spokenText,
       messageId: approval.requestId,
       requestId: approval.requestId,
     });
