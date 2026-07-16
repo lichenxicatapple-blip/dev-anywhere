@@ -174,6 +174,7 @@ interface PtyKeyboardFollowInput {
 }
 
 interface PtyPhysicalKeyboardModeInput {
+  touchEditingSurface: boolean;
   inputModePreference: InputModePreference;
   detectedPhysicalKeyboard: boolean;
   softKeyboardDetected: boolean;
@@ -236,10 +237,12 @@ export function shouldForcePtyKeyboardFollow({
 }
 
 export function resolvePtyPhysicalKeyboardMode({
+  touchEditingSurface,
   inputModePreference,
   detectedPhysicalKeyboard,
   softKeyboardDetected,
 }: PtyPhysicalKeyboardModeInput): boolean {
+  if (!touchEditingSurface) return true;
   if (inputModePreference === "hardware") return true;
   if (inputModePreference === "touch") return false;
   return detectedPhysicalKeyboard && !softKeyboardDetected;
@@ -372,6 +375,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const { bottomOffset: detectedKeyboardOffset, layoutBottomInset } = useVisualViewportInsets();
   const forceHardwareInput = inputModePreference === "hardware";
   const physicalKeyboardMode = resolvePtyPhysicalKeyboardMode({
+    touchEditingSurface,
     inputModePreference,
     detectedPhysicalKeyboard,
     softKeyboardDetected: detectedKeyboardOffset > 0,

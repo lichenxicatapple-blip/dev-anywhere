@@ -45,9 +45,21 @@ describe("shouldShowMobilePtyControlsForState", () => {
 });
 
 describe("resolvePtyPhysicalKeyboardMode", () => {
+  it("uses physical keyboard semantics on non-touch editing surfaces", () => {
+    expect(
+      resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: false,
+        inputModePreference: "auto",
+        detectedPhysicalKeyboard: false,
+        softKeyboardDetected: false,
+      }),
+    ).toBe(true);
+  });
+
   it("uses explicit input preferences before adaptive detection", () => {
     expect(
       resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: true,
         inputModePreference: "hardware",
         detectedPhysicalKeyboard: false,
         softKeyboardDetected: true,
@@ -55,6 +67,7 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: true,
         inputModePreference: "touch",
         detectedPhysicalKeyboard: true,
         softKeyboardDetected: false,
@@ -65,6 +78,7 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
   it("keeps auto mode in touch behavior until a hardware key arrives", () => {
     expect(
       resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: true,
         inputModePreference: "auto",
         detectedPhysicalKeyboard: false,
         softKeyboardDetected: false,
@@ -72,6 +86,7 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
     ).toBe(false);
     expect(
       resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: true,
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
         softKeyboardDetected: false,
@@ -79,6 +94,7 @@ describe("resolvePtyPhysicalKeyboardMode", () => {
     ).toBe(true);
     expect(
       resolvePtyPhysicalKeyboardMode({
+        touchEditingSurface: true,
         inputModePreference: "auto",
         detectedPhysicalKeyboard: true,
         softKeyboardDetected: true,
