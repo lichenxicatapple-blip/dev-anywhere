@@ -143,6 +143,8 @@ describe("VoicePilotSessionMachine", () => {
     ).toEqual({
       phase: "waiting",
       effects: [
+        { type: "stopCapture" },
+        { type: "cancelTurnBuffer" },
         { type: "approveTool", requestId: "toolu_1", whitelistTool: false },
         { type: "playCue", cue: "user-end" },
       ],
@@ -158,6 +160,8 @@ describe("VoicePilotSessionMachine", () => {
     ).toEqual({
       phase: "waiting",
       effects: [
+        { type: "stopCapture" },
+        { type: "cancelTurnBuffer" },
         { type: "approveTool", requestId: "toolu_1", whitelistTool: true },
         { type: "playCue", cue: "user-end" },
       ],
@@ -173,6 +177,8 @@ describe("VoicePilotSessionMachine", () => {
     ).toEqual({
       phase: "waiting",
       effects: [
+        { type: "stopCapture" },
+        { type: "cancelTurnBuffer" },
         { type: "denyTool", requestId: "toolu_1" },
         { type: "playCue", cue: "user-end" },
       ],

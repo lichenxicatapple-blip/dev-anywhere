@@ -44,6 +44,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system" | "activity";
   text: string;
   isPartial: boolean;
+  inputMethod?: "voice";
   timestamp: number;
   toolCalls: ToolCallInfo[];
   deliveryStatus?: "queued";
@@ -53,6 +54,7 @@ export interface ChatMessage {
 
 interface ChatSessionSlice {
   messages: ChatMessage[];
+  turnCompletionVersion: number;
   historyInitialized: boolean;
   historyHasMore: boolean;
   historyNextBefore: string | null;
@@ -66,6 +68,7 @@ interface ChatSessionSlice {
 
 export const EMPTY_SLICE: ChatSessionSlice = {
   messages: [],
+  turnCompletionVersion: 0,
   historyInitialized: false,
   historyHasMore: false,
   historyNextBefore: null,
@@ -347,6 +350,7 @@ export const useChatStore = create<ChatStoreState>()(
           updateSlice(state, sessionId, (slice) => ({
             ...slice,
             messages: completeRunningActivities(closeAssistantPartials(slice.messages)),
+            turnCompletionVersion: slice.turnCompletionVersion + 1,
             workingToolName: "",
             pendingApprovals: [],
           })),
@@ -357,6 +361,7 @@ export const useChatStore = create<ChatStoreState>()(
           updateSlice(state, sessionId, (slice) => ({
             ...slice,
             messages: failRunningActivities(closeAssistantPartials(slice.messages)),
+            turnCompletionVersion: slice.turnCompletionVersion + 1,
             workingToolName: "",
             pendingApprovals: [],
           })),

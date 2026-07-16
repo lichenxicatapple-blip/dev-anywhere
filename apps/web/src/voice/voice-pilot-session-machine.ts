@@ -239,6 +239,8 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       if (event.type === "approvalResolved" && fsm.is("approval")) {
         transitionTo("waiting");
         return result([
+          { type: "stopCapture" },
+          { type: "cancelTurnBuffer" },
           event.action === "approve"
             ? { type: "approveTool", requestId: event.requestId, whitelistTool: false }
             : event.action === "approve_always"

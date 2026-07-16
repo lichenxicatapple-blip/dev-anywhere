@@ -260,6 +260,10 @@ export function VoicePilotController({
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
+  const turnCompletionVersion = useChatStore(
+    (s) =>
+      s.bySessionId[sessionId]?.turnCompletionVersion ?? EMPTY_SLICE.turnCompletionVersion,
+  );
   const agentBusy = useSessionStore((s) => {
     const session = s.sessions.find((item) => item.sessionId === sessionId);
     const agentStatus = s.agentStatusBySessionId[sessionId];
@@ -302,6 +306,9 @@ export function VoicePilotController({
   // 当前轮的语音 partial 气泡 id; 提交/取消/cleanup 时清空
   const voicePartialIdRef = useRef<string | null>(null);
   const sessionMachineRef = useRef<VoicePilotSessionMachine | null>(null);
+  const awaitingTurnCompletionRef = useRef(false);
+  const observedTurnCompletionVersionRef = useRef(turnCompletionVersion);
+  const pendingAssistantSpeechPreparationsRef = useRef(new Set<symbol>());
   agentBusyRef.current = agentBusy;
 
   const traceVoice = useCallback(
@@ -410,6 +417,7 @@ export function VoicePilotController({
             useVoicePilotStore.getState().setError(sessionId, "开发机连接不可用");
             break;
           }
+          awaitingTurnCompletionRef.current = true;
           relay.sendEnvelope({
             type: "user_input",
             sessionId,
@@ -425,6 +433,7 @@ export function VoicePilotController({
           break;
         }
         case "approveTool":
+          awaitingTurnCompletionRef.current = true;
           relayClientRef?.sendControl({
             type: "tool_approve",
             sessionId,
@@ -432,6 +441,7 @@ export function VoicePilotController({
           });
           break;
         case "denyTool":
+          awaitingTurnCompletionRef.current = true;
           relayClientRef?.sendControl({
             type: "tool_deny",
             sessionId,
@@ -580,7 +590,11 @@ export function VoicePilotController({
   });
 
   function hasQueuedOrActiveSpeech(): boolean {
-    return Boolean(activeSpeechRef.current) || speechQueueRef.current.length > 0;
+    return (
+      pendingAssistantSpeechPreparationsRef.current.size > 0 ||
+      Boolean(activeSpeechRef.current) ||
+      speechQueueRef.current.length > 0
+    );
   }
 
   const syncCapturePhaseWithAgentState = useEventCallback((): void => {
@@ -588,11 +602,13 @@ export function VoicePilotController({
     const phase = currentPilotPhase();
     const hasApproval = Boolean(firstPendingApproval(approvalsRef.current));
     if (phase === "listening" && agentBusyRef.current && !hasApproval) {
+      awaitingTurnCompletionRef.current = true;
       void sendMachineEvent({ type: "agentBecameBusy" });
       return;
     }
     if (
       phase === "waiting" &&
+      !awaitingTurnCompletionRef.current &&
       !agentBusyRef.current &&
       !hasApproval &&
       !hasQueuedOrActiveSpeech()
@@ -779,6 +795,7 @@ export function VoicePilotController({
       role: "user",
       text,
       isPartial: true,
+      inputMethod: "voice",
       timestamp: Date.now(),
       toolCalls: [],
     });
@@ -996,6 +1013,8 @@ export function VoicePilotController({
     activeTtsRequestIdRef.current = null;
     ttsStatsRef.current.clear();
     scheduledApprovalRequestIdsRef.current.clear();
+    awaitingTurnCompletionRef.current = false;
+    pendingAssistantSpeechPreparationsRef.current.clear();
     discardVoicePartialBubble();
     sessionMachineRef.current = null;
     void captureShutdown.finally(releaseAudioSession);
@@ -1126,6 +1145,7 @@ export function VoicePilotController({
         role: "user",
         text,
         isPartial: false,
+        inputMethod: "voice",
         timestamp: now,
         toolCalls: [],
       });
@@ -1509,31 +1529,38 @@ export function VoicePilotController({
         return true;
       }
       const fallbackText = fallbackSpeechSummary(policy.reason);
+      const preparationToken = Symbol(message.id);
+      pendingAssistantSpeechPreparationsRef.current.add(preparationToken);
       void (async () => {
-        const relay = relayClientRef;
-        if (!relay) {
-          enqueueAssistantText(fallbackText, message.id);
-          return;
-        }
         try {
-          const result = await relay.requestVoiceSummary(
-            sessionId,
-            message.id,
-            text,
-            policy.reason,
-          );
-          if (result.success && result.summary?.trim()) {
-            enqueueAssistantText(`下面是摘要：${result.summary.trim()}`, message.id);
+          const relay = relayClientRef;
+          if (!relay) {
+            enqueueAssistantText(fallbackText, message.id);
             return;
           }
-        } catch {
-          // Fall through to deterministic local fallback.
+          try {
+            const result = await relay.requestVoiceSummary(
+              sessionId,
+              message.id,
+              text,
+              policy.reason,
+            );
+            if (result.success && result.summary?.trim()) {
+              enqueueAssistantText(`下面是摘要：${result.summary.trim()}`, message.id);
+              return;
+            }
+          } catch {
+            // Fall through to deterministic local fallback.
+          }
+          enqueueAssistantText(fallbackText, message.id);
+        } finally {
+          pendingAssistantSpeechPreparationsRef.current.delete(preparationToken);
+          syncCapturePhaseWithAgentState();
         }
-        enqueueAssistantText(fallbackText, message.id);
       })();
       return true;
     },
-    [enqueueAssistantText, sessionId],
+    [enqueueAssistantText, sessionId, syncCapturePhaseWithAgentState],
   );
 
   useEffect(() => {
@@ -1580,6 +1607,19 @@ export function VoicePilotController({
     if (!lastAssistant || lastAssistant.isPartial) return;
     speakAssistantMessage(lastAssistant);
   }, [enabled, messages, speakAssistantMessage]);
+
+  useEffect(() => {
+    if (!enabled) {
+      observedTurnCompletionVersionRef.current = turnCompletionVersion;
+      awaitingTurnCompletionRef.current = false;
+      return;
+    }
+    if (observedTurnCompletionVersionRef.current === turnCompletionVersion) return;
+    observedTurnCompletionVersionRef.current = turnCompletionVersion;
+    awaitingTurnCompletionRef.current = false;
+    // The assistant-message effect above queues speech first when both updates arrive together.
+    syncCapturePhaseWithAgentState();
+  }, [enabled, syncCapturePhaseWithAgentState, turnCompletionVersion]);
 
   useEffect(() => {
     if (!enabled) return;

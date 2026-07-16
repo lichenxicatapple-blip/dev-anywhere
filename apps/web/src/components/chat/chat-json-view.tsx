@@ -20,6 +20,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 import { estimateChatMessageHeight } from "@/lib/chat-message-size-estimate";
 import { getTurnControlTarget } from "./turn-control-target";
+import { isLiveVoiceTranscript } from "./chat-message-follow";
 import { findChatMessageIndexes } from "@/lib/chat-message-search";
 import { toast } from "@/components/toast";
 import {
@@ -542,8 +543,11 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     if (!initialScrollDoneRef.current || messages.length === 0) return;
     if (findOpen && findQuery) return;
     if (preservePrependRef.current) return;
-    if (isAtBottomRef.current) {
-      traceJsonScrollRef.current("follow-output");
+    const followLiveVoiceTranscript = isLiveVoiceTranscript(lastMsg);
+    if (isAtBottomRef.current || followLiveVoiceTranscript) {
+      traceJsonScrollRef.current(
+        followLiveVoiceTranscript ? "follow-voice-transcript" : "follow-output",
+      );
       virtualizer.scrollToIndex(messages.length - 1, {
         align: "end",
         behavior: "auto",

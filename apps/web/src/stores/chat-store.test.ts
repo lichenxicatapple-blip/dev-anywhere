@@ -65,6 +65,16 @@ describe("chat-store per-session", () => {
     useChatStore.getState().markTurnComplete("s1");
     expect(useChatStore.getState().bySessionId["s1"].messages[0].isPartial).toBe(false);
     expect(useChatStore.getState().bySessionId["s2"].messages[0].isPartial).toBe(true);
+    expect(useChatStore.getState().bySessionId["s1"].turnCompletionVersion).toBe(1);
+    expect(useChatStore.getState().bySessionId["s2"].turnCompletionVersion).toBe(0);
+  });
+
+  it("markTurnFailed advances the formal turn completion signal", () => {
+    useChatStore.getState().appendAssistantText("s1", "failed");
+
+    useChatStore.getState().markTurnFailed("s1");
+
+    expect(useChatStore.getState().bySessionId.s1.turnCompletionVersion).toBe(1);
   });
 
   it("completeActivityMessage marks the native activity terminal without touching other sessions", () => {

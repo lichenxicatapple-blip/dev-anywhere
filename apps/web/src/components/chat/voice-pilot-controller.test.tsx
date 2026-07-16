@@ -691,7 +691,13 @@ describe("VoicePilotController", () => {
         updatedAt: 110,
       });
     });
+    await flushMicrotasks();
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting");
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
 
+    act(() => {
+      useChatStore.getState().markTurnComplete("s1");
+    });
     await waitFor(() => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
       expect(createSpeechCapture).toHaveBeenCalledTimes(2);
@@ -1456,6 +1462,68 @@ describe("VoicePilotController", () => {
     );
   });
 
+  it("stops approval capture and waits for formal turn completion before listening again", async () => {
+    const firstStop = vi.fn().mockResolvedValue(undefined);
+    const approvalStop = vi.fn().mockResolvedValue(undefined);
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockResolvedValueOnce(speechCaptureResult(approvalStop))
+      .mockResolvedValue(speechCaptureResult());
+    requestVoiceSummary.mockResolvedValueOnce({
+      sessionId: "s1",
+      messageId: "toolu_1",
+      success: true,
+      summary: "需要运行项目测试。",
+    });
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    act(() => {
+      useChatStore.getState().addApprovalRequest("s1", {
+        requestId: "toolu_1",
+        toolName: "Bash",
+        input: { command: "pnpm test" },
+        status: "pending",
+      });
+    });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("approval"),
+    );
+    ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "拒绝" });
+
+    await waitFor(() =>
+      expect(sendControl).toHaveBeenCalledWith({
+        type: "tool_deny",
+        sessionId: "s1",
+        payload: { toolId: "toolu_1" },
+      }),
+    );
+    await waitFor(() => expect(approvalStop).toHaveBeenCalledTimes(1));
+    act(() => {
+      useChatStore.getState().updateApprovalStatus("s1", "toolu_1", "denied");
+      useSessionStore.getState().updateSessionState("s1", "idle");
+    });
+    await flushMicrotasks();
+
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting");
+    expect(createSpeechCapture).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      useChatStore.getState().markTurnComplete("s1");
+    });
+    await waitFor(() => {
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
+      expect(createSpeechCapture).toHaveBeenCalledTimes(3);
+    });
+  });
+
   it("always-approves pending tools with the voice command after the prompt finishes", async () => {
     requestVoiceSummary.mockResolvedValueOnce({
       sessionId: "s1",
@@ -1623,7 +1691,7 @@ describe("VoicePilotController", () => {
     await waitFor(() => {
       const messages = useChatStore.getState().bySessionId.s1?.messages ?? [];
       const partial = messages.find((m) => m.isPartial && m.role === "user");
-      expect(partial?.text).toBe("你好世界");
+      expect(partial).toMatchObject({ text: "你好世界", inputMethod: "voice" });
     });
     expect(sendEnvelope).not.toHaveBeenCalled();
   });
@@ -1654,7 +1722,12 @@ describe("VoicePilotController", () => {
       payload: { text: "请检查项目状态", messageId: partialId },
     });
     const commit = useChatStore.getState().bySessionId.s1?.messages.find((m) => m.id === partialId);
-    expect(commit).toMatchObject({ role: "user", isPartial: false, text: "请检查项目状态" });
+    expect(commit).toMatchObject({
+      role: "user",
+      isPartial: false,
+      inputMethod: "voice",
+      text: "请检查项目状态",
+    });
     const partialAfter =
       useChatStore
         .getState()
@@ -1737,125 +1810,6 @@ describe("VoicePilotController", () => {
     );
   });
 
-  it("starts a fresh capture after an in-flight listening startup was cancelled", async () => {
-    const firstStop = vi.fn().mockResolvedValue(undefined);
-    const staleStop = vi.fn().mockResolvedValue(undefined);
-    const resumedStop = vi.fn().mockResolvedValue(undefined);
-    let resolveStaleCapture!: (capture: ReturnType<typeof speechCaptureResult>) => void;
-    const staleCapture = new Promise<ReturnType<typeof speechCaptureResult>>((resolve) => {
-      resolveStaleCapture = resolve;
-    });
-    createSpeechCapture
-      .mockResolvedValueOnce(speechCaptureResult(firstStop))
-      .mockReturnValueOnce(staleCapture)
-      .mockResolvedValueOnce(speechCaptureResult(resumedStop));
-    useVoicePilotStore.getState().enable("s1");
-    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
-
-    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
-    asrSocket().open();
-    ttsSocket().open();
-    await waitForListeningReady();
-
-    emitMicSpeechChunk();
-    asrSocket().emitJson({ type: "final", text: "请告诉我当前目录" });
-    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
-    act(() => useSessionStore.getState().updateSessionState("s1", "working"));
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
-    );
-
-    act(() => useSessionStore.getState().updateSessionState("s1", "idle"));
-    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
-
-    act(() => {
-      useChatStore.getState().appendAssistantText("s1", "当前目录是 /tmp。");
-      useChatStore.getState().markTurnComplete("s1");
-    });
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
-    );
-
-    ttsSocket().emitJson({ type: "finished" });
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
-    );
-    expect(createSpeechCapture).toHaveBeenCalledTimes(2);
-
-    resolveStaleCapture(speechCaptureResult(staleStop));
-
-    await waitFor(() => {
-      expect(staleStop).toHaveBeenCalledTimes(1);
-      expect(createSpeechCapture).toHaveBeenCalledTimes(3);
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening");
-    });
-  });
-
-  it("closes an in-flight microphone startup before preparing assistant playback", async () => {
-    const initialStop = vi.fn().mockResolvedValue(undefined);
-    const pendingStop = vi.fn().mockResolvedValue(undefined);
-    let resolvePendingCapture!: (capture: ReturnType<typeof speechCaptureResult>) => void;
-    const pendingCapture = new Promise<ReturnType<typeof speechCaptureResult>>((resolve) => {
-      resolvePendingCapture = resolve;
-    });
-    createSpeechCapture
-      .mockResolvedValueOnce(speechCaptureResult(initialStop))
-      .mockReturnValueOnce(pendingCapture);
-    useVoicePilotStore.getState().enable("s1");
-    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
-
-    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
-    asrSocket().open();
-    const tts = ttsSocket();
-    tts.open();
-    await waitForListeningReady();
-
-    emitMicSpeechChunk();
-    asrSocket().emitJson({ type: "final", text: "请告诉我当前目录" });
-    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
-    act(() => useSessionStore.getState().updateSessionState("s1", "working"));
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
-    );
-
-    act(() => useSessionStore.getState().updateSessionState("s1", "idle"));
-    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
-    voicePlaybackContextReactivate.mockClear();
-
-    act(() => {
-      useChatStore.getState().appendAssistantText("s1", "当前目录是 /tmp。");
-      useChatStore.getState().markTurnComplete("s1");
-    });
-    await waitFor(() =>
-      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
-    );
-    await flushMicrotasks();
-
-    expect(pendingStop).not.toHaveBeenCalled();
-    expect(voicePlaybackContextReactivate).not.toHaveBeenCalled();
-    expect(
-      tts.sent.some((item) => typeof item === "string" && JSON.parse(item).type === "speak"),
-    ).toBe(false);
-
-    resolvePendingCapture(speechCaptureResult(pendingStop));
-
-    await waitFor(() => expect(pendingStop).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(voicePlaybackContextReactivate).toHaveBeenCalledTimes(1));
-    expect(pendingStop.mock.invocationCallOrder[0]!).toBeLessThan(
-      voicePlaybackContextReactivate.mock.invocationCallOrder[0]!,
-    );
-    await waitFor(() =>
-      expect(
-        tts.sent.some(
-          (item) =>
-            typeof item === "string" &&
-            JSON.parse(item).type === "speak" &&
-            JSON.parse(item).text === "当前目录是 /tmp。",
-        ),
-      ).toBe(true),
-    );
-  });
-
   it("mirrors machine phase through listening → waiting → speaking → waiting → listening", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
@@ -1875,12 +1829,25 @@ describe("VoicePilotController", () => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("waiting"),
     );
 
-    useChatStore.getState().appendAssistantText("s1", "好的。");
-    useChatStore.getState().markTurnComplete("s1");
+    const beforeReplySequence = getVoicePilotDiagnostics().at(-1)?.sequence ?? 0;
+    act(() => {
+      useChatStore.getState().appendAssistantText("s1", "好的。");
+      useChatStore.getState().markTurnComplete("s1");
+    });
 
     await waitFor(() =>
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("speaking"),
     );
+    const replyTransitions = getVoicePilotDiagnostics()
+      .filter(
+        (event) =>
+          event.sequence > beforeReplySequence &&
+          event.scope === "state-machine" &&
+          event.event === "transition",
+      )
+      .map((event) => event.details?.input);
+    expect(replyTransitions).toContain("assistantTextReady");
+    expect(replyTransitions).not.toContain("agentBecameIdle");
 
     ttsSocket().emitJson({ type: "finished" });
     await waitFor(() =>
