@@ -75,7 +75,7 @@ describe("Bailian ASR adapter", () => {
         input_audio_transcription: { language: "zh" },
         turn_detection: {
           type: "server_vad",
-          threshold: 0.2,
+          threshold: 0.8,
           silence_duration_ms: 1200,
         },
       },
@@ -165,5 +165,39 @@ describe("Bailian ASR adapter", () => {
       { type: "final", text: "打开项目" },
       { type: "error", message: "bad audio" },
     ]);
+  });
+
+  it("closes the provider session after session.finished without duplicating final text", () => {
+    let socket: MockProviderSocket | undefined;
+    const client = createBailianAsrClient(
+      {
+        apiKey: "sk-test",
+        region: "cn",
+        model: "qwen3-asr-flash-realtime",
+        sampleRate: 16000,
+        language: "zh",
+      },
+      {
+        socketFactory: () => {
+          socket = new MockProviderSocket();
+          return socket;
+        },
+      },
+    );
+    const final = vi.fn();
+    const closed = vi.fn();
+    client.on("final", final);
+    client.on("closed", closed);
+
+    socket?.json({
+      type: "conversation.item.input_audio_transcription.completed",
+      transcript: "打开项目",
+    });
+    socket?.json({ type: "session.finished", transcript: "打开项目" });
+
+    expect(final).toHaveBeenCalledOnce();
+    expect(final).toHaveBeenCalledWith("打开项目");
+    expect(closed).toHaveBeenCalledOnce();
+    expect(socket?.readyState).toBe(3);
   });
 });

@@ -137,6 +137,59 @@ describe("VoiceAsrTransport", () => {
     });
   });
 
+  it("completes a finished attempt when the provider closes it", async () => {
+    const socket = new FakeWebSocket();
+    const onAttemptComplete = vi.fn();
+    const transport = new VoiceAsrTransport({
+      url: "ws://relay.test/voice/asr",
+      createSocket: () => socket as unknown as WebSocket,
+      onPartial: vi.fn(),
+      onFinal: vi.fn(),
+      onAttemptComplete,
+      onAttemptError: vi.fn(),
+      onTransportError: vi.fn(),
+    });
+    const attempt = await startReadyAttempt(transport, socket);
+
+    attempt.finish();
+    socket.emit({
+      type: "closed",
+      attemptId: "attempt-1",
+      code: 1000,
+      reason: "completed",
+    });
+
+    expect(onAttemptComplete).toHaveBeenCalledOnce();
+    expect(onAttemptComplete).toHaveBeenCalledWith("attempt-1", "closed");
+  });
+
+  it("completes a finished attempt when the provider never closes it", async () => {
+    const socket = new FakeWebSocket();
+    const onAttemptComplete = vi.fn();
+    const transport = new VoiceAsrTransport({
+      url: "ws://relay.test/voice/asr",
+      createSocket: () => socket as unknown as WebSocket,
+      completionTimeoutMs: 500,
+      onPartial: vi.fn(),
+      onFinal: vi.fn(),
+      onAttemptComplete,
+      onAttemptError: vi.fn(),
+      onTransportError: vi.fn(),
+    });
+    const attempt = await startReadyAttempt(transport, socket);
+
+    vi.useFakeTimers();
+    try {
+      attempt.finish();
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(onAttemptComplete).toHaveBeenCalledOnce();
+      expect(onAttemptComplete).toHaveBeenCalledWith("attempt-1", "timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports an active socket failure once through the attempt boundary", async () => {
     const socket = new FakeWebSocket();
     const onAttemptError = vi.fn();

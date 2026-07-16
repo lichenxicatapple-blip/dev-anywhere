@@ -5,7 +5,10 @@ import {
 } from "@dev-anywhere/shared";
 
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
+const DEFAULT_COMPLETION_TIMEOUT_MS = 5_000;
 const DEFAULT_IN_FLIGHT_WINDOW_BYTES = 32 * 1024;
+
+export type VoiceAsrAttemptCompletionReason = "closed" | "timeout";
 
 export interface VoiceAsrAttemptOptions {
   sessionId: string;
@@ -37,9 +40,11 @@ interface VoiceAsrTransportOptions {
   url: string;
   createSocket?: (url: string) => WebSocket;
   readyTimeoutMs?: number;
+  completionTimeoutMs?: number;
   inFlightWindowBytes?: number;
   onPartial: (text: string, attemptId: string) => void;
   onFinal: (text: string, attemptId: string) => void;
+  onAttemptComplete?: (attemptId: string, reason: VoiceAsrAttemptCompletionReason) => void;
   onAttemptError: (error: string, attemptId: string) => void;
   onTransportError: (error: string) => void;
   onTrace?: (event: string, details: Record<string, unknown>) => void;
@@ -58,6 +63,7 @@ interface ActiveAttempt {
   stopSent: boolean;
   terminal: boolean;
   readyTimeoutId: number;
+  completionTimeoutId: number | null;
   resolveReady: (attempt: VoiceAsrAttempt) => void;
   rejectReady: (error: Error) => void;
   publicAttempt: VoiceAsrAttempt;
@@ -75,9 +81,15 @@ function parseServerMessage(data: unknown): VoiceAsrServerMessage | null {
 
 export class VoiceAsrTransport {
   private readonly options: Required<
-    Pick<VoiceAsrTransportOptions, "readyTimeoutMs" | "inFlightWindowBytes">
+    Pick<
+      VoiceAsrTransportOptions,
+      "readyTimeoutMs" | "completionTimeoutMs" | "inFlightWindowBytes"
+    >
   > &
-    Omit<VoiceAsrTransportOptions, "readyTimeoutMs" | "inFlightWindowBytes">;
+    Omit<
+      VoiceAsrTransportOptions,
+      "readyTimeoutMs" | "completionTimeoutMs" | "inFlightWindowBytes"
+    >;
   private socket: WebSocket | null = null;
   private connectionPromise: Promise<void> | null = null;
   private activeAttempt: ActiveAttempt | null = null;
@@ -87,6 +99,7 @@ export class VoiceAsrTransport {
     this.options = {
       ...options,
       readyTimeoutMs: options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+      completionTimeoutMs: options.completionTimeoutMs ?? DEFAULT_COMPLETION_TIMEOUT_MS,
       inFlightWindowBytes: options.inFlightWindowBytes ?? DEFAULT_IN_FLIGHT_WINDOW_BYTES,
     };
   }
@@ -176,6 +189,7 @@ export class VoiceAsrTransport {
       finishRequested: false,
       stopSent: false,
       terminal: false,
+      completionTimeoutId: null,
       resolveReady,
       rejectReady,
       publicAttempt,
@@ -236,18 +250,22 @@ export class VoiceAsrTransport {
         return;
       case "partial":
         this.options.onPartial(message.text, message.attemptId);
+        this.refreshCompletionTimeout(state);
         return;
       case "final":
         this.options.onFinal(message.text, message.attemptId);
+        this.refreshCompletionTimeout(state);
         return;
       case "closed":
-        state.terminal = true;
-        window.clearTimeout(state.readyTimeoutId);
-        if (!state.ready) state.rejectReady(new Error("语音识别连接已断开"));
-        if (state.ready && !state.finishRequested) {
-          this.options.onAttemptError("语音识别连接已断开", message.attemptId);
+        if (!state.ready) {
+          this.failAttempt(state, "语音识别连接已断开");
+          return;
         }
-        if (this.activeAttempt === state) this.activeAttempt = null;
+        if (!state.finishRequested) {
+          this.failAttempt(state, "语音识别连接已断开");
+          return;
+        }
+        this.completeAttempt(state, "closed");
         return;
       case "error":
         this.failAttempt(state, message.error ?? "语音识别失败");
@@ -275,6 +293,10 @@ export class VoiceAsrTransport {
     state.queue = [];
     state.queuedBytes = 0;
     window.clearTimeout(state.readyTimeoutId);
+    if (state.completionTimeoutId !== null) {
+      window.clearTimeout(state.completionTimeoutId);
+      state.completionTimeoutId = null;
+    }
     if (!state.ready) state.rejectReady(new Error("语音识别已取消"));
     if (this.activeAttempt === state) {
       const socket = this.socket;
@@ -305,7 +327,42 @@ export class VoiceAsrTransport {
       state.stopSent = true;
       socket.send(JSON.stringify({ type: "stop", attemptId: state.options.attemptId }));
       this.trace("attempt-stop-sent", { ...this.snapshot(state) });
+      this.refreshCompletionTimeout(state);
     }
+  }
+
+  private refreshCompletionTimeout(state: ActiveAttempt): void {
+    if (
+      this.activeAttempt !== state ||
+      state.terminal ||
+      !state.finishRequested ||
+      !state.stopSent
+    ) {
+      return;
+    }
+    if (state.completionTimeoutId !== null) {
+      window.clearTimeout(state.completionTimeoutId);
+    }
+    state.completionTimeoutId = window.setTimeout(() => {
+      if (this.activeAttempt !== state || state.terminal) return;
+      this.trace("attempt-completion-timeout", { ...this.snapshot(state) });
+      this.completeAttempt(state, "timeout");
+    }, this.options.completionTimeoutMs);
+  }
+
+  private completeAttempt(
+    state: ActiveAttempt,
+    reason: VoiceAsrAttemptCompletionReason,
+  ): void {
+    if (state.terminal) return;
+    state.terminal = true;
+    window.clearTimeout(state.readyTimeoutId);
+    if (state.completionTimeoutId !== null) {
+      window.clearTimeout(state.completionTimeoutId);
+      state.completionTimeoutId = null;
+    }
+    if (this.activeAttempt === state) this.activeAttempt = null;
+    this.options.onAttemptComplete?.(state.options.attemptId, reason);
   }
 
   private failActiveAttempt(error: string): void {
@@ -317,6 +374,10 @@ export class VoiceAsrTransport {
     if (state.terminal) return;
     state.terminal = true;
     window.clearTimeout(state.readyTimeoutId);
+    if (state.completionTimeoutId !== null) {
+      window.clearTimeout(state.completionTimeoutId);
+      state.completionTimeoutId = null;
+    }
     if (state.ready) {
       this.options.onAttemptError(error, state.options.attemptId);
     } else {

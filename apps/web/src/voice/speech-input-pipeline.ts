@@ -115,6 +115,18 @@ export class SpeechInputPipeline {
     this.stream = null;
   }
 
+  rearm(): boolean {
+    if (this.state !== "complete") return false;
+    this.state = "armed";
+    this.preRoll = [];
+    this.preRollBytes = 0;
+    this.pending = [];
+    this.pendingBytes = 0;
+    this.stream = null;
+    this.speechEnded = false;
+    return true;
+  }
+
   snapshot(): SpeechInputPipelineSnapshot {
     return {
       state: this.state,

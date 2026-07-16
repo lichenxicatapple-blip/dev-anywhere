@@ -516,6 +516,34 @@ describe("ChatHeader PTY upload menu", () => {
     expect(voicePilotWakeLockDisable).toHaveBeenCalledWith("voice-pilot:s1");
   });
 
+  it("leaves the starting state when wake lock fails while microphone access is pending", async () => {
+    voicePilotWakeLockEnable.mockRejectedValueOnce(
+      new DOMException("Permission was denied", "NotAllowedError"),
+    );
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(() => new Promise<MediaStream>(() => undefined)),
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+    });
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
+
+    const menuTrigger = screen.getByRole("button", { name: "会话操作" });
+    fireEvent.keyDown(menuTrigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Voice Pilot" }));
+    fireEvent.click(await screen.findByRole("button", { name: "开启 Voice Pilot" }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("屏幕常亮请求被浏览器拒绝，Voice Pilot 未开启。"),
+    );
+    expect(screen.getByRole("button", { name: "开启 Voice Pilot" })).not.toBeDisabled();
+    expect(voiceAudioSessionRelease).toHaveBeenCalledTimes(1);
+    expect(voicePilotWakeLockDisable).toHaveBeenCalledWith("voice-pilot:s1");
+  });
+
   it("shows a toast and keeps Voice Pilot disabled when microphone permission is denied", async () => {
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,

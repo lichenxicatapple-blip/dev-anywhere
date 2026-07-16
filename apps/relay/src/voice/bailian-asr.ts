@@ -37,8 +37,9 @@ interface BailianAsrClientOptions {
 
 const OPEN = 1;
 const END_OF_SPEECH_SILENCE_MS = 1200;
-// Bailian's documented default avoids treating low-level room noise as speech.
-const SERVER_VAD_THRESHOLD = 0.2;
+// Voice Pilot already uses an aggressive client-side VAD. Keep the provider-side
+// gate less sensitive so sustained household noise is not transcribed as speech.
+const NOISE_RESISTANT_SERVER_VAD_THRESHOLD = 0.8;
 
 function defaultSocketFactory(url: string, options: SocketOptions): ProviderSocket {
   return new WebSocket(url, options) as ProviderSocket;
@@ -100,6 +101,7 @@ class BailianAsrClientImpl extends EventEmitter implements BailianAsrClient {
   private socket: ProviderSocket;
   private isOpen = false;
   private isReady = false;
+  private hasFinalTranscript = false;
   private pending: string[] = [];
 
   constructor(
@@ -157,7 +159,7 @@ class BailianAsrClientImpl extends EventEmitter implements BailianAsrClient {
         },
         turn_detection: {
           type: "server_vad",
-          threshold: SERVER_VAD_THRESHOLD,
+          threshold: NOISE_RESISTANT_SERVER_VAD_THRESHOLD,
           silence_duration_ms: END_OF_SPEECH_SILENCE_MS,
         },
       },
@@ -195,14 +197,21 @@ class BailianAsrClientImpl extends EventEmitter implements BailianAsrClient {
       if (preview) this.emit("partial", preview);
       return;
     }
-    if (
-      type === "conversation.item.input_audio_transcription.completed" ||
-      type === "session.finished"
-    ) {
+    if (type === "conversation.item.input_audio_transcription.completed") {
       const transcript = extractFinalText(payload);
       if (transcript) {
+        this.hasFinalTranscript = true;
         this.emit("final", transcript);
       }
+      return;
+    }
+    if (type === "session.finished") {
+      const transcript = extractFinalText(payload);
+      if (transcript && !this.hasFinalTranscript) {
+        this.hasFinalTranscript = true;
+        this.emit("final", transcript);
+      }
+      this.socket.close(1000, "session-finished");
     }
   }
 

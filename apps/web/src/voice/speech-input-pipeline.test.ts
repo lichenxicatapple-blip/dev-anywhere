@@ -100,4 +100,34 @@ describe("SpeechInputPipeline", () => {
     expect(stream.abort).toHaveBeenCalledTimes(1);
     expect(stream.send).not.toHaveBeenCalled();
   });
+
+  it("rearms a completed pipeline without replacing the audio capture", async () => {
+    const streams = [streamSpies(), streamSpies()];
+    const openStream = vi
+      .fn<() => Promise<SpeechAudioStream>>()
+      .mockResolvedValueOnce(streams[0]!)
+      .mockResolvedValueOnce(streams[1]!);
+    const pipeline = new SpeechInputPipeline({
+      preRollBytes: 8,
+      openStream,
+      onError: vi.fn(),
+    });
+
+    pipeline.speechStarted();
+    await Promise.resolve();
+    pipeline.speechFinished();
+    expect(pipeline.snapshot().state).toBe("complete");
+
+    expect(pipeline.rearm()).toBe(true);
+    pipeline.pushFrame(Uint8Array.from([1, 2]));
+    pipeline.speechStarted();
+    await Promise.resolve();
+
+    expect(openStream).toHaveBeenCalledTimes(2);
+    expect(streams[1]?.send).toHaveBeenCalledWith(Uint8Array.from([1, 2]));
+    expect(pipeline.snapshot()).toMatchObject({
+      state: "streaming",
+      speechEnded: false,
+    });
+  });
 });

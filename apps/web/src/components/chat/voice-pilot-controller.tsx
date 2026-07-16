@@ -24,7 +24,10 @@ import {
   type VoiceSpeechCapture,
 } from "@/voice/speech-capture";
 import { SpeechInputPipeline } from "@/voice/speech-input-pipeline";
-import { VoiceAsrTransport } from "@/voice/voice-asr-transport";
+import {
+  VoiceAsrTransport,
+  type VoiceAsrAttemptCompletionReason,
+} from "@/voice/voice-asr-transport";
 import { voicePlaybackContext } from "@/voice/voice-playback-context";
 import { decideSpeechPolicy } from "@/voice/speech-policy";
 import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
@@ -1227,6 +1230,41 @@ export function VoicePilotController({
     if (!preservedRecognizedText) reportProviderError(error);
   });
 
+  const handleAsrAttemptComplete = useEventCallback(
+    (attemptId: string, reason: VoiceAsrAttemptCompletionReason): void => {
+      traceVoice("asr", "attempt-complete", {
+        attemptId,
+        details: { reason },
+      });
+      if (!acceptsAsrInput() || asrAttemptIdRef.current !== attemptId) return;
+      const bufferedText = turnBufferRef.current?.getSnapshot();
+      if (bufferedText?.draft || bufferedText?.partial) return;
+
+      if (speechInputRef.current?.rearm()) {
+        asrAttemptIdRef.current = null;
+        traceVoice("capture", "rearmed-after-empty-attempt", {
+          attemptId,
+          details: { reason },
+        });
+        return;
+      }
+
+      traceVoice("capture", "restarting-after-empty-attempt", {
+        attemptId,
+        details: { reason },
+      });
+      void stopCapture()
+        .then(() => {
+          if (!voicePilotEnabled() || !shouldCaptureNow()) return;
+          return beginListening(false);
+        })
+        .catch((error: unknown) => {
+          if (!voicePilotEnabled()) return;
+          reportProviderError(errorMessage(error, "重新开始语音采集失败"));
+        });
+    },
+  );
+
   function ensureVoiceRuntime(): void {
     if (turnBufferRef.current || asrTransportRef.current || ttsRef.current || playerRef.current) {
       return;
@@ -1261,6 +1299,9 @@ export function VoicePilotController({
       },
       onAttemptError: (error, attemptId) => {
         handleAsrAttemptError(error, attemptId);
+      },
+      onAttemptComplete: (attemptId, reason) => {
+        handleAsrAttemptComplete(attemptId, reason);
       },
       onTransportError: (error) => {
         traceVoice("asr", "transport-error", {

@@ -400,6 +400,42 @@ describe("VoicePilotController", () => {
     expect(useVoicePilotStore.getState().bySessionId.s1?.waveform.length).toBeGreaterThan(0);
   });
 
+  it("rearms the speech pipeline after an empty ASR attempt without replacing capture", async () => {
+    const firstStop = vi.fn().mockResolvedValue(undefined);
+    createSpeechCapture.mockResolvedValueOnce(speechCaptureResult(firstStop));
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const asr = asrSocket();
+    asr.open();
+    ttsSocket().open();
+    await waitForListeningReady();
+
+    emitMicSpeechChunk(0);
+    speechCaptureCallbacks(0).onSpeechEnd();
+    await waitFor(() => expect(socketControlTypes(asr)).toEqual(["start", "stop"]));
+    asr.emitJson({ type: "closed", code: 1000, reason: "empty" });
+
+    await waitFor(() =>
+      expect(
+        getVoicePilotDiagnostics().some(
+          (entry) => entry.event === "rearmed-after-empty-attempt",
+        ),
+      ).toBe(true),
+    );
+    expect(firstStop).not.toHaveBeenCalled();
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
+    expect(useVoicePilotStore.getState().bySessionId.s1).toMatchObject({
+      enabled: true,
+      phase: "listening",
+      error: null,
+    });
+
+    emitMicSpeechChunk(0);
+    await waitFor(() => expect(socketControlTypes(asr)).toEqual(["start", "stop", "start"]));
+  });
+
   it("drives the Voice Pilot activity meter from microphone and speech PCM", async () => {
     useVoicePilotStore.getState().enable("s1");
 

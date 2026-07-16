@@ -291,15 +291,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
       const speechSource = resolveVoiceSpeechSource();
       const speechSourceReady =
         speechSource.kind === "microphone" ? ensureMicrophoneReady() : Promise.resolve();
-      const startupResults = await Promise.allSettled([
-        wakeLockReady,
-        playbackReady,
-        speechSourceReady,
-      ]);
-      const startupFailure = startupResults.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      if (startupFailure) throw startupFailure.reason;
+      await Promise.all([wakeLockReady, playbackReady, speechSourceReady]);
       enableVoicePilot(sessionId);
       wakeLockHandedOff = true;
       setVoicePilotConfirmOpen(false);
