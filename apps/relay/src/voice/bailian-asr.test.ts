@@ -75,7 +75,7 @@ describe("Bailian ASR adapter", () => {
         input_audio_transcription: { language: "zh" },
         turn_detection: {
           type: "server_vad",
-          threshold: 0,
+          threshold: 0.2,
           silence_duration_ms: 1200,
         },
       },

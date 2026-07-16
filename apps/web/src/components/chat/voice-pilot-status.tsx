@@ -22,7 +22,6 @@ const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
   summarizing: "摘要",
   speaking: "播报",
   approval: "审批",
-  paused: "暂停",
   error: "异常",
 };
 
@@ -35,7 +34,6 @@ const PHASE_TONE: Record<VoicePilotPhase, string> = {
   summarizing: "active",
   speaking: "speak",
   approval: "approval",
-  paused: "quiet",
   error: "error",
 };
 
@@ -69,7 +67,7 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   if (!enabled) return null;
 
   const tone = PHASE_TONE[phase];
-  const active = phase !== "paused" && phase !== "error";
+  const active = phase !== "error";
   const wavePath = buildWavePath(pilot.waveform);
   const detailText = pilot.error?.trim() || null;
 

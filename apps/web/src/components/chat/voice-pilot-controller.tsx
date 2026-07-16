@@ -61,6 +61,7 @@ const WAVEFORM_BINS_PER_PCM_CHUNK = 8;
 // Keep enough audio to cover local VAD confirmation and provider startup.
 const SPEECH_PRE_ROLL_MS = 1200;
 const MU_LAW_BYTES_PER_SECOND = ASR_SAMPLE_RATE;
+const APPROVAL_DECISION_HINT = "当前正在等待审批，请说允许、始终允许或拒绝。";
 
 declare global {
   interface Window {
@@ -1139,26 +1140,6 @@ export function VoicePilotController({
         store.disable(sessionId);
         return true;
       }
-      if (command.type === "pause") {
-        void sendMachineEvent({ type: "pauseRequested" });
-        return true;
-      }
-      if (command.type === "cancel" || command.type === "redo") {
-        void sendMachineEvent({ type: "cancelTurnRequested" }).catch((err: unknown) => {
-          store.setError(sessionId, err instanceof Error ? err.message : String(err));
-        });
-        return true;
-      }
-      if (command.type === "resume") {
-        void sendMachineEvent({ type: "resumeRequested" }).catch((err: unknown) => {
-          store.setError(sessionId, err instanceof Error ? err.message : String(err));
-        });
-        return true;
-      }
-      if (command.type === "status") {
-        speak(`当前语音助手状态：${pilotRef.current.phase}。`);
-        return true;
-      }
       const approval = firstPendingApproval(approvalsRef.current);
       if (
         approval &&
@@ -1193,16 +1174,25 @@ export function VoicePilotController({
         approvalPromptActive: Boolean(approval),
       });
       if (route.kind === "command") {
+        traceVoice("runtime", "voice-command-routed", {
+          details: { command: route.command.type },
+        });
         // 命令路径的 cue / cap 状态由 handleCommand 触发的 machine event 管
         handleCommand(route.command);
         return;
       }
+      traceVoice("runtime", "voice-text-routed", {
+        details: { chars: route.text.length, approvalPromptActive: Boolean(approval) },
+      });
       // 文本路径: turnIdleElapsed effect 触发 stopCapture + playCue user-end
       await sendMachineEvent({ type: "turnIdleElapsed" });
       if (!useVoicePilotStore.getState().bySessionId[sessionId]?.enabled) return;
       if (approval) {
+        traceVoice("runtime", "approval-guidance-requested", {
+          details: { chars: route.text.length },
+        });
         discardVoicePartialBubble();
-        scheduleApprovalSpeech(approval);
+        speak(APPROVAL_DECISION_HINT);
         return;
       }
       const messageId = commitRecognizedInput(route.text);
@@ -1212,9 +1202,10 @@ export function VoicePilotController({
       commitRecognizedInput,
       discardVoicePartialBubble,
       handleCommand,
-      scheduleApprovalSpeech,
       sendMachineEvent,
       sessionId,
+      speak,
+      traceVoice,
     ],
   );
 

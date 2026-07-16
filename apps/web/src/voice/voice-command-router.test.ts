@@ -23,18 +23,10 @@ describe("routeVoiceText", () => {
     }
   });
 
-  it("routes repeat, cancel, and redo commands", () => {
+  it("routes repeat commands", () => {
     expect(routeVoiceText("复述", { phase: "listening" })).toEqual({
       kind: "command",
       command: { type: "repeat" },
-    });
-    expect(routeVoiceText("取消", { phase: "listening" })).toEqual({
-      kind: "command",
-      command: { type: "cancel" },
-    });
-    expect(routeVoiceText("重说", { phase: "listening" })).toEqual({
-      kind: "command",
-      command: { type: "redo" },
     });
   });
 
@@ -80,6 +72,16 @@ describe("routeVoiceText", () => {
       kind: "command",
       command: { type: "deny_once" },
     });
+    expect(routeVoiceText("我同意。", { phase: "approval", approvalPromptActive: true })).toEqual({
+      kind: "command",
+      command: { type: "approve_once" },
+    });
+    expect(
+      routeVoiceText("我不同意！", { phase: "approval", approvalPromptActive: true }),
+    ).toEqual({
+      kind: "command",
+      command: { type: "deny_once" },
+    });
     expect(routeVoiceText("批准这次", { phase: "approval" })).toEqual({
       kind: "agentText",
       text: "批准这次",
@@ -113,6 +115,18 @@ describe("routeVoiceText", () => {
       kind: "command",
       command: { type: "deny_once" },
     });
+    expect(
+      routeVoiceText("好的，我不同意。", { phase: "approval", approvalPromptActive: true }),
+    ).toEqual({
+      kind: "command",
+      command: { type: "deny_once" },
+    });
+    expect(
+      routeVoiceText("好的，我始终允许！", { phase: "approval", approvalPromptActive: true }),
+    ).toEqual({
+      kind: "command",
+      command: { type: "approve_always" },
+    });
     expect(routeVoiceText("嗯。批准。", { phase: "listening" })).toEqual({
       kind: "agentText",
       text: "嗯。批准。",
@@ -129,14 +143,29 @@ describe("routeVoiceText", () => {
     );
   });
 
-  it("only treats 继续 as resume while paused", () => {
-    expect(routeVoiceText("继续", { phase: "paused" })).toEqual({
-      kind: "command",
-      command: { type: "resume" },
+  it("matches negative approval phrases before their positive substrings", () => {
+    for (const text of ["不同意。", "我不允许，", "请不要同意！", "别允许。"] as const) {
+      expect(routeVoiceText(text, { phase: "approval", approvalPromptActive: true })).toEqual({
+        kind: "command",
+        command: { type: "deny_once" },
+      });
+    }
+  });
+
+  it("keeps pause and continue phrases as normal agent text", () => {
+    expect(routeVoiceText("暂停", { phase: "listening" })).toEqual({
+      kind: "agentText",
+      text: "暂停",
     });
     expect(routeVoiceText("继续", { phase: "listening" })).toEqual({
       kind: "agentText",
       text: "继续",
     });
+    for (const text of ["取消", "重说", "状态"]) {
+      expect(routeVoiceText(text, { phase: "listening" })).toEqual({
+        kind: "agentText",
+        text,
+      });
+    }
   });
 });

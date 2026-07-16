@@ -29,10 +29,10 @@ describe("voice pilot store", () => {
     });
   });
 
-  it("keeps last spoken text across pause and repeat-ready state changes", () => {
+  it("keeps last spoken text across runtime state changes", () => {
     useVoicePilotStore.getState().enable("s1");
     useVoicePilotStore.getState().setLastSpokenText("s1", "上一条播报");
-    useVoicePilotStore.getState().setPhase("s1", "paused");
+    useVoicePilotStore.getState().setPhase("s1", "waiting");
     useVoicePilotStore.getState().setPhase("s1", "listening");
 
     expect(state().lastSpokenText).toBe("上一条播报");

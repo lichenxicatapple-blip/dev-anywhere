@@ -256,6 +256,10 @@ async function waitForListeningReady(): Promise<void> {
 import { VoicePilotController } from "./voice-pilot-controller";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
+import {
+  clearVoicePilotDiagnostics,
+  getVoicePilotDiagnostics,
+} from "@/voice/voice-pilot-diagnostics";
 import { useVoicePilotStore } from "@/voice/voice-pilot-store";
 
 describe("VoicePilotController", () => {
@@ -311,6 +315,7 @@ describe("VoicePilotController", () => {
       setMode: voiceAudioSessionSetMode,
       release: voiceAudioSessionRelease,
     });
+    clearVoicePilotDiagnostics();
     useVoicePilotStore.getState().resetAll();
     useChatStore.setState({ bySessionId: { s1: { ...EMPTY_SLICE, inputDraft: "typed draft" } } });
     useSessionStore.setState({
@@ -691,6 +696,12 @@ describe("VoicePilotController", () => {
     asr.emitJson({ type: "final", text: "嗯。" });
 
     expect(sendEnvelope).not.toHaveBeenCalled();
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    expect(sendEnvelope.mock.calls[0]?.[0]).toMatchObject({
+      type: "user_input",
+      sessionId: "s1",
+      payload: { text: "嗯。" },
+    });
   });
 
   it("accepts provider text without applying a second local volume threshold", async () => {
@@ -1415,6 +1426,53 @@ describe("VoicePilotController", () => {
     );
   });
 
+  it("keeps approval pending and explains the valid responses after unrelated speech", async () => {
+    requestVoiceSummary.mockResolvedValueOnce({
+      sessionId: "s1",
+      messageId: "toolu_1",
+      success: true,
+      summary: "需要运行项目测试。",
+    });
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    useChatStore.getState().addApprovalRequest("s1", {
+      requestId: "toolu_1",
+      toolName: "Bash",
+      input: { command: "pnpm test" },
+      status: "pending",
+    });
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("approval"),
+    );
+    ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "我还没想好" });
+
+    await waitFor(() => {
+      const spoken = ttsSocket().sent
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => JSON.parse(item));
+      expect(spoken).toContainEqual(
+        expect.objectContaining({
+          type: "speak",
+          text: "当前正在等待审批，请说允许、始终允许或拒绝。",
+        }),
+      );
+    });
+    expect(sendEnvelope).not.toHaveBeenCalled();
+    expect(sendControl).not.toHaveBeenCalled();
+    expect(useChatStore.getState().bySessionId.s1?.pendingApprovals[0]).toMatchObject({
+      requestId: "toolu_1",
+      status: "pending",
+    });
+  });
+
   it("stays waiting when an externally resolved approval clears while the agent is busy", async () => {
     const firstStop = vi.fn();
     const secondStop = vi.fn();
@@ -1562,7 +1620,7 @@ describe("VoicePilotController", () => {
     expect(partials).toHaveLength(0);
   });
 
-  it("discards the partial bubble when the recognized turn is a voice command", async () => {
+  it("submits pause as ordinary agent text", async () => {
     useVoicePilotStore.getState().enable("s1");
     render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
 
@@ -1574,11 +1632,42 @@ describe("VoicePilotController", () => {
     emitMicSpeechChunk();
     asrSocket().emitJson({ type: "final", text: "暂停" });
 
-    await waitFor(() => expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("paused"));
-    const remaining =
-      useChatStore.getState().bySessionId.s1?.messages.filter((m) => m.role === "user") ?? [];
-    expect(remaining).toHaveLength(0);
+    await waitFor(() => expect(sendEnvelope).toHaveBeenCalledTimes(1));
+    expect(sendEnvelope.mock.calls[0]?.[0]).toMatchObject({ payload: { text: "暂停" } });
+  });
+
+  it("records repeat routing, replays the last response, and does not submit agent text", async () => {
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    const tts = ttsSocket();
+    tts.open();
+    await waitForListeningReady();
+    useVoicePilotStore.getState().setLastSpokenText("s1", "上一条回复");
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "再说一遍" });
+
+    await waitFor(() =>
+      expect(
+        tts.sent
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => JSON.parse(item))
+          .some((item) => item.type === "speak" && item.text === "上一条回复"),
+      ).toBe(true),
+    );
     expect(sendEnvelope).not.toHaveBeenCalled();
+    expect(getVoicePilotDiagnostics()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: "runtime",
+          event: "voice-command-routed",
+          details: { command: "repeat" },
+        }),
+      ]),
+    );
   });
 
   it("starts a fresh capture after an in-flight listening startup was cancelled", async () => {

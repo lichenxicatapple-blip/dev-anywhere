@@ -94,41 +94,6 @@ describe("VoicePilotSessionMachine", () => {
     expect(machine.getPhase()).toBe("summarizing");
   });
 
-  it("pauses on pauseRequested from listening", () => {
-    const machine = createVoicePilotSessionMachine();
-    machine.hydrateReadyForTest("listening");
-
-    expect(machine.send({ type: "pauseRequested" })).toEqual({
-      phase: "paused",
-      effects: [{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }],
-    });
-  });
-
-  it("resumes from paused on resumeRequested", () => {
-    const machine = createVoicePilotSessionMachine();
-    machine.hydrateReadyForTest("paused");
-
-    expect(machine.send({ type: "resumeRequested" })).toEqual({
-      phase: "listening",
-      effects: [{ type: "beginListening" }],
-    });
-  });
-
-  it("cancels the in-flight turn and restarts capture on cancelTurnRequested", () => {
-    const machine = createVoicePilotSessionMachine();
-    machine.hydrateReadyForTest("listening");
-
-    expect(machine.send({ type: "cancelTurnRequested" })).toEqual({
-      phase: "listening",
-      effects: [
-        { type: "cancelTurnBuffer" },
-        { type: "stopCapture" },
-        { type: "playCue", cue: "user-end" },
-        { type: "beginListening" },
-      ],
-    });
-  });
-
   it("moves from listening to waiting and cancels buffered speech when the agent becomes busy", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");
@@ -281,7 +246,7 @@ describe("VoicePilotSessionMachine", () => {
       ],
     });
 
-    // approval / paused 内的 speak 不切 phase, 等用户回应或保持暂停
+    // 审批状态内的播报不切换 phase，等待用户回应。
     const fromApproval = createVoicePilotSessionMachine();
     fromApproval.hydrateReadyForTest("approval");
     expect(
@@ -289,15 +254,6 @@ describe("VoicePilotSessionMachine", () => {
     ).toEqual({
       phase: "approval",
       effects: [{ type: "stopCapture" }, { type: "speakText", text: "审批提示。", messageId: "" }],
-    });
-
-    const fromPaused = createVoicePilotSessionMachine();
-    fromPaused.hydrateReadyForTest("paused");
-    expect(
-      fromPaused.send({ type: "assistantTextReady", text: "暂停状态播报。", messageId: "" }),
-    ).toEqual({
-      phase: "paused",
-      effects: [{ type: "speakText", text: "暂停状态播报。", messageId: "" }],
     });
   });
 });

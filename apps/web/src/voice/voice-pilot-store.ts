@@ -11,7 +11,6 @@ export type VoicePilotPhase =
   | "summarizing"
   | "speaking"
   | "approval"
-  | "paused"
   | "error";
 
 export interface VoicePilotState {

@@ -37,6 +37,8 @@ interface BailianAsrClientOptions {
 
 const OPEN = 1;
 const END_OF_SPEECH_SILENCE_MS = 1200;
+// Bailian's documented default avoids treating low-level room noise as speech.
+const SERVER_VAD_THRESHOLD = 0.2;
 
 function defaultSocketFactory(url: string, options: SocketOptions): ProviderSocket {
   return new WebSocket(url, options) as ProviderSocket;
@@ -155,7 +157,7 @@ class BailianAsrClientImpl extends EventEmitter implements BailianAsrClient {
         },
         turn_detection: {
           type: "server_vad",
-          threshold: 0,
+          threshold: SERVER_VAD_THRESHOLD,
           silence_duration_ms: END_OF_SPEECH_SILENCE_MS,
         },
       },

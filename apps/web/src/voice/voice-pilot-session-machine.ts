@@ -42,9 +42,6 @@ export type VoicePilotEvent =
   | { type: "agentBecameBusy" }
   | { type: "agentBecameIdle" }
   | { type: "providerError"; error: string }
-  | { type: "pauseRequested" }
-  | { type: "resumeRequested" }
-  | { type: "cancelTurnRequested" }
   | { type: "approvalArrived"; requestId: string }
   | { type: "approvalCleared"; requestId: string }
   | { type: "approvalResolved"; action: "approve" | "approve_always" | "deny"; requestId: string };
@@ -70,7 +67,6 @@ const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[
     "speaking",
     "summarizing",
     "approval",
-    "paused",
     "error",
     "idle",
   ],
@@ -79,7 +75,6 @@ const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[
   summarizing: ["speaking", "approval", "error", "idle"],
   speaking: ["waiting", "listening", "approval", "error", "idle"],
   approval: ["waiting", "speaking", "error", "idle"],
-  paused: ["listening", "error", "idle"],
   error: ["idle"],
 };
 
@@ -205,7 +200,7 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         ]);
       }
 
-      if (event.type === "ttsFinished" && fsm.isIn(["speaking", "approval", "paused"])) {
+      if (event.type === "ttsFinished" && fsm.isIn(["speaking", "approval"])) {
         return result([{ type: "playCue", cue: "assistant-end" }]);
       }
 
@@ -218,10 +213,6 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         return result([{ type: "beginListening" }]);
       }
 
-      if (event.type === "assistantEndCueDone" && fsm.is("paused")) {
-        return result([]);
-      }
-
       if (event.type === "agentBecameBusy" && fsm.is("listening")) {
         transitionTo("waiting");
         return result([{ type: "stopCapture" }, { type: "cancelTurnBuffer" }]);
@@ -230,25 +221,6 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
       if (event.type === "agentBecameIdle" && fsm.is("waiting")) {
         transitionTo("listening");
         return result([{ type: "beginListening" }]);
-      }
-
-      if (event.type === "pauseRequested" && fsm.is("listening")) {
-        transitionTo("paused");
-        return result([{ type: "stopCapture" }, { type: "playCue", cue: "user-end" }]);
-      }
-
-      if (event.type === "resumeRequested" && fsm.is("paused")) {
-        transitionTo("listening");
-        return result([{ type: "beginListening" }]);
-      }
-
-      if (event.type === "cancelTurnRequested" && fsm.is("listening")) {
-        return result([
-          { type: "cancelTurnBuffer" },
-          { type: "stopCapture" },
-          { type: "playCue", cue: "user-end" },
-          { type: "beginListening" },
-        ]);
       }
 
       if (
@@ -311,10 +283,6 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
           { type: "stopCapture" },
           { type: "speakText", text: event.text, messageId: event.messageId },
         ]);
-      }
-
-      if (event.type === "assistantTextReady" && fsm.is("paused")) {
-        return result([{ type: "speakText", text: event.text, messageId: event.messageId }]);
       }
 
       if (
