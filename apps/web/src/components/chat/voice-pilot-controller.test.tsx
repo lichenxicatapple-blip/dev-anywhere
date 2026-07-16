@@ -359,16 +359,106 @@ describe("VoicePilotController", () => {
       expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
     );
     expect(voiceAudioSessionAcquire).toHaveBeenCalledWith("capture");
-    expect(voiceAudioSessionSetMode.mock.calls.slice(0, 2)).toEqual([
-      ["playback"],
-      ["capture"],
-    ]);
+    expect(voiceAudioSessionSetMode.mock.calls.slice(0, 2)).toEqual([["playback"], ["capture"]]);
     expect(playerEnqueue.mock.invocationCallOrder[0]).toBeLessThan(
       capture.start.mock.invocationCallOrder[0],
     );
 
     view.unmount();
     await waitFor(() => expect(voiceAudioSessionRelease).toHaveBeenCalledTimes(1));
+  });
+
+  it("releases voice resources in the background and resumes only after an explicit request", async () => {
+    const firstStop = vi.fn().mockResolvedValue(undefined);
+    const secondStop = vi.fn().mockResolvedValue(undefined);
+    createSpeechCapture
+      .mockResolvedValueOnce(speechCaptureResult(firstStop))
+      .mockResolvedValueOnce(speechCaptureResult(secondStop));
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("suspended"),
+    );
+    expect(firstStop).toHaveBeenCalledTimes(1);
+    expect(playerStop).toHaveBeenCalled();
+    expect(wakeDisable).toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushMicrotasks();
+    expect(createSpeechCapture).toHaveBeenCalledTimes(1);
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("suspended");
+
+    act(() => {
+      useVoicePilotStore.getState().requestResume("s1");
+    });
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(4));
+    FakeWebSocket.instances[2]?.open();
+    FakeWebSocket.instances[3]?.open();
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("listening"),
+    );
+  });
+
+  it("does not create voice sockets when config returns after the page was hidden", async () => {
+    let resolveConfig:
+      | ((value: Awaited<ReturnType<typeof requestVoiceConfig>>) => void)
+      | undefined;
+    requestVoiceConfig.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveConfig = resolve;
+      }),
+    );
+    useVoicePilotStore.getState().enable("s1");
+
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    await waitFor(() =>
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("suspended"),
+    );
+
+    resolveConfig?.({
+      config: {
+        provider: "aliyun-bailian",
+        configured: true,
+        region: "cn",
+        asrModel: "qwen3-asr-flash-realtime",
+        ttsModel: "cosyvoice-v3-flash",
+        ttsVoice: "longanyang",
+      },
+    });
+    await flushMicrotasks();
+
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(createSpeechCapture).not.toHaveBeenCalled();
+    expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("suspended");
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
   });
 
   it("keeps silence local and flushes speech only after the ASR provider is ready", async () => {
@@ -419,9 +509,7 @@ describe("VoicePilotController", () => {
 
     await waitFor(() =>
       expect(
-        getVoicePilotDiagnostics().some(
-          (entry) => entry.event === "rearmed-after-empty-attempt",
-        ),
+        getVoicePilotDiagnostics().some((entry) => entry.event === "rearmed-after-empty-attempt"),
       ).toBe(true),
     );
     expect(firstStop).not.toHaveBeenCalled();
@@ -864,9 +952,7 @@ describe("VoicePilotController", () => {
         ]),
       );
     });
-    expect(useVoicePilotStore.getState().bySessionId.s1?.lastSpokenText).toBe(
-      "来源：国务院通知",
-    );
+    expect(useVoicePilotStore.getState().bySessionId.s1?.lastSpokenText).toBe("来源：国务院通知");
   });
 
   it("waits for queued TTS playback before resuming microphone capture", async () => {
@@ -1590,8 +1676,8 @@ describe("VoicePilotController", () => {
     asrSocket().emitJson({ type: "final", text: "我还没想好" });
 
     await waitFor(() => {
-      const spoken = ttsSocket().sent
-        .filter((item): item is string => typeof item === "string")
+      const spoken = ttsSocket()
+        .sent.filter((item): item is string => typeof item === "string")
         .map((item) => JSON.parse(item));
       expect(spoken).toContainEqual(
         expect.objectContaining({

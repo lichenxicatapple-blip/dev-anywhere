@@ -94,6 +94,52 @@ describe("VoicePilotSessionMachine", () => {
     expect(machine.getPhase()).toBe("summarizing");
   });
 
+  it("suspends any active phase and requires an explicit resume", () => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest("listening");
+
+    expect(machine.send({ type: "suspendRequested" })).toEqual({
+      phase: "suspended",
+      effects: [
+        { type: "releaseWakeLock" },
+        { type: "cancelTurnBuffer" },
+        { type: "suspendRuntime" },
+      ],
+    });
+    expect(machine.send({ type: "agentBecameIdle" })).toEqual({
+      phase: "suspended",
+      effects: [],
+    });
+    expect(machine.send({ type: "resumeRequested" })).toEqual({
+      phase: "starting",
+      effects: [
+        { type: "loadConfig" },
+        { type: "requestMicPermission" },
+        { type: "requestWakeLock" },
+      ],
+    });
+  });
+
+  it.each([
+    "starting",
+    "suspended",
+    "listening",
+    "submitting",
+    "waiting",
+    "summarizing",
+    "speaking",
+    "approval",
+    "error",
+  ] as const)("disables and cleans up from %s", (phase) => {
+    const machine = createVoicePilotSessionMachine();
+    machine.hydrateReadyForTest(phase);
+
+    expect(machine.send({ type: "disableRequested" })).toEqual({
+      phase: "idle",
+      effects: [{ type: "stopCapture" }, { type: "releaseWakeLock" }, { type: "cleanup" }],
+    });
+  });
+
   it("moves from listening to waiting and cancels buffered speech when the agent becomes busy", () => {
     const machine = createVoicePilotSessionMachine();
     machine.hydrateReadyForTest("listening");

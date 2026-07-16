@@ -18,11 +18,14 @@ export type VoicePilotEffect =
   | { type: "approveTool"; requestId: string; whitelistTool: boolean }
   | { type: "denyTool"; requestId: string }
   | { type: "cleanup" }
+  | { type: "suspendRuntime" }
   | { type: "setError"; error: string };
 
 export type VoicePilotEvent =
   | { type: "enableRequested" }
   | { type: "disableRequested" }
+  | { type: "suspendRequested" }
+  | { type: "resumeRequested" }
   | { type: "configReady" }
   | { type: "micPermissionGranted" }
   | { type: "micPermissionDenied"; error: string }
@@ -60,8 +63,10 @@ interface Readiness {
 
 const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[]> = {
   idle: ["starting"],
-  starting: ["listening", "speaking", "summarizing", "error", "idle"],
+  starting: ["suspended", "listening", "speaking", "summarizing", "error", "idle"],
+  suspended: ["starting", "idle"],
   listening: [
+    "suspended",
     "submitting",
     "waiting",
     "speaking",
@@ -70,12 +75,12 @@ const VOICE_PILOT_TRANSITIONS: Record<VoicePilotPhase, readonly VoicePilotPhase[
     "error",
     "idle",
   ],
-  submitting: ["waiting", "speaking", "approval", "error", "idle"],
-  waiting: ["listening", "speaking", "summarizing", "approval", "error", "idle"],
-  summarizing: ["speaking", "approval", "error", "idle"],
-  speaking: ["waiting", "listening", "approval", "error", "idle"],
-  approval: ["waiting", "speaking", "error", "idle"],
-  error: ["idle"],
+  submitting: ["suspended", "waiting", "speaking", "approval", "error", "idle"],
+  waiting: ["suspended", "listening", "speaking", "summarizing", "approval", "error", "idle"],
+  summarizing: ["suspended", "speaking", "approval", "error", "idle"],
+  speaking: ["suspended", "waiting", "listening", "approval", "error", "idle"],
+  approval: ["suspended", "waiting", "speaking", "error", "idle"],
+  error: ["suspended", "idle"],
 };
 
 // Runtime invariants:
@@ -133,6 +138,26 @@ export function createVoicePilotSessionMachine(): VoicePilotSessionMachine {
         transitionTo("idle");
         readiness = { config: false, mic: false, asr: false, tts: false };
         return result([{ type: "stopCapture" }, { type: "releaseWakeLock" }, { type: "cleanup" }]);
+      }
+
+      if (event.type === "suspendRequested" && !fsm.isIn(["idle", "suspended"])) {
+        transitionTo("suspended");
+        readiness = { config: false, mic: false, asr: false, tts: false };
+        return result([
+          { type: "releaseWakeLock" },
+          { type: "cancelTurnBuffer" },
+          { type: "suspendRuntime" },
+        ]);
+      }
+
+      if (event.type === "resumeRequested" && fsm.is("suspended")) {
+        transitionTo("starting");
+        readiness = { config: false, mic: false, asr: false, tts: false };
+        return result([
+          { type: "loadConfig" },
+          { type: "requestMicPermission" },
+          { type: "requestWakeLock" },
+        ]);
       }
 
       if (event.type === "providerError") {

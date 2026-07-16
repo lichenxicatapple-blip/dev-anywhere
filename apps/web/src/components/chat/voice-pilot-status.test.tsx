@@ -76,4 +76,20 @@ describe("VoicePilotStatus", () => {
     expect(screen.getByText("语音识别连接不可用")).not.toBeNull();
     expect(screen.queryByText("需要处理")).toBeNull();
   });
+
+  it("requires an explicit action to resume after background suspension", () => {
+    useVoicePilotStore.getState().enable("s1");
+    useVoicePilotStore.getState().setPhase("s1", "suspended");
+
+    render(
+      <TooltipProvider>
+        <VoicePilotStatus sessionId="s1" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByText("已暂停")).not.toBeNull();
+    expect(screen.getByText("页面曾进入后台，继续后才会重新使用麦克风。")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    expect(useVoicePilotStore.getState().bySessionId.s1?.resumeRequestSeq).toBe(1);
+  });
 });

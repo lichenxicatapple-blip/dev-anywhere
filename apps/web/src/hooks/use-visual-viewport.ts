@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react";
 
 const VISUAL_VIEWPORT_HEIGHT_VAR = "--dev-visual-viewport-height";
 const SOFT_KEYBOARD_MIN_OCCLUDED_VIEWPORT_SHARE = 0.3;
-const TOUCH_TABLET_MIN_SHORT_EDGE = 600;
-const TOUCH_TABLET_MIN_LONG_EDGE = 768;
 
 interface VisualViewportBottomOffsetInput {
   layoutViewportHeight: number;
@@ -18,26 +16,6 @@ interface VisualViewportBottomOffsetInput {
 export interface VisualViewportInsets {
   bottomOffset: number;
   layoutBottomInset: number;
-}
-
-interface TouchTabletViewportInput {
-  width: number;
-  height: number;
-  maxTouchPoints: number;
-}
-
-export function isTouchTabletViewport({
-  width,
-  height,
-  maxTouchPoints,
-}: TouchTabletViewportInput): boolean {
-  const shortEdge = Math.min(width, height);
-  const longEdge = Math.max(width, height);
-  return (
-    maxTouchPoints > 0 &&
-    shortEdge >= TOUCH_TABLET_MIN_SHORT_EDGE &&
-    longEdge >= TOUCH_TABLET_MIN_LONG_EDGE
-  );
 }
 
 export function computeVisualViewportBottomOffset({
@@ -61,13 +39,18 @@ export function computeVisualViewportLayoutBottomInset({
   layoutViewportHeight,
   visualViewportHeight,
   visualViewportOffsetTop,
-}: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight">): number {
+  baselineViewportHeight = layoutViewportHeight,
+  allowBaselineFallback = false,
+}: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight"> &
+  Partial<
+    Pick<VisualViewportBottomOffsetInput, "baselineViewportHeight" | "allowBaselineFallback">
+  >): number {
   return computeVisualViewportBottomOffset({
     layoutViewportHeight,
     visualViewportHeight,
     visualViewportOffsetTop,
-    baselineViewportHeight: layoutViewportHeight,
-    allowBaselineFallback: false,
+    baselineViewportHeight,
+    allowBaselineFallback,
   });
 }
 
@@ -173,7 +156,8 @@ export function useVisualViewportInsets(): VisualViewportInsets {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const allowBaselineFallback = !isIosLikeTouchWebKit();
+    const iosLikeTouchWebKit = isIosLikeTouchWebKit();
+    let raf = 0;
 
     const update = () => {
       const visualHeight = vv.height;
@@ -196,18 +180,26 @@ export function useVisualViewportInsets(): VisualViewportInsets {
       // Only treat large viewport compression as the soft keyboard; otherwise we add
       // padding that creates a visible dead zone above the Safari address bar.
       const layoutViewportHeight = window.innerHeight;
+      const focusedTextInput = hasFocusedTextEditingSurface();
+      const allowBottomOffsetBaseline = !iosLikeTouchWebKit || focusedTextInput;
+      // During iPadOS keyboard presentation, Safari can transiently shrink innerHeight
+      // together with visualViewport and restore it without another resize event. A
+      // focused editing surface distinguishes that transition from browser chrome.
+      const allowLayoutInsetBaseline = iosLikeTouchWebKit && focusedTextInput;
       const next: VisualViewportInsets = {
         bottomOffset: computeVisualViewportBottomOffset({
           layoutViewportHeight,
           visualViewportHeight: visualHeight,
           visualViewportOffsetTop: visualTop,
           baselineViewportHeight: baselineHeightRef.current,
-          allowBaselineFallback,
+          allowBaselineFallback: allowBottomOffsetBaseline,
         }),
         layoutBottomInset: computeVisualViewportLayoutBottomInset({
           layoutViewportHeight,
           visualViewportHeight: visualHeight,
           visualViewportOffsetTop: visualTop,
+          baselineViewportHeight: baselineHeightRef.current,
+          allowBaselineFallback: allowLayoutInsetBaseline,
         }),
       };
       setInsets((previous) =>
@@ -218,19 +210,30 @@ export function useVisualViewportInsets(): VisualViewportInsets {
       );
     };
 
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        update();
+      });
+    };
+
+    scheduleUpdate();
+    window.addEventListener("resize", scheduleUpdate);
+    vv.addEventListener("resize", scheduleUpdate);
+    vv.addEventListener("scroll", scheduleUpdate);
 
     // 键盘关闭后 visualViewport 更新可能滞后, 失焦延迟 300ms 再采样一次
     const onBlur = () => {
-      setTimeout(update, 300);
+      setTimeout(scheduleUpdate, 300);
     };
     window.addEventListener("focusout", onBlur);
 
     return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", scheduleUpdate);
+      vv.removeEventListener("resize", scheduleUpdate);
+      vv.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("focusout", onBlur);
     };
   }, []);
@@ -248,5 +251,14 @@ function isIosLikeTouchWebKit(): boolean {
     (platform === "MacIntel" &&
       maxTouchPoints > 1 &&
       (userAgent.includes("Mac OS X") || userAgent.includes("Macintosh")))
+  );
+}
+
+function hasFocusedTextEditingSurface(): boolean {
+  const activeElement = document.activeElement;
+  return (
+    activeElement instanceof HTMLInputElement ||
+    activeElement instanceof HTMLTextAreaElement ||
+    (activeElement instanceof HTMLElement && activeElement.isContentEditable)
   );
 }

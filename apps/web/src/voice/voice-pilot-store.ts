@@ -5,6 +5,7 @@ import { VOICE_WAVEFORM_BIN_CAPACITY, type PcmWaveformBin } from "./pcm-waveform
 export type VoicePilotPhase =
   | "idle"
   | "starting"
+  | "suspended"
   | "listening"
   | "submitting"
   | "waiting"
@@ -21,12 +22,14 @@ export interface VoicePilotState {
   approvalRequestId: string | null;
   activityLevel: number;
   waveform: PcmWaveformBin[];
+  resumeRequestSeq: number;
 }
 
 interface VoicePilotStoreState {
   bySessionId: Record<string, VoicePilotState>;
   enable: (sessionId: string) => void;
   disable: (sessionId: string) => void;
+  requestResume: (sessionId: string) => void;
   setPhase: (sessionId: string, phase: VoicePilotPhase) => void;
   setError: (sessionId: string, error: string) => void;
   clearError: (sessionId: string) => void;
@@ -46,6 +49,7 @@ export const DEFAULT_VOICE_PILOT_STATE: VoicePilotState = {
   approvalRequestId: null,
   activityLevel: 0,
   waveform: [],
+  resumeRequestSeq: 0,
 };
 
 function clampActivityLevel(level: number): number {
@@ -93,6 +97,14 @@ export const useVoicePilotStore = create<VoicePilotStoreState>()(
             approvalRequestId: null,
             activityLevel: 0,
             waveform: [],
+          })),
+        ),
+
+      requestResume: (sessionId) =>
+        set((state) =>
+          ensureSession(state, sessionId, (current) => ({
+            ...current,
+            resumeRequestSeq: current.resumeRequestSeq + 1,
           })),
         ),
 

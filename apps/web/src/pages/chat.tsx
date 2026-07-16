@@ -23,7 +23,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
-import { isTouchTabletViewport, useVisualViewportInsets } from "@/hooks/use-visual-viewport";
+import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { describeCurrentClientDevice } from "@/lib/client-device";
 import {
@@ -104,15 +104,13 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       setAdaptiveInputModality("touch");
     }
   }, [adaptiveInputModality, inputModePreference, setAdaptiveInputModality, softKeyboardDetected]);
-  const touchTabletViewport = useTouchTabletViewport();
   const isLandscape = useMediaQuery("(orientation: landscape)");
   const [isIpadClient] = useState(() => describeCurrentClientDevice().osName === "iPad");
   const floatingKeyboardHintShownRef = useRef(false);
   const effectiveKbOffset = hardwareInputActive ? 0 : kbOffset;
-  // iPad/PWA 这类触摸平板通常会自己把聚焦输入框上推。这里再给根节点补整段
-  // keyboard padding，会变成可见的底部空白横条。
-  const effectiveLayoutKbInset =
-    hardwareInputActive || (mode === "json" && touchTabletViewport) ? 0 : layoutKbInset;
+  // layoutKbInset is already zero when the browser resizes the layout viewport and
+  // non-zero only when the soft keyboard overlays it.
+  const effectiveLayoutKbInset = hardwareInputActive ? 0 : layoutKbInset;
 
   useEffect(() => {
     const keyboardOpen = effectiveKbOffset > 0;
@@ -242,7 +240,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     <ImagePreviewProvider sessionId={id}>
       <FileDownloadProvider sessionId={id}>
         <div
-          className="flex flex-col h-full"
+          className="flex flex-col h-full transition-[padding-bottom] duration-200 ease-out motion-reduce:transition-none"
           style={effectiveLayoutKbInset ? { paddingBottom: effectiveLayoutKbInset } : undefined}
           data-keyboard-offset={effectiveKbOffset}
           data-keyboard-layout-inset={effectiveLayoutKbInset}
@@ -289,7 +287,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             <>
               <QuotePreviewBar sessionId={id} />
               <div
-                className="dev-chat-input-rail-inset relative z-20 overflow-visible bg-background pt-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+                className={`dev-chat-input-rail-inset relative z-20 overflow-visible bg-background pt-2 transition-[padding-bottom] duration-200 ease-out motion-reduce:transition-none ${
+                  effectiveLayoutKbInset > 0
+                    ? "pb-2"
+                    : "pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+                }`}
                 data-slot="input-bar-region"
               >
                 <div className="dev-message-rail mx-auto w-full">
@@ -326,37 +328,6 @@ function FailedSessionPanel({ mode, onBack }: { mode: "json" | "pty"; onBack: ()
       </Button>
     </div>
   );
-}
-
-function readTouchTabletViewport(): boolean {
-  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
-  return isTouchTabletViewport({
-    width: window.innerWidth,
-    height: window.innerHeight,
-    maxTouchPoints: navigator.maxTouchPoints ?? 0,
-  });
-}
-
-function useTouchTabletViewport(): boolean {
-  const [touchTabletViewport, setTouchTabletViewport] = useState(readTouchTabletViewport);
-
-  useEffect(() => {
-    let raf = 0;
-    const update = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => setTouchTabletViewport(readTouchTabletViewport()));
-    };
-
-    window.addEventListener("resize", update);
-    window.visualViewport?.addEventListener("resize", update);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("resize", update);
-    };
-  }, []);
-
-  return touchTabletViewport;
 }
 
 function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {

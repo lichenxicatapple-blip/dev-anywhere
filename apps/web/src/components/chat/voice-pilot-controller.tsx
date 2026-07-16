@@ -34,10 +34,7 @@ import { prepareSpeechText } from "@/voice/speech-text";
 import { describeToolApprovalForSpeech } from "@/voice/tool-approval-speech";
 import { routeVoiceText, type VoiceCommand } from "@/voice/voice-command-router";
 import { isVoicePilotAgentBusy } from "@/voice/voice-pilot-agent-state";
-import {
-  createVoicePilotEarcon,
-  type VoicePilotEarcon,
-} from "@/voice/voice-pilot-earcon";
+import { createVoicePilotEarcon, type VoicePilotEarcon } from "@/voice/voice-pilot-earcon";
 import {
   createVoicePilotSessionMachine,
   type VoicePilotEffect,
@@ -261,8 +258,7 @@ export function VoicePilotController({
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
   );
   const turnCompletionVersion = useChatStore(
-    (s) =>
-      s.bySessionId[sessionId]?.turnCompletionVersion ?? EMPTY_SLICE.turnCompletionVersion,
+    (s) => s.bySessionId[sessionId]?.turnCompletionVersion ?? EMPTY_SLICE.turnCompletionVersion,
   );
   const agentBusy = useSessionStore((s) => {
     const session = s.sessions.find((item) => item.sessionId === sessionId);
@@ -309,6 +305,7 @@ export function VoicePilotController({
   const awaitingTurnCompletionRef = useRef(false);
   const observedTurnCompletionVersionRef = useRef(turnCompletionVersion);
   const pendingAssistantSpeechPreparationsRef = useRef(new Set<symbol>());
+  const lastResumeRequestSeqRef = useRef(pilot.resumeRequestSeq);
   agentBusyRef.current = agentBusy;
 
   const traceVoice = useCallback(
@@ -453,6 +450,9 @@ export function VoicePilotController({
           break;
         case "cleanup":
           cleanupRuntime();
+          break;
+        case "suspendRuntime":
+          cleanupRuntime(false);
           break;
         case "setError":
           releaseAudioSession();
@@ -653,7 +653,7 @@ export function VoicePilotController({
         turnIdleMs,
       );
       await sendMachineEvent({ type: "configReady" });
-      if (!voicePilotEnabled()) return;
+      if (!voicePilotEnabled() || currentPilotPhase() !== "starting") return;
       ensureVoiceRuntime();
     } catch (err) {
       if (!voicePilotEnabled()) return;
@@ -992,34 +992,37 @@ export function VoicePilotController({
     [muteCaptureFor, traceVoice],
   );
 
-  const cleanupRuntime = useCallback(() => {
-    traceVoice("runtime", "cleanup-started");
-    const captureShutdown = stopCapture();
-    turnBufferRef.current?.dispose();
-    playerRef.current?.stop();
-    captureMutedUntilRef.current = 0;
-    ttsPlaybackEndAtRef.current = 0;
-    const asrTransport = asrTransportRef.current;
-    const tts = ttsRef.current;
-    asrTransportRef.current = null;
-    ttsRef.current = null;
-    asrTransport?.dispose();
-    tts?.close();
-    turnBufferRef.current = null;
-    playerRef.current = null;
-    pendingSpeechRef.current = [];
-    speechQueueRef.current = [];
-    activeSpeechRef.current = null;
-    activeTtsRequestIdRef.current = null;
-    ttsStatsRef.current.clear();
-    scheduledApprovalRequestIdsRef.current.clear();
-    awaitingTurnCompletionRef.current = false;
-    pendingAssistantSpeechPreparationsRef.current.clear();
-    discardVoicePartialBubble();
-    sessionMachineRef.current = null;
-    void captureShutdown.finally(releaseAudioSession);
-    traceVoice("runtime", "cleanup-finished");
-  }, [discardVoicePartialBubble, releaseAudioSession, stopCapture, traceVoice]);
+  const cleanupRuntime = useCallback(
+    (resetMachine = true) => {
+      traceVoice("runtime", "cleanup-started");
+      const captureShutdown = stopCapture();
+      turnBufferRef.current?.dispose();
+      playerRef.current?.stop();
+      captureMutedUntilRef.current = 0;
+      ttsPlaybackEndAtRef.current = 0;
+      const asrTransport = asrTransportRef.current;
+      const tts = ttsRef.current;
+      asrTransportRef.current = null;
+      ttsRef.current = null;
+      asrTransport?.dispose();
+      tts?.close();
+      turnBufferRef.current = null;
+      playerRef.current = null;
+      pendingSpeechRef.current = [];
+      speechQueueRef.current = [];
+      activeSpeechRef.current = null;
+      activeTtsRequestIdRef.current = null;
+      ttsStatsRef.current.clear();
+      scheduledApprovalRequestIdsRef.current.clear();
+      awaitingTurnCompletionRef.current = false;
+      pendingAssistantSpeechPreparationsRef.current.clear();
+      discardVoicePartialBubble();
+      if (resetMachine) sessionMachineRef.current = null;
+      void captureShutdown.finally(releaseAudioSession);
+      traceVoice("runtime", "cleanup-finished");
+    },
+    [discardVoicePartialBubble, releaseAudioSession, stopCapture, traceVoice],
+  );
 
   const sendSpeechNow = useCallback(
     (socket: WebSocket, text: string) => {
@@ -1502,6 +1505,7 @@ export function VoicePilotController({
       reportProviderError("语音播报连接不可用");
     });
     tts.addEventListener("open", () => {
+      if (ttsRef.current !== tts || currentPilotPhase() === "suspended") return;
       traceVoice("tts", "websocket-open");
       void sendMachineEvent({ type: "ttsReady" }).catch((err: unknown) => {
         useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "语音播报连接不可用"));
@@ -1587,6 +1591,53 @@ export function VoicePilotController({
     // wakeLock methods are stable in the real hook; tests provide fixed spies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cleanupRuntime, enabled, sessionId]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const suspend = (): void => {
+      traceVoice("runtime", "page-hidden");
+      void sendMachineEvent({ type: "suspendRequested" }).catch((err: unknown) => {
+        if (!voicePilotEnabled()) return;
+        useVoicePilotStore
+          .getState()
+          .setError(sessionId, errorMessage(err, "暂停 Voice Pilot 失败"));
+      });
+    };
+    const suspendWhenHidden = (): void => {
+      if (document.visibilityState === "hidden") suspend();
+    };
+
+    document.addEventListener("visibilitychange", suspendWhenHidden);
+    window.addEventListener("pagehide", suspend);
+    return () => {
+      document.removeEventListener("visibilitychange", suspendWhenHidden);
+      window.removeEventListener("pagehide", suspend);
+    };
+  }, [enabled, sendMachineEvent, sessionId, traceVoice, voicePilotEnabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      lastResumeRequestSeqRef.current = pilot.resumeRequestSeq;
+      return;
+    }
+    if (pilot.resumeRequestSeq === lastResumeRequestSeqRef.current) return;
+    lastResumeRequestSeqRef.current = pilot.resumeRequestSeq;
+    if (currentPilotPhase() !== "suspended") return;
+    traceVoice("runtime", "resume-requested");
+    void sendMachineEvent({ type: "resumeRequested" }).catch((err: unknown) => {
+      if (!voicePilotEnabled()) return;
+      useVoicePilotStore.getState().setError(sessionId, errorMessage(err, "继续 Voice Pilot 失败"));
+    });
+  }, [
+    currentPilotPhase,
+    enabled,
+    pilot.resumeRequestSeq,
+    sendMachineEvent,
+    sessionId,
+    traceVoice,
+    voicePilotEnabled,
+  ]);
 
   useEffect(() => {
     if (!enabled) {

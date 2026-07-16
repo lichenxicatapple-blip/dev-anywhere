@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Play, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import {
 const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
   idle: "离线",
   starting: "准备中",
+  suspended: "已暂停",
   listening: "聆听",
   submitting: "发送",
   waiting: "等待",
@@ -28,6 +29,7 @@ const PHASE_CHIPS: Record<VoicePilotPhase, string> = {
 const PHASE_TONE: Record<VoicePilotPhase, string> = {
   idle: "quiet",
   starting: "active",
+  suspended: "quiet",
   listening: "live",
   submitting: "active",
   waiting: "active",
@@ -60,6 +62,7 @@ function buildWavePath(waveform: PcmWaveformBin[]): string {
 export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   const pilot = useVoicePilotStore((s) => s.bySessionId[sessionId] ?? DEFAULT_VOICE_PILOT_STATE);
   const disable = useVoicePilotStore((s) => s.disable);
+  const requestResume = useVoicePilotStore((s) => s.requestResume);
   const enabled = pilot.enabled;
   const phase = pilot.phase;
   const level = pilot.activityLevel;
@@ -67,9 +70,11 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
   if (!enabled) return null;
 
   const tone = PHASE_TONE[phase];
-  const active = phase !== "error";
+  const active = phase !== "error" && phase !== "suspended";
   const wavePath = buildWavePath(pilot.waveform);
-  const detailText = pilot.error?.trim() || null;
+  const detailText =
+    pilot.error?.trim() ||
+    (phase === "suspended" ? "页面曾进入后台，继续后才会重新使用麦克风。" : null);
 
   return (
     <div
@@ -94,7 +99,21 @@ export function VoicePilotStatus({ sessionId }: { sessionId: string }) {
           </span>
         </div>
         {detailText ? (
-          <div className="mt-1 min-w-0 truncate text-xs text-muted-foreground">{detailText}</div>
+          <div className="mt-1 min-w-0 break-words text-xs leading-5 text-muted-foreground">
+            {detailText}
+          </div>
+        ) : null}
+        {phase === "suspended" ? (
+          <Button
+            type="button"
+            size="xs"
+            data-slot="voice-pilot-resume"
+            className="mt-2"
+            onClick={() => requestResume(sessionId)}
+          >
+            <Play aria-hidden="true" />
+            继续
+          </Button>
         ) : null}
       </div>
       <Tooltip>

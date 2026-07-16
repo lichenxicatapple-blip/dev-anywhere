@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   computeVisualViewportBottomOffset,
   computeVisualViewportLayoutBottomInset,
-  isTouchTabletViewport,
   resetDocumentScrollIfNeeded,
 } from "./use-visual-viewport";
 
@@ -118,6 +117,18 @@ describe("computeVisualViewportLayoutBottomInset", () => {
     ).toBe(0);
   });
 
+  it("uses the pre-focus baseline during the iPadOS keyboard transition", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 460,
+        visualViewportHeight: 460,
+        visualViewportOffsetTop: 0,
+        baselineViewportHeight: 800,
+        allowBaselineFallback: true,
+      }),
+    ).toBe(340);
+  });
+
   it("ignores small browser chrome viewport changes", () => {
     expect(
       computeVisualViewportLayoutBottomInset({
@@ -126,18 +137,6 @@ describe("computeVisualViewportLayoutBottomInset", () => {
         visualViewportOffsetTop: 0,
       }),
     ).toBe(0);
-  });
-});
-
-describe("isTouchTabletViewport", () => {
-  it("detects touch tablet portrait and landscape layouts", () => {
-    expect(isTouchTabletViewport({ width: 1024, height: 768, maxTouchPoints: 5 })).toBe(true);
-    expect(isTouchTabletViewport({ width: 768, height: 1024, maxTouchPoints: 5 })).toBe(true);
-  });
-
-  it("does not treat phones or non-touch desktop viewports as touch tablets", () => {
-    expect(isTouchTabletViewport({ width: 844, height: 390, maxTouchPoints: 5 })).toBe(false);
-    expect(isTouchTabletViewport({ width: 1280, height: 800, maxTouchPoints: 0 })).toBe(false);
   });
 });
 
