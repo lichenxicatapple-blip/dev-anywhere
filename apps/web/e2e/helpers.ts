@@ -1063,6 +1063,14 @@ export async function openCreateAgentSessionDialog(page: Page) {
 export async function gotoWithFakeProxy(page: Page, path: string): Promise<void> {
   await selectFakeProxy(page);
   await page.goto(`${BASE_URL}${path}`);
+  const desktopTrigger = page.locator('[data-slot="proxy-switcher-trigger"]');
+  if (
+    (page.viewportSize()?.width ?? 0) >= 768 &&
+    (await desktopTrigger.getAttribute("aria-expanded")) === "true"
+  ) {
+    await page.keyboard.press("Escape");
+    await expect(desktopTrigger).toHaveAttribute("aria-expanded", "false");
+  }
 }
 
 export async function sentFakeRelayMessages(page: Page): Promise<FakeRelayMessage[]> {
