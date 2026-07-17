@@ -94,28 +94,37 @@ e2e_mobile_accept_chrome_first_run() {
   local _attempt
 
   for _attempt in $(seq 1 5); do
-    if ! adb shell dumpsys activity activities 2>/dev/null | grep -q 'org.chromium.chrome.browser.firstrun.FirstRunActivity'; then
-      return 0
+    adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+    if adb exec-out cat /sdcard/window.xml 2>/dev/null | grep -q 'com.android.chrome:id/promo_dialog_layout'; then
+      if e2e_mobile_tap_ui_node 'com.android.chrome:id/button_primary'; then
+        sleep 1
+        continue
+      fi
     fi
 
-    if e2e_mobile_tap_ui_node \
-      'com.android.chrome:id/signin_fre_dismiss_button' \
-      'com.android.chrome:id/terms_accept' \
-      'com.android.chrome:id/negative_button' \
-      'Use without an account' \
-      'Accept & continue' \
-      'No thanks' \
-      'Got it' \
-      'Continue' \
-      'Skip'; then
+    if adb shell dumpsys activity activities 2>/dev/null | grep -q 'org.chromium.chrome.browser.firstrun.FirstRunActivity'; then
+      if e2e_mobile_tap_ui_node \
+        'com.android.chrome:id/signin_fre_dismiss_button' \
+        'com.android.chrome:id/terms_accept' \
+        'com.android.chrome:id/negative_button' \
+        'Use without an account' \
+        'Accept & continue' \
+        'No thanks' \
+        'Got it' \
+        'Continue' \
+        'Skip'; then
+        sleep 1
+        continue
+      fi
+
       sleep 1
       continue
     fi
 
-    sleep 1
+    return 0
   done
 
-  ! adb shell dumpsys activity activities 2>/dev/null | grep -q 'org.chromium.chrome.browser.firstrun.FirstRunActivity'
+  return 1
 }
 
 e2e_mobile_teardown_adb_reverse() {
