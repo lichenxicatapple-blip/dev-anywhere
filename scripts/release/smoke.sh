@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-RELEASE_MOBILE_EMULATORS="${RELEASE_MOBILE_EMULATORS:-2}"
+RELEASE_MOBILE_EMULATORS="${RELEASE_MOBILE_EMULATORS:-1}"
 RELEASE_MOBILE_KEEP_EMULATORS="${RELEASE_MOBILE_KEEP_EMULATORS:-0}"
 
 cleanup_mobile_emulators() {
@@ -34,4 +34,4 @@ if [[ "$RELEASE_MOBILE_KEEP_EMULATORS" != "1" ]]; then
   trap cleanup_mobile_emulators EXIT
 fi
 bash scripts/test/mobile-emulators.sh start "$RELEASE_MOBILE_EMULATORS"
-TEST_MOBILE_REQUIRE_EMULATOR=1 pnpm test:mobile
+TEST_MOBILE_REQUIRE_EMULATOR=1 TEST_MOBILE_PARALLEL_WORKERS=1 pnpm test:mobile
