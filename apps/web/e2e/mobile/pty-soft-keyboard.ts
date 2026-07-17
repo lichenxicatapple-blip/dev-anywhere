@@ -111,6 +111,14 @@ export async function touchPtyTerminal(page: Page): Promise<void> {
 }
 
 export async function waitForSoftKeyboard(page: Page): Promise<void> {
+  const serialArgs = await adbArgs();
+  await expect
+    .poll(() => isNativeSoftKeyboardVisible(serialArgs), {
+      timeout: 10_000,
+      message: "Android soft keyboard did not become visible",
+    })
+    .toBe(true);
+
   await expect
     .poll(
       () =>
@@ -124,6 +132,49 @@ export async function waitForSoftKeyboard(page: Page): Promise<void> {
       { timeout: 10_000, message: "Android soft keyboard did not produce a keyboard offset" },
     )
     .toBeGreaterThan(0);
+}
+
+async function waitForPtyControlsToSettleAboveKeyboard(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const timeoutAt = performance.now() + 10_000;
+        let alignedSince: number | null = null;
+
+        const sample = () => {
+          const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
+          const controlsRect = controls?.getBoundingClientRect();
+          const viewportTop = window.visualViewport?.offsetTop ?? 0;
+          const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+          const viewportBottom = viewportTop + viewportHeight;
+          const gap = controlsRect ? viewportBottom - controlsRect.bottom : Number.NaN;
+          const aligned = controlsRect != null && gap >= -2 && gap <= 24;
+          const now = performance.now();
+
+          if (aligned) {
+            alignedSince ??= now;
+            if (now - alignedSince >= 500) {
+              resolve();
+              return;
+            }
+          } else {
+            alignedSince = null;
+          }
+
+          if (now >= timeoutAt) {
+            reject(
+              new Error(
+                `PTY controls did not settle above Android keyboard: gap=${String(gap)}, viewportTop=${viewportTop}, viewportHeight=${viewportHeight}`,
+              ),
+            );
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+
+        requestAnimationFrame(sample);
+      }),
+  );
 }
 
 export async function dismissSoftKeyboard(_page: Page): Promise<void> {
@@ -145,4 +196,5 @@ export async function touchPtyTerminalAndWaitForSoftKeyboard(page: Page): Promis
     page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
   ).toBeFocused();
   await waitForSoftKeyboard(page);
+  await waitForPtyControlsToSettleAboveKeyboard(page);
 }

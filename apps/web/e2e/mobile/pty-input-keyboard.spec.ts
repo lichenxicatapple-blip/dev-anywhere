@@ -69,17 +69,6 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
 
     await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
 
-    await expect
-      .poll(() =>
-        emuPage.evaluate(() => {
-          const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
-          const controlsRect = controls?.getBoundingClientRect();
-          const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-          return controlsRect ? Math.abs(viewportHeight - controlsRect.bottom) : Infinity;
-        }),
-      )
-      .toBeLessThanOrEqual(24);
-
     const metrics = await emuPage.evaluate((sid) => {
       const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
       const controlsRect = controls?.getBoundingClientRect();
@@ -96,6 +85,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
             .querySelector("[data-keyboard-layout-inset]")
             ?.getAttribute("data-keyboard-layout-inset") ?? "0",
         ),
+        visualViewportTop: window.visualViewport?.offsetTop ?? 0,
         visualViewportHeight: window.visualViewport?.height ?? window.innerHeight,
       };
     }, SESSION_ID);
@@ -105,10 +95,11 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(metrics.controlsBottom).not.toBeNull();
     expect(metrics.controlsHeight).not.toBeNull();
     expect(metrics.controlsHeight ?? 0).toBeGreaterThan(80);
+    const visualViewportBottom = metrics.visualViewportTop + metrics.visualViewportHeight;
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-      metrics.visualViewportHeight + 2,
+      visualViewportBottom + 2,
     );
-    expect(metrics.visualViewportHeight - (metrics.controlsBottom ?? 0)).toBeLessThanOrEqual(24);
+    expect(visualViewportBottom - (metrics.controlsBottom ?? 0)).toBeLessThanOrEqual(24);
 
     const controlHeights: number[] = [];
     for (let sample = 0; sample < 20; sample += 1) {
