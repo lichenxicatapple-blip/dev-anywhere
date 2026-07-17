@@ -69,6 +69,17 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
 
     await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
 
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() => {
+          const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
+          const controlsRect = controls?.getBoundingClientRect();
+          const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+          return controlsRect ? Math.abs(viewportHeight - controlsRect.bottom) : Infinity;
+        }),
+      )
+      .toBeLessThanOrEqual(24);
+
     const metrics = await emuPage.evaluate((sid) => {
       const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
       const controlsRect = controls?.getBoundingClientRect();

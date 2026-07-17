@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const CHROME_NOTIFICATIONS_PROMPT = "Chrome notifications make things easier";
+const CHROME_SEARCH_PROMPT = "Search with Sogou";
 
 async function adbArgs(): Promise<string[]> {
   if (process.env.ANDROID_SERIAL) return ["-s", process.env.ANDROID_SERIAL];
@@ -21,6 +22,11 @@ async function adbArgs(): Promise<string[]> {
     );
   }
   return ["-s", devices[0]];
+}
+
+async function isNativeSoftKeyboardVisible(serialArgs: string[]): Promise<boolean> {
+  const { stdout } = await execFileAsync("adb", [...serialArgs, "shell", "dumpsys", "window"]);
+  return /mImeShowing=true/.test(stdout) || /type=ime[^\n]*visible=true/.test(stdout);
 }
 
 export async function tapWithAdb(locator: Locator): Promise<void> {
@@ -47,14 +53,24 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
           value.includes(`content-desc="${label}"`) ||
           value.includes(`hint="${label}"`),
       );
-    if (!node && hierarchy.includes(CHROME_NOTIFICATIONS_PROMPT)) {
+    if (
+      !node &&
+      (hierarchy.includes(CHROME_NOTIFICATIONS_PROMPT) || hierarchy.includes(CHROME_SEARCH_PROMPT))
+    ) {
       const dismissButton = [...hierarchy.matchAll(/<node\b[^>]*>/g)]
         .map(([value]) => value)
-        .find(
-          (value) =>
-            value.includes('resource-id="com.android.chrome:id/negative_button"') &&
-            value.includes('text="No thanks"'),
-        );
+        .find((value) => {
+          if (hierarchy.includes(CHROME_NOTIFICATIONS_PROMPT)) {
+            return (
+              value.includes('resource-id="com.android.chrome:id/negative_button"') &&
+              value.includes('text="No thanks"')
+            );
+          }
+          return (
+            value.includes('resource-id="com.android.chrome:id/button_secondary"') &&
+            value.includes('text="Keep Google"')
+          );
+        });
       const dismissBounds = dismissButton?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
       if (dismissBounds) {
         const [, left, top, right, bottom] = dismissBounds.map(Number);
@@ -110,29 +126,17 @@ export async function waitForSoftKeyboard(page: Page): Promise<void> {
     .toBeGreaterThan(0);
 }
 
-export async function dismissSoftKeyboard(page: Page): Promise<void> {
-  const keyboardOffset = await page.evaluate(() =>
-    Number(
-      document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ?? "0",
-    ),
-  );
-  if (keyboardOffset <= 0) return;
-
+export async function dismissSoftKeyboard(_page: Page): Promise<void> {
   const serialArgs = await adbArgs();
+  if (!(await isNativeSoftKeyboardVisible(serialArgs))) return;
+
   await execFileAsync("adb", [...serialArgs, "shell", "input", "keyevent", "4"]);
   await expect
-    .poll(
-      () =>
-        page.evaluate(() =>
-          Number(
-            document
-              .querySelector("[data-keyboard-offset]")
-              ?.getAttribute("data-keyboard-offset") ?? "0",
-          ),
-        ),
-      { timeout: 10_000, message: "Android soft keyboard did not close between tests" },
-    )
-    .toBe(0);
+    .poll(async () => !(await isNativeSoftKeyboardVisible(serialArgs)), {
+      timeout: 10_000,
+      message: "Android soft keyboard did not close between tests",
+    })
+    .toBe(true);
 }
 
 export async function touchPtyTerminalAndWaitForSoftKeyboard(page: Page): Promise<void> {
