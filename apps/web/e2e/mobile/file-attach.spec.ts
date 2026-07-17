@@ -112,10 +112,8 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
       const input = emuPage.getByLabel("输入聊天消息");
       await test.step("focus input and open @ picker", async () => {
         await expect(input).toBeVisible({ timeout: 30_000 });
-        // Android Chrome CDP 复用现有 browser context, Playwright 无法给该 context
-        // retro-fit hasTouch, Locator.tap 会直接报 "page does not support tap"。
-        // 这里仍跑在真 Android Chrome 上, 用 click 驱动 DOM 交互并由 L2 覆盖触屏尺寸契约。
-        await input.click({ timeout: 15_000 });
+        await input.click({ force: true });
+        await expect(input).toBeFocused({ timeout: 15_000 });
         await input.fill("@", { timeout: 15_000 });
       });
 
@@ -131,7 +129,9 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
         await expect(fileEntry).toBeVisible({ timeout: 15_000 });
         const entryText = (await fileEntry.innerText()).trim().split(/\s+/)[0];
         expect(entryText).toBeTruthy();
-        await fileEntry.click({ timeout: 15_000 });
+        // Android Chrome 会在键盘动画后继续平移 visual viewport；Playwright 的
+        // actionability 稳定性检查会因此卡住，但浏览器命中测试始终落在该条目上。
+        await fileEntry.click({ force: true });
 
         // picker 关闭 + input 内容包含 entry 名 (具体格式可能是 "@src" 或 "@<full path>",
         // 这里只 lock 包含关系).
@@ -146,7 +146,7 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
         // 发送, 验证 user_input 经 fakeRelay 收到包含 path token 的文本.
         const send = emuPage.locator('[data-slot="send-button"][data-variant="send"]');
         await expect(send).toBeEnabled({ timeout: 15_000 });
-        await send.click({ timeout: 15_000 });
+        await send.click({ force: true });
         await expect
           .poll(
             async () =>
