@@ -1029,10 +1029,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
 
 export async function selectFakeProxy(page: Page): Promise<void> {
   await page.goto(`${BASE_URL}/#/`);
-  if ((page.viewportSize()?.width ?? 0) >= 768) {
-    await page.locator('[data-slot="proxy-switcher-trigger"]').click();
+  const desktop = (page.viewportSize()?.width ?? 0) >= 768;
+  const desktopTrigger = page.locator('[data-slot="proxy-switcher-trigger"]');
+  if (desktop) {
+    await desktopTrigger.click();
   }
   await page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible').last().click();
+  if (desktop) {
+    await expect(desktopTrigger).toHaveAttribute("aria-expanded", "false");
+  }
   await expect(
     page
       .locator(
