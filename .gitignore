@@ -13,10 +13,13 @@ test-results/
 docs/sketches/
 docs/superpowers/
 artifacts/
+.tmp/
 *.png
 # PWA 图标必须入库 (generator 生成, 供 deploy.sh 同步到 nginx)
 !apps/web/public/*.png
 !docs/assets/*.png
+docs/assets/readme-session-modes.png
+docs/assets/readme-workflow.png
 .dev-anywhere/
 apps/web/e2e/fixtures/sessions/.runtime/
 apps/relay/assets/web/

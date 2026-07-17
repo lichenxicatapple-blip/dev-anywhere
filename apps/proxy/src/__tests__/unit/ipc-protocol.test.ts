@@ -671,6 +671,14 @@ describe("Worker Protocol", () => {
       },
       { type: "worker_ready", payload: { type: "worker_ready", pid: 999 } },
       {
+        type: "worker_ready_with_native_session",
+        payload: {
+          type: "worker_ready",
+          pid: 999,
+          nativeSession: { provider: "codex", sessionId: "cx-ready-123" },
+        },
+      },
+      {
         type: "worker_claude_session_id",
         payload: { type: "worker_claude_session_id", sessionId: "cs-123" },
       },

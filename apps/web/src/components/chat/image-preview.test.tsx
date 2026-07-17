@@ -70,7 +70,7 @@ describe("ImagePreviewProvider", () => {
 
     render(
       <ImagePreviewProvider sessionId="s1">
-        <PreviewProbe path="docs/assets/readme-mobile-create.png" />
+        <PreviewProbe path="docs/assets/example-preview.png" />
       </ImagePreviewProvider>,
     );
 

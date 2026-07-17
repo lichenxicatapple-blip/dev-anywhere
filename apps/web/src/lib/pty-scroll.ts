@@ -33,7 +33,7 @@ export function computePtyHostLayout(
   // 长会话 (bufferLength > rows) 已进入 scrollback 区, 光标上方都是有效 buffer 行,
   // 光标下方的空行属于"光标余空"; 这时再加 paddingTop 会把 host 内容整体下推,
   // 与 positionHostAt 给出的 host.top (按 ydisp*cellH 算) 拼起来在视窗顶部留出
-  // 与 padding 等高的黑带, 即 blank-render 现场 (#docs/known-issues/pty-blank-render.md)。
+  // 与 padding 等高的黑带，表现为终端顶部出现空白渲染区。
   //
   // padding 底参考: 当 rows*cellH > visibleContentHeight (窄高度终端 / 移动端) 时,
   // 仅 host 顶部 visible 高度可见, padding 必须夹到 visible, 否则内容被压到截断点之下看不见。

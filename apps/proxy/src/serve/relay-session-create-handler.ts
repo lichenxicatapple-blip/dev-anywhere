@@ -247,6 +247,14 @@ export class RelaySessionCreateHandler {
       );
       return;
     }
+    const nativeSession = this.deps.workerRegistry.takePendingNativeSession(session.id);
+    if (nativeSession) {
+      if (nativeSession.provider === "claude") {
+        this.deps.sessionManager.setClaudeSessionId(session.id, nativeSession.sessionId);
+      } else {
+        this.deps.sessionManager.setHistorySessionId(session.id, nativeSession.sessionId);
+      }
+    }
     if (options.resumeSessionId) {
       this.deps.sessionManager.setHistorySessionId(session.id, options.resumeSessionId);
     }

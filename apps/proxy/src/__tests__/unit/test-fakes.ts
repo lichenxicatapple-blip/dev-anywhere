@@ -66,6 +66,7 @@ export function createWorkerRegistryFake(options?: {
   hasProcess?: unknown;
   waitForReady?: unknown;
   terminateProcess?: unknown;
+  takePendingNativeSession?: unknown;
 }): WorkerRegistry {
   return {
     send: options?.send ?? vi.fn(),
@@ -75,6 +76,7 @@ export function createWorkerRegistryFake(options?: {
     hasProcess: options?.hasProcess ?? vi.fn(() => true),
     waitForReady: options?.waitForReady ?? vi.fn(async () => {}),
     terminateProcess: options?.terminateProcess ?? vi.fn(() => false),
+    takePendingNativeSession: options?.takePendingNativeSession ?? vi.fn(),
   } as unknown as WorkerRegistry;
 }
 

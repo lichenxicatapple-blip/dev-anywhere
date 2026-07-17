@@ -53,6 +53,11 @@ interface ReadyWaiter {
   timeout: NodeJS.Timeout;
 }
 
+interface NativeSessionRef {
+  provider: ProviderId;
+  sessionId: string;
+}
+
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
 function normalizeLocalCommandText(content: string): string {
@@ -94,6 +99,7 @@ export class WorkerRegistry {
   private children = new Map<string, ChildProcess>();
   private readySessions = new Set<string>();
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
+  private pendingNativeSessions = new Map<string, NativeSessionRef>();
   // 记录哪些 session 是 spawn 时带 --stream-delta 的；forwardEvent 据此决定是否跳过 aggregated 去重
   private streamDeltaSessions = new Set<string>();
 
@@ -232,12 +238,25 @@ export class WorkerRegistry {
         this.sockets.set(sessionId, sock);
         createWorkerReader(
           sock,
-          (msg) => this.handleWorkerMessage(sessionId, msg),
+          (msg) => {
+            try {
+              this.handleWorkerMessage(sessionId, msg);
+            } catch (err) {
+              serviceLogger.error(
+                { sessionId, error: err instanceof Error ? err.message : String(err) },
+                "Worker message handler failed",
+              );
+            }
+          },
           (err, line) => {
             // 单条 worker NDJSON 行 schema 校验失败：warn 而非断连。Claude/Codex CLI 增量
             // 加新事件类型时不该把整个 session 推进 ERROR；连接保持开放，下一条仍继续解析。
             serviceLogger.warn(
-              { sessionId, err: err.message, lineLen: line.length },
+              {
+                sessionId,
+                err: err.message,
+                lineLen: line.length,
+              },
               "Worker IPC message dropped (parse/schema error)",
             );
           },
@@ -308,6 +327,7 @@ export class WorkerRegistry {
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
     this.streamDeltaSessions.delete(sessionId);
+    this.pendingNativeSessions.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker session deleted before ready: ${sessionId}`),
       sessionId,
@@ -321,6 +341,7 @@ export class WorkerRegistry {
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
     this.streamDeltaSessions.delete(sessionId);
+    this.pendingNativeSessions.delete(sessionId);
     this.children.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker process terminated before ready: ${sessionId}`),
@@ -344,12 +365,16 @@ export class WorkerRegistry {
     }
     this.sockets.clear();
     this.readySessions.clear();
+    this.pendingNativeSessions.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
 
   private handleWorkerMessage(sessionId: string, msg: WorkerMessage): void {
     switch (msg.type) {
       case "worker_ready":
+        if (msg.nativeSession) {
+          this.captureNativeSession(sessionId, msg.nativeSession);
+        }
         this.readySessions.add(sessionId);
         this.resolveReadyWaiters(sessionId);
         serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
@@ -399,7 +424,7 @@ export class WorkerRegistry {
         break;
 
       case "worker_claude_session_id":
-        this.deps.sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
+        this.captureNativeSession(sessionId, { provider: "claude", sessionId: msg.sessionId });
         serviceLogger.info(
           { sessionId, claudeSessionId: msg.sessionId },
           "Claude session ID captured",
@@ -407,16 +432,33 @@ export class WorkerRegistry {
         break;
 
       case "worker_native_session_id":
-        if (msg.provider === "claude") {
-          this.deps.sessionManager.setClaudeSessionId(sessionId, msg.sessionId);
-        } else {
-          this.deps.sessionManager.setHistorySessionId(sessionId, msg.sessionId);
-        }
+        this.captureNativeSession(sessionId, {
+          provider: msg.provider,
+          sessionId: msg.sessionId,
+        });
         serviceLogger.info(
           { sessionId, provider: msg.provider, nativeSessionId: msg.sessionId },
           "Native JSON session ID captured",
         );
         break;
+    }
+  }
+
+  takePendingNativeSession(sessionId: string): NativeSessionRef | undefined {
+    const nativeSession = this.pendingNativeSessions.get(sessionId);
+    this.pendingNativeSessions.delete(sessionId);
+    return nativeSession;
+  }
+
+  private captureNativeSession(sessionId: string, nativeSession: NativeSessionRef): void {
+    if (!this.deps.sessionManager.getSession(sessionId)) {
+      this.pendingNativeSessions.set(sessionId, nativeSession);
+      return;
+    }
+    if (nativeSession.provider === "claude") {
+      this.deps.sessionManager.setClaudeSessionId(sessionId, nativeSession.sessionId);
+    } else {
+      this.deps.sessionManager.setHistorySessionId(sessionId, nativeSession.sessionId);
     }
   }
 

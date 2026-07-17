@@ -276,8 +276,12 @@ server.listen(sockPath, () => {
   if (provider === "codex" && session instanceof CodexAppServerSession) {
     void session
       .waitUntilReady()
-      .then(() => {
-        sendToServe({ type: "worker_ready", pid });
+      .then((threadId) => {
+        sendToServe({
+          type: "worker_ready",
+          pid,
+          nativeSession: { provider: "codex", sessionId: threadId },
+        });
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);

@@ -38,7 +38,7 @@ describe("Relay Server Integration", () => {
     const packagedFontDir = join(tempRoot, "packaged-fonts");
     mkdirSync(join(packagedFontDir, "sarasa-fixed-sc"), { recursive: true });
     writeFileSync(join(packagedFontDir, "sarasa-fixed-sc", "result.css"), "/* packaged font */");
-    const webAssetDir = join(tempRoot, "web");
+    const webAssetDir = join(tempRoot, ".package-store", "web");
     mkdirSync(join(webAssetDir, "assets"), { recursive: true });
     writeFileSync(join(webAssetDir, "index.html"), "<!doctype html><main>DEV Anywhere</main>");
     writeFileSync(join(webAssetDir, "assets", "app-abc123.js"), "console.log('app');");

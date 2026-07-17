@@ -1,149 +1,91 @@
-<p align="center">
-  <img src="docs/assets/logo.svg" width="88" height="88" alt="DEV Anywhere logo" />
-</p>
+<div align="center">
+  <img src="./docs/assets/logo.svg" width="96" alt="DEV Anywhere 标志">
+  <h1>DEV Anywhere</h1>
+  <p>在浏览器中创建、接管和管理开发机上的 Claude Code、Codex 与 Shell 会话。</p>
+  <p>
+    <a href="./README.en.md">English</a>
+    ·
+    <a href="#快速开始">快速开始</a>
+    ·
+    <a href="./docs/DEPLOYMENT.md">VPS 部署</a>
+  </p>
+  <p>
+    <a href="https://www.npmjs.com/package/@dev-anywhere/proxy"><img src="https://img.shields.io/npm/v/@dev-anywhere/proxy?label=npm" alt="npm 版本"></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证"></a>
+    <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node.js 20 或更高版本">
+  </p>
+</div>
 
-<h1 align="center">DEV Anywhere</h1>
+![DEV Anywhere 桌面端会话界面](./docs/assets/readme-hero-web.gif)
 
-<p align="center">
-  <strong>Create and control Claude Code, Codex, and shell sessions on your own developer machine from any browser.</strong>
-</p>
+## 这是什么
 
-<p align="center">
-  <a href="README.zh-CN.md">简体中文</a>
-</p>
+DEV Anywhere 是一个自托管的远程 AI coding 工作台，用浏览器操作开发机上的 Claude Code、Codex 和 Shell 会话。你可以远程启动新会话、继续历史会话，或接管已经从本地终端启动的会话。Agent 会话可以选择终端模式或聊天模式，Shell 会话使用终端模式。
 
-<p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node.js >= 20" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" />
-  <img src="https://img.shields.io/npm/v/@dev-anywhere/proxy?label=proxy" alt="@dev-anywhere/proxy on npm" />
-  <img src="https://img.shields.io/npm/v/@dev-anywhere/relay?label=relay" alt="@dev-anywhere/relay on npm" />
-</p>
+本地接入时，只需把 `claude` 或 `codex` 改为 `dev-anywhere claude` 或 `dev-anywhere codex`。其余 CLI 参数和终端交互保持不变；命令会按需启动 Proxy，并让会话出现在 Web 中。从 Web 创建的会话也仍在开发机上运行，继续使用本地的 CLI、环境变量和工作目录。
 
-DEV Anywhere is a self-hosted browser control layer for local development sessions. It can start Claude Code or Codex in a project directory, open a plain shell, attach to sessions started from the local CLI, handle tool approvals, and move files between the browser and the developer machine.
+DEV Anywhere 直接围绕远程 Agent 工作流设计。除了查看终端输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、Agent CLI 和模型凭据仍然留在开发机上。
 
-Your repositories, shell state, agent CLIs, API keys, and credentials stay on the machine that already has your development environment. The relay only forwards authenticated WebSocket and file traffic between that machine and your desktop, iPad, phone, or installed PWA.
+> **为什么做这个？**
+>
+> 离开电脑后，我还是想通过开发机上的 Agent 继续 vibe coding。我想在吃饭时 🍜 看看 Agent 干到哪了，坐在马桶上 🚽 顺手处理一次审批；甚至在使用辅助驾驶时，也能通过语音交互 🎙️ 听取结果、下达指令（⚠️ 辅助驾驶不等于自动驾驶，请始终关注路况，切勿操作屏幕）。
 
-```text
-Browser / PWA
-    <-> Relay + Web client
-    <-> Local proxy daemon
-    <-> Claude Code / Codex / Shell
-```
+## 快速开始
 
-## Why It Exists
+### 1. 安装本地 Proxy
 
-Projects such as [code-server](https://github.com/coder/code-server) and [OpenVSCode Server](https://github.com/gitpod-io/openvscode-server) bring a full IDE to the browser. [ttyd](https://github.com/tsl0922/ttyd) exposes a terminal over the web. [OpenHands](https://github.com/OpenHands/openhands) focuses on agent-driven software work.
-
-DEV Anywhere is narrower: it is not a cloud IDE and it does not try to replace your local terminal setup. It gives the browser a clean control surface for the sessions you actually use while coding: agent CLIs, plain shells, approvals, mobile controls, and file transfer.
-
-## Core Workflows
-
-### Create Agent Sessions
-
-Create a Claude Code or Codex session from the web client, choose the working directory, pick terminal or chat mode, and select the permission mode before the process starts.
-
-<p>
-  <img src="docs/assets/readme-create-agent.png" alt="Create an agent session in a real DEV Anywhere checkout" />
-</p>
-
-You can also start from the local CLI:
-
-```bash
-dev-anywhere claude
-dev-anywhere codex
-```
-
-Those sessions appear in the browser sidebar and can be resumed after refreshes, network changes, or browser switches.
-
-### Open Plain Terminals
-
-When you do not need an agent turn, create a terminal session directly from the browser. It opens a normal shell on the developer machine, keeps the session in the same sidebar, and supports the same PTY controls as agent terminal mode.
-
-Terminal sessions are useful for checking logs, restarting a service, running one-off commands, or keeping a long command visible from mobile while the actual process stays on the developer machine.
-
-### Work From Phone Or Tablet
-
-The mobile UI uses the same session model as desktop, but it is not a shrunken desktop layout. Creation, session switching, terminal helper keys, file actions, and PWA usage are adapted for touch.
-
-<p>
-  <img src="docs/assets/readme-mobile-create.png" alt="Mobile new-session sheet connected to a real local proxy" width="360" />
-</p>
-
-### Approve Tools And Manage Clients
-
-Agent tool approvals are sent to the browser before scoped local commands proceed. For repeated prompts, Always Yes can be enabled per session.
-
-The settings panel also shows connected browser and PWA clients so stale clients can be disconnected without touching the proxy daemon.
-
-<p>
-  <img src="docs/assets/readme-client-management.png" alt="Client management dialog connected to a real local proxy" />
-</p>
-
-### Move Files Through The Relay
-
-DEV Anywhere supports practical file paths instead of directory browsing:
-
-- paste images into chat or PTY sessions to upload them to the developer machine;
-- click supported image paths in terminal or chat output to preview them;
-- click supported file paths to download them through the relay;
-- configure `previewRoots` when images outside the active project or OS temp directory must be previewed.
-
-## Quick Start
-
-### Try It Without A VPS
-
-For a temporary evaluation, install
-[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
-and the DEV Anywhere CLI:
+在开发机上安装 DEV Anywhere：
 
 ```bash
 npm install -g @dev-anywhere/proxy
+```
+
+如果要创建 Agent 会话，还需要提前安装并登录 Claude Code 或 Codex。只使用 Shell 时可以跳过这一步。
+
+### 2. 建立连接
+
+DEV Anywhere 提供两种连接方式：
+
+| 方式                              | 适合场景           | 需要准备                   |
+| --------------------------------- | ------------------ | -------------------------- |
+| Quick Tunnel                      | 首次体验、临时使用 | Node.js 20+、`cloudflared` |
+| [VPS Relay](./docs/DEPLOYMENT.md) | 长期使用、稳定访问 | Linux VPS、域名、HTTPS     |
+
+#### 方式一：Quick Tunnel（体验）
+
+Quick Tunnel 是给没有 VPS、又想先实际跑起来看一眼的用户准备的。它会在开发机上启动临时 Relay、Web 和 Proxy，再通过 Cloudflare 生成一个无需账号的随机 HTTPS 地址。
+
+macOS 可以使用 Homebrew 安装 `cloudflared`：
+
+```bash
+brew install cloudflared
+```
+
+其他平台参见 Cloudflare 的 [`cloudflared` 安装说明](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)。
+
+在开发机上启动临时链路：
+
+```bash
 dev-anywhere tunnel
 ```
 
-The command:
+首次运行会自动初始化 `~/.dev-anywhere`，不需要手动配置 Relay。
 
-- starts an isolated local Relay, Web client, and Proxy profile;
-- creates a random `trycloudflare.com` HTTPS address without a Cloudflare account;
-- verifies the public Web page, health endpoint, and WebSocket connection;
-- prints a URL that securely imports the temporary Client Token from its fragment.
+公网连通性检查通过后，命令会打印一个包含临时 Client Token 的访问地址。保持命令运行，在浏览器中打开该地址即可。按 `Ctrl+C` 会同时停止 Proxy、Relay 和隧道。
 
-Keep the command running while you evaluate DEV Anywhere. Press `Ctrl+C` to stop
-the tunnel and temporary Proxy. Cloudflare Quick Tunnels have no uptime SLA, are
-limited to 200 in-flight requests, and are intended only for testing and
-development. Use the VPS deployment below for regular use.
+Quick Tunnel 的随机域名会变化，进程退出后地址立即失效，也没有可用性承诺。它适合体验，不适合长期依赖。
 
-### Recommended VPS Deployment
+#### 方式二：VPS Relay（推荐）
 
-The hosted setup has two parts:
+长期使用时，推荐在有公网 IP 的 Linux VPS 上部署 Relay，并用自己的域名提供 HTTPS 访问。一个 Relay 容器会同时托管 Web、HTTP API、文件、语音和 WebSocket 服务；宿主机 Nginx 负责 HTTPS。
 
-1. a VPS that runs the combined Relay and Web service;
-2. the developer machine that runs the local proxy daemon and agent CLIs.
-
-#### 1. Deploy Relay And Web
-
-From a checkout of this repository:
+部署 Relay 后，在开发机上初始化 DEV Anywhere：
 
 ```bash
-IMAGE_TAG=latest ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
-```
-
-The installer configures Docker, nginx, TLS, and the combined Relay container. It prints:
-
-- `RELAY_PROXY_TOKEN` for local proxy daemons;
-- `RELAY_CLIENT_TOKEN` for browsers and PWAs;
-- the web URL, such as `https://dev-anywhere.example.com/`.
-
-#### 2. Configure The Developer Machine
-
-Install the proxy on the developer machine where your repositories are checked out and Claude Code or Codex is installed:
-
-```bash
-npm install -g @dev-anywhere/proxy
 dev-anywhere init
 ```
 
-Edit `~/.dev-anywhere/config.json`:
+编辑 `~/.dev-anywhere/config.json`，填入 Relay 地址和部署脚本输出的 `RELAY_PROXY_TOKEN`：
 
 ```json
 {
@@ -156,109 +98,167 @@ Edit `~/.dev-anywhere/config.json`:
   "relays": {
     "cloud": {
       "url": "wss://dev-anywhere.example.com",
-      "proxyToken": "<RELAY_PROXY_TOKEN>"
+      "proxyToken": "部署输出中的 RELAY_PROXY_TOKEN"
     }
-  },
-  "previewRoots": []
+  }
 }
 ```
 
-Start the daemon:
+让开发机连接 Relay：
 
 ```bash
 dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-#### 3. Open The Web Client
+打开部署脚本输出的 Web 地址，首次访问时在“设置 → Relay Token”中填写 `RELAY_CLIENT_TOKEN`。
 
-Open the web URL printed by the installer. In **Settings -> Relay Token**, paste `RELAY_CLIENT_TOKEN`, reconnect, then choose your developer machine.
+部署、升级和排障步骤见 [VPS 部署指南](./docs/DEPLOYMENT.md)。
 
-On iPhone or iPad, add the site to the home screen if you want the PWA experience.
+### 3. 开始使用
 
-#### 4. Start Working
+连接建立后，可以直接从 Web 远程创建会话；也可以先在开发机的终端开工，离开电脑后再从浏览器继续。
 
-Create an agent session or terminal session from the web client, or start an agent session from the local CLI:
+#### 从 Web 远程创建
+
+打开访问地址，选择开发机并点击“新建”，即可创建 Claude Code、Codex 或 Shell 会话。Quick Tunnel 和 VPS Relay 的操作相同，不需要先在本地启动 Agent。
+
+#### 从本地终端启动
+
+如果希望在本地启动的 AI Agent 会话还能从浏览器接管，只需在原命令前加上 `dev-anywhere`，本地 Agent 的使用体验不会有变化。
+
+**VPS Relay**
 
 ```bash
 dev-anywhere claude
 dev-anywhere codex
 ```
 
-## Local Development Relay
+这两个命令会在需要时自动启动已配置的 Proxy，其他 CLI 参数会继续传给 Claude Code 或 Codex。
 
-For local testing without a VPS, run a relay directly:
+**Quick Tunnel**
 
-```bash
-npm install -g @dev-anywhere/relay
-RELAY_PROXY_TOKEN="$(openssl rand -hex 24)" \
-RELAY_CLIENT_TOKEN="$(openssl rand -hex 24)" \
-PORT=3100 dev-anywhere-relay
-```
-
-The npm Relay package serves the Web/PWA client, HTTP API, files, voice endpoints, and WebSockets from the same port. Public deployments should still use the Docker installer so nginx can terminate TLS and manage certificates.
-
-## Security Model
-
-- The relay does not need repository access and does not run agent CLIs.
-- CLI processes, shell state, local paths, API keys, and credentials stay on the developer machine.
-- Public relays must set both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`, and should run behind HTTPS.
-- Tool approvals are sent to the browser before scoped local commands proceed.
-- File preview and download require explicit paths; DEV Anywhere does not expose directory browsing.
-- Additional preview roots are opt-in through `previewRoots`.
-
-An unauthenticated public relay is unsafe. Anyone who can reach it may list connected proxies or attempt to bind to them.
-
-## Packages
-
-| Package               | Purpose                                                          |
-| --------------------- | ---------------------------------------------------------------- |
-| `@dev-anywhere/proxy` | Local daemon, CLI wrapper, PTY/session runtime, and file bridge. |
-| `@dev-anywhere/relay` | WebSocket relay for proxy daemons, browser clients, and files.   |
-| `@dev-anywhere/web`   | React browser/PWA client, published as a Docker image.           |
-
-## Repository Layout
-
-```text
-apps/proxy       Local daemon and session runtime
-apps/relay       WebSocket relay service
-apps/web         React web/PWA client
-packages/shared  Shared protocol schemas and utilities
-docs             Public documentation and README assets
-scripts          Development, verification, deployment, and release helpers
-```
-
-## Development
+保持 `dev-anywhere tunnel` 运行，并在另一个终端执行：
 
 ```bash
-pnpm install
-pnpm typecheck
-pnpm test
-pnpm release:check
+dev-anywhere --profile quick-tunnel claude
+dev-anywhere --profile quick-tunnel codex
 ```
 
-Useful local loops:
+## 主要功能
 
-```bash
-pnpm dev:web -- --relay cloud --port 5174
-pnpm dev:restart
-pnpm dev:health
+### 会话管理
+
+- 直接从浏览器创建 Claude Code、Codex 和 Shell 会话。
+- 创建时选择工作目录、交互方式和 Agent 权限模式。
+- 接入从本地终端启动的会话，也可以恢复历史会话。
+- 重命名、终止或分离会话；托管终端在 Proxy 重启后可以重新连接。
+- 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端。
+
+![从浏览器创建真实 Agent 会话](./docs/assets/readme-create-session.gif)
+
+### 终端与聊天视图
+
+**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 Agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。
+
+![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
+
+### 审批、搜索与文件
+
+- 实时显示会话的工作、空闲、等待审批和连接状态。
+- 在页面中处理工具审批；`Always Yes` 可以为指定会话自动确认后续审批。
+- 会话从工作转为空闲时，可按设置发送浏览器通知。
+- 使用 `Cmd/Ctrl + F` 或菜单入口搜索终端与聊天记录，并定位到命中位置。
+- 支持上传图片和文件、拖放与剪贴板粘贴；输出中的真实路径可以预览图片或流式下载文件。
+
+![PTY 会话中的审批、搜索与文件下载](./docs/assets/readme-workflow.gif)
+
+### Voice Pilot
+
+Voice Pilot 面向不方便持续盯着或操作屏幕的场景。它可以在聊天会话中通过语音交互的方式提交指令、播报或复述回复、处理权限审批，并生成阶段性总结；也能听懂“退出语音助手”等自然表达。
+
+语音识别与语音合成服务由 Relay 配置；浏览器端负责录音、状态机、提示音与播放。该功能目前更适合作为辅助操作方式，而不是替代所有精细的键盘输入。
+
+![Voice Pilot 真实交互](./docs/assets/readme-voice-pilot.gif)
+
+### 跨设备访问
+
+DEV Anywhere 支持桌面、Android、iPhone 和 iPad，也可以添加到手机或平板的主屏幕。移动端界面针对触摸选择、软键盘、终端辅助键、文件操作和会话创建进行了适配。
+
+<table>
+  <tr>
+    <td width="56%"><strong>iPad · Safari</strong></td>
+    <td width="22%"><strong>Android · Chrome</strong></td>
+    <td width="22%"><strong>iPhone · Safari</strong></td>
+  </tr>
+  <tr>
+    <td><img src="./docs/assets/readme-ipad-safari.png" alt="iPad Safari 上的 DEV Anywhere" /></td>
+    <td><img src="./docs/assets/readme-android-chrome.jpg" alt="Android Chrome 上的 DEV Anywhere" /></td>
+    <td><img src="./docs/assets/readme-iphone-safari.png" alt="iPhone Safari 上的 DEV Anywhere PTY" /></td>
+  </tr>
+</table>
+
+## 工作方式
+
+```mermaid
+flowchart LR
+  subgraph clients["浏览器"]
+    direction TB
+    desktop["桌面"]
+    phone["手机"]
+    tablet["平板"]
+  end
+
+  relay["Relay<br/>Web · 认证 · 实时转发<br/>文件 · 语音"]
+
+  subgraph machine["开发机"]
+    direction TB
+    proxy["Proxy<br/>会话 · 终端 · 文件"]
+    agent["Claude Code / Codex"]
+    shell["Shell"]
+    local["代码仓库 · CLI 配置 · 本地权限"]
+
+    proxy --> agent
+    proxy --> shell
+    agent --> local
+    shell --> local
+  end
+
+  desktop -->|"HTTPS / WSS"| relay
+  phone -->|"HTTPS / WSS"| relay
+  tablet -->|"HTTPS / WSS"| relay
+  relay <-->|"会话与终端数据"| proxy
 ```
 
-`dev:web` runs local web code against a relay. `dev:restart` and `dev:health` exercise the local proxy/relay/web loop using the isolated `local` profile.
+- **Web 客户端**：提供会话列表、终端与聊天界面、审批、文件操作和 Voice Pilot。
+- **Relay**：托管 Web，认证并转发浏览器与开发机之间的实时流量。
+- **Proxy**：运行在开发机上，管理 Agent、终端、会话历史和文件访问。
+- **Agent/Shell**：继续使用开发机上的 CLI、环境变量、仓库和本地权限。
 
-## Documentation
+代码仓库和 Agent 进程都留在开发机上。Relay 会转发终端、消息、文件和语音数据，并且能够读取这些内容，因此必须部署在受信任的服务器上。当前版本不提供端到端加密。
 
-- [Deployment guide](docs/DEPLOYMENT.md)
-- [Configuration reference](docs/CONFIG.md)
-- [PWA install guide](docs/PWA.md)
-- [Testing guide](docs/TESTING.md)
-- [Script guide](docs/SCRIPTS.md)
-- [Proxy package README](apps/proxy/README.md)
-- [Relay package README](apps/relay/README.md)
-- [Publishing](PUBLISHING.md)
-- [Changelog](CHANGELOG.md)
+## 平台支持
 
-## License
+| 平台    | 系统版本   | 浏览器                       |
+| ------- | ---------- | ---------------------------- |
+| macOS   | 26+        | Chrome、Edge、Safari         |
+| Android | 16+        | Chrome、Edge                 |
+| iPhone  | iOS 26+    | Safari、Chrome、Edge         |
+| iPad    | iPadOS 26+ | Safari；暂不支持第三方浏览器 |
 
-MIT
+## 安全边界
+
+- Agent 与 Shell 以开发机当前用户的权限运行。DEV Anywhere 不提供沙箱隔离。
+- `RELAY_PROXY_TOKEN` 用于认证开发机，写入 `~/.dev-anywhere/config.json` 中对应 Relay 的 `proxyToken`；`RELAY_CLIENT_TOKEN` 用于认证浏览器，首次访问时填入“设置 → Relay Token”。VPS 部署脚本会生成两者，具体见 [部署指南](./docs/DEPLOYMENT.md#连接开发机)。
+- 公网 Relay 必须使用 HTTPS/WSS。Token 是持有者凭据，泄露后应立即轮换。
+- Relay 会转发终端、消息、文件和语音数据，应部署在你信任的服务器上。
+- 工具审批仍然是重要的安全边界。`Always Yes` 和跳过审批模式会减少确认，也会扩大误操作的影响范围。
+- 不要把带 Token 的访问链接发给不受信任的人，也不要将 `~/.dev-anywhere/config.json` 提交到版本库。
+
+## 开发
+
+仓库结构、本地隔离环境、测试矩阵和发布门禁见 [开发指南](./docs/DEVELOPMENT.md)。
+
+## 许可证
+
+[MIT License](./LICENSE)

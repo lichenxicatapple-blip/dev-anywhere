@@ -54,6 +54,9 @@ function createRouter(options: {
   workerHasProcess?: (sessionId: string) => boolean;
   workerWaitForReady?: (sessionId: string, timeoutMs?: number) => Promise<void>;
   workerTerminateProcess?: (sessionId: string) => boolean;
+  workerTakePendingNativeSession?: (
+    sessionId: string,
+  ) => { provider: "claude" | "codex"; sessionId: string } | undefined;
   permissionBroker?: PermissionBroker;
   agentStatusRegistry?: AgentStatusRegistry;
   cleanupHookContext?: (sessionId: string) => void;
@@ -95,6 +98,9 @@ function createRouter(options: {
       waitForReady: options.workerWaitForReady ? vi.fn(options.workerWaitForReady) : undefined,
       terminateProcess: options.workerTerminateProcess
         ? vi.fn(options.workerTerminateProcess)
+        : undefined,
+      takePendingNativeSession: options.workerTakePendingNativeSession
+        ? vi.fn(options.workerTakePendingNativeSession)
         : undefined,
     }),
     controlHandlers: {
@@ -543,15 +549,20 @@ describe("RelayRouter input routing", () => {
       resolveReady = resolve;
     });
     const workerWaitForReady = vi.fn(async (_sessionId: string, _timeoutMs?: number) => ready);
+    const setHistorySessionId = vi.fn();
     const router = createRouter({
       mode: "json",
       relaySend,
       workerSpawn,
       workerConnect: async () => workerSocket,
       workerWaitForReady,
+      workerTakePendingNativeSession: () => ({
+        provider: "codex",
+        sessionId: "codex-thread-ready",
+      }),
       sessionManager: {
         createSession,
-        setHistorySessionId: vi.fn(),
+        setHistorySessionId,
       } as unknown as SessionManager,
     });
 
@@ -575,6 +586,7 @@ describe("RelayRouter input routing", () => {
     await vi.runAllTimersAsync();
 
     expect(createSession).toHaveBeenCalledTimes(1);
+    expect(setHistorySessionId).toHaveBeenCalledWith("json-session", "codex-thread-ready");
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg).toMatchObject({
       type: "session_create_response",

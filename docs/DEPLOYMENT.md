@@ -1,121 +1,79 @@
-# Deploy DEV Anywhere
+# VPS 部署
 
-This guide covers both the temporary account-free trial path and the recommended hosted path. The Relay serves the Web client, HTTP API, files, voice endpoints, and WebSockets from one process.
+本指南用于把 DEV Anywhere 长期运行在自己的 VPS 上。只想先体验功能时，使用 [Quick Tunnel](../README.md#方式一quick-tunnel体验) 即可，不需要 VPS、域名或 Cloudflare 账号。
 
-## Temporary Trial Without A VPS
+## 准备工作
 
-Install
-[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
-and the DEV Anywhere CLI on the developer machine:
+部署前需要：
 
-```bash
-npm install -g @dev-anywhere/proxy
-dev-anywhere tunnel
-```
+- 一台有公网 IPv4 的 Linux VPS；
+- 一个已经将 `A` 记录指向该 VPS 的域名；
+- 可以通过 SSH 密钥登录，并能执行 `sudo` 的账户；
+- 对公网开放的 `80` 和 `443` 端口；
+- 本地安装 Git。
 
-`dev-anywhere tunnel` creates fresh Proxy and Client tokens, starts an isolated
-`quick-tunnel` Proxy profile, starts the bundled Relay and Web client on
-loopback, and opens an account-free Cloudflare Quick Tunnel. It verifies the
-public Web page, `/health`, and `/client` WebSocket before printing the access
-URL. The Client Token is carried in the URL fragment, which is not sent in the
-HTTP request, and is removed from the address after the Web client stores it.
+部署脚本支持使用 `apt-get` 或 `yum` 的发行版。缺少 Docker、Nginx 或 Certbot 时会自动安装，Docker Compose 必须为 v2。
 
-Keep the command running while testing. Press `Ctrl+C` to stop the temporary
-Proxy, Relay, and Tunnel. This does not change or restart the default Proxy
-profile.
-
-Quick Tunnels use a random `trycloudflare.com` hostname and are suitable only
-for evaluation. Cloudflare provides no uptime SLA, limits them to 200 in-flight
-requests, and does not support SSE. DEV Anywhere does not depend on SSE, but the
-uptime and request limits still make the VPS deployment below the recommended
-path.
-
-## Prerequisites
-
-- A Linux VPS. Ubuntu 22.04 LTS or 24.04 LTS is the recommended path.
-- A DNS name pointing at the VPS, for example `dev-anywhere.example.com`.
-- Public inbound TCP ports `80` and `443`.
-- SSH access to the VPS with a user that can run `sudo`.
-- Outbound HTTPS access from the VPS so it can install packages, request Let's Encrypt certificates, and pull Docker images.
-- Docker Compose v2 on the VPS, or permission for the installer to install Docker.
-- nginx on the VPS, or permission for the installer to install and start nginx.
-- Node.js 20+ on each developer machine.
-- Claude Code or Codex installed locally on each developer machine.
-
-## VPS Checklist
-
-Before running the installer:
-
-1. Create an Ubuntu 22.04/24.04 VPS with at least 1 vCPU, 1 GB RAM, and a few GB of free disk.
-2. Add an `A` record such as `dev-anywhere.example.com -> <VPS public IPv4>`.
-3. Confirm DNS has propagated:
+先确认 DNS 已经生效：
 
 ```bash
 dig +short dev-anywhere.example.com
 ```
 
-4. Open ports `80/tcp` and `443/tcp` in the cloud firewall/security group.
-5. If the VPS uses UFW, allow SSH, HTTP, and HTTPS:
+输出应包含 VPS 的公网 IP。HTTPS 证书依赖正确的 DNS 记录。
+
+## 部署 Relay
+
+在本地电脑拉取仓库：
 
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
+git clone https://github.com/lichenxicatapple-blip/dev-anywhere.git
+cd dev-anywhere
 ```
 
-6. Confirm your SSH user can run `sudo`:
+通过 SSH 部署到 VPS：
 
 ```bash
-ssh ubuntu@dev-anywhere.example.com 'sudo -v'
+bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  dev-anywhere.example.com
 ```
 
-The installer can install Docker, nginx, and certbot on apt/yum based distributions. If you prefer to install them yourself, make sure `docker compose version`, `nginx -v`, and `certbot --version` work before deployment.
-
-The default image registry is the public Aliyun ACR mirror used by this project. If you want GHCR instead, pass `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip` when running the installer.
-
-## 1. Deploy Relay And Web
-
-From your laptop:
+非 `root` 账户也可以使用，只要它能够免交互执行 `sudo`：
 
 ```bash
-IMAGE_TAG=latest ./scripts/deploy/install-relay.sh --ssh ubuntu@dev-anywhere.example.com dev-anywhere.example.com
+bash scripts/deploy/install-relay.sh \
+  --ssh deploy@your-vps \
+  dev-anywhere.example.com
 ```
 
-Or run directly on the VPS:
+如果仓库已经位于 VPS，可以直接在服务器上执行：
 
 ```bash
-sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example.com
+sudo bash scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
-The installer creates `/opt/dev-anywhere/docker-compose.yml`, obtains a TLS certificate, writes `/etc/nginx/conf.d/dev-anywhere.conf`, writes `/opt/dev-anywhere/.env`, pulls the published image, and starts:
+脚本会配置 Docker、Nginx 与 HTTPS，启动 Relay 容器，并请求公网健康检查。Relay 只监听 VPS 的 `127.0.0.1:3100`，公网流量由 Nginx 通过 HTTPS 转发。
 
-- `dev-anywhere-relay`
+部署成功后，终端会打印：
 
-The container binds only to a loopback port on the VPS:
+- Web 地址；
+- `RELAY_PROXY_TOKEN`，供开发机连接 Relay；
+- `RELAY_CLIENT_TOKEN`，供浏览器访问 Web；
+- 开发机配置示例。
 
-- `127.0.0.1:3100` → combined Relay and Web service
+两个 Token 也会保存在 VPS 的 `/opt/dev-anywhere/.env` 中。它们都是访问凭据，不要公开传播。
 
-Host nginx owns public `80/443`, terminates TLS, and forwards this domain to the Relay. This keeps the VPS ready for more services: add another nginx server block for the next domain or path instead of letting another container bind `80/443`.
+## 连接开发机
 
-The final output includes:
-
-- Web UI URL: `https://dev-anywhere.example.com/`
-- Proxy WebSocket URL: `wss://dev-anywhere.example.com/proxy?token=<RELAY_PROXY_TOKEN>`
-- Client WebSocket URL: `wss://dev-anywhere.example.com/client?token=<RELAY_CLIENT_TOKEN>`
-
-Keep both tokens private. `RELAY_PROXY_TOKEN` is for local proxy daemons. `RELAY_CLIENT_TOKEN` is for browsers and PWAs.
-
-## 2. Configure a Developer Machine
-
-Install the proxy:
+在运行 Claude Code、Codex 或 Shell 的开发机上安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
 dev-anywhere init
 ```
 
-Edit `~/.dev-anywhere/config.json`:
+编辑 `~/.dev-anywhere/config.json`：
 
 ```json
 {
@@ -128,91 +86,160 @@ Edit `~/.dev-anywhere/config.json`:
   "relays": {
     "cloud": {
       "url": "wss://dev-anywhere.example.com",
-      "proxyToken": "<RELAY_PROXY_TOKEN>"
+      "proxyToken": "部署输出中的 RELAY_PROXY_TOKEN"
     }
-  },
-  "previewRoots": []
+  }
 }
 ```
 
-Start the daemon:
+让 Proxy 在后台连接 Relay：
 
 ```bash
 dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-## 3. Open the Client
+`status` 应显示 Relay 已连接。默认 profile 的服务日志位于 `~/.dev-anywhere/logs/service.log`。
 
-Open the Web UI URL printed by the installer:
+如果 Claude Code 或 Codex 不在普通的 `PATH` 中，将下面的字段合并到配置顶层：
+
+```json
+{
+  "agentCli": {
+    "claudeBin": "/absolute/path/to/claude",
+    "codexBin": "/absolute/path/to/codex"
+  }
+}
+```
+
+## 连接浏览器
+
+打开部署后的 Web 地址：
 
 ```text
 https://dev-anywhere.example.com/
 ```
 
-Open Settings -> Relay Token, paste `RELAY_CLIENT_TOKEN`, then reconnect. The browser stores the client token in local browser storage for future launches. On iOS or iPadOS, use Safari's **Add to Home Screen** action to install it as a PWA, then enter the token again inside the installed app.
+首次访问时，在设置中填写 `RELAY_CLIENT_TOKEN`。也可以在受信任设备上打开一次带 Token 的地址：
 
-For a step-by-step PWA guide, see [Install the PWA](PWA.md).
+```text
+https://dev-anywhere.example.com/#/?relayToken=你的_RELAY_CLIENT_TOKEN
+```
 
-## 4. Start Sessions
+页面会把 Token 保存到当前浏览器。带 Token 的 URL 等同于登录凭据，不要放进截图、聊天记录或公开书签。
 
-From any project directory on the developer machine:
+如果手头只有开发机配置中的 Proxy Token，可以读取 Relay 当前的 Client Token：
 
 ```bash
-dev-anywhere claude
-dev-anywhere codex
+dev-anywhere relay token --relay cloud
 ```
 
-Then open the web client, choose the connected machine, and create or resume a session.
+## 验证部署
 
-## Image Preview
-
-The web client can preview explicit image paths that appear in JSON messages or PTY terminal output. By default, the proxy allows images under the active session working directory and the developer machine's OS temp directory. To allow additional absolute folders, add them to `previewRoots`:
-
-```json
-{
-  "previewRoots": ["/Users/alice/Pictures/dev-screenshots", "/var/tmp"]
-}
-```
-
-Only direct image file paths are supported. The proxy does not expose directory listing, rejects non-image files, and limits previews to 10 MB.
-
-## Operations
-
-Upgrade to a new published image tag:
-
-```bash
-sudo env IMAGE_TAG=latest ./scripts/deploy/install-relay.sh dev-anywhere.example.com
-```
-
-If another local service already uses the default loopback ports, override them:
-
-```bash
-sudo env DEV_ANYWHERE_RELAY_PORT=13100 IMAGE_TAG=latest \
-  ./scripts/deploy/install-relay.sh dev-anywhere.example.com
-```
-
-Check service health:
+检查公网入口：
 
 ```bash
 curl -fsS https://dev-anywhere.example.com/health
-ssh ubuntu@dev-anywhere.example.com 'cd /opt/dev-anywhere && sudo docker compose ps'
-ssh ubuntu@dev-anywhere.example.com 'sudo nginx -t'
 ```
 
-Rotate tokens by editing `/opt/dev-anywhere/.env` and restarting:
+响应应为 JSON，且 `status` 为 `ok`。
+
+检查开发机连接：
 
 ```bash
-cd /opt/dev-anywhere
-sudo editor .env
-sudo docker compose up -d
+dev-anywhere serve status
 ```
 
-After rotating `RELAY_PROXY_TOKEN`, update each developer's `~/.dev-anywhere/config.json`. After rotating `RELAY_CLIENT_TOKEN`, update Settings -> Relay Token in each browser or installed PWA.
+检查 VPS 容器：
 
-## Security Notes
+```bash
+ssh root@your-vps \
+  'cd /opt/dev-anywhere && docker compose ps'
+```
 
-- Always use TLS for public deployments.
-- Always set both `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN`.
-- Do not put repository credentials or AI provider credentials on the VPS.
-- The relay should route traffic only; the local proxy owns CLI processes and repository access.
+`dev-anywhere-relay` 应处于运行和健康状态。最后在 Web 中确认能够看到开发机，并创建一个 Shell 会话。
+
+## 升级
+
+升级到最新版本：
+
+```bash
+git pull --ff-only
+bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  dev-anywhere.example.com
+npm install -g @dev-anywhere/proxy@latest
+dev-anywhere serve restart --relay cloud
+```
+
+部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
+
+需要固定版本时，在同一个终端执行：
+
+```bash
+VERSION=x.y.z
+IMAGE_TAG="$VERSION" bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  dev-anywhere.example.com
+npm install -g "@dev-anywhere/proxy@$VERSION"
+dev-anywhere serve restart --relay cloud
+```
+
+## 排障
+
+查看 Relay 日志：
+
+```bash
+ssh root@your-vps \
+  'cd /opt/dev-anywhere && sudo docker compose logs -f relay'
+```
+
+检查 Nginx：
+
+```bash
+ssh root@your-vps \
+  'sudo nginx -t && sudo systemctl status nginx --no-pager'
+```
+
+查看开发机日志：
+
+```bash
+tail -f ~/.dev-anywhere/logs/service.log
+```
+
+连接失败时依次检查：
+
+1. `dig` 是否返回正确的 VPS IP；
+2. `curl https://域名/health` 是否成功；
+3. Relay 容器是否健康；
+4. `dev-anywhere serve status` 是否连接到预期 Relay；
+5. 开发机是否使用 Proxy Token，浏览器是否使用 Client Token；
+6. VPS 防火墙或云安全组是否开放 `80/443`。
+
+## 数据与卸载
+
+部署文件和 Token 位于 `/opt/dev-anywhere`，Relay 持久数据位于 Docker 的 `relay-data` volume。
+
+停止服务并保留数据：
+
+```bash
+ssh root@your-vps \
+  'cd /opt/dev-anywhere && sudo docker compose down'
+```
+
+删除容器和 Relay 数据：
+
+```bash
+ssh root@your-vps \
+  'cd /opt/dev-anywhere && sudo docker compose down -v'
+```
+
+第二条命令会永久删除 Relay 数据。Nginx 配置和 Let's Encrypt 证书由宿主机管理，不会随 Docker volume 一起删除。
+
+## 安全边界
+
+- Relay 可以读取经过自己的终端、消息、文件和语音流量，应部署在受信任的服务器上。
+- `RELAY_PROXY_TOKEN` 和 `RELAY_CLIENT_TOKEN` 都是持有者凭据；泄露后需要重新生成，并更新 VPS、开发机和浏览器。
+- Proxy 以开发机当前用户的权限运行，远程操作具备该用户原有的文件和进程权限。
+- `Always Yes` 与跳过审批模式会扩大误操作的影响范围。
+- 不要把 Relay 的 `3100` 端口直接暴露到公网，公网入口应始终经过 HTTPS Nginx。

@@ -274,6 +274,12 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_ready"),
     pid: z.number(),
+    nativeSession: z
+      .object({
+        provider: z.enum(["claude", "codex"]),
+        sessionId: z.string(),
+      })
+      .optional(),
   }),
 
   // worker → serve: 从 stream-json 的 system.init 事件捕获 Claude CLI 侧的 session ID
@@ -317,20 +323,22 @@ export function createWorkerReader(
   lineBuffer.on("data", (line: Buffer | string) => {
     const str = typeof line === "string" ? line : line.toString();
     if (str.length === 0) return;
+    let raw: unknown;
     try {
-      const raw = JSON.parse(str);
-      const result = WorkerMessageSchema.safeParse(raw);
-      if (result.success) {
-        onMessage(result.data);
-      } else {
-        onProtocolError?.(
-          new Error(`Worker message validation failed: ${result.error.message}`),
-          str,
-        );
-      }
+      raw = JSON.parse(str);
     } catch (err) {
       onProtocolError?.(new Error("Worker message parse error", { cause: err }), str);
+      return;
     }
+    const result = WorkerMessageSchema.safeParse(raw);
+    if (!result.success) {
+      onProtocolError?.(
+        new Error(`Worker message validation failed: ${result.error.message}`),
+        str,
+      );
+      return;
+    }
+    onMessage(result.data);
   });
   (stream as NodeJS.ReadableStream).pipe(lineBuffer);
 }

@@ -230,4 +230,48 @@ describe("WorkerRegistry Codex app-server events", () => {
       expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "cx-thread-1"),
     );
   });
+
+  it("stores the Codex thread id atomically with worker readiness", async () => {
+    const { sessionManager } = await createConnectedRegistry();
+
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_ready",
+        pid: 123,
+        nativeSession: { provider: "codex", sessionId: "cx-ready-thread-1" },
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "cx-ready-thread-1"),
+    );
+  });
+
+  it("holds the Codex thread id until a pending session is published", async () => {
+    const relay = createRelayConnectionFake();
+    const sessionManager = createSessionManagerFake([]);
+    const registry = new WorkerRegistry({
+      sessionManager,
+      permissionBroker: new PermissionBroker(),
+      relayConnection: relay.relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+    expect(await registry.connect("pending", sockPath)).not.toBeNull();
+
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_ready",
+        pid: 123,
+        nativeSession: { provider: "codex", sessionId: "cx-pending-thread" },
+      }),
+    );
+
+    await registry.waitForReady("pending", 1_000);
+    expect(registry.takePendingNativeSession("pending")).toEqual({
+      provider: "codex",
+      sessionId: "cx-pending-thread",
+    });
+    expect(sessionManager.setHistorySessionId).not.toHaveBeenCalled();
+  });
 });

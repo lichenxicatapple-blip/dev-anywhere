@@ -85,7 +85,7 @@ export function mountWebApp(
     }
 
     response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    response.sendFile(indexPath);
+    response.sendFile("index.html", { root: webAssetDir });
   });
 
   logger.info({ webAssetDir }, "Web UI mounted");
