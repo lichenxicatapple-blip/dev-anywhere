@@ -79,12 +79,14 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect(page.locator('[data-slot="status-line"]')).toHaveCount(0);
     const approvalHintBox = await ptyApprovalHint(page).boundingBox();
     expect(approvalHintBox).not.toBeNull();
-    const afterApprovalChrome = await readPtyScrollMetrics(page);
-    expect(afterApprovalChrome.clientHeight).toBeCloseTo(
+    const expectedApprovalClientHeight =
       beforeApprovalChrome.clientHeight -
-        (approvalHintBox!.height - beforeApprovalStatusLine!.height),
-      1,
-    );
+      (approvalHintBox!.height - beforeApprovalStatusLine!.height);
+    await expect
+      .poll(async () => (await readPtyScrollMetrics(page)).clientHeight)
+      .toBeCloseTo(expectedApprovalClientHeight, 1);
+    const afterApprovalChrome = await readPtyScrollMetrics(page);
+    expect(afterApprovalChrome.clientHeight).toBeCloseTo(expectedApprovalClientHeight, 1);
     expect(afterApprovalChrome.scrollTop).toBeGreaterThan(0);
     expect(afterApprovalChrome.scrollTop).toBeGreaterThanOrEqual(
       beforeApprovalChrome.scrollTop - 8,
