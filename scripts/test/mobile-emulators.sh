@@ -199,6 +199,8 @@ start_pool() {
         -- "$EMULATOR_BIN" \
         -avd "$name" \
         -port "$port" \
+        -wipe-data \
+        -no-snapshot-load \
         -no-snapshot-save \
         -no-boot-anim \
         -no-audio \
@@ -216,6 +218,8 @@ start_pool() {
         "$log" \
         -avd "$name" \
         -port "$port" \
+        -wipe-data \
+        -no-snapshot-load \
         -no-snapshot-save \
         -no-boot-anim \
         -no-audio \
