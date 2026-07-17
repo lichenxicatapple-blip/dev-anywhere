@@ -40,6 +40,7 @@ interface UsePtySelectionGestureDriverOptions {
   onLongPressMove: (point: PtySelectionClientPoint) => void;
   onLongPressEnd: (point: PtySelectionClientPoint) => void;
   onHorizontalScrollIntent?: (reason: string) => void;
+  onSelectionAutoscroll?: (position: { scrollLeft: number; scrollTop: number }) => void;
   onHandleDragStart: (kind: PtySelectionHandleKind) => void;
   onHandleDragMove: (kind: PtySelectionHandleKind, point: PtySelectionClientPoint) => void;
   onHandleDragEnd: (kind: PtySelectionHandleKind, point: PtySelectionClientPoint | null) => void;
@@ -72,6 +73,7 @@ export function usePtySelectionGestureDriver({
   onLongPressMove,
   onLongPressEnd,
   onHorizontalScrollIntent,
+  onSelectionAutoscroll,
   onHandleDragStart,
   onHandleDragMove,
   onHandleDragEnd,
@@ -119,10 +121,16 @@ export function usePtySelectionGestureDriver({
       containerEl.scrollLeft += dx;
     }
     if (dy !== 0) containerEl.scrollTop += dy;
-    if (dx !== 0 || dy !== 0) autoscrollApplyRef.current?.(point);
+    if (dx !== 0 || dy !== 0) {
+      onSelectionAutoscroll?.({
+        scrollLeft: containerEl.scrollLeft,
+        scrollTop: containerEl.scrollTop,
+      });
+      autoscrollApplyRef.current?.(point);
+    }
 
     autoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
-  }, [containerEl, isSelectionActive, onHorizontalScrollIntent]);
+  }, [containerEl, isSelectionActive, onHorizontalScrollIntent, onSelectionAutoscroll]);
 
   const updatePtySelectionAutoscroll = useCallback(
     (point: PtySelectionClientPoint, applyMove: (point: PtySelectionClientPoint) => void): void => {

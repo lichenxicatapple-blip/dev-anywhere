@@ -133,6 +133,9 @@ export function usePtySelectionController(
     null,
   );
   const selectionDraggedRef = useRef(false);
+  const selectionAutoscrollPositionRef = useRef<{ scrollLeft: number; scrollTop: number } | null>(
+    null,
+  );
   const selectedPathActionRef = useRef<PtySelectionPathAction | null>(null);
   const selectedPtyTextRef = useRef("");
   const stopPtySelectionGestureRef = useRef<(() => void) | null>(null);
@@ -230,6 +233,7 @@ export function usePtySelectionController(
     selectionAnchorRef.current = null;
     selectionFocusRef.current = null;
     selectionDraggedRef.current = false;
+    selectionAutoscrollPositionRef.current = null;
     selectedPathActionRef.current = null;
     selectedPtyTextRef.current = "";
     terminalRef.current?.clearSelection();
@@ -307,6 +311,7 @@ export function usePtySelectionController(
       const terminal = terminalRef.current;
       const host = xtermHostRef.current;
       if (!terminal || !host) return false;
+      selectionAutoscrollPositionRef.current = null;
 
       const pathSelection = point ? selectTerminalPathLinkAtBufferPoint({ terminal, point }) : null;
       const selected =
@@ -424,22 +429,19 @@ export function usePtySelectionController(
 
   useEffect(() => {
     if (!containerEl || !ptySelectionToolbar) return;
-    const dismissSelection = (event: Event): void => {
-      const target = event.target;
+    const dismissSelection = (): void => {
+      const autoscrollPosition = selectionAutoscrollPositionRef.current;
       if (
-        target instanceof Element &&
-        target.closest('[data-slot="pty-selection-toolbar"], [data-slot="pty-selection-handle"]')
+        autoscrollPosition &&
+        containerEl.scrollLeft === autoscrollPosition.scrollLeft &&
+        containerEl.scrollTop === autoscrollPosition.scrollTop
       ) {
         return;
       }
       clearPtySelection();
     };
-    containerEl.addEventListener("wheel", dismissSelection, { passive: true });
-    containerEl.addEventListener("touchmove", dismissSelection, { passive: true });
-    return () => {
-      containerEl.removeEventListener("wheel", dismissSelection);
-      containerEl.removeEventListener("touchmove", dismissSelection);
-    };
+    containerEl.addEventListener("scroll", dismissSelection, { passive: true });
+    return () => containerEl.removeEventListener("scroll", dismissSelection);
   }, [clearPtySelection, containerEl, ptySelectionToolbar]);
 
   const hasPtySelectionHandles = ptySelectionHandles !== null;
@@ -641,6 +643,10 @@ export function usePtySelectionController(
     [applyPtySelectionRange, showToolbarForCurrentSelection],
   );
 
+  const handlePtySelectionHandleDragCancel = useCallback((): void => {
+    setPtySelectionToolbar(null);
+  }, []);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const controllers = (window.__ccTestPtySelectionControllers ??= new Map());
@@ -696,10 +702,13 @@ export function usePtySelectionController(
     onLongPressEnd: handlePtyLongPressEnd,
     onHorizontalScrollIntent: (reason) =>
       scrollControllerRef.current?.markHorizontalScrollIntent(reason),
+    onSelectionAutoscroll: (position) => {
+      selectionAutoscrollPositionRef.current = position;
+    },
     onHandleDragStart: handlePtySelectionHandleDragStart,
     onHandleDragMove: handlePtySelectionHandleDragMove,
     onHandleDragEnd: handlePtySelectionHandleDragEnd,
-    onHandleDragCancel: handlePtySelectionHandleDragStart,
+    onHandleDragCancel: handlePtySelectionHandleDragCancel,
   });
   stopPtySelectionGestureRef.current = selectionGesture.stopPtySelectionGesture;
 
