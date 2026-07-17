@@ -17,6 +17,12 @@ COUNT="${COUNT_ARG:-${DEV_ANYWHERE_MOBILE_EMULATORS:-2}}"
 BASE_PORT="${DEV_ANYWHERE_MOBILE_BASE_PORT:-5570}"
 START_GAP_SECONDS="${DEV_ANYWHERE_MOBILE_START_GAP_SECONDS:-20}"
 ARTIFACT_DIR="${TEST_MOBILE_ARTIFACT_DIR:-$ROOT/artifacts/test-mobile/emulators}"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_GPU_MODE="host"
+else
+  DEFAULT_GPU_MODE="auto"
+fi
+GPU_MODE="${DEV_ANYWHERE_MOBILE_GPU_MODE:-$DEFAULT_GPU_MODE}"
 
 usage() {
   cat <<EOF
@@ -28,6 +34,7 @@ Environment:
   DEV_ANYWHERE_MOBILE_BASE_PORT         First emulator console port. Default: 5570
   DEV_ANYWHERE_MOBILE_AVD_PREFIX        AVD name prefix. Default: dev-anywhere-mobile
   DEV_ANYWHERE_MOBILE_NO_WINDOW         Start headless when 1. Default: 1
+  DEV_ANYWHERE_MOBILE_GPU_MODE          Emulator GPU backend. Default: host on macOS, auto elsewhere
   DEV_ANYWHERE_MOBILE_START_GAP_SECONDS Delay between emulator starts. Default: 20
 EOF
 }
@@ -195,6 +202,7 @@ start_pool() {
         -no-snapshot-save \
         -no-boot-anim \
         -no-audio \
+        -gpu "$GPU_MODE" \
         "${no_window_arg[@]}"
     else
       bash -lc '
@@ -211,6 +219,7 @@ start_pool() {
         -no-snapshot-save \
         -no-boot-anim \
         -no-audio \
+        -gpu "$GPU_MODE" \
         "${no_window_arg[@]}" \
         >"$ARTIFACT_DIR/$serial.pid"
     fi

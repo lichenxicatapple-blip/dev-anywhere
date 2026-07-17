@@ -55,11 +55,17 @@ async function installFakeVoiceRuntime(page: Page): Promise<void> {
     class FakeAudioContext {
       state: AudioContextState = "suspended";
       currentTime = 0;
+      sampleRate = 16_000;
       destination = {};
 
       resume() {
         voiceRuntime.resumeCalls += 1;
         this.state = "running";
+        return Promise.resolve();
+      }
+
+      suspend() {
+        this.state = "suspended";
         return Promise.resolve();
       }
 
@@ -92,6 +98,7 @@ async function installFakeVoiceRuntime(page: Page): Promise<void> {
       }
 
       close() {
+        this.state = "closed";
         return Promise.resolve();
       }
     }
@@ -99,6 +106,14 @@ async function installFakeVoiceRuntime(page: Page): Promise<void> {
     Object.defineProperty(window, "__devVoiceRuntimeE2E", {
       configurable: true,
       value: voiceRuntime,
+    });
+    Object.defineProperty(window, "__ccTestVoiceActivityClassifierFactory", {
+      configurable: true,
+      value: async () => ({
+        process: () => true,
+        reset() {},
+        destroy() {},
+      }),
     });
     Object.defineProperty(window, "__devAnywhereVoicePilotTurnIdleMs", {
       configurable: true,
@@ -132,48 +147,60 @@ async function openJsonVoicePilot(page: Page, sessionId = "test-sess"): Promise<
   await expect(confirmDialog).toBeVisible();
   await expect(confirmDialog).toContainText("开启后会持续聆听并保持屏幕常亮");
   await confirmDialog.getByRole("button", { name: "开启 Voice Pilot" }).click();
+  await waitForCaptureReady(page);
+}
+
+async function emitSyntheticSpeech(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const sampleRate = 16_000;
+    const samples = Array.from({ length: 320 * 20 }, (_, index) => {
+      const time = index / sampleRate;
+      const envelope = Math.min(1, index / 320, (320 * 20 - index) / 320);
+      return (
+        envelope *
+        (0.5 * Math.sin(2 * Math.PI * 140 * time) +
+          0.25 * Math.sin(2 * Math.PI * 280 * time) +
+          0.15 * Math.sin(2 * Math.PI * 420 * time))
+      );
+    });
+    window.__devVoiceRuntimeE2E?.emitMicSamples(samples);
+  });
+}
+
+async function waitForCaptureReady(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => ({
+          phase: document
+            .querySelector('[data-slot="voice-pilot-status"]')
+            ?.getAttribute("data-phase"),
+          processorReady: window.__devVoiceRuntimeE2E?.processorReady ?? false,
+        })),
+      { intervals: [100, 100, 100, 100, 250, 250, 500], timeout: 10_000 },
+    )
+    .toEqual({ phase: "listening", processorReady: true });
+}
+
+async function waitForAsrAttempt(page: Page, previousStartCount = 0): Promise<void> {
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        (window.__devAnywhereE2E?.voice.asrSent ?? []).some((raw) => {
+      page.evaluate((before) => {
+        const starts = (window.__devAnywhereE2E?.voice.asrSent ?? []).filter((raw) => {
           if (typeof raw !== "string") return false;
           try {
             return JSON.parse(raw).type === "start";
           } catch {
             return false;
           }
-        }),
-      ),
+        }).length;
+        return {
+          active: window.__devAnywhereE2E?.voice.activeAsrSocketCount() ?? 0,
+          started: starts > before,
+        };
+      }, previousStartCount),
     )
-    .toBe(true);
-  let previousStartCount = -1;
-  await expect
-    .poll(
-      async () => {
-        const state = await page.evaluate(() => {
-          const starts = (window.__devAnywhereE2E?.voice.asrSent ?? []).filter((raw) => {
-            if (typeof raw !== "string") return false;
-            try {
-              return JSON.parse(raw).type === "start";
-            } catch {
-              return false;
-            }
-          }).length;
-          return {
-            activeAsrSocketCount: window.__devAnywhereE2E?.voice.activeAsrSocketCount() ?? 0,
-            phase: document
-              .querySelector('[data-slot="voice-pilot-status"]')
-              ?.getAttribute("data-phase"),
-            starts,
-          };
-        });
-        const stable = state.starts === previousStartCount;
-        previousStartCount = state.starts;
-        return state.phase === "listening" && state.activeAsrSocketCount > 0 && stable;
-      },
-      { intervals: [100, 100, 100, 100, 250, 250, 500], timeout: 10_000 },
-    )
-    .toBe(true);
+    .toEqual({ active: 1, started: true });
 }
 
 async function voicePilotDiagnostics(page: Page, sessionId: string) {
@@ -208,8 +235,20 @@ async function waitForVoiceUserInput(
 }
 
 async function emitRecognizedSpeech(page: Page, text: string): Promise<number> {
+  const previousStartCount = await page.evaluate(
+    () =>
+      (window.__devAnywhereE2E?.voice.asrSent ?? []).filter((raw) => {
+        if (typeof raw !== "string") return false;
+        try {
+          return JSON.parse(raw).type === "start";
+        } catch {
+          return false;
+        }
+      }).length,
+  );
+  await emitSyntheticSpeech(page);
+  await waitForAsrAttempt(page, previousStartCount);
   return page.evaluate((utterance) => {
-    window.__devVoiceRuntimeE2E?.emitMicSamples([0.9, -0.9, 0.55, -0.55]);
     return window.__devAnywhereE2E?.voice.emitAsrFinal(utterance) ?? 0;
   }, text);
 }
@@ -261,9 +300,8 @@ test.describe("L4 mobile / Voice Pilot", () => {
       .toBe(true);
 
     const before = await emuPage.evaluate(() => window.__devAnywhereE2E?.voice.asrSent.length ?? 0);
-    await emuPage.evaluate(() => {
-      window.__devVoiceRuntimeE2E?.emitMicSamples([0.9, -0.9, 0.55, -0.55, 0.2, -0.2]);
-    });
+    await emitSyntheticSpeech(emuPage);
+    await waitForAsrAttempt(emuPage);
 
     await expect
       .poll(() =>
@@ -327,23 +365,7 @@ test.describe("L4 mobile / Voice Pilot", () => {
     await emuPage.evaluate(() => {
       window.__devAnywhereE2E?.voice.emitTtsFinished();
     });
-
-    await expect
-      .poll(() =>
-        emuPage.evaluate(
-          (before) =>
-            (window.__devAnywhereE2E?.voice.asrSent ?? []).filter((raw) => {
-              if (typeof raw !== "string") return false;
-              try {
-                return JSON.parse(raw).type === "start";
-              } catch {
-                return false;
-              }
-            }).length > before,
-          startCountBefore,
-        ),
-      )
-      .toBe(true);
+    await waitForCaptureReady(emuPage);
 
     const binaryCountBefore = await emuPage.evaluate(
       () =>
@@ -351,9 +373,8 @@ test.describe("L4 mobile / Voice Pilot", () => {
           (raw) => typeof raw !== "string" && !(raw instanceof Blob) && raw.byteLength > 0,
         ).length,
     );
-    await emuPage.evaluate(() => {
-      window.__devVoiceRuntimeE2E?.emitMicSamples([0.8, -0.8, 0.5, -0.5]);
-    });
+    await emitSyntheticSpeech(emuPage);
+    await waitForAsrAttempt(emuPage, startCountBefore);
     await expect
       .poll(() =>
         emuPage.evaluate(
@@ -366,7 +387,9 @@ test.describe("L4 mobile / Voice Pilot", () => {
       )
       .toBe(true);
 
-    const secondDelivered = await emitRecognizedSpeech(emuPage, "第二轮请求");
+    const secondDelivered = await emuPage.evaluate(
+      () => window.__devAnywhereE2E?.voice.emitAsrFinal("第二轮请求") ?? 0,
+    );
     expect(secondDelivered).toBeGreaterThan(0);
     await waitForVoiceUserInput(emuPage, "voice-second-turn-sess", 2);
   });

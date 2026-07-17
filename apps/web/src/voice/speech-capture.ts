@@ -9,8 +9,7 @@ import {
 } from "./web-rtc-vad";
 
 const DEFAULT_FIXTURE_URL = "/__dev_anywhere_debug/voice-fixture";
-const CAPTURE_PROCESSOR_BUFFER_SAMPLES =
-  (WEB_RTC_VAD_SAMPLE_RATE * VOICE_WAVEFORM_FRAME_MS) / 1000;
+const CAPTURE_PROCESSOR_BUFFER_SAMPLES = (WEB_RTC_VAD_SAMPLE_RATE * VOICE_WAVEFORM_FRAME_MS) / 1000;
 
 export type VoiceSpeechSource = { kind: "microphone" } | { kind: "fixture"; url: string };
 
@@ -47,8 +46,21 @@ interface VoiceSpeechCaptureDependencies {
   fetch(input: RequestInfo | URL): Promise<Response>;
 }
 
+declare global {
+  interface Window {
+    __ccTestVoiceActivityClassifierFactory?: () => Promise<VoiceActivityClassifier>;
+  }
+}
+
+function createDefaultVoiceActivityClassifier(): Promise<VoiceActivityClassifier> {
+  if (import.meta.env.DEV && window.__ccTestVoiceActivityClassifierFactory) {
+    return window.__ccTestVoiceActivityClassifierFactory();
+  }
+  return WebRtcVadClassifier.create(3);
+}
+
 const defaultDependencies: VoiceSpeechCaptureDependencies = {
-  createVad: () => WebRtcVadClassifier.create(3),
+  createVad: createDefaultVoiceActivityClassifier,
   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
   createAudioContext: (options) => new AudioContext(options),
   fetch: (input) => fetch(input),

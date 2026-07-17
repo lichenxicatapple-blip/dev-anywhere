@@ -151,7 +151,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
 
     await emuPage.keyboard.press("Enter");
 
-    await expect.poll(() => readRawPtyInput(emuPage)).toContain("\n");
+    await expect.poll(() => readRawPtyInput(emuPage)).toContain("\r");
     await expect
       .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
       .toBeLessThanOrEqual(1);
