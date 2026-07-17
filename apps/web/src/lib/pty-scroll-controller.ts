@@ -67,7 +67,7 @@ interface PtyScrollController {
   restorePageResume: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
-  resetHorizontalScroll: (reason?: string) => void;
+  resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
@@ -521,7 +521,10 @@ export function attachPtyScrollController(
     notifyScroll();
   };
 
-  const resetHorizontalScroll = (reason: string = "external"): void => {
+  const resetHorizontalScroll = (
+    reason: string = "external",
+    opts: { holdUntilCursorVisible?: boolean } = {},
+  ): void => {
     const previous = container.scrollLeft;
     const result = clearPtyHorizontalIntent(horizontalState, {
       details: `site=resetHorizontalScroll reason=${reason}`,
@@ -531,6 +534,9 @@ export function attachPtyScrollController(
     traceHorizontalIntent(result.trace);
     if (previous !== 0) {
       container.scrollLeft = 0;
+    }
+    if (opts.holdUntilCursorVisible) {
+      markHorizontalUserInput(`site=resetHorizontalScroll-hold reason=${reason}`);
     }
     trace(`horizontal-scroll-reset[${reason}]`, {
       details: `scrollLeft=${previous}->${container.scrollLeft}`,

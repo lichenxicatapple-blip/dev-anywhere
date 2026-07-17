@@ -2558,7 +2558,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollLeft).toBe(0);
   });
 
-  it("resets horizontal scroll to line start immediately for raw input enter", () => {
+  it("holds the line-start viewport after enter until the new cursor becomes visible", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
     const { terminal, emitRender } = createTerminal({ 19: "prompt" });
@@ -2577,13 +2577,19 @@ describe("attachPtyScrollController", () => {
     emitRender();
     expect(container.scrollLeft).toBe(800);
 
-    controller.resetHorizontalScroll("rawInputEnter");
+    controller.resetHorizontalScroll("rawInputEnter", { holdUntilCursorVisible: true });
 
     expect(container.scrollLeft).toBe(0);
-    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(false);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
 
     emitRender();
-    expect(container.scrollLeft).toBe(800);
+    expect(container.scrollLeft).toBe(0);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+
+    terminal.buffer.active.cursorX = 2;
+    emitRender();
+    expect(container.scrollLeft).toBe(0);
+    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(false);
   });
 
   // 光标贴最右端时, target 会超过 maxScrollLeft, 必须 clamp 否则 scrollLeft 越界。

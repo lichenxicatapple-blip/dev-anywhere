@@ -147,7 +147,7 @@ interface ScrollControllerHandle {
   restorePageResume: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
-  resetHorizontalScroll: (reason?: string) => void;
+  resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
@@ -544,7 +544,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const resetHorizontalScrollAfterLineSubmit = useCallback((data: string, reason: string): void => {
     if (!data.includes("\r") && !data.includes("\n")) return;
-    scrollControllerRef.current?.resetHorizontalScroll(reason);
+    // The terminal cursor still points at the submitted line until remote echo arrives. Keep the
+    // line-start viewport stable through intervening render frames, then resume horizontal follow
+    // as soon as the new cursor becomes visible.
+    scrollControllerRef.current?.resetHorizontalScroll(reason, {
+      holdUntilCursorVisible: true,
+    });
   }, []);
 
   const getPtyPlainEnterBehavior = useCallback((): "submit" | "linefeed" => {
