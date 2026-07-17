@@ -424,9 +424,22 @@ export function usePtySelectionController(
 
   useEffect(() => {
     if (!containerEl || !ptySelectionToolbar) return;
-    const dismissSelection = (): void => clearPtySelection();
-    containerEl.addEventListener("scroll", dismissSelection, { passive: true });
-    return () => containerEl.removeEventListener("scroll", dismissSelection);
+    const dismissSelection = (event: Event): void => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('[data-slot="pty-selection-toolbar"], [data-slot="pty-selection-handle"]')
+      ) {
+        return;
+      }
+      clearPtySelection();
+    };
+    containerEl.addEventListener("wheel", dismissSelection, { passive: true });
+    containerEl.addEventListener("touchmove", dismissSelection, { passive: true });
+    return () => {
+      containerEl.removeEventListener("wheel", dismissSelection);
+      containerEl.removeEventListener("touchmove", dismissSelection);
+    };
   }, [clearPtySelection, containerEl, ptySelectionToolbar]);
 
   const hasPtySelectionHandles = ptySelectionHandles !== null;

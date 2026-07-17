@@ -50,16 +50,22 @@ export function getPtySelectionHandles({
   anchor,
   focus,
 }: GetPtySelectionHandlesOptions): PtySelectionHandles | null {
+  const viewportStart = terminal.buffer.active.viewportY;
+  const viewportEnd = viewportStart + terminal.rows - 1;
+  const projectToViewport = (point: TerminalSelectionPoint): TerminalSelectionPoint => ({
+    ...point,
+    row: Math.min(viewportEnd, Math.max(viewportStart, point.row)),
+  });
   const anchorPosition = getClientPositionForTerminalPoint({
     terminal,
     host,
-    point: anchor,
+    point: projectToViewport(anchor),
     affinity: "before",
   });
   const focusPosition = getClientPositionForTerminalPoint({
     terminal,
     host,
-    point: focus,
+    point: projectToViewport(focus),
     affinity: "after",
   });
   if (!anchorPosition || !focusPosition) return null;

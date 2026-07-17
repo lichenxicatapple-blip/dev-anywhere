@@ -205,7 +205,7 @@ start_pool() {
         -no-boot-anim \
         -no-audio \
         -gpu "$GPU_MODE" \
-        "${no_window_arg[@]}"
+        ${no_window_arg[@]+"${no_window_arg[@]}"}
     else
       bash -lc '
         emulator_bin="$1"
@@ -224,7 +224,7 @@ start_pool() {
         -no-boot-anim \
         -no-audio \
         -gpu "$GPU_MODE" \
-        "${no_window_arg[@]}" \
+        ${no_window_arg[@]+"${no_window_arg[@]}"} \
         >"$ARTIFACT_DIR/$serial.pid"
     fi
 

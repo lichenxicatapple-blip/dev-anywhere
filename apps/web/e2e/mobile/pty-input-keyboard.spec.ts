@@ -4,58 +4,9 @@
 // 3. focus 后基础输入 + Enter 落到 raw input.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
-import type { Page } from "@playwright/test";
+import { touchPtyTerminal, touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-input";
-
-async function touchTerminal(page: Page): Promise<void> {
-  const box = await page.locator('[data-slot="pty-terminal"]').boundingBox();
-  if (!box) throw new Error("PTY terminal missing");
-  const client = await page.context().newCDPSession(page);
-  try {
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [
-        {
-          x: box.x + box.width / 2,
-          y: box.y + Math.min(box.height / 2, 160),
-          id: 1,
-          radiusX: 3,
-          radiusY: 3,
-          force: 1,
-        },
-      ],
-    });
-    await page.waitForTimeout(80);
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchEnd",
-      touchPoints: [],
-    });
-  } finally {
-    await client.detach();
-  }
-}
-
-async function waitForSoftKeyboard(page: Page): Promise<boolean> {
-  try {
-    await expect
-      .poll(
-        () =>
-          page.evaluate(() =>
-            Number(
-              document
-                .querySelector("[data-keyboard-offset]")
-                ?.getAttribute("data-keyboard-offset") ?? "0",
-            ),
-          ),
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThan(0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test.setTimeout(60_000);
@@ -73,7 +24,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(initialFocus).not.toBe("Terminal input");
 
     // 用户主动点 PTY 容器, textarea 才接管 focus.
-    await touchTerminal(emuPage);
+    await touchPtyTerminal(emuPage);
     await expect
       .poll(() => emuPage.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
       .toBe("Terminal input");
@@ -108,20 +59,14 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     );
     expect(rowsBeforeFocus).toBeGreaterThan(0);
 
-    await touchTerminal(emuPage);
-    await expect(
-      emuPage.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
-    ).toBeFocused();
-
-    if (!(await waitForSoftKeyboard(emuPage))) {
-      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
-    }
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
 
     const metrics = await emuPage.evaluate((sid) => {
       const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
       const controlsRect = controls?.getBoundingClientRect();
       return {
         controlsBottom: controlsRect ? controlsRect.y + controlsRect.height : null,
+        controlsHeight: controlsRect?.height ?? null,
         terminalRows: window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
         keyboardOffset: Number(
           document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
@@ -139,9 +84,22 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(metrics.keyboardOffset).toBeGreaterThan(0);
     expect(metrics.terminalRows).toBe(rowsBeforeFocus);
     expect(metrics.controlsBottom).not.toBeNull();
+    expect(metrics.controlsHeight).not.toBeNull();
+    expect(metrics.controlsHeight ?? 0).toBeGreaterThan(80);
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       metrics.visualViewportHeight + 2,
     );
     expect(metrics.visualViewportHeight - (metrics.controlsBottom ?? 0)).toBeLessThanOrEqual(24);
+
+    const controlHeights: number[] = [];
+    for (let sample = 0; sample < 20; sample += 1) {
+      controlHeights.push(
+        await emuPage
+          .locator('[data-slot="pty-mobile-controls"]')
+          .evaluate((element) => Math.round(element.getBoundingClientRect().height)),
+      );
+      await emuPage.waitForTimeout(100);
+    }
+    expect(new Set(controlHeights)).toEqual(new Set([Math.round(metrics.controlsHeight ?? 0)]));
   });
 });

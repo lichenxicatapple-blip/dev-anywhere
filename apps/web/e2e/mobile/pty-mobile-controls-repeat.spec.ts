@@ -13,9 +13,7 @@ test.describe("L4 mobile / PTY soft controls long-press repeat", () => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    if (!(await touchPtyTerminalAndWaitForSoftKeyboard(emuPage))) {
-      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
-    }
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
     const left = emuPage.locator('[data-slot="pty-mobile-key-left"]');
     await expect(left).toBeVisible();
 

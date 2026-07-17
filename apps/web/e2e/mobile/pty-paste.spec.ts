@@ -1,7 +1,7 @@
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
 import { ptyInput, sendPtyOutput } from "../pty-scroll-helpers";
-import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
+import { tapWithAdb, touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
@@ -48,12 +48,10 @@ test.describe("L4 mobile / PTY paste", () => {
       )
       .toBe(true);
 
-    if (!(await touchPtyTerminalAndWaitForSoftKeyboard(emuPage))) {
-      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
-    }
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
     await expect(ptyInput(emuPage)).toBeFocused();
     await expect(emuPage.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
-    await emuPage.locator('[data-slot="pty-mobile-key-paste"]').click();
+    await tapWithAdb(emuPage.locator('[data-slot="pty-mobile-key-paste"]'));
 
     await expect.poll(() => readRawPtyInput(emuPage)).toBe(bracketedPastePayload(pastedText));
   });

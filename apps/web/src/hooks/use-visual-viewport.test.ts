@@ -94,9 +94,42 @@ describe("computeVisualViewportBottomOffset", () => {
       }),
     ).toBe(320);
   });
+
+  it("detects an Android keyboard when Chrome pans the visual viewport", () => {
+    expect(
+      computeVisualViewportBottomOffset({
+        layoutViewportHeight: 789,
+        visualViewportHeight: 477,
+        visualViewportOffsetTop: 312,
+        baselineViewportHeight: 789,
+        subtractVisualViewportOffsetTop: false,
+      }),
+    ).toBe(312);
+  });
 });
 
 describe("computeVisualViewportLayoutBottomInset", () => {
+  it("tracks a small Android viewport pan after the keyboard is already confirmed open", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 789,
+        visualViewportHeight: 477,
+        visualViewportOffsetTop: 258,
+        softKeyboardOpen: true,
+      }),
+    ).toBe(54);
+  });
+
+  it("still ignores the same small inset when no keyboard is open", () => {
+    expect(
+      computeVisualViewportLayoutBottomInset({
+        layoutViewportHeight: 789,
+        visualViewportHeight: 477,
+        visualViewportOffsetTop: 258,
+      }),
+    ).toBe(0);
+  });
+
   it("returns the current inset when the keyboard overlays the layout viewport", () => {
     expect(
       computeVisualViewportLayoutBottomInset({

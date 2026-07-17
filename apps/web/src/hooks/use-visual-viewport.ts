@@ -11,6 +11,7 @@ interface VisualViewportBottomOffsetInput {
   visualViewportOffsetTop: number;
   baselineViewportHeight: number;
   allowBaselineFallback?: boolean;
+  subtractVisualViewportOffsetTop?: boolean;
 }
 
 export interface VisualViewportInsets {
@@ -24,10 +25,11 @@ export function computeVisualViewportBottomOffset({
   visualViewportOffsetTop,
   baselineViewportHeight,
   allowBaselineFallback = true,
+  subtractVisualViewportOffsetTop = true,
 }: VisualViewportBottomOffsetInput): number {
-  const currentBottomInset = layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop;
-  const baselineBottomInset =
-    baselineViewportHeight - visualViewportHeight - visualViewportOffsetTop;
+  const viewportTop = subtractVisualViewportOffsetTop ? visualViewportOffsetTop : 0;
+  const currentBottomInset = layoutViewportHeight - visualViewportHeight - viewportTop;
+  const baselineBottomInset = baselineViewportHeight - visualViewportHeight - viewportTop;
   const currentKeyboardInset = softKeyboardInset(currentBottomInset, layoutViewportHeight);
   const baselineKeyboardInset = allowBaselineFallback
     ? softKeyboardInset(baselineBottomInset, baselineViewportHeight)
@@ -41,10 +43,14 @@ export function computeVisualViewportLayoutBottomInset({
   visualViewportOffsetTop,
   baselineViewportHeight = layoutViewportHeight,
   allowBaselineFallback = false,
+  softKeyboardOpen = false,
 }: Omit<VisualViewportBottomOffsetInput, "baselineViewportHeight"> &
   Partial<
     Pick<VisualViewportBottomOffsetInput, "baselineViewportHeight" | "allowBaselineFallback">
-  >): number {
+  > & { softKeyboardOpen?: boolean }): number {
+  if (softKeyboardOpen) {
+    return Math.max(layoutViewportHeight - visualViewportHeight - visualViewportOffsetTop, 0);
+  }
   return computeVisualViewportBottomOffset({
     layoutViewportHeight,
     visualViewportHeight,
@@ -186,20 +192,27 @@ export function useVisualViewportInsets(): VisualViewportInsets {
       // together with visualViewport and restore it without another resize event. A
       // focused editing surface distinguishes that transition from browser chrome.
       const allowLayoutInsetBaseline = iosLikeTouchWebKit && focusedTextInput;
+      const bottomOffset = computeVisualViewportBottomOffset({
+        layoutViewportHeight,
+        visualViewportHeight: visualHeight,
+        visualViewportOffsetTop: visualTop,
+        baselineViewportHeight: baselineHeightRef.current,
+        allowBaselineFallback: allowBottomOffsetBaseline,
+        // Android Chrome may pan the visual viewport while the keyboard is open.
+        // That pan does not make the keyboard disappear; bottomOffset is the
+        // keyboard-presence signal, while layoutBottomInset below still accounts
+        // for the pan to avoid adding duplicate layout padding.
+        subtractVisualViewportOffsetTop: iosLikeTouchWebKit,
+      });
       const next: VisualViewportInsets = {
-        bottomOffset: computeVisualViewportBottomOffset({
-          layoutViewportHeight,
-          visualViewportHeight: visualHeight,
-          visualViewportOffsetTop: visualTop,
-          baselineViewportHeight: baselineHeightRef.current,
-          allowBaselineFallback: allowBottomOffsetBaseline,
-        }),
+        bottomOffset,
         layoutBottomInset: computeVisualViewportLayoutBottomInset({
           layoutViewportHeight,
           visualViewportHeight: visualHeight,
           visualViewportOffsetTop: visualTop,
           baselineViewportHeight: baselineHeightRef.current,
           allowBaselineFallback: allowLayoutInsetBaseline,
+          softKeyboardOpen: bottomOffset > 0,
         }),
       };
       setInsets((previous) =>

@@ -2,7 +2,7 @@
 // L2 mobile-contract pty test 只验证 terminal visible, L4 钉死全部按键的 raw 序列.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
-import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
+import { tapWithAdb, touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-controls";
 
@@ -22,24 +22,27 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     expect(isTouchSurface).toBe(true);
 
     // 软控制区只在系统软键盘实际打开后出现。
-    if (!(await touchPtyTerminalAndWaitForSoftKeyboard(emuPage))) {
-      test.skip(true, "Android emulator did not expose a soft-keyboard visualViewport resize");
-    }
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
     const controls = emuPage.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
 
     // esc (\x1b) + clear input area (\x1b\x1b) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
-    await emuPage.locator('[data-slot="pty-mobile-key-esc"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-clear"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-left"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-right"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-up"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-down"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-ctrl-s"]').click();
-    await emuPage.locator('[data-slot="pty-mobile-key-enter"]').click();
+    let expectedRawInput = "";
+    for (const [slot, input] of [
+      ["pty-mobile-key-esc", "\x1b"],
+      ["pty-mobile-key-clear", "\x1b\x1b"],
+      ["pty-mobile-key-left", "\x1b[D"],
+      ["pty-mobile-key-right", "\x1b[C"],
+      ["pty-mobile-key-up", "\x1b[A"],
+      ["pty-mobile-key-down", "\x1b[B"],
+      ["pty-mobile-key-ctrl-s", "\x13"],
+      ["pty-mobile-key-enter", "\r"],
+    ] as const) {
+      await tapWithAdb(emuPage.locator(`[data-slot="${slot}"]`));
+      expectedRawInput += input;
+      await expect.poll(() => readRawPtyInput(emuPage)).toBe(expectedRawInput);
+    }
 
-    await expect
-      .poll(() => readRawPtyInput(emuPage))
-      .toContain("\x1b\x1b\x1b\x1b[D\x1b[C\x1b[A\x1b[B\x13\r");
+    expect(expectedRawInput).toBe("\x1b\x1b\x1b\x1b[D\x1b[C\x1b[A\x1b[B\x13\r");
   });
 });
