@@ -4,12 +4,20 @@
 // 3. focus 后基础输入 + Enter 落到 raw input.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
-import { touchPtyTerminal, touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
+import {
+  dismissSoftKeyboard,
+  touchPtyTerminal,
+  touchPtyTerminalAndWaitForSoftKeyboard,
+} from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-input";
 
 test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test.setTimeout(60_000);
+
+  test.afterEach(async ({ emuPage }) => {
+    await dismissSoftKeyboard(emuPage);
+  });
 
   test("does not auto-focus terminal; tap focuses, sends input, and preserves IME punctuation", async ({
     emuPage,
