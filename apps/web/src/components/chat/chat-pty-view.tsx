@@ -83,7 +83,12 @@ export function ChatPtyView({
   }, [clearFind, findNext, findOpen, findQuery, findReady]);
 
   return (
-    <div className="flex flex-col h-full relative" data-slot="chat-pty-view">
+    <div
+      className="flex flex-col h-full relative"
+      data-slot="chat-pty-view"
+      data-connection-ready={view.connectionReady ? "true" : "false"}
+      aria-busy={!view.connectionReady}
+    >
       {findOpen ? (
         <ChatFindBar
           query={findQuery}

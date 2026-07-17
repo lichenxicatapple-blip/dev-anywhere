@@ -100,6 +100,7 @@ interface UsePtyViewResult {
   physicalKeyboardMode: boolean;
   keyboardOffset: number;
   mobileControlsBottomInset: number;
+  connectionReady: boolean;
   connectionOverlay: { connecting: boolean; subscribeDelayed: boolean };
   containerPaddingBottom: number;
   traceEnabled: boolean;
@@ -1219,6 +1220,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     physicalKeyboardMode,
     softKeyboardEditingSurface,
     mobileControlsBottomInset,
+    connectionReady: connection.ready,
     connectionOverlay: connection.overlay,
     containerPaddingBottom,
     traceEnabled,

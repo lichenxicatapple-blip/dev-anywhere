@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
 
 type Provider = "claude" | "codex";
@@ -15,7 +14,6 @@ const chaosRoot =
   process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/local-pty";
 const proxyProfile = "local";
 const proxyRelay = "local";
-const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 
 test.setTimeout(120_000);
@@ -30,10 +28,37 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await firstProxy.click();
 }
 
+async function runProcess(file: string, args: string[], timeout: number): Promise<void> {
+  await new Promise<void>((resolveProcess, reject) => {
+    const child = spawn(file, args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: "ignore",
+    });
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`${file} timed out after ${timeout}ms`));
+    }, timeout);
+
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolveProcess();
+        return;
+      }
+      reject(new Error(`${file} exited with code=${code} signal=${signal}`));
+    });
+  });
+}
+
 async function startLocalRuntime(cwd: string, screenName: string): Promise<void> {
   if (!chaosBin) throw new Error("DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN is required");
   const providerBinEnv = provider === "codex" ? `CODEX_BIN=${chaosBin}` : `CLAUDE_BIN=${chaosBin}`;
-  await execFileAsync(
+  await runProcess(
     "screen",
     [
       "-dmS",
@@ -54,19 +79,16 @@ async function startLocalRuntime(cwd: string, screenName: string): Promise<void>
       proxyProfile,
       provider,
     ],
-    { cwd: repoRoot, timeout: 10_000, env: process.env },
+    10_000,
   );
 }
 
 async function stopLocalRuntime(screenName: string): Promise<void> {
-  await execFileAsync("screen", ["-S", screenName, "-X", "quit"], {
-    cwd: repoRoot,
-    timeout: 5_000,
-  }).catch(() => undefined);
+  await runProcess("screen", ["-S", screenName, "-X", "quit"], 5_000).catch(() => undefined);
 }
 
 async function restartServeOnly(): Promise<void> {
-  await execFileAsync(
+  await runProcess(
     "pnpm",
     [
       "--filter",
@@ -81,11 +103,7 @@ async function restartServeOnly(): Promise<void> {
       "--relay",
       proxyRelay,
     ],
-    {
-      cwd: repoRoot,
-      timeout: 30_000,
-      env: process.env,
-    },
+    30_000,
   );
 }
 
@@ -112,6 +130,11 @@ async function openLocalRuntimeSession(page: Page, uniqueName: string): Promise<
 }
 
 async function sendRemoteLine(page: Page, sessionId: string, text: string): Promise<void> {
+  await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+    "data-connection-ready",
+    "true",
+    { timeout: 30_000 },
+  );
   const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.focus();
@@ -146,33 +169,40 @@ test.describe("real local runtime PTY chaos", () => {
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
     const screenName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
     mkdirSync(cwd, { recursive: true });
-    await startLocalRuntime(cwd, screenName);
+    await test.step("start local terminal runtime", () => startLocalRuntime(cwd, screenName));
 
     try {
-      const sessionId = await openLocalRuntimeSession(page, uniqueName);
-      await expect
-        .poll(() => terminalText(page, sessionId), { timeout: 30_000 })
-        .toContain("DEV Anywhere local PTY ready");
-
-      await sendRemoteLine(page, sessionId, "before-serve-restart");
-
-      await restartServeOnly();
-      await page.goto("/#/sessions");
-      await selectFirstProxy(page);
-      await page
-        .locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`)
-        .locator("button")
-        .first()
-        .click();
-      await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}\\?mode=pty`), {
-        timeout: 30_000,
+      const sessionId = await test.step("open local terminal session", async () => {
+        const id = await openLocalRuntimeSession(page, uniqueName);
+        await expect
+          .poll(() => terminalText(page, id), { timeout: 30_000 })
+          .toContain("DEV Anywhere local PTY ready");
+        return id;
       });
-      await expect
-        .poll(() => terminalText(page, sessionId), { timeout: 30_000 })
-        .toContain("before-serve-restart");
 
-      await sendRemoteLine(page, sessionId, "after-serve-restart");
-      await detachRemoteView(page, sessionId);
+      await test.step("send input before serve restart", () =>
+        sendRemoteLine(page, sessionId, "before-serve-restart"));
+
+      await test.step("restart serve daemon", restartServeOnly);
+      await test.step("reopen reconnected terminal session", async () => {
+        await page.goto("/#/sessions", { waitUntil: "domcontentloaded", timeout: 20_000 });
+        await selectFirstProxy(page);
+        await page
+          .locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`)
+          .locator("button")
+          .first()
+          .click();
+        await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}\\?mode=pty`), {
+          timeout: 30_000,
+        });
+        await expect
+          .poll(() => terminalText(page, sessionId), { timeout: 30_000 })
+          .toContain("before-serve-restart");
+      });
+
+      await test.step("send input after serve restart", () =>
+        sendRemoteLine(page, sessionId, "after-serve-restart"));
+      await test.step("detach remote terminal view", () => detachRemoteView(page, sessionId));
     } finally {
       await stopLocalRuntime(screenName);
     }
