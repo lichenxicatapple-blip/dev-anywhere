@@ -111,6 +111,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       window.dispatchEvent(new Event("pagehide"));
       const node = el as HTMLElement;
       node.scrollTop = 0;
+      node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
       node.dispatchEvent(new Event("scroll", { bubbles: true }));
       const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
       return maxScrollTop - node.scrollTop;
@@ -119,6 +120,9 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
     await expectPtyAtBottom(page);
+    await expect
+      .poll(() => ptyTerminal(page).evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBe(0);
 
     await scrollPtyToTop(page);
     await expect(backToBottom(page)).toBeVisible();
@@ -127,6 +131,37 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
 
     await expectPtyAtBottom(page);
+  });
+
+  test("owns the PTY scroll position across a full browser reload", async ({ page }) => {
+    const snapshot = `${Array.from(
+      { length: 140 },
+      (_, index) => `reload line ${String(index).padStart(3, "0")} ${"x".repeat(180)}\r\n`,
+    ).join("")}$ `;
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-reload`,
+      snapshotData: snapshot,
+      cols: 270,
+      rows: 52,
+    });
+    await expectPtyTerminalMounted(page);
+    await expectPtyAtBottom(page);
+    await expect
+      .poll(() => ptyTerminal(page).evaluate((el) => (el as HTMLElement).scrollWidth))
+      .toBeGreaterThan(1200);
+
+    await ptyTerminal(page).evaluate((el) => {
+      const node = el as HTMLElement;
+      node.scrollTop = 0;
+      node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+    });
+    await page.reload();
+    await expectPtyTerminalMounted(page);
+
+    await expectPtyAtBottom(page);
+    await expect
+      .poll(() => ptyTerminal(page).evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBe(0);
   });
 
   // longHost 模式 (rows*cellH > visible content height) 下, isAtBottom = cursorInViewport。

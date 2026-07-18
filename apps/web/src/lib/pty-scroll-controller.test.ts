@@ -234,6 +234,7 @@ describe("attachPtyScrollController", () => {
 
     container.dispatchEvent(touchEvent("touchstart", 320));
     container.scrollTop = 100;
+    container.scrollLeft = 600;
     container.dispatchEvent(new Event("scroll"));
     container.scrollTop = 145;
     container.dispatchEvent(new Event("scroll"));
@@ -1746,6 +1747,7 @@ describe("attachPtyScrollController", () => {
     controller.scrollToBottom("backToBottomBtn", { force: true });
 
     expect(container.scrollTop).toBe(1600);
+    expect(container.scrollLeft).toBe(0);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });

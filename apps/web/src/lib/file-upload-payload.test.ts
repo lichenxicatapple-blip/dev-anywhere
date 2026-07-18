@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { uploadFile, toastLoading, toastSuccess, toastError, toastDismiss } = vi.hoisted(() => ({
+const {
+  uploadFile,
+  compressLargeImageForUpload,
+  toastLoading,
+  toastSuccess,
+  toastError,
+  toastDismiss,
+} = vi.hoisted(() => ({
   uploadFile: vi.fn(),
+  compressLargeImageForUpload: vi.fn(async (file: File) => file),
   toastLoading: vi.fn(() => "loading-id"),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -17,12 +25,19 @@ vi.mock("@/components/toast", () => ({
   },
 }));
 
+vi.mock("./image-upload-compression", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./image-upload-compression")>()),
+  compressLargeImageForUpload,
+}));
+
 import { uploadFileAndShowToast } from "./file-upload-payload";
 import type { RelayClient } from "@/services/relay-client";
 
 describe("uploadFileAndShowToast", () => {
   beforeEach(() => {
     uploadFile.mockReset();
+    compressLargeImageForUpload.mockReset();
+    compressLargeImageForUpload.mockImplementation(async (file: File) => file);
     toastLoading.mockReset();
     toastLoading.mockReturnValue("loading-id");
     toastSuccess.mockReset();
@@ -67,6 +82,21 @@ describe("uploadFileAndShowToast", () => {
     expect(path).toBe("uploaded/x.bin");
     expect(toastDismiss).toHaveBeenCalledWith("loading-id");
     expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("passes the prepared image file to the relay upload", async () => {
+    const original = makeFile("large.png", "image/png");
+    const compressed = makeFile("large.webp", "image/webp");
+    compressLargeImageForUpload.mockResolvedValueOnce(compressed);
+
+    await uploadFileAndShowToast({
+      relay: relayWith({ success: true, path: "uploaded/large.webp" }),
+      sessionId: "s1",
+      file: original,
+    });
+
+    expect(compressLargeImageForUpload).toHaveBeenCalledWith(original);
+    expect(uploadFile).toHaveBeenCalledWith("s1", compressed);
   });
 
   it("uses custom successLabel when provided", async () => {

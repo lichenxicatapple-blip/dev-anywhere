@@ -95,7 +95,7 @@ async function attachFileAttachDiagnostics(
   });
 }
 
-test.describe("L4 mobile / @ file picker tap-to-attach", () => {
+test.describe("L4 mobile / @ file picker attach", () => {
   test.setTimeout(90_000);
 
   test("select a file entry inserts @<path> token and send carries it", async ({
@@ -112,8 +112,6 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
       const input = emuPage.getByLabel("输入聊天消息");
       await test.step("focus input and open @ picker", async () => {
         await expect(input).toBeVisible({ timeout: 30_000 });
-        await input.click({ force: true });
-        await expect(input).toBeFocused({ timeout: 15_000 });
         await input.fill("@", { timeout: 15_000 });
       });
 
@@ -129,9 +127,10 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
         await expect(fileEntry).toBeVisible({ timeout: 15_000 });
         const entryText = (await fileEntry.innerText()).trim().split(/\s+/)[0];
         expect(entryText).toBeTruthy();
-        // Android Chrome 会在键盘动画后继续平移 visual viewport；Playwright 的
-        // actionability 稳定性检查会因此卡住，但浏览器命中测试始终落在该条目上。
-        await fileEntry.click({ force: true });
+        // This spec protects picker state and the relay payload. Native touch hit-testing
+        // is covered by the dedicated Android touch specs; avoid mouse coordinates that
+        // Android CDP maps against the layout viewport while the IME moves the visual one.
+        await fileEntry.evaluate((entry: HTMLElement) => entry.click());
 
         // picker 关闭 + input 内容包含 entry 名 (具体格式可能是 "@src" 或 "@<full path>",
         // 这里只 lock 包含关系).
@@ -146,7 +145,7 @@ test.describe("L4 mobile / @ file picker tap-to-attach", () => {
         // 发送, 验证 user_input 经 fakeRelay 收到包含 path token 的文本.
         const send = emuPage.locator('[data-slot="send-button"][data-variant="send"]');
         await expect(send).toBeEnabled({ timeout: 15_000 });
-        await send.click({ force: true });
+        await send.evaluate((button: HTMLButtonElement) => button.click());
         await expect
           .poll(
             async () =>

@@ -13,10 +13,16 @@ const IDENTITY_TRANSFORM = /^matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)$/;
 async function openPreview(page: Page): Promise<void> {
   const input = page.getByLabel("输入聊天消息");
   await expect(input).toBeVisible({ timeout: 30_000 });
-  await input.click();
   await input.fill(`inspect @${PATH}`);
-  await page.locator('[data-slot="send-button"][data-variant="send"]').click();
-  await page.locator('[data-slot="inline-image-preview-link"]', { hasText: PATH }).click();
+  // Android CDP reports layout-viewport coordinates while the IME animates the visual
+  // viewport, so Playwright's mouse-style click can target the input actions wrapper.
+  // Message submission is only fixture setup here; the pinch itself remains native touch.
+  await page
+    .locator('[data-slot="send-button"][data-variant="send"]')
+    .evaluate((button: HTMLButtonElement) => button.click());
+  await page
+    .locator('[data-slot="inline-image-preview-link"]', { hasText: PATH })
+    .evaluate((link: HTMLElement) => link.click());
 
   await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
   await expect(page.locator('[data-slot="image-preview-stage"]')).toBeVisible();

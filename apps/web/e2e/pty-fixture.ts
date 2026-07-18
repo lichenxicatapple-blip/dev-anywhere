@@ -8,6 +8,9 @@ import { installVisualViewportMock } from "./mobile-helpers";
 export type PtyFakeRelayOptions = {
   sessionId: string;
   provider?: "claude" | "codex";
+  snapshotData?: string;
+  cols?: number;
+  rows?: number;
 };
 
 const PTY_FAKE_RELAY_ACTIVE_KEY = "__dev_anywhere_pty_fake_relay_active";
@@ -45,7 +48,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
     )
     .catch(() => {});
   await page.addInitScript(
-    ({ activeKey, sessionId, provider }) => {
+    ({ activeKey, sessionId, provider, snapshotData, initialCols, initialRows }) => {
       const active = (() => {
         try {
           return JSON.parse(sessionStorage.getItem(activeKey) ?? "null") as {
@@ -84,8 +87,8 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         readyState = FakeWebSocket.CONNECTING;
         sent: string[] = [];
         outputSeq = 0;
-        cols = 80;
-        rows = 24;
+        cols = initialCols;
+        rows = initialRows;
 
         constructor(url: string) {
           super();
@@ -179,7 +182,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
           }
 
           if (msg.type === "session_subscribe") {
-            this.emitSnapshot(String(msg.requestId ?? ""), "PTY SMOKE READY\r\n$ ");
+            this.emitSnapshot(String(msg.requestId ?? ""), snapshotData);
           }
         }
 
@@ -268,6 +271,9 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       activeKey: PTY_FAKE_RELAY_ACTIVE_KEY,
       sessionId: options.sessionId,
       provider: options.provider ?? "claude",
+      snapshotData: options.snapshotData ?? "PTY SMOKE READY\r\n$ ",
+      initialCols: options.cols ?? 80,
+      initialRows: options.rows ?? 24,
     },
   );
 }
@@ -318,6 +324,9 @@ export type SetupPtyChatOptions = {
   provider?: "claude" | "codex";
   query?: string;
   withVisualViewportMock?: boolean;
+  snapshotData?: string;
+  cols?: number;
+  rows?: number;
   // mobile L4 spec 用 mobileBaseUrl, PC L3 用默认 BASE_URL.
   baseUrl?: string;
 };
@@ -333,9 +342,16 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
     navNonce += 1;
     return `${baseUrl}/?ptyFakeRelay=${Date.now()}-${navNonce}#/chat/${options.sessionId}?mode=pty${query}`;
   };
-  await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
+  const relayOptions = {
+    sessionId: options.sessionId,
+    provider: options.provider,
+    snapshotData: options.snapshotData,
+    cols: options.cols,
+    rows: options.rows,
+  };
+  await installPtyFakeRelay(page, relayOptions);
   await page.goto(url());
   await resetLocalState(page);
-  await installPtyFakeRelay(page, { sessionId: options.sessionId, provider: options.provider });
+  await installPtyFakeRelay(page, relayOptions);
   await page.goto(url());
 }

@@ -452,6 +452,7 @@ export function attachPtyScrollController(
     preparePageResumeRestore();
     updateSpacer();
     scrollToBottom("pageResume", { force: true });
+    resetHorizontalScroll("pageResume");
     pageResumeRestorePendingFromFollowing = false;
   };
 

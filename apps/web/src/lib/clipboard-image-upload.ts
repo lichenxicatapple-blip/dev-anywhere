@@ -1,4 +1,5 @@
 import { clipboardImagePathMention, getClipboardImageFile } from "./clipboard-image";
+import { compressLargeImageForUpload } from "./image-upload-compression";
 
 type ClipboardImageRelay = {
   uploadClipboardImage: (
@@ -22,7 +23,8 @@ export async function uploadClipboardImageFromPaste(options: {
   if (!file) return null;
   if (!options.relay) throw new Error("请先连接开发机");
 
-  const response = await options.relay.uploadClipboardImage(options.sessionId, file);
+  const uploadFile = await compressLargeImageForUpload(file);
+  const response = await options.relay.uploadClipboardImage(options.sessionId, uploadFile);
   if (!response.success || !response.path) {
     throw new Error(response.error ?? "剪贴板图片上传失败");
   }

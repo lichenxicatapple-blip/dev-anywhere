@@ -59,6 +59,13 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       const pages = context.pages();
       const page = pages[0] ?? (await context.newPage());
       await safeGoto(page, VITE_BASE_URL);
+      // force-stop restarts Chrome but preserves this origin's storage. Clear it before
+      // each spec installs its init scripts so a previous fake proxy/session selection
+      // cannot redirect the next spec to stale offline state.
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
       await use(page);
     },
     { scope: "worker" },

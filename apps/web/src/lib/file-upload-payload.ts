@@ -1,5 +1,9 @@
 import type { RelayClient } from "@/services/relay-client";
 import { toast } from "@/components/toast";
+import {
+  compressLargeImageForUpload,
+  shouldCompressImageForUpload,
+} from "./image-upload-compression";
 
 interface UploadFileWithToastOptions {
   relay: RelayClient;
@@ -17,9 +21,13 @@ interface UploadFileWithToastOptions {
 export async function uploadFileAndShowToast(
   opts: UploadFileWithToastOptions,
 ): Promise<string | null> {
-  const toastId = toast.loading(`上传 ${opts.file.name} ...`);
+  const compressing = shouldCompressImageForUpload(opts.file);
+  const toastId = toast.loading(
+    compressing ? `正在压缩并上传 ${opts.file.name} ...` : `上传 ${opts.file.name} ...`,
+  );
   try {
-    const result = await opts.relay.uploadFile(opts.sessionId, opts.file);
+    const uploadFile = await compressLargeImageForUpload(opts.file);
+    const result = await opts.relay.uploadFile(opts.sessionId, uploadFile);
     if (!result.success || !result.path) {
       toast.error(result.error ?? "上传失败", { id: toastId });
       return null;

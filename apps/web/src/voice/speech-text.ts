@@ -61,7 +61,10 @@ function replaceInlineMarkdownLinks(text: string): string {
       continue;
     }
 
-    const label = text.slice(labelStart, labelEnd).replace(/\\([\[\]])/gu, "$1").trim();
+    const label = text
+      .slice(labelStart, labelEnd)
+      .replace(/\\(\[|\])/gu, "$1")
+      .trim();
     result += image ? (label ? `图片：${label}` : "图片") : label || "链接";
     cursor = destination.end;
   }

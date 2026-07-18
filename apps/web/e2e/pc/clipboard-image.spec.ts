@@ -15,6 +15,45 @@ async function dispatchImagePaste(target: Locator): Promise<void> {
   });
 }
 
+async function dispatchLargeImagePaste(target: Locator): Promise<number> {
+  return target.evaluate(async (node) => {
+    const width = 3000;
+    const height = 2000;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("2D canvas is unavailable");
+
+    const pixels = context.createImageData(width, height);
+    let state = 0x12345678;
+    for (let offset = 0; offset < pixels.data.length; offset += 4) {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      pixels.data[offset] = state & 0xff;
+      pixels.data[offset + 1] = (state >>> 8) & 0xff;
+      pixels.data[offset + 2] = (state >>> 16) & 0xff;
+      pixels.data[offset + 3] = 0xff;
+    }
+    context.putImageData(pixels, 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((result) =>
+        result ? resolve(result) : reject(new Error("PNG encode failed")),
+      );
+    });
+    const file = new File([blob], "large-screenshot.png", { type: "image/png" });
+    const data = new DataTransfer();
+    data.items.add(file);
+    node.dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }),
+    );
+    return file.size;
+  });
+}
+
 test.describe("clipboard image paste", () => {
   test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
@@ -77,5 +116,38 @@ test.describe("clipboard image paste", () => {
         size: 3,
       }),
     );
+  });
+
+  test("large static images are compressed before upload", async ({ page }) => {
+    await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+
+    const input = page.getByLabel("输入聊天消息");
+    const originalSize = await dispatchLargeImagePaste(input);
+    expect(originalSize).toBeGreaterThan(2 * 1024 * 1024);
+
+    await expect
+      .poll(async () => {
+        const sent = await sentFakeRelayMessages(page);
+        return sent.find(
+          (message) =>
+            message.type === "remote_file_upload_url_request" &&
+            message.fileName === "large-screenshot.webp",
+        );
+      })
+      .toEqual(
+        expect.objectContaining({
+          sessionId: "test-sess",
+          kind: "clipboard_image",
+          mimeType: "image/webp",
+        }),
+      );
+
+    const sent = await sentFakeRelayMessages(page);
+    const upload = sent.find(
+      (message) =>
+        message.type === "remote_file_upload_url_request" &&
+        message.fileName === "large-screenshot.webp",
+    );
+    expect(Number(upload?.size)).toBeLessThan(originalSize * 0.9);
   });
 });

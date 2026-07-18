@@ -357,6 +357,33 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     virtualizer.scrollToIndex(messageIndex, { align: "center", behavior: "auto" });
   }, [activeFindMessageId, messages, virtualizer]);
 
+  useEffect(() => {
+    if (!activeFindMessageId || !scrollEl) return;
+
+    let frame: number | null = null;
+    const centerActiveMatch = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        scrollEl
+          .querySelector<HTMLElement>('[data-slot="message-row"][data-find-active="true"]')
+          ?.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      });
+    };
+
+    // Focusing the find input can resize the message viewport while the soft
+    // keyboard animates in. Keep the selected result centered in the resized
+    // scroll area instead of retaining coordinates from the pre-keyboard layout.
+    const observer = new ResizeObserver(centerActiveMatch);
+    observer.observe(scrollEl);
+    centerActiveMatch();
+
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [activeFindMessageId, scrollEl]);
+
   const navigateFindResult = useCallback(
     (direction: "previous" | "next"): void => {
       if (findMatchIds.length === 0) return;

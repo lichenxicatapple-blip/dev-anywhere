@@ -121,7 +121,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
       .toBeGreaterThan(100);
   });
 
-  test("resets horizontal scroll to line start immediately after Enter on a long line", async ({
+  test("resets horizontal scroll to line start after mobile-control Enter on a long line", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -148,8 +148,11 @@ test.describe("L4 mobile / PTY input scroll", () => {
     await expect
       .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
       .toBeGreaterThan(0);
+    await expect(ptyInput(emuPage)).toBeFocused();
 
-    await emuPage.keyboard.press("Enter");
+    const enterControl = emuPage.getByRole("button", { name: "回车" });
+    await expect(enterControl).toBeVisible();
+    await enterControl.evaluate((button: HTMLButtonElement) => button.click());
 
     await expect.poll(() => readRawPtyInput(emuPage)).toContain("\r");
     await expect
