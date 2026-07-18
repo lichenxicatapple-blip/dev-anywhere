@@ -36,14 +36,23 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
   const dumpPath = "/sdcard/dev-anywhere-window.xml";
   let node: string | undefined;
   let lastHierarchy = "";
+  let lastDumpError = "";
   for (let attempt = 0; attempt < 10 && !node; attempt += 1) {
-    await execFileAsync("adb", [...serialArgs, "shell", "uiautomator", "dump", dumpPath]);
-    const { stdout: hierarchy } = await execFileAsync("adb", [
-      ...serialArgs,
-      "shell",
-      "cat",
-      dumpPath,
-    ]);
+    let hierarchy: string;
+    try {
+      await execFileAsync("adb", [...serialArgs, "shell", "uiautomator", "dump", dumpPath]);
+      ({ stdout: hierarchy } = await execFileAsync("adb", [
+        ...serialArgs,
+        "shell",
+        "cat",
+        dumpPath,
+      ]));
+      lastDumpError = "";
+    } catch (error) {
+      lastDumpError = error instanceof Error ? error.message : String(error);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
     lastHierarchy = hierarchy;
     node = [...hierarchy.matchAll(/<node\b[^>]*>/g)]
       .map(([value]) => value)
@@ -96,7 +105,7 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
       .slice(0, 8)
       .join("\n");
     throw new Error(
-      `Android accessibility target missing: ${label}${visibleNodes ? `\nVisible nodes:\n${visibleNodes}` : ""}`,
+      `Android accessibility target missing: ${label}${lastDumpError ? `\nLast hierarchy error: ${lastDumpError}` : ""}${visibleNodes ? `\nVisible nodes:\n${visibleNodes}` : ""}`,
     );
   }
   const [, left, top, right, bottom] = bounds.map(Number);
