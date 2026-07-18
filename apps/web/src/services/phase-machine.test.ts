@@ -158,7 +158,7 @@ describe("phase-machine request failure handling", () => {
     errSpy.mockRestore();
   });
 
-  it("surfaces requestSessionHistory failure via toast", async () => {
+  it("surfaces session history failure after the connection is stable", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let boundProxyId: string | null = "proxy-1";
     const relay = {
@@ -197,6 +197,52 @@ describe("phase-machine request failure handling", () => {
     await vi.waitFor(() => {
       expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
     });
+    expect(useAppStore.getState().phase).toBe("chatting");
+    errSpy.mockRestore();
+  });
+
+  it("suppresses a stale history failure while the socket is reconnecting", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let rejectHistory!: (reason: Error) => void;
+    const historyRequest = new Promise<never>((_resolve, reject) => {
+      rejectHistory = reject;
+    });
+    let boundProxyId: string | null = "proxy-1";
+    const relay = {
+      getBoundProxyId: vi.fn(() => boundProxyId),
+      listProxies: vi.fn(),
+      requestAgentStatuses: vi.fn().mockResolvedValue([]),
+      requestProxyInfo: vi.fn().mockResolvedValue({
+        homePath: "/h",
+        agentCli: {
+          claude: { available: true, command: "c" },
+          codex: { available: true, command: "c" },
+        },
+      }),
+      requestSessionHistory: vi.fn(() => historyRequest),
+      selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
+        boundProxyId = proxyId;
+        return { success: true, proxyId };
+      }),
+      sendControl: vi.fn(),
+    } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    useAppStore.setState({ phase: "reconnecting", connected: true, proxyOnline: true });
+    await handleRelayMessage(
+      {
+        type: "proxy_list_response",
+        proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
+      },
+      timers,
+      relay,
+    );
+
+    useAppStore.setState({ phase: "reconnecting", connected: false, proxyOnline: false });
+    rejectHistory(new Error("连接已断开"));
+
+    await vi.waitFor(() => expect(errSpy).toHaveBeenCalled());
+    expect(toastError).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
 });

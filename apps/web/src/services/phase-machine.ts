@@ -56,6 +56,10 @@ function requestSessionHistory(relay: RelayClient): void {
     })
     .catch((err: unknown) => {
       console.error("[phase-machine] requestSessionHistory failed", err);
+      const app = useAppStore.getState();
+      // 手机唤醒时，旧连接上的请求会随 socket 断开而失败；新连接随后会重新同步。
+      // 只有连接已经稳定后仍然失败，才向用户报告真正需要关注的问题。
+      if (!app.connected || !app.proxyOnline || app.phase === "reconnecting") return;
       toast.error("无法加载历史会话");
     });
 }
