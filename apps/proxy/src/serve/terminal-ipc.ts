@@ -333,7 +333,9 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     (sessionId, data, outputSeq) => {
       if (!sessionManager.getSession(sessionId)) return;
       touchSessionActivity(sessionManager, relayConnection, sessionId);
-      applyPtyStateToSession(bridgeDeps, sessionId, "working");
+      // Local-terminal lifecycle is owned by pty_semantic_event. Codex and Claude can emit
+      // redraw/cursor output while waiting for input; promoting every byte frame to working
+      // would reopen an already completed turn without a matching future turn_complete event.
       relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
     },
     (err, line) => {

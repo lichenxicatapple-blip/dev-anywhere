@@ -51,7 +51,8 @@ type PersistedSessionRecord = Omit<SessionInfo, "state">;
 // ERROR 在 PTY 观察通道不可达：PTY 错误体现为终端 ANSI 内容，proxy 不建模观察器失联。
 const PTY_TRANSITIONS: Record<SessionState, readonly SessionState[]> = {
   [SessionState.IDLE]: [
-    // claude 开始响应用户输入 → handlePtyData 首字节翻 working
+    // 用户提交输入或 provider 发出显式 working 信号 → PTY semantic 翻 working。
+    // 原始 PTY 字节只负责输出转发，空闲期的终端重绘不能推动生命周期。
     SessionState.WORKING,
     // provider hook 是语义事件，可能比 PTY 字节观察更早到达；PermissionRequest 可直接进入审批等待。
     SessionState.WAITING_APPROVAL,
