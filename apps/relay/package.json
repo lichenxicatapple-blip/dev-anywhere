@@ -1,6 +1,6 @@
 {
   "name": "@dev-anywhere/relay",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Relay server for DEV Anywhere — bridges local AI CLI proxies to remote web clients via WebSocket.",
   "keywords": [
     "claude-code",
