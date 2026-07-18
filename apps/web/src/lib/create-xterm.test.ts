@@ -37,8 +37,10 @@ describe("createXtermTerminal font invalidation", () => {
     // jsdom 不实现 FontFaceSet 也不实现 matchMedia, 都给 xterm/我们的代码塞最小桩。
     const addEventListener = vi.fn();
     const removeEventListener = vi.fn();
+    const load = vi.fn().mockResolvedValue([]);
     const fontsStub = {
       ready: Promise.resolve(),
+      load,
       addEventListener,
       removeEventListener,
     };
@@ -62,6 +64,8 @@ describe("createXtermTerminal font invalidation", () => {
 
     try {
       const result = await createXtermTerminal(container);
+
+      expect(load).toHaveBeenCalledWith('16px "Sarasa Fixed SC"', "─│╭╮╰╯");
 
       const addedListeners = addEventListener.mock.calls.filter(
         (args) => args[0] === "loadingdone",

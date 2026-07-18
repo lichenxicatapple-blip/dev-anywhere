@@ -18,6 +18,8 @@ interface CreateXtermOptions {
   fontSize?: number;
 }
 
+const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯";
+
 // 提到独立纯函数让单测可以直接断言关键 option 不被无意改回——尤其是
 // cursorInactiveStyle: "none" (失焦时不画 ghost 光标)。
 export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITerminalOptions {
@@ -44,6 +46,15 @@ export async function createXtermTerminal(
   options: CreateXtermOptions = {},
 ): Promise<CreateXtermResult> {
   await document.fonts.ready;
+
+  // split font 的框线字形默认按需加载。必须在 xterm DOM renderer 首次测量前请求，
+  // 否则 renderer 会长期保留 fallback 字体的宽度缓存，单纯 refresh 也不会清掉。
+  const fontSize = options.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+  try {
+    await document.fonts.load(`${fontSize}px "Sarasa Fixed SC"`, TERMINAL_FONT_METRIC_GLYPHS);
+  } catch {
+    // 字体服务不可用时仍允许终端使用系统等宽字体启动。
+  }
 
   const terminal = new Terminal(buildXtermTerminalOptions(options));
 
