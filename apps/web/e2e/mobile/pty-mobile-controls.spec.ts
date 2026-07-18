@@ -7,7 +7,9 @@ import { tapWithAdb, touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-k
 const SESSION_ID = "mobile-pty-controls";
 
 test.describe("L4 mobile / PTY soft controls full key sequence", () => {
-  test.setTimeout(60_000);
+  // Each key is tapped through Android's accessibility hierarchy so this gate
+  // verifies real native hit testing. Cold uiautomator dumps can exceed 60s.
+  test.setTimeout(120_000);
 
   test("esc / clear / arrows / enter buttons emit correct raw escape sequences", async ({
     emuPage,

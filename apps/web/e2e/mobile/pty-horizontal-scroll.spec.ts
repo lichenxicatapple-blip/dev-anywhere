@@ -12,6 +12,7 @@ import {
   sendPtyLines,
   sendPtyOutput,
 } from "../pty-scroll-helpers";
+import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-horizontal-scroll";
 
@@ -134,8 +135,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
       )
       .toBe(270);
 
-    await ptyTerminal(emuPage).click();
-    await expect(ptyInput(emuPage)).toBeFocused();
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
 
     await sendPtyOutput(emuPage, `LONG ${"x".repeat(140)}`);
     await expect
