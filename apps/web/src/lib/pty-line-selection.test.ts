@@ -167,7 +167,7 @@ describe("selectTerminalTokenAtPoint", () => {
 });
 
 describe("selectTerminalInitialRangeAtPoint", () => {
-  it("expands a short touched token to nearby tokens so the handles are usable", () => {
+  it("selects the touched token without swallowing neighboring tokens", () => {
     const select = vi.fn();
     const terminal = {
       rows: 10,
@@ -203,8 +203,83 @@ describe("selectTerminalInitialRangeAtPoint", () => {
       cellHeight: 20,
     });
 
-    expect(selected?.text).toBe("pnpm dev:restart --filter");
-    expect(select).toHaveBeenCalledWith(0, 32, 25);
+    expect(selected?.text).toBe("dev:restart");
+    expect(select).toHaveBeenCalledWith(5, 32, 11);
+  });
+
+  it("keeps an English token separate from adjacent Chinese text", () => {
+    const select = vi.fn();
+    const content = "明确保留为Post-M2.4资格验证";
+    const terminal = {
+      rows: 10,
+      cols: 40,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) =>
+            row === 32
+              ? line(content.split("").concat(Array.from({ length: 12 }, () => " ")))
+              : undefined,
+        },
+      },
+      select,
+    } as unknown as Terminal;
+    const host = document.createElement("div");
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    host.append(screen);
+    screen.getBoundingClientRect = () =>
+      ({ left: 10, top: 20, width: 400, height: 200 }) as DOMRect;
+
+    const tokenStart = content.indexOf("Post-M2.4");
+    const selected = selectTerminalInitialRangeAtPoint({
+      terminal,
+      host,
+      clientX: 10 + (tokenStart + 2.5) * 10,
+      clientY: 60,
+      cellWidth: 10,
+      cellHeight: 20,
+    });
+
+    expect(selected?.text).toBe("Post-M2.4");
+    expect(select).toHaveBeenCalledWith(tokenStart, 32, "Post-M2.4".length);
+  });
+
+  it("uses Chinese word boundaries instead of selecting an entire sentence fragment", () => {
+    const select = vi.fn();
+    const content = "明确保留资格验证";
+    const terminal = {
+      rows: 10,
+      cols: 30,
+      buffer: {
+        active: {
+          viewportY: 30,
+          getLine: (row: number) =>
+            row === 32
+              ? line(content.split("").concat(Array.from({ length: 12 }, () => " ")))
+              : undefined,
+        },
+      },
+      select,
+    } as unknown as Terminal;
+    const host = document.createElement("div");
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    host.append(screen);
+    screen.getBoundingClientRect = () =>
+      ({ left: 10, top: 20, width: 300, height: 200 }) as DOMRect;
+
+    const selected = selectTerminalInitialRangeAtPoint({
+      terminal,
+      host,
+      clientX: 42,
+      clientY: 60,
+      cellWidth: 10,
+      cellHeight: 20,
+    });
+
+    expect(selected?.text).toBe("保留");
+    expect(select).toHaveBeenCalledWith(2, 32, 2);
   });
 
   it("keeps a long touched token tight instead of selecting the whole row", () => {
@@ -279,8 +354,8 @@ describe("selectTerminalInitialRangeAtPoint", () => {
       cellHeight: 20,
     });
 
-    expect(selected?.text).toBe("alpha  beta gamma");
-    expect(select).toHaveBeenCalledWith(0, 32, 17);
+    expect(selected?.text).toBe("beta");
+    expect(select).toHaveBeenCalledWith(7, 32, 4);
   });
 });
 

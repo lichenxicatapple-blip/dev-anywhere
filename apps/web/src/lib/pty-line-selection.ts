@@ -56,6 +56,22 @@ interface TerminalPointClientPositionOptions {
   cellHeight?: number;
 }
 
+interface TerminalLineTextCellSpan {
+  textStart: number;
+  textEnd: number;
+  cellStart: number;
+  cellEnd: number;
+}
+
+interface TerminalLineTextRange {
+  start: number;
+  end: number;
+}
+
+const terminalWordSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
+const TECHNICAL_TOKEN_CONNECTOR_PATTERN = /^[./:@_+~=-]+$/u;
+const ASCII_WORD_PATTERN = /[a-z0-9]/iu;
+
 function getCellSize({
   terminal,
   host,
@@ -113,23 +129,129 @@ function hasVisibleChars(
   return (line.getCell(index)?.getChars() ?? "").trim().length > 0;
 }
 
-function findTokenCellRanges(
+function getTerminalLineTextAndCellSpans(
+  line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
+  maxCols: number,
+): { text: string; spans: TerminalLineTextCellSpan[] } {
+  const endLimit = Math.min(line.length, maxCols);
+  const spans: TerminalLineTextCellSpan[] = [];
+  let text = "";
+
+  for (let column = 0; column < endLimit; column += 1) {
+    const cell = line.getCell(column);
+    const width = cell?.getWidth() ?? 1;
+    if (width === 0) continue;
+
+    const chars = cell?.getChars() || " ";
+    const textStart = text.length;
+    text += chars;
+    spans.push({
+      textStart,
+      textEnd: text.length,
+      cellStart: column,
+      cellEnd: Math.min(endLimit - 1, column + Math.max(1, width) - 1),
+    });
+  }
+
+  return { text: text.trimEnd(), spans };
+}
+
+function isTechnicalConnector(segment: Intl.SegmentData): boolean {
+  return TECHNICAL_TOKEN_CONNECTOR_PATTERN.test(segment.segment);
+}
+
+function isAsciiWord(segment: Intl.SegmentData): boolean {
+  return segment.isWordLike === true && ASCII_WORD_PATTERN.test(segment.segment);
+}
+
+// Preserve terminal identifiers that Intl.Segmenter splits around connector punctuation.
+function expandTechnicalTextRange(
+  segments: Intl.SegmentData[],
+  wordIndex: number,
+): TerminalLineTextRange {
+  let startIndex = wordIndex;
+  let endIndex = wordIndex;
+
+  while (startIndex > 0) {
+    let connectorIndex = startIndex - 1;
+    while (connectorIndex >= 0 && isTechnicalConnector(segments[connectorIndex])) {
+      connectorIndex -= 1;
+    }
+    if (connectorIndex === startIndex - 1) break;
+    if (connectorIndex >= 0 && isAsciiWord(segments[connectorIndex])) {
+      startIndex = connectorIndex;
+      continue;
+    }
+    startIndex = connectorIndex + 1;
+    break;
+  }
+
+  while (endIndex + 1 < segments.length) {
+    let connectorIndex = endIndex + 1;
+    while (connectorIndex < segments.length && isTechnicalConnector(segments[connectorIndex])) {
+      connectorIndex += 1;
+    }
+    if (
+      connectorIndex === endIndex + 1 ||
+      connectorIndex >= segments.length ||
+      !isAsciiWord(segments[connectorIndex])
+    ) {
+      break;
+    }
+    endIndex = connectorIndex;
+  }
+
+  const start = segments[startIndex].index;
+  const last = segments[endIndex];
+  return { start, end: last.index + last.segment.length };
+}
+
+function findSemanticTextRanges(text: string): TerminalLineTextRange[] {
+  const segments = Array.from(terminalWordSegmenter.segment(text));
+  const ranges: TerminalLineTextRange[] = [];
+  const seen = new Set<string>();
+
+  const addRange = (range: TerminalLineTextRange): void => {
+    const key = `${range.start}:${range.end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    ranges.push(range);
+  };
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    if (!segment.isWordLike) continue;
+    addRange(
+      isAsciiWord(segment)
+        ? expandTechnicalTextRange(segments, index)
+        : { start: segment.index, end: segment.index + segment.segment.length },
+    );
+  }
+
+  for (const segment of segments) {
+    if (segment.isWordLike || !segment.segment.trim()) continue;
+    const range = { start: segment.index, end: segment.index + segment.segment.length };
+    if (!ranges.some((candidate) => candidate.start <= range.start && candidate.end >= range.end)) {
+      addRange(range);
+    }
+  }
+
+  return ranges.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+function findSemanticTokenCellRanges(
   line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
   maxCols: number,
 ): Array<{ start: number; end: number }> {
-  const endLimit = Math.min(line.length, maxCols);
-  const ranges: Array<{ start: number; end: number }> = [];
-  let index = 0;
-  while (index < endLimit) {
-    while (index < endLimit && !hasVisibleChars(line, index)) index += 1;
-    if (index >= endLimit) break;
-
-    const start = index;
-    while (index + 1 < endLimit && hasVisibleChars(line, index + 1)) index += 1;
-    ranges.push({ start, end: index });
-    index += 1;
-  }
-  return ranges;
+  const { text, spans } = getTerminalLineTextAndCellSpans(line, maxCols);
+  return findSemanticTextRanges(text).flatMap((range) => {
+    const covered = spans.filter(
+      (span) => span.textStart < range.end && span.textEnd > range.start,
+    );
+    const first = covered[0];
+    const last = covered.at(-1);
+    return first && last ? [{ start: first.cellStart, end: last.cellEnd }] : [];
+  });
 }
 
 function findNearestTokenIndex(
@@ -150,45 +272,6 @@ function findNearestTokenIndex(
     }
   }
   return nearestIndex;
-}
-
-function expandInitialTokenRange(
-  ranges: Array<{ start: number; end: number }>,
-  tokenIndex: number,
-  column: number,
-): { start: number; end: number } {
-  const minSelectionCells = 18;
-  const maxSelectionTokens = 3;
-  const token = ranges[tokenIndex];
-  if (!token) return { start: 0, end: 0 };
-  if (token.end - token.start + 1 >= minSelectionCells) return token;
-
-  let startIndex = tokenIndex;
-  let endIndex = tokenIndex;
-  const selectedCellCount = (): number => ranges[endIndex].end - ranges[startIndex].start + 1;
-  const selectedTokenCount = (): number => endIndex - startIndex + 1;
-
-  while (selectedCellCount() < minSelectionCells && selectedTokenCount() < maxSelectionTokens) {
-    const left = startIndex > 0 ? ranges[startIndex - 1] : null;
-    const right = endIndex + 1 < ranges.length ? ranges[endIndex + 1] : null;
-    if (!left && !right) break;
-
-    if (left && right) {
-      const leftDistance = Math.max(0, column - left.end);
-      const rightDistance = Math.max(0, right.start - column);
-      if (leftDistance <= rightDistance) {
-        startIndex -= 1;
-      } else {
-        endIndex += 1;
-      }
-    } else if (left) {
-      startIndex -= 1;
-    } else {
-      endIndex += 1;
-    }
-  }
-
-  return { start: ranges[startIndex].start, end: ranges[endIndex].end };
 }
 
 function normalizeSelectionPoints(
@@ -378,11 +461,12 @@ export function selectTerminalInitialRangeAtBufferPoint({
   const line = terminal.buffer.active.getLine(point.row);
   if (!line) return null;
 
-  const ranges = findTokenCellRanges(line, terminal.cols);
+  const ranges = findSemanticTokenCellRanges(line, terminal.cols);
   const tokenIndex = findNearestTokenIndex(ranges, point.column);
   if (tokenIndex === null) return null;
 
-  const range = expandInitialTokenRange(ranges, tokenIndex, point.column);
+  const range = ranges[tokenIndex];
+  if (!range) return null;
   return selectTerminalRange({
     terminal,
     anchor: { row: point.row, column: range.start },

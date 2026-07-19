@@ -577,14 +577,16 @@ test.describe("L4 mobile / PTY long press copy", () => {
     await expect(copyButton).toBeHidden();
   });
 
-  test("plain long press expands a short token to a usable initial range", async ({ emuPage }) => {
+  test("plain long press selects the touched token without swallowing adjacent text", async ({
+    emuPage,
+  }) => {
     await setupPtyChat(emuPage, {
       sessionId: `${SESSION_ID}-initial-range`,
       baseUrl: mobileBaseUrl,
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emuPage.evaluate(() => {
-      window.__ptySmoke.sendPty("alpha beta gamma delta\r\n");
+      window.__ptySmoke.sendPty("明确保留为Post-M2.4资格验证\r\n");
     });
     await expect
       .poll(() =>
@@ -593,7 +595,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
           `${SESSION_ID}-initial-range`,
         ),
       )
-      .toContain("alpha beta gamma delta");
+      .toContain("明确保留为Post-M2.4资格验证");
 
     const box = await emuPage.locator('[data-slot="pty-host"] .xterm-screen').boundingBox();
     if (!box) throw new Error("xterm screen missing");
@@ -603,12 +605,13 @@ test.describe("L4 mobile / PTY long press copy", () => {
       if (!term || !screen) return null;
       const buffer = term.buffer.active;
       for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
-        const text = buffer.getLine(row)?.translateToString(true) ?? "";
-        const column = text.indexOf("beta");
-        if (column >= 0) {
+        const line = buffer.getLine(row);
+        if (!line || !line.translateToString(true).includes("Post-M2.4")) continue;
+        for (let column = 0; column < line.length; column += 1) {
+          if (line.getCell(column)?.getChars() !== "P") continue;
           return {
             rowInViewport: row - buffer.viewportY,
-            column: column + 1,
+            column: column + 2,
             cellWidth: screen.clientWidth / term.cols,
             cellHeight: screen.clientHeight / term.rows,
           };
@@ -630,7 +633,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
           `${SESSION_ID}-initial-range`,
         ),
       )
-      .toBe("alpha beta gamma");
+      .toBe("Post-M2.4");
 
     const handle = emuPage.getByRole("button", { name: "调整选区起点" });
     const dot = emuPage.locator('[data-slot="pty-selection-handle-dot"]').first();
@@ -886,7 +889,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
     if (!target) throw new Error("keyboard long-press target is not visible");
 
     await longPress(emuPage, { x: target.x, y: target.y });
-    await waitForSelectionToContain(emuPage, sessionId, ["KEYBOARD COPY LINE"]);
+    await waitForSelectionToContain(emuPage, sessionId, ["KEYBOARD"]);
     await expect
       .poll(
         () =>
