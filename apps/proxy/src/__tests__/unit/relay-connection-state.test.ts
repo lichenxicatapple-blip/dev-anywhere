@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
+import { encodeFileStreamFrame } from "@dev-anywhere/shared";
 
 // RelayConnectionState 需要从 relay-connection.ts 导出
 import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
@@ -200,5 +201,43 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     await vi.waitFor(() => expect(fakeWs.terminate).toHaveBeenCalled(), { timeout: 100 });
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
     conn.close();
+  });
+
+  it("treats inbound upload data as connection liveness while awaiting pong", async () => {
+    vi.useFakeTimers();
+    const conn = new RelayConnection("ws://test:1234", {
+      proxyIdPath: "/tmp/test-proxy-id",
+      heartbeatIntervalMs: 100,
+      heartbeatTimeoutMs: 50,
+    });
+    try {
+      conn.connect();
+      const mod = (await import("ws")) as unknown as MockWsModule;
+      const fakeWs = mod.default.lastInstance;
+      if (!fakeWs) throw new Error("mock WebSocket did not capture instance");
+
+      fakeWs.readyState = mod.default.OPEN;
+      fakeWs.emit("open");
+      fakeWs.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
+      );
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fakeWs.ping).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(40);
+      fakeWs.emit(
+        "message",
+        Buffer.from(encodeFileStreamFrame("upload-1", 0, Buffer.from("upload data"))),
+        true,
+      );
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(fakeWs.terminate).not.toHaveBeenCalled();
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+    } finally {
+      conn.close();
+      vi.useRealTimers();
+    }
   });
 });

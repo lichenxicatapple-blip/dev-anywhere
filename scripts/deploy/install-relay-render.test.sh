@@ -50,6 +50,8 @@ assert_contains "$nginx" "ssl_certificate /etc/letsencrypt/live/relay/fullchain.
 assert_contains "$nginx" "location ~ ^/(proxy|client|voice/asr|voice/tts)$"
 assert_contains "$nginx" 'proxy_set_header Upgrade $http_upgrade;'
 assert_contains "$nginx" "proxy_pass http://127.0.0.1:3100;"
+assert_contains "$nginx" "location ^~ /api/remote-uploads/"
+assert_contains "$nginx" "proxy_request_buffering off;"
 assert_not_contains "$nginx" "127.0.0.1:8080"
 assert_contains "$nginx" "location /.well-known/acme-challenge/"
 

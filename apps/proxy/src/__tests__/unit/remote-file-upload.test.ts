@@ -116,4 +116,34 @@ describe("RemoteFileUploadManager", () => {
     });
     expect(existsSync(join(dataDir, "paste-badmime.bmp"))).toBe(false);
   });
+
+  it("removes a partial file when an upload is canceled", async () => {
+    const manager = new RemoteFileUploadManager({
+      relayConnection: relayConnection as RelayConnection,
+      sessionManager: sessionManager as SessionManager,
+      dataDir,
+      randomSuffix: () => "canceled",
+    });
+    const path = join(dataDir, "up-canceled.mp4");
+
+    manager.start({
+      type: "remote_file_upload_stream_request",
+      uploadId: "upload-canceled",
+      sessionId: "s1",
+      kind: "file",
+      fileName: "clip.mp4",
+      mimeType: "video/mp4",
+      size: 1024,
+    });
+    manager.handleBinary(
+      Buffer.from(encodeFileStreamFrame("upload-canceled", 0, Buffer.from("partial"))),
+    );
+    manager.cancel({
+      type: "remote_file_upload_stream_cancel",
+      uploadId: "upload-canceled",
+    });
+
+    await waitFor(() => expect(existsSync(path)).toBe(false));
+    expect(relayConnection.sendRaw).not.toHaveBeenCalled();
+  });
 });

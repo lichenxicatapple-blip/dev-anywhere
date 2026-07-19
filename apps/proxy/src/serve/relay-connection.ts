@@ -162,6 +162,7 @@ export class RelayConnection extends EventEmitter {
       this.ws.on("message", (data, isBinary) => {
         const buf = data as Buffer;
         if (isBinary) {
+          this.clearHeartbeatTimeout();
           this.emit("binary", buf);
           return;
         }
@@ -180,6 +181,7 @@ export class RelayConnection extends EventEmitter {
           serviceLogger.warn({ error: String(err) }, "Non-JSON message from relay, dropped");
           return;
         }
+        this.clearHeartbeatTimeout();
         if (msg.type === "proxy_register_response") {
           serviceLogger.info({ status: msg.status }, "Received register response");
           if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;

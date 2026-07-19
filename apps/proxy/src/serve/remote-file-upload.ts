@@ -9,6 +9,7 @@ import {
   type ControlMessage,
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { unlinkIfPresent } from "../common/safe-unlink.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
 
@@ -155,18 +156,14 @@ export class RemoteFileUploadManager {
   cancel(msg: ControlMessage<"remote_file_upload_stream_cancel">): void {
     const active = this.activeUploads.get(msg.uploadId);
     if (!active) return;
-    active.completed = true;
-    this.activeUploads.delete(msg.uploadId);
-    active.stream.destroy();
+    this.discard(msg.uploadId, active);
     serviceLogger.info({ uploadId: msg.uploadId }, "Remote file upload canceled");
   }
 
   private fail(uploadId: string, error: string): void {
     const active = this.activeUploads.get(uploadId);
     if (!active) return;
-    active.completed = true;
-    this.activeUploads.delete(uploadId);
-    active.stream.destroy();
+    this.discard(uploadId, active);
     this.sendResponse({
       uploadId,
       sessionId: active.sessionId,
@@ -174,6 +171,27 @@ export class RemoteFileUploadManager {
       error,
       errorCode: ControlErrorCode.UNKNOWN,
     });
+  }
+
+  private discard(uploadId: string, active: ActiveUpload): void {
+    active.completed = true;
+    this.activeUploads.delete(uploadId);
+    const removePartialFile = () => {
+      try {
+        unlinkIfPresent(active.path);
+      } catch (err) {
+        serviceLogger.warn(
+          { uploadId, path: active.path, error: String(err) },
+          "Failed to remove partial upload",
+        );
+      }
+    };
+    if (active.stream.closed) {
+      removePartialFile();
+      return;
+    }
+    active.stream.once("close", removePartialFile);
+    active.stream.destroy();
   }
 
   private sendResponse(
