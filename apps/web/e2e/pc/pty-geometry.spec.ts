@@ -107,7 +107,7 @@ test.describe("PTY geometry edges", () => {
       .toBe(userScrollLeft);
 
     // 触发若干 onRender — PTY 增量输出会让 cursor 从 col 0 推进到 col N。N 仍小于 viewport
-    // 起始 (scrollLeft=500) → cursor 不在 viewport 内 → bug 版本 followCursorX 会强行 snap 回。
+    // 即使 cursor 不在 viewport 内，增量输出也不应覆盖用户主动设置的横向位置。
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => window.__ptySmoke.sendPty("B"));
     }

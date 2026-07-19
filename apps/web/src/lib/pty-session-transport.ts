@@ -39,8 +39,6 @@ interface PtySessionTransportOptions {
 
 interface PtySessionTransport {
   dispose: () => void;
-  flushOutput: () => void;
-  setOutputPaused: (value: boolean) => void;
 }
 
 export function attachPtySessionTransport(
@@ -199,8 +197,6 @@ export function attachPtySessionTransport(
   startSnapshotSubscribe();
 
   return {
-    flushOutput: () => frameWriter.flush(),
-    setOutputPaused: (value) => frameWriter.setPaused(value),
     dispose: () => {
       disposed = true;
       clearRetry();

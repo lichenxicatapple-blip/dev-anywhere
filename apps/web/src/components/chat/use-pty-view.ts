@@ -155,8 +155,7 @@ interface ScrollControllerHandle {
 }
 
 interface TerminalControllerHandle {
-  flushOutput: () => void;
-  setOutputPaused: (value: boolean) => void;
+  dispose: () => void;
 }
 
 interface MobilePtyControlsVisibilityInput {
@@ -537,11 +536,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
-  const resumePtyOutputForLocalInput = useCallback((): void => {
-    terminalControllerRef.current?.setOutputPaused(false);
-    terminalControllerRef.current?.flushOutput();
-  }, []);
-
   const resetHorizontalScrollAfterLineSubmit = useCallback((data: string, reason: string): void => {
     if (!data.includes("\r") && !data.includes("\n")) return;
     // The terminal cursor still points at the submitted line until remote echo arrives. Keep the
@@ -606,7 +600,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       event.preventDefault();
       event.stopPropagation();
       sendRemoteInputRaw(sessionId, raw);
-      resumePtyOutputForLocalInput();
       scheduleRawInputFollow("physicalKeyboard");
       resetHorizontalScrollAfterLineSubmit(raw, "physicalKeyboardEnter");
     };
@@ -619,7 +612,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     containerEl,
     inputModePreference,
     resetHorizontalScrollAfterLineSubmit,
-    resumePtyOutputForLocalInput,
     scheduleRawInputFollow,
     sessionId,
     setAdaptiveInputModality,
@@ -680,10 +672,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
     terminalRef,
-    onAfterPaste: () => {
-      resumePtyOutputForLocalInput();
-      scheduleRawInputFollow("paste");
-    },
+    onAfterPaste: () => scheduleRawInputFollow("paste"),
   });
   const handlePasteCapture = useCallback(
     (event: ClipboardEvent<HTMLDivElement>): void => {
@@ -723,11 +712,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const path = await uploadFileAndShowToast({ relay, sessionId, file });
       if (path) {
         sendRemoteInputRaw(sessionId, `@${path} `);
-        resumePtyOutputForLocalInput();
         scheduleRawInputFollow("dropUpload");
       }
     },
-    [canAcceptInput, resumePtyOutputForLocalInput, scheduleRawInputFollow, sessionId],
+    [canAcceptInput, scheduleRawInputFollow, sessionId],
   );
 
   const handleTerminalContainerMouseDown = useCallback(
@@ -783,7 +771,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (data: string): void => {
-      resumePtyOutputForLocalInput();
       scheduleRawInputFollow("rawInput");
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
@@ -863,8 +850,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             : userHasVerticalScrollIntentRef.current,
           onUserVerticalScrollIntentChange: (value) => {
             userHasVerticalScrollIntentRef.current = value;
-            terminalControllerRef.current?.setOutputPaused(value);
-            if (!value) terminalControllerRef.current?.flushOutput();
           },
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
@@ -1031,7 +1016,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
-    resumePtyOutputForLocalInput,
     webOwnsPtyGeometry,
   ]);
 
@@ -1149,7 +1133,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           return;
         }
         sendRemoteInputRaw(sessionId, text);
-        resumePtyOutputForLocalInput();
         scheduleRawInputFollow("paste");
         resetHorizontalScrollAfterLineSubmit(text, "pasteEnter");
       })
@@ -1161,7 +1144,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, [
     canAcceptInput,
     resetHorizontalScrollAfterLineSubmit,
-    resumePtyOutputForLocalInput,
     scheduleRawInputFollow,
     sessionId,
   ]);

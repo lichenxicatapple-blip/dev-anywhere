@@ -191,7 +191,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeGreaterThan(0);
 
-    // 远端继续输出: bug 版本 → notifyAtBottom 误清 intent → flushOutput → scrollToBottom 拉回
+    // 远端继续输出时，不能误清回看意图并把用户拉回底部。
     for (let i = 0; i < 8; i++) {
       await sendPtyOutput(page, `continuous output ${i}\r\n`);
     }

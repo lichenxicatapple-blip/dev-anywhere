@@ -32,8 +32,6 @@ type PtyTransportAttacher = (opts: {
   onSubscribeDelayed?: () => void;
 }) => {
   dispose: () => void;
-  flushOutput: () => void;
-  setOutputPaused: (value: boolean) => void;
 };
 
 interface PtyTerminalControllerOptions {
@@ -67,8 +65,6 @@ interface PtyTerminalControllerOptions {
 
 interface PtyTerminalController {
   dispose: () => void;
-  flushOutput: () => void;
-  setOutputPaused: (value: boolean) => void;
 }
 
 export function attachPtyTerminalController(
@@ -100,7 +96,6 @@ export function attachPtyTerminalController(
   let disposeRawInput: (() => void) | null = null;
   let transport: ReturnType<typeof attachPtySessionTransport> | null = null;
   let removeFocusHandler: (() => void) | null = null;
-  let outputPaused = false;
 
   void (async () => {
     try {
@@ -137,7 +132,6 @@ export function attachPtyTerminalController(
         onSubscribeStarted,
         onSubscribeDelayed,
       });
-      transport.setOutputPaused(outputPaused);
     } catch (err) {
       // createTerminal / attachTransport 抛出会让用户看到空白终端无任何提示。
       // 至少把错误抛给上层（toast / 错误态）+ 控制台，避免静默失败。
@@ -147,11 +141,6 @@ export function attachPtyTerminalController(
   })();
 
   return {
-    flushOutput: () => transport?.flushOutput(),
-    setOutputPaused: (value) => {
-      outputPaused = value;
-      transport?.setOutputPaused(value);
-    },
     dispose: () => {
       disposed = true;
       transport?.dispose();

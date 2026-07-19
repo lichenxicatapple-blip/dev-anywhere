@@ -3,7 +3,6 @@ import type { PtyRenderTarget } from "./pty-recovery";
 interface PtyFrameWriteBufferOptions {
   onFramePending?: () => void;
   onFrameWritten?: () => void;
-  paused?: boolean;
   schedule?: (callback: FrameRequestCallback) => number;
   cancel?: (handle: number) => void;
 }
@@ -11,8 +10,6 @@ interface PtyFrameWriteBufferOptions {
 interface PtyFrameWriteBuffer {
   target: PtyRenderTarget;
   clear: () => void;
-  flush: () => void;
-  setPaused: (value: boolean) => void;
   dispose: () => void;
 }
 
@@ -23,13 +20,11 @@ export function createPtyFrameWriteBuffer(
   const {
     onFramePending,
     onFrameWritten,
-    paused: initialPaused = false,
     schedule = (callback) => requestAnimationFrame(callback),
     cancel = (handle) => cancelAnimationFrame(handle),
   } = options;
   let frame: number | null = null;
   let disposed = false;
-  let paused = initialPaused;
   let pendingBytes: Uint8Array[] = [];
   let pendingCallbacks: Array<() => void> = [];
 
@@ -63,7 +58,7 @@ export function createPtyFrameWriteBuffer(
   };
 
   const scheduleFlush = (): void => {
-    if (disposed || paused || frame !== null || pendingBytes.length === 0) return;
+    if (disposed || frame !== null || pendingBytes.length === 0) return;
     frame = schedule(flush);
   };
 
@@ -87,18 +82,6 @@ export function createPtyFrameWriteBuffer(
       },
     },
     clear: clearPending,
-    flush: () => {
-      if (frame !== null) {
-        cancel(frame);
-        frame = null;
-      }
-      flush();
-    },
-    setPaused: (value) => {
-      if (paused === value) return;
-      paused = value;
-      if (!paused) scheduleFlush();
-    },
     dispose: () => {
       disposed = true;
       clearPending();

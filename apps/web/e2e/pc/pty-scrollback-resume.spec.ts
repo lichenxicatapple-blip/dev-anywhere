@@ -1,8 +1,8 @@
 // 复现 user 反馈的 PTY 滚回底冻结现象:
 //   1. PTY 持续输出
-//   2. wheel 上滚离开底部 → output 被 paused
-//   3. paused 期间 server 端继续 sendPty (frame writer 累积)
-//   4. wheel 滚回底部 → 期望 intent 释放 + output 恢复 + 探针行可见
+//   2. wheel 上滚离开底部 → 进入 review, 但 output 仍持续写入 xterm
+//   3. review 期间 server 端继续 sendPty → buffer 更新且用户位置保持
+//   4. wheel 滚回底部 → 期望恢复自动跟随 + 探针行可见
 //
 // 如果 bug 在 e2e 能复现, 这条 spec 就是 fail; 修好之后变 green。
 import { expect, test } from "@playwright/test";
@@ -45,15 +45,20 @@ test.describe("PTY scrollback resume", () => {
     for (let i = 0; i < 5; i++) {
       await page.mouse.wheel(0, -120);
     }
+    const reviewedScrollTop = await terminal.evaluate((node) => node.scrollTop);
 
-    // wheel 后继续 sendPty: paused 路径下 frameWriter 在 pendingBytes 累积。
+    // 回看期间仍继续写 xterm，不能把输出藏在前端队列里等下一次用户交互唤醒。
     await page.evaluate(() => {
       window.__ptySmoke.sendPty(
         Array.from({ length: 10 }, (_, i) => `mid ${String(i).padStart(2, "0")}\r\n`).join(""),
       );
     });
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+      .toContain("mid 09");
+    expect(await terminal.evaluate((node) => node.scrollTop)).toBeCloseTo(reviewedScrollTop, 0);
 
-    // 小 wheel 滚回底部 (跟 user trace 同节奏)。
+    // 小 wheel 滚回底部。
     for (let i = 0; i < 6; i++) {
       await page.mouse.wheel(0, 120);
     }
