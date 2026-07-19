@@ -325,7 +325,7 @@ describe("ChatHeader PTY upload menu", () => {
       "在会话中查找",
       "重命名",
       "发送 Ctrl+O",
-      "上传图片",
+      "上传照片或视频",
       "上传文件",
       "恢复默认",
     ];

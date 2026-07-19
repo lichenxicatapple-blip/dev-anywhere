@@ -1,12 +1,11 @@
-// 验证图片 / 文件 input 拆分: vivo Chrome 等 OEM 定制在点击没设 accept 的 file input
-// 时会预申请相机权限。"上传文件" 路径 accept 排除 image/video → 不再触发相机弹窗;
-// "上传图片" 路径 accept="image/*" → 显式选图意图, 即使弹相机也符合预期。
+// 验证媒体 / 文件 input 拆分：媒体入口接受照片和视频；通用文件入口按平台策略过滤，
+// 桌面和 Safari 接受所有类型，Android 则避免触发部分浏览器的相机权限请求。
 //
 // 这里只验静态 DOM 契约 (菜单两项 + hidden input accept 属性), 不真触发文件选择器。
 import { test, expect } from "@playwright/test";
 import { gotoWithFakeProxy, installFakeRelay } from "../helpers";
 
-test.describe("attach menu — image vs file accept split", () => {
+test.describe("attach menu — media vs file accept split", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
   });
@@ -22,8 +21,11 @@ test.describe("attach menu — image vs file accept split", () => {
     // hidden input 不在 visible tree 里, 用 attached + getAttribute 直接断言
     const imageInput = page.locator('input[data-slot="chat-menu-upload-image-input"]');
     const fileInput = page.locator('input[data-slot="chat-menu-upload-file-input"]');
-    await expect(imageInput).toHaveAttribute("accept", "image/*");
-    await expect(fileInput).toHaveAttribute("accept", "application/*,text/*");
+    await expect(page.locator('[data-slot="chat-menu-upload-image"]')).toContainText(
+      "上传照片或视频",
+    );
+    await expect(imageInput).toHaveAttribute("accept", "image/*,video/*");
+    await expect(fileInput).not.toHaveAttribute("accept");
     await expect(imageInput).toHaveAttribute("type", "file");
     await expect(fileInput).toHaveAttribute("type", "file");
   });
@@ -44,8 +46,11 @@ test.describe("attach menu — image vs file accept split", () => {
 
     const imageInput = page.locator('input[data-slot="input-attach-image-input"]');
     const fileInput = page.locator('input[data-slot="input-attach-file-input"]');
-    await expect(imageInput).toHaveAttribute("accept", "image/*");
-    await expect(fileInput).toHaveAttribute("accept", "application/*,text/*");
+    await expect(page.locator('[data-slot="input-attach-menu-image"]')).toContainText(
+      "上传照片或视频",
+    );
+    await expect(imageInput).toHaveAttribute("accept", "image/*,video/*");
+    await expect(fileInput).not.toHaveAttribute("accept");
     await expect(imageInput).toHaveAttribute("type", "file");
     await expect(fileInput).toHaveAttribute("type", "file");
   });

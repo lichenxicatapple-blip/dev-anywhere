@@ -51,6 +51,7 @@ import { voicePlaybackContext } from "@/voice/voice-playback-context";
 import { recordVoicePilotDiagnostic } from "@/voice/voice-pilot-diagnostics";
 import { voicePilotWakeLockScopeKey } from "@/voice/voice-pilot-wake-lock";
 import { resolveVoiceSpeechSource } from "@/voice/speech-capture";
+import { getUploadPickerPolicy } from "@/lib/upload-picker-policy";
 import {
   Dialog,
   DialogContent,
@@ -150,6 +151,7 @@ function ShortcutKeyIcon({ label }: { label: string }) {
 }
 
 export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
+  const uploadPickerPolicy = getUploadPickerPolicy();
   const navigate = useNavigate();
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
@@ -316,9 +318,8 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
 
   // PTY 模式上传文件: 触发隐藏 input → 读字节 → relay.uploadFile → 把返回路径作为
   // "@<path> " 文本写到终端 stdin, 用户接着回车或自己拼到命令里 (与图片粘贴同形状)。
-  // 图片 / 文件分两个 input: 部分 Android Chrome (vivo 等 OEM 定制) 在点击没设
-  // accept 的 file input 时会预申请相机权限。拆开后"上传文件"路径用排除 image/video
-  // 的 accept, 不再触发相机授权弹窗。
+  // 媒体 / 文件分两个 input: "上传照片或视频" 用 image/*,video/* 进入系统相册；
+  // 普通文件入口由 upload picker policy 处理 Safari 与 Android 的系统选择器差异。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -489,7 +490,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
                     <ChatMenuIcon>
                       <ImageIcon aria-hidden="true" />
                     </ChatMenuIcon>
-                    上传图片
+                    上传照片或视频
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={menuItemClass}
@@ -617,7 +618,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept={uploadPickerPolicy.mediaAccept}
             className="hidden"
             data-slot="chat-menu-upload-image-input"
             onChange={(event) => {
@@ -627,7 +628,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/*,text/*"
+            accept={uploadPickerPolicy.fileAccept}
             className="hidden"
             data-slot="chat-menu-upload-file-input"
             onChange={(event) => {

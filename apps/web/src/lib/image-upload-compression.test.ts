@@ -41,6 +41,9 @@ describe("image upload compression", () => {
     expect(
       shouldCompressImageForUpload(fileWithSize("archive.zip", "application/zip", LARGE_FILE_SIZE)),
     ).toBe(false);
+    expect(
+      shouldCompressImageForUpload(fileWithSize("recording.mp4", "video/mp4", LARGE_FILE_SIZE)),
+    ).toBe(false);
   });
 
   it("keeps aspect ratio while limiting the longest edge", () => {

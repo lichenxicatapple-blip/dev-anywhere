@@ -33,6 +33,7 @@ import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
 import { getClipboardImageFile, insertTextAtSelection } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
 import { showCompactStartToast } from "@/lib/compact-toast";
+import { getUploadPickerPolicy } from "@/lib/upload-picker-policy";
 import { toast } from "@/components/toast";
 
 interface InputBarProps {
@@ -40,6 +41,7 @@ interface InputBarProps {
 }
 
 export function InputBar({ sessionId }: InputBarProps) {
+  const uploadPickerPolicy = getUploadPickerPolicy();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashPickerRef = useRef<PickerHandle>(null);
   const filePickerRef = useRef<PickerHandle>(null);
@@ -304,9 +306,8 @@ export function InputBar({ sessionId }: InputBarProps) {
   // 任意文件上传: picker (Paperclip 按钮) 和 drag-drop 共用同一上传逻辑。
   // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
   // image paste 的 insertTextAtSelection / insertedMentions 跟踪逻辑。
-  // 图片 / 文件分两个 input: Android Chrome (vivo 等 OEM 定制) 在点击没设 accept 的
-  // file input 时会预申请相机权限。拆开后"上传文件"路径用排除 image/video 的 accept,
-  // 不再触发相机授权弹窗; "上传图片" 路径明确想选图, 即使弹相机也符合预期。
+  // 媒体 / 文件分两个 input: "上传照片或视频" 用 image/*,video/* 进入系统相册；
+  // 普通文件入口由 upload picker policy 处理 Safari 与 Android 的系统选择器差异。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -494,7 +495,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/*"
+        accept={uploadPickerPolicy.mediaAccept}
         className="hidden"
         data-slot="input-attach-image-input"
         onChange={(event) => {
@@ -504,7 +505,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept="application/*,text/*"
+        accept={uploadPickerPolicy.fileAccept}
         className="hidden"
         data-slot="input-attach-file-input"
         onChange={(event) => {
@@ -593,7 +594,7 @@ function AttachMenuItems({
         onClick={onPickImage}
       >
         <ImageIcon aria-hidden="true" className="size-4" />
-        上传图片
+        上传照片或视频
       </button>
       <button
         type="button"
