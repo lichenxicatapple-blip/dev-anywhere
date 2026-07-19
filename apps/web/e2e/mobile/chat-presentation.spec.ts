@@ -49,7 +49,7 @@ test.describe("L4 mobile / chat presentation", () => {
 
     const panel = emuPage.locator('[data-slot="connection-lost-panel"][data-variant="proxy"]');
     await expect(panel).toBeVisible({ timeout: 10_000 });
-    await expect(panel.getByText("开发机未连接")).toBeVisible();
+    await expect(panel.getByText("开发机连接可能遇到问题")).toBeVisible();
     await expectNoHorizontalDocumentOverflow(emuPage);
     // input bar 已被替代, 不应再可见
     await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toHaveCount(0);

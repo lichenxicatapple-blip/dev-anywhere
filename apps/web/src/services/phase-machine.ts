@@ -9,6 +9,8 @@ import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 
+const RECONNECT_GRACE_PERIOD_MS = 30_000;
+
 export interface Timers {
   reconnect: ReturnType<typeof setTimeout> | null;
   coldStartDone: boolean;
@@ -50,7 +52,7 @@ function requestProxyState(relay: RelayClient): void {
 
 function requestSessionHistory(relay: RelayClient): void {
   void relay
-    .requestSessionHistory()
+    .requestSessionHistory(RECONNECT_GRACE_PERIOD_MS)
     .then((sessions) => {
       useSessionStore.getState().setHistorySessions(sessions);
     })
@@ -60,7 +62,7 @@ function requestSessionHistory(relay: RelayClient): void {
       // 手机唤醒时，旧连接上的请求会随 socket 断开而失败；新连接随后会重新同步。
       // 只有连接已经稳定后仍然失败，才向用户报告真正需要关注的问题。
       if (!app.connected || !app.proxyOnline || app.phase === "reconnecting") return;
-      toast.error("无法加载历史会话");
+      toast.warning("历史会话加载可能遇到问题，仍在等待开发机返回");
     });
 }
 
@@ -121,7 +123,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
           useAppStore.getState().resetProxyListLoaded();
           useAppStore.getState().transitionToPhase("connecting");
           router.navigate("/");
-        }, 10000);
+        }, RECONNECT_GRACE_PERIOD_MS);
       }
     }
   }

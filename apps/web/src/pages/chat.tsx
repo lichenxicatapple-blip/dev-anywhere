@@ -347,11 +347,11 @@ function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {
 }
 
 function ConnectionLostPanel({ variant }: { variant: "relay" | "proxy" }) {
-  const title = variant === "relay" ? "中继连接已中断" : "开发机未连接";
+  const title = variant === "relay" ? "中继连接可能遇到问题" : "开发机连接可能遇到问题";
   const message =
     variant === "relay"
-      ? "与中继服务器的 WebSocket 连接已断开，正在尝试重新建立连接。"
-      : "目标开发机当前未在线。请确认开发机上 dev-anywhere proxy 守护进程在运行，或返回会话列表选择其他开发机。";
+      ? "正在继续尝试连接中继服务器，网络恢复后会自动返回当前会话。"
+      : "正在继续尝试连接开发机。若长时间没有恢复，请确认 DEV Anywhere 正在开发机上运行。";
   return (
     <div
       className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 px-6 text-center bg-background"

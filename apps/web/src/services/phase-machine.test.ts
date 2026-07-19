@@ -3,16 +3,18 @@ import type { RelayClient } from "@/services/relay-client";
 import { handleRelayMessage, handleWsStatusChange, type Timers } from "./phase-machine";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
+import { router } from "@/lib/router";
 
 vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
 }));
 
 const toastError = vi.fn();
+const toastWarning = vi.fn();
 vi.mock("@/components/toast", () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
-    warning: vi.fn(),
+    warning: (...args: unknown[]) => toastWarning(...args),
     success: vi.fn(),
   },
 }));
@@ -36,6 +38,7 @@ describe("phase-machine reconnect timers", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetAppStore();
+    vi.mocked(router.navigate).mockClear();
   });
 
   afterEach(() => {
@@ -66,6 +69,24 @@ describe("phase-machine reconnect timers", () => {
     expect(useAppStore.getState().phase).toBe("reconnecting");
     expect(relay.register).toHaveBeenCalledTimes(1);
     expect(relay.listProxies).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps retrying for 30 seconds before falling back to the connection page", () => {
+    const relay = {
+      register: vi.fn(),
+      listProxies: vi.fn(),
+    } as unknown as RelayClient;
+    const timers: Timers = { reconnect: null, coldStartDone: true };
+
+    handleWsStatusChange(false, timers, relay);
+
+    vi.advanceTimersByTime(29_999);
+    expect(useAppStore.getState().phase).toBe("reconnecting");
+    expect(router.navigate).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(useAppStore.getState().phase).toBe("connecting");
+    expect(router.navigate).toHaveBeenCalledWith("/");
   });
 
   it("reselects the current proxy when it returns after a graceful proxy restart", async () => {
@@ -114,6 +135,7 @@ describe("phase-machine request failure handling", () => {
   beforeEach(() => {
     resetAppStore();
     toastError.mockClear();
+    toastWarning.mockClear();
   });
 
   afterEach(() => {
@@ -195,8 +217,12 @@ describe("phase-machine request failure handling", () => {
     );
 
     await vi.waitFor(() => {
-      expect(toastError).toHaveBeenCalledWith("无法加载历史会话");
+      expect(toastWarning).toHaveBeenCalledWith(
+        "历史会话加载可能遇到问题，仍在等待开发机返回",
+      );
     });
+    expect(toastError).not.toHaveBeenCalled();
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(30_000);
     expect(useAppStore.getState().phase).toBe("chatting");
     errSpy.mockRestore();
   });
@@ -243,6 +269,7 @@ describe("phase-machine request failure handling", () => {
 
     await vi.waitFor(() => expect(errSpy).toHaveBeenCalled());
     expect(toastError).not.toHaveBeenCalled();
+    expect(toastWarning).not.toHaveBeenCalled();
     errSpy.mockRestore();
   });
 });
