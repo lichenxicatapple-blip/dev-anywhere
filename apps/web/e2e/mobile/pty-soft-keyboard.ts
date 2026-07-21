@@ -199,6 +199,67 @@ export async function dismissSoftKeyboard(_page: Page): Promise<void> {
     .toBe(true);
 }
 
+export async function setAndroidEmulatorOrientation(
+  page: Page,
+  orientation: "portrait" | "landscape" | "auto",
+): Promise<void> {
+  const serialArgs = await adbArgs();
+  const serial = serialArgs.at(-1) ?? "";
+  if (!serial.startsWith("emulator-")) {
+    throw new Error(
+      `Refusing to change orientation on non-emulator device: ${serial || "unknown"}`,
+    );
+  }
+
+  if (orientation === "auto") {
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "user_rotation",
+      "0",
+    ]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "accelerometer_rotation",
+      "1",
+    ]);
+  } else {
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "accelerometer_rotation",
+      "0",
+    ]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "user_rotation",
+      orientation === "landscape" ? "1" : "0",
+    ]);
+  }
+
+  const expectLandscape = orientation === "landscape";
+  await expect
+    .poll(() => page.evaluate(() => window.innerWidth > window.innerHeight), {
+      timeout: 10_000,
+      message: `Android emulator did not settle in ${orientation} orientation`,
+    })
+    .toBe(expectLandscape);
+}
+
 export async function touchPtyTerminalAndWaitForSoftKeyboard(page: Page): Promise<void> {
   await touchPtyTerminal(page);
   await expect(

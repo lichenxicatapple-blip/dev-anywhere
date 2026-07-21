@@ -155,6 +155,9 @@ body {
   color: var(--popover-foreground);
   box-shadow: 0 -10px 24px color-mix(in srgb, var(--foreground) 12%, transparent);
   backdrop-filter: saturate(1.2) blur(10px);
+  /* Mobile keyboards can paint their toolbar into the viewport edge. Keep the
+     bottom row's hit targets inside the control surface in every orientation. */
+  padding-bottom: 1rem;
 }
 
 .dev-pty-mobile-key {

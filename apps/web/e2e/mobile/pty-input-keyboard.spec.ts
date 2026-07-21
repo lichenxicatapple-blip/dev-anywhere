@@ -6,6 +6,7 @@ import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
 import {
   dismissSoftKeyboard,
+  setAndroidEmulatorOrientation,
   touchPtyTerminal,
   touchPtyTerminalAndWaitForSoftKeyboard,
 } from "./pty-soft-keyboard";
@@ -72,9 +73,18 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     const metrics = await emuPage.evaluate((sid) => {
       const controls = document.querySelector('[data-slot="pty-mobile-controls"]');
       const controlsRect = controls?.getBoundingClientRect();
+      const controlKeys = Array.from(
+        controls?.querySelectorAll<HTMLElement>('button[data-slot^="pty-mobile-key-"]') ?? [],
+      );
+      const lowestKeyBottom =
+        controlKeys.length > 0
+          ? Math.max(...controlKeys.map((key) => key.getBoundingClientRect().bottom))
+          : null;
       return {
         controlsBottom: controlsRect ? controlsRect.y + controlsRect.height : null,
         controlsHeight: controlsRect?.height ?? null,
+        interactiveBottomClearance:
+          controlsRect && lowestKeyBottom !== null ? controlsRect.bottom - lowestKeyBottom : null,
         terminalRows: window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
         keyboardOffset: Number(
           document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
@@ -95,6 +105,8 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(metrics.controlsBottom).not.toBeNull();
     expect(metrics.controlsHeight).not.toBeNull();
     expect(metrics.controlsHeight ?? 0).toBeGreaterThan(80);
+    expect(metrics.interactiveBottomClearance).not.toBeNull();
+    expect(metrics.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(15);
     const visualViewportBottom = metrics.visualViewportTop + metrics.visualViewportHeight;
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       visualViewportBottom + 2,
@@ -111,5 +123,38 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       await emuPage.waitForTimeout(100);
     }
     expect(new Set(controlHeights)).toEqual(new Set([Math.round(metrics.controlsHeight ?? 0)]));
+  });
+
+  test("keeps one-row PTY controls clear of the Android keyboard in landscape", async ({
+    emuPage,
+  }) => {
+    await setAndroidEmulatorOrientation(emuPage, "landscape");
+    try {
+      await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+      await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+      await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+
+      const geometry = await emuPage.evaluate(() => {
+        const controls = document.querySelector<HTMLElement>('[data-slot="pty-mobile-controls"]');
+        const keys = Array.from(
+          controls?.querySelectorAll<HTMLElement>('button[data-slot^="pty-mobile-key-"]') ?? [],
+        );
+        const rootRect = controls?.getBoundingClientRect();
+        return {
+          keyRows: new Set(keys.map((key) => Math.round(key.getBoundingClientRect().top))).size,
+          interactiveBottomClearance:
+            rootRect && keys.length > 0
+              ? rootRect.bottom - Math.max(...keys.map((key) => key.getBoundingClientRect().bottom))
+              : null,
+        };
+      });
+
+      expect(geometry.keyRows).toBe(1);
+      expect(geometry.interactiveBottomClearance).not.toBeNull();
+      expect(geometry.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(15);
+    } finally {
+      await dismissSoftKeyboard(emuPage);
+      await setAndroidEmulatorOrientation(emuPage, "auto");
+    }
   });
 });

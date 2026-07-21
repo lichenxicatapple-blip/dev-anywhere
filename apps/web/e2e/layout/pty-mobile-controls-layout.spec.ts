@@ -17,7 +17,7 @@ function averageRgbChannel(color: string): number {
 test.describe("PTY mobile controls — portrait layout geometry", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
-  test("two rows render at ~105px height with uniform key sizes", async ({ page }) => {
+  test("two rows keep uniform key sizes and keyboard-edge clearance", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
     await expectPtyTerminalMounted(page);
 
@@ -56,13 +56,22 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
       })
       .toBe(true);
 
-    // 2 行布局: 容器内 grid 2 行 × 6 列, 容器 py-1.5 (12px) + 2*h-11 (88px) +
-    // gap-1 (4px) + border-t (1px) ≈ 105px。给 ±15px 容差 (字体行高 / 边框 / shadow)。
+    // 2 行布局: 容器内 grid 2 行 × 6 列。辅助区底部留出键盘边缘安全区，
+    // 避免输入法的顶部工具栏盖住最下排按键。
     const controlsBox = await controls.boundingBox();
     expect(controlsBox).not.toBeNull();
     if (!controlsBox) return;
     expect(controlsBox.height).toBeGreaterThanOrEqual(95);
     expect(controlsBox.height).toBeLessThanOrEqual(125);
+
+    const interactiveBottomClearance = await controls.evaluate((element) => {
+      const rootRect = element.getBoundingClientRect();
+      const keys = Array.from(
+        element.querySelectorAll<HTMLElement>('button[data-slot^="pty-mobile-key-"]'),
+      );
+      return rootRect.bottom - Math.max(...keys.map((key) => key.getBoundingClientRect().bottom));
+    });
+    expect(interactiveBottomClearance).toBeGreaterThanOrEqual(15);
 
     // 所有非 Enter 按键 outer 都是 h-11 (44px), 用 4 个代表性 slot 抽样:
     // 文本键 / icon 键 / 第一个 / 最后一个。
@@ -271,8 +280,8 @@ test.describe("PTY mobile controls — iPad landscape keyboard", () => {
     expect(geometry.keyRows).toBe(1);
     expect(geometry.controlHeight).toBeGreaterThanOrEqual(50);
     expect(geometry.controlHeight).toBeLessThanOrEqual(70);
-    expect(geometry.bottomPadding).toBeGreaterThanOrEqual(5);
-    expect(geometry.bottomPadding).toBeLessThanOrEqual(8);
+    expect(geometry.bottomPadding).toBeGreaterThanOrEqual(15);
+    expect(geometry.bottomPadding).toBeLessThanOrEqual(17);
     expect(geometry.slotsByPosition.slice(8, 12)).toEqual([
       "pty-mobile-key-left",
       "pty-mobile-key-up",
