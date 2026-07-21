@@ -301,6 +301,21 @@ export async function expectPtyTerminalMounted(
       { timeout },
     )
     .toBeTruthy();
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          window.__ptySmoke.sent.some((raw) => {
+            try {
+              return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
+            } catch {
+              return false;
+            }
+          }),
+        ),
+      { timeout },
+    )
+    .toBe(true);
 }
 
 export async function readRawPtyInput(page: Page): Promise<string> {
