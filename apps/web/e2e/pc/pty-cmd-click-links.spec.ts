@@ -55,25 +55,30 @@ async function activate(
 }
 
 async function selectTerminalText(page: Page, text: string): Promise<void> {
-  const selected = await page.evaluate((target) => {
-    const term = window.__ccTestPtyTerminals?.get("claude-pty");
-    const controller = window.__ccTestPtySelectionControllers?.get("claude-pty");
-    if (!term || !controller) return false;
-    const buffer = term.buffer.active;
-    for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
-      const line = buffer.getLine(row)?.translateToString(true) ?? "";
-      const column = line.indexOf(target);
-      if (column < 0) continue;
-      return controller.selectRange({
-        anchorRow: row,
-        focusRow: row,
-        anchorColumn: column,
-        focusColumn: Math.min(column + target.length - 1, term.cols - 1),
-      });
-    }
-    return false;
-  }, text);
-  if (!selected) throw new Error(`could not select terminal text ${JSON.stringify(text)}`);
+  await expect
+    .poll(() =>
+      page.evaluate((target) => {
+        if (document.querySelector('[data-slot="pty-selection-toolbar"]')) return true;
+        const term = window.__ccTestPtyTerminals?.get("claude-pty");
+        const controller = window.__ccTestPtySelectionControllers?.get("claude-pty");
+        if (!term || !controller) return false;
+        const buffer = term.buffer.active;
+        for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+          const line = buffer.getLine(row)?.translateToString(true) ?? "";
+          const column = line.indexOf(target);
+          if (column < 0) continue;
+          controller.selectRange({
+            anchorRow: row,
+            focusRow: row,
+            anchorColumn: column,
+            focusColumn: Math.min(column + target.length - 1, term.cols - 1),
+          });
+          return false;
+        }
+        return false;
+      }, text),
+    )
+    .toBe(true);
 }
 
 test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
@@ -223,9 +228,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
 
     await expect(toolbar).toBeHidden();
     await expect
-      .poll(() =>
-        page.evaluate(() => window.__ccTest?.pty.getSelection("claude-pty") ?? "missing"),
-      )
+      .poll(() => page.evaluate(() => window.__ccTest?.pty.getSelection("claude-pty") ?? "missing"))
       .toBe("");
   });
 
@@ -263,7 +266,9 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     }
   });
 
-  test("cmd+click on a bare nested relative file path asks relay for download", async ({ page }) => {
+  test("cmd+click on a bare nested relative file path asks relay for download", async ({
+    page,
+  }) => {
     await gotoPty(page);
     const path = "pa_break_analysis/SKILL.md";
     await emitPtyLine(page, `  - ${path} 里的完整路径在哪里\r\n`);
@@ -277,9 +282,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         const sent = await sentFakeRelayMessages(page);
         return sent.some(
           (m: FakeRelayMessage) =>
-            m.type === "remote_file_url_request" &&
-            m.path === path &&
-            m.disposition === "download",
+            m.type === "remote_file_url_request" && m.path === path && m.disposition === "download",
         );
       })
       .toBe(true);
