@@ -100,6 +100,7 @@ declare global {
     __ptySmoke: {
       sent: string[];
       socket: {
+        sent: string[];
         emitPty: (data: string) => void;
         emitPtyWithSeq: (data: string, outputSeq: number) => void;
         emitResize: (cols: number, rows: number) => void;

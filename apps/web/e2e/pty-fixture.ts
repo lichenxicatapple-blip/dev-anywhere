@@ -304,14 +304,15 @@ export async function expectPtyTerminalMounted(
   await expect
     .poll(
       () =>
-        page.evaluate(() =>
-          window.__ptySmoke.sent.some((raw) => {
-            try {
-              return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
-            } catch {
-              return false;
-            }
-          }),
+        page.evaluate(
+          () =>
+            window.__ptySmoke.socket?.sent.some((raw) => {
+              try {
+                return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
+              } catch {
+                return false;
+              }
+            }) ?? false,
         ),
       { timeout },
     )
