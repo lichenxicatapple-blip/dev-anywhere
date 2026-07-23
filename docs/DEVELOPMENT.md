@@ -9,7 +9,7 @@
 - Node.js 20 或更高版本；CI 使用 Node.js 20；
 - pnpm 9，与 CI 保持一致；
 - macOS 或 Linux；
-- 可选：已经登录的 Claude Code、Codex，用于验证真实 Agent 链路；
+- 可选：已经登录的 Claude Code、Codex，用于验证真实 coding agent 链路；
 - 可选：`cloudflared`，用于验证 Quick Tunnel。
 
 安装 pnpm 和项目依赖：
@@ -81,7 +81,7 @@ pnpm --filter @dev-anywhere/proxy run dev -- \
   codex
 ```
 
-测试 Agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
+测试 coding agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
 
 ```bash
 DEV_ANYWHERE_CWD="$(mktemp -d)" \
@@ -94,7 +94,7 @@ DEV_ANYWHERE_CWD="$(mktemp -d)" \
 
 ```text
 apps/
-  proxy/    开发机服务、PTY、Agent 适配、文件与会话管理
+  proxy/    开发机服务、PTY、coding agent 适配、文件与会话管理
   relay/    Relay、Web 托管、认证、文件和语音端点
   web/      React 界面、终端与聊天视图
 packages/
@@ -201,7 +201,7 @@ pnpm test:integration
 pnpm dev:chaos
 ```
 
-集成测试覆盖 Relay 与 Proxy 的真实连接。Chaos 测试覆盖进程退出、重连、PTY 和 Agent 生命周期，运行时间与资源开销更高。
+集成测试覆盖 Relay 与 Proxy 的真实连接。Chaos 测试覆盖进程退出、重连、PTY 和 coding agent 生命周期，运行时间与资源开销更高。
 
 提交前至少运行与改动范围对应的测试。修改共享协议、Relay 鉴权、PTY 生命周期、移动输入或 Voice Pilot 时，不能只依赖单个单元测试。
 
