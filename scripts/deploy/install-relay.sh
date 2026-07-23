@@ -4,14 +4,14 @@
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./scripts/deploy/install-relay.sh --ssh user@vps-host dev-anywhere.example.com
+#        ./scripts/deploy/install-relay.sh --ssh user@vps-host <domain-or-public-ip>
 #      Requires ssh-key access to the remote host and sudo for that user.
 #
 #   2) Run directly on the VPS:
-#        sudo ./scripts/deploy/install-relay.sh dev-anywhere.example.com
+#        sudo ./scripts/deploy/install-relay.sh <domain-or-public-ip>
 #
 # Arguments:
-#   domain — public DNS name with an A record pointing at the VPS.
+#   public_host  — public DNS name pointing at the VPS, or its public IPv4 address.
 #   proxy_token  — optional; a fresh RELAY_PROXY_TOKEN is generated when omitted.
 #   client_token — optional; a fresh RELAY_CLIENT_TOKEN is generated when omitted.
 #
@@ -32,8 +32,9 @@
 # Docker starts one loopback-only Relay service that serves the Web UI, HTTP API,
 # files, voice endpoints, and WebSockets. Host nginx owns public 80/443 and
 # terminates TLS, leaving the VPS free to host more services.
-# TLS certs live under /etc/letsencrypt/live/relay/ and are auto-renewed by the
-# host's certbot cron job.
+# Domain certificates use the host's regular Certbot state. Public-IP
+# certificates use isolated state under /opt/dev-anywhere/certbot-ip so their
+# short renewal cycle cannot contend with certificates for other sites.
 #
 set -euo pipefail
 
@@ -49,8 +50,8 @@ fi
 # --ssh mode: feed this very script over stdin to a remote bash.
 if [ "${1:-}" = "--ssh" ]; then
   shift
-  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain> [proxy_token] [client_token]}"
-  DOMAIN_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain> [proxy_token] [client_token]}"
+  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
+  PUBLIC_HOST_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
   PROXY_TOKEN_ARG="${3:-}"
   CLIENT_TOKEN_ARG="${4:-}"
   SELF_PATH="${BASH_SOURCE[0]}"
@@ -64,17 +65,17 @@ if [ "${1:-}" = "--ssh" ]; then
     echo "error: missing $RENDER_LIB" >&2
     exit 1
   fi
-  echo "==> deploying to $SSH_HOST (domain: $DOMAIN_ARG)"
+  echo "==> deploying to $SSH_HOST (public host: $PUBLIC_HOST_ARG)"
   # sudo strips env vars; use `sudo env VAR=val` to thread REGISTRY_BASE / IMAGE_TAG through
   {
     cat "$RENDER_LIB"
     printf '\n'
     cat "$SELF_PATH"
-  } | ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' DEV_ANYWHERE_RELAY_PORT='${DEV_ANYWHERE_RELAY_PORT:-}' bash -s -- '$DOMAIN_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'"
+  } | ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' DEV_ANYWHERE_RELAY_PORT='${DEV_ANYWHERE_RELAY_PORT:-}' bash -s -- '$PUBLIC_HOST_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'"
   exit $?
 fi
 
-DOMAIN="${1:?Usage: install-relay.sh <domain> [proxy_token] [client_token]  |  install-relay.sh --ssh <host> <domain> [proxy_token] [client_token]}"
+PUBLIC_HOST="${1:?Usage: install-relay.sh <domain-or-public-ip> [proxy_token] [client_token]  |  install-relay.sh --ssh <host> <domain-or-public-ip> [proxy_token] [client_token]}"
 PROXY_TOKEN="${2:-}"
 CLIENT_TOKEN="${3:-}"
 INSTALL_DIR="/opt/dev-anywhere"
@@ -82,6 +83,10 @@ CERT_NAME="${CERT_NAME:-relay}"   # existing deployments already use this Let's 
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-dev-anywhere}"
 NGINX_SITE_PATH="/etc/nginx/conf.d/${NGINX_SITE_NAME}.conf"
 CERTBOT_WEBROOT="/var/www/certbot"
+CERTBOT_CONFIG_DIR="/etc/letsencrypt"
+CERTBOT_WORK_DIR="/var/lib/letsencrypt"
+CERTBOT_LOGS_DIR="/var/log/letsencrypt"
+CERT_LIVE_ROOT="$CERTBOT_CONFIG_DIR/live"
 DEV_ANYWHERE_RELAY_PORT="${DEV_ANYWHERE_RELAY_PORT:-3100}"
 # REGISTRY_BASE is the "registry/namespace" prefix. Production defaults to the
 # public Aliyun ACR image mirror used by the China VPS deployment path.
@@ -89,12 +94,17 @@ REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.a
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 RELAY_IMAGE="${REGISTRY_BASE}/dev-anywhere-relay:${IMAGE_TAG}"
 
+if ! TARGET_KIND="$(dev_anywhere_public_host_kind "$PUBLIC_HOST")"; then
+  echo "error: public host must be a valid domain or public IPv4 address without a scheme, port, or path" >&2
+  exit 1
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: must run as root (use sudo)" >&2
   exit 1
 fi
 
-echo "==> domain:       $DOMAIN"
+echo "==> public host:  $PUBLIC_HOST ($TARGET_KIND)"
 echo "==> install dir:  $INSTALL_DIR"
 echo "==> relay image:  $RELAY_IMAGE"
 echo "==> relay port:   127.0.0.1:$DEV_ANYWHERE_RELAY_PORT"
@@ -115,7 +125,7 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-# Step 2: install host nginx + certbot if missing.
+# Step 2: install host nginx and a suitable Certbot.
 install_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -y && apt-get install -y "$@"
@@ -131,10 +141,59 @@ if ! command -v nginx >/dev/null 2>&1; then
   echo "==> installing nginx"
   install_packages nginx
 fi
-if ! command -v certbot >/dev/null 2>&1; then
-  echo "==> installing certbot"
-  install_packages certbot
+
+mkdir -p "$INSTALL_DIR"
+
+CERTBOT_BIN=""
+if command -v certbot >/dev/null 2>&1; then
+  CERTBOT_BIN="$(command -v certbot)"
 fi
+
+if [ "$TARGET_KIND" = "domain" ]; then
+  if [ -z "$CERTBOT_BIN" ]; then
+    echo "==> installing certbot"
+    install_packages certbot
+    CERTBOT_BIN="$(command -v certbot)"
+  fi
+else
+  CERTBOT_VENV="$INSTALL_DIR/certbot-venv"
+  CERTBOT_STATE_DIR="$INSTALL_DIR/certbot-ip"
+  CERTBOT_CONFIG_DIR="$CERTBOT_STATE_DIR/config"
+  CERTBOT_WORK_DIR="$CERTBOT_STATE_DIR/work"
+  CERTBOT_LOGS_DIR="$CERTBOT_STATE_DIR/logs"
+  CERT_LIVE_ROOT="$CERTBOT_CONFIG_DIR/live"
+  mkdir -p "$CERTBOT_CONFIG_DIR" "$CERTBOT_WORK_DIR" "$CERTBOT_LOGS_DIR"
+
+  if [ -x "$CERTBOT_VENV/bin/certbot" ] &&
+    dev_anywhere_certbot_supports_ip_certificates "$("$CERTBOT_VENV/bin/certbot" --version 2>&1)"; then
+    CERTBOT_BIN="$CERTBOT_VENV/bin/certbot"
+  elif [ -n "$CERTBOT_BIN" ] &&
+    dev_anywhere_certbot_supports_ip_certificates "$("$CERTBOT_BIN" --version 2>&1)"; then
+    :
+  else
+    echo "==> installing Certbot 5.4+ for public IP certificates"
+    if command -v apt-get >/dev/null 2>&1; then
+      install_packages python3 python3-venv
+    else
+      install_packages python3
+    fi
+    if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+      echo "error: public IP deployment requires Python 3.10+ to install Certbot 5.4+" >&2
+      exit 1
+    fi
+    python3 -m venv "$CERTBOT_VENV"
+    "$CERTBOT_VENV/bin/python" -m pip install --disable-pip-version-check --upgrade pip
+    "$CERTBOT_VENV/bin/python" -m pip install --disable-pip-version-check "certbot>=5.4"
+    CERTBOT_BIN="$CERTBOT_VENV/bin/certbot"
+  fi
+
+  if ! dev_anywhere_certbot_supports_ip_certificates "$("$CERTBOT_BIN" --version 2>&1)"; then
+    echo "error: public IP deployment requires Certbot 5.4 or later" >&2
+    exit 1
+  fi
+fi
+
+echo "==> certbot:      $CERTBOT_BIN ($("$CERTBOT_BIN" --version 2>&1))"
 
 # Stop old docker-owned nginx before host nginx takes 80/443.
 if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
@@ -144,21 +203,28 @@ docker rm -f dev-anywhere-nginx 2>/dev/null || true
 
 mkdir -p "$CERTBOT_WEBROOT" "$(dirname "$NGINX_SITE_PATH")"
 
-# Step 3: obtain the SSL certificate through host nginx webroot.
-CERT_PATH="/etc/letsencrypt/live/$CERT_NAME/fullchain.pem"
+# Step 3: obtain the TLS certificate through host nginx webroot.
+CERT_PATH="$CERT_LIVE_ROOT/$CERT_NAME/fullchain.pem"
 NEED_CERT=0
 if [ ! -f "$CERT_PATH" ]; then
   NEED_CERT=1
-elif ! openssl x509 -in "$CERT_PATH" -noout -checkhost "$DOMAIN" >/dev/null 2>&1; then
-  echo "==> existing cert name '$CERT_NAME' does not cover $DOMAIN; renewing"
+elif [ "$TARGET_KIND" = "ip" ]; then
+  if ! openssl x509 -in "$CERT_PATH" -noout -checkip "$PUBLIC_HOST" >/dev/null 2>&1; then
+    echo "==> existing cert name '$CERT_NAME' does not cover $PUBLIC_HOST; renewing"
+    NEED_CERT=1
+  else
+    echo "==> cert already covers $PUBLIC_HOST at $CERT_LIVE_ROOT/$CERT_NAME"
+  fi
+elif ! openssl x509 -in "$CERT_PATH" -noout -checkhost "$PUBLIC_HOST" >/dev/null 2>&1; then
+  echo "==> existing cert name '$CERT_NAME' does not cover $PUBLIC_HOST; renewing"
   NEED_CERT=1
 else
-  echo "==> cert already covers $DOMAIN at /etc/letsencrypt/live/$CERT_NAME"
+  echo "==> cert already covers $PUBLIC_HOST at $CERT_LIVE_ROOT/$CERT_NAME"
 fi
 
 if [ "$NEED_CERT" -eq 1 ]; then
   echo "==> preparing nginx ACME challenge route"
-  render_dev_anywhere_nginx_challenge_conf "$DOMAIN" > "$NGINX_SITE_PATH"
+  render_dev_anywhere_nginx_challenge_conf "$PUBLIC_HOST" > "$NGINX_SITE_PATH"
   nginx -t
   if command -v systemctl >/dev/null 2>&1; then
     systemctl enable nginx >/dev/null 2>&1 || true
@@ -167,20 +233,70 @@ if [ "$NEED_CERT" -eq 1 ]; then
     nginx -s reload 2>/dev/null || nginx
   fi
 
-  echo "==> requesting SSL cert for $DOMAIN (cert name: $CERT_NAME)"
-  certbot certonly --webroot -w "$CERTBOT_WEBROOT" -d "$DOMAIN" --non-interactive --agree-tos \
-    --email "admin@$DOMAIN" --cert-name "$CERT_NAME" --force-renewal
+  echo "==> requesting TLS cert for $PUBLIC_HOST (cert name: $CERT_NAME)"
+  request_dev_anywhere_certificate \
+    "$CERTBOT_BIN" \
+    "$TARGET_KIND" \
+    "$PUBLIC_HOST" \
+    "$CERTBOT_WEBROOT" \
+    "$CERT_NAME" \
+    "$CERTBOT_CONFIG_DIR" \
+    "$CERTBOT_WORK_DIR" \
+    "$CERTBOT_LOGS_DIR"
 fi
 
 # Step 4: write host nginx route and docker deployment manifest. No build, no Dockerfile.
 echo "==> writing nginx reverse-proxy route"
-render_dev_anywhere_nginx_conf "$DOMAIN" "$CERT_NAME" "$DEV_ANYWHERE_RELAY_PORT" > "$NGINX_SITE_PATH"
+render_dev_anywhere_nginx_conf \
+  "$PUBLIC_HOST" \
+  "$CERT_NAME" \
+  "$DEV_ANYWHERE_RELAY_PORT" \
+  "$CERT_LIVE_ROOT" \
+  > "$NGINX_SITE_PATH"
 nginx -t
 if command -v systemctl >/dev/null 2>&1; then
   systemctl enable nginx >/dev/null 2>&1 || true
   systemctl reload nginx || systemctl restart nginx
 else
   nginx -s reload 2>/dev/null || nginx
+fi
+
+configure_ip_certificate_renewal() {
+  local deploy_hook_dir="$CERTBOT_CONFIG_DIR/renewal-hooks/deploy"
+  local deploy_hook="$deploy_hook_dir/dev-anywhere-nginx-reload"
+
+  mkdir -p "$deploy_hook_dir"
+  render_dev_anywhere_certbot_deploy_hook > "$deploy_hook"
+  chmod 755 "$deploy_hook"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    render_dev_anywhere_certbot_renew_service \
+      "$CERTBOT_BIN" \
+      "$CERTBOT_CONFIG_DIR" \
+      "$CERTBOT_WORK_DIR" \
+      "$CERTBOT_LOGS_DIR" \
+      "$CERT_NAME" \
+      > /etc/systemd/system/dev-anywhere-certbot-renew.service
+    render_dev_anywhere_certbot_renew_timer \
+      > /etc/systemd/system/dev-anywhere-certbot-renew.timer
+    systemctl daemon-reload
+    systemctl enable --now dev-anywhere-certbot-renew.timer
+  else
+    render_dev_anywhere_certbot_renew_cron \
+      "$CERTBOT_BIN" \
+      "$CERTBOT_CONFIG_DIR" \
+      "$CERTBOT_WORK_DIR" \
+      "$CERTBOT_LOGS_DIR" \
+      "$CERT_NAME" \
+      > /etc/cron.d/dev-anywhere-certbot-renew
+    chmod 644 /etc/cron.d/dev-anywhere-certbot-renew
+  fi
+
+  echo "==> public IP certificate renewal scheduled twice daily"
+}
+
+if [ "$TARGET_KIND" = "ip" ]; then
+  configure_ip_certificate_renewal
 fi
 
 mkdir -p "$INSTALL_DIR"
@@ -262,27 +378,27 @@ cleanup_old_images() {
 
 # Step 7: verify.
 sleep 3
-if curl -fsS "https://$DOMAIN/health" >/dev/null 2>&1; then
+if curl -fsS "https://$PUBLIC_HOST/health" >/dev/null 2>&1; then
   cleanup_old_images
   echo
   echo "=== dev-anywhere deployed ==="
-  echo "  Web UI:  https://$DOMAIN/"
-  echo "  Health:  https://$DOMAIN/health"
-  echo "  Proxy:   wss://$DOMAIN/proxy?token=$PROXY_TOKEN"
-  echo "  Client:  wss://$DOMAIN/client?token=$CLIENT_TOKEN"
+  echo "  Web UI:  https://$PUBLIC_HOST/"
+  echo "  Health:  https://$PUBLIC_HOST/health"
+  echo "  Proxy:   wss://$PUBLIC_HOST/proxy?token=$PROXY_TOKEN"
+  echo "  Client:  wss://$PUBLIC_HOST/client?token=$CLIENT_TOKEN"
   echo "  Client token for Settings -> Relay Token: $CLIENT_TOKEN"
   echo
   echo "Next, on your local machine:"
   echo "  npm install -g @dev-anywhere/proxy"
   echo "  dev-anywhere init"
   echo "  # edit ~/.dev-anywhere/config.json:"
-  echo "  #   { \"defaultProfile\": \"default\", \"profiles\": { \"default\": { \"relay\": \"cloud\" } }, \"relays\": { \"cloud\": { \"url\": \"wss://$DOMAIN\", \"proxyToken\": \"$PROXY_TOKEN\" } } }"
+  echo "  #   { \"defaultProfile\": \"default\", \"profiles\": { \"default\": { \"relay\": \"cloud\" } }, \"relays\": { \"cloud\": { \"url\": \"wss://$PUBLIC_HOST\", \"proxyToken\": \"$PROXY_TOKEN\" } } }"
   echo "  dev-anywhere serve start --relay cloud"
   echo
   echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."
   echo
   echo "To upgrade later:"
-  echo "  sudo env IMAGE_TAG=$IMAGE_TAG ./scripts/deploy/install-relay.sh $DOMAIN"
+  echo "  sudo env IMAGE_TAG=$IMAGE_TAG ./scripts/deploy/install-relay.sh $PUBLIC_HOST"
 else
   echo "error: health check failed; run 'docker compose logs' in $INSTALL_DIR to investigate" >&2
   exit 1

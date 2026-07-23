@@ -7,18 +7,27 @@
 #   3. docker / docker compose v2
 #   4. apt-get 或 yum (certbot 安装会用到)
 #   5. 80 / 443 端口入方向 (LE HTTP-01 challenge 需要 80 公网可达; host nginx 可复用)
-#   6. 域名 DNS A 记录是否解析到当前 VPS IP
+#   6. 域名模式下，DNS A 记录是否解析到当前 VPS IP
 #
 # 用法:
-#   bash scripts/deploy/check-prerequisite.sh <ssh-host> <domain>
+#   bash scripts/deploy/check-prerequisite.sh <ssh-host> <domain-or-public-ip>
 #   例:
 #     bash scripts/deploy/check-prerequisite.sh root@1.2.3.4 dev-anywhere.example.com
+#     bash scripts/deploy/check-prerequisite.sh root@1.2.3.4 1.2.3.4
 #     bash scripts/deploy/check-prerequisite.sh ubuntu@1.2.3.4 dev-anywhere.example.com
 #     bash scripts/deploy/check-prerequisite.sh my-aws-host dev-anywhere.example.com  # 用 ssh config 里的 User
 set -euo pipefail
 
-SSH_HOST="${1:?Usage: check-prerequisite.sh <ssh-host> <domain>}"
-DOMAIN="${2:?Usage: check-prerequisite.sh <ssh-host> <domain>}"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=scripts/lib/install-relay-render.sh
+source "$ROOT/scripts/lib/install-relay-render.sh"
+
+SSH_HOST="${1:?Usage: check-prerequisite.sh <ssh-host> <domain-or-public-ip>}"
+PUBLIC_HOST="${2:?Usage: check-prerequisite.sh <ssh-host> <domain-or-public-ip>}"
+if ! TARGET_KIND="$(dev_anywhere_public_host_kind "$PUBLIC_HOST")"; then
+  echo "error: public host must be a valid domain or public IPv4 address without a scheme, port, or path" >&2
+  exit 1
+fi
 
 PASS=0
 FAIL=0
@@ -30,14 +39,20 @@ warn() { echo "  WARN $1" >&2; WARN=$((WARN+1)); }
 
 section() { echo ""; echo "=== $1 ==="; }
 
-section "Local DNS resolution for $DOMAIN"
-if RESOLVED_IP="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')" && [ -n "$RESOLVED_IP" ]; then
-  ok "$DOMAIN resolves to $RESOLVED_IP"
-elif RESOLVED_IP="$(dig +short "$DOMAIN" A 2>/dev/null | tail -1)" && [ -n "$RESOLVED_IP" ]; then
-  ok "$DOMAIN resolves to $RESOLVED_IP (via dig)"
+if [ "$TARGET_KIND" = "ip" ]; then
+  RESOLVED_IP="$PUBLIC_HOST"
+  section "Public IP target"
+  ok "using VPS public IP directly: $PUBLIC_HOST"
 else
-  fail "$DOMAIN does not resolve. 切换 VPS 后域名 A 记录指过来了吗?"
-  RESOLVED_IP=""
+  section "Local DNS resolution for $PUBLIC_HOST"
+  if RESOLVED_IP="$(getent hosts "$PUBLIC_HOST" 2>/dev/null | awk '{print $1; exit}')" && [ -n "$RESOLVED_IP" ]; then
+    ok "$PUBLIC_HOST resolves to $RESOLVED_IP"
+  elif RESOLVED_IP="$(dig +short "$PUBLIC_HOST" A 2>/dev/null | tail -1)" && [ -n "$RESOLVED_IP" ]; then
+    ok "$PUBLIC_HOST resolves to $RESOLVED_IP (via dig)"
+  else
+    fail "$PUBLIC_HOST does not resolve. 域名 A 记录指向 VPS 了吗?"
+    RESOLVED_IP=""
+  fi
 fi
 
 section "SSH reachability + host key"
@@ -79,6 +94,9 @@ REMOTE_PROBE="$(ssh -o BatchMode=yes "$SSH_HOST" "
   echo APT=\$(command -v apt-get >/dev/null && echo yes || echo no)
   echo YUM=\$(command -v yum >/dev/null && echo yes || echo no)
   echo CERTBOT=\$(command -v certbot >/dev/null && certbot --version 2>/dev/null || echo missing)
+  echo IP_CERTBOT=\$(test -x /opt/dev-anywhere/certbot-venv/bin/certbot && /opt/dev-anywhere/certbot-venv/bin/certbot --version 2>/dev/null || echo missing)
+  echo PYTHON=\$(command -v python3 >/dev/null && python3 --version 2>/dev/null || echo missing)
+  echo PYTHON_IP_CERT=\$(command -v python3 >/dev/null && python3 -c 'import sys; print(\"yes\" if sys.version_info >= (3, 10) else \"no\")' || echo missing)
   echo PORT80=\$(ss -tlnp 2>/dev/null | grep -E ':80\s' | head -1 || echo free)
   echo PORT443=\$(ss -tlnp 2>/dev/null | grep -E ':443\s' | head -1 || echo free)
 ")"
@@ -93,6 +111,9 @@ NGINX_VER=$(printf   '%s\n' "$REMOTE_PROBE" | awk -F= '/^NGINX=/{sub(/^NGINX=/,"
 APT=$(printf         '%s\n' "$REMOTE_PROBE" | awk -F= '/^APT=/{sub(/^APT=/,""); print; exit}')
 YUM=$(printf         '%s\n' "$REMOTE_PROBE" | awk -F= '/^YUM=/{sub(/^YUM=/,""); print; exit}')
 CERTBOT_VER=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^CERTBOT=/{sub(/^CERTBOT=/,""); print; exit}')
+IP_CERTBOT_VER=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^IP_CERTBOT=/{sub(/^IP_CERTBOT=/,""); print; exit}')
+PYTHON_VER=$(printf  '%s\n' "$REMOTE_PROBE" | awk -F= '/^PYTHON=/{sub(/^PYTHON=/,""); print; exit}')
+PYTHON_IP_CERT=$(printf '%s\n' "$REMOTE_PROBE" | awk -F= '/^PYTHON_IP_CERT=/{sub(/^PYTHON_IP_CERT=/,""); print; exit}')
 PORT80=$(printf      '%s\n' "$REMOTE_PROBE" | awk -F= '/^PORT80=/{sub(/^PORT80=/,""); print; exit}')
 PORT443=$(printf     '%s\n' "$REMOTE_PROBE" | awk -F= '/^PORT443=/{sub(/^PORT443=/,""); print; exit}')
 
@@ -134,7 +155,24 @@ else
   fail "没有 apt-get / yum, install-relay.sh 装 certbot 那步会挂"
 fi
 
-if [[ "$CERTBOT_VER" == missing* ]]; then
+if [ "$TARGET_KIND" = "ip" ]; then
+  if [[ "$CERTBOT_VER" != missing* ]] &&
+    dev_anywhere_certbot_supports_ip_certificates "$CERTBOT_VER"; then
+    ok "$CERTBOT_VER supports public IP certificates"
+  elif [[ "$IP_CERTBOT_VER" != missing* ]] &&
+    dev_anywhere_certbot_supports_ip_certificates "$IP_CERTBOT_VER"; then
+    ok "$IP_CERTBOT_VER supports public IP certificates (isolated install)"
+  else
+    warn "公网 IP 证书需要 Certbot 5.4+；install-relay.sh 会安装独立版本"
+    if [[ "$PYTHON_VER" == missing* ]]; then
+      warn "python3 没装；install-relay.sh 会安装，但系统需要提供 Python 3.10+"
+    elif [ "$PYTHON_IP_CERT" != "yes" ]; then
+      fail "$PYTHON_VER 低于 3.10，无法安装支持公网 IP 证书的 Certbot"
+    else
+      ok "$PYTHON_VER 可用于安装 Certbot 5.4+"
+    fi
+  fi
+elif [[ "$CERTBOT_VER" == missing* ]]; then
   warn "certbot 没装, install-relay.sh 会自动安装"
 else
   ok "$CERTBOT_VER"

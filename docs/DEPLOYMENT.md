@@ -7,20 +7,45 @@
 部署前需要：
 
 - 一台有公网 IPv4 的 Linux VPS；
-- 一个已经将 `A` 记录指向该 VPS 的域名；
 - 可以通过 SSH 密钥登录，并能执行 `sudo` 的账户；
 - 对公网开放的 `80` 和 `443` 端口；
 - 本地安装 Git。
 
-部署脚本支持使用 `apt-get` 或 `yum` 的发行版。缺少 Docker、Nginx 或 Certbot 时会自动安装，Docker Compose 必须为 v2。
+公网入口可以直接使用 VPS 的 IPv4 地址，也可以使用一个已经将 `A` 记录指向该 VPS 的域名。两种方式都只提供 HTTPS/WSS，不会把应用直接暴露在 HTTP 上。
 
-先确认 DNS 已经生效：
+部署脚本支持使用 `apt-get` 或 `yum` 的发行版。缺少 Docker、Nginx 或 Certbot 时会自动安装，Docker Compose 必须为 v2。公网 IP 模式需要 Certbot 5.4 或更高版本；系统版本过低时，脚本会在独立虚拟环境中安装新版本，这要求系统提供 Python 3.10 或更高版本。
+
+使用域名时，先确认 DNS 已经生效：
 
 ```bash
 dig +short dev-anywhere.example.com
 ```
 
-输出应包含 VPS 的公网 IP。HTTPS 证书依赖正确的 DNS 记录。
+输出应包含 VPS 的公网 IP。直接使用公网 IP 时不需要 DNS 或域名。
+
+## 配置 SSH 免密登录
+
+从本地执行部署脚本前，需要确保本机可以通过 SSH 密钥登录 VPS。下文使用 `203.0.113.10` 代表 VPS 的公网 IPv4，使用 `dev-anywhere.example.com` 代表指向 VPS 的域名。两者都是文档专用的示例地址，不会指向真实服务器；执行命令前必须替换为自己的实际地址。
+
+如果本机还没有 SSH 密钥，先生成一对密钥：
+
+```bash
+ssh-keygen -t ed25519
+```
+
+将 `~/.ssh/id_ed25519.pub` 的内容添加到云服务商提供的 SSH 公钥配置中，或写入 VPS 登录账户的 `~/.ssh/authorized_keys`。系统提供 `ssh-copy-id` 时，也可以直接上传：
+
+```bash
+ssh-copy-id root@203.0.113.10
+```
+
+确认本地可以在不输入密码的情况下执行远程命令：
+
+```bash
+ssh -o BatchMode=yes root@203.0.113.10 'echo SSH ready'
+```
+
+看到 `SSH ready` 后即可继续。使用普通账户时，该账户还必须能够免交互执行 `sudo`。
 
 ## 部署 Relay
 
@@ -31,7 +56,21 @@ git clone https://github.com/lichenxicatapple-blip/dev-anywhere.git
 cd dev-anywhere
 ```
 
-通过 SSH 部署到 VPS：
+可以先检查目标 VPS 是否满足部署条件。最后一个参数使用计划中的公网入口：
+
+```bash
+bash scripts/deploy/check-prerequisite.sh root@your-vps 203.0.113.10
+```
+
+通过 SSH 部署到 VPS。直接使用公网 IP：
+
+```bash
+bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  203.0.113.10
+```
+
+使用域名：
 
 ```bash
 bash scripts/deploy/install-relay.sh \
@@ -39,21 +78,17 @@ bash scripts/deploy/install-relay.sh \
   dev-anywhere.example.com
 ```
 
-非 `root` 账户也可以使用，只要它能够免交互执行 `sudo`：
+也可以将 `root@your-vps` 换成其他 SSH 账户，例如 `deploy@your-vps`，但该账户必须能够免交互执行 `sudo`。
 
-```bash
-bash scripts/deploy/install-relay.sh \
-  --ssh deploy@your-vps \
-  dev-anywhere.example.com
-```
-
-如果仓库已经位于 VPS，可以直接在服务器上执行：
+上述命令会从本地电脑通过 SSH 完成部署。如果你选择直接操作服务器，也可以先登录 VPS、克隆仓库，然后在仓库目录中执行：
 
 ```bash
 sudo bash scripts/deploy/install-relay.sh dev-anywhere.example.com
 ```
 
-脚本会配置 Docker、Nginx 与 HTTPS，启动 Relay 容器，并请求公网健康检查。Relay 只监听 VPS 的 `127.0.0.1:3100`，公网流量由 Nginx 通过 HTTPS 转发。
+脚本会识别最后一个参数是域名还是公网 IP，配置 Docker、Nginx 与对应的 HTTPS 证书，启动 Relay 容器，并请求公网健康检查。Relay 只监听 VPS 的 `127.0.0.1:3100`，公网流量由 Nginx 通过 HTTPS 转发；`80` 端口仅响应证书验证并跳转到 HTTPS。
+
+[公网 IP 证书](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/)的有效期为六天。脚本会创建每天运行两次的续期任务，并在证书更新后重新加载 Nginx。域名证书沿用系统 Certbot 的状态目录；公网 IP 证书使用 `/opt/dev-anywhere/certbot-ip` 中的独立状态和续期任务，不会接管同一台 VPS 上其他站点的证书。
 
 部署成功后，终端会打印：
 
@@ -85,12 +120,14 @@ dev-anywhere init
   },
   "relays": {
     "cloud": {
-      "url": "wss://dev-anywhere.example.com",
+      "url": "wss://203.0.113.10",
       "proxyToken": "部署输出中的 RELAY_PROXY_TOKEN"
     }
   }
 }
 ```
+
+使用域名时，将 `url` 改为 `wss://dev-anywhere.example.com`。部署脚本会在结束时打印与当前入口匹配的完整配置示例。
 
 让 Proxy 在后台连接 Relay：
 
@@ -117,16 +154,12 @@ dev-anywhere serve status
 打开部署后的 Web 地址：
 
 ```text
-https://dev-anywhere.example.com/
+https://203.0.113.10/
 ```
 
-首次访问时，在设置中填写 `RELAY_CLIENT_TOKEN`。也可以在受信任设备上打开一次带 Token 的地址：
+使用域名时打开 `https://dev-anywhere.example.com/`。
 
-```text
-https://dev-anywhere.example.com/#/?relayToken=你的_RELAY_CLIENT_TOKEN
-```
-
-页面会把 Token 保存到当前浏览器。带 Token 的 URL 等同于登录凭据，不要放进截图、聊天记录或公开书签。
+首次访问时，在“设置 → Relay Token”中填写 `RELAY_CLIENT_TOKEN`。页面会将 Token 保存在当前浏览器中，以后无需重复填写。
 
 如果手头只有开发机配置中的 Proxy Token，可以读取 Relay 当前的 Client Token：
 
@@ -139,10 +172,10 @@ dev-anywhere relay token --relay cloud
 检查公网入口：
 
 ```bash
-curl -fsS https://dev-anywhere.example.com/health
+curl -fsS https://203.0.113.10/health
 ```
 
-响应应为 JSON，且 `status` 为 `ok`。
+使用域名时将地址替换为自己的域名。响应应为 JSON，且 `status` 为 `ok`。
 
 检查开发机连接：
 
@@ -167,12 +200,14 @@ ssh root@your-vps \
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
-  dev-anywhere.example.com
+  203.0.113.10
 npm install -g @dev-anywhere/proxy@latest
 dev-anywhere serve restart --relay cloud
 ```
 
 部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
+
+升级命令的最后一个参数应与首次部署保持一致：首次使用域名就继续传域名，首次使用公网 IP 就继续传公网 IP。
 
 需要固定版本时，在同一个终端执行：
 
@@ -180,7 +215,7 @@ dev-anywhere serve restart --relay cloud
 VERSION=x.y.z
 IMAGE_TAG="$VERSION" bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
-  dev-anywhere.example.com
+  203.0.113.10
 npm install -g "@dev-anywhere/proxy@$VERSION"
 dev-anywhere serve restart --relay cloud
 ```
@@ -209,8 +244,8 @@ tail -f ~/.dev-anywhere/logs/service.log
 
 连接失败时依次检查：
 
-1. `dig` 是否返回正确的 VPS IP；
-2. `curl https://域名/health` 是否成功；
+1. 使用域名时，`dig` 是否返回正确的 VPS IP；
+2. `curl https://域名或公网IP/health` 是否成功；
 3. Relay 容器是否健康；
 4. `dev-anywhere serve status` 是否连接到预期 Relay；
 5. 开发机是否使用 Proxy Token，浏览器是否使用 Client Token；
@@ -234,7 +269,7 @@ ssh root@your-vps \
   'cd /opt/dev-anywhere && sudo docker compose down -v'
 ```
 
-第二条命令会永久删除 Relay 数据。Nginx 配置和 Let's Encrypt 证书由宿主机管理，不会随 Docker volume 一起删除。
+第二条命令会永久删除 Relay 数据。Nginx 配置和 Let's Encrypt 证书由宿主机管理，不会随 Docker volume 一起删除。域名证书通常位于 `/etc/letsencrypt`；公网 IP 证书位于 `/opt/dev-anywhere/certbot-ip`。
 
 ## 安全边界
 
