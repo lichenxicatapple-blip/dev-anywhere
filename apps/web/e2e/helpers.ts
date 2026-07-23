@@ -50,6 +50,7 @@ declare global {
       setImagePreviewDelay(ms: number): void;
       setImagePreviewDataBase64(value: string): void;
       setProxySelectDelay(ms: number): void;
+      setSessionListDelay(ms: number): void;
       setProxyOnline(online: boolean): void;
       voice: {
         asrSent: FakeVoiceSocketPayload[];
@@ -227,6 +228,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     let holdConnections = false;
     let proxyOnlineState = true;
     let proxySelectDelayMs = 0;
+    let sessionListDelayMs = 0;
     let imagePreviewDelayMs = 0;
     const ptyBuffers = new Map<string, string>();
     const voiceAsrSent: FakeVoiceSocketPayload[] = [];
@@ -472,7 +474,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 type: "proxy_select_response",
                 requestId: msg.requestId,
                 success: true,
-                proxyId: "proxy-1",
+                proxyId: String(msg.proxyId),
               });
             }, proxySelectDelayMs);
             break;
@@ -508,7 +510,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
             break;
           }
           case "session_list":
-            this.emitJson(envelope("session_list", "system", { sessions }));
+            setTimeout(() => {
+              this.emitJson(envelope("session_list", "system", { sessions }));
+            }, sessionListDelayMs);
             break;
           case "session_history_request":
             this.emitJson({
@@ -974,6 +978,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       setProxySelectDelay(ms: number) {
         proxySelectDelayMs = Math.max(0, ms);
+      },
+      setSessionListDelay(ms: number) {
+        sessionListDelayMs = Math.max(0, ms);
       },
       setProxyOnline(online: boolean) {
         if (proxyOnlineState === online) return;

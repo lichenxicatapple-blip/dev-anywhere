@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router";
 import { ChevronDown, Check, Loader2 } from "lucide-react";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
+import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -23,25 +24,30 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
+  const proxySwitchTarget = useAppStore((s) => s.proxySwitchTarget);
   const location = useLocation();
   const navigate = useNavigate();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [selectingProxyId, setSelectingProxyId] = useState<string | null>(null);
 
   async function handleSelect(proxyId: string, proxyName: string | undefined): Promise<void> {
-    if (selectingProxyId) return;
+    if (proxySwitchTarget) return;
     const relay = relayClientRef;
     if (!relay) {
       toast.error("请先连接开发机");
       return;
     }
     const displayName = proxyName ?? proxyId;
-    setSelectingProxyId(proxyId);
+    const isChangingProxy = selectedProxyId !== null && selectedProxyId !== proxyId;
+    useAppStore.getState().setProxySwitchTarget({ proxyId, name: displayName });
     try {
       const result = await relay.selectProxy(proxyId);
       if (!result.success) {
         toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
         return;
+      }
+      if (isChangingProxy) {
+        useSessionStore.getState().prepareForProxySwitch(displayName);
+        useFileStore.getState().prepareForProxySwitch();
       }
       writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
       useAppStore.getState().setProxy(proxyId, proxyName ?? null);
@@ -50,8 +56,20 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       // 绑定成功后刷新会话列表，并用 request-scoped snapshot 拉取历史和 provider 状态。
       relay.sendControl({ type: "session_list" });
       void relay
+        .requestProxyInfo()
+        .then((info) => {
+          if (useAppStore.getState().selectedProxyId !== proxyId) return;
+          const fileStore = useFileStore.getState();
+          fileStore.setHomePath(info.homePath);
+          fileStore.setAgentCli(info.agentCli);
+        })
+        .catch((err: unknown) => {
+          console.error("[proxy-switcher] post-bind proxy info fetch failed", err);
+        });
+      void relay
         .requestAgentStatuses()
         .then((statuses) => {
+          if (useAppStore.getState().selectedProxyId !== proxyId) return;
           const store = useSessionStore.getState();
           for (const status of statuses) {
             store.setAgentStatus(status.sessionId, status.payload);
@@ -62,7 +80,10 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         });
       void relay
         .requestSessionHistory()
-        .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
+        .then((sessions) => {
+          if (useAppStore.getState().selectedProxyId !== proxyId) return;
+          useSessionStore.getState().setHistorySessions(sessions);
+        })
         .catch((err: unknown) => {
           console.error("[proxy-switcher] post-bind data fetch failed", err);
         });
@@ -76,7 +97,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       const message = err instanceof Error ? err.message : "未知错误";
       toast.error(`无法连接 ${displayName}：${message}`);
     } finally {
-      setSelectingProxyId(null);
+      useAppStore.getState().setProxySwitchTarget(null);
     }
   }
 
@@ -106,8 +127,8 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         </h3>
         <ul role="list" className="flex flex-col gap-2">
           {proxies.map((p) => {
-            const isSelectingThis = selectingProxyId === p.proxyId;
-            const isSelectionPending = selectingProxyId !== null;
+            const isSelectingThis = proxySwitchTarget?.proxyId === p.proxyId;
+            const isSelectionPending = proxySwitchTarget !== null;
             return (
               <li key={p.proxyId}>
                 <button
@@ -137,10 +158,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                   {isSelectingThis ? (
                     <>
                       <span className="text-xs text-muted-foreground shrink-0">正在连接</span>
-                      <Loader2
-                        className="h-4 w-4 animate-spin text-primary shrink-0"
-                        aria-hidden
-                      />
+                      <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" aria-hidden />
                     </>
                   ) : selectedProxyId === p.proxyId ? (
                     <Check className="h-4 w-4 text-primary shrink-0" aria-label="已选" />
@@ -197,8 +215,8 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         ) : (
           <ul role="list" className="flex flex-col">
             {proxies.map((p) => {
-              const isSelectingThis = selectingProxyId === p.proxyId;
-              const isSelectionPending = selectingProxyId !== null;
+              const isSelectingThis = proxySwitchTarget?.proxyId === p.proxyId;
+              const isSelectionPending = proxySwitchTarget !== null;
               return (
                 <li key={p.proxyId}>
                   <button

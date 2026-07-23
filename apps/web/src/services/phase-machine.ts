@@ -24,10 +24,13 @@ function extractSessionIdFromHash(): string | null {
 }
 
 function requestProxyState(relay: RelayClient): void {
+  const requestedProxyId = useAppStore.getState().selectedProxyId;
+  if (!requestedProxyId) return;
   relay.sendControl({ type: "session_list" });
   void relay
     .requestProxyInfo()
     .then((info) => {
+      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
       const fileStore = useFileStore.getState();
       fileStore.setHomePath(info.homePath);
       fileStore.setAgentCli(info.agentCli);
@@ -39,6 +42,7 @@ function requestProxyState(relay: RelayClient): void {
   void relay
     .requestAgentStatuses()
     .then((statuses) => {
+      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
       const store = useSessionStore.getState();
       for (const status of statuses) {
         store.setAgentStatus(status.sessionId, status.payload);
@@ -51,9 +55,12 @@ function requestProxyState(relay: RelayClient): void {
 }
 
 function requestSessionHistory(relay: RelayClient): void {
+  const requestedProxyId = useAppStore.getState().selectedProxyId;
+  if (!requestedProxyId) return;
   void relay
     .requestSessionHistory(RECONNECT_GRACE_PERIOD_MS)
     .then((sessions) => {
+      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
       useSessionStore.getState().setHistorySessions(sessions);
     })
     .catch((err: unknown) => {

@@ -54,6 +54,8 @@ interface SessionStoreState {
   sessions: SessionInfo[];
   // 首次 session_list envelope 到达前为 false; WS 断开或切换 proxy 时回退 false, 区分"加载中"与"真的没有会话"
   sessionListLoaded: boolean;
+  // 已绑定新开发机但 session_list 尚未返回时保留目标名称，避免退化成无上下文的加载态。
+  loadingProxyName: string | null;
   historySessions: HistorySession[];
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
@@ -76,6 +78,7 @@ interface SessionStoreState {
   setPtyTitle: (sessionId: string, title: string) => void;
   setPtyAutoYes: (sessionKey: string, enabled: boolean) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
+  prepareForProxySwitch: (proxyName: string) => void;
 }
 
 export const useSessionStore = create<SessionStoreState>()(
@@ -83,6 +86,7 @@ export const useSessionStore = create<SessionStoreState>()(
     (set) => ({
       sessions: [],
       sessionListLoaded: false,
+      loadingProxyName: null,
       historySessions: [],
       ptyTitles: {},
       ptyStateBySessionId: {},
@@ -95,6 +99,7 @@ export const useSessionStore = create<SessionStoreState>()(
           return {
             sessions,
             sessionListLoaded: true,
+            loadingProxyName: null,
             agentStatusBySessionId: Object.fromEntries(
               Object.entries(state.agentStatusBySessionId).filter(([sid]) =>
                 activeSessionIds.has(sid),
@@ -192,6 +197,16 @@ export const useSessionStore = create<SessionStoreState>()(
           return { ptyAutoYesBySessionKey };
         }),
       setHistorySessions: (sessions) => set({ historySessions: sessions }),
+      prepareForProxySwitch: (loadingProxyName) =>
+        set({
+          sessions: [],
+          sessionListLoaded: false,
+          loadingProxyName,
+          historySessions: [],
+          ptyTitles: {},
+          ptyStateBySessionId: {},
+          agentStatusBySessionId: {},
+        }),
     }),
     { name: "session-store" },
   ),

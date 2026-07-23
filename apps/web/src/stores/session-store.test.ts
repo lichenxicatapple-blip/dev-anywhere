@@ -8,6 +8,7 @@ describe("session-store agent status", () => {
     useSessionStore.setState({
       sessions: [],
       sessionListLoaded: false,
+      loadingProxyName: null,
       historySessions: [],
       ptyTitles: {},
       ptyStateBySessionId: {},
@@ -145,5 +146,49 @@ describe("session-store agent status", () => {
 
     expect(useSessionStore.getState().ptyAutoYesBySessionKey).toEqual({});
     expect(sessionStorage.getItem(STORAGE_KEYS.ptyAutoYesSessions)).toBeNull();
+  });
+
+  it("clears proxy-scoped session data while preserving per-proxy auto-yes during a switch", () => {
+    const sessionKey = ptyAutoYesSessionKey("proxy-a", "s1");
+    if (!sessionKey) throw new Error("missing session key");
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "pty" }],
+      sessionListLoaded: true,
+      historySessions: [
+        {
+          id: "history-1",
+          title: "Old history",
+          projectDir: "/old",
+          updatedAt: 1,
+          provider: "claude",
+        },
+      ],
+      ptyTitles: { s1: "Old title" },
+      ptyStateBySessionId: { s1: { state: "working" } },
+      agentStatusBySessionId: {
+        s1: { provider: "claude", phase: "thinking", seq: 1, updatedAt: 1 },
+      },
+      ptyAutoYesBySessionKey: { [sessionKey]: true },
+    });
+
+    useSessionStore.getState().prepareForProxySwitch("Slow Mac");
+
+    expect(useSessionStore.getState()).toMatchObject({
+      sessions: [],
+      sessionListLoaded: false,
+      loadingProxyName: "Slow Mac",
+      historySessions: [],
+      ptyTitles: {},
+      ptyStateBySessionId: {},
+      agentStatusBySessionId: {},
+      ptyAutoYesBySessionKey: { [sessionKey]: true },
+    });
+
+    useSessionStore
+      .getState()
+      .setSessions([{ sessionId: "s2", state: "idle", provider: "codex", mode: "json" }]);
+
+    expect(useSessionStore.getState().loadingProxyName).toBeNull();
+    expect(useSessionStore.getState().sessionListLoaded).toBe(true);
   });
 });

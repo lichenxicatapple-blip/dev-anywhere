@@ -17,6 +17,7 @@ interface FileStoreState {
   setHomePath: (homePath: string) => void;
   setAgentCli: (agentCli: AgentCliStatus) => void;
   clearTree: () => void;
+  prepareForProxySwitch: () => void;
 }
 
 export const useFileStore = create<FileStoreState>()(
@@ -36,6 +37,7 @@ export const useFileStore = create<FileStoreState>()(
       setHomePath: (homePath) => set({ homePath }),
       setAgentCli: (agentCli) => set({ agentCli }),
       clearTree: () => set({ tree: new Map(), cwd: "" }),
+      prepareForProxySwitch: () => set({ tree: new Map(), cwd: "", homePath: "", agentCli: null }),
     }),
     { name: "file-store" },
   ),

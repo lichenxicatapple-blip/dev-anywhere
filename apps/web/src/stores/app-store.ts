@@ -35,6 +35,11 @@ interface PendingToast {
   message: string;
 }
 
+export interface ProxySwitchTarget {
+  proxyId: string;
+  name: string;
+}
+
 export type InputModePreference = "auto" | "touch" | "hardware";
 export type AdaptiveInputModality = "unknown" | "touch" | "hardware";
 
@@ -45,6 +50,8 @@ interface AppStoreState {
   proxyOnline: boolean;
   selectedProxyId: string | null;
   selectedProxyName: string | null;
+  // 用户主动切换开发机时的临时目标；重连不使用此状态，避免把两种流程混在一起。
+  proxySwitchTarget: ProxySwitchTarget | null;
   proxies: ProxyInfo[];
   // 首次 proxy_list_response 到达前为 false; WS 断开回退 false, 区分"加载中"与"真的没有 proxy"
   proxyListLoaded: boolean;
@@ -65,6 +72,7 @@ interface AppStoreState {
 
   setConnected: (connected: boolean) => void;
   setProxy: (proxyId: string | null, proxyName: string | null) => void;
+  setProxySwitchTarget: (target: ProxySwitchTarget | null) => void;
   setProxyOnline: (online: boolean) => void;
   setRelayUrl: (url: string) => void;
   setRelayClientAuthIssue: (issue: RelayClientAuthIssue | null) => void;
@@ -163,6 +171,7 @@ export const useAppStore = create<AppStoreState>()(
       proxyOnline: false,
       selectedProxyId: null,
       selectedProxyName: null,
+      proxySwitchTarget: null,
       proxies: [],
       proxyListLoaded: false,
       clientId: loadClientId(),
@@ -183,6 +192,7 @@ export const useAppStore = create<AppStoreState>()(
       setPendingToast: (toast) => set({ pendingToast: toast }),
       setProxy: (proxyId, proxyName) =>
         set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
+      setProxySwitchTarget: (proxySwitchTarget) => set({ proxySwitchTarget }),
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
       setRelayClientAuthIssue: (issue) => set({ relayClientAuthIssue: issue }),

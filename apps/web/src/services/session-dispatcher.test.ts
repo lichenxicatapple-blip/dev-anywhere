@@ -57,4 +57,34 @@ describe("session-dispatcher lifecycle reconciliation", () => {
     expect(useSessionStore.getState().sessions[0].state).toBe("error");
     expect(useChatStore.getState().bySessionId.s1.pendingApprovals).toEqual([]);
   });
+
+  it("leaves request-scoped history responses to the proxy-checked request owner", () => {
+    useSessionStore.setState({
+      historySessions: [
+        {
+          id: "current",
+          title: "Current proxy",
+          projectDir: "/current",
+          updatedAt: 1,
+          provider: "claude",
+        },
+      ],
+    });
+
+    createSessionMessageHandler()({
+      type: "session_history_response",
+      requestId: "history-old-proxy",
+      sessions: [
+        {
+          id: "stale",
+          title: "Old proxy",
+          projectDir: "/old",
+          updatedAt: 2,
+          provider: "claude",
+        },
+      ],
+    });
+
+    expect(useSessionStore.getState().historySessions.map((item) => item.id)).toEqual(["current"]);
+  });
 });

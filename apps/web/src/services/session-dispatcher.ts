@@ -82,6 +82,8 @@ export function createSessionMessageHandler(): (
         handlePtyState(msg);
         break;
       case "session_history_response":
+        // 带 requestId 的响应由发起请求的调用点在校验目标开发机后写入，避免慢响应跨开发机污染。
+        if (msg.requestId) break;
         handleSessionHistoryResponse(msg);
         break;
       default:

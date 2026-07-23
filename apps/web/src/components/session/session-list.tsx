@@ -53,8 +53,13 @@ export function SessionList({ layout }: SessionListProps) {
   const activeSessionId = chatMatch?.params.id ?? null;
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
+  const proxySwitchTarget = useAppStore((s) => s.proxySwitchTarget);
+  const loadingProxyName = useSessionStore((s) => s.loadingProxyName);
   // 冷启动刷新时, proxy_list / session_list envelope 均未到, 显示 spinner 避免 no-proxy / no-session 一闪而过
-  const isLoading = !proxyListLoaded || (hasProxy && !sessionListLoaded);
+  const isLoading =
+    proxySwitchTarget !== null || !proxyListLoaded || (hasProxy && !sessionListLoaded);
+  const loadingLabel = proxySwitchTarget?.name ?? loadingProxyName;
+  const loadingMessage = loadingLabel ? `正在连接 ${loadingLabel}...` : "连接中...";
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [createTypeOpen, setCreateTypeOpen] = useState(false);
@@ -141,8 +146,13 @@ export function SessionList({ layout }: SessionListProps) {
   if (layout === "sidebar" && (isLoading || !hasProxy)) {
     return (
       <>
-        <div className="px-4 py-3 text-sm text-muted-foreground/70">
-          {isLoading ? "连接中..." : "请先连接开发机"}
+        <div
+          className="px-4 py-3 text-sm text-muted-foreground/70"
+          data-slot={isLoading ? "session-list-loading" : undefined}
+          role={isLoading ? "status" : undefined}
+          aria-live={isLoading ? "polite" : undefined}
+        >
+          {isLoading ? loadingMessage : "请先连接开发机"}
         </div>
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         <SessionTerminationDialog
@@ -167,9 +177,14 @@ export function SessionList({ layout }: SessionListProps) {
   }
   if (layout === "page" && isLoading) {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+      <div
+        className="flex h-full w-full flex-col items-center justify-center gap-3 text-muted-foreground animate-in fade-in-0 duration-200 motion-reduce:animate-none"
+        data-slot="session-list-loading"
+        role="status"
+        aria-live="polite"
+      >
         <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-        <p className="text-sm">连接中...</p>
+        <p className="max-w-[min(24rem,calc(100%-2rem))] truncate text-sm">{loadingMessage}</p>
       </div>
     );
   }
@@ -403,16 +418,18 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   const [tipOpen, setTipOpen] = useState(false);
   const suppressMenuRestoreFocusRef = useRef(false);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
+  const switchingProxy = useAppStore((s) => s.proxySwitchTarget !== null);
+  const canCreate = hasProxy && !switchingProxy;
   const { creatingTerminal, createTerminal } = useTerminalCreator();
 
-  function showMissingProxyTip() {
+  function showBlockedTip() {
     setTipOpen(true);
     window.setTimeout(() => setTipOpen(false), 2000);
   }
 
   function handleCreateAgent() {
-    if (!hasProxy) {
-      showMissingProxyTip();
+    if (!canCreate) {
+      showBlockedTip();
       return;
     }
     suppressMenuRestoreFocusRef.current = true;
@@ -420,8 +437,8 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   }
 
   function handleCreateTerminal() {
-    if (!hasProxy) {
-      showMissingProxyTip();
+    if (!canCreate) {
+      showBlockedTip();
       return;
     }
     suppressMenuRestoreFocusRef.current = true;
@@ -430,7 +447,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
 
   function handleBlockedTrigger(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    showMissingProxyTip();
+    showBlockedTip();
   }
 
   const triggerButton = (
@@ -441,18 +458,18 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
         compact
           ? "h-11 w-11 justify-center border-border px-0"
           : "h-[46px] w-full justify-center gap-2 border-border px-3",
-        !hasProxy && "opacity-50 hover:bg-background",
+        !canCreate && "opacity-50 hover:bg-background",
       )}
       aria-label="新建会话"
-      aria-disabled={!hasProxy}
-      onClick={!hasProxy ? handleBlockedTrigger : undefined}
+      aria-disabled={!canCreate}
+      onClick={!canCreate ? handleBlockedTrigger : undefined}
     >
       <PlusCircle className="size-4 text-muted-foreground" aria-hidden="true" />
       {!compact && <span className="truncate">新建</span>}
     </Button>
   );
 
-  const menuButton = hasProxy ? (
+  const menuButton = canCreate ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
       <DropdownMenuContent
@@ -490,15 +507,17 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
 
   return (
     <>
-      {hasProxy ? (
+      {canCreate ? (
         menuButton
       ) : (
         <Tooltip
-          open={!hasProxy ? tipOpen : undefined}
-          onOpenChange={!hasProxy ? setTipOpen : undefined}
+          open={!canCreate ? tipOpen : undefined}
+          onOpenChange={!canCreate ? setTipOpen : undefined}
         >
           <TooltipTrigger asChild>{menuButton}</TooltipTrigger>
-          <TooltipContent side="top">{hasProxy ? "新建会话" : "请先连接开发机"}</TooltipContent>
+          <TooltipContent side="top">
+            {switchingProxy ? "正在切换开发机" : "请先连接开发机"}
+          </TooltipContent>
         </Tooltip>
       )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />
