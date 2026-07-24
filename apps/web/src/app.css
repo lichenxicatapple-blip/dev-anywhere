@@ -150,14 +150,19 @@ body {
 }
 
 .dev-pty-mobile-controls {
+  --dev-pty-mobile-keyboard-overlap-guard: 1rem;
+  --dev-pty-mobile-keyboard-gap: 0.5rem;
   border-color: var(--border);
   background: color-mix(in srgb, var(--popover) 96%, transparent);
   color: var(--popover-foreground);
   box-shadow: 0 -10px 24px color-mix(in srgb, var(--foreground) 12%, transparent);
   backdrop-filter: saturate(1.2) blur(10px);
-  /* Mobile keyboards can paint their toolbar into the viewport edge. Keep the
-     bottom row's hit targets inside the control surface in every orientation. */
-  padding-bottom: 1rem;
+  /* Some Android keyboards paint their toolbar into the visual viewport edge.
+     Keep a separate overlap guard plus a visible component gap so the keyboard
+     cannot consume all spacing below the bottom row. */
+  padding-bottom: calc(
+    var(--dev-pty-mobile-keyboard-overlap-guard) + var(--dev-pty-mobile-keyboard-gap)
+  );
 }
 
 .dev-pty-mobile-key {
@@ -457,6 +462,14 @@ body {
 
 .dev-image-preview-dialog[data-state="closed"] {
   --tw-exit-scale: 1;
+}
+
+/* Landscape phones cross the sm width breakpoint but do not have enough height
+   for the desktop stage minimum; let the stage shrink instead of covering actions. */
+@media (max-height: 40rem) {
+  .dev-image-preview-dialog .dev-image-preview-stage {
+    min-height: 0 !important;
+  }
 }
 
 @media (min-width: 40rem) {

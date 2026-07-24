@@ -103,6 +103,7 @@ describe("ImagePreviewProvider", () => {
     const loading = document.querySelector('[data-slot="image-preview-loading"]');
 
     expect((img as HTMLImageElement).dataset.loaded).toBe("false");
+    expect(screen.getByRole("button", { name: "复制图片" })).toBeDisabled();
     expect(meta?.textContent).toBe("正在加载图片...");
     expect(loading?.textContent).toContain("正在加载图片...");
     expect(screen.queryByText("图片已加载")).toBeNull();
@@ -111,5 +112,6 @@ describe("ImagePreviewProvider", () => {
 
     await waitFor(() => expect(meta?.textContent).toBe("图片已加载"));
     expect((img as HTMLImageElement).dataset.loaded).toBe("true");
+    expect(screen.getByRole("button", { name: "复制图片" })).toBeEnabled();
   });
 });

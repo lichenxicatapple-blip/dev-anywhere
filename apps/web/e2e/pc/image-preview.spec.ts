@@ -133,7 +133,9 @@ test.describe("image preview", () => {
       await expect(page.locator('[data-slot="image-preview-loading"]')).toContainText(
         "正在从开发机读取图片",
       );
+      await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeDisabled();
       await expectPreviewReady(page, path);
+      await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeEnabled();
 
       await closePreview(page);
       await page.locator('[data-slot="inline-image-preview-link"]', { hasText: path }).click();
@@ -168,12 +170,53 @@ test.describe("image preview", () => {
       );
       await expectInside(
         dialog,
+        page.locator('[data-slot="image-preview-copy-image"]'),
+        "copy image button",
+      );
+      await expectInside(
+        dialog,
         page.locator('[data-slot="image-preview-copy-path"]'),
         "copy path button",
       );
 
       await expectPreviewReady(page, path);
       await expect(page.locator('[data-slot="image-preview-meta"]')).toHaveText("图片已加载");
+    });
+
+    test("writes the loaded image itself to the image Clipboard API", async ({ page }) => {
+      const path = ".dev-anywhere/clipboard/test-sess/copy-image.png";
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            write: async (items: ClipboardItem[]) => {
+              await Promise.all(
+                items.flatMap((item) => item.types.map((type) => item.getType(type))),
+              );
+              Object.defineProperty(window, "__copiedImageTypes", {
+                configurable: true,
+                value: items.flatMap((item) => item.types),
+              });
+            },
+          },
+        });
+      });
+      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await openJsonPreview(page, path);
+      await expectPreviewReady(page, path);
+
+      await page.locator('[data-slot="image-preview-copy-image"]').click();
+
+      await expect(page.getByText("图片已复制到剪贴板")).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as typeof window & { __copiedImageTypes?: string[] }).__copiedImageTypes ??
+              [],
+          ),
+        )
+        .toContain("image/png");
     });
 
     test("shows an explicit error when the browser cannot decode the image", async ({ page }) => {
@@ -342,6 +385,48 @@ test.describe("image preview", () => {
       expect(box!.y).toBeLessThanOrEqual(1);
       expect(box!.width).toBeGreaterThanOrEqual(388);
       expect(box!.height).toBeGreaterThanOrEqual(840);
+    });
+
+    test("keeps all image actions above the mobile bottom edge without covering the preview", async ({
+      page,
+    }) => {
+      const path = "./screenshots/mobile-actions.png";
+      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await openJsonPreview(page, path);
+      await expectPreviewReady(page, path);
+
+      const dialog = page.locator('[data-slot="image-preview-dialog"]');
+      const stage = page.locator('[data-slot="image-preview-stage"]');
+      const footer = page.locator('[data-slot="image-preview-footer"]');
+      const actionSlots = [
+        "image-preview-download",
+        "image-preview-copy-image",
+        "image-preview-copy-path",
+      ];
+      const [dialogBox, stageBox, footerBox] = await Promise.all([
+        dialog.boundingBox(),
+        stage.boundingBox(),
+        footer.boundingBox(),
+      ]);
+      expect(dialogBox).not.toBeNull();
+      expect(stageBox).not.toBeNull();
+      expect(footerBox).not.toBeNull();
+      expect(
+        dialogBox!.y + dialogBox!.height - (footerBox!.y + footerBox!.height),
+      ).toBeGreaterThanOrEqual(20);
+      expect(stageBox!.y + stageBox!.height).toBeLessThanOrEqual(footerBox!.y);
+
+      const widths: number[] = [];
+      for (const slot of actionSlots) {
+        const button = page.locator(`[data-slot="${slot}"]`);
+        await expect(button).toBeVisible();
+        const box = await button.boundingBox();
+        expect(box).not.toBeNull();
+        widths.push(box!.width);
+        expect(box!.x).toBeGreaterThanOrEqual(dialogBox!.x);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+      }
+      expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
     });
 
     test("fits a very wide image inside the mobile viewport on first render", async ({ page }) => {

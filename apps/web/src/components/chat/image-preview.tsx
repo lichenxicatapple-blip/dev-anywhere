@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Copy, Download, Image as ImageIcon } from "lucide-react";
+import { ClipboardCopy, Copy, Download, Image as ImageIcon, LoaderCircle } from "lucide-react";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { describeControlError } from "@/lib/control-error-message";
+import { copyLoadedImageToClipboard } from "@/lib/copy-image";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
@@ -145,7 +146,9 @@ function ImagePreviewDialog({
   const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
   const [stageSize, setStageSize] = useState<ImagePreviewSize | null>(null);
   const [naturalSize, setNaturalSize] = useState<ImagePreviewNaturalSize | null>(null);
+  const [copyingImage, setCopyingImage] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const src = state.status === "ready" && state.url ? state.url : "";
   const imageLoaded = src !== "" && loadedSrc === src;
   const currentNaturalSize = naturalSize?.src === src ? naturalSize : null;
@@ -205,6 +208,34 @@ function ImagePreviewDialog({
     }
   }
 
+  async function copyImage(): Promise<void> {
+    const image = imageRef.current;
+    if (!imageLoaded || !image || copyingImage) return;
+
+    setCopyingImage(true);
+    const toastId = toast.loading("正在复制图片...");
+    const result = await copyLoadedImageToClipboard(image);
+    setCopyingImage(false);
+
+    if (result === "copied") {
+      toast.success("图片已复制到剪贴板", { id: toastId });
+      return;
+    }
+    if (result === "insecure") {
+      toast.error("复制图片需要 HTTPS 安全连接", { id: toastId });
+      return;
+    }
+    if (result === "unsupported") {
+      toast.error("当前浏览器不支持复制图片", { id: toastId });
+      return;
+    }
+    if (result === "not-ready") {
+      toast.error("图片仍在加载，请稍后重试", { id: toastId });
+      return;
+    }
+    toast.error("复制图片失败，请稍后重试", { id: toastId });
+  }
+
   async function downloadImage(): Promise<void> {
     const relay = relayClientRef;
     if (!relay || !state.path) return;
@@ -217,7 +248,7 @@ function ImagePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !p-3 sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!p-4"
+        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !px-3 !pt-3 !pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!px-4 sm:!pt-4"
         data-slot="image-preview-dialog"
         focusSurfaceOnOpen
       >
@@ -264,6 +295,7 @@ function ImagePreviewDialog({
                 contentStyle={imageContentStyle}
               >
                 <img
+                  ref={imageRef}
                   src={src}
                   alt={state.path}
                   className="relative z-10 block h-auto max-h-none max-w-none translate-y-1 object-contain opacity-0 transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] data-[loaded=true]:translate-y-0 data-[loaded=true]:opacity-100 motion-reduce:transition-none"
@@ -296,12 +328,12 @@ function ImagePreviewDialog({
           data-slot="image-preview-footer"
         >
           <span
-            className="min-w-0 truncate text-xs text-muted-foreground"
+            className="min-w-0 truncate text-xs text-muted-foreground max-sm:sr-only"
             data-slot="image-preview-meta"
           >
             {metaText}
           </span>
-          <div className="grid w-52 shrink-0 grid-cols-2 gap-2">
+          <div className="grid w-full shrink-0 grid-cols-3 gap-2 sm:w-80">
             <Button
               variant="outline"
               size="sm"
@@ -312,6 +344,21 @@ function ImagePreviewDialog({
             >
               <Download aria-hidden="true" />
               下载
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => void copyImage()}
+              disabled={!imageLoaded || showDecodeError || copyingImage}
+              data-slot="image-preview-copy-image"
+            >
+              {copyingImage ? (
+                <LoaderCircle aria-hidden="true" className="animate-spin" />
+              ) : (
+                <ClipboardCopy aria-hidden="true" />
+              )}
+              {copyingImage ? "复制中" : "复制图片"}
             </Button>
             <Button
               variant="outline"

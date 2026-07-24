@@ -79,8 +79,56 @@ async function dispatchBoundedPinch(page: Page): Promise<void> {
   }
 }
 
-test.describe("L4 mobile / image preview pinch zoom", () => {
+test.describe("L4 mobile / image preview", () => {
   test.setTimeout(60_000);
+
+  test("keeps all preview actions clear of the Android bottom edge", async ({ emuPage }) => {
+    await installFakeRelay(emuPage);
+    await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
+
+    await openPreview(emuPage);
+
+    const layout = await emuPage.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[data-slot="image-preview-dialog"]');
+      const stage = document.querySelector<HTMLElement>('[data-slot="image-preview-stage"]');
+      const footer = document.querySelector<HTMLElement>('[data-slot="image-preview-footer"]');
+      const slots = [
+        "image-preview-download",
+        "image-preview-copy-image",
+        "image-preview-copy-path",
+      ];
+      if (!dialog || !stage || !footer) throw new Error("image preview layout is incomplete");
+
+      const dialogRect = dialog.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const footerRect = footer.getBoundingClientRect();
+      const buttons = slots.map((slot) => {
+        const button = document.querySelector<HTMLElement>(`[data-slot="${slot}"]`);
+        if (!button) throw new Error(`${slot} is missing`);
+        return button.getBoundingClientRect();
+      });
+
+      return {
+        bottomGap: dialogRect.bottom - footerRect.bottom,
+        stageFooterGap: footerRect.top - stageRect.bottom,
+        buttonWidths: buttons.map((rect) => rect.width),
+        buttonsInsideDialog: buttons.every(
+          (rect) => rect.left >= dialogRect.left && rect.right <= dialogRect.right,
+        ),
+      };
+    });
+
+    expect(layout.bottomGap).toBeGreaterThanOrEqual(20);
+    expect(layout.stageFooterGap).toBeGreaterThanOrEqual(0);
+    expect(layout.buttonsInsideDialog).toBe(true);
+    expect(Math.max(...layout.buttonWidths) - Math.min(...layout.buttonWidths)).toBeLessThanOrEqual(
+      1,
+    );
+
+    await emuPage.locator('[data-slot="image-preview-copy-image"]').click();
+    await expect(emuPage.getByText("图片已复制到剪贴板")).toBeVisible();
+  });
 
   test("two-finger pinch zooms transform out of identity", async ({ emuPage }) => {
     await installFakeRelay(emuPage);

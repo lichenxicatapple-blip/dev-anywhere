@@ -56,13 +56,13 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
       })
       .toBe(true);
 
-    // 2 行布局: 容器内 grid 2 行 × 6 列。辅助区底部留出键盘边缘安全区，
-    // 避免输入法的顶部工具栏盖住最下排按键。
+    // 2 行布局: 容器内 grid 2 行 × 6 列。辅助区底部包含 16px 键盘覆盖保护
+    // 和 8px 可见间距，避免输入法工具栏吃掉最下排按键下方的全部空间。
     const controlsBox = await controls.boundingBox();
     expect(controlsBox).not.toBeNull();
     if (!controlsBox) return;
     expect(controlsBox.height).toBeGreaterThanOrEqual(95);
-    expect(controlsBox.height).toBeLessThanOrEqual(125);
+    expect(controlsBox.height).toBeLessThanOrEqual(135);
 
     const interactiveBottomClearance = await controls.evaluate((element) => {
       const rootRect = element.getBoundingClientRect();
@@ -71,7 +71,7 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
       );
       return rootRect.bottom - Math.max(...keys.map((key) => key.getBoundingClientRect().bottom));
     });
-    expect(interactiveBottomClearance).toBeGreaterThanOrEqual(15);
+    expect(interactiveBottomClearance).toBeGreaterThanOrEqual(23);
 
     // 所有非 Enter 按键 outer 都是 h-11 (44px), 用 4 个代表性 slot 抽样:
     // 文本键 / icon 键 / 第一个 / 最后一个。
@@ -278,10 +278,10 @@ test.describe("PTY mobile controls — iPad landscape keyboard", () => {
     });
     expect(geometry.keyCount).toBe(14);
     expect(geometry.keyRows).toBe(1);
-    expect(geometry.controlHeight).toBeGreaterThanOrEqual(50);
-    expect(geometry.controlHeight).toBeLessThanOrEqual(70);
-    expect(geometry.bottomPadding).toBeGreaterThanOrEqual(15);
-    expect(geometry.bottomPadding).toBeLessThanOrEqual(17);
+    expect(geometry.controlHeight).toBeGreaterThanOrEqual(58);
+    expect(geometry.controlHeight).toBeLessThanOrEqual(82);
+    expect(geometry.bottomPadding).toBeGreaterThanOrEqual(23);
+    expect(geometry.bottomPadding).toBeLessThanOrEqual(25);
     expect(geometry.slotsByPosition.slice(8, 12)).toEqual([
       "pty-mobile-key-left",
       "pty-mobile-key-up",

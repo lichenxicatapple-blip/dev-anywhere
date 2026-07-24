@@ -106,7 +106,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     expect(metrics.controlsHeight).not.toBeNull();
     expect(metrics.controlsHeight ?? 0).toBeGreaterThan(80);
     expect(metrics.interactiveBottomClearance).not.toBeNull();
-    expect(metrics.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(15);
+    expect(metrics.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(23);
     const visualViewportBottom = metrics.visualViewportTop + metrics.visualViewportHeight;
     expect(metrics.controlsBottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       visualViewportBottom + 2,
@@ -151,7 +151,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
 
       expect(geometry.keyRows).toBe(1);
       expect(geometry.interactiveBottomClearance).not.toBeNull();
-      expect(geometry.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(15);
+      expect(geometry.interactiveBottomClearance ?? 0).toBeGreaterThanOrEqual(23);
     } finally {
       await dismissSoftKeyboard(emuPage);
       await setAndroidEmulatorOrientation(emuPage, "auto");
