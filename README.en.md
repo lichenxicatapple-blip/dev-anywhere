@@ -7,6 +7,8 @@
     ·
     <a href="#quick-start">Quick start</a>
     ·
+    <a href="#upgrading">Upgrading</a>
+    ·
     <a href="./docs/DEPLOYMENT.md">VPS deployment (Chinese)</a>
   </p>
   <p>
@@ -157,6 +159,41 @@ dev-anywhere --profile quick-tunnel codex
 #### Start a new session from the browser
 
 Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, or Shell in a directory on that machine.
+
+## Upgrading
+
+### Quick Tunnel
+
+Press `Ctrl+C` to stop the running Quick Tunnel, then update the local Proxy and start it again:
+
+```bash
+npm install -g @dev-anywhere/proxy@latest
+dev-anywhere tunnel
+```
+
+### VPS Relay
+
+Run the following commands in your local DEV Anywhere clone:
+
+```bash
+git pull --ff-only
+bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  dev-anywhere.example.com
+npm install -g @dev-anywhere/proxy@latest
+dev-anywhere serve restart --relay cloud
+```
+
+Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
+
+After upgrading, verify the local version and connection:
+
+```bash
+dev-anywhere --version
+dev-anywhere serve status
+```
+
+For pinned versions or VPS container checks, see the [VPS deployment guide](./docs/DEPLOYMENT.md#升级).
 
 ## Main features
 

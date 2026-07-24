@@ -7,6 +7,8 @@
     ·
     <a href="#快速开始">快速开始</a>
     ·
+    <a href="#升级">升级</a>
+    ·
     <a href="./docs/DEPLOYMENT.md">VPS 部署</a>
   </p>
   <p>
@@ -157,6 +159,41 @@ dev-anywhere --profile quick-tunnel codex
 #### 从浏览器启动新会话
 
 打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex 或 Shell。
+
+## 升级
+
+### Quick Tunnel
+
+先按 `Ctrl+C` 结束正在运行的 Quick Tunnel，然后更新本机 Proxy 并重新启动：
+
+```bash
+npm install -g @dev-anywhere/proxy@latest
+dev-anywhere tunnel
+```
+
+### VPS Relay
+
+在本机克隆的 DEV Anywhere 仓库中执行：
+
+```bash
+git pull --ff-only
+bash scripts/deploy/install-relay.sh \
+  --ssh root@your-vps \
+  dev-anywhere.example.com
+npm install -g @dev-anywhere/proxy@latest
+dev-anywhere serve restart --relay cloud
+```
+
+最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
+
+升级后可以确认本机版本和连接状态：
+
+```bash
+dev-anywhere --version
+dev-anywhere serve status
+```
+
+需要固定版本或检查 VPS 容器时，参见 [VPS 部署指南](./docs/DEPLOYMENT.md#升级)。
 
 ## 主要功能
 
