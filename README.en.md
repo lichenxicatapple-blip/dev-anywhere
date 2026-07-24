@@ -20,7 +20,7 @@
 
 ## What it is
 
-DEV Anywhere is a self-hosted remote AI coding workspace. From a browser on any device, you can continue using Claude Code or Codex already running in a terminal on your development machine, resume a previous session, start a new coding agent remotely, or use a Shell directly.
+DEV Anywhere is a self-hosted remote AI coding workspace. From a browser on any device, you can continue using Claude Code or Codex already running in a terminal on your remote development machine, resume a previous session, start a new coding agent remotely, or use a Shell directly.
 
 To continue a locally started Claude Code or Codex session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
 
