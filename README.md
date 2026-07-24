@@ -20,9 +20,9 @@
 
 ## 这是什么
 
-DEV Anywhere 是一个自托管的远程 AI coding 工作台，用浏览器操作开发机上的 Claude Code、Codex 和 Shell 会话。你可以在任意设备上通过浏览器接管已经从本地终端启动的会话，也可以继续历史会话或远程启动新会话。
+DEV Anywhere 是一个自托管的远程 AI coding 工作台。你可以在任意设备的浏览器中，继续操作开发机终端里正在运行的 Claude Code 或 Codex，也可以恢复历史会话、远程启动新的 coding agent，或者直接使用 Shell。
 
-如果希望通过 DEV Anywhere 中继本地开发机上的会话，只需在启动 `claude` 或 `codex` 时加上 `dev-anywhere` 前缀，其余 CLI 参数和终端交互保持不变；命令会按需启动 Proxy，并让会话出现在 Web 中。从 Web 创建的会话也仍在开发机上运行，继续使用本地的 CLI、环境变量和工作目录。
+想让本地启动的 Claude Code 或 Codex 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
 
 DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 coding agent 的输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、coding agent CLI 和模型凭据仍然留在开发机上。
 
