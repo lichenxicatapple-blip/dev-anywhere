@@ -61,7 +61,7 @@ test.describe("clipboard image paste", () => {
     await installFakeRelay(page);
   });
 
-  test("JSON mode uploads pasted images and inserts a file token", async ({ page }) => {
+  test("JSON mode previews pasted images and sends the original file token", async ({ page }) => {
     await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
 
     const input = page.getByLabel("输入聊天消息");
@@ -69,9 +69,12 @@ test.describe("clipboard image paste", () => {
     await dispatchImagePaste(input);
 
     const expectedPath = ".dev-anywhere/clipboard/test-sess/pasted-e2e.png";
-    await expect(input).toHaveValue(`inspect @${expectedPath} `);
+    await expect(page.locator('[data-slot="input-image-attachment"]')).toBeVisible();
+    await expect(page.getByRole("img", { name: "shot.png" })).toBeVisible();
+    await expect(input).toHaveValue("inspect ");
+    await expect(input).not.toHaveValue(new RegExp(expectedPath));
 
-    const sent = await sentFakeRelayMessages(page);
+    let sent = await sentFakeRelayMessages(page);
     expect(sent).toContainEqual(
       expect.objectContaining({
         type: "remote_file_upload_url_request",
@@ -83,6 +86,22 @@ test.describe("clipboard image paste", () => {
       }),
     );
     expect(sent.some((msg) => msg.type === "user_input")).toBe(false);
+
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect
+      .poll(async () => {
+        sent = await sentFakeRelayMessages(page);
+        return sent.find((message) => message.type === "user_input");
+      })
+      .toEqual(
+        expect.objectContaining({
+          sessionId: "test-sess",
+          payload: expect.objectContaining({
+            text: `inspect @${expectedPath}`,
+          }),
+        }),
+      );
+    await expect(page.locator('[data-slot="input-attachments"]')).toHaveCount(0);
   });
 
   test("PTY mode uploads pasted images and sends the returned file token as raw input", async ({

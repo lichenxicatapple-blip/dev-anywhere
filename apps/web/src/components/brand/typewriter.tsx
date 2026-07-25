@@ -63,13 +63,22 @@ export function Typewriter({ texts, className }: TypewriterProps) {
     return () => clearTimeout(timer);
   }, [texts]);
 
+  const devPrefixLength = displayed.startsWith("DEV")
+    ? 3
+    : displayed.length <= 3 && "DEV".startsWith(displayed)
+      ? displayed.length
+      : 0;
+
   return (
     <div
       className={`font-mono leading-tight select-none ${className ?? ""}`}
       data-slot="brand-typewriter"
     >
       <span className="text-green-500">&gt; </span>
-      <span className="text-foreground/90">{displayed}</span>
+      <span className="text-primary" data-slot="brand-typewriter-dev">
+        {displayed.slice(0, devPrefixLength)}
+      </span>
+      <span className="text-foreground/90">{displayed.slice(devPrefixLength)}</span>
       <span className={`text-primary ${cursorOn ? "opacity-100" : "opacity-0"}`}>_</span>
     </div>
   );

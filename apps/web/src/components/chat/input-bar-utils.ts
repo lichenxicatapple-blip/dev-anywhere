@@ -27,6 +27,16 @@ export function detectPickerMode(val: string): PickerMode {
   return "none";
 }
 
+export function composeInputWithAttachments(
+  draft: string,
+  attachments: Array<{ path: string }>,
+): string {
+  const parts = [draft.trim(), ...attachments.map((attachment) => `@${attachment.path}`)].filter(
+    Boolean,
+  );
+  return parts.join(" ");
+}
+
 // 退格删除已插入的原子片段 (slash / @<路径>) 时清理残留, 返回清理后文本
 export function cleanupDeletedMention(
   val: string,

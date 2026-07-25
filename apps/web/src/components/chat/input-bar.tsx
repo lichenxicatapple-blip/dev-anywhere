@@ -24,13 +24,19 @@ import { useAppStore } from "@/stores/app-store";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { cleanupDeletedMention, computeSendDisabled, detectPickerMode } from "./input-bar-utils";
+import {
+  cleanupDeletedMention,
+  composeInputWithAttachments,
+  computeSendDisabled,
+  detectPickerMode,
+} from "./input-bar-utils";
 import { SlashCommandPicker } from "./slash-command-picker";
 import { FilePathPicker } from "./file-path-picker";
 import { SendButton } from "./send-button";
+import { InputAttachmentPreview } from "./input-attachment-preview";
 import type { PickerHandle } from "./picker-handle";
 import { getEffectiveChatContentFontSize } from "@/lib/chat-font-size";
-import { getClipboardImageFile, insertTextAtSelection } from "@/lib/clipboard-image";
+import { getClipboardImageFile } from "@/lib/clipboard-image";
 import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
 import { showCompactStartToast } from "@/lib/compact-toast";
 import { getUploadPickerPolicy } from "@/lib/upload-picker-policy";
@@ -40,6 +46,8 @@ interface InputBarProps {
   sessionId: string;
 }
 
+let draftAttachmentSequence = 0;
+
 export function InputBar({ sessionId }: InputBarProps) {
   const uploadPickerPolicy = getUploadPickerPolicy();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -47,6 +55,9 @@ export function InputBar({ sessionId }: InputBarProps) {
   const filePickerRef = useRef<PickerHandle>(null);
   const slice = useChatStore((s) => s.bySessionId[sessionId] ?? EMPTY_SLICE);
   const setInputDraft = useChatStore((s) => s.setInputDraft);
+  const addDraftAttachment = useChatStore((s) => s.addDraftAttachment);
+  const removeDraftAttachment = useChatStore((s) => s.removeDraftAttachment);
+  const clearDraftAttachments = useChatStore((s) => s.clearDraftAttachments);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const forceHardwareInput = useAppStore((s) => s.inputModePreference === "hardware");
@@ -66,7 +77,8 @@ export function InputBar({ sessionId }: InputBarProps) {
   const submitOnPlainEnter = (isDesktop || forceHardwareInput) && !touchEditingSurface;
 
   const value = slice.inputDraft;
-  const trimmedValue = value.trim();
+  const draftAttachments = slice.draftAttachments;
+  const submissionText = composeInputWithAttachments(value, draftAttachments);
   const isWorking = sessionState === "working";
   const isBusy = isWorking || sessionState === "compacting";
   const pendingApprovals = slice.pendingApprovals;
@@ -74,9 +86,12 @@ export function InputBar({ sessionId }: InputBarProps) {
 
   const pickerMode = detectPickerMode(value);
   const sendDisabled = computeSendDisabled(isBusy, pendingApprovals);
-  const canSend = !sendDisabled && trimmedValue !== "";
+  const canSend = !sendDisabled && submissionText !== "";
   const canQueue =
-    isWorking && !hasPendingApproval && trimmedValue !== "" && !isCompactCommandText(trimmedValue);
+    isWorking &&
+    !hasPendingApproval &&
+    submissionText !== "" &&
+    !isCompactCommandText(submissionText);
 
   // 已插入的原子片段 (slash 命令 / @<路径>), 用于 backspace 整体删除
   const [insertedMentions, setInsertedMentions] = useState<string[]>([]);
@@ -105,6 +120,13 @@ export function InputBar({ sessionId }: InputBarProps) {
     setArgumentHint("");
   }, []);
 
+  const clearComposer = useCallback(() => {
+    setInputDraft(sessionId, "");
+    prevTextRef.current = "";
+    clearDraftAttachments(sessionId);
+    clearTrackingState();
+  }, [clearDraftAttachments, clearTrackingState, sessionId, setInputDraft]);
+
   const applyInputDraft = useCallback(
     (nextValue: string) => {
       setInputDraft(sessionId, nextValue);
@@ -120,32 +142,31 @@ export function InputBar({ sessionId }: InputBarProps) {
     addUserMessage(sessionId, {
       id: messageId,
       role: "user",
-      text: trimmedValue,
+      text: submissionText,
       isPartial: false,
       timestamp: now,
       toolCalls: [],
       deliveryStatus: "queued",
     });
-    applyInputDraft("");
-    clearTrackingState();
-  }, [canQueue, trimmedValue, sessionId, addUserMessage, applyInputDraft, clearTrackingState]);
+    clearComposer();
+  }, [canQueue, submissionText, sessionId, addUserMessage, clearComposer]);
 
   const send = useCallback(() => {
     // 只负责真正发给 relay 的路径；form submit / Enter / 按钮先走 submitDraft 分流。
     // working 中的普通输入应由 queueDraft 入队，不应绕到这里直接发送。
     if (!canSend) return;
-    if (!trimmedValue) return;
+    if (!submissionText) return;
     const relay = relayClientRef;
     if (!relay) return;
     const now = Date.now();
     const messageId = `${sessionId}-user-${now}`;
-    const isCompactCommand = isCompactCommandText(trimmedValue);
+    const isCompactCommand = isCompactCommandText(submissionText);
     if (!isCompactCommand) {
       // 乐观入 store: 立即显示 user bubble + working 态, echo 回来时 dispatcher 不重复追加
       addUserMessage(sessionId, {
         id: messageId,
         role: "user",
-        text: trimmedValue,
+        text: submissionText,
         isPartial: false,
         timestamp: now,
         toolCalls: [],
@@ -157,23 +178,14 @@ export function InputBar({ sessionId }: InputBarProps) {
     relay.sendEnvelope({
       type: "user_input",
       sessionId,
-      payload: { text: trimmedValue, messageId },
+      payload: { text: submissionText, messageId },
       seq: 0,
       timestamp: now,
       source: "client",
       version: "1",
     });
-    applyInputDraft("");
-    clearTrackingState();
-  }, [
-    canSend,
-    trimmedValue,
-    sessionId,
-    addUserMessage,
-    updateSessionState,
-    applyInputDraft,
-    clearTrackingState,
-  ]);
+    clearComposer();
+  }, [canSend, submissionText, sessionId, addUserMessage, updateSessionState, clearComposer]);
 
   const submitDraft = useCallback(() => {
     if (canSend) {
@@ -226,8 +238,8 @@ export function InputBar({ sessionId }: InputBarProps) {
   const handlePaste = useCallback(
     async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const data = event.clipboardData;
-      const hasImage = Boolean(getClipboardImageFile(data));
-      const otherFile = hasImage
+      const imageFile = getClipboardImageFile(data);
+      const otherFile = imageFile
         ? null
         : (() => {
             if (!data.files || data.files.length === 0) return null;
@@ -236,7 +248,8 @@ export function InputBar({ sessionId }: InputBarProps) {
             }
             return null;
           })();
-      if (!hasImage && !otherFile) return;
+      const attachmentFile = imageFile ?? otherFile;
+      if (!attachmentFile) return;
       event.preventDefault();
 
       const relay = relayClientRef;
@@ -248,9 +261,8 @@ export function InputBar({ sessionId }: InputBarProps) {
       const pasteSessionId = sessionId;
       setClipboardImageUploading(true);
       try {
-        // pathMention: 上传成功后插入到输入框的 "@<path> " 文本片段
-        let pathMention: string | null = null;
-        if (hasImage) {
+        let path: string | null = null;
+        if (imageFile) {
           const uploadToastId = toast.loading("图片上传中...");
           try {
             const result = await uploadClipboardImageFromPaste({
@@ -260,52 +272,40 @@ export function InputBar({ sessionId }: InputBarProps) {
             });
             toast.dismiss(uploadToastId);
             if (!result) return;
-            pathMention = result.pathMention;
+            path = result.path;
           } catch (err) {
             toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
             return;
           }
         } else if (otherFile) {
-          const path = await uploadFileAndShowToast({
+          path = await uploadFileAndShowToast({
             relay,
             sessionId: pasteSessionId,
             file: otherFile,
             successLabel: null,
           });
           if (!path) return;
-          pathMention = `@${path} `;
         }
-        if (!pathMention) return;
+        if (!path) return;
 
-        const activeTextarea =
-          currentSessionIdRef.current === pasteSessionId ? textareaRef.current : null;
-        const currentValue =
-          activeTextarea?.value ??
-          useChatStore.getState().bySessionId[pasteSessionId]?.inputDraft ??
-          "";
-        const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
-        const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
-        const next = insertTextAtSelection(currentValue, pathMention, selectionStart, selectionEnd);
-        if (activeTextarea) {
-          applyInputDraft(next.value);
-          setInsertedMentions((mentions) => [...mentions, pathMention.trim()]);
-          requestAnimationFrame(() => {
-            textareaRef.current?.focus();
-            textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
-          });
-        } else {
-          setInputDraft(pasteSessionId, next.value);
+        addDraftAttachment(pasteSessionId, {
+          id: nextDraftAttachmentId(pasteSessionId),
+          kind: isImageFile(attachmentFile) ? "image" : "file",
+          file: attachmentFile,
+          path,
+        });
+        if (currentSessionIdRef.current === pasteSessionId) {
+          requestAnimationFrame(() => textareaRef.current?.focus());
         }
       } finally {
         setClipboardImageUploading(false);
       }
     },
-    [applyInputDraft, sessionId, setInputDraft],
+    [addDraftAttachment, sessionId],
   );
 
   // 任意文件上传: picker (Paperclip 按钮) 和 drag-drop 共用同一上传逻辑。
-  // 走 file-upload-payload → relay.uploadFile, 成功后把 @<path> 插入当前光标位置, 复用
-  // image paste 的 insertTextAtSelection / insertedMentions 跟踪逻辑。
+  // 上传成功后只把附件元数据放入输入区预览，发送时再还原为 coding agent 需要的 @<path>。
   // 媒体 / 文件分两个 input: "上传照片或视频" 用 image/*,video/* 进入系统相册；
   // 普通文件入口由 upload picker policy 处理 Safari 与 Android 的系统选择器差异。
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -313,7 +313,7 @@ export function InputBar({ sessionId }: InputBarProps) {
   const [attachOpen, setAttachOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const uploadAndInsertFile = useCallback(
+  const uploadAndAttachFile = useCallback(
     async (file: File): Promise<void> => {
       const relay = relayClientRef;
       if (!relay) {
@@ -331,40 +331,29 @@ export function InputBar({ sessionId }: InputBarProps) {
           successLabel: null,
         });
         if (!path) return;
-        const pathMention = `@${path} `;
-        const activeTextarea =
-          currentSessionIdRef.current === uploadSessionId ? textareaRef.current : null;
-        const currentValue =
-          activeTextarea?.value ??
-          useChatStore.getState().bySessionId[uploadSessionId]?.inputDraft ??
-          "";
-        const selectionStart = activeTextarea?.selectionStart ?? currentValue.length;
-        const selectionEnd = activeTextarea?.selectionEnd ?? currentValue.length;
-        const next = insertTextAtSelection(currentValue, pathMention, selectionStart, selectionEnd);
-        if (activeTextarea) {
-          applyInputDraft(next.value);
-          setInsertedMentions((mentions) => [...mentions, pathMention.trim()]);
-          requestAnimationFrame(() => {
-            textareaRef.current?.focus();
-            textareaRef.current?.setSelectionRange(next.cursor, next.cursor);
-          });
-        } else {
-          setInputDraft(uploadSessionId, next.value);
+        addDraftAttachment(uploadSessionId, {
+          id: nextDraftAttachmentId(uploadSessionId),
+          kind: isImageFile(file) ? "image" : "file",
+          file,
+          path,
+        });
+        if (currentSessionIdRef.current === uploadSessionId) {
+          requestAnimationFrame(() => textareaRef.current?.focus());
         }
       } finally {
         setClipboardImageUploading(false);
       }
     },
-    [applyInputDraft, sessionId, setInputDraft],
+    [addDraftAttachment, sessionId],
   );
 
   const handleFilePicked = useCallback(
     async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
       const file = event.target.files?.[0];
       event.target.value = "";
-      if (file) await uploadAndInsertFile(file);
+      if (file) await uploadAndAttachFile(file);
     },
-    [uploadAndInsertFile],
+    [uploadAndAttachFile],
   );
 
   const handleDrop = useCallback(
@@ -373,9 +362,9 @@ export function InputBar({ sessionId }: InputBarProps) {
       if (!file) return;
       event.preventDefault();
       setIsDragOver(false);
-      await uploadAndInsertFile(file);
+      await uploadAndAttachFile(file);
     },
-    [uploadAndInsertFile],
+    [uploadAndAttachFile],
   );
 
   const placeholder = submitOnPlainEnter
@@ -446,6 +435,10 @@ export function InputBar({ sessionId }: InputBarProps) {
             参数: {argumentHint}
           </div>
         )}
+        <InputAttachmentPreview
+          attachments={draftAttachments}
+          onRemove={(attachmentId) => removeDraftAttachment(sessionId, attachmentId)}
+        />
         <div className="flex items-center w-full">
           <Textarea
             ref={textareaRef}
@@ -607,4 +600,14 @@ function AttachMenuItems({
       </button>
     </div>
   );
+}
+
+function nextDraftAttachmentId(sessionId: string): string {
+  draftAttachmentSequence += 1;
+  return `${sessionId}-attachment-${draftAttachmentSequence}`;
+}
+
+function isImageFile(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  return /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
 }

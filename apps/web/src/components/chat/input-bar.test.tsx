@@ -81,8 +81,8 @@ describe("InputBar clipboard image paste", () => {
     });
   });
 
-  it("uploads pasted images and inserts the returned file token into JSON input", async () => {
-    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+  it("shows pasted images as previews while preserving the agent file token on send", async () => {
+    const { getByLabelText, getByRole, queryByLabelText } = render(<InputBar sessionId="s1" />);
     const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
@@ -94,8 +94,23 @@ describe("InputBar clipboard image paste", () => {
       expect(uploadClipboardImage).toHaveBeenCalledWith("s1", file);
     });
     await waitFor(() => {
-      expect(textarea.value).toBe("inspect @.dev-anywhere/clipboard/s1/shot.png ");
+      expect(getByRole("img", { name: "shot.png" })).toBeTruthy();
     });
+    expect(textarea.value).toBe("inspect ");
+    expect(textarea.value).not.toContain(".dev-anywhere");
+
+    fireEvent.click(getByLabelText("发送"));
+
+    expect(sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "user_input",
+        sessionId: "s1",
+        payload: expect.objectContaining({
+          text: "inspect @.dev-anywhere/clipboard/s1/shot.png",
+        }),
+      }),
+    );
+    expect(queryByLabelText("已上传附件")).toBeNull();
     expect(toastError).not.toHaveBeenCalled();
   });
 
@@ -140,7 +155,7 @@ describe("InputBar clipboard image paste", () => {
     expect(toastDismiss).not.toHaveBeenCalled();
   });
 
-  it("inserts uploaded image tokens into the latest draft after slow uploads", async () => {
+  it("keeps the latest visible draft intact after slow image uploads", async () => {
     const upload = deferred<{ success: boolean; path: string }>();
     uploadClipboardImage.mockReturnValueOnce(upload.promise);
     const { getByLabelText } = render(<InputBar sessionId="s1" />);
@@ -154,8 +169,14 @@ describe("InputBar clipboard image paste", () => {
     upload.resolve({ success: true, path: ".dev-anywhere/clipboard/s1/shot.png" });
 
     await waitFor(() => {
-      expect(textarea.value).toBe("inspect this screenshot @.dev-anywhere/clipboard/s1/shot.png ");
+      expect(useChatStore.getState().bySessionId.s1?.draftAttachments).toEqual([
+        expect.objectContaining({
+          kind: "image",
+          path: ".dev-anywhere/clipboard/s1/shot.png",
+        }),
+      ]);
     });
+    expect(textarea.value).toBe("inspect this screenshot ");
   });
 
   it("keeps slow image uploads scoped to the original session after switching sessions", async () => {
@@ -185,10 +206,13 @@ describe("InputBar clipboard image paste", () => {
     upload.resolve({ success: true, path: ".dev-anywhere/clipboard/s1/shot.png" });
 
     await waitFor(() => {
-      expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
-        "inspect @.dev-anywhere/clipboard/s1/shot.png ",
-      );
+      expect(useChatStore.getState().bySessionId.s1?.draftAttachments).toEqual([
+        expect.objectContaining({
+          path: ".dev-anywhere/clipboard/s1/shot.png",
+        }),
+      ]);
     });
+    expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe("inspect ");
     expect(useChatStore.getState().bySessionId.s2?.inputDraft).toBe("new session ");
     expect(switchedTextarea.value).toBe("new session ");
   });
@@ -198,6 +222,7 @@ describe("InputBar attach file picker", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
+    sendEnvelope.mockReset();
     uploadFile.mockReset();
     uploadFile.mockResolvedValue({
       sessionId: "s1",
@@ -216,8 +241,10 @@ describe("InputBar attach file picker", () => {
     });
   });
 
-  it("uploads picked file and inserts the @<path> token at the cursor", async () => {
-    const { container, getByLabelText } = render(<InputBar sessionId="s1" />);
+  it("uploads picked files into a removable file card and sends the original path token", async () => {
+    const { container, getByLabelText, getByText, queryByLabelText } = render(
+      <InputBar sessionId="s1" />,
+    );
     const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 
@@ -230,13 +257,42 @@ describe("InputBar attach file picker", () => {
 
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
     expect(uploadFile).toHaveBeenCalledWith("s1", file);
-    await waitFor(() =>
-      expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
-        "see @.dev-anywhere/uploads/s1/notes.txt ",
-      ),
-    );
+    await waitFor(() => expect(getByText("notes.txt")).toBeTruthy());
+    expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe("see ");
+    expect(textarea.value).toBe("see ");
     expect(toastDismiss).toHaveBeenCalledWith("loading-id");
     expect(toastError).not.toHaveBeenCalled();
+
+    fireEvent.click(getByLabelText("发送"));
+    expect(sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          text: "see @.dev-anywhere/uploads/s1/notes.txt",
+        }),
+      }),
+    );
+    expect(queryByLabelText("已上传附件")).toBeNull();
+  });
+
+  it("removes uploaded files without adding their path to the outgoing message", async () => {
+    const { container, getByLabelText, getByText } = render(<InputBar sessionId="s1" />);
+    const input = container.querySelector(
+      'input[data-slot="input-attach-file-input"]',
+    ) as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "notes.txt", { type: "text/plain" });
+    Object.defineProperty(input, "files", { value: [file] });
+    fireEvent.change(input);
+
+    await waitFor(() => expect(getByText("notes.txt")).toBeTruthy());
+    fireEvent.click(getByLabelText("移除附件 notes.txt"));
+    fireEvent.click(getByLabelText("发送"));
+
+    expect(sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ text: "see" }),
+      }),
+    );
+    expect(useChatStore.getState().bySessionId.s1?.draftAttachments).toEqual([]);
   });
 
   it("shows error toast when upload fails", async () => {
@@ -253,8 +309,8 @@ describe("InputBar attach file picker", () => {
     expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe("see ");
   });
 
-  // Finder 等来源 cmd+C 复制文件 → 输入框 cmd+V, 走 file_upload 链路插入 @<path>
-  it("uploads non-image pasted file via clipboardData.files and inserts @<path>", async () => {
+  // Finder 等来源 cmd+C 复制文件 → 输入框 cmd+V, 走 file_upload 链路显示文件卡片。
+  it("uploads non-image pasted files into the attachment preview", async () => {
     const { getByLabelText } = render(<InputBar sessionId="s1" />);
     const textarea = getByLabelText("输入聊天消息") as HTMLTextAreaElement;
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
@@ -274,10 +330,14 @@ describe("InputBar attach file picker", () => {
     await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(1));
     expect(uploadFile).toHaveBeenCalledWith("s1", file);
     await waitFor(() =>
-      expect(useChatStore.getState().bySessionId.s1?.inputDraft).toBe(
-        "see @.dev-anywhere/uploads/s1/notes.txt ",
-      ),
+      expect(useChatStore.getState().bySessionId.s1?.draftAttachments).toEqual([
+        expect.objectContaining({
+          kind: "file",
+          path: ".dev-anywhere/uploads/s1/notes.txt",
+        }),
+      ]),
     );
+    expect(textarea.value).toBe("see ");
   });
 });
 

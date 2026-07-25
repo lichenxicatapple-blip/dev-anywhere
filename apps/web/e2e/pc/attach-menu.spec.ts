@@ -3,7 +3,7 @@
 //
 // 这里只验静态 DOM 契约 (菜单两项 + hidden input accept 属性), 不真触发文件选择器。
 import { test, expect } from "@playwright/test";
-import { gotoWithFakeProxy, installFakeRelay } from "../helpers";
+import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
 test.describe("attach menu — media vs file accept split", () => {
   test.beforeEach(async ({ page }) => {
@@ -53,5 +53,39 @@ test.describe("attach menu — media vs file accept split", () => {
     await expect(fileInput).not.toHaveAttribute("accept");
     await expect(imageInput).toHaveAttribute("type", "file");
     await expect(fileInput).toHaveAttribute("type", "file");
+  });
+
+  test("JSON 模式把上传文件显示为卡片, 发送时仍使用 @<path>", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+
+    const input = page.getByLabel("输入聊天消息");
+    await input.fill("review ");
+    await page.locator('input[data-slot="input-attach-file-input"]').setInputFiles({
+      name: "release-notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("release notes"),
+    });
+
+    const expectedPath = ".dev-anywhere/uploads/test-sess/uploaded-e2e.txt";
+    await expect(page.locator('[data-slot="input-file-attachment"]')).toBeVisible();
+    await expect(page.locator('[data-slot="input-attachment-name"]')).toHaveText(
+      "release-notes.txt",
+    );
+    await expect(input).toHaveValue("review ");
+    await expect(input).not.toHaveValue(new RegExp(expectedPath));
+
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect
+      .poll(async () =>
+        (await sentFakeRelayMessages(page)).find((message) => message.type === "user_input"),
+      )
+      .toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            text: `review @${expectedPath}`,
+          }),
+        }),
+      );
   });
 });

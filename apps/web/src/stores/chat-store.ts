@@ -22,6 +22,13 @@ export interface QuotedMessage {
   text: string;
 }
 
+export interface ChatDraftAttachment {
+  id: string;
+  kind: "image" | "file";
+  file: File;
+  path: string;
+}
+
 export type ChatActivitySource = "claude-native" | "user-action";
 export type ChatActivityKind = "tool" | "marker";
 export type ChatActivityStatus = "running" | "done" | "error";
@@ -64,6 +71,7 @@ interface ChatSessionSlice {
   pendingApprovals: ToolApprovalRequest[];
   quotedMessage: QuotedMessage | null;
   inputDraft: string;
+  draftAttachments: ChatDraftAttachment[];
 }
 
 export const EMPTY_SLICE: ChatSessionSlice = {
@@ -77,6 +85,7 @@ export const EMPTY_SLICE: ChatSessionSlice = {
   pendingApprovals: [],
   quotedMessage: null,
   inputDraft: "",
+  draftAttachments: [],
 };
 
 interface ChatStoreState {
@@ -112,6 +121,9 @@ interface ChatStoreState {
   setWorkingTool: (sessionId: string, toolName: string) => void;
   setQuotedMessage: (sessionId: string, quote: QuotedMessage | null) => void;
   setInputDraft: (sessionId: string, draft: string) => void;
+  addDraftAttachment: (sessionId: string, attachment: ChatDraftAttachment) => void;
+  removeDraftAttachment: (sessionId: string, attachmentId: string) => void;
+  clearDraftAttachments: (sessionId: string) => void;
   loadHistory: (
     sessionId: string,
     messages: Array<{
@@ -452,6 +464,29 @@ export const useChatStore = create<ChatStoreState>()(
 
       setInputDraft: (sessionId, draft) =>
         set((state) => updateSlice(state, sessionId, (slice) => ({ ...slice, inputDraft: draft }))),
+
+      addDraftAttachment: (sessionId, attachment) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            draftAttachments: [...slice.draftAttachments, attachment],
+          })),
+        ),
+
+      removeDraftAttachment: (sessionId, attachmentId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            draftAttachments: slice.draftAttachments.filter(
+              (attachment) => attachment.id !== attachmentId,
+            ),
+          })),
+        ),
+
+      clearDraftAttachments: (sessionId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({ ...slice, draftAttachments: [] })),
+        ),
 
       loadHistory: (sessionId, historyMessages) =>
         set((state) =>

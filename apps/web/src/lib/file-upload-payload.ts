@@ -10,7 +10,7 @@ interface UploadFileWithToastOptions {
   sessionId: string;
   file: File;
   // 默认 "已上传 {path}"。传 null 不弹成功 toast, 上传中 toast 直接 dismiss
-  // (input-bar 用这个 mode: 输入框出现 @<path> 自身就是反馈, 不需要二次成功提示)。
+  // (input-bar 用附件预览承载成功反馈, 不需要二次 toast)。
   successLabel?: string | null;
 }
 
