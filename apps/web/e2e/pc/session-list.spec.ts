@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { installFakeRelay, openCreateAgentSessionDialog, selectFakeProxy } from "../helpers";
+import {
+  installFakeRelay,
+  openCreateAgentSessionDialog,
+  selectFakeProxy,
+  sentFakeRelayMessages,
+} from "../helpers";
 import webPackage from "../../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;
@@ -96,6 +101,25 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(page.getByText("Relay 服务器", { exact: true })).toBeVisible();
     await expect(page.getByText("9.8.7")).toBeVisible();
     await expect(page.getByText("运行 2 分钟")).toBeVisible();
+  });
+
+  test("保存 Relay Token 后提示成功并重新刷新开发机列表", async ({ page }) => {
+    const initialProxyListRequests = (await sentFakeRelayMessages(page)).filter(
+      (message) => message.type === "proxy_list_request",
+    ).length;
+
+    await page.getByRole("button", { name: "设置" }).click();
+    await page.getByRole("button", { name: "Relay Token" }).click();
+    await page.getByRole("textbox", { name: "Token", exact: true }).fill("client-secret");
+    await page.getByRole("button", { name: "保存" }).click();
+
+    await expect(page.getByText("Relay Token 已保存，正在重新连接")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const messages = await sentFakeRelayMessages(page);
+        return messages.filter((message) => message.type === "proxy_list_request").length;
+      })
+      .toBeGreaterThan(initialProxyListRequests);
   });
 
   test("设置菜单可以查看并断开其他 Relay 客户端", async ({ page }) => {

@@ -54,6 +54,21 @@ function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
   store.setPhase("proxy_selecting");
 }
 
+function prepareRelayReconnect(): void {
+  const store = useAppStore.getState();
+  const hasSelectedProxy = store.selectedProxyId !== null;
+  store.setConnected(false);
+  store.setProxyOnline(false);
+  store.setProxies([]);
+  store.resetProxyListLoaded();
+
+  if (hasSelectedProxy) {
+    if (store.phase !== "reconnecting") store.setPhase("reconnecting");
+  } else {
+    store.setPhase("connecting");
+  }
+}
+
 export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> {
   const ws = wsManagerRef;
   if (!ws) return;
@@ -71,6 +86,7 @@ export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> 
     return;
   }
   useAppStore.getState().setRelayClientAuthIssue(null);
+  prepareRelayReconnect();
   ws.connect(toClientWsUrl(relayUrl));
 }
 

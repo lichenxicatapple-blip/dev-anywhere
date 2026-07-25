@@ -13,6 +13,7 @@ const {
   testVoiceConfig,
   toastError,
   toastInfo,
+  toastSuccess,
   updateVoiceConfig,
 } = vi.hoisted(() => ({
   playerEnqueue: vi.fn(),
@@ -26,6 +27,7 @@ const {
   testVoiceConfig: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
+  toastSuccess: vi.fn(),
   updateVoiceConfig: vi.fn(),
 }));
 
@@ -37,6 +39,7 @@ vi.mock("@/components/toast", () => ({
   toast: {
     error: toastError,
     info: toastInfo,
+    success: toastSuccess,
   },
 }));
 
@@ -174,6 +177,7 @@ describe("SettingsDialog", () => {
     requestBrowserNotificationPermission.mockResolvedValue("granted");
     toastError.mockReset();
     toastInfo.mockReset();
+    toastSuccess.mockReset();
     requestVoiceCapabilities.mockReset();
     requestVoiceCapabilities.mockResolvedValue({
       capabilities: {
@@ -501,7 +505,37 @@ describe("SettingsDialog", () => {
 
     expect(localStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
     expect(sessionStorage.getItem("dev_anywhere_relayClientToken")).toBe("client-secret");
+    expect(toastSuccess).toHaveBeenCalledWith("Relay Token 已保存，正在重新连接");
     expect(reconnectRelayClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports relay client token storage failures without reconnecting", () => {
+    const unavailableStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException("Storage unavailable", "SecurityError");
+      },
+      removeItem: () => undefined,
+      clear: () => undefined,
+      key: () => null,
+      length: 0,
+    } as Storage;
+    vi.stubGlobal("localStorage", unavailableStorage);
+    vi.stubGlobal("sessionStorage", unavailableStorage);
+    render(<SettingsDialog open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Relay Token" }));
+    fireEvent.change(screen.getByLabelText("Token"), {
+      target: { value: "client-secret" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(screen.getByText("Relay Token 保存失败，请检查浏览器存储权限。")).not.toBeNull();
+    expect(toastError).toHaveBeenCalledWith(
+      "Relay Token 保存失败，请检查浏览器存储权限。",
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(reconnectRelayClient).not.toHaveBeenCalled();
   });
 
   it("shows saved relay client token state and can clear it from settings", () => {

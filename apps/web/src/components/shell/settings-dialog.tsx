@@ -557,7 +557,14 @@ function RelayTokenPanel({ saved }: { saved: boolean }) {
       setError("请输入 token。");
       return;
     }
-    persistRelayClientToken(token);
+    if (!persistRelayClientToken(token)) {
+      const message = "Relay Token 保存失败，请检查浏览器存储权限。";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    setError(null);
+    toast.success("Relay Token 已保存，正在重新连接");
     reconnect();
   };
 

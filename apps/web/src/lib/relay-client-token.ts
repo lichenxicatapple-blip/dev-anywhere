@@ -18,9 +18,10 @@ export function hasStoredRelayClientToken(): boolean {
   return readStoredRelayClientToken() !== null;
 }
 
-export function persistRelayClientToken(token: string): void {
+export function persistRelayClientToken(token: string): boolean {
   writeStorageValue("local", RELAY_CLIENT_TOKEN_KEY, token);
   writeStorageValue("session", RELAY_CLIENT_TOKEN_KEY, token);
+  return readStoredRelayClientToken() === token;
 }
 
 export function clearRelayClientToken(): void {
