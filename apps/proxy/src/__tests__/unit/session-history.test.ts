@@ -375,7 +375,7 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("Same question");
   });
 
-  it("does NOT dedup when all user messages are isMeta and titles fall back to unique session IDs", async () => {
+  it("does NOT dedup untitled sessions in the same project (keys fall back to session id)", async () => {
     // All user messages are metadata, so the title falls back to the sessionId prefix.
     const older = writeSession("-test-proj", "aaaaaaaa-1111", [
       JSON.stringify({
@@ -411,10 +411,10 @@ describe("scanSessionHistory", () => {
     utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
-    // 没有真实标题时统一显示未命名；同一 provider + projectDir + title 会折叠到最新一条。
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("bbbbbbbb-2222");
-    expect(result[0].title).toBe("未命名会话");
+    // 没有真实标题时统一显示未命名，但去重键回退到 session id，避免不同会话被误折叠成一条。
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.id).sort()).toEqual(["aaaaaaaa-1111", "bbbbbbbb-2222"]);
+    expect(result.every((r) => r.title === "未命名会话")).toBe(true);
   });
 
   it("includes Codex sessions from ~/.codex/sessions", async () => {
@@ -544,14 +544,104 @@ describe("scanSessionHistory", () => {
         payload: {
           type: "message",
           role: "user",
-          content: [{ type: "input_text", text: "engine的日志在哪里啊" }],
+          content: [{ type: "input_text", text: "第一个真实问题" }],
         },
       }),
     ]);
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(1);
-    expect(result[0].title).toBe("engine的日志在哪里啊");
+    expect(result[0].title).toBe("第一个真实问题");
+  });
+
+  it("filters Codex AGENTS.md + environment_context blocks in one message, uses next real prompt", async () => {
+    // 真实 rollout 里 Codex 把 AGENTS.md 指令和 environment_context 塞进同一条 user 消息的
+    // 两个 input_text 块; 拼接后以 `#` 开头会绕过只认 `<` 的过滤, 必须逐块剔除。
+    writeCodexSession("codex-agents", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-agents", cwd: "/home/dev/projects/sample-app" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "# AGENTS.md instructions for /home/dev/projects/sample-app\n\n<INSTRUCTIONS>\n# Repository Guidelines\n</INSTRUCTIONS>",
+            },
+            {
+              type: "input_text",
+              text: "<environment_context><cwd>/home/dev/projects/sample-app</cwd></environment_context>",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "这是用户的真实提问" }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("这是用户的真实提问");
+  });
+
+  it("keeps distinct Codex sessions in the same project separate after AGENTS.md injection", async () => {
+    const agentsBlock = {
+      type: "input_text",
+      text: "# AGENTS.md instructions for /home/dev/projects/sample-app\n\n<INSTRUCTIONS>\n</INSTRUCTIONS>",
+    };
+    writeCodexSession("codex-multi-1", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-multi-1", cwd: "/home/dev/projects/sample-app" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [agentsBlock] },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "第一个会话的问题" }],
+        },
+      }),
+    ]);
+    writeCodexSession("codex-multi-2", [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: "codex-multi-2", cwd: "/home/dev/projects/sample-app" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [agentsBlock] },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "第二个会话的问题" }],
+        },
+      }),
+    ]);
+
+    const result = await scanSessionHistory();
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.title).sort()).toEqual([
+      "第一个会话的问题",
+      "第二个会话的问题",
+    ]);
   });
 
   it("keeps Claude and Codex entries with the same title and cwd separate", async () => {

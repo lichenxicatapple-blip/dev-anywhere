@@ -47,6 +47,10 @@ const INTERNAL_TITLE_PATTERNS = [
   /^codex agent history\b/i,
   /^conversation summary\b/i,
 ];
+// Codex 会把 AGENTS.md 指令注入到首条 user 消息的一个 input_text 块里 (以 `# AGENTS.md
+// instructions for <path>` 开头), 和 <environment_context> 块并排。这些块不是用户输入,
+// 若被当作标题会让同项目所有会话标题雷同, 进而在去重时相互折叠。
+const CODEX_AGENTS_INSTRUCTIONS_PATTERN = /^#\s*AGENTS\.md instructions for\b/i;
 const CLAUDE_CONTINUATION_SUMMARY_PATTERN =
   /^This session is being continued from a previous conversation that ran out of context\.\s+The summary below covers the earlier portion of the conversation\.\s+Summary:/i;
 const TEMP_HISTORY_ROOTS = expandPathAliases([tmpdir(), "/tmp", "/private/tmp", "/var/tmp"])
@@ -63,10 +67,13 @@ export async function scanSessionHistory(
     readSessionHistoryMetadata(options.metadataPath),
   ).filter((entry) => !isTemporaryProjectDir(entry.projectDir));
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
-  // 按 provider + title + projectDir 去重，resume 产生的多个 session 只保留最新的
+  // 按 provider + projectDir + title 去重，resume 产生的多个 session 只保留最新的。
+  // 兜底: 标题回退为「未命名会话」时改用 session id 参与去重, 避免提取不到标题的不同会话
+  // 被错误折叠成一条 (真实标题相同仍按设计折叠)。
   const seen = new Set<string>();
   const uniqueEntries = entries.filter((e) => {
-    const key = `${e.provider}::${e.projectDir}::${e.title}::${e.preferredMode ?? "unknown"}`;
+    const titleKey = e.title === UNTITLED_SESSION_TITLE ? `id:${e.id}` : e.title;
+    const key = `${e.provider}::${e.projectDir}::${titleKey}::${e.preferredMode ?? "unknown"}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -723,7 +730,18 @@ function extractCodexUserText(payload: unknown): string | null {
       const typed = block as { type?: unknown; text?: unknown };
       return typed.type === "input_text" && typeof typed.text === "string" ? typed.text : "";
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((text) => !isCodexInjectedContextBlock(text));
   const joined = texts.join("\n").trim();
   return normalizeHistoryTitle(joined);
+}
+
+// 判断某个 input_text 块是否为 Codex 自动注入的上下文 (AGENTS.md 指令 / environment_context)。
+// 逐块过滤而非拼接后再判断: 注入块常与真实内容混在同一条消息, 且 `# AGENTS.md...` 以 `#`
+// 开头会绕过 normalizeHistoryTitle 里只认 `<` 开头的噪音过滤。
+function isCodexInjectedContextBlock(text: string): boolean {
+  const trimmed = text.trimStart();
+  return (
+    CODEX_AGENTS_INSTRUCTIONS_PATTERN.test(trimmed) || trimmed.startsWith("<environment_context>")
+  );
 }
