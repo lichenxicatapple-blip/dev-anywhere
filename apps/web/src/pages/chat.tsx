@@ -269,7 +269,6 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 sessionId={id}
                 sessionKind={session?.kind}
                 provider={session?.provider}
-                ptyOwner={session?.ptyOwner}
                 findRequest={activeFindRequest}
               />
             ) : (

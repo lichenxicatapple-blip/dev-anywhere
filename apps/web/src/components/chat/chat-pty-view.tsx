@@ -21,7 +21,6 @@ interface ChatPtyViewProps {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
-  ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
   findRequest?: number;
 }
@@ -30,7 +29,6 @@ export function ChatPtyView({
   sessionId,
   sessionKind,
   provider,
-  ptyOwner,
   active = true,
   findRequest,
 }: ChatPtyViewProps) {
@@ -44,8 +42,6 @@ export function ChatPtyView({
 
   const view = usePtyView({
     sessionId,
-    sessionKind,
-    ptyOwner,
     active,
     containerEl,
     spacerRef,

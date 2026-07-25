@@ -8,6 +8,60 @@ import { BASE_URL, resetLocalState } from "../helpers";
 const SESSION_ID = "pty-geometry";
 
 test.describe("PTY geometry edges", () => {
+  test("keeps snapshot geometry stable when session metadata has no size", async ({ page }) => {
+    // session_list 故意不带 cols/rows，覆盖升级前已存在的会话；尺寸仍由历史协议中
+    // 一直存在的 session_snapshot 恢复。
+    await setupPtyChat(page, {
+      sessionId: `${SESSION_ID}-session-owned`,
+      sessionKind: "terminal",
+      ptyOwner: "local-terminal",
+      cols: 80,
+      rows: 24,
+      snapshotData: `${"QR".repeat(38)}\r\n$ `,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await expect
+      .poll(() =>
+        page.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          if (!term) return null;
+          const wrappedLines = Array.from(
+            { length: term.buffer.active.length },
+            (_, index) => term.buffer.active.getLine(index)?.isWrapped === true,
+          ).filter(Boolean).length;
+          return { cols: term.cols, rows: term.rows, wrappedLines };
+        }, `${SESSION_ID}-session-owned`),
+      )
+      .toEqual({ cols: 80, rows: 24, wrappedLines: 0 });
+
+    await page.setViewportSize({ width: 390, height: 700 });
+    await expect
+      .poll(() =>
+        page.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          if (!term) return null;
+          const wrappedLines = Array.from(
+            { length: term.buffer.active.length },
+            (_, index) => term.buffer.active.getLine(index)?.isWrapped === true,
+          ).filter(Boolean).length;
+          return { cols: term.cols, rows: term.rows, wrappedLines };
+        }, `${SESSION_ID}-session-owned`),
+      )
+      .toEqual({ cols: 80, rows: 24, wrappedLines: 0 });
+
+    const resizeRequests = await page.evaluate(() =>
+      window.__ptySmoke.sent.filter((raw) => {
+        try {
+          return (JSON.parse(raw) as { type?: string }).type === "terminal_resize_request";
+        } catch {
+          return false;
+        }
+      }),
+    );
+    expect(resizeRequests).toEqual([]);
+  });
+
   test("keeps xterm at the real last viewport when small fonts leave extra vertical space", async ({
     page,
   }) => {

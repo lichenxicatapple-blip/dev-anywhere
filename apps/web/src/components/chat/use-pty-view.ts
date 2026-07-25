@@ -1,9 +1,9 @@
-// PTY 视图编排 hook：把 4 个 controller（terminal / scroll / resize / font-size）
+// PTY 视图编排 hook：把 3 个 controller（terminal / scroll / font-size）
 // 的 bringup 顺序、命令式句柄、调试注册、image preview link provider 等横切关注点
 // 集中到这里，让 chat-pty-view.tsx 退化为纯 JSX shell。
 //
 // 关键设计：单一 effect 在 attachPtyTerminalController 的 onTerminalReady 回调里
-// 就近挂 scroll/resize/debug——typed handshake（term 直接作为入参传入），跨 effect
+// 就近挂 scroll/debug——typed handshake（term 直接作为入参传入），跨 effect
 // 没有隐式 ref 协议。font-size effect 因为依赖 store 状态独立 trigger 单独保留。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -21,7 +21,6 @@ import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
-import { attachPtyResizeController } from "@/lib/pty-resize-controller";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
@@ -63,8 +62,6 @@ import { useTerminalPaste } from "./use-terminal-paste";
 
 interface UsePtyViewOptions {
   sessionId: string;
-  sessionKind?: "agent" | "terminal";
-  ptyOwner?: "local-terminal" | "proxy-hosted";
   active?: boolean;
   containerEl: HTMLDivElement | null;
   spacerRef: RefObject<HTMLDivElement | null>;
@@ -304,8 +301,6 @@ function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
 export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const {
     sessionId,
-    sessionKind,
-    ptyOwner,
     active = true,
     containerEl,
     spacerRef,
@@ -335,7 +330,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const rawInputFollowSchedulerRef = useRef<RafScheduler | null>(null);
   const pendingRawInputFollowRef = useRef<{ reason: string; force: boolean } | null>(null);
   const keyboardFollowStateRef = useRef({ keyboardOpen: false, controlsVisible: false });
-  const softKeyboardLayoutActiveRef = useRef(false);
   const physicalKeyboardModeRef = useRef(false);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
@@ -370,7 +364,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const adaptiveInputModality = useAppStore((s) => s.adaptiveInputModality);
   const setAdaptiveInputModality = useAppStore((s) => s.setAdaptiveInputModality);
   const detectedPhysicalKeyboard = adaptiveInputModality === "hardware";
-  const webOwnsPtyGeometry = ptyOwner === "proxy-hosted" || sessionKind === "terminal";
   const touchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const { bottomOffset: detectedKeyboardOffset, layoutBottomInset } = useVisualViewportInsets();
   const forceHardwareInput = inputModePreference === "hardware";
@@ -413,8 +406,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     ptyInputFocused,
     keyboardOpen,
   });
-  softKeyboardLayoutActiveRef.current =
-    softKeyboardEditingSurface && (showMobilePtyControls || keyboardOffset > 0);
 
   mobileLayoutDebugRef.current = {
     keyboardOffset,
@@ -734,10 +725,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [canAcceptInput],
   );
 
-  // === controller graph：单 effect 编排 terminal / scroll / resize ===
+  // === controller graph：单 effect 编排 terminal / scroll ===
   // attachPtyTerminalController 的 onTerminalReady 是 typed handshake：term 在 callback
   // 入参里直接给到，不再依赖 React 重渲染让下游 effect 通过 ref 读到。所有 terminal
-  // 衍生 wiring（image link / debug 注册 / scroll-controller / resize-controller）
+  // 衍生 wiring（image link / debug 注册 / scroll-controller）
   // 都在这个 callback 内一并挂载。reconnect 时 termCtrl/scrollCtrl 一起重建——靠
   // userHasVerticalScrollIntentRef 跨周期保留用户回看意图，且 scroll-controller 内部
   // 对 wasAtBottom 的判定已修正（updateSpacer 之后再读 scrollHeight），不会因 spacer
@@ -754,7 +745,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let imageLinkDispose: (() => void) | null = null;
     let fileDownloadLinkDispose: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
-    let resizeDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
 
@@ -937,19 +927,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             scrollControllerRef.current?.markHorizontalScrollIntent(reason),
         });
         dragSelectDispose = dragSelect.dispose;
-
-        if (webOwnsPtyGeometry) {
-          const resizeCtrl = attachPtyResizeController({
-            container,
-            term: xterm,
-            onResize: (cols, rows) => {
-              relay.sendControl({ type: "terminal_resize_request", sessionId, cols, rows });
-            },
-            onRelayout: () => scrollControllerRef.current?.relayout(),
-            preserveRows: () => softKeyboardLayoutActiveRef.current,
-          });
-          resizeDispose = resizeCtrl.dispose;
-        }
       },
       onFramePending,
       onFrameWritten,
@@ -963,7 +940,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalControllerRef.current = termCtrl;
 
     return () => {
-      resizeDispose?.();
       dragSelectDispose?.();
       scrollDispose?.();
       searchResultsRegistration?.dispose();
@@ -989,7 +965,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     //
     // usePtyFollowState 每次都返回一个新对象字面量, follow 的 === 引用每次父级
     // re-render 都不相等; 真把 follow 列进 deps 会让本 effect 每次父 render 都
-    // tear down + rebuild xterm Terminal / scroll-controller / resize-controller,
+    // tear down + rebuild xterm Terminal / scroll-controller,
     // 极贵且闪屏。
     //
     // 子字段反过来是 useCallback / RefObject / useState setter, React 保证引用
@@ -1016,7 +992,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
-    webOwnsPtyGeometry,
   ]);
 
   // === font-size effect：依赖 ptyFontSize 单独触发 ===
@@ -1141,12 +1116,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         toast.error(message);
       })
       .finally(() => terminalRef.current?.focus());
-  }, [
-    canAcceptInput,
-    resetHorizontalScrollAfterLineSubmit,
-    scheduleRawInputFollow,
-    sessionId,
-  ]);
+  }, [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId]);
 
   // 控制条会随横竖屏在一行/两行之间切换，PTY 留白直接跟随实测高度。
   const containerPaddingBottom = resolvePtyContainerPaddingBottom({

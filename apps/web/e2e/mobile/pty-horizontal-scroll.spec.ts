@@ -54,6 +54,50 @@ async function touchDrag(
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
 
+  test("keeps a legacy Shell session at its snapshot width after mobile reconnect", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-session-owned`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "terminal",
+      ptyOwner: "local-terminal",
+      cols: 80,
+      rows: 24,
+      snapshotData: `${"QR".repeat(38)}\r\n$ `,
+      baseUrl: mobileBaseUrl,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await expect
+      .poll(() =>
+        emuPage.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          if (!term) return null;
+          const wrappedLines = Array.from(
+            { length: term.buffer.active.length },
+            (_, index) => term.buffer.active.getLine(index)?.isWrapped === true,
+          ).filter(Boolean).length;
+          return { cols: term.cols, rows: term.rows, wrappedLines };
+        }, sessionId),
+      )
+      .toEqual({ cols: 80, rows: 24, wrappedLines: 0 });
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.maxScrollLeft))
+      .toBeGreaterThan(100);
+
+    const resizeRequests = await emuPage.evaluate(() =>
+      window.__ptySmoke.sent.filter((raw) => {
+        try {
+          return (JSON.parse(raw) as { type?: string }).type === "terminal_resize_request";
+        } catch {
+          return false;
+        }
+      }),
+    );
+    expect(resizeRequests).toEqual([]);
+  });
+
   test("touch-drag pans horizontally when the PTY overflows the mobile viewport", async ({
     emuPage,
   }) => {

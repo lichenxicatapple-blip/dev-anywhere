@@ -61,7 +61,7 @@ describe("PtyKeepAliveProvider", () => {
     const { container } = render(
       <PtyKeepAliveProvider>
         <div style={{ height: 200, width: 300 }}>
-          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" />
+          <PtyKeepAliveViewport sessionId="pty-1" />
         </div>
       </PtyKeepAliveProvider>,
     );
@@ -78,7 +78,7 @@ describe("PtyKeepAliveProvider", () => {
     const { container } = render(
       <PtyKeepAliveProvider>
         <div style={{ height: 200, width: 300 }}>
-          <PtyKeepAliveViewport sessionId="pty-1" provider="codex" ptyOwner="proxy-hosted" />
+          <PtyKeepAliveViewport sessionId="pty-1" provider="codex" />
         </div>
       </PtyKeepAliveProvider>,
     );
@@ -93,7 +93,7 @@ describe("PtyKeepAliveProvider", () => {
     const { container, rerender } = render(
       <PtyKeepAliveProvider>
         <div style={{ height: 200, width: 300 }}>
-          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" />
+          <PtyKeepAliveViewport sessionId="pty-1" />
         </div>
       </PtyKeepAliveProvider>,
     );
@@ -101,7 +101,7 @@ describe("PtyKeepAliveProvider", () => {
     rerender(
       <PtyKeepAliveProvider>
         <div style={{ height: 200, width: 300 }}>
-          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" findRequest={1} />
+          <PtyKeepAliveViewport sessionId="pty-1" findRequest={1} />
         </div>
       </PtyKeepAliveProvider>,
     );
@@ -128,7 +128,7 @@ describe("PtyKeepAliveProvider", () => {
     const { container } = render(
       <PtyKeepAliveProvider>
         <div style={{ height: 200, width: 300 }}>
-          <PtyKeepAliveViewport sessionId="pty-1" ptyOwner="proxy-hosted" />
+          <PtyKeepAliveViewport sessionId="pty-1" />
         </div>
       </PtyKeepAliveProvider>,
     );

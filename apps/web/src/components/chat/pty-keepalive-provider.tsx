@@ -16,12 +16,9 @@ import type { SessionProvider } from "@/lib/session-provider";
 import { ImagePreviewProvider } from "./image-preview";
 import { ChatPtyView } from "./chat-pty-view";
 
-type PtyOwner = "local-terminal" | "proxy-hosted";
-
 interface CachedPtyEntry extends PtyKeepAliveEntry {
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
-  ptyOwner?: PtyOwner;
   findRequest?: number;
 }
 
@@ -36,7 +33,6 @@ interface ActivePtyView {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
-  ptyOwner?: PtyOwner;
 }
 
 interface PtyKeepAliveContextValue {
@@ -88,7 +84,6 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
               ...entry,
               sessionKind: view.sessionKind,
               provider: view.provider,
-              ptyOwner: view.ptyOwner,
             }
           : entry,
       );
@@ -157,13 +152,11 @@ export function PtyKeepAliveViewport({
   sessionId,
   sessionKind,
   provider,
-  ptyOwner,
   findRequest,
 }: {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
-  ptyOwner?: PtyOwner;
   findRequest?: number;
 }) {
   const context = useContext(PtyKeepAliveContext);
@@ -176,9 +169,9 @@ export function PtyKeepAliveViewport({
   const { activate, deactivate, updateFindRequest, updateViewportRect } = context;
 
   useLayoutEffect(() => {
-    activate({ sessionId, sessionKind, provider, ptyOwner });
+    activate({ sessionId, sessionKind, provider });
     return () => deactivate(sessionId);
-  }, [activate, deactivate, sessionId, sessionKind, provider, ptyOwner]);
+  }, [activate, deactivate, sessionId, sessionKind, provider]);
 
   useLayoutEffect(() => {
     updateFindRequest(sessionId, findRequest);
@@ -263,7 +256,6 @@ function PtyKeepAliveLayer({
                 sessionId={entry.sessionId}
                 sessionKind={entry.sessionKind}
                 provider={entry.provider}
-                ptyOwner={entry.ptyOwner}
                 active={active}
                 findRequest={entry.findRequest}
               />

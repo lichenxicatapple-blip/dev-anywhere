@@ -38,9 +38,10 @@ export const SessionInfoSchema = z.object({
   state: z.enum(sessionStateValues),
   mode: z.enum(sessionModeValues).optional(),
   provider: z.enum(providerValues),
-  // PTY 尺寸所有权:
-  // - local-terminal: 本地 terminal 进程持有真实 PTY，Web 只按原始 cols/rows 展示
-  // - proxy-hosted: serve 内托管 PTY，Web 可按视口请求 resize
+  // PTY 进程所有权。两种 PTY 的 cols/rows 都由会话端持有，Web 仅按服务端快照展示，
+  // 浏览器视口变化不会隐式改变真实 PTY 几何。
+  // - local-terminal: 本地 terminal worker 持有 PTY
+  // - proxy-hosted: serve 内 HostedPtyRegistry 持有 PTY
   ptyOwner: z.enum(ptyOwnerValues).optional(),
   lastActive: z.number().optional(),
 });

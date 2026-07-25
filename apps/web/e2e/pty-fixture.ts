@@ -8,6 +8,8 @@ import { installVisualViewportMock } from "./mobile-helpers";
 export type PtyFakeRelayOptions = {
   sessionId: string;
   provider?: "claude" | "codex";
+  sessionKind?: "agent" | "terminal";
+  ptyOwner?: "local-terminal" | "proxy-hosted";
   snapshotData?: string;
   cols?: number;
   rows?: number;
@@ -48,7 +50,16 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
     )
     .catch(() => {});
   await page.addInitScript(
-    ({ activeKey, sessionId, provider, snapshotData, initialCols, initialRows }) => {
+    ({
+      activeKey,
+      sessionId,
+      provider,
+      sessionKind,
+      ptyOwner,
+      snapshotData,
+      initialCols,
+      initialRows,
+    }) => {
       const active = (() => {
         try {
           return JSON.parse(sessionStorage.getItem(activeKey) ?? "null") as {
@@ -148,8 +159,10 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
                 sessions: [
                   {
                     sessionId,
+                    ...(sessionKind ? { kind: sessionKind } : {}),
                     mode: "pty",
                     provider: providerForSession,
+                    ...(ptyOwner ? { ptyOwner } : {}),
                     state: "working",
                     lastActive: Date.now(),
                   },
@@ -271,6 +284,8 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       activeKey: PTY_FAKE_RELAY_ACTIVE_KEY,
       sessionId: options.sessionId,
       provider: options.provider ?? "claude",
+      sessionKind: options.sessionKind,
+      ptyOwner: options.ptyOwner,
       snapshotData: options.snapshotData ?? "PTY SMOKE READY\r\n$ ",
       initialCols: options.cols ?? 80,
       initialRows: options.rows ?? 24,
@@ -338,6 +353,8 @@ export async function readRawPtyInput(page: Page): Promise<string> {
 export type SetupPtyChatOptions = {
   sessionId: string;
   provider?: "claude" | "codex";
+  sessionKind?: "agent" | "terminal";
+  ptyOwner?: "local-terminal" | "proxy-hosted";
   query?: string;
   withVisualViewportMock?: boolean;
   snapshotData?: string;
@@ -361,6 +378,8 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
   const relayOptions = {
     sessionId: options.sessionId,
     provider: options.provider,
+    sessionKind: options.sessionKind,
+    ptyOwner: options.ptyOwner,
     snapshotData: options.snapshotData,
     cols: options.cols,
     rows: options.rows,
