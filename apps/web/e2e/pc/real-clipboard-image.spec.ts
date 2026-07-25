@@ -391,7 +391,10 @@ test.describe("real clipboard image chain", () => {
       jsonUpload = await waitForNewUploadedFile(jsonBefore, "paste-", ".png");
       expectUploadedBytes(jsonUpload, pngBytes);
       // 文件落 tmp 绝对路径, 不再相对 cwd, 不再追加 user .gitignore (commit 55ad4c4f)。
-      await expect(input).toHaveValue(`inspect @${jsonUpload} `);
+      await expect(page.locator('[data-slot="input-image-attachment"]')).toBeVisible();
+      await expect(page.getByRole("img", { name: "shot.png" })).toBeVisible();
+      await expect(input).toHaveValue("inspect ");
+      await expect(input).not.toHaveValue(new RegExp(jsonUpload));
       await previewJsonImagePath(page, jsonUpload);
 
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
