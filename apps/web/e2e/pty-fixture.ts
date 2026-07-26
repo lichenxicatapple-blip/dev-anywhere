@@ -147,6 +147,39 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
             return;
           }
 
+          if (msg.type === "proxy_info_request") {
+            this.emitJson({
+              type: "proxy_info",
+              requestId: msg.requestId,
+              homePath: "/tmp",
+              agentCli: {
+                claude: { available: true, command: "claude" },
+                codex: { available: true, command: "codex" },
+              },
+            });
+            return;
+          }
+
+          if (msg.type === "session_history_request") {
+            this.emitJson({
+              type: "session_history_response",
+              requestId: msg.requestId,
+              sessions: [],
+            });
+            return;
+          }
+
+          if (msg.type === "session_messages_request") {
+            this.emitJson({
+              type: "session_history_messages",
+              requestId: msg.requestId,
+              sessionId,
+              messages: [],
+              hasMore: false,
+            });
+            return;
+          }
+
           if (msg.type === "session_list") {
             this.emitJson({
               seq: 1,

@@ -201,6 +201,35 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("starts a hosted PTY with the requested initial geometry", () => {
+    withExecutable("codex", (codexBin) => {
+      const registry = createRegistry("codex", codexBin);
+
+      registry.start({
+        sessionId: "s1",
+        provider: "codex",
+        cwd: "/tmp/project",
+        args: [],
+        cols: 125,
+        rows: 34,
+        hook: {
+          provider: "codex",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+      registry.destroyAll();
+
+      expect(ptySpawnMock).toHaveBeenCalledWith(
+        codexBin,
+        [],
+        expect.objectContaining({ cols: 125, rows: 34 }),
+      );
+    });
+  });
+
   it("reports a pure shell terminal working-directory change from OSC 7", () => {
     withExecutable("zsh", (shellPath) => {
       const updateTerminalCwd = vi.fn(() => true);

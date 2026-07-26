@@ -16,12 +16,14 @@ interface BackToBottomProps {
 }
 
 export function BackToBottom({ visible, hasNewMessages, onClick, className }: BackToBottomProps) {
+  const label = hasNewMessages ? "回到最新" : "回到底部";
   return (
     <Button
       size="icon"
       variant="outline"
       onClick={onClick}
-      aria-label="回到底部"
+      aria-label={label}
+      title={label}
       inert={!visible}
       data-slot="back-to-bottom"
       className={cn(

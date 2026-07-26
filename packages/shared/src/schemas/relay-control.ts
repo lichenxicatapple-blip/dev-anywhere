@@ -17,6 +17,7 @@ import {
   sessionKindValues,
   sessionModeValues,
 } from "../constants/enums.js";
+import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "../constants/pty.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -534,6 +535,10 @@ const relayControlDefinitions = [
       provider: z.enum(providerValues).optional(),
       mode: z.enum(sessionModeValues).optional(),
       resumeSessionId: z.string().optional(),
+      // 仅用于新建 PTY 的一次性初始几何。创建后尺寸由会话端持有，浏览器刷新、
+      // 重连或换设备不会隐式重排既有终端内容。
+      cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS).optional(),
+      rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS).optional(),
       // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
       permissionMode: z
         .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])

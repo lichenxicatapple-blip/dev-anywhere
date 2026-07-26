@@ -107,7 +107,10 @@ export function ChatPtyView({
           overflowAnchor: "none",
         }}
         onMouseDownCapture={view.handleTerminalContainerMouseDown}
-        onPointerDownCapture={view.pointerHandlers.onPointerDownCapture}
+        onPointerDownCapture={(event) => {
+          view.refreshReviewSnapshot();
+          view.pointerHandlers.onPointerDownCapture(event);
+        }}
         onPointerMoveCapture={view.pointerHandlers.onPointerMoveCapture}
         onPointerUpCapture={view.pointerHandlers.onPointerUpCapture}
         onPointerCancelCapture={view.pointerHandlers.onPointerCancelCapture}

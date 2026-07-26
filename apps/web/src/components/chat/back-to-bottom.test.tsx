@@ -21,4 +21,14 @@ describe("BackToBottom", () => {
     expect(button.className).not.toContain("top-4");
     expect(button.className).not.toContain("bottom-");
   });
+
+  it("uses the same button as the shortcut to the latest output", () => {
+    render(<BackToBottom visible hasNewMessages onClick={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "回到最新" });
+    expect(button).toHaveAttribute("title", "回到最新");
+    expect(button.querySelector('[data-slot="back-to-bottom-new-indicator"]')).toHaveClass(
+      "opacity-100",
+    );
+  });
 });

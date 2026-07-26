@@ -49,6 +49,8 @@ interface PtyScrollControllerOptions {
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
+  onReviewSnapshotCapture?: () => boolean;
+  onReviewSnapshotClear?: () => void;
   atBottomThreshold?: number;
 }
 
@@ -71,6 +73,7 @@ interface PtyScrollController {
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
+  refreshReviewSnapshot: () => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
   getDebugProbe: () => PtyScrollDebugProbe;
 }
@@ -106,6 +109,8 @@ export function attachPtyScrollController(
     onUserVerticalScrollIntentChange,
     onTouchReviewStart,
     onTouchBoundaryPrevent,
+    onReviewSnapshotCapture,
+    onReviewSnapshotClear,
     atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
   } = options;
 
@@ -163,6 +168,7 @@ export function attachPtyScrollController(
   let lastRawInputFollowAt: number | null = null;
   let pendingTouchScrollNotifyFrame: number | null = null;
   let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
+  let reviewSnapshotRefreshPending = initialUserHasVerticalScrollIntent;
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
 
@@ -331,6 +337,11 @@ export function attachPtyScrollController(
     trace("rawInputFollow:fire");
   };
 
+  const refreshReviewSnapshot = (): void => {
+    if (!userHasVerticalScrollIntent()) return;
+    reviewSnapshotRefreshPending = onReviewSnapshotCapture?.() === false;
+  };
+
   const dispatchVerticalIntent = (event: PtyVerticalIntentEvent): PtyVerticalIntentResult => {
     const previousReviewing = isReviewing(verticalIntent);
     const result = reducePtyVerticalIntent(verticalIntent, event, { atBottomThreshold });
@@ -345,6 +356,12 @@ export function attachPtyScrollController(
     const nextReviewing = isReviewing(verticalIntent);
     if (previousReviewing !== nextReviewing) {
       onUserVerticalScrollIntentChange?.(nextReviewing);
+      if (nextReviewing) {
+        reviewSnapshotRefreshPending = true;
+      } else {
+        reviewSnapshotRefreshPending = false;
+        onReviewSnapshotClear?.();
+      }
     }
     if (result.notifyTouchReviewStart) {
       onTouchReviewStart?.();
@@ -466,6 +483,7 @@ export function attachPtyScrollController(
       ratio: clamped,
       scrollTop: nextScrollTop,
     });
+    reviewSnapshotRefreshPending = true;
     container.scrollTop = nextScrollTop;
     syncContainerScroll();
   };
@@ -491,6 +509,7 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
+    reviewSnapshotRefreshPending = true;
     container.scrollTop = next;
     lastSeenScrollTop = next;
     syncContainerScroll();
@@ -506,6 +525,9 @@ export function attachPtyScrollController(
         next >= maxScrollTop - atBottomThreshold &&
         getCurrentAnchor().isAtBottom,
     });
+    if (userHasVerticalScrollIntent()) {
+      reviewSnapshotRefreshPending = true;
+    }
   };
 
   const scrollToXRatio = (ratio: number): void => {
@@ -921,6 +943,9 @@ export function attachPtyScrollController(
       atCursorAwareBottom: atBottom,
       verticalDelta,
     });
+    if (userHasVerticalScrollIntent()) {
+      reviewSnapshotRefreshPending = true;
+    }
     if (skipSameRowTouchScrollSync(effectiveScrollTop)) {
       return;
     }
@@ -1146,6 +1171,9 @@ export function attachPtyScrollController(
     handlePendingNewFrame();
     followCursorX();
     followCursorY();
+    if (reviewSnapshotRefreshPending && userHasVerticalScrollIntent()) {
+      reviewSnapshotRefreshPending = onReviewSnapshotCapture?.() === false;
+    }
     notifyScroll();
   };
 
@@ -1223,6 +1251,7 @@ export function attachPtyScrollController(
       domAdapter.dispose();
       traceAdapter.dispose();
       cancelPendingTouchScrollNotify();
+      onReviewSnapshotClear?.();
     },
     relayout,
     scrollToBottom,
@@ -1234,6 +1263,7 @@ export function attachPtyScrollController(
     markHorizontalScrollIntent,
     traceRawInputFollowScheduled,
     traceRawInputFollowFire,
+    refreshReviewSnapshot,
     getDebugProbe,
   };
 }

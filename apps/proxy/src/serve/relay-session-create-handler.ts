@@ -4,6 +4,10 @@ import { isAbsolute } from "node:path";
 import { nanoid } from "nanoid";
 import {
   ControlErrorCode,
+  PTY_INITIAL_MAX_COLS,
+  PTY_INITIAL_MAX_ROWS,
+  PTY_INITIAL_MIN_COLS,
+  PTY_INITIAL_MIN_ROWS,
   SESSION_CREATE_SERVER_DEADLINE_MS,
   serializeControl,
   type ControlMessage,
@@ -90,6 +94,20 @@ function resolveTerminalCwd(): string {
     }
   }
   return process.cwd();
+}
+
+export function resolveInitialPtyGeometry(input: { cols?: number; rows?: number }): {
+  cols: number;
+  rows: number;
+} {
+  const normalize = (value: number | undefined, min: number, max: number): number => {
+    if (!Number.isFinite(value)) return min;
+    return Math.min(max, Math.max(min, Math.trunc(value ?? min)));
+  };
+  return {
+    cols: normalize(input.cols, PTY_INITIAL_MIN_COLS, PTY_INITIAL_MAX_COLS),
+    rows: normalize(input.rows, PTY_INITIAL_MIN_ROWS, PTY_INITIAL_MAX_ROWS),
+  };
 }
 
 export class RelaySessionCreateHandler {
@@ -343,6 +361,7 @@ export class RelaySessionCreateHandler {
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
+    const geometry = resolveInitialPtyGeometry(msg);
     let session: SessionInfo;
     try {
       const hook = this.deps.createHookContext(pendingId, provider);
@@ -353,6 +372,7 @@ export class RelaySessionCreateHandler {
         args: buildHostedPtyArgs(provider, resumeSessionId),
         permissionMode,
         hook,
+        ...geometry,
       });
       session = this.deps.sessionManager.createSession(
         "pty",
@@ -434,12 +454,14 @@ export class RelaySessionCreateHandler {
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
+    const geometry = resolveInitialPtyGeometry(msg);
 
     try {
       const pid = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
         cwd,
         name,
+        ...geometry,
       });
       const session = this.deps.sessionManager.createSession(
         "pty",

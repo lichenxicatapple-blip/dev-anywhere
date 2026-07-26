@@ -896,6 +896,50 @@ describe("RelayClient request handling", () => {
     await expect(second).resolves.toMatchObject({ sessionId: "second-session" });
   });
 
+  it("adds a QR-safe adaptive geometry to PTY session creation", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.createSession({ cwd: "/tmp/project", provider: "codex", mode: "pty" });
+    const requestId = sentRequestId(ws);
+    const sent = JSON.parse(ws.sent[0] ?? "{}") as {
+      cols?: number;
+      rows?: number;
+    };
+
+    expect(sent.cols).toBeGreaterThanOrEqual(80);
+    expect(sent.rows).toBeGreaterThanOrEqual(24);
+
+    ws.emit({
+      type: "session_create_response",
+      requestId,
+      sessionId: "adaptive-session",
+      mode: "pty",
+      provider: "codex",
+    });
+    await expect(promise).resolves.toMatchObject({ sessionId: "adaptive-session" });
+  });
+
+  it("does not add terminal geometry to JSON session creation", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.createSession({ cwd: "/tmp/project", provider: "claude", mode: "json" });
+    const requestId = sentRequestId(ws);
+    const sent = JSON.parse(ws.sent[0] ?? "{}") as {
+      cols?: number;
+      rows?: number;
+    };
+
+    expect(sent.cols).toBeUndefined();
+    expect(sent.rows).toBeUndefined();
+
+    ws.emit({
+      type: "session_create_response",
+      requestId,
+      sessionId: "json-session",
+      mode: "json",
+      provider: "claude",
+    });
+    await expect(promise).resolves.toMatchObject({ sessionId: "json-session" });
+  });
+
   it("measures Web to Relay latency by requestId", async () => {
     const { relay, ws } = createClient();
     const promise = relay.measureWebRelayLatency();

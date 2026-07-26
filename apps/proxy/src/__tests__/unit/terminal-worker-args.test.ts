@@ -10,19 +10,31 @@ describe("terminal worker args", () => {
           sessionId: "session-1",
           cwd: "/Users/catli",
           name: "~",
+          cols: 125,
+          rows: 34,
         },
         "local",
       ),
-    ).toEqual(["--profile", "local", "session-1", "/Users/catli", "~"]);
+    ).toEqual(["--profile", "local", "session-1", "/Users/catli", "~", "125", "34"]);
   });
 
   it("parses a profile-prefixed terminal worker invocation", () => {
     expect(
-      parseTerminalWorkerCliArgs(["--profile", "local", "session-1", "/Users/catli", "~"]),
+      parseTerminalWorkerCliArgs([
+        "--profile",
+        "local",
+        "session-1",
+        "/Users/catli",
+        "~",
+        "125",
+        "34",
+      ]),
     ).toEqual({
       sessionId: "session-1",
       cwd: "/Users/catli",
       name: "~",
+      cols: 125,
+      rows: 34,
     });
   });
 
@@ -33,6 +45,18 @@ describe("terminal worker args", () => {
       sessionId: "session-1",
       cwd: "/Users/catli",
       name: "--profile",
+      cols: 80,
+      rows: 24,
+    });
+  });
+
+  it("keeps old invocations compatible with the QR-safe baseline", () => {
+    expect(parseTerminalWorkerCliArgs(["session-1", "/Users/catli", "~"])).toEqual({
+      sessionId: "session-1",
+      cwd: "/Users/catli",
+      name: "~",
+      cols: 80,
+      rows: 24,
     });
   });
 });

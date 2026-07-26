@@ -85,11 +85,13 @@ describe("RelayControlSchema round-trip stability", () => {
       mode: "pty",
       resumeSessionId: "sess-prev",
       permissionMode: "default",
+      cols: 125,
+      rows: 34,
     };
     const a = RelayControlSchema.parse(original);
     const b = roundTrip(RelayControlSchema, original);
     expect(b).toEqual(a);
-    expect(b).toMatchObject({ name: "Release checklist" });
+    expect(b).toMatchObject({ name: "Release checklist", cols: 125, rows: 34 });
   });
 
   it("session_create_response minimum success shape", () => {

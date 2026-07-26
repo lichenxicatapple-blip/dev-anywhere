@@ -6,13 +6,23 @@ export interface TerminalWorkerStartOptions {
   sessionId: string;
   cwd: string;
   name: string;
+  cols: number;
+  rows: number;
 }
 
 export function buildTerminalWorkerArgs(
   options: TerminalWorkerStartOptions,
   profileName = PROFILE_NAME,
 ): string[] {
-  return ["--profile", profileName, options.sessionId, options.cwd, options.name];
+  return [
+    "--profile",
+    profileName,
+    options.sessionId,
+    options.cwd,
+    options.name,
+    String(options.cols),
+    String(options.rows),
+  ];
 }
 
 export class TerminalWorkerSpawner {
@@ -25,7 +35,13 @@ export class TerminalWorkerSpawner {
       throw new Error("Terminal worker failed to expose a process id");
     }
     serviceLogger.info(
-      { sessionId: options.sessionId, pid: child.pid, cwd: options.cwd },
+      {
+        sessionId: options.sessionId,
+        pid: child.pid,
+        cwd: options.cwd,
+        cols: options.cols,
+        rows: options.rows,
+      },
       "Terminal worker spawned",
     );
     return child.pid;

@@ -149,7 +149,14 @@ export {
   sessionModeValues,
 } from "./constants/enums.js";
 export type { ProviderId, PtyOwner, SessionMode } from "./constants/enums.js";
-export { PtySemanticState, ptySemanticStateValues } from "./constants/pty.js";
+export {
+  PtySemanticState,
+  ptySemanticStateValues,
+  PTY_INITIAL_MIN_COLS,
+  PTY_INITIAL_MIN_ROWS,
+  PTY_INITIAL_MAX_COLS,
+  PTY_INITIAL_MAX_ROWS,
+} from "./constants/pty.js";
 export { RelayCloseCode } from "./constants/relay-close-codes.js";
 export {
   RELAY_BINARY_FRAME_MAX_BYTES,

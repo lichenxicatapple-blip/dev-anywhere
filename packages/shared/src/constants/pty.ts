@@ -15,3 +15,11 @@ export const ptySemanticStateValues = [
   PtySemanticState.TURN_COMPLETE,
   PtySemanticState.APPROVAL_WAIT,
 ] as const;
+
+// Web 创建 PTY 时可以按可用视口放大初始几何，但不能低于传统 80x24。
+// 这个底线既保证常见 TUI 布局，也避免 Claude Code / Codex 等 CLI 因终端过窄
+// 省略二维码或启动信息。上限用于拦截异常客户端提交的不合理 PTY 尺寸。
+export const PTY_INITIAL_MIN_COLS = 80;
+export const PTY_INITIAL_MIN_ROWS = 24;
+export const PTY_INITIAL_MAX_COLS = 500;
+export const PTY_INITIAL_MAX_ROWS = 200;

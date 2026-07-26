@@ -2,6 +2,7 @@ import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
+import { PTY_INITIAL_MIN_COLS, PTY_INITIAL_MIN_ROWS } from "@dev-anywhere/shared";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { Socket } from "node:net";
@@ -20,8 +21,6 @@ import { parseTerminalWorkerCliArgs } from "./terminal-worker-args.js";
 import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
 
-const DEFAULT_COLS = 80;
-const DEFAULT_ROWS = 24;
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
 
@@ -41,12 +40,7 @@ function normalizeTerminalWorkerEnv(env: NodeJS.ProcessEnv): Record<string, stri
 class ShellTerminalWorker {
   private socket: Socket | null = null;
   private child: IPty | null = null;
-  private readonly terminal = new HeadlessTerminal({
-    cols: DEFAULT_COLS,
-    rows: DEFAULT_ROWS,
-    scrollback: 5000,
-    allowProposedApi: true,
-  });
+  private readonly terminal: InstanceType<typeof HeadlessTerminal>;
   private readonly serializeAddon = new SerializeAddon();
   private outputSeq = 0;
   private exiting = false;
@@ -57,8 +51,16 @@ class ShellTerminalWorker {
     private readonly sessionId: string,
     private readonly cwd: string,
     private readonly name: string,
+    cols = PTY_INITIAL_MIN_COLS,
+    rows = PTY_INITIAL_MIN_ROWS,
   ) {
     this.currentCwd = cwd;
+    this.terminal = new HeadlessTerminal({
+      cols,
+      rows,
+      scrollback: 5000,
+      allowProposedApi: true,
+    });
     this.terminal.loadAddon(this.serializeAddon);
     this.terminal.loadAddon(new UnicodeGraphemesAddon());
   }
@@ -267,12 +269,12 @@ class ShellTerminalWorker {
 
 const parsedArgs = parseTerminalWorkerCliArgs(process.argv.slice(2));
 if (!parsedArgs) {
-  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name>");
+  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name> [cols] [rows]");
   process.exit(1);
 }
 
-const { sessionId, cwd, name } = parsedArgs;
-new ShellTerminalWorker(sessionId, cwd, name).run().catch((err) => {
+const { sessionId, cwd, name, cols, rows } = parsedArgs;
+new ShellTerminalWorker(sessionId, cwd, name, cols, rows).run().catch((err) => {
   log.error({ err: err instanceof Error ? err.message : String(err) }, "Terminal worker failed");
   process.exit(1);
 });

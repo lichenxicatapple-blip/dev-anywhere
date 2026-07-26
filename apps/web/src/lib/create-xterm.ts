@@ -5,7 +5,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import "@xterm/xterm/css/xterm.css";
-import { DEFAULT_TERMINAL_FONT_SIZE } from "@/lib/chat-font-size";
+import { DEFAULT_TERMINAL_FONT_SIZE, TERMINAL_FONT_FAMILY } from "@/lib/chat-font-size";
 import { xtermFixedDarkTheme } from "@/lib/xterm-theme";
 
 interface CreateXtermResult {
@@ -25,8 +25,7 @@ const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯";
 export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITerminalOptions {
   return {
     scrollback: 5000,
-    fontFamily:
-      '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
+    fontFamily: TERMINAL_FONT_FAMILY,
     fontSize: options.fontSize ?? DEFAULT_TERMINAL_FONT_SIZE,
     cursorBlink: true,
     cursorStyle: "block",

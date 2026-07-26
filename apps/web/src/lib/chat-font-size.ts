@@ -3,6 +3,8 @@ export const MAX_CHAT_FONT_SIZE = 24;
 export const MOBILE_CHAT_CONTENT_FONT_SIZE_MIN = 16;
 export const DEFAULT_TERMINAL_FONT_SIZE = 16;
 export const DEFAULT_CHAT_CONTENT_FONT_SIZE = 16;
+export const TERMINAL_FONT_FAMILY =
+  '"Sarasa Fixed SC", "Noto Sans Mono CJK SC", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace';
 
 export function getEffectiveChatContentFontSize(
   fontSize: number,

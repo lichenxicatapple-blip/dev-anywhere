@@ -19,6 +19,7 @@ import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
+import { attachPtyReviewSnapshot } from "@/lib/pty-review-snapshot";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
@@ -107,6 +108,7 @@ interface UsePtyViewResult {
   findNext: (query: string, incremental?: boolean) => boolean;
   findPrevious: (query: string) => boolean;
   clearFind: () => void;
+  refreshReviewSnapshot: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -148,6 +150,7 @@ interface ScrollControllerHandle {
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
+  refreshReviewSnapshot: () => void;
   getDebugProbe: () => PtyScrollDebugProbe;
 }
 
@@ -745,6 +748,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let imageLinkDispose: (() => void) | null = null;
     let fileDownloadLinkDispose: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
+    let reviewSnapshotDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
 
@@ -816,6 +820,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
+        const reviewSnapshot = attachPtyReviewSnapshot(host);
+        reviewSnapshotDispose = reviewSnapshot.dispose;
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
@@ -843,6 +849,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           },
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
+          onReviewSnapshotCapture: reviewSnapshot.capture,
+          onReviewSnapshotClear: reviewSnapshot.clear,
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
@@ -942,6 +950,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return () => {
       dragSelectDispose?.();
       scrollDispose?.();
+      reviewSnapshotDispose?.();
       searchResultsRegistration?.dispose();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
@@ -1016,6 +1025,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     },
     [],
   );
+  const refreshReviewSnapshot = useCallback((): void => {
+    scrollControllerRef.current?.refreshReviewSnapshot();
+  }, []);
   const scrollToRatio = useCallback((ratio: number): void => {
     scrollControllerRef.current?.scrollToRatio(ratio);
   }, []);
@@ -1187,6 +1199,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     findNext,
     findPrevious,
     clearFind,
+    refreshReviewSnapshot,
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,

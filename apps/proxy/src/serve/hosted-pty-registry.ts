@@ -1,6 +1,8 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import {
+  PTY_INITIAL_MIN_COLS,
+  PTY_INITIAL_MIN_ROWS,
   SessionState,
   encodeBinaryFrame,
   serializeControl,
@@ -32,8 +34,6 @@ import {
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
 
-const DEFAULT_COLS = 80;
-const DEFAULT_ROWS = 24;
 const IDLE_CHECK_INTERVAL_MS = 3_000;
 const IDLE_THRESHOLD_MS = 3_000;
 const STARTUP_EXIT_DIAGNOSTIC_WINDOW_MS = 10_000;
@@ -147,8 +147,8 @@ export class HostedPtyRegistry {
 
   start(options: HostedPtyStartOptions | HostedShellStartOptions): number {
     const kind = options.kind ?? "agent";
-    const cols = options.cols ?? DEFAULT_COLS;
-    const rows = options.rows ?? DEFAULT_ROWS;
+    const cols = options.cols ?? PTY_INITIAL_MIN_COLS;
+    const rows = options.rows ?? PTY_INITIAL_MIN_ROWS;
     const command =
       options.kind === "terminal"
         ? {

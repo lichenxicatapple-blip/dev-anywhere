@@ -208,6 +208,38 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
+  it("captures one coherent review frame and keeps it frozen across output renders", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const capture = vi.fn(() => true);
+    const clear = vi.fn();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture: capture,
+      onReviewSnapshotClear: clear,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    emitRender();
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    emitRender();
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    controller.refreshReviewSnapshot();
+    expect(capture).toHaveBeenCalledTimes(2);
+
+    controller.scrollToBottom("test", { force: true });
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
   it("syncs native touch scroll to the matching terminal row before committing host position on render", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(

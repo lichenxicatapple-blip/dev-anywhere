@@ -968,24 +968,32 @@ describe("RelayControlSchema", () => {
       provider: "claude",
       mode: "pty",
       permissionMode: "default",
+      cols: 125,
+      rows: 34,
     });
     expect(result.type).toBe("session_create");
     if (result.type === "session_create") {
       expect(result.kind).toBe("agent");
       expect(result.provider).toBe("claude");
       expect(result.mode).toBe("pty");
+      expect(result.cols).toBe(125);
+      expect(result.rows).toBe(34);
     }
 
     const terminal = RelayControlSchema.parse({
       type: "session_create",
       kind: "terminal",
       mode: "pty",
+      cols: 80,
+      rows: 30,
     });
     expect(terminal.type).toBe("session_create");
     if (terminal.type === "session_create") {
       expect(terminal.kind).toBe("terminal");
       expect(terminal.cwd).toBeUndefined();
       expect(terminal.provider).toBeUndefined();
+      expect(terminal.cols).toBe(80);
+      expect(terminal.rows).toBe(30);
     }
   });
 

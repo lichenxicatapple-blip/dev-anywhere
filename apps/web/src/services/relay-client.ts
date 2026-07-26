@@ -18,6 +18,8 @@ import type {
 } from "@dev-anywhere/shared";
 import { SESSION_CREATE_CLIENT_TIMEOUT_MS } from "@dev-anywhere/shared";
 import { describeCurrentClientDevice } from "@/lib/client-device";
+import { measureInitialPtyGeometry } from "@/lib/pty-initial-geometry";
+import { useAppStore } from "@/stores/app-store";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const VOICE_SUMMARY_REQUEST_TIMEOUT_MS = 20_000;
@@ -761,6 +763,10 @@ export class RelayClient {
     timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
   ): Promise<SessionCreateResponse> {
     const requestId = nextRequestId("session-create");
+    const initialPtyGeometry =
+      request.mode === "pty"
+        ? measureInitialPtyGeometry(useAppStore.getState().ptyFontSize)
+        : undefined;
     return this.waitForMessage(
       (msg): msg is SessionCreateResponse =>
         msg.type === "session_create_response" && msg.requestId === requestId,
@@ -769,6 +775,7 @@ export class RelayClient {
           JSON.stringify({
             type: "session_create",
             requestId,
+            ...initialPtyGeometry,
             ...request,
           }),
         ),
