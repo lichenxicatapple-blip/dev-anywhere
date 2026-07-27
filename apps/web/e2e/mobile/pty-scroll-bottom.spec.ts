@@ -76,6 +76,179 @@ async function touchDrag(
   }
 }
 
+async function touchFlick(
+  page: Page,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): Promise<void> {
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+    });
+    for (let step = 1; step <= 3; step += 1) {
+      const progress = step / 3;
+      await page.waitForTimeout(12);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          {
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress,
+            id: 1,
+            radiusX: 2,
+            radiusY: 2,
+            force: 1,
+          },
+        ],
+      });
+    }
+    await page.waitForTimeout(12);
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  } finally {
+    await client.detach();
+  }
+}
+
+interface ReviewScrollSample {
+  scrollTop: number;
+  hostTopDrift: number;
+  renderedLine: number | null;
+  renderedLineContentTop: number | null;
+  renderedRowHeight: number | null;
+  renderedBottomGap: number | null;
+}
+
+async function startReviewScrollSampling(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __ptyReviewScrollSamples?: ReviewScrollSample[];
+      __ptyReviewScrollSampling?: boolean;
+      __ptyReviewScrollListener?: () => void;
+    };
+    testWindow.__ptyReviewScrollSamples = [];
+    testWindow.__ptyReviewScrollSampling = true;
+    const sample = () => {
+      if (!testWindow.__ptyReviewScrollSampling) return;
+      const snapshot = window.__devAnywherePtyDebug?.();
+      const scrollContainer = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      if (snapshot && scrollContainer) {
+        const frozenRows = document.querySelector<HTMLElement>(
+          '[data-slot="pty-review-snapshot"] .xterm-rows',
+        );
+        const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+        const liveRows =
+          screen &&
+          Array.from(screen.children).find(
+            (child): child is HTMLElement =>
+              child instanceof HTMLElement && child.classList.contains("xterm-rows"),
+          );
+        const rows = frozenRows ?? liveRows ?? null;
+        let renderedLine: number | null = null;
+        let renderedLineContentTop: number | null = null;
+        let renderedRowHeight: number | null = null;
+        let renderedBottomGap: number | null = null;
+        if (rows) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const paddingBottom =
+            Number.parseFloat(getComputedStyle(scrollContainer).paddingBottom) || 0;
+          renderedBottomGap = Math.max(
+            0,
+            containerRect.bottom - paddingBottom - rows.getBoundingClientRect().bottom,
+          );
+          for (const row of Array.from(rows.children)) {
+            const match = row.textContent?.match(/rapid-review\s+(\d+)/);
+            if (!match) continue;
+            renderedLine = Number.parseInt(match[1], 10);
+            const rowRect = row.getBoundingClientRect();
+            renderedLineContentTop = rowRect.top - containerRect.top + snapshot.container.scrollTop;
+            renderedRowHeight = rowRect.height;
+            break;
+          }
+        }
+        testWindow.__ptyReviewScrollSamples?.push({
+          scrollTop: snapshot.container.scrollTop,
+          hostTopDrift: snapshot.host.topDrift,
+          renderedLine,
+          renderedLineContentTop,
+          renderedRowHeight,
+          renderedBottomGap,
+        });
+      }
+    };
+    const sampleFrame = () => {
+      if (!testWindow.__ptyReviewScrollSampling) return;
+      sample();
+      requestAnimationFrame(sampleFrame);
+    };
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const onScroll = () => sample();
+    testWindow.__ptyReviewScrollListener = onScroll;
+    container?.addEventListener("scroll", onScroll);
+    requestAnimationFrame(sampleFrame);
+  });
+}
+
+async function stopReviewScrollSampling(page: Page): Promise<ReviewScrollSample[]> {
+  return page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __ptyReviewScrollSamples?: ReviewScrollSample[];
+      __ptyReviewScrollSampling?: boolean;
+      __ptyReviewScrollListener?: () => void;
+    };
+    testWindow.__ptyReviewScrollSampling = false;
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    if (testWindow.__ptyReviewScrollListener) {
+      container?.removeEventListener("scroll", testWindow.__ptyReviewScrollListener);
+      testWindow.__ptyReviewScrollListener = undefined;
+    }
+    return testWindow.__ptyReviewScrollSamples ?? [];
+  });
+}
+
+function expectReviewScrollSamplesStable(
+  samples: ReviewScrollSample[],
+  options: { minimumScrollRange: number },
+): void {
+  const maxHostTopDrift = Math.max(...samples.map((sample) => Math.abs(sample.hostTopDrift)));
+  const renderedSamples = samples.filter(
+    (
+      sample,
+    ): sample is ReviewScrollSample & {
+      renderedLine: number;
+      renderedLineContentTop: number;
+      renderedRowHeight: number;
+    } =>
+      sample.renderedLine !== null &&
+      sample.renderedLineContentTop !== null &&
+      sample.renderedRowHeight !== null,
+  );
+  const baseline = renderedSamples[0];
+  if (!baseline) throw new Error("PTY rendered row samples are not available");
+  const baselineRenderedOffset =
+    baseline.renderedLineContentTop - baseline.renderedLine * baseline.renderedRowHeight;
+  const maxRenderedGeometryDrift = Math.max(
+    ...renderedSamples.map((sample) =>
+      Math.abs(
+        sample.renderedLineContentTop -
+          sample.renderedLine * baseline.renderedRowHeight -
+          baselineRenderedOffset,
+      ),
+    ),
+  );
+  const scrollRange =
+    Math.max(...samples.map((sample) => sample.scrollTop)) -
+    Math.min(...samples.map((sample) => sample.scrollTop));
+  const maxRenderedBottomGap = Math.max(...samples.map((sample) => sample.renderedBottomGap ?? 0));
+
+  expect(samples.length).toBeGreaterThan(10);
+  expect(scrollRange).toBeGreaterThan(options.minimumScrollRange);
+  expect(maxHostTopDrift).toBeLessThanOrEqual(20);
+  expect(maxRenderedGeometryDrift).toBeLessThanOrEqual(20);
+  expect(maxRenderedBottomGap).toBeLessThanOrEqual(8);
+}
+
 async function readPtyScreenBottomGap(page: Page): Promise<number> {
   return page.evaluate(() => {
     const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
@@ -148,6 +321,64 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     expect(afterSnapshot.container.scrollTop).toBeGreaterThanOrEqual(
       beforeSnapshot.container.scrollTop - 32,
     );
+  });
+
+  test("fast upward flick keeps host geometry aligned with the xterm viewport", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-rapid-review`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      sessionKind: "terminal",
+      ptyOwner: "proxy-hosted",
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 122, rows: 29 });
+    await sendPtyLines(emuPage, { count: 394, prefix: "rapid-review" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    await startReviewScrollSampling(emuPage);
+    await touchFlick(
+      emuPage,
+      { x, y: box.y + box.height * 0.22 },
+      { x, y: box.y + box.height * 0.78 },
+    );
+    await emuPage.waitForTimeout(700);
+    const samples = await stopReviewScrollSampling(emuPage);
+
+    expectReviewScrollSamplesStable(samples, { minimumScrollRange: 100 });
+  });
+
+  test("ordinary upward drag keeps a newly created PTY fully painted", async ({ emuPage }) => {
+    const sessionId = `${SESSION_ID}-ordinary-review`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      sessionKind: "terminal",
+      ptyOwner: "proxy-hosted",
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 122, rows: 29 });
+    await sendPtyLines(emuPage, { count: 394, prefix: "rapid-review" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    await startReviewScrollSampling(emuPage);
+    await touchDrag(
+      emuPage,
+      { x, y: box.y + box.height * 0.3 },
+      { x, y: box.y + box.height * 0.68 },
+    );
+    await emuPage.waitForTimeout(500);
+    const samples = await stopReviewScrollSampling(emuPage);
+
+    expectReviewScrollSamplesStable(samples, { minimumScrollRange: 60 });
   });
 
   test("new PTY output while scrolled up surfaces 有新消息 indicator without snapping to bottom", async ({

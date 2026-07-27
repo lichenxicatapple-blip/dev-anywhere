@@ -174,6 +174,37 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
+  it("commits a native touch row atomically when a buffer preview is available", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 19: "prompt" });
+    const preview = vi.fn(() => true);
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture: preview,
+    });
+    terminal.buffer.active.viewportY = 10;
+    host.style.top = "200px";
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.scrollTop = 199.7;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(preview).toHaveBeenCalledWith(9, terminal.rows);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
+    expect(preview.mock.invocationCallOrder[0]).toBeLessThan(
+      terminal.scrollToLine.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(host.style.top).toBe("180px");
+  });
+
   it("commits wheel row transitions atomically with xterm viewport changes", () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitRender } = createTerminal({ 19: "prompt" });
@@ -229,12 +260,14 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
 
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
 
     controller.refreshReviewSnapshot();
     expect(capture).toHaveBeenCalledTimes(2);
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
 
     controller.scrollToBottom("test", { force: true });
     expect(clear).toHaveBeenCalledTimes(1);

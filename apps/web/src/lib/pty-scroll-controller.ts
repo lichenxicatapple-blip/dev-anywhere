@@ -49,7 +49,7 @@ interface PtyScrollControllerOptions {
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
-  onReviewSnapshotCapture?: () => boolean;
+  onReviewSnapshotCapture?: (ydisp: number, rows: number) => boolean;
   onReviewSnapshotClear?: () => void;
   atBottomThreshold?: number;
 }
@@ -339,7 +339,8 @@ export function attachPtyScrollController(
 
   const refreshReviewSnapshot = (): void => {
     if (!userHasVerticalScrollIntent()) return;
-    reviewSnapshotRefreshPending = onReviewSnapshotCapture?.() === false;
+    reviewSnapshotRefreshPending =
+      onReviewSnapshotCapture?.(term.buffer.active.viewportY, term.rows) === false;
   };
 
   const dispatchVerticalIntent = (event: PtyVerticalIntentEvent): PtyVerticalIntentResult => {
@@ -685,8 +686,13 @@ export function attachPtyScrollController(
     }
     pendingContainerSyncRetry = false;
     const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
+    const previewCaptured =
+      ydisp !== term.buffer.active.viewportY &&
+      userHasVerticalScrollIntent() &&
+      onReviewSnapshotCapture?.(ydisp, term.rows) === true;
     syncViewportAndHostAt(ydisp, cellH, {
-      deferHostUntilRender: opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp(),
+      deferHostUntilRender:
+        (opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp()) && !previewCaptured,
     });
     notifyScroll();
     trace("container-sync:end", { ydisp });
@@ -1174,7 +1180,8 @@ export function attachPtyScrollController(
     followCursorX();
     followCursorY();
     if (reviewSnapshotRefreshPending && userHasVerticalScrollIntent()) {
-      reviewSnapshotRefreshPending = onReviewSnapshotCapture?.() === false;
+      reviewSnapshotRefreshPending =
+        onReviewSnapshotCapture?.(term.buffer.active.viewportY, term.rows) === false;
     }
     notifyScroll();
   };

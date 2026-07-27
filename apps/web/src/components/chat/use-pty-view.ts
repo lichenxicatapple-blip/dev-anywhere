@@ -751,6 +751,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let reviewSnapshotDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
+    let terminalSerializeAddon:
+      | Awaited<ReturnType<typeof createXtermTerminal>>["serializeAddon"]
+      | null = null;
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
@@ -783,6 +786,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,
         });
+        terminalSerializeAddon = result.serializeAddon;
         return result;
       },
       attachRawInput: (term, rawSessionId, rawOptions) =>
@@ -820,7 +824,19 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
-        const reviewSnapshot = attachPtyReviewSnapshot(host);
+        const reviewSnapshot = attachPtyReviewSnapshot(host, {
+          serializeRangeAsHtml: (startLine, endLine) =>
+            terminalSerializeAddon?.serializeAsHTML({
+              range: {
+                startLine,
+                endLine: Math.min(endLine, Math.max(0, xterm.buffer.active.length - 1)),
+                startCol: 0,
+              },
+              includeGlobalBackground: true,
+              onlySelection: false,
+              scrollback: 0,
+            }) ?? "",
+        });
         reviewSnapshotDispose = reviewSnapshot.dispose;
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
@@ -849,7 +865,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           },
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
-          onReviewSnapshotCapture: reviewSnapshot.capture,
+          onReviewSnapshotCapture: reviewSnapshot.captureRange,
           onReviewSnapshotClear: reviewSnapshot.clear,
         });
         scrollControllerRef.current = scrollCtrl;
