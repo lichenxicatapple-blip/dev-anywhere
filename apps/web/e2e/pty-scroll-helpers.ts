@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { PtyDebugSnapshot } from "../src/lib/pty-debug-snapshot";
 
 export const PTY_BOTTOM_THRESHOLD_PX = 8;
 
@@ -16,21 +17,6 @@ export interface PtyHorizontalScrollMetrics {
   clientWidth: number;
   maxScrollLeft: number;
   rightGap: number;
-}
-
-export interface PtyDebugSnapshot {
-  container: { scrollTop: number; clientHeight: number };
-  anchor: {
-    atBottom: boolean;
-    cursorInViewport: boolean;
-    bottomScrollTop: number;
-    scrollTopDeltaToBottom: number;
-  };
-  verticalIntent: {
-    mode: "following" | "reviewing";
-    source: string;
-    transitionId: string;
-  };
 }
 
 export function ptyTerminal(page: Page): Locator {

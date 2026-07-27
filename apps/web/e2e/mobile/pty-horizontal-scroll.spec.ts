@@ -166,6 +166,37 @@ test.describe("L4 mobile / PTY input scroll", () => {
       .toBeGreaterThan(100);
   });
 
+  test("starts following before the cursor reaches the mobile right edge", async ({ emuPage }) => {
+    const sessionId = `${SESSION_ID}-right-edge-follow`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await resizePty(emuPage, 80, 24);
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.maxScrollLeft))
+      .toBeGreaterThan(100);
+    await sendPtyOutput(emuPage, "\r\u001b[2K");
+
+    const before = await readPtyDebugSnapshot(emuPage);
+    if (!before || before.cell.w <= 0) throw new Error("PTY debug geometry is not available");
+    const triggerColumn = Math.ceil(before.container.clientWidth / before.cell.w - 8);
+    expect(triggerColumn).toBeGreaterThan(1);
+
+    await sendPtyOutput(emuPage, "x".repeat(triggerColumn - 1));
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
+      .toBeLessThanOrEqual(1);
+
+    await sendPtyOutput(emuPage, "x");
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
+      .toBeGreaterThan(1);
+
+    const after = await readPtyDebugSnapshot(emuPage);
+    if (!after) throw new Error("PTY debug snapshot is not available");
+    expect(after.term.cursorX * after.cell.w).toBeLessThan(after.container.clientWidth);
+  });
+
   test("resets horizontal scroll to line start after mobile-control Enter on a long line", async ({
     emuPage,
   }) => {

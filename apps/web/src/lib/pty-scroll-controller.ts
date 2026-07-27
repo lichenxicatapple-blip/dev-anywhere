@@ -94,7 +94,7 @@ export interface PtyScrollState {
   horizontalScrollable: boolean;
 }
 
-type PendingFrameResult = "none" | "followed" | "marked";
+type PendingFrameResult = "none" | "deferred" | "followed" | "marked";
 
 export function attachPtyScrollController(
   options: PtyScrollControllerOptions,
@@ -442,7 +442,7 @@ export function attachPtyScrollController(
     const anchor = getCurrentAnchor();
     const action = decideScrollToBottomAction({
       force: opts.force ?? false,
-      reviewing: userHasVerticalScrollIntent(),
+      reviewing: userHasVerticalScrollIntent() || verticalIntent.touchActive,
       viewportY: term.buffer.active.viewportY,
       expectedYdisp,
       scrollTop: container.scrollTop,
@@ -681,6 +681,12 @@ export function attachPtyScrollController(
 
   const handlePendingNewFrame = (): PendingFrameResult => {
     if (!hasNewFrame()) return "none";
+    // The native scroller owns the viewport for the whole touch lifetime, including the
+    // sub-threshold phase before the browser has classified the gesture. Consuming the frame
+    // here would let pendingFrame/relayout pull a slow drag back to bottom one row at a time.
+    if (verticalIntent.touchActive && !userHasVerticalScrollIntent()) {
+      return "deferred";
+    }
     consumeNewFrame();
     // 重连或 snapshot 重放时 DOM 尺寸会短暂变化, anchor.isAtBottom 可能误判。
     // 用户已经表达过回看历史时, 以用户意图为准, 避免新输出把视图强行拉到底。
@@ -1091,7 +1097,7 @@ export function attachPtyScrollController(
     const prevRow = prevCursorBufferRow;
     const anchor = getCurrentAnchor();
     const decision = decideFollowCursorY({
-      reviewing: userHasVerticalScrollIntent(),
+      reviewing: userHasVerticalScrollIntent() || verticalIntent.touchActive,
       cellH,
       rows: term.rows,
       visibleContentHeight,
@@ -1185,12 +1191,26 @@ export function attachPtyScrollController(
       });
       horizontalState = result.state;
       traceHorizontalIntent(result.trace);
-      trace("followCursorX:skip", { details: "cursorInViewport" });
-      return;
+      if (result.trace) {
+        trace("followCursorX:skip", { details: "cursorInViewport" });
+        return;
+      }
     }
     if (horizontalState.intent) {
       trace("followCursorX:skip", {
         details: `horizontalIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
+      });
+      return;
+    }
+    const rightMarginPx = Math.min(
+      container.clientWidth / 2,
+      PTY_SCROLL_CONFIG.horizontal.cursorFollowRightMarginColumns * cellW,
+    );
+    const rightFollowBoundary = viewportRight - rightMarginPx;
+    const cursorNeedsFollow = cursorPxX < viewportLeft || cursorPxX >= rightFollowBoundary;
+    if (!cursorNeedsFollow) {
+      trace("followCursorX:skip", {
+        details: `cursorSafe cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary}`,
       });
       return;
     }
@@ -1200,7 +1220,7 @@ export function attachPtyScrollController(
     horizontalState = setPtyHorizontalPendingFollow(horizontalState, pendingFollowLeft);
     container.scrollLeft = pendingFollowLeft;
     trace("followCursorX:hit", {
-      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} target=${pendingFollowLeft}`,
+      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary} target=${pendingFollowLeft}`,
     });
   };
 
@@ -1252,8 +1272,14 @@ export function attachPtyScrollController(
     onWheel,
     onTouchStart: touchHandler.onTouchStart,
     onTouchMove: touchHandler.onTouchMove,
-    onTouchEnd: touchHandler.onTouchEnd,
-    onTouchCancel: touchHandler.onTouchCancel,
+    onTouchEnd: () => {
+      touchHandler.onTouchEnd();
+      relayout();
+    },
+    onTouchCancel: () => {
+      touchHandler.onTouchCancel();
+      relayout();
+    },
     onContainerScroll,
     onTermScroll,
     onRender,

@@ -113,6 +113,7 @@ async function touchFlick(
 
 interface ReviewScrollSample {
   scrollTop: number;
+  viewportY: number;
   hostTopDrift: number;
   renderedLine: number | null;
   renderedLineContentTop: number | null;
@@ -169,6 +170,7 @@ async function startReviewScrollSampling(page: Page): Promise<void> {
         }
         testWindow.__ptyReviewScrollSamples?.push({
           scrollTop: snapshot.container.scrollTop,
+          viewportY: snapshot.term.viewportY,
           hostTopDrift: snapshot.host.topDrift,
           renderedLine,
           renderedLineContentTop,
@@ -247,6 +249,17 @@ function expectReviewScrollSamplesStable(
   expect(maxHostTopDrift).toBeLessThanOrEqual(20);
   expect(maxRenderedGeometryDrift).toBeLessThanOrEqual(20);
   expect(maxRenderedBottomGap).toBeLessThanOrEqual(8);
+}
+
+function expectViewportNeverPulledTowardBottom(samples: ReviewScrollSample[]): void {
+  const viewportMoves = samples
+    .slice(1)
+    .map((sample, index) => sample.viewportY - samples[index].viewportY);
+  expect(samples.length).toBeGreaterThan(10);
+  expect(Math.min(...samples.map((sample) => sample.viewportY))).toBeLessThan(
+    samples[0].viewportY,
+  );
+  expect(Math.max(...viewportMoves)).toBeLessThanOrEqual(0);
 }
 
 async function readPtyScreenBottomGap(page: Page): Promise<number> {
@@ -437,6 +450,56 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const samples = await stopReviewScrollSampling(emuPage);
 
     expectReviewScrollSamplesStable(samples, { minimumScrollRange: 60 });
+  });
+
+  test("slow upward review is never pulled one row back by pending output", async ({ emuPage }) => {
+    const sessionId = `${SESSION_ID}-slow-review-pending-output`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      sessionKind: "terminal",
+      ptyOwner: "proxy-hosted",
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 80, rows: 29 });
+    await sendPtyLines(emuPage, { count: 5_029, prefix: "slow-review" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    const startY = box.y + box.height * 0.46;
+    const client = await emuPage.context().newCDPSession(emuPage);
+    await startReviewScrollSampling(emuPage);
+    try {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x, y: startY, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+      });
+      for (const [index, distance] of [5, 10, 15, 22, 30, 38].entries()) {
+        await emuPage.waitForTimeout(45);
+        await client.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [
+            { x, y: startY + distance, id: 1, radiusX: 2, radiusY: 2, force: 1 },
+          ],
+        });
+        await sendPtyOutput(
+          emuPage,
+          `\u001b7\u001b[1A\rWORKING slow ${String(index).padStart(2, "0")}s                  \u001b8`,
+        );
+      }
+      await emuPage.waitForTimeout(80);
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await emuPage.waitForTimeout(250);
+    } finally {
+      await client.detach();
+    }
+    const samples = await stopReviewScrollSampling(emuPage);
+
+    expectViewportNeverPulledTowardBottom(samples);
+    const snapshot = await readPtyDebugSnapshot(emuPage);
+    expect(snapshot?.verticalIntent.mode).toBe("reviewing");
   });
 
   test("new PTY output while scrolled up surfaces 有新消息 indicator without snapping to bottom", async ({

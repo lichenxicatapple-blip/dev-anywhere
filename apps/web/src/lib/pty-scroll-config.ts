@@ -6,6 +6,9 @@ export const PTY_SCROLL_CONFIG = {
   },
   horizontal: {
     nativeIntentThresholdPx: 48,
+    // Keep one terminal tab stop of typing room ahead of the cursor. This scales with the
+    // active font metrics instead of tying cursor follow to a particular device width.
+    cursorFollowRightMarginColumns: 8,
   },
   rawInput: {
     // Input/focus follow can briefly shrink/re-expand the DOM scroll range before the next render

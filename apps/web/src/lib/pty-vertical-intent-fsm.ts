@@ -118,7 +118,7 @@ export function createInitialPtyVerticalIntentState(options?: {
 export const isReviewing = (state: PtyVerticalIntentState): boolean => state.mode === "reviewing";
 
 export const canPassiveFollow = (state: PtyVerticalIntentState): boolean =>
-  state.mode === "following";
+  state.mode === "following" && !state.touchActive;
 
 function actionFor(
   previous: PtyVerticalIntentMode,

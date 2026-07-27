@@ -767,6 +767,57 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("pending");
   });
 
+  it("does not let pending output pull a slow native touch scroll back to bottom", () => {
+    const { container, spacer, host } = createDom();
+    const onUserVerticalScrollIntentChange = vi.fn();
+    const setNewFramesWhileAway = vi.fn();
+    const { terminal, emitRender } = createTerminal({ 99: "live prompt" });
+    let hasNewFrame = false;
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame: () => {
+        hasNewFrame = false;
+      },
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway,
+      onUserVerticalScrollIntentChange,
+    });
+    expect(container.scrollTop).toBe(1600);
+    terminal.scrollToLine.mockClear();
+
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 315));
+    container.scrollTop = 1594;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(controller.getDebugProbe().touchScrollGestureMode).toBe("pending");
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(terminal.buffer.active.viewportY).toBe(79);
+    terminal.scrollToLine.mockClear();
+
+    hasNewFrame = true;
+    emitRender();
+
+    expect(container.scrollTop).toBe(1594);
+    expect(terminal.buffer.active.viewportY).toBe(79);
+    expect(terminal.scrollToLine).not.toHaveBeenCalledWith(80);
+    expect(hasNewFrame).toBe(true);
+
+    container.dispatchEvent(touchEvent("touchmove", 317));
+    container.dispatchEvent(touchEvent("touchend", 317));
+
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1594);
+    expect(terminal.buffer.active.viewportY).toBe(79);
+    expect(hasNewFrame).toBe(false);
+    expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
+    expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("lets native vertical touch scroll own scrollTop after gesture lock", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
@@ -2474,6 +2525,34 @@ describe("attachPtyScrollController", () => {
   // in controller coverage until horizontal scrolling gets its own model.
   // 长行(终端宽度 cols=80, 内容延伸到 cols * 2 等), 光标随输入移到屏外右侧时,
   // 水平滚动条应该自动把光标拉回视窗中部, 留出左右上下文而不是贴着光标。
+  it("starts horizontal cursor following within one tab stop of the right edge", () => {
+    const { container, spacer, host } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
+    defineScrollWidth(container, 1_600);
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    // cellW=10 and the right margin is 8 cells, so [280, 360] is the follow zone.
+    terminal.buffer.active.cursorX = 27;
+    emitRender();
+    expect(container.scrollLeft).toBe(0);
+
+    terminal.buffer.active.cursorX = 28;
+    emitRender();
+    expect(container.scrollLeft).toBe(100);
+  });
+
   it("auto-scrolls horizontally to center the cursor when it leaves the viewport", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);

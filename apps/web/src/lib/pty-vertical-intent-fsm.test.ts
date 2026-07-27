@@ -108,6 +108,17 @@ describe("pty vertical intent FSM", () => {
     expect(result.trace?.action).toBe("keep");
   });
 
+  it("suspends passive follow while a touch gesture owns the viewport", () => {
+    const touching = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
+      type: "touch-start",
+      clientY: 300,
+      scrollTop: 1600,
+    }).state;
+
+    expect(touching.mode).toBe("following");
+    expect(canPassiveFollow(touching)).toBe(false);
+  });
+
   it("keeps following when viewport resize changes the raw bottom scrollTop before touch review", () => {
     const touchingAtBottom = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
       type: "touch-start",

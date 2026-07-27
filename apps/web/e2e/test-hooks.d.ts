@@ -1,6 +1,7 @@
 // e2e 专用 window 类型声明: 镜像 src/test-hooks.ts 的 CCTestHooks 形状
 // 两边 tsconfig 分属不同 project, declare global 不会冲突, 保持 src 边界干净
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
+import type { PtyDebugSnapshot } from "../src/lib/pty-debug-snapshot";
 interface CCTestChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -55,35 +56,6 @@ interface DevAnywherePtyScrollTraceEntry {
   event?: string;
 }
 
-interface DevAnywherePtyDebugSnapshot {
-  spacerDrift: number;
-  expectedSpacerHeight: number;
-  spacer: { height: number };
-  host: { top: number; height: number; expectedTop: number; topDrift: number };
-  container: { scrollTop: number; clientHeight: number };
-  anchor: {
-    atBottom: boolean;
-    cursorInViewport: boolean;
-    cursorBufferRow: number;
-    bottomScrollTop: number;
-    scrollTopDeltaToBottom: number;
-  };
-  intent: { vertical: boolean; horizontal: boolean };
-  verticalIntent: {
-    mode: "following" | "reviewing";
-    source: string;
-    transitionId: string;
-  };
-  pending: {
-    programmaticScrollTop: number | null;
-    followCursorScrollTop: number | null;
-    followCursorScrollLeft: number | null;
-    containerSyncRetry: boolean;
-  };
-  viewportHostCoverage: number;
-  pendingContainerSyncRetry: boolean;
-}
-
 interface DevAnywherePtyDebugToolsApi {
   isTraceEnabled: () => boolean;
   setTrace: (enabled: boolean) => void;
@@ -95,7 +67,7 @@ declare global {
     __ccTest?: CCTestHooks;
     __ccTestPtyTerminals?: Map<string, Terminal>;
     __ccTestPtyLinkProviders?: Map<string, ILinkProvider>;
-    __devAnywherePtyDebug?: () => DevAnywherePtyDebugSnapshot | null;
+    __devAnywherePtyDebug?: () => PtyDebugSnapshot | null;
     __devAnywherePtyDebugTools?: DevAnywherePtyDebugToolsApi;
     __ptySmoke: {
       sent: string[];
