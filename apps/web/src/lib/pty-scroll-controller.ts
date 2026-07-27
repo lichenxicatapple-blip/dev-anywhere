@@ -49,7 +49,12 @@ interface PtyScrollControllerOptions {
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
-  onReviewSnapshotCapture?: (ydisp: number, rows: number) => boolean;
+  onReviewSnapshotCapture?: (
+    ydisp: number,
+    rows: number,
+    options?: { visible?: boolean },
+  ) => boolean;
+  onReviewSnapshotSetVisible?: (visible: boolean) => boolean;
   onReviewSnapshotClear?: () => void;
   atBottomThreshold?: number;
 }
@@ -110,6 +115,7 @@ export function attachPtyScrollController(
     onTouchReviewStart,
     onTouchBoundaryPrevent,
     onReviewSnapshotCapture,
+    onReviewSnapshotSetVisible,
     onReviewSnapshotClear,
     atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
   } = options;
@@ -337,10 +343,36 @@ export function attachPtyScrollController(
     trace("rawInputFollow:fire");
   };
 
-  const refreshReviewSnapshot = (): void => {
+  const captureReviewSnapshot = (ydisp: number, visible: boolean): boolean =>
+    (visible
+      ? onReviewSnapshotCapture?.(ydisp, term.rows)
+      : onReviewSnapshotCapture?.(ydisp, term.rows, { visible: false })) === true;
+
+  const reconcileReviewSnapshot = (liveFrameChanged = false): void => {
     if (!userHasVerticalScrollIntent()) return;
-    reviewSnapshotRefreshPending =
-      onReviewSnapshotCapture?.(term.buffer.active.viewportY, term.rows) === false;
+    const latestOutputVisible = getCurrentAnchor().cursorInViewport;
+    if (latestOutputVisible) {
+      if (!reviewSnapshotRefreshPending && !liveFrameChanged) {
+        onReviewSnapshotSetVisible?.(false);
+        return;
+      }
+      // Keep a hidden copy of the latest coherent frame. The live xterm rows
+      // remain visible and can repaint in-place status such as "Working 12s".
+      // If a later frame pushes the cursor out of view, this copy becomes the
+      // frozen review frame without letting that new output move the viewport.
+      reviewSnapshotRefreshPending = !captureReviewSnapshot(term.buffer.active.viewportY, false);
+      return;
+    }
+
+    if (!reviewSnapshotRefreshPending && onReviewSnapshotSetVisible?.(true) === true) {
+      return;
+    }
+    reviewSnapshotRefreshPending = !captureReviewSnapshot(term.buffer.active.viewportY, true);
+  };
+
+  const refreshReviewSnapshot = (): void => {
+    reviewSnapshotRefreshPending = true;
+    reconcileReviewSnapshot();
   };
 
   const dispatchVerticalIntent = (event: PtyVerticalIntentEvent): PtyVerticalIntentResult => {
@@ -686,10 +718,17 @@ export function attachPtyScrollController(
     }
     pendingContainerSyncRetry = false;
     const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
-    const previewCaptured =
+    const snapshotCaptured =
       ydisp !== term.buffer.active.viewportY &&
       userHasVerticalScrollIntent() &&
-      onReviewSnapshotCapture?.(ydisp, term.rows) === true;
+      captureReviewSnapshot(ydisp, true);
+    // Even when the live tail remains visible, keep the serialized frame on top
+    // until xterm paints the requested row. reconcileReviewSnapshot hides it in
+    // that same render cycle, avoiding both a stale live tail and a host/row tear.
+    const previewCaptured = snapshotCaptured;
+    if (snapshotCaptured) {
+      reviewSnapshotRefreshPending = false;
+    }
     syncViewportAndHostAt(ydisp, cellH, {
       deferHostUntilRender:
         (opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp()) && !previewCaptured,
@@ -1176,12 +1215,11 @@ export function attachPtyScrollController(
       trace("pending-sync-retry-fire");
       syncContainerScroll();
     }
-    handlePendingNewFrame();
+    const pendingFrameResult = handlePendingNewFrame();
     followCursorX();
     followCursorY();
-    if (reviewSnapshotRefreshPending && userHasVerticalScrollIntent()) {
-      reviewSnapshotRefreshPending =
-        onReviewSnapshotCapture?.(term.buffer.active.viewportY, term.rows) === false;
+    if (userHasVerticalScrollIntent()) {
+      reconcileReviewSnapshot(pendingFrameResult === "marked");
     }
     notifyScroll();
   };

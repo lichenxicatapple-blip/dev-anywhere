@@ -260,14 +260,18 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
-    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows, {
+      visible: false,
+    });
 
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
 
     controller.refreshReviewSnapshot();
     expect(capture).toHaveBeenCalledTimes(2);
-    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows, {
+      visible: false,
+    });
 
     controller.scrollToBottom("test", { force: true });
     expect(clear).toHaveBeenCalledTimes(1);

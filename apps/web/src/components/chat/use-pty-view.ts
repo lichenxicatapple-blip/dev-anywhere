@@ -866,6 +866,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
           onReviewSnapshotCapture: reviewSnapshot.captureRange,
+          onReviewSnapshotSetVisible: reviewSnapshot.setVisible,
           onReviewSnapshotClear: reviewSnapshot.clear,
         });
         scrollControllerRef.current = scrollCtrl;

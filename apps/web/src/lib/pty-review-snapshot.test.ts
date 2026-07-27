@@ -83,6 +83,21 @@ describe("attachPtyReviewSnapshot", () => {
     expect(snapshots[0]?.textContent).toContain("next viewport");
   });
 
+  it("keeps a captured frame hidden until the live tail leaves the viewport", () => {
+    const host = createHost();
+    const controller = attachPtyReviewSnapshot(host, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div><span>live tail</span></div></div></pre></body></html>",
+    });
+
+    controller.captureRange(0, 1, { visible: false });
+
+    const snapshot = host.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    expect(snapshot?.style.visibility).toBe("hidden");
+    expect(controller.setVisible(true)).toBe(true);
+    expect(snapshot?.style.visibility).toBe("visible");
+  });
+
   it("clears the frozen layer when following resumes", () => {
     const host = createHost();
     const controller = attachPtyReviewSnapshot(host, {

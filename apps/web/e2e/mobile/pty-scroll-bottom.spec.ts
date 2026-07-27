@@ -336,6 +336,51 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       .toContain("WORKING elapsed 02s");
   });
 
+  test("visible live tail keeps repainting while review intent holds the scroll position", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-visible-live-tail`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 120, rows: 54 });
+    await sendPtyLines(emuPage, { count: 260, prefix: "visible-live-tail" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    await ptyTerminal(emuPage).evaluate((element) => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -4, cancelable: true }));
+    });
+
+    await expect
+      .poll(async () => {
+        const snapshot = await readPtyDebugSnapshot(emuPage);
+        return {
+          mode: snapshot?.verticalIntent.mode,
+          cursorInViewport: snapshot?.anchor.cursorInViewport,
+        };
+      })
+      .toEqual({ mode: "reviewing", cursorInViewport: true });
+
+    const beforeUpdate = await readPtyDebugSnapshot(emuPage);
+    if (!beforeUpdate) throw new Error("PTY debug snapshot is not available");
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toBeHidden();
+
+    await sendPtyOutput(
+      emuPage,
+      "\u001b7\u001b[1A\rWORKING elapsed 03s                              \u001b8",
+    );
+    await expect
+      .poll(() => emuPage.locator('[data-slot="pty-host"] .xterm-rows').last().textContent())
+      .toContain("WORKING elapsed 03s");
+    await expect(reviewSnapshot).toBeHidden();
+
+    const afterUpdate = await readPtyDebugSnapshot(emuPage);
+    if (!afterUpdate) throw new Error("PTY debug snapshot is not available");
+    expect(afterUpdate.container.scrollTop).toBeCloseTo(beforeUpdate.container.scrollTop, 0);
+    expect(afterUpdate.verticalIntent.mode).toBe("reviewing");
+    expect(afterUpdate.anchor.cursorInViewport).toBe(true);
+  });
+
   test("fast upward flick keeps host geometry aligned with the xterm viewport", async ({
     emuPage,
   }) => {
