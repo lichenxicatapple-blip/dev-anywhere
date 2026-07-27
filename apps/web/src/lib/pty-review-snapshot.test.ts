@@ -43,6 +43,26 @@ describe("attachPtyReviewSnapshot", () => {
     expect(host.style.overflow).toBe("visible");
   });
 
+  it("dims serialized glyphs without fading their cell background", () => {
+    const host = createHost();
+    const controller = attachPtyReviewSnapshot(host, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div><span style='color: rgb(150, 150, 150); background-color: rgb(52, 55, 60); opacity: 0.5'>Explain this codebase</span></div></div></pre></body></html>",
+    });
+
+    controller.captureRange(0, 1);
+
+    const cell = host.querySelector<HTMLElement>(
+      '[data-slot="pty-review-snapshot"] .xterm-rows > div > span',
+    );
+    const foreground = cell?.firstElementChild;
+    expect(cell?.style.backgroundColor).toBe("rgb(52, 55, 60)");
+    expect(cell?.style.opacity).toBe("");
+    expect(foreground).toBeInstanceOf(HTMLSpanElement);
+    expect((foreground as HTMLElement | null)?.style.opacity).toBe("0.5");
+    expect(foreground?.textContent).toBe("Explain this codebase");
+  });
+
   it("replaces the whole snapshot after deliberate navigation", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi

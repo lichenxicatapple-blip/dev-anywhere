@@ -321,6 +321,19 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     expect(afterSnapshot.container.scrollTop).toBeGreaterThanOrEqual(
       beforeSnapshot.container.scrollTop - 32,
     );
+
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toHaveCount(0);
+    await sendPtyOutput(
+      emuPage,
+      "\u001b7\u001b[20;1HWORKING elapsed 02s                              \u001b8",
+    );
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("WORKING elapsed 02s");
+    await expect
+      .poll(() => emuPage.locator('[data-slot="pty-host"] .xterm-rows').last().textContent())
+      .toContain("WORKING elapsed 02s");
   });
 
   test("fast upward flick keeps host geometry aligned with the xterm viewport", async ({

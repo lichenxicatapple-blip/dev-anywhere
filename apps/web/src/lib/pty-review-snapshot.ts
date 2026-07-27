@@ -39,6 +39,22 @@ function createSnapshotShell(screen: HTMLElement, rows: HTMLElement): HTMLElemen
   return next;
 }
 
+function isolateSerializedForegroundOpacity(rows: HTMLElement): void {
+  for (const cell of rows.querySelectorAll<HTMLElement>("span[style]")) {
+    const opacity = cell.style.opacity;
+    if (!opacity || opacity === "1") continue;
+
+    // SerializeAddon represents xterm's dim attribute by fading the whole cell.
+    // The live renderer fades only glyphs, so isolate that opacity from the
+    // cell background to keep review snapshots visually identical.
+    cell.style.removeProperty("opacity");
+    const foreground = document.createElement("span");
+    foreground.style.opacity = opacity;
+    foreground.append(...Array.from(cell.childNodes));
+    cell.append(foreground);
+  }
+}
+
 function createSerializedRows(
   html: string,
   renderedRows: HTMLElement,
@@ -51,6 +67,7 @@ function createSerializedRows(
   const rows = document.importNode(serializedRows, true);
   rows.className = renderedRows.className;
   rows.removeAttribute("id");
+  isolateSerializedForegroundOpacity(rows);
   const renderedStyle = getComputedStyle(renderedRows);
   const rowHeight = rowCount > 0 ? renderedRows.clientHeight / rowCount : 0;
   const serializedRowCount = rows.childElementCount;
