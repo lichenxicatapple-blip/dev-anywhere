@@ -82,8 +82,17 @@ interface RemoteFileBridgeDeps {
 
 function encodeContentDisposition(disposition: RemoteFileDisposition, fileName: string): string {
   const type = disposition === "download" ? "attachment" : "inline";
-  const fallback = fileName.replace(/["\\\r\n]/g, "_") || "download";
-  return `${type}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+  const fallback =
+    fileName
+      .replace(/[^\x20-\x7e]/g, "_")
+      .replace(/["\\/\r\n]/g, "_")
+      .replace(/_+/g, "_")
+      .trim() || "download";
+  const encodedFileName = encodeURIComponent(fileName).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encodedFileName}`;
 }
 
 function statusForErrorCode(errorCode?: string): number {
@@ -459,19 +468,28 @@ export class RemoteFileBridge {
       return;
     }
 
-    pending.headersSent = true;
-    pending.res.status(200);
-    pending.res.setHeader("Content-Type", msg.mimeType ?? "application/octet-stream");
-    pending.res.setHeader("Cache-Control", "no-store");
-    pending.res.setHeader("X-Content-Type-Options", "nosniff");
-    if (msg.size !== undefined) {
-      pending.res.setHeader("Content-Length", String(msg.size));
+    try {
+      pending.res.status(200);
+      pending.res.setHeader("Content-Type", msg.mimeType ?? "application/octet-stream");
+      pending.res.setHeader("Cache-Control", "no-store");
+      pending.res.setHeader("X-Content-Type-Options", "nosniff");
+      if (msg.size !== undefined) {
+        pending.res.setHeader("Content-Length", String(msg.size));
+      }
+      pending.res.setHeader(
+        "Content-Disposition",
+        encodeContentDisposition(pending.token.disposition, msg.fileName ?? "download"),
+      );
+      pending.res.flushHeaders();
+      pending.headersSent = true;
+    } catch (error) {
+      pending.headersSent = pending.res.headersSent;
+      this.deps.logger.error(
+        { err: error, streamId: pending.streamId, fileName: msg.fileName },
+        "Remote file response headers rejected",
+      );
+      this.failStream(pending.streamId, 500, "文件下载响应无效");
     }
-    pending.res.setHeader(
-      "Content-Disposition",
-      encodeContentDisposition(pending.token.disposition, msg.fileName ?? "download"),
-    );
-    pending.res.flushHeaders();
   }
 
   private handleStreamComplete(

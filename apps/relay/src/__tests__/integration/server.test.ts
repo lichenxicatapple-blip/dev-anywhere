@@ -259,6 +259,7 @@ describe("Relay Server Integration", () => {
       disposition: "download",
     });
 
+    const unicodeFileName = "面试三问话术_搜索Fanout_DEVAnywhere_Agent.md";
     proxy.send(
       serializeControl({
         type: "remote_file_stream_response",
@@ -268,7 +269,7 @@ describe("Relay Server Integration", () => {
         path: "build/out.txt",
         mimeType: "text/plain",
         size: 11,
-        fileName: "out.txt",
+        fileName: unicodeFileName,
       }),
     );
     proxy.send(
@@ -286,7 +287,12 @@ describe("Relay Server Integration", () => {
     const res = await fetchPromise;
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/plain");
-    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const contentDisposition = res.headers.get("content-disposition");
+    expect(contentDisposition).toContain("attachment");
+    expect(contentDisposition).toContain(
+      `filename*=UTF-8''${encodeURIComponent(unicodeFileName)}`,
+    );
+    expect(contentDisposition).not.toContain("面试");
     expect(await res.text()).toBe("hello world");
   });
 
