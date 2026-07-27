@@ -172,4 +172,37 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const afterScrollTop = (await readPtyScrollMetrics(emuPage)).scrollTop;
     expect(afterScrollTop).toBeLessThanOrEqual(beforeScrollTop + 8);
   });
+
+  test("continuous output does not repaint the reviewed frame", async ({ emuPage }) => {
+    const sessionId = `${SESSION_ID}-frozen-review`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await sendPtyLines(emuPage, { count: 240, prefix: "frozen-history" });
+    await expectPtyScrollable(emuPage, 200);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    await touchDrag(
+      emuPage,
+      { x, y: box.y + box.height * 0.35 },
+      { x, y: box.y + box.height * 0.75 },
+    );
+
+    const snapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(snapshot).toBeVisible();
+    const frozenText = await snapshot.textContent();
+    const frozenBox = await snapshot.boundingBox();
+
+    for (let index = 1; index <= 12; index += 1) {
+      await sendPtyOutput(emuPage, `mobile-live-append ${String(index).padStart(2, "0")}\r\n`);
+      await emuPage.waitForTimeout(50);
+    }
+
+    await expect(snapshot).toHaveText(frozenText ?? "");
+    await expect(snapshot).not.toContainText("mobile-live-append");
+    expect(await snapshot.boundingBox()).toEqual(frozenBox);
+    await expect(backToBottom(emuPage)).toHaveAttribute("aria-label", "回到最新");
+  });
 });

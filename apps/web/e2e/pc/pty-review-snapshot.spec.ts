@@ -85,3 +85,102 @@ test("keeps a coherent frame while live rows update across the scrollback bounda
   await expect(snapshot).toHaveCount(0);
   await expect(backToBottom(page)).toHaveJSProperty("inert", true);
 });
+
+test("keeps the reviewed frame frozen while live output appends new lines", async ({ page }) => {
+  await setupPtyChat(page, {
+    sessionId: SESSION_ID,
+    cols: 80,
+    rows: 24,
+    withVisualViewportMock: true,
+  });
+  await expectPtyTerminalMounted(page);
+
+  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
+  await page.waitForTimeout(100);
+  await sendPtyOutput(
+    page,
+    Array.from(
+      { length: 5_200 },
+      (_, index) => `APPEND HISTORY ${String(index + 1).padStart(4, "0")}\r\n`,
+    ).join(""),
+  );
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("APPEND HISTORY 5199");
+
+  const box = await ptyTerminal(page).boundingBox();
+  if (!box) throw new Error("PTY terminal is not visible");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -240);
+
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toBeVisible();
+  const frozenText = await snapshot.textContent();
+  const frozenBox = await snapshot.boundingBox();
+
+  await sendPtyOutput(
+    page,
+    Array.from(
+      { length: 12 },
+      (_, index) => `LIVE APPEND ${String(index + 1).padStart(2, "0")}\r\n`,
+    ).join(""),
+  );
+
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("LIVE APPEND 12");
+  await expect(snapshot).toHaveText(frozenText ?? "");
+  await expect(snapshot).not.toContainText("LIVE APPEND");
+  expect(await snapshot.boundingBox()).toEqual(frozenBox);
+  await expect(backToBottom(page)).toHaveAttribute("aria-label", "回到最新");
+});
+
+test("ignores passive container scroll events while the reviewed frame is frozen", async ({
+  page,
+}) => {
+  await setupPtyChat(page, {
+    sessionId: SESSION_ID,
+    cols: 80,
+    rows: 24,
+    withVisualViewportMock: true,
+  });
+  await expectPtyTerminalMounted(page);
+
+  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
+  await page.waitForTimeout(100);
+  await sendPtyOutput(
+    page,
+    Array.from(
+      { length: 72 },
+      (_, index) => `PASSIVE SCROLL HISTORY ${String(index + 1).padStart(2, "0")}\r\n`,
+    ).join(""),
+  );
+
+  const box = await ptyTerminal(page).boundingBox();
+  if (!box) throw new Error("PTY terminal is not visible");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -240);
+
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toBeVisible();
+  const frozenText = await snapshot.textContent();
+
+  await sendPtyOutput(
+    page,
+    "\u001b7\u001b[8;1HPASSIVE LIVE UPDATE 01                         \u001b8",
+  );
+  await expect.poll(() => directRenderedRowsText(page)).toContain("PASSIVE LIVE UPDATE 01");
+  await expect(snapshot).toHaveText(frozenText ?? "");
+
+  await ptyTerminal(page).evaluate((element) => {
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await sendPtyOutput(
+    page,
+    "\u001b7\u001b[8;1HPASSIVE LIVE UPDATE 02                         \u001b8",
+  );
+
+  await expect.poll(() => directRenderedRowsText(page)).toContain("PASSIVE LIVE UPDATE 02");
+  await expect(snapshot).toHaveText(frozenText ?? "");
+  await expect(snapshot).not.toContainText("PASSIVE LIVE UPDATE");
+});

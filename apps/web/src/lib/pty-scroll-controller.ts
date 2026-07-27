@@ -943,7 +943,9 @@ export function attachPtyScrollController(
       atCursorAwareBottom: atBottom,
       verticalDelta,
     });
-    if (userHasVerticalScrollIntent()) {
+    // 内容高度、横向滚动或布局更新也可能派发 scroll，即使 scrollTop 没有变化。
+    // 此时不能重新拍摄回看快照，否则下一帧实时输出会混入用户正在看的历史。
+    if (userHasVerticalScrollIntent() && verticalDelta !== 0) {
       reviewSnapshotRefreshPending = true;
     }
     if (skipSameRowTouchScrollSync(effectiveScrollTop)) {

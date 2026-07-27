@@ -240,6 +240,32 @@ describe("attachPtyScrollController", () => {
     expect(clear).toHaveBeenCalledTimes(1);
   });
 
+  it("does not refresh the review frame for a container scroll event without vertical movement", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const capture = vi.fn(() => true);
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture: capture,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    emitRender();
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    container.dispatchEvent(new Event("scroll"));
+    emitRender();
+
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+
   it("syncs native touch scroll to the matching terminal row before committing host position on render", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
