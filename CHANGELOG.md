@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.23](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.22...v0.5.23) (2026-07-28)
+
+
+### 修复
+
+* **proxy:** 修复 Codex 会话因 AGENTS.md 注入被错误合并 ([185bf13](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/185bf1318f0e7fc5337f36bf3a96236d5dad9f21))
+
 ## [0.5.22] - 2026-07-27
 
 ### 修复
