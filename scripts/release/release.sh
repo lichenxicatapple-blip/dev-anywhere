@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 一键发布: 验证发布源分支 → 验证 CHANGELOG → release:check → release:smoke → bump 4 个 package.json
-# → commit "release: vX.Y.Z" → tag vX.Y.Z → 确认后 push commit + tag。
-# CI (.github/workflows/release.yml) 监听 tag push 后自动 build/publish docker + npm。
+# 应急手工发布: 验证发布源分支 → 验证 CHANGELOG → release:check → release:smoke
+# → 同步 Release Please manifest 与 5 个 package.json → commit/tag/push。
+# 日常发布由 Release Please 的 Release PR 完成；这个脚本保留给需要指定版本的应急场景。
 #
 # 发布必须基于 main，并且本地 main 必须与 origin/main 完全一致。
 #
@@ -81,13 +81,15 @@ fi
 echo "OK: release source is main and matches origin/main"
 
 PKG_FILES=(
+  "package.json"
   "apps/proxy/package.json"
   "apps/relay/package.json"
   "apps/web/package.json"
   "packages/shared/package.json"
 )
+RELEASE_MANIFEST=".release-please-manifest.json"
 
-CURRENT_VERSION="$(node -p "require('./apps/proxy/package.json').version")"
+CURRENT_VERSION="$(node -p "require('./package.json').version")"
 echo "Current version: $CURRENT_VERSION"
 echo "Target version:  $TARGET_VERSION"
 if [[ "$EMERGENCY" == "1" ]]; then
@@ -114,10 +116,10 @@ fi
 echo "OK: CHANGELOG.md has [${TARGET_VERSION}] entry"
 
 echo "=== Verify git working tree state ==="
-# 允许的 dirty 文件: CHANGELOG.md (release notes) + 4 个 package.json (如果脚本之前部分跑过)。
+# 允许的 dirty 文件: CHANGELOG、Release Please manifest 与 5 个 package.json。
 # 任何其它文件 dirty 都拒绝, 避免发布混入未审查改动。
 DIRTY="$(git status --porcelain)"
-ALLOWED_RE='^.. (CHANGELOG\.md|apps/proxy/package\.json|apps/relay/package\.json|apps/web/package\.json|packages/shared/package\.json)$'
+ALLOWED_RE='^.. (CHANGELOG\.md|\.release-please-manifest\.json|package\.json|apps/proxy/package\.json|apps/relay/package\.json|apps/web/package\.json|packages/shared/package\.json)$'
 UNEXPECTED="$(printf '%s\n' "$DIRTY" | grep -vE "$ALLOWED_RE" | grep -v '^$' || true)"
 if [[ -n "$UNEXPECTED" ]]; then
   echo "ERROR: unexpected uncommitted changes:" >&2
@@ -150,7 +152,7 @@ else
   pnpm release:smoke
 fi
 
-echo "=== Bump 4 package.json to ${TARGET_VERSION} ==="
+echo "=== Bump package versions to ${TARGET_VERSION} ==="
 for f in "${PKG_FILES[@]}"; do
   # macOS sed 需要 -i ''; node 改写更可移植
   node -e "
@@ -164,8 +166,18 @@ for f in "${PKG_FILES[@]}"; do
   "
 done
 
+echo "=== Update Release Please manifest ==="
+node -e "
+  const fs = require('fs');
+  const path = '$RELEASE_MANIFEST';
+  const manifest = JSON.parse(fs.readFileSync(path, 'utf-8'));
+  manifest['.'] = '$TARGET_VERSION';
+  fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+  console.log(path + ' updated to $TARGET_VERSION');
+"
+
 echo "=== Commit release ==="
-git add CHANGELOG.md "${PKG_FILES[@]}"
+git add CHANGELOG.md "$RELEASE_MANIFEST" "${PKG_FILES[@]}"
 
 # 幂等支路: 如果 HEAD 已经是这次的 release commit (pkg + CHANGELOG 都和工作区一致, 没有
 # 待 staged 的内容了), 跳过创建新 commit, 进入 tag 阶段。
