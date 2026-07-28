@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChildProcessFake } from "./test-fakes.js";
 
 let mockChild: ReturnType<typeof createChildProcessFake>;
@@ -42,11 +42,16 @@ describe("CodexAppServerSession", () => {
   let CodexAppServerSession: typeof import("#src/worker/codex-app-server-session.js").CodexAppServerSession;
 
   beforeEach(async () => {
+    vi.stubEnv("CODEX_BIN", "codex");
     mockChild = createChildProcessFake();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
     const mod = await import("#src/worker/codex-app-server-session.js");
     CodexAppServerSession = mod.CodexAppServerSession;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("starts Codex app-server over stdio and sends initialize", async () => {
