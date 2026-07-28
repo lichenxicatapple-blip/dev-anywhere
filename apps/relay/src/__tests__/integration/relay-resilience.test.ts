@@ -477,21 +477,25 @@ describe("proxy lifecycle", () => {
       const client2 = ws.client(port);
       await waitForOpen(client1);
       await waitForOpen(client2);
+      const register1 = waitForMessageType(client1, "client_register_response");
+      const register2 = waitForMessageType(client2, "client_register_response");
       client1.send(JSON.stringify(clientRegister(`client-${id}-1`)));
       client2.send(JSON.stringify(clientRegister(`client-${id}-2`)));
-      await waitForMessage(client1); // consume client_register_response
-      await waitForMessage(client2); // consume client_register_response
+      await Promise.all([register1, register2]);
+
+      const select1 = waitForMessageType(client1, "proxy_select_response");
+      const select2 = waitForMessageType(client2, "proxy_select_response");
       client1.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
       client2.send(JSON.stringify({ type: "proxy_select", proxyId: id }));
-      await waitForMessage(client1); // consume proxy_select_response ACK
-      await waitForMessage(client2); // consume proxy_select_response ACK
+      await Promise.all([select1, select2]);
 
-      const offline1 = waitForMessage(client1);
-      const offline2 = waitForMessage(client2);
+      const offline1 = waitForMessageType(client1, "proxy_offline");
+      const offline2 = waitForMessageType(client2, "proxy_offline");
       proxy.terminate();
 
-      const msg1 = JSON.parse(await offline1);
-      const msg2 = JSON.parse(await offline2);
+      const [raw1, raw2] = await Promise.all([offline1, offline2]);
+      const msg1 = JSON.parse(raw1);
+      const msg2 = JSON.parse(raw2);
       expect(msg1.type).toBe("proxy_offline");
       expect(msg2.type).toBe("proxy_offline");
     },
