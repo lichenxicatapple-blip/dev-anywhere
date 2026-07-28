@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 echo "=== Check release scripts ==="
+bash -n scripts/release/release.sh
 bash -n scripts/deploy/install-relay.sh
 bash -n scripts/lib/install-relay-render.sh
 bash -n scripts/deploy/check-prerequisite.sh
@@ -17,6 +18,7 @@ node --check scripts/tools/emu-debug.mjs
 node --check scripts/quality/check-source-comment-refs.mjs
 node --check scripts/lib/resolve-dev-profile.mjs
 bash scripts/release/options.test.sh
+node scripts/release/config.test.mjs
 if ! grep -F 'REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"' scripts/deploy/install-relay.sh >/dev/null; then
   echo "Release installer must default to the Aliyun ACR deployment registry" >&2
   exit 1
