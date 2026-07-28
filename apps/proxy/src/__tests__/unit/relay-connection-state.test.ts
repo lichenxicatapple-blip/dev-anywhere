@@ -179,28 +179,37 @@ describe("RelayConnection: async ws events arriving after close()", () => {
   });
 
   it("terminates a half-open synced socket when heartbeat pong is missing", async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
     const conn = new RelayConnection("ws://test:1234", {
       proxyIdPath: "/tmp/test-proxy-id",
       heartbeatIntervalMs: 5,
       heartbeatTimeoutMs: 5,
     });
-    conn.connect();
-    const mod = (await import("ws")) as unknown as MockWsModule;
-    const fakeWs = mod.default.lastInstance;
-    if (!fakeWs) throw new Error("mock WebSocket did not capture instance");
+    try {
+      conn.connect();
+      const mod = (await import("ws")) as unknown as MockWsModule;
+      const fakeWs = mod.default.lastInstance;
+      if (!fakeWs) throw new Error("mock WebSocket did not capture instance");
 
-    fakeWs.readyState = mod.default.OPEN;
-    fakeWs.emit("open");
-    fakeWs.emit(
-      "message",
-      Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
-    );
-    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+      fakeWs.readyState = mod.default.OPEN;
+      fakeWs.emit("open");
+      fakeWs.emit(
+        "message",
+        Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
+      );
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
 
-    await vi.waitFor(() => expect(fakeWs.ping).toHaveBeenCalled(), { timeout: 100 });
-    await vi.waitFor(() => expect(fakeWs.terminate).toHaveBeenCalled(), { timeout: 100 });
-    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
-    conn.close();
+      await vi.advanceTimersByTimeAsync(5);
+      expect(fakeWs.ping).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5);
+      expect(fakeWs.terminate).toHaveBeenCalledTimes(1);
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
+    } finally {
+      conn.close();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("treats inbound upload data as connection liveness while awaiting pong", async () => {
