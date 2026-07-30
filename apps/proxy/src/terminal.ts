@@ -22,6 +22,7 @@ import {
   decidePtySemanticTransition,
   shouldStartPtyTurnOnInput,
 } from "./common/pty-semantic-machine.js";
+import { capturePtySnapshot } from "./common/pty-snapshot.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
 import { SOCK_PATH, STOPPED_PATH, tildify } from "./common/paths.js";
@@ -331,26 +332,32 @@ class TerminalSession {
           this.handleBridgeStatus(msg.connected);
         } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
           if (this.serializeAddon && this.headlessTerminal) {
-            const data = this.serializeAddon.serialize();
-            this.socket.write(
-              serializeIpc({
-                type: "pty_snapshot",
-                sessionId: msg.sessionId,
-                cols: this.headlessTerminal.cols,
-                rows: this.headlessTerminal.rows,
-                data,
-                outputSeq: this.outputSeq,
-                requestId: msg.requestId,
-              }),
-            );
-            log.info(
-              {
-                sessionId: this.sessionId,
-                cols: this.headlessTerminal.cols,
-                rows: this.headlessTerminal.rows,
-                bytes: data.length,
+            const responseSocket = this.socket;
+            capturePtySnapshot(
+              this.headlessTerminal,
+              this.serializeAddon,
+              this.outputSeq,
+              (snapshot) => {
+                if (this.socket !== responseSocket || !responseSocket.writable) return;
+                responseSocket.write(
+                  serializeIpc({
+                    type: "pty_snapshot",
+                    sessionId: msg.sessionId,
+                    ...snapshot,
+                    requestId: msg.requestId,
+                  }),
+                );
+                log.info(
+                  {
+                    sessionId: this.sessionId,
+                    cols: snapshot.cols,
+                    rows: snapshot.rows,
+                    bytes: snapshot.data.length,
+                    outputSeq: snapshot.outputSeq,
+                  },
+                  "Snapshot sent via IPC",
+                );
               },
-              "Snapshot sent via IPC",
             );
           }
         }

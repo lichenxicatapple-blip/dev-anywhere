@@ -326,22 +326,20 @@ export function createControlMessageHandlers(
       const activeSessions = sessionManager.listSessions().filter((s) => s.state !== "terminated");
 
       // 先同步 session 列表，relay 据此建立 proxy-session 关联
-      if (activeSessions.length > 0) {
-        send(
-          serializeControl({
-            type: "session_sync",
-            sessions: activeSessions.map((s) => ({
-              id: s.id,
-              ...(s.kind !== undefined ? { kind: s.kind } : {}),
-              mode: s.mode,
-              provider: s.provider,
-              ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
-              state: s.state,
-            })),
-          }),
-        );
-        serviceLogger.info({ count: activeSessions.length }, "Session list synced to relay");
-      }
+      send(
+        serializeControl({
+          type: "session_sync",
+          sessions: activeSessions.map((s) => ({
+            id: s.id,
+            ...(s.kind !== undefined ? { kind: s.kind } : {}),
+            mode: s.mode,
+            provider: s.provider,
+            ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
+            state: s.state,
+          })),
+        }),
+      );
+      serviceLogger.info({ count: activeSessions.length }, "Session list synced to relay");
 
       for (const session of activeSessions) {
         const resources = sessionResources.get(session.id);

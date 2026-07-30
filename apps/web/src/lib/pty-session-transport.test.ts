@@ -300,6 +300,36 @@ describe("attachPtySessionTransport", () => {
     expect(harness.sent).toHaveLength(1);
   });
 
+  it("recovers a gap created when the pre-snapshot frame buffer reaches its limit", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+    const requestId = lastRequestId(harness.sent);
+
+    // frameBuffer 最多保留 5000 帧；第 5001 帧会淘汰 seq=1，留下一个永久缺口。
+    for (let outputSeq = 1; outputSeq <= 5001; outputSeq += 1) {
+      harness.emitBinary(new Uint8Array([outputSeq & 0xff]), outputSeq);
+    }
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId,
+      cols: 80,
+      rows: 24,
+      data: "snapshot",
+      outputSeq: 0,
+    });
+
+    vi.advanceTimersByTime(2_000);
+    expect(harness.sent).toHaveLength(2);
+  });
+
   it("cleans up subscriptions and pending retry timer", () => {
     const harness = createHarness();
     const target = createTarget();

@@ -260,6 +260,23 @@ describe("control-messages: cleanup", () => {
 });
 
 describe("control-messages: reinitializeOnReconnect", () => {
+  it("sends an empty session sync so relay can clear stale associations", async () => {
+    const sent: string[] = [];
+    const handlers = createControlMessageHandlers(
+      (data) => sent.push(data),
+      createMockSessionManager([{ id: "terminated-1", state: SessionState.TERMINATED }]),
+    );
+
+    await handlers.reinitializeOnReconnect();
+
+    expect(sent.map((data) => JSON.parse(data))).toEqual([
+      {
+        type: "session_sync",
+        sessions: [],
+      },
+    ]);
+  });
+
   it("re-pushes command list and file tree for active sessions", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-reinit-"));
     await writeFile(join(tmpDir, "app.ts"), "");

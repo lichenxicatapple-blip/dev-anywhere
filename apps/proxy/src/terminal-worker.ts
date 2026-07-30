@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extractor.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { SOCK_PATH, STOPPED_PATH } from "./common/paths.js";
+import { capturePtySnapshot } from "./common/pty-snapshot.js";
 import {
   createIpcReader,
   encodeBinaryIpcFrame,
@@ -173,18 +174,20 @@ class ShellTerminalWorker {
         this.child?.write(msg.data);
         break;
       case "pty_subscribe":
-        if (this.socket?.writable) {
-          this.socket.write(
-            serializeIpc({
-              type: "pty_snapshot",
-              sessionId: this.sessionId,
-              cols: this.terminal.cols,
-              rows: this.terminal.rows,
-              data: this.serializeAddon.serialize(),
-              outputSeq: this.outputSeq,
-              requestId: msg.requestId,
-            }),
-          );
+        {
+          const responseSocket = this.socket;
+          if (!responseSocket?.writable) break;
+          capturePtySnapshot(this.terminal, this.serializeAddon, this.outputSeq, (snapshot) => {
+            if (this.socket !== responseSocket || !responseSocket.writable) return;
+            responseSocket.write(
+              serializeIpc({
+                type: "pty_snapshot",
+                sessionId: this.sessionId,
+                ...snapshot,
+                requestId: msg.requestId,
+              }),
+            );
+          });
         }
         break;
       case "pty_resize_request":

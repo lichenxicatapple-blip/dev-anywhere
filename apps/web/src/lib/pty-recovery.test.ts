@@ -15,6 +15,44 @@ function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
 }
 
 describe("PtyRecoveryController", () => {
+  it("does not accept a snapshot requested by another controller", () => {
+    const firstRecovery = createPtyRecoveryController();
+    const secondRecovery = createPtyRecoveryController();
+    const target = createTarget();
+
+    const firstRequestId = firstRecovery.startSnapshotRequest();
+    const secondRequestId = secondRecovery.startSnapshotRequest();
+
+    expect(firstRequestId).not.toBe(secondRequestId);
+    expect(
+      secondRecovery.applySnapshot(
+        {
+          requestId: firstRequestId,
+          cols: 80,
+          rows: 24,
+          data: "other client snapshot",
+          outputSeq: 1,
+        },
+        target,
+      ),
+    ).toEqual({ applied: false, reason: "stale_snapshot" });
+    expect(target.calls).toEqual([]);
+
+    expect(
+      secondRecovery.applySnapshot(
+        {
+          requestId: secondRequestId,
+          cols: 80,
+          rows: 24,
+          data: "own snapshot",
+          outputSeq: 2,
+        },
+        target,
+      ),
+    ).toEqual({ applied: true, replayedFrames: 0 });
+    expect(target.calls.at(-1)).toEqual(["write", "own snapshot"]);
+  });
+
   it("buffers binary frames until the matching snapshot is applied", () => {
     const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();

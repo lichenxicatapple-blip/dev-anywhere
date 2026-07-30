@@ -24,6 +24,7 @@ import {
   decidePtySemanticTransition,
   shouldStartPtyTurnOnInput,
 } from "../common/pty-semantic-machine.js";
+import { capturePtySnapshot } from "../common/pty-snapshot.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -279,22 +280,27 @@ export class HostedPtyRegistry {
   snapshot(sessionId: string, requestId?: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
-    const data = hosted.serializeAddon.serialize();
-    this.deps.relayConnection.sendRaw(
-      serializeControl({
-        type: "session_snapshot",
-        sessionId,
-        cols: hosted.terminal.cols,
-        rows: hosted.terminal.rows,
-        data,
-        outputSeq: hosted.outputSeq,
-        ...(requestId !== undefined ? { requestId } : {}),
-      }),
-    );
-    serviceLogger.info(
-      { sessionId, cols: hosted.terminal.cols, rows: hosted.terminal.rows, bytes: data.length },
-      "Hosted PTY snapshot sent",
-    );
+    capturePtySnapshot(hosted.terminal, hosted.serializeAddon, hosted.outputSeq, (snapshot) => {
+      if (this.sessions.get(sessionId) !== hosted) return;
+      this.deps.relayConnection.sendRaw(
+        serializeControl({
+          type: "session_snapshot",
+          sessionId,
+          ...snapshot,
+          ...(requestId !== undefined ? { requestId } : {}),
+        }),
+      );
+      serviceLogger.info(
+        {
+          sessionId,
+          cols: snapshot.cols,
+          rows: snapshot.rows,
+          bytes: snapshot.data.length,
+          outputSeq: snapshot.outputSeq,
+        },
+        "Hosted PTY snapshot sent",
+      );
+    });
     return true;
   }
 

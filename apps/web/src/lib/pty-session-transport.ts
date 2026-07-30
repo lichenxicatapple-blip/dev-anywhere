@@ -185,6 +185,14 @@ export function attachPtySessionTransport(
         outputSeq: msg.outputSeq as number,
       },
       frameWriter.target,
+      (hasGap) => {
+        if (disposed) return;
+        if (hasGap) {
+          armGapRecoveryTimer();
+        } else {
+          clearGapRecovery();
+        }
+      },
     );
     if (!result.applied) return;
     clearRetry();

@@ -38,14 +38,34 @@ interface PtyRecoveryController {
     frame: { data: Uint8Array; outputSeq: number },
     target: PtyRenderTarget,
   ) => { written: boolean; hasGap: boolean };
-  applySnapshot: (snapshot: PtySnapshotMessage, target: PtyRenderTarget) => SnapshotResult;
+  applySnapshot: (
+    snapshot: PtySnapshotMessage,
+    target: PtyRenderTarget,
+    onReplaySettled?: (hasGap: boolean) => void,
+  ) => SnapshotResult;
 }
+
+function createSnapshotRequestPageScope(): string {
+  const values = new Uint32Array(4);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(values);
+    return Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+const SNAPSHOT_REQUEST_PAGE_SCOPE = createSnapshotRequestPageScope();
+let snapshotControllerSeq = 0;
 
 export function createPtyRecoveryController(
   options: PtyRecoveryOptions = {},
 ): PtyRecoveryController {
   let seq = 0;
-  const requestIdFactory = options.requestIdFactory ?? (() => `pty-snapshot-${++seq}`);
+  const controllerScope = `${SNAPSHOT_REQUEST_PAGE_SCOPE}-${++snapshotControllerSeq}`;
+  // Relay 会把 proxy 的快照广播给绑定到同一开发机的所有客户端。requestId 必须跨
+  // 页面和 controller 唯一，接收方才能拒绝其他客户端请求产生的同 session 快照。
+  const requestIdFactory =
+    options.requestIdFactory ?? (() => `pty-snapshot-${controllerScope}-${++seq}`);
 
   let activeRequestId: string | null = null;
   let snapshotApplied = false;
@@ -113,7 +133,7 @@ export function createPtyRecoveryController(
       return { written, hasGap: pendingFrames.size > 0 };
     },
 
-    applySnapshot(snapshot, target) {
+    applySnapshot(snapshot, target, onReplaySettled) {
       if (!activeRequestId) {
         return { applied: false, reason: "no_active_request" };
       }
@@ -143,6 +163,7 @@ export function createPtyRecoveryController(
           pendingFrames.set(frame.outputSeq, frame.data);
         }
         flushContiguousFrames(target);
+        onReplaySettled?.(pendingFrames.size > 0);
       });
 
       return { applied: true, replayedFrames: replayFrames.length };

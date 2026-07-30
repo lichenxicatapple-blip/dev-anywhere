@@ -230,6 +230,70 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("waits for queued output before sending a hosted PTY snapshot", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-hosted-pty-snapshot-"));
+    const shellPath = join(dir, "zsh");
+    writeFileSync(shellPath, "#!/bin/sh\n");
+    chmodSync(shellPath, 0o755);
+    const relayConnection = {
+      sendRaw: vi.fn(),
+      sendBinary: vi.fn(),
+    };
+    const registry = new HostedPtyRegistry({
+      sessionManager: {
+        getSession: vi.fn(() => ({
+          id: "terminal-1",
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          state: SessionState.IDLE,
+          cwd: "/tmp",
+          pid: 2468,
+        })),
+        terminateSession: vi.fn(() => ({ success: true })),
+      } as never,
+      relayConnection: relayConnection as never,
+      getProviderEnv: () => ({ SHELL: shellPath }),
+      touchSessionActivity: vi.fn(() => true),
+      updateTerminalCwd: vi.fn(() => true),
+      applyPtyStateToSession: vi.fn(),
+    });
+
+    try {
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("snapshot-sentinel\r\n");
+      expect(registry.snapshot("terminal-1", "request-1")).toBe(true);
+      expect(relayConnection.sendRaw).not.toHaveBeenCalled();
+
+      await vi.waitFor(() => {
+        expect(relayConnection.sendRaw).toHaveBeenCalledTimes(1);
+      });
+      const snapshot = JSON.parse(relayConnection.sendRaw.mock.calls[0][0] as string) as {
+        type: string;
+        requestId: string;
+        data: string;
+        outputSeq: number;
+      };
+      expect(snapshot).toMatchObject({
+        type: "session_snapshot",
+        requestId: "request-1",
+        outputSeq: 1,
+      });
+      expect(snapshot.data).toContain("snapshot-sentinel");
+    } finally {
+      registry.destroyAll();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reports a pure shell terminal working-directory change from OSC 7", () => {
     withExecutable("zsh", (shellPath) => {
       const updateTerminalCwd = vi.fn(() => true);
