@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.24](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.23...v0.5.24) (2026-07-30)
+
+
+### 修复
+
+* **web:** preserve PTY snapshot row styles ([38eda48](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/38eda48807bc76074fd5dd9aaf23788855b82585))
+
 ## [0.5.23](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.22...v0.5.23) (2026-07-28)
 
 
