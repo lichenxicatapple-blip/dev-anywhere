@@ -4,6 +4,18 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.25](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.24...v0.5.25) (2026-07-30)
+
+
+### 修复
+
+* **pty:** make snapshot recovery lossless ([ebbc79a](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/ebbc79a7db954e73db9d0fc6898e711e3837b76e))
+
+
+### 文档
+
+* explain PTY network synchronization ([627d02f](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/627d02f9abe913a05da43cdbbe2443365210915f))
+
 ## [0.5.24](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.23...v0.5.24) (2026-07-30)
 
 
