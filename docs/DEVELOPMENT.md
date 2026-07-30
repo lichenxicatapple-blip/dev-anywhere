@@ -110,6 +110,10 @@ docs/       长期维护的中文文档和 README 媒体资源
 
 `shared` 不依赖应用。Proxy、Relay 和 Web 通过共享协议协作，不直接读取彼此的内部状态。
 
+## 深入文档
+
+- [PTY 网络同步机制](./PTY-NETWORK-SYNC.md)：实时帧、`outputSeq`、快照、重连、丢帧恢复、协议上限与测试方法。
+
 ## 配置
 
 用户配置位于 `~/.dev-anywhere/config.json`，顶层字段包括：
