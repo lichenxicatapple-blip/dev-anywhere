@@ -63,6 +63,28 @@ describe("attachPtyReviewSnapshot", () => {
     expect(foreground?.textContent).toBe("Explain this codebase");
   });
 
+  it("preserves a background that carries onto a blank row", () => {
+    const host = createHost();
+    const controller = attachPtyReviewSnapshot(host, {
+      serializeRangeAsHtml: () => `
+        <html><body><pre><div>
+          <div><span></span><span style="background-color: #393939">   </span></div>
+          <div><span></span><span style="background-color: #393939">› prompt   </span></div>
+          <div><span>   </span></div>
+          <div><span></span><span>next row</span></div>
+        </div></pre></body></html>
+      `,
+    });
+
+    controller.captureRange(0, 4);
+
+    const rows = host.querySelectorAll<HTMLElement>(
+      '[data-slot="pty-review-snapshot"] .xterm-rows > div',
+    );
+    expect(rows[2]?.firstElementChild).toHaveStyle({ backgroundColor: "#393939" });
+    expect(rows[3]?.lastElementChild).not.toHaveAttribute("style");
+  });
+
   it("replaces the whole snapshot after deliberate navigation", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi

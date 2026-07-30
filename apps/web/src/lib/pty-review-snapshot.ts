@@ -56,6 +56,33 @@ function isolateSerializedForegroundOpacity(rows: HTMLElement): void {
   }
 }
 
+function restoreSerializedRowStyleCarry(rows: HTMLElement): void {
+  let carriedStyle = "";
+
+  for (const row of Array.from(rows.children)) {
+    if (!(row instanceof HTMLElement)) continue;
+    const spans = Array.from(row.children).filter(
+      (child): child is HTMLSpanElement => child instanceof HTMLSpanElement,
+    );
+    const first = spans[0];
+    if (!first) continue;
+
+    // SerializeAddon keeps style state between rows, but each HTML row starts a
+    // fresh unstyled <span>. An empty leading span marks an explicit style
+    // transition at column 0; otherwise the first span must inherit the style
+    // that ended the previous row.
+    const hasLeadingStyleTransition = first.textContent === "" && spans.length > 1;
+    if (!hasLeadingStyleTransition && !first.hasAttribute("style") && carriedStyle) {
+      first.style.cssText = carriedStyle;
+    }
+
+    const last = spans.at(-1);
+    if (last) {
+      carriedStyle = last.getAttribute("style") ?? "";
+    }
+  }
+}
+
 function createSerializedRows(
   html: string,
   renderedRows: HTMLElement,
@@ -68,6 +95,7 @@ function createSerializedRows(
   const rows = document.importNode(serializedRows, true);
   rows.className = renderedRows.className;
   rows.removeAttribute("id");
+  restoreSerializedRowStyleCarry(rows);
   isolateSerializedForegroundOpacity(rows);
   const renderedStyle = getComputedStyle(renderedRows);
   const rowHeight = rowCount > 0 ? renderedRows.clientHeight / rowCount : 0;

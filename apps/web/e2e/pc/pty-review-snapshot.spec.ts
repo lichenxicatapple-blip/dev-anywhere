@@ -184,3 +184,73 @@ test("ignores passive container scroll events while the reviewed frame is frozen
   await expect(snapshot).toHaveText(frozenText ?? "");
   await expect(snapshot).not.toContainText("PASSIVE LIVE UPDATE");
 });
+
+test("preserves BCE-only padding around Codex prompts in the reviewed frame", async ({ page }) => {
+  await setupPtyChat(page, {
+    sessionId: SESSION_ID,
+    provider: "codex",
+    cols: 80,
+    rows: 24,
+    withVisualViewportMock: true,
+  });
+  await expectPtyTerminalMounted(page);
+
+  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
+  await page.waitForTimeout(100);
+  const gray = "\u001b[48;2;57;57;57m";
+  const reset = "\u001b[0m";
+  await sendPtyOutput(
+    page,
+    [
+      Array.from({ length: 48 }, (_, index) => `BCE HISTORY ${index + 1}\r\n`).join(""),
+      `${gray}\u001b[2K${reset}\r\n`,
+      `${gray}› 真实 Codex 历史输入\u001b[K${reset}\r\n`,
+      `${gray}\u001b[2K${reset}\r\n`,
+      Array.from({ length: 30 }, (_, index) => `BCE LATER ${index + 1}\r\n`).join(""),
+    ].join(""),
+  );
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("真实 Codex 历史输入");
+
+  await ptyTerminal(page).evaluate((container, sessionId) => {
+    const terminal = window.__ccTestPtyTerminals?.get(sessionId);
+    if (!terminal) throw new Error("PTY terminal is unavailable");
+    let targetLine = -1;
+    for (let index = 0; index < terminal.buffer.active.length; index += 1) {
+      if (
+        terminal.buffer.active
+          .getLine(index)
+          ?.translateToString(true)
+          .includes("真实 Codex 历史输入")
+      ) {
+        targetLine = index;
+        break;
+      }
+    }
+    if (targetLine < 0) throw new Error("Codex prompt row is unavailable");
+    const renderedRow = container.querySelector<HTMLElement>(".xterm-rows > div");
+    const cellHeight = renderedRow?.getBoundingClientRect().height ?? 18;
+    container.scrollTop = Math.max(0, (targetLine - 5) * cellHeight);
+    container.dispatchEvent(new Event("scroll"));
+  }, SESSION_ID);
+
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toContainText("真实 Codex 历史输入");
+  const bottomPaddingBackground = await snapshot.evaluate((element) => {
+    const rows = element.querySelector(".xterm-rows");
+    const promptRow = rows
+      ? Array.from(rows.children).findIndex((row) =>
+          row.textContent?.includes("真实 Codex 历史输入"),
+        )
+      : -1;
+    const bottomPadding = promptRow >= 0 ? rows?.children[promptRow + 1] : null;
+    const contentSpan = bottomPadding
+      ? Array.from(bottomPadding.children).find((child) => child.textContent?.length)
+      : null;
+    return contentSpan instanceof HTMLElement
+      ? getComputedStyle(contentSpan).backgroundColor
+      : null;
+  });
+  expect(bottomPaddingBackground).toBe("rgb(57, 57, 57)");
+});
