@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.26](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.25...v0.5.26) (2026-08-01)
+
+
+### 修复
+
+* **web:** stabilize PTY review and keyboard follow ([896f556](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/896f556694fc0e2b8587e027be0dfab858232dc3))
+
 ## [0.5.25](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.24...v0.5.25) (2026-07-30)
 
 
