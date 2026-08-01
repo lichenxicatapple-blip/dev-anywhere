@@ -260,21 +260,51 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
-    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows, {
-      visible: false,
-    });
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
 
     emitRender();
     expect(capture).toHaveBeenCalledTimes(1);
 
     controller.refreshReviewSnapshot();
     expect(capture).toHaveBeenCalledTimes(2);
-    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows, {
-      visible: false,
-    });
+    expect(capture).toHaveBeenLastCalledWith(terminal.buffer.active.viewportY, terminal.rows);
 
     controller.scrollToBottom("test", { force: true });
     expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the review host and row anchor stable while the live buffer grows", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitRender, emitScroll } = createTerminal({ 19: "prompt" });
+    const capture = vi.fn(() => true);
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture: capture,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    expect(capture).toHaveBeenLastCalledWith(78, terminal.rows);
+    const frozenHostTop = host.style.top;
+
+    terminal.buffer.active.length += 12;
+    terminal.buffer.active.viewportY += 12;
+    emitScroll();
+    emitRender();
+
+    expect(host.style.top).toBe(frozenHostTop);
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
+
+    expect(capture).toHaveBeenLastCalledWith(77, terminal.rows);
+    expect(host.style.top).toBe("1540px");
   });
 
   it("does not refresh the review frame for a container scroll event without vertical movement", () => {

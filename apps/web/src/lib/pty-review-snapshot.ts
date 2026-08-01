@@ -1,6 +1,5 @@
 interface PtyReviewSnapshotController {
-  captureRange: (startLine: number, rowCount: number, options?: { visible?: boolean }) => boolean;
-  setVisible: (visible: boolean) => boolean;
+  captureRange: (startLine: number, rowCount: number) => boolean;
   clear: () => void;
   dispose: () => void;
 }
@@ -159,11 +158,7 @@ export function attachPtyReviewSnapshot(
     host.style.overflow = initialHostOverflow;
   };
 
-  const captureRange = (
-    startLine: number,
-    rowCount: number,
-    captureOptions: { visible?: boolean } = {},
-  ): boolean => {
+  const captureRange = (startLine: number, rowCount: number): boolean => {
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     const renderedRows = screen ? findRenderedRows(screen) : null;
     if (!screen || !renderedRows || !options.serializeRangeAsHtml || rowCount <= 0) return false;
@@ -175,18 +170,12 @@ export function attachPtyReviewSnapshot(
     const rows = createSerializedRows(html, renderedRows, rowCount);
     if (!rows) return false;
     const next = createSnapshotShell(screen, rows);
-    next.style.visibility = captureOptions.visible === false ? "hidden" : "visible";
     replaceSnapshot(next);
     return true;
   };
 
   return {
     captureRange,
-    setVisible: (visible) => {
-      if (!snapshot) return false;
-      snapshot.style.visibility = visible ? "visible" : "hidden";
-      return true;
-    },
     clear,
     dispose: clear,
   };

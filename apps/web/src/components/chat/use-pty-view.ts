@@ -768,7 +768,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (data: string): void => {
-      scheduleRawInputFollow("rawInput");
+      scheduleRawInputFollow("rawInput", { force: true });
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
 
@@ -866,7 +866,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
           onReviewSnapshotCapture: reviewSnapshot.captureRange,
-          onReviewSnapshotSetVisible: reviewSnapshot.setVisible,
           onReviewSnapshotClear: reviewSnapshot.clear,
         });
         scrollControllerRef.current = scrollCtrl;
@@ -1172,8 +1171,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       if (ptySelectionActiveRef.current) {
         clearNewFramesWhileAway();
       } else if (shouldForceKeyboardFollow) {
-        scrollControllerRef.current?.scrollToBottom("keyboardOffset", { force: true });
-        clearNewFramesWhileAway();
+        // relayout was scheduled above. Queue the forced follow after it so the bottom anchor
+        // includes the keyboard controls' committed height instead of the previous frame's spacer.
+        scheduleRawInputFollow("keyboardOffset", { force: true });
       } else if (!keyboardOpen) {
         scheduleRawInputFollow("keyboardOffset");
       }

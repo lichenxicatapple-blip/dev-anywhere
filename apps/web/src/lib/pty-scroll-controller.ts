@@ -49,12 +49,7 @@ interface PtyScrollControllerOptions {
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
-  onReviewSnapshotCapture?: (
-    ydisp: number,
-    rows: number,
-    options?: { visible?: boolean },
-  ) => boolean;
-  onReviewSnapshotSetVisible?: (visible: boolean) => boolean;
+  onReviewSnapshotCapture?: (ydisp: number, rows: number) => boolean;
   onReviewSnapshotClear?: () => void;
   atBottomThreshold?: number;
 }
@@ -115,7 +110,6 @@ export function attachPtyScrollController(
     onTouchReviewStart,
     onTouchBoundaryPrevent,
     onReviewSnapshotCapture,
-    onReviewSnapshotSetVisible,
     onReviewSnapshotClear,
     atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
   } = options;
@@ -175,8 +169,12 @@ export function attachPtyScrollController(
   let pendingTouchScrollNotifyFrame: number | null = null;
   let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
   let reviewSnapshotRefreshPending = initialUserHasVerticalScrollIntent;
+  let reviewSnapshotCaptured = false;
+  let reviewScrollAnchor: { scrollTop: number; ydisp: number; cellH: number } | null = null;
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
+  const shouldPreserveReviewHost = (): boolean =>
+    userHasVerticalScrollIntent() && reviewSnapshotCaptured;
 
   const traceAdapter = createPtyScrollTraceAdapter({
     container,
@@ -343,31 +341,28 @@ export function attachPtyScrollController(
     trace("rawInputFollow:fire");
   };
 
-  const captureReviewSnapshot = (ydisp: number, visible: boolean): boolean =>
-    (visible
-      ? onReviewSnapshotCapture?.(ydisp, term.rows)
-      : onReviewSnapshotCapture?.(ydisp, term.rows, { visible: false })) === true;
+  const captureReviewSnapshot = (ydisp: number): boolean => {
+    const captured = onReviewSnapshotCapture?.(ydisp, term.rows) === true;
+    if (captured) reviewSnapshotCaptured = true;
+    return captured;
+  };
 
-  const reconcileReviewSnapshot = (liveFrameChanged = false): void => {
+  const reconcileReviewSnapshot = (): void => {
     if (!userHasVerticalScrollIntent()) return;
-    const latestOutputVisible = getCurrentAnchor().cursorInViewport;
-    if (latestOutputVisible) {
-      if (!reviewSnapshotRefreshPending && !liveFrameChanged) {
-        onReviewSnapshotSetVisible?.(false);
-        return;
-      }
-      // Keep a hidden copy of the latest coherent frame. The live xterm rows
-      // remain visible and can repaint in-place status such as "Working 12s".
-      // If a later frame pushes the cursor out of view, this copy becomes the
-      // frozen review frame without letting that new output move the viewport.
-      reviewSnapshotRefreshPending = !captureReviewSnapshot(term.buffer.active.viewportY, false);
+    if (!reviewSnapshotRefreshPending) return;
+    const { cellH } = getDims();
+    if (cellH <= 0) return;
+    if (!reviewScrollAnchor) {
+      const ydisp = getAbsoluteYdispForScrollTop(container.scrollTop, cellH);
+      reviewScrollAnchor = { scrollTop: container.scrollTop, ydisp, cellH };
+      const captured = captureReviewSnapshot(ydisp);
+      reviewSnapshotRefreshPending = !captured;
+      if (!captured) reviewScrollAnchor = null;
       return;
     }
-
-    if (!reviewSnapshotRefreshPending && onReviewSnapshotSetVisible?.(true) === true) {
-      return;
-    }
-    reviewSnapshotRefreshPending = !captureReviewSnapshot(term.buffer.active.viewportY, true);
+    reviewSnapshotRefreshPending = !captureReviewSnapshot(
+      getYdispForScrollTop(container.scrollTop, cellH),
+    );
   };
 
   const refreshReviewSnapshot = (): void => {
@@ -391,8 +386,18 @@ export function attachPtyScrollController(
       onUserVerticalScrollIntentChange?.(nextReviewing);
       if (nextReviewing) {
         reviewSnapshotRefreshPending = true;
+        const { cellH } = getDims();
+        if (cellH > 0) {
+          const ydisp = getAbsoluteYdispForScrollTop(container.scrollTop, cellH);
+          reviewScrollAnchor = { scrollTop: container.scrollTop, ydisp, cellH };
+          const captured = captureReviewSnapshot(ydisp);
+          reviewSnapshotRefreshPending = !captured;
+          if (!captured) reviewScrollAnchor = null;
+        }
       } else {
         reviewSnapshotRefreshPending = false;
+        reviewSnapshotCaptured = false;
+        reviewScrollAnchor = null;
         onReviewSnapshotClear?.();
       }
     }
@@ -558,9 +563,6 @@ export function attachPtyScrollController(
         next >= maxScrollTop - atBottomThreshold &&
         getCurrentAnchor().isAtBottom,
     });
-    if (userHasVerticalScrollIntent()) {
-      reviewSnapshotRefreshPending = true;
-    }
   };
 
   const scrollToXRatio = (ratio: number): void => {
@@ -647,7 +649,11 @@ export function attachPtyScrollController(
     setStyle(host, "height", `${layout.hostHeight}px`);
     setStyle(host, "paddingTop", `${layout.hostPaddingTop}px`);
     lastSpacerUpdateAt = performance.now();
-    positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
+    // A captured review frame lives inside host. Live output may advance xterm's
+    // viewport, but it must not move that host until the user navigates again.
+    if (!shouldPreserveReviewHost()) {
+      positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
+    }
   };
 
   const syncViewportAndHostAt = (
@@ -701,7 +707,7 @@ export function attachPtyScrollController(
     return "marked";
   };
 
-  const getYdispForScrollTop = (scrollTop: number, cellH: number): number => {
+  function getAbsoluteYdispForScrollTop(scrollTop: number, cellH: number): number {
     const buffer = term.buffer.active;
     return computeScrollTarget(scrollTop, {
       bufferLength: buffer.length,
@@ -711,7 +717,28 @@ export function attachPtyScrollController(
       cellH,
       cellW: 1,
     }).ydisp;
-  };
+  }
+
+  function ensureReviewScrollAnchor(cellH: number): void {
+    if (!userHasVerticalScrollIntent() || !reviewScrollAnchor) return;
+    if (reviewScrollAnchor.cellH !== cellH) {
+      reviewScrollAnchor = {
+        scrollTop: container.scrollTop,
+        ydisp: reviewScrollAnchor.ydisp,
+        cellH,
+      };
+    }
+  }
+
+  function getYdispForScrollTop(scrollTop: number, cellH: number): number {
+    ensureReviewScrollAnchor(cellH);
+    if (!reviewScrollAnchor) {
+      return getAbsoluteYdispForScrollTop(scrollTop, cellH);
+    }
+    const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
+    const deltaRows = Math.floor((scrollTop - reviewScrollAnchor.scrollTop) / cellH);
+    return Math.max(0, Math.min(maxYdisp, reviewScrollAnchor.ydisp + deltaRows));
+  }
 
   const syncContainerScroll = (opts: { deferHostUntilRender?: boolean } = {}): void => {
     cancelPendingTouchScrollNotify();
@@ -724,20 +751,18 @@ export function attachPtyScrollController(
     }
     pendingContainerSyncRetry = false;
     const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
+    const reviewing = userHasVerticalScrollIntent();
     const snapshotCaptured =
-      ydisp !== term.buffer.active.viewportY &&
-      userHasVerticalScrollIntent() &&
-      captureReviewSnapshot(ydisp, true);
-    // Even when the live tail remains visible, keep the serialized frame on top
-    // until xterm paints the requested row. reconcileReviewSnapshot hides it in
-    // that same render cycle, avoiding both a stale live tail and a host/row tear.
-    const previewCaptured = snapshotCaptured;
+      reviewing &&
+      (reviewSnapshotRefreshPending || !reviewSnapshotCaptured) &&
+      captureReviewSnapshot(ydisp);
     if (snapshotCaptured) {
       reviewSnapshotRefreshPending = false;
     }
     syncViewportAndHostAt(ydisp, cellH, {
       deferHostUntilRender:
-        (opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp()) && !previewCaptured,
+        (opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp()) &&
+        !(reviewing && reviewSnapshotCaptured),
     });
     notifyScroll();
     trace("container-sync:end", { ydisp });
@@ -1022,6 +1047,13 @@ export function attachPtyScrollController(
         scrollToBottom("termScroll");
         return;
       }
+      if (shouldPreserveReviewHost()) {
+        if (pendingFrame === "marked" && getCurrentAnchor().cursorInViewport) {
+          reviewSnapshotRefreshPending = true;
+        }
+        notifyScroll();
+        return;
+      }
       const { cellH } = getDims();
       if (cellH !== 0) {
         const buffer = term.buffer.active;
@@ -1052,6 +1084,10 @@ export function attachPtyScrollController(
     // 这里只需对"无意图"时跟底，避免 reconnect 空容器误清 intent。
     if (pendingFrame === "none" && canPassiveFollow(verticalIntent)) {
       scrollToBottom("relayout");
+      return;
+    }
+    if (shouldPreserveReviewHost()) {
+      notifyScroll();
       return;
     }
 
@@ -1235,11 +1271,14 @@ export function attachPtyScrollController(
       trace("pending-sync-retry-fire");
       syncContainerScroll();
     }
-    const pendingFrameResult = handlePendingNewFrame();
+    const pendingFrame = handlePendingNewFrame();
     followCursorX();
     followCursorY();
     if (userHasVerticalScrollIntent()) {
-      reconcileReviewSnapshot(pendingFrameResult === "marked");
+      if (pendingFrame === "marked" && getCurrentAnchor().cursorInViewport) {
+        reviewSnapshotRefreshPending = true;
+      }
+      reconcileReviewSnapshot();
     }
     notifyScroll();
   };

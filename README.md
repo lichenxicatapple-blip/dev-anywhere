@@ -55,7 +55,7 @@ npm install -g @dev-anywhere/proxy
 
 ### 2. 建立连接
 
-DEV Anywhere 提供两种连接方式。VPS（Virtual Private Server，虚拟专用服务器）是一台可通过公网访问的云服务器。
+DEV Anywhere 提供两种部署方式：
 
 | 方式                              | 适合场景           | 需要准备                   |
 | --------------------------------- | ------------------ | -------------------------- |
@@ -88,7 +88,7 @@ Quick Tunnel 的随机域名会变化，进程退出后地址立即失效，也�
 
 #### 方式二：VPS Relay（推荐）
 
-长期使用时，推荐在有公网 IP 的 Linux VPS 上部署 Relay。你可以直接使用 VPS 的公网 IPv4，也可以使用指向该 VPS 的域名；部署脚本会识别两种入口并自动配置对应的 HTTPS 证书。公网环境只通过 HTTPS/WSS 提供服务，HTTP 端口仅用于证书验证和跳转。一个 Relay 容器会同时托管 Web、HTTP API、文件、语音和 WebSocket 服务。
+VPS 是 Virtual Private Server 的缩写，通常就是一台可以通过公网访问的云服务器。长期使用时，推荐在 Linux VPS 上部署 Relay。你可以直接使用 VPS 的公网 IPv4，也可以使用指向该 VPS 的域名；部署脚本会识别两种入口并自动配置对应的 HTTPS 证书。公网环境只通过 HTTPS/WSS 提供服务，HTTP 端口仅用于证书验证和跳转。一个 Relay 容器会同时托管 Web、HTTP API、文件、语音和 WebSocket 服务。
 
 部署 Relay 后，在开发机上初始化 DEV Anywhere：
 
@@ -193,7 +193,7 @@ dev-anywhere --version
 dev-anywhere serve status
 ```
 
-需要固定版本或检查 VPS 容器时，参见 [VPS 部署指南](./docs/DEPLOYMENT.md#升级)。
+安装指定版本的命令见 [VPS 部署指南的升级章节](./docs/DEPLOYMENT.md#升级)；如果升级后 Web 无法访问或开发机无法上线，请按 [排障步骤](./docs/DEPLOYMENT.md#排障) 查看 Relay 与 Nginx 日志。
 
 ## 主要功能
 

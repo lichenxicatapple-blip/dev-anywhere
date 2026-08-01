@@ -3,15 +3,93 @@
 // 2. 用户主动点 PTY 后才 focus,
 // 3. focus 后基础输入 + Enter 落到 raw input.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
+import type { Page } from "@playwright/test";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
 import {
   dismissSoftKeyboard,
   setAndroidEmulatorOrientation,
   touchPtyTerminal,
   touchPtyTerminalAndWaitForSoftKeyboard,
+  waitForSoftKeyboard,
 } from "./pty-soft-keyboard";
 
 const SESSION_ID = "mobile-pty-input";
+
+async function readPtyCursorKeyboardClearance(page: Page, sessionId: string) {
+  return page.evaluate((sid) => {
+    const term = window.__ccTestPtyTerminals?.get(sid);
+    const textarea = document.querySelector<HTMLElement>(
+      '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
+    );
+    const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    const controls = document.querySelector<HTMLElement>('[data-slot="pty-mobile-controls"]');
+    if (!term || !textarea || !screen || !controls) return null;
+
+    const textareaRect = textarea.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const controlsRect = controls.getBoundingClientRect();
+    const cellHeight = screenRect.height / Math.max(term.rows, 1);
+    return {
+      cursorTop: textareaRect.top,
+      cursorBottom: textareaRect.top + cellHeight,
+      controlsTop: controlsRect.top,
+      clearance: controlsRect.top - (textareaRect.top + cellHeight),
+      keyboardOffset: Number(
+        document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
+          "0",
+      ),
+    };
+  }, sessionId);
+}
+
+async function expectPtyCursorAboveKeyboard(page: Page, sessionId: string): Promise<void> {
+  await expect
+    .poll(
+      async () => (await readPtyCursorKeyboardClearance(page, sessionId))?.clearance ?? -Infinity,
+      {
+        timeout: 10_000,
+        message: "PTY input cursor did not settle above the soft-keyboard controls",
+      },
+    )
+    .toBeGreaterThanOrEqual(-2);
+}
+
+async function movePtyViewportAwayWhileKeyboardStaysOpen(
+  page: Page,
+  sessionId: string,
+): Promise<void> {
+  const terminal = page.locator('[data-slot="pty-terminal"]');
+  await terminal.evaluate(
+    (element) =>
+      new Promise<void>((resolve) => {
+        let previous = (element as HTMLElement).scrollTop;
+        let stableFrames = 0;
+        let remainingFrames = 10;
+        const sample = () => {
+          const current = (element as HTMLElement).scrollTop;
+          stableFrames = Math.abs(current - previous) <= 1 ? stableFrames + 1 : 0;
+          previous = current;
+          remainingFrames -= 1;
+          if (stableFrames >= 2 || remainingFrames <= 0) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+  const before = await terminal.evaluate((element) => (element as HTMLElement).scrollTop);
+  const clearance = await readPtyCursorKeyboardClearance(page, sessionId);
+  const reviewDistance = Math.max(240, (clearance?.clearance ?? 0) + 80);
+  await terminal.evaluate((element, distance) => {
+    const scroller = element as HTMLElement;
+    scroller.scrollTop = Math.max(0, scroller.scrollTop - distance);
+  }, reviewDistance);
+  await expect
+    .poll(() => terminal.evaluate((element) => (element as HTMLElement).scrollTop))
+    .toBeLessThan(before - 100);
+}
 
 test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test.setTimeout(60_000);
@@ -123,6 +201,151 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       await emuPage.waitForTimeout(100);
     }
     expect(new Set(controlHeights)).toEqual(new Set([Math.round(metrics.controlsHeight ?? 0)]));
+  });
+
+  test("keeps the input row visible on the first keyboard open while PTY output settles", async ({
+    emuPage,
+  }) => {
+    test.setTimeout(90_000);
+    const sessionId = `${SESSION_ID}-first-keyboard-open`;
+    await dismissSoftKeyboard(emuPage);
+    await setAndroidEmulatorOrientation(emuPage, "portrait");
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      rows: 52,
+      cols: 80,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      let line = 0;
+      const timer = window.setInterval(() => {
+        window.__ptySmoke.sendPty(`first-open output ${String(line).padStart(3, "0")}\r\n`);
+        line += 1;
+        if (line >= 180) window.clearInterval(timer);
+      }, 16);
+    });
+
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(
+            (sid) => window.__ccTestPtyTerminals?.get(sid)?.buffer.active.baseY ?? 0,
+            sessionId,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(100);
+    await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+
+    await dismissSoftKeyboard(emuPage);
+    await emuPage.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+    await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+  });
+
+  test("keeps the live PTY input cursor visible across repeated soft-keyboard cycles", async ({
+    emuPage,
+  }) => {
+    test.setTimeout(120_000);
+    const sessionId = `${SESSION_ID}-cursor-clearance`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      rows: 52,
+      cols: 80,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from(
+          { length: 220 },
+          (_, index) => `keyboard cursor line ${String(index).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(
+            (sid) => window.__ccTestPtyTerminals?.get(sid)?.buffer.active.baseY ?? 0,
+            sessionId,
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThan(0);
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+      await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+
+      await emuPage.keyboard.type(String(cycle));
+      await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+
+      await dismissSoftKeyboard(emuPage);
+      await emuPage.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await expect
+        .poll(() =>
+          emuPage.evaluate(() =>
+            Number(
+              document
+                .querySelector("[data-keyboard-offset]")
+                ?.getAttribute("data-keyboard-offset") ?? "0",
+            ),
+          ),
+        )
+        .toBe(0);
+    }
+  });
+
+  test("returns to the live cursor when typing after keyboard-open history review", async ({
+    emuPage,
+  }) => {
+    test.setTimeout(90_000);
+    const sessionId = `${SESSION_ID}-review-then-type`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      rows: 52,
+      cols: 80,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        Array.from(
+          { length: 220 },
+          (_, index) => `keyboard review line ${String(index).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+    await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+    await movePtyViewportAwayWhileKeyboardStaysOpen(emuPage, sessionId);
+    await waitForSoftKeyboard(emuPage);
+    await expect(emuPage.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() =>
+          Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        ),
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => (await readPtyCursorKeyboardClearance(emuPage, sessionId))?.clearance ?? 0,
+        { message: "history review did not move the live cursor below the controls" },
+      )
+      .toBeLessThan(-20);
+
+    await emuPage.keyboard.type("resume");
+    await expect.poll(() => readRawPtyInput(emuPage)).toContain("resume");
+    await expectPtyCursorAboveKeyboard(emuPage, sessionId);
   });
 
   test("keeps one-row PTY controls clear of the Android keyboard in landscape", async ({
