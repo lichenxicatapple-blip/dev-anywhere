@@ -337,6 +337,13 @@ function normalizeHistoryToolParameters(
       delete rest.cmd;
       return { ...rest, command };
     }
+    if (typeof input === "string" && input.trim()) {
+      try {
+        JSON.parse(input);
+      } catch {
+        return { ...parameters, command: input };
+      }
+    }
   }
   if (toolName === "Patch" && typeof input === "string" && !parameters.content) {
     return { ...parameters, content: input };

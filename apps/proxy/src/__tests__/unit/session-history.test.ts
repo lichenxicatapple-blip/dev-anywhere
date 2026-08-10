@@ -1099,6 +1099,43 @@ describe("readSessionMessages", () => {
     ]);
   });
 
+  it("restores raw Codex custom exec input as command details", async () => {
+    writeCodexConversation("codex-custom-exec-history", [
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input: 'const result = await tools.exec_command({ cmd: "pnpm test" });',
+          call_id: "call-custom-exec",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-custom-exec",
+          output: "passed",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("codex-custom-exec-history", { limit: 10 }, "codex");
+    expect(page.messages).toMatchObject([
+      {
+        role: "activity",
+        toolId: "call-custom-exec",
+        toolName: "Bash",
+        parameters: {
+          command: 'const result = await tools.exec_command({ cmd: "pnpm test" });',
+        },
+        status: "done",
+      },
+    ]);
+  });
+
   it("rejects path-unsafe session ids", async () => {
     for (const badId of ["../etc/passwd", "..", "foo/bar", "foo\0bar", "foo bar", "", "with.dot"]) {
       const messages = await readSessionMessages(badId);
