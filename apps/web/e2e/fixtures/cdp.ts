@@ -3,7 +3,7 @@
 import { chromium, type Browser, type Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 
-const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://localhost:9222";
+const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://localhost:5174";
 
 interface MobileWorkerFixtures {

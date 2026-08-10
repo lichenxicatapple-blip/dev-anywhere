@@ -195,12 +195,12 @@ mobile_run_playwright_spec() {
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$BASE_URL" \
-      MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+      MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
       ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
   else
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$BASE_URL" \
-      MOBILE_CDP_ENDPOINT="http://localhost:$CDP_PORT" \
+      MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
       ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec"
   fi
 }
