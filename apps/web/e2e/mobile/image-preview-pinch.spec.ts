@@ -21,8 +21,8 @@ async function openPreview(page: Page): Promise<void> {
     .locator('[data-slot="send-button"][data-variant="send"]')
     .evaluate((button: HTMLButtonElement) => button.click());
   await page
-    .locator('[data-slot="inline-image-preview-link"]', { hasText: PATH })
-    .evaluate((link: HTMLElement) => link.click());
+    .locator('[data-slot="user-image-attachment"]')
+    .evaluate((button: HTMLButtonElement) => button.click());
 
   await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
   await expect(page.locator('[data-slot="image-preview-stage"]')).toBeVisible();
