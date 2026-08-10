@@ -74,6 +74,53 @@ test.describe("JSON diff preview", () => {
     );
   });
 
+  test("renders historical apply_patch content with the shared red-green diff view", async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_history_messages",
+        sessionId: "test-sess",
+        messages: [
+          {
+            role: "activity",
+            text: "应用补丁：/tmp/app.ts",
+            toolId: "history-patch-1",
+            toolName: "Patch",
+            parameters: {
+              content: [
+                "*** Begin Patch",
+                "*** Update File: /tmp/app.ts",
+                "@@",
+                " same",
+                "-old",
+                "+new",
+                "*** End Patch",
+              ].join("\n"),
+            },
+            status: "done",
+            cursor: "history:patch:1",
+          },
+        ],
+        hasMore: false,
+      });
+    });
+
+    const activity = page.locator('[data-slot="activity-bubble"]', {
+      hasText: "应用补丁：/tmp/app.ts",
+    });
+    await expect(activity).toBeVisible();
+    await activity.getByRole("button", { name: "展开工具详情" }).click();
+    await expect(activity.locator('[data-slot="activity-detail"][data-kind="diff"]')).toBeVisible();
+    await expect(activity.locator('[data-slot="activity-detail-content"]')).toHaveCount(0);
+    await expect(
+      activity.locator('[data-slot="activity-diff-row"][data-kind="remove"]'),
+    ).toHaveCount(1);
+    await expect(activity.locator('[data-slot="activity-diff-row"][data-kind="add"]')).toHaveCount(
+      1,
+    );
+  });
+
   test("renders Edit approval details as a diff preview", async ({ page }) => {
     await page.evaluate(() => {
       window.__devAnywhereE2E?.socket?.emitJson({

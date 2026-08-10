@@ -125,6 +125,49 @@ function patchDiffDetail(title: string, diff: string, kind: unknown): ClaudeTool
   };
 }
 
+function applyPatchDetails(content: string): ClaudeToolActivityDetail[] {
+  const lines = content.replace(/\r\n?/gu, "\n").split("\n");
+  const details: ClaudeToolActivityDetail[] = [];
+  let current: { kind: "add" | "delete" | "update"; path: string; lines: string[] } | null = null;
+
+  const flush = (): void => {
+    if (!current) return;
+    const body = current.lines.join("\n").replace(/\n+$/u, "");
+    if (body) {
+      const parseableDiff = current.lines.some((line) => line.startsWith("@@"))
+        ? body
+        : `@@\n${body}`;
+      const detail = patchDiffDetail(
+        `${patchKindLabel(current.kind)}：${current.path}`,
+        parseableDiff,
+        current.kind,
+      );
+      details.push(detail.kind === "diff" ? { ...detail, content: body } : detail);
+    }
+    current = null;
+  };
+
+  for (const line of lines) {
+    const header = /^\*\*\* (Add|Delete|Update) File: (.+)$/u.exec(line);
+    if (header) {
+      flush();
+      current = {
+        kind: header[1] === "Add" ? "add" : header[1] === "Delete" ? "delete" : "update",
+        path: header[2],
+        lines: [],
+      };
+      continue;
+    }
+    if (line === "*** End Patch") {
+      flush();
+      continue;
+    }
+    if (current && !line.startsWith("*** Move to:")) current.lines.push(line);
+  }
+  flush();
+  return details;
+}
+
 function compactDetails(
   details: Array<ClaudeToolActivityDetail | null>,
 ): ClaudeToolActivityDetail[] {
@@ -166,7 +209,10 @@ export function getClaudeToolActivityDetails(
         return [patchDiffDetail(title, diff, record.kind)];
       });
       if (changeDetails.length > 0) return changeDetails;
-      return compactDetails([detail("补丁内容", input.content)]);
+      const content = asString(input.content);
+      const historicalDetails = content ? applyPatchDetails(content) : [];
+      if (historicalDetails.length > 0) return historicalDetails;
+      return compactDetails([detail("补丁内容", content)]);
     }
     default: {
       const entries = Object.entries(input);

@@ -174,6 +174,43 @@ describe("summarizeClaudeToolActivity", () => {
     ]);
   });
 
+  it("normalizes historical apply_patch text into per-file diff details", () => {
+    const content = [
+      "*** Begin Patch",
+      "*** Update File: /tmp/app.ts",
+      "@@",
+      " const stable = true;",
+      "-const mode = 'old';",
+      "+const mode = 'new';",
+      "*** Add File: /tmp/new.ts",
+      "+export const created = true;",
+      "*** End Patch",
+    ].join("\n");
+
+    expect(getClaudeToolActivityDetails("Patch", { content })).toEqual([
+      {
+        kind: "diff",
+        title: "更新：/tmp/app.ts",
+        content: "@@\n const stable = true;\n-const mode = 'old';\n+const mode = 'new';",
+        oldContent: "const stable = true;\nconst mode = 'old';",
+        newContent: "const stable = true;\nconst mode = 'new';",
+      },
+      {
+        kind: "diff",
+        title: "新增：/tmp/new.ts",
+        content: "+export const created = true;",
+        oldContent: "",
+        newContent: "export const created = true;",
+      },
+    ]);
+  });
+
+  it("keeps malformed historical patch text as a readable fallback", () => {
+    expect(getClaudeToolActivityDetails("Patch", { content: "unstructured patch output" })).toEqual(
+      [{ title: "补丁内容", content: "unstructured patch output" }],
+    );
+  });
+
   it("uses a generic native tool label for unknown tools", () => {
     expect(summarizeClaudeToolActivity("CustomTool", { token: "abc" })).toBe(
       "使用工具：CustomTool",
