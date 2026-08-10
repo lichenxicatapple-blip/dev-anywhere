@@ -153,19 +153,26 @@ reset_chrome() {
     echo "Set TEST_MOBILE_ALLOW_REAL_DEVICE_RESET=1 only for a dedicated test device." >&2
     return 1
   fi
-  # force-stop 后 chrome restore session 把 tab 全恢复, page.close 在 emu 上又不真删
-  # tab, 跑多了累积几十个 tab 会让 page.goto / locator 操作 timeout. CDP /json/close
-  # endpoint 是真能 close target 的, 拿它把多余 tab 关掉留 1 个干净的.
-  adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
-  e2e_mobile_setup_adb_reverse
-  e2e_mobile_remove_forward_port "$CDP_PORT"
-  adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
-  e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
-  if ! mobile_wait_for_cdp_page; then
-    echo "ERROR: chrome 重启后 CDP ${CDP_READY_TIMEOUT_SECONDS}s 内仍无可用 page target" >&2
-    return 1
-  fi
-  mobile_close_stale_tabs
+  local attempt
+  for attempt in 1 2; do
+    # force-stop 后 chrome restore session 把 tab 全恢复, page.close 在 emu 上又不真删
+    # tab, 跑多了累积几十个 tab 会让 page.goto / locator 操作 timeout. CDP /json/close
+    # endpoint 是真能 close target 的, 拿它把多余 tab 关掉留 1 个干净的.
+    adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+    e2e_mobile_setup_adb_reverse
+    e2e_mobile_remove_forward_port "$CDP_PORT"
+    adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
+    e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
+    if mobile_wait_for_cdp_page; then
+      mobile_close_stale_tabs
+      return 0
+    fi
+    if [[ "$attempt" -eq 1 ]]; then
+      echo "WARN: chrome 重启后暂无 CDP page target，完整重试一次" >&2
+    fi
+  done
+  echo "ERROR: chrome 重启两次后 CDP 仍无可用 page target" >&2
+  return 1
 }
 
 if [[ "$#" -gt 0 ]]; then
