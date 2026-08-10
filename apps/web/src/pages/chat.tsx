@@ -292,9 +292,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                     : "pb-[max(env(safe-area-inset-bottom),0.5rem)]"
                 }`}
                 data-slot="input-bar-region"
-                data-keyboard-edge-guard={
-                  effectiveKbOffset > 0 && effectiveLayoutKbInset === 0 ? "true" : undefined
-                }
+                // layout inset 负责避开键盘覆盖区；edge guard 是键盘工具栏上方独立的可见间距。
+                // 两者不能互斥，否则 overlay 键盘场景只剩 pb-2，实际间距会不足 8px。
+                data-keyboard-edge-guard={effectiveKbOffset > 0 ? "true" : undefined}
               >
                 <div className="dev-message-rail mx-auto w-full">
                   <VoicePilotStatus sessionId={id} />
