@@ -60,12 +60,6 @@ function UnifiedDiffDetail({ detail }: { detail: ChatActivityDiffDetail }) {
         data-slot="activity-diff-content"
         className="max-h-[min(58vh,560px)] min-w-0 overflow-auto rounded border border-current/10 bg-background/90 font-mono text-[11px] leading-relaxed text-foreground"
       >
-        <div className="sticky top-0 z-10 grid w-full grid-cols-[2.75rem_2.75rem_1.25rem_minmax(0,1fr)] border-b border-border bg-muted/80 px-0 text-[10px] text-muted-foreground backdrop-blur">
-          <span className="px-2 py-1 text-right">旧</span>
-          <span className="px-2 py-1 text-right">新</span>
-          <span className="px-1 py-1" aria-hidden="true" />
-          <span className="px-2 py-1">内容</span>
-        </div>
         {rows.length > 0 ? (
           rows.map((row, index) => (
             <div

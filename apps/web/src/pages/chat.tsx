@@ -292,6 +292,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                     : "pb-[max(env(safe-area-inset-bottom),0.5rem)]"
                 }`}
                 data-slot="input-bar-region"
+                data-soft-keyboard-open={effectiveKbOffset > 0 ? "true" : undefined}
               >
                 <div className="dev-message-rail mx-auto w-full">
                   <VoicePilotStatus sessionId={id} />

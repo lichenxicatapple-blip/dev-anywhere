@@ -38,12 +38,12 @@ export const MessageBubble = memo(function MessageBubble({
           data-align="center"
           data-find-match={findState ? "true" : undefined}
           data-find-active={findState === "active" ? "true" : undefined}
-          className="dev-message-rail mx-auto flex w-full items-center"
+          className="dev-message-rail mx-auto flex w-full min-w-0 max-w-full items-center"
         >
           <div className="h-px flex-1 bg-border" />
           <div
             data-slot="message-system-marker"
-            className="mx-3 shrink-0 rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground"
+            className="mx-3 min-w-0 max-w-[calc(100%_-_3rem)] whitespace-pre-wrap rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground [overflow-wrap:anywhere]"
           >
             {message.text}
           </div>
@@ -69,7 +69,7 @@ export const MessageBubble = memo(function MessageBubble({
           data-align="start"
           data-find-match={findState ? "true" : undefined}
           data-find-active={findState === "active" ? "true" : undefined}
-          className="dev-message-rail mx-auto flex w-full justify-start"
+          className="dev-message-rail mx-auto flex w-full min-w-0 max-w-full justify-start"
         >
           <div
             data-slot="activity-bubble"
@@ -80,22 +80,20 @@ export const MessageBubble = memo(function MessageBubble({
             style={contentStyle}
           >
             <div className="flex min-w-0 items-center gap-2">
-              {isActive ? (
-                <span
-                  data-slot="activity-spinner"
-                  className="relative flex size-3 shrink-0 items-center justify-center text-current"
-                  aria-hidden="true"
-                >
+              <span
+                data-slot="activity-status-indicator"
+                data-state={isActive ? "running" : "settled"}
+                className="relative flex size-3 shrink-0 items-center justify-center text-current"
+                aria-hidden="true"
+              >
+                {isActive ? (
                   <span className="absolute size-2 rounded-full bg-current opacity-40 animate-ping" />
-                  <span className="size-1.5 rounded-full bg-current opacity-80" />
-                </span>
-              ) : (
+                ) : null}
                 <span
                   data-slot="activity-dot"
-                  className="size-1.5 shrink-0 rounded-full bg-current opacity-60"
-                  aria-hidden="true"
+                  className={`size-1.5 rounded-full bg-current ${isActive ? "opacity-80" : "opacity-60"}`}
                 />
-              )}
+              </span>
               <span
                 data-slot="activity-text"
                 data-wrap="anywhere"
@@ -163,12 +161,12 @@ export const MessageBubble = memo(function MessageBubble({
           data-align="end"
           data-find-match={findState ? "true" : undefined}
           data-find-active={findState === "active" ? "true" : undefined}
-          className="dev-message-rail mx-auto flex w-full justify-end"
+          className="dev-message-rail mx-auto flex w-full min-w-0 max-w-full justify-end"
         >
           <div
             data-slot="message-body"
             data-variant={message.isPartial ? "partial" : isQueued ? "queued" : "sent"}
-            className={userBodyClass}
+            className={`${userBodyClass} w-fit [overflow-wrap:anywhere]`}
             style={contentStyle}
           >
             <MarkdownView
@@ -199,11 +197,11 @@ export const MessageBubble = memo(function MessageBubble({
         data-align="start"
         data-find-match={findState ? "true" : undefined}
         data-find-active={findState === "active" ? "true" : undefined}
-        className="dev-message-rail mx-auto flex w-full justify-start"
+        className="dev-message-rail mx-auto flex w-full min-w-0 max-w-full justify-start"
       >
         <div
           data-slot="message-body"
-          className="w-fit max-w-[88%] min-w-0 rounded-md bg-card text-foreground px-4 py-2"
+          className="w-fit max-w-[88%] min-w-0 rounded-md bg-card text-foreground px-4 py-2 [overflow-wrap:anywhere]"
           style={contentStyle}
         >
           <MarkdownView text={message.text} trailingInline={streamingCursor} />

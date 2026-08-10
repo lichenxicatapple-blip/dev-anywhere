@@ -91,8 +91,39 @@ describe("MessageBubble", () => {
 
     const bubble = screen.getByRole("article");
     expect(bubble.getAttribute("data-role")).toBe("activity");
-    expect(container.querySelector('[data-slot="activity-spinner"]')).not.toBeNull();
+    const indicator = container.querySelector<HTMLElement>(
+      '[data-slot="activity-status-indicator"]',
+    );
+    expect(indicator?.getAttribute("data-state")).toBe("running");
+    expect(indicator?.className).toContain("size-3");
     expect(screen.getByText("运行命令：pnpm test")).not.toBeNull();
+  });
+
+  it("keeps settled and running activity dots on the same indicator axis", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "act-settled",
+          role: "activity",
+          text: "完成命令：pnpm test",
+          activity: {
+            id: "tool-settled",
+            source: "claude-native",
+            kind: "tool",
+            status: "done",
+            text: "完成命令：pnpm test",
+            durable: true,
+          },
+        })}
+      />,
+    );
+
+    const indicator = container.querySelector<HTMLElement>(
+      '[data-slot="activity-status-indicator"]',
+    );
+    expect(indicator?.getAttribute("data-state")).toBe("settled");
+    expect(indicator?.className).toContain("size-3");
+    expect(indicator?.querySelector('[data-slot="activity-dot"]')).not.toBeNull();
   });
 
   it("allows long activity command paths to wrap without early hyphen gaps", () => {
@@ -204,6 +235,11 @@ describe("MessageBubble", () => {
 
     expect(container.querySelector('[data-slot="activity-diff-content"]')).not.toBeNull();
     expect(container.querySelector('[data-slot="activity-detail-content"]')).toBeNull();
+    expect(
+      container
+        .querySelector('[data-slot="activity-diff-content"]')
+        ?.firstElementChild?.getAttribute("data-slot"),
+    ).toBe("activity-diff-row");
     expect(
       container.querySelectorAll('[data-slot="activity-diff-row"][data-kind="remove"]'),
     ).toHaveLength(1);

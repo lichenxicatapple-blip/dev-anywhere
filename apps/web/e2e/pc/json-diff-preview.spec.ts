@@ -74,4 +74,56 @@ test.describe("JSON diff preview", () => {
     );
     await expect(card.locator('[data-slot="activity-diff-row"][data-kind="add"]')).toHaveCount(1);
   });
+
+  test("keeps running and settled activity indicators on the same vertical axis", async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      const socket = window.__devAnywhereE2E?.socket;
+      const base = {
+        timestamp: Date.now(),
+        source: "proxy",
+        version: "1",
+        sessionId: "test-sess",
+      };
+      socket?.emitJson({
+        ...base,
+        seq: 101,
+        type: "assistant_tool_use",
+        payload: {
+          toolId: "tool-settled-axis",
+          toolName: "Bash",
+          parameters: { command: "pnpm lint" },
+        },
+      });
+      socket?.emitJson({
+        ...base,
+        seq: 102,
+        type: "tool_result",
+        payload: { toolId: "tool-settled-axis", result: "ok", isError: false },
+      });
+      socket?.emitJson({
+        ...base,
+        seq: 103,
+        type: "assistant_tool_use",
+        payload: {
+          toolId: "tool-running-axis",
+          toolName: "Bash",
+          parameters: { command: "pnpm test" },
+        },
+      });
+    });
+
+    const indicators = page.locator('[data-slot="activity-status-indicator"]');
+    await expect(indicators).toHaveCount(2);
+    const geometry = await indicators.evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return { centerX: rect.left + rect.width / 2, width: rect.width, height: rect.height };
+      }),
+    );
+    expect(geometry[0].centerX).toBeCloseTo(geometry[1].centerX, 1);
+    expect(geometry[0].width).toBe(geometry[1].width);
+    expect(geometry[0].height).toBe(geometry[1].height);
+  });
 });

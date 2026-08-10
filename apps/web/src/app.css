@@ -45,6 +45,8 @@
   --dev-chat-rail-inset: 0.875rem;
   --dev-chat-scrollbar-compensation: 11px;
   --dev-message-rail-width: 90rem;
+  --dev-mobile-keyboard-overlap-guard: 1rem;
+  --dev-mobile-keyboard-gap: 0.5rem;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -150,8 +152,6 @@ body {
 }
 
 .dev-pty-mobile-controls {
-  --dev-pty-mobile-keyboard-overlap-guard: 1rem;
-  --dev-pty-mobile-keyboard-gap: 0.5rem;
   border-color: var(--border);
   background: color-mix(in srgb, var(--popover) 96%, transparent);
   color: var(--popover-foreground);
@@ -160,9 +160,7 @@ body {
   /* Some Android keyboards paint their toolbar into the visual viewport edge.
      Keep a separate overlap guard plus a visible component gap so the keyboard
      cannot consume all spacing below the bottom row. */
-  padding-bottom: calc(
-    var(--dev-pty-mobile-keyboard-overlap-guard) + var(--dev-pty-mobile-keyboard-gap)
-  );
+  padding-bottom: calc(var(--dev-mobile-keyboard-overlap-guard) + var(--dev-mobile-keyboard-gap));
 }
 
 .dev-pty-mobile-key {
@@ -535,6 +533,9 @@ code.hljs,
   --tw-prose-pre-bg: var(--popover);
   --tw-prose-th-borders: var(--border);
   --tw-prose-td-borders: var(--border);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .prose :where(code):not(:where([class~="not-prose"] *))::before,
@@ -744,6 +745,12 @@ code.hljs,
 .dev-chat-input-rail-inset {
   padding-inline-start: var(--dev-chat-rail-inset);
   padding-inline-end: calc(var(--dev-chat-rail-inset) + var(--dev-chat-scrollbar-compensation));
+}
+
+/* Android keyboard toolbars can paint into the visual viewport edge. Keep the
+   complete composer above that overlap, matching the PTY mobile controls. */
+.dev-chat-input-rail-inset[data-soft-keyboard-open="true"] {
+  padding-bottom: calc(var(--dev-mobile-keyboard-overlap-guard) + var(--dev-mobile-keyboard-gap));
 }
 
 .dev-chat-rail-floating-right {
