@@ -93,6 +93,7 @@ export { buildMessage, serializeControl } from "./builders/index.js";
 
 // slash command helpers
 export { isCompactCommandText } from "./slash-commands.js";
+export { summarizeToolActivity } from "./tool-activity-summary.js";
 
 // relay control
 export {
@@ -104,6 +105,7 @@ export {
   FileTreeGroupSchema,
   CommandEntrySchema,
   HistorySessionSchema,
+  SessionHistoryMessageSchema,
   RelayControlSchema,
   ProxyToClientRelayControlTypes,
   isProxyToClientRelayControlType,
@@ -119,6 +121,7 @@ export type {
   FileTreeGroup,
   CommandEntry,
   HistorySession,
+  SessionHistoryMessage,
   RelayControlMessage,
   RelayControlType,
 } from "./schemas/relay-control.js";

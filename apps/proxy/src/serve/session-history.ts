@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
+import { summarizeToolActivity, type SessionHistoryMessage } from "@dev-anywhere/shared";
 import {
   applySessionHistoryMetadata,
   readSessionHistoryMetadata,
@@ -177,12 +178,12 @@ async function scanCodexSessionHistory(): Promise<SessionHistoryEntry[]> {
   return entries;
 }
 
-interface SessionMessage {
-  role: "user" | "assistant" | "system";
-  text: string;
-  timestamp?: number;
-  cursor?: string;
-}
+type WithoutCursor<T> = T extends unknown ? Omit<T, "cursor"> : never;
+type SessionMessage = SessionHistoryMessage;
+type UnpositionedSessionMessage = WithoutCursor<SessionHistoryMessage>;
+type ExtractedHistoryItem =
+  | { kind: "message"; message: UnpositionedSessionMessage }
+  | { kind: "tool-result"; toolId: string; isError: boolean };
 
 interface SessionMessagesPage {
   messages: SessionMessage[];
@@ -209,8 +210,9 @@ function normalizeHistoryPageLimit(limit: unknown): number {
   return Math.max(1, Math.min(MAX_HISTORY_PAGE_LIMIT, Math.floor(limit)));
 }
 
-function encodeHistoryCursor(offset: number): string {
-  return `${HISTORY_CURSOR_PREFIX}${Math.max(0, Math.floor(offset))}`;
+function encodeHistoryCursor(offset: number, itemIndex = 0): string {
+  const base = `${HISTORY_CURSOR_PREFIX}${Math.max(0, Math.floor(offset))}`;
+  return itemIndex > 0 ? `${base}:${itemIndex}` : base;
 }
 
 function decodeHistoryCursor(cursor: string | undefined, fileSize: number): number {
@@ -218,7 +220,7 @@ function decodeHistoryCursor(cursor: string | undefined, fileSize: number): numb
   const raw = cursor.startsWith(HISTORY_CURSOR_PREFIX)
     ? cursor.slice(HISTORY_CURSOR_PREFIX.length)
     : cursor;
-  const parsed = Number(raw);
+  const parsed = Number(raw.match(/^\d+/u)?.[0]);
   if (!Number.isInteger(parsed) || parsed < 0) return fileSize;
   return Math.min(parsed, fileSize);
 }
@@ -279,8 +281,148 @@ async function findSessionFile(
   return (await findClaudeSessionFile(sessionId)) ?? (await findCodexSessionFile(sessionId));
 }
 
-function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, "cursor"> | null {
-  if (!obj || typeof obj !== "object") return null;
+function historyTimestamp(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function parseToolInput(value: unknown): Record<string, unknown> {
+  const direct = asRecord(value);
+  if (direct) return direct;
+  if (typeof value !== "string") return {};
+  try {
+    return asRecord(JSON.parse(value)) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeHistoryToolName(name: string): string {
+  switch (name) {
+    case "exec":
+    case "exec_command":
+    case "shell":
+    case "shell_command":
+      return "Bash";
+    case "apply_patch":
+      return "Patch";
+    case "read_file":
+      return "Read";
+    case "write_file":
+      return "Write";
+    case "search_query":
+      return "WebSearch";
+    default:
+      return name;
+  }
+}
+
+function toolUseHistoryItem(
+  toolId: string,
+  rawToolName: string,
+  input: unknown,
+  timestamp?: number,
+): ExtractedHistoryItem | null {
+  if (!toolId || !rawToolName) return null;
+  const toolName = normalizeHistoryToolName(rawToolName);
+  const parameters = parseToolInput(input);
+  return {
+    kind: "message",
+    message: {
+      role: "activity",
+      text: summarizeToolActivity(toolName, parameters),
+      toolId,
+      toolName,
+      status: "running",
+      ...(timestamp !== undefined ? { timestamp } : {}),
+    },
+  };
+}
+
+function extractClaudeContentItems(
+  role: "user" | "assistant",
+  content: unknown,
+  timestamp?: number,
+): ExtractedHistoryItem[] {
+  if (typeof content === "string") {
+    const payload = extractConversationString(content);
+    return payload
+      ? [
+          {
+            kind: "message",
+            message: {
+              role: payload.role ?? role,
+              text: payload.text,
+              ...(timestamp !== undefined ? { timestamp } : {}),
+            },
+          },
+        ]
+      : [];
+  }
+  if (!Array.isArray(content)) return [];
+
+  const items: ExtractedHistoryItem[] = [];
+  const pushTextMessage = (payload: ConversationPayload): void => {
+    const messageRole = payload.role ?? role;
+    const previous = items.at(-1);
+    if (
+      previous?.kind === "message" &&
+      previous.message.role !== "activity" &&
+      previous.message.role === messageRole
+    ) {
+      previous.message = {
+        ...previous.message,
+        text: `${previous.message.text}\n${payload.text}`,
+      };
+      return;
+    }
+    items.push({
+      kind: "message",
+      message: {
+        role: messageRole,
+        text: payload.text,
+        ...(timestamp !== undefined ? { timestamp } : {}),
+      },
+    });
+  };
+  for (const rawBlock of content) {
+    const block = asRecord(rawBlock);
+    if (!block || typeof block.type !== "string") continue;
+    if (block.type === "text" && typeof block.text === "string") {
+      const payload = extractConversationString(block.text);
+      if (payload) pushTextMessage(payload);
+      continue;
+    }
+    if (
+      role === "assistant" &&
+      block.type === "tool_use" &&
+      typeof block.id === "string" &&
+      typeof block.name === "string"
+    ) {
+      const item = toolUseHistoryItem(block.id, block.name, block.input, timestamp);
+      if (item) items.push(item);
+      continue;
+    }
+    if (role === "user" && block.type === "tool_result" && typeof block.tool_use_id === "string") {
+      items.push({
+        kind: "tool-result",
+        toolId: block.tool_use_id,
+        isError: block.is_error === true,
+      });
+    }
+  }
+  return items;
+}
+
+function extractConversationItemsFromJson(obj: unknown): ExtractedHistoryItem[] {
+  if (!obj || typeof obj !== "object") return [];
   const record = obj as {
     type?: unknown;
     isMeta?: unknown;
@@ -288,41 +430,60 @@ function extractConversationMessageFromJson(obj: unknown): Omit<SessionMessage, 
     timestamp?: unknown;
     payload?: unknown;
   };
+  const timestamp = historyTimestamp(record.timestamp);
   if (record.type === "event_msg") {
     const payload =
       record.payload && typeof record.payload === "object"
         ? (record.payload as { type?: unknown; message?: unknown })
         : null;
-    if (!payload || typeof payload.message !== "string") return null;
+    if (!payload || typeof payload.message !== "string") return [];
     const role =
       payload.type === "user_message"
         ? "user"
         : payload.type === "agent_message"
           ? "assistant"
           : null;
-    if (!role) return null;
+    if (!role) return [];
     const text = normalizeConversationText(payload.message);
-    if (!text) return null;
-    const ts =
-      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
-    return { role, text, timestamp: ts };
+    if (!text) return [];
+    return [
+      {
+        kind: "message",
+        message: { role, text, ...(timestamp !== undefined ? { timestamp } : {}) },
+      },
+    ];
+  }
+  if (record.type === "response_item") {
+    const payload = asRecord(record.payload);
+    if (!payload || typeof payload.type !== "string") return [];
+    if (payload.type === "function_call" || payload.type === "custom_tool_call") {
+      const toolId =
+        typeof payload.call_id === "string"
+          ? payload.call_id
+          : typeof payload.id === "string"
+            ? payload.id
+            : "";
+      const toolName = typeof payload.name === "string" ? payload.name : "";
+      const input = payload.arguments ?? payload.input;
+      const item = toolUseHistoryItem(toolId, toolName, input, timestamp);
+      return item ? [item] : [];
+    }
+    if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
+      const toolId = typeof payload.call_id === "string" ? payload.call_id : "";
+      return toolId ? [{ kind: "tool-result", toolId, isError: payload.status === "failed" }] : [];
+    }
+    return [];
   }
   if (record.type === "user") {
-    if (record.isMeta) return null;
-    const payload = extractConversationPayload(record.message);
-    if (!payload) return null;
-    const ts =
-      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
-    return { role: payload.role ?? "user", text: payload.text, timestamp: ts };
+    if (record.isMeta) return [];
+    const message = asRecord(record.message);
+    return extractClaudeContentItems("user", message?.content ?? record.message, timestamp);
   }
   if (record.type === "assistant") {
-    const payload = extractConversationPayload(record.message);
-    if (!payload) return null;
-    const ts =
-      typeof record.timestamp === "string" ? new Date(record.timestamp).getTime() : undefined;
-    return { role: payload.role ?? "assistant", text: payload.text, timestamp: ts };
+    const message = asRecord(record.message);
+    return extractClaudeContentItems("assistant", message?.content ?? record.message, timestamp);
   }
-  return null;
+  return [];
 }
 
 function splitLineSegments(
@@ -358,6 +519,7 @@ async function readSessionMessagesPageFromFile(
     let position = endOffset;
     let carry: Buffer = Buffer.alloc(0);
     const collected: SessionMessage[] = [];
+    const toolResults = new Map<string, boolean>();
 
     while (position > 0 && collected.length <= limit) {
       const readSize = Math.min(HISTORY_READ_CHUNK_BYTES, position);
@@ -377,9 +539,31 @@ async function readSessionMessagesPageFromFile(
         if (line.length === 0) continue;
         try {
           const parsed = JSON.parse(line.toString("utf-8"));
-          const message = extractConversationMessageFromJson(parsed);
-          if (!message) continue;
-          collected.push({ ...message, cursor: encodeHistoryCursor(segment.start) });
+          const items = extractConversationItemsFromJson(parsed);
+          for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+            const item = items[itemIndex];
+            if (!item) continue;
+            if (item.kind === "tool-result") {
+              toolResults.set(item.toolId, item.isError);
+              continue;
+            }
+            const message =
+              item.message.role === "activity"
+                ? {
+                    ...item.message,
+                    status: toolResults.has(item.message.toolId)
+                      ? toolResults.get(item.message.toolId)
+                        ? ("error" as const)
+                        : ("done" as const)
+                      : ("running" as const),
+                  }
+                : item.message;
+            collected.push({
+              ...message,
+              cursor: encodeHistoryCursor(segment.start, itemIndex),
+            });
+            if (collected.length > limit) break;
+          }
           if (collected.length > limit) break;
         } catch {
           /* skip malformed lines */
@@ -408,6 +592,7 @@ export async function readSessionMessages(
   if (!filePath) return [];
 
   const messages: SessionMessage[] = [];
+  const toolMessageIndexes = new Map<string, number>();
   return new Promise((resolve) => {
     const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
@@ -417,8 +602,24 @@ export async function readSessionMessages(
     rl.on("line", (line) => {
       if (!line.trim()) return;
       try {
-        const message = extractConversationMessageFromJson(JSON.parse(line));
-        if (message) messages.push(message);
+        const items = extractConversationItemsFromJson(JSON.parse(line));
+        for (const item of items) {
+          if (item.kind === "tool-result") {
+            const messageIndex = toolMessageIndexes.get(item.toolId);
+            const message = messageIndex !== undefined ? messages[messageIndex] : undefined;
+            if (messageIndex !== undefined && message?.role === "activity") {
+              messages[messageIndex] = {
+                ...message,
+                status: item.isError ? "error" : "done",
+              };
+            }
+            continue;
+          }
+          if (item.message.role === "activity") {
+            toolMessageIndexes.set(item.message.toolId, messages.length);
+          }
+          messages.push(item.message);
+        }
       } catch {
         /* skip */
       }
@@ -500,7 +701,7 @@ function normalizeLocalCommandText(text: string): string {
 }
 
 interface ConversationPayload {
-  role?: SessionMessage["role"];
+  role?: "user" | "assistant" | "system";
   text: string;
 }
 
@@ -566,39 +767,6 @@ function normalizeConversationText(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
   return trimmed;
-}
-
-// 对话正文恢复必须保留换行和 Markdown 结构；不能复用标题归一化逻辑。
-function extractConversationPayload(msg: unknown): ConversationPayload | null {
-  if (typeof msg === "string") {
-    return extractConversationString(msg);
-  }
-
-  if (msg && typeof msg === "object" && "content" in msg) {
-    const content = (msg as { content: unknown }).content;
-    if (typeof content === "string") {
-      return extractConversationString(content);
-    }
-    if (Array.isArray(content)) {
-      const texts = content
-        .filter(
-          (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
-        )
-        .map((b: { text: string }) => b.text);
-      return extractConversationString(texts.join("\n"));
-    }
-  }
-
-  if (Array.isArray(msg)) {
-    const texts = msg
-      .filter(
-        (b: { type?: string; text?: string }) => b.type === "text" && typeof b.text === "string",
-      )
-      .map((b: { text: string }) => b.text);
-    return extractConversationString(texts.join("\n"));
-  }
-
-  return null;
 }
 
 // 从 JSONL 文件头部提取 cwd 和第一条有效用户文本消息作为标题

@@ -9,6 +9,9 @@ type SendOptions = {
 // 离线 pending 队列上限。proxy 端 MemoryMessageQueue 用同一数值。超过后丢弃最旧条目，
 // 避免在长时间离线 + 连续 send 的场景下无限增长把 tab 内存吃光。
 const MAX_PENDING_QUEUE_SIZE = 10000;
+// 手机锁屏/切后台后，浏览器可能保留一个 readyState=OPEN、实际已被系统回收的半开连接。
+// 短暂切应用不必抖动连接；超过这个窗口则在恢复前台时建立一条全新的连接。
+const BACKGROUND_RECONNECT_THRESHOLD_MS = 5_000;
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -22,12 +25,31 @@ export class WebSocketManager {
   private statusHandlers = new Set<(connected: boolean) => void>();
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
+  private backgroundedAt: number | null = null;
   // 命名引用让 close() 能 removeEventListener；匿名 lambda 注册到 document/window 上
   // 后无法摘除，instance 不会被 GC，长寿 tab 上 close → reconnect 反复后能堆积大量回调。
   private readonly visibilityListener = (): void => {
-    if (document.visibilityState === "visible") this.wakeReconnect();
+    if (document.visibilityState === "hidden") {
+      this.markBackgrounded();
+      return;
+    }
+    if (document.visibilityState === "visible") this.resumeFromBackground();
   };
   private readonly wakeListener = (): void => this.wakeReconnect();
+  private readonly pageHideListener = (): void => this.markBackgrounded();
+  private readonly pageShowListener = (): void => this.resumeFromBackground();
+
+  private markBackgrounded(): void {
+    this.backgroundedAt ??= Date.now();
+  }
+
+  private resumeFromBackground(): void {
+    const backgroundedAt = this.backgroundedAt;
+    this.backgroundedAt = null;
+    const wasBackgroundedLongEnough =
+      backgroundedAt !== null && Date.now() - backgroundedAt >= BACKGROUND_RECONNECT_THRESHOLD_MS;
+    this.wakeReconnect(wasBackgroundedLongEnough);
+  }
 
   private cancelReconnectTimer(): void {
     if (this.reconnectTimer) {
@@ -57,6 +79,8 @@ export class WebSocketManager {
     document.addEventListener("visibilitychange", this.visibilityListener);
     window.addEventListener("online", this.wakeListener);
     window.addEventListener("focus", this.wakeListener);
+    window.addEventListener("pagehide", this.pageHideListener);
+    window.addEventListener("pageshow", this.pageShowListener);
   }
 
   private detachWakeListeners(): void {
@@ -65,25 +89,32 @@ export class WebSocketManager {
     document.removeEventListener("visibilitychange", this.visibilityListener);
     window.removeEventListener("online", this.wakeListener);
     window.removeEventListener("focus", this.wakeListener);
+    window.removeEventListener("pagehide", this.pageHideListener);
+    window.removeEventListener("pageshow", this.pageShowListener);
   }
 
-  private wakeReconnect(): void {
-    if (this.closed || this.connected) return;
+  private wakeReconnect(force = false): void {
+    if (this.closed || (!force && this.connected)) return;
     // 老 ws 还在 CONNECTING: 不打断它, 浏览器会输出 "WebSocket is closed before
     // the connection is established" 警告且新建一份会跟它 race, stale 事件互相
     // 覆盖 this.ws 直到出 InvalidStateError CONNECTING。等它自己 OPEN 或 close。
-    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
+    if (!force && this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
     // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
     this.reconnectAttempt = 0;
     this.cancelReconnectTimer();
     // 老 ws 可能处于 half-open（TCP 半死），显式 close 再立即重连
-    if (this.ws) {
+    const previousWs = this.ws;
+    const wasConnected = this.connected;
+    // 先摘掉 active 引用，previousWs.close() 同步/异步触发的 close 都会被 stale guard 忽略。
+    this.ws = null;
+    this.connected = false;
+    if (wasConnected) this.statusHandlers.forEach((handler) => handler(false));
+    if (previousWs) {
       try {
-        this.ws.close();
+        previousWs.close();
       } catch {
         // 已死的 ws close 可能抛，忽略
       }
-      this.ws = null;
     }
     this.doConnect();
   }
@@ -116,6 +147,7 @@ export class WebSocketManager {
     this.ws?.close();
     this.ws = null;
     this.connected = false;
+    this.backgroundedAt = null;
     this.detachWakeListeners();
   }
 

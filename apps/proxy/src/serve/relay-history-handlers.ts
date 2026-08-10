@@ -1,4 +1,8 @@
-import { serializeControl, type ControlMessage } from "@dev-anywhere/shared";
+import {
+  serializeControl,
+  type ControlMessage,
+  type SessionHistoryMessage,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
@@ -89,13 +93,6 @@ export class RelayHistoryHandlers {
 interface HistoryPageOptions {
   limit?: number;
   before?: string;
-}
-
-interface SessionHistoryMessage {
-  role: "user" | "assistant" | "system";
-  text: string;
-  timestamp?: number;
-  cursor?: string;
 }
 
 interface SessionHistoryPage {

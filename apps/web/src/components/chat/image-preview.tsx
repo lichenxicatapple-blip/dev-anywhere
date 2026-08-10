@@ -54,11 +54,13 @@ type ImagePreviewNaturalSize = ImagePreviewSize & {
 
 type ImagePreviewContextValue = {
   openImagePreview: (path: string) => void;
+  requestImagePreviewUrl: (path: string) => Promise<{ url: string; path: string }>;
 };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
 const NOOP_IMAGE_PREVIEW_CONTEXT: ImagePreviewContextValue = {
   openImagePreview: () => undefined,
+  requestImagePreviewUrl: () => Promise.reject(new Error("图片预览不可用")),
 };
 
 export function useImagePreview(): ImagePreviewContextValue {
@@ -75,39 +77,51 @@ export function ImagePreviewProvider({
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<ImagePreviewState>({ status: "idle", path: "" });
   const requestSeqRef = useRef(0);
+  const previewUrlCacheRef = useRef(new Map<string, Promise<{ url: string; path: string }>>());
+
+  const requestImagePreviewUrl = useCallback(
+    (path: string): Promise<{ url: string; path: string }> => {
+      const cached = previewUrlCacheRef.current.get(path);
+      if (cached) return cached;
+      const relay = relayClientRef;
+      if (!relay) return Promise.reject(new Error("请先连接开发机"));
+      const request = relay
+        .requestRemoteFileUrl(sessionId, path, "inline")
+        .then((result) => {
+          if (!result.success || !result.url) {
+            throw new Error(
+              describeControlError({
+                errorCode: result.errorCode,
+                rawError: result.error,
+                fallback: "图片预览失败",
+              }),
+            );
+          }
+          return { url: result.url, path: result.path || path };
+        })
+        .catch((error: unknown) => {
+          previewUrlCacheRef.current.delete(path);
+          throw error;
+        });
+      previewUrlCacheRef.current.set(path, request);
+      return request;
+    },
+    [sessionId],
+  );
 
   const openImagePreview = useCallback(
     (path: string): void => {
-      const relay = relayClientRef;
       const requestSeq = requestSeqRef.current + 1;
       requestSeqRef.current = requestSeq;
       setOpen(true);
       setState({ status: "loading", path });
 
-      if (!relay) {
-        setState({ status: "error", path, error: "请先连接开发机" });
-        return;
-      }
-
-      void relay
-        .requestRemoteFileUrl(sessionId, path, "inline")
+      void requestImagePreviewUrl(path)
         .then((result) => {
           if (requestSeqRef.current !== requestSeq) return;
-          if (!result.success || !result.url) {
-            setState({
-              status: "error",
-              path,
-              error: describeControlError({
-                errorCode: result.errorCode,
-                rawError: result.error,
-                fallback: "图片预览失败",
-              }),
-            });
-            return;
-          }
           setState({
             status: "ready",
-            path: result.path || path,
+            path: result.path,
             url: result.url,
           });
         })
@@ -120,16 +134,20 @@ export function ImagePreviewProvider({
           });
         });
     },
-    [sessionId],
+    [requestImagePreviewUrl],
   );
 
   useEffect(() => {
     requestSeqRef.current += 1;
+    previewUrlCacheRef.current.clear();
     setOpen(false);
     setState({ status: "idle", path: "" });
   }, [sessionId]);
 
-  const value = useMemo(() => ({ openImagePreview }), [openImagePreview]);
+  const value = useMemo(
+    () => ({ openImagePreview, requestImagePreviewUrl }),
+    [openImagePreview, requestImagePreviewUrl],
+  );
 
   return (
     <ImagePreviewContext.Provider value={value}>

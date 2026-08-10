@@ -2,6 +2,7 @@
 // StatusLine / QuotePreviewBar / InputBar 由 chat.tsx 统一承载，此文件只负责消息区
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { SessionHistoryMessage } from "@dev-anywhere/shared";
 import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -36,12 +37,7 @@ interface ChatJsonViewProps {
 
 const HISTORY_PAGE_SIZE = 50;
 const HISTORY_LOAD_TOP_THRESHOLD = 96;
-type SearchHistoryMessage = {
-  role: "user" | "assistant" | "system";
-  text: string;
-  timestamp?: number;
-  cursor?: string;
-};
+type SearchHistoryMessage = SessionHistoryMessage;
 
 export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const messages = useChatStore((s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages);
@@ -137,23 +133,37 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     if (!relay || !sessionId || !connected || !proxyOnline) return;
     relay.sendControl({ type: "session_subscribe", sessionId });
     const historySlice = useChatStore.getState().bySessionId[sessionId];
-    if (historySlice?.historyLoading || historySlice?.historyInitialized) return;
-    traceJsonScrollRef.current("history-initial:request");
+    const isReconcile = historySlice?.historyInitialized === true;
+    const refreshStartedAt = Date.now();
+    let cancelled = false;
+    traceJsonScrollRef.current(
+      isReconcile ? "history-reconcile:request" : "history-initial:request",
+    );
     setHistoryLoading(sessionId, true);
     void relay
       .requestSessionMessagesPage(sessionId, { limit: HISTORY_PAGE_SIZE })
       .then((page) => {
-        traceJsonScrollRef.current("history-initial:response", {
-          historyHasMore: page.hasMore,
-        });
+        if (cancelled) return;
+        traceJsonScrollRef.current(
+          isReconcile ? "history-reconcile:response" : "history-initial:response",
+          {
+            historyHasMore: page.hasMore,
+          },
+        );
         useChatStore.getState().loadHistoryPage(sessionId, {
-          mode: "replace",
+          mode: isReconcile ? "reconcile" : "replace",
           messages: page.messages,
           hasMore: page.hasMore,
           nextBefore: page.nextBefore,
+          preserveLiveSince: isReconcile ? refreshStartedAt : undefined,
         });
       })
-      .catch(() => useChatStore.getState().setHistoryLoading(sessionId, false));
+      .catch(() => {
+        if (!cancelled) useChatStore.getState().setHistoryLoading(sessionId, false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, connected, proxyOnline, setHistoryLoading]);
 
   const loadOlderHistory = useCallback(() => {

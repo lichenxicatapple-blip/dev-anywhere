@@ -84,12 +84,27 @@ export const HistorySessionSchema = z.object({
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
-const SessionHistoryMessageSchema = z.object({
-  role: z.enum(["user", "assistant", "system"]),
-  text: z.string(),
+const SessionHistoryPositionShape = {
   timestamp: z.number().optional(),
   cursor: z.string().optional(),
-});
+};
+
+export const SessionHistoryMessageSchema = z.discriminatedUnion("role", [
+  z.object({
+    role: z.enum(["user", "assistant", "system"]),
+    text: z.string(),
+    ...SessionHistoryPositionShape,
+  }),
+  z.object({
+    role: z.literal("activity"),
+    text: z.string(),
+    toolId: IdSchema,
+    toolName: z.string(),
+    status: z.enum(["running", "done", "error"]),
+    ...SessionHistoryPositionShape,
+  }),
+]);
+export type SessionHistoryMessage = z.infer<typeof SessionHistoryMessageSchema>;
 
 type RelayControlDirection = "proxy_to_client" | "client_to_proxy";
 type EmptyShape = Record<never, never>;

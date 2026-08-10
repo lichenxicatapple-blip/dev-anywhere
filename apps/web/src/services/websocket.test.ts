@@ -129,6 +129,38 @@ describe("WebSocketManager", () => {
     manager.close();
   });
 
+  it("replaces an apparently OPEN socket after returning from a long background period", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+
+    const manager = new WebSocketManager();
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(5_001);
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(sockets).toHaveLength(2);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(statuses).toEqual([true, false]);
+    sockets[1]!.open();
+    expect(statuses).toEqual([true, false, true]);
+
+    manager.close();
+  });
+
   it("does not reconnect after the relay kicks this client", async () => {
     vi.useFakeTimers();
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
@@ -173,14 +205,14 @@ describe("WebSocketManager", () => {
     manager.connect("ws://relay/client");
 
     expect(docAdds).toContain("visibilitychange");
-    expect(winAdds).toEqual(expect.arrayContaining(["online", "focus"]));
+    expect(winAdds).toEqual(expect.arrayContaining(["online", "focus", "pagehide", "pageshow"]));
 
     manager.close();
 
     // 每个被注册的 wake listener 在 close 时都该有一次匹配的 removeEventListener，
     // 否则 document/window 上残留匿名 lambda 引用，instance 永远拿不到 GC。
     expect(docRemoves).toContain("visibilitychange");
-    expect(winRemoves).toEqual(expect.arrayContaining(["online", "focus"]));
+    expect(winRemoves).toEqual(expect.arrayContaining(["online", "focus", "pagehide", "pageshow"]));
 
     docAdd.mockRestore();
     docRemove.mockRestore();

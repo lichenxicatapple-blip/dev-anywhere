@@ -1,6 +1,7 @@
 // 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import type { SessionHistoryMessage } from "@dev-anywhere/shared";
 import type { ChatActivityDetail } from "@/lib/chat-activity-detail";
 
 export interface ToolCallInfo {
@@ -124,27 +125,15 @@ interface ChatStoreState {
   addDraftAttachment: (sessionId: string, attachment: ChatDraftAttachment) => void;
   removeDraftAttachment: (sessionId: string, attachmentId: string) => void;
   clearDraftAttachments: (sessionId: string) => void;
-  loadHistory: (
-    sessionId: string,
-    messages: Array<{
-      role: "user" | "assistant" | "system";
-      text: string;
-      timestamp?: number;
-      cursor?: string;
-    }>,
-  ) => void;
+  loadHistory: (sessionId: string, messages: SessionHistoryMessage[]) => void;
   loadHistoryPage: (
     sessionId: string,
     page: {
-      mode: "replace" | "prepend";
-      messages: Array<{
-        role: "user" | "assistant" | "system";
-        text: string;
-        timestamp?: number;
-        cursor?: string;
-      }>;
+      mode: "replace" | "prepend" | "reconcile";
+      messages: SessionHistoryMessage[];
       hasMore?: boolean;
       nextBefore?: string;
+      preserveLiveSince?: number;
     },
   ) => void;
   setHistoryLoading: (sessionId: string, loading: boolean) => void;
@@ -172,30 +161,33 @@ function hashHistoryText(text: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function historyMessageId(
-  sessionId: string,
-  message: {
-    role: "user" | "assistant" | "system";
-    text: string;
-    timestamp?: number;
-    cursor?: string;
-  },
-): string {
+function historyMessageId(sessionId: string, message: SessionHistoryMessage): string {
   if (message.cursor) return `history-${sessionId}-${message.cursor}`;
   return `history-${sessionId}-${message.timestamp ?? "na"}-${message.role}-${hashHistoryText(
     message.text,
   )}`;
 }
 
-function toHistoryChatMessage(
-  sessionId: string,
-  message: {
-    role: "user" | "assistant" | "system";
-    text: string;
-    timestamp?: number;
-    cursor?: string;
-  },
-): ChatMessage {
+function toHistoryChatMessage(sessionId: string, message: SessionHistoryMessage): ChatMessage {
+  if (message.role === "activity") {
+    return {
+      id: historyMessageId(sessionId, message),
+      role: "activity",
+      text: message.text,
+      isPartial: message.status === "running",
+      timestamp: message.timestamp || 0,
+      toolCalls: [],
+      activity: {
+        id: message.toolId,
+        source: "claude-native",
+        kind: "tool",
+        status: message.status,
+        text: message.text,
+        toolName: message.toolName,
+        durable: true,
+      },
+    };
+  }
   return {
     id: historyMessageId(sessionId, message),
     role: message.role,
@@ -209,6 +201,15 @@ function toHistoryChatMessage(
 function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const existingIds = new Set(existing.map((message) => message.id));
   return [...incoming.filter((message) => !existingIds.has(message.id)), ...existing];
+}
+
+function isEquivalentHistoryMessage(message: ChatMessage, history: ChatMessage[]): boolean {
+  return history.some(
+    (candidate) =>
+      candidate.role === message.role &&
+      candidate.text === message.text &&
+      Math.abs(candidate.timestamp - message.timestamp) <= 2_000,
+  );
 }
 
 let liveMessageCounter = 0;
@@ -513,13 +514,44 @@ export const useChatStore = create<ChatStoreState>()(
           updateSlice(state, sessionId, (slice) => {
             const historyPrefix = `history-${sessionId}-`;
             const historyMessages = page.messages.map((m) => toHistoryChatMessage(sessionId, m));
-            const nextMessages =
-              page.mode === "replace"
-                ? [
-                    ...historyMessages,
-                    ...slice.messages.filter((m) => !m.id.startsWith(historyPrefix)),
-                  ]
-                : mergeMessages(slice.messages, historyMessages);
+            let nextMessages: ChatMessage[];
+            if (page.mode === "prepend") {
+              nextMessages = mergeMessages(slice.messages, historyMessages);
+            } else if (page.mode === "reconcile") {
+              // 恢复前台后服务端历史是已落盘消息的权威来源。只保留仍在本地排队、或在本次
+              // 拉取开始后通过实时通道到达的消息，避免陈旧 partial/activity 永久留在界面。
+              // 如果用户之前翻页加载过更老历史，则保留最新页首个重叠项之前的部分。
+              const currentHistory = slice.messages.filter((message) =>
+                message.id.startsWith(historyPrefix),
+              );
+              const refreshedIds = new Set(historyMessages.map((message) => message.id));
+              const firstOverlapIndex = currentHistory.findIndex((message) =>
+                refreshedIds.has(message.id),
+              );
+              const reconciledHistory = [
+                ...(firstOverlapIndex >= 0 ? currentHistory.slice(0, firstOverlapIndex) : []),
+                ...historyMessages,
+              ];
+              const preserveLiveSince = page.preserveLiveSince ?? Number.POSITIVE_INFINITY;
+              const liveMessages = slice.messages.filter(
+                (message) =>
+                  !message.id.startsWith(historyPrefix) &&
+                  (message.deliveryStatus === "queued" || message.timestamp >= preserveLiveSince),
+              );
+              nextMessages = [
+                ...reconciledHistory,
+                ...liveMessages.filter(
+                  (message) =>
+                    message.deliveryStatus === "queued" ||
+                    !isEquivalentHistoryMessage(message, reconciledHistory),
+                ),
+              ];
+            } else {
+              nextMessages = [
+                ...historyMessages,
+                ...slice.messages.filter((m) => !m.id.startsWith(historyPrefix)),
+              ];
+            }
             return {
               ...slice,
               messages: nextMessages,

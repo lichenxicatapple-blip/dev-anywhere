@@ -459,6 +459,25 @@ describe("MessageBubble", () => {
     expect(container.querySelector('[data-slot="file-download-links"]')).toBeNull();
   });
 
+  it("replaces uploaded file suffixes in user messages with a semantic attachment card", () => {
+    const { container } = render(
+      <MessageBubble
+        message={makeMessage({
+          id: "user-uploaded-file",
+          role: "user",
+          text: "请分析这个文件 @uploads/session/private-report.pdf",
+        })}
+      />,
+    );
+
+    expect(container.querySelector('[data-slot="user-file-attachment"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="markdown-view"]')?.textContent).toBe(
+      "请分析这个文件",
+    );
+    expect(container.textContent).not.toContain("private-report.pdf");
+    expect(container.textContent).not.toContain("uploads/session");
+  });
+
   it("renders markdown links to local file paths as download actions", () => {
     const { container } = render(
       <FileDownloadProvider sessionId="s1">

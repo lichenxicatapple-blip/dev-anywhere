@@ -184,6 +184,25 @@ describe("RelayControlSchema round-trip stability", () => {
     if (d.type === "session_history_messages") expect(d.nextBefore).toBeUndefined();
   });
 
+  it("session_history_messages preserves historical tool activities", () => {
+    const message = {
+      type: "session_history_messages" as const,
+      sessionId: "s1",
+      messages: [
+        {
+          role: "activity" as const,
+          text: "运行命令：pnpm test",
+          toolId: "tool-history",
+          toolName: "Bash",
+          status: "done" as const,
+          cursor: "b:10:1",
+        },
+      ],
+    };
+
+    expect(roundTrip(RelayControlSchema, message)).toEqual(message);
+  });
+
   it("agent_status with optional fields absent stays undefined after round-trip", () => {
     const original = {
       type: "agent_status",

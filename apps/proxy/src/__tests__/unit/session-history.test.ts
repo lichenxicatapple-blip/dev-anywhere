@@ -638,10 +638,7 @@ describe("scanSessionHistory", () => {
 
     const result = await scanSessionHistory();
     expect(result).toHaveLength(2);
-    expect(result.map((r) => r.title).sort()).toEqual([
-      "第一个会话的问题",
-      "第二个会话的问题",
-    ]);
+    expect(result.map((r) => r.title).sort()).toEqual(["第一个会话的问题", "第二个会话的问题"]);
   });
 
   it("keeps Claude and Codex entries with the same title and cwd separate", async () => {
@@ -749,6 +746,127 @@ describe("readSessionMessages", () => {
       role: "assistant",
       text: "| 维度 | Rust | Go |\n|---|---|---|\n| 内存 | 所有权 | GC |",
     });
+  });
+
+  it("restores Claude tool calls as durable activities with terminal status", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "session-tools.jsonl"),
+      [
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-08-10T00:00:01.000Z",
+          message: { role: "user", content: "检查测试" },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-08-10T00:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "我先运行测试。" },
+              {
+                type: "tool_use",
+                id: "toolu-test",
+                name: "Bash",
+                input: { command: "pnpm test" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          timestamp: "2026-08-10T00:00:03.000Z",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu-test",
+                content: "passed",
+                is_error: false,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-08-10T00:00:04.000Z",
+          message: { role: "assistant", content: "测试通过。" },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const messages = await readSessionMessages("session-tools", "claude");
+    expect(messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "activity",
+      "assistant",
+    ]);
+    expect(messages[2]).toMatchObject({
+      role: "activity",
+      text: "运行命令：pnpm test",
+      toolId: "toolu-test",
+      toolName: "Bash",
+      status: "done",
+    });
+
+    const page = await readSessionMessagesPage("session-tools", { limit: 10 }, "claude");
+    expect(page.messages).toEqual(
+      messages.map((message, index) =>
+        expect.objectContaining({
+          role: message.role,
+          text: message.text,
+          ...(index === 2 ? { status: "done", toolId: "toolu-test" } : {}),
+        }),
+      ),
+    );
+    expect(new Set(page.messages.map((message) => message.cursor)).size).toBe(page.messages.length);
+  });
+
+  it("keeps unfinished and failed Claude tool history distinguishable", async () => {
+    const projectDir = join(testDir, ".claude", "projects", "-test-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "session-tool-status.jsonl"),
+      [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "failed-tool", name: "Read", input: { file_path: "a.ts" } },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "failed-tool", content: "no", is_error: true },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "running-tool", name: "Glob", input: { pattern: "**/*.ts" } },
+            ],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const messages = await readSessionMessages("session-tool-status", "claude");
+    expect(messages).toMatchObject([
+      { role: "activity", toolId: "failed-tool", status: "error" },
+      { role: "activity", toolId: "running-tool", status: "running" },
+    ]);
   });
 
   it("keeps a compact history marker without restoring Claude slash-command noise", async () => {
@@ -934,6 +1052,49 @@ describe("readSessionMessages", () => {
     ]);
     expect(page.messages[0].timestamp).toBe(Date.parse("2026-05-26T00:00:01.000Z"));
     expect(page.hasMore).toBe(false);
+  });
+
+  it("restores Codex function calls alongside visible event messages", async () => {
+    writeCodexConversation("codex-tool-history", [
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "运行测试" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          arguments: JSON.stringify({ cmd: "pnpm test", command: "pnpm test" }),
+          call_id: "call-test",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:03.000Z",
+        type: "response_item",
+        payload: { type: "function_call_output", call_id: "call-test", output: "passed" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-08-10T00:00:04.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "测试通过。" },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("codex-tool-history", { limit: 10 }, "codex");
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "运行测试" },
+      {
+        role: "activity",
+        text: "运行命令：pnpm test",
+        toolId: "call-test",
+        toolName: "Bash",
+        status: "done",
+      },
+      { role: "assistant", text: "测试通过。" },
+    ]);
   });
 
   it("rejects path-unsafe session ids", async () => {

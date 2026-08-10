@@ -246,4 +246,110 @@ describe("chat-store per-session", () => {
       "live",
     ]);
   });
+
+  it("restores historical tool calls as durable activity messages", () => {
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      messages: [
+        { role: "user", text: "运行测试", cursor: "b:1" },
+        {
+          role: "activity",
+          text: "运行命令：pnpm test",
+          toolId: "tool-history",
+          toolName: "Bash",
+          status: "done",
+          cursor: "b:2:1",
+        },
+        { role: "assistant", text: "测试通过。", cursor: "b:3" },
+      ],
+    });
+
+    const activity = useChatStore.getState().bySessionId.s1.messages[1];
+    expect(activity).toMatchObject({
+      role: "activity",
+      text: "运行命令：pnpm test",
+      isPartial: false,
+      activity: {
+        id: "tool-history",
+        toolName: "Bash",
+        status: "done",
+        durable: true,
+      },
+    });
+  });
+
+  it("reconciles stale chat state after reconnect while preserving queued and racing messages", () => {
+    const refreshStartedAt = Date.now() + 10_000;
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      messages: [{ role: "user", text: "stale history", timestamp: 100 }],
+    });
+    useChatStore.getState().appendAssistantText("s1", "stale partial");
+    useChatStore.getState().upsertActivityMessage("s1", {
+      id: "stale-tool",
+      source: "claude-native",
+      kind: "tool",
+      status: "running",
+      text: "stale activity",
+      durable: false,
+    });
+    useChatStore.getState().addUserMessage("s1", {
+      id: "queued-user",
+      role: "user",
+      text: "queued locally",
+      isPartial: false,
+      timestamp: 200,
+      toolCalls: [],
+      deliveryStatus: "queued",
+    });
+    useChatStore.getState().addUserMessage("s1", {
+      id: "racing-live",
+      role: "user",
+      text: "arrived during refresh",
+      isPartial: false,
+      timestamp: refreshStartedAt + 1,
+      toolCalls: [],
+    });
+    useChatStore.getState().addUserMessage("s1", {
+      id: "racing-live-duplicate",
+      role: "user",
+      text: "already captured by history",
+      isPartial: false,
+      timestamp: refreshStartedAt + 2,
+      toolCalls: [],
+    });
+    useChatStore.getState().setInputDraft("s1", "unsent draft");
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "reconcile",
+      preserveLiveSince: refreshStartedAt,
+      hasMore: true,
+      nextBefore: "before:1",
+      messages: [
+        { role: "user", text: "server old", timestamp: 100, cursor: "c:1" },
+        { role: "assistant", text: "server while locked", timestamp: 300, cursor: "c:2" },
+        {
+          role: "user",
+          text: "already captured by history",
+          timestamp: refreshStartedAt + 2,
+          cursor: "c:3",
+        },
+      ],
+    });
+
+    const slice = useChatStore.getState().bySessionId.s1;
+    expect(slice.messages.map((message) => message.text)).toEqual([
+      "server old",
+      "server while locked",
+      "already captured by history",
+      "queued locally",
+      "arrived during refresh",
+    ]);
+    expect(slice.messages.some((message) => message.isPartial)).toBe(false);
+    expect(slice.messages.some((message) => message.role === "activity")).toBe(false);
+    expect(slice.inputDraft).toBe("unsent draft");
+    expect(slice.historyHasMore).toBe(true);
+    expect(slice.historyNextBefore).toBe("before:1");
+    expect(slice.historyLoading).toBe(false);
+  });
 });

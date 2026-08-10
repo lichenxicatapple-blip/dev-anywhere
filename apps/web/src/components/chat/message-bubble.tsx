@@ -2,8 +2,10 @@ import { ChevronDown, Clock3 } from "lucide-react";
 import { memo, useState } from "react";
 import type { ReactNode } from "react";
 import type { ChatMessage } from "@/stores/chat-store";
+import { extractUserMessageAttachments } from "@/lib/user-message-attachments";
 import { ActivityDetailView } from "./activity-detail-view";
 import { MarkdownView } from "./markdown-view";
+import { UserMessageAttachments } from "./user-message-attachments";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -144,11 +146,13 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (role === "user") {
     const isQueued = message.deliveryStatus === "queued";
+    const content = extractUserMessageAttachments(message.text);
+    const hasAttachments = content.attachments.length > 0;
     const userBodyClass = message.isPartial
-      ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary-foreground/40 bg-primary/60 text-primary-foreground/90 px-4 py-2"
+      ? "min-w-0 rounded-md border border-dashed border-primary-foreground/40 bg-primary/60 text-primary-foreground/90"
       : isQueued
-        ? "min-w-0 max-w-[80%] rounded-md border border-dashed border-primary/50 bg-primary/70 text-primary-foreground/90 px-4 py-2"
-        : "min-w-0 max-w-[80%] rounded-md bg-primary text-primary-foreground px-4 py-2";
+        ? "min-w-0 rounded-md border border-dashed border-primary/50 bg-primary/70 text-primary-foreground/90"
+        : "min-w-0 rounded-md bg-primary text-primary-foreground";
     return (
       <article
         data-slot="message-bubble"
@@ -166,15 +170,24 @@ export const MessageBubble = memo(function MessageBubble({
           <div
             data-slot="message-body"
             data-variant={message.isPartial ? "partial" : isQueued ? "queued" : "sent"}
-            className={`${userBodyClass} w-fit [overflow-wrap:anywhere]`}
+            className={`${userBodyClass} ${hasAttachments ? "max-w-[88%] overflow-hidden px-2 py-2" : "max-w-[80%] px-4 py-2"} w-fit [overflow-wrap:anywhere]`}
             style={contentStyle}
           >
-            <MarkdownView
-              text={message.text}
-              tone="on-primary"
-              trailingInline={streamingCursor}
-              preserveSoftBreaks
-            />
+            {content.bodyText ? (
+              <div className={hasAttachments ? "px-2" : undefined}>
+                <MarkdownView
+                  text={content.bodyText}
+                  tone="on-primary"
+                  trailingInline={streamingCursor}
+                  preserveSoftBreaks
+                />
+              </div>
+            ) : null}
+            {hasAttachments ? (
+              <div className={content.bodyText ? "mt-2" : undefined}>
+                <UserMessageAttachments attachments={content.attachments} />
+              </div>
+            ) : null}
             {isQueued ? (
               <div
                 data-slot="queued-message-status"
