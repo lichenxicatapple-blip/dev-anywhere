@@ -78,6 +78,9 @@ describe("ImagePreviewProvider", () => {
 
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("dialog")));
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "复制路径" }));
+    const close = screen.getByRole("button", { name: "关闭图片预览" });
+    expect(close).toHaveClass("size-11");
+    expect(close.querySelector('[data-slot="image-preview-close-visual"]')).toHaveClass("size-7");
   });
 
   it("does not report the image as loaded until the browser image load event fires", async () => {

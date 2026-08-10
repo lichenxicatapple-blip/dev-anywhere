@@ -97,11 +97,17 @@ function safeDecodeHrefPath(href: string): string {
   }
 }
 
+function stripLocalSourceLocation(path: string): string {
+  return path.replace(/:\d+(?::\d+)?$/, "");
+}
+
 function decodeLocalPathHref(href: string): { kind: InlinePathLinkKind; path: string } | null {
   if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
-  const path = safeDecodeHrefPath(href);
+  // Codex file links may append :line or :line:column for editor navigation.
+  // Remote-file APIs need the underlying filesystem path, without that source location.
+  const path = stripLocalSourceLocation(safeDecodeHrefPath(href));
   if (isImagePreviewPath(path)) return { kind: "image", path };
-  if (isFileDownloadPath(path)) return { kind: "file", path };
+  if (isFileDownloadPath(path, { allowBare: true })) return { kind: "file", path };
   return null;
 }
 

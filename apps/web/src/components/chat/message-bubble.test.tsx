@@ -386,6 +386,24 @@ describe("MessageBubble", () => {
     screen.getByRole("button", { name: /shot\.png/ });
   });
 
+  it("renders a local image path containing spaces as one preview link", () => {
+    const path = "/Users/cat/My Project/final shot.png";
+    render(
+      <ImagePreviewProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a4-spaced-path",
+            role: "assistant",
+            text: `screenshot: @${path}`,
+          })}
+        />
+      </ImagePreviewProvider>,
+    );
+
+    const preview = screen.getByRole("button", { name: `预览 ${path}` });
+    expect(preview).toHaveTextContent(path);
+  });
+
   it("renders file paths inline and does not duplicate them as bottom download chips", () => {
     const { container } = render(
       <FileDownloadProvider sessionId="s1">
@@ -423,6 +441,26 @@ describe("MessageBubble", () => {
     expect(
       container.querySelector('a[href="/Users/catli/MyApps/rust-feature-tests/hello_world.rs"]'),
     ).toBeNull();
+  });
+
+  it("renders source links with line locations as downloads of the underlying file", () => {
+    const { container } = render(
+      <FileDownloadProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            id: "a-local-file-markdown-link-with-line",
+            role: "assistant",
+            text: "Open [use-pty-view.ts](/Users/catli/MyApps/dev-anywhere/apps/web/src/components/chat/use-pty-view.ts:288)",
+          })}
+        />
+      </FileDownloadProvider>,
+    );
+
+    const inlineLink = container.querySelector('[data-slot="inline-file-download-link"]');
+    expect(inlineLink?.textContent).toContain("use-pty-view.ts");
+    expect(inlineLink?.getAttribute("title")).toBe(
+      "/Users/catli/MyApps/dev-anywhere/apps/web/src/components/chat/use-pty-view.ts",
+    );
   });
 
   it("renders inline-code file paths inside tables as download actions", () => {

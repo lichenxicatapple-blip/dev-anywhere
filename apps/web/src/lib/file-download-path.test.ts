@@ -67,6 +67,15 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
+  it("supports explicitly bounded, spaced and Unicode file paths", () => {
+    expect(
+      extractFileDownloadPaths(
+        "read @/Users/cat/项目 资料/最终 报告.csv and docs/设计稿/说明文档.md",
+      ),
+    ).toEqual(["/Users/cat/项目 资料/最终 报告.csv", "docs/设计稿/说明文档.md"]);
+    expect(extractFileDownloadPaths("open @biome.json next")).toEqual(["biome.json"]);
+  });
+
   it("recognizes paths and well-known top-level project filenames", () => {
     expect(extractFileDownloadPaths("see README.md")).toEqual(["README.md"]);
     expect(extractFileDownloadPaths("edit package.json next")).toEqual(["package.json"]);
@@ -76,9 +85,9 @@ describe("file-download-path extraction", () => {
     expect(extractFileDownloadPaths("./docs/superpowers/specs/2026-05-10-spec.md is")).toEqual([
       "./docs/superpowers/specs/2026-05-10-spec.md",
     ]);
-    expect(
-      extractFileDownloadPaths("- pa_break_analysis/SKILL.md 里的完整路径在哪里"),
-    ).toEqual(["pa_break_analysis/SKILL.md"]);
+    expect(extractFileDownloadPaths("- pa_break_analysis/SKILL.md 里的完整路径在哪里")).toEqual([
+      "pa_break_analysis/SKILL.md",
+    ]);
     expect(extractFileDownloadPaths("./pa_break_analysis/SKILL.md 里的完整路径在哪里")).toEqual([
       "./pa_break_analysis/SKILL.md",
     ]);
@@ -112,6 +121,7 @@ describe("file-download-path extraction", () => {
     expect(isFileDownloadPath("../a.log")).toBe(true);
     expect(isFileDownloadPath("~/a.log")).toBe(true);
     expect(isFileDownloadPath(".dev-anywhere/x.log")).toBe(true);
+    expect(isFileDownloadPath("custom-cache/a.log")).toBe(true);
   });
 
   it("does not extend a match across non-ASCII text into a later @path token", () => {

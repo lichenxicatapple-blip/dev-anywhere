@@ -16,6 +16,17 @@ describe("resolvePtySelectionPathAction", () => {
     });
   });
 
+  it("resolves selected paths containing spaces and Unicode", () => {
+    expect(resolvePtySelectionPathAction("/Users/cat/项目 素材/最终 截图.png")).toEqual({
+      kind: "image-preview",
+      path: "/Users/cat/项目 素材/最终 截图.png",
+    });
+    expect(resolvePtySelectionPathAction("docs/项目 文档/发布 说明.md")).toEqual({
+      kind: "file-download",
+      path: "docs/项目 文档/发布 说明.md",
+    });
+  });
+
   it("ignores selections that merely contain a path among other text", () => {
     expect(resolvePtySelectionPathAction("artifact ./build/out.tar.gz ready")).toBeNull();
   });

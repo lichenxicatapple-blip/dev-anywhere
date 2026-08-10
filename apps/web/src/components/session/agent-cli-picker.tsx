@@ -172,9 +172,7 @@ function AgentCliPathEditor({
                 onCancel();
               }
             }}
-            placeholder={
-              provider === "claude" ? "/home/dev/.local/bin/claude" : "/home/dev/.local/bin/codex"
-            }
+            placeholder={provider === "claude" ? "/path/to/claude" : "/path/to/codex"}
             className="min-h-11 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-10 md:min-h-0 md:text-sm"
           />
           <datalist id={`agent-cli-path-${provider}`}>

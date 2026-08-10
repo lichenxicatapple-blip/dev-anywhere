@@ -124,6 +124,42 @@ class PtyOutputCapture {
 }
 
 test.describe("real terminal worker chaos", () => {
+  test("keeps shell input and Vim cursor keys interactive through the full relay path", async ({
+    localRuntime,
+  }) => {
+    const session = await spawnSessionViaRelay(localRuntime, { kind: "terminal", mode: "pty" });
+    const output = new PtyOutputCapture(session);
+    const send = (data: string): void => {
+      session.send({ type: "remote_input_raw", sessionId: session.sessionId, data });
+    };
+
+    try {
+      await output.waitForSnapshot(15_000);
+
+      const shellMarker = `SHELL_INPUT_OK_${Date.now()}`;
+      send(`printf '${shellMarker}\\n'\r`);
+      await output.waitFor(shellMarker, 15_000);
+
+      send("vim -Nu NONE -n -c 'call setline(1, range(1,20))'\r");
+      await new Promise((resolveFn) => setTimeout(resolveFn, 500));
+
+      send("gg\x1bOB");
+      await new Promise((resolveFn) => setTimeout(resolveFn, 100));
+      send(":echo 'VIM_APPLICATION_CURSOR_ROW_'.line('.')\r");
+      await output.waitFor("VIM_APPLICATION_CURSOR_ROW_2", 15_000);
+
+      send("gg\x1b[B");
+      await new Promise((resolveFn) => setTimeout(resolveFn, 100));
+      send(":echo 'VIM_NORMAL_CURSOR_ROW_'.line('.')\r");
+      await output.waitFor("VIM_NORMAL_CURSOR_ROW_2", 15_000);
+
+      send(":qa!\r");
+    } finally {
+      output.dispose();
+      await session.terminate();
+    }
+  });
+
   test("keeps a web-created pure terminal usable across proxy serve restart", async ({
     localRuntime,
   }) => {

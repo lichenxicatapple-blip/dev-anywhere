@@ -1,13 +1,12 @@
 import { isScpLikeRemotePath } from "./scp-like-remote";
+import { isRecognizedBareDomain } from "./bare-domain";
 
 export type PtySelectionPathAction =
   | { kind: "image-preview"; path: string }
   | { kind: "file-download"; path: string };
 
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
-const FILE_EXT_RE = /\.[A-Za-z0-9]{1,8}$/;
-const DOMAIN_TLD_RE =
-  /^(?:com|net|org|io|dev|app|top|cn|ai|co|me|xyz|site|online|cloud|tools|tech|info|biz|us|uk|de|jp|fr|ru|nl|in)$/i;
+const FILE_EXT_RE = /\.[\p{L}\p{N}]{1,16}$/u;
 
 function normalizeSelectionToken(value: string): string {
   return value
@@ -21,7 +20,7 @@ function getSingleSelectedPath(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed || trimmed.includes("\n")) return null;
   const path = normalizeSelectionToken(trimmed);
-  if (!path || /\s/.test(path)) return null;
+  if (!path) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return null;
   if (isScpLikeRemotePath(path)) return null;
   if (path.split("/").includes("...")) return null;
@@ -29,34 +28,14 @@ function getSingleSelectedPath(text: string): string | null {
 }
 
 function isBareDomainLike(path: string): boolean {
-  if (
-    path.startsWith("/") ||
-    path.startsWith("./") ||
-    path.startsWith("../") ||
-    path.startsWith("~/") ||
-    path.startsWith(".dev-anywhere/") ||
-    path.includes("/")
-  ) {
-    return false;
-  }
-
-  const labels = path.split(".");
-  if (labels.length < 2) return false;
-  const tld = labels.at(-1) ?? "";
-  if (!DOMAIN_TLD_RE.test(tld)) return false;
-  return labels.every((label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+  if (path.includes("/")) return false;
+  return isRecognizedBareDomain(path);
 }
 
 function hasPlausibleStem(path: string): boolean {
-  if (
-    path.startsWith("/") ||
-    path.startsWith("./") ||
-    path.startsWith("../") ||
-    path.startsWith("~/") ||
-    path.startsWith(".dev-anywhere/")
-  ) {
-    return true;
-  }
+  const finalPathSegment = path.split("/").pop() ?? path;
+  if (/^\d+(?:\.\d+)+$/.test(finalPathSegment)) return false;
+  if (path.includes("/")) return true;
   const stem = path.replace(FILE_EXT_RE, "");
   const finalSegment = stem.split("/").pop() ?? stem;
   return /[A-Za-z_-]/.test(finalSegment);

@@ -8,11 +8,19 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ClipboardCopy, Copy, Download, Image as ImageIcon, LoaderCircle } from "lucide-react";
+import {
+  ClipboardCopy,
+  Copy,
+  Download,
+  Image as ImageIcon,
+  LoaderCircle,
+  XIcon,
+} from "lucide-react";
 import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -248,10 +256,22 @@ function ImagePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !px-3 !pt-3 !pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!px-4 sm:!pt-4"
+        className="dev-image-preview-dialog !top-0 !left-0 grid h-dvh min-w-0 max-h-dvh !max-w-none !translate-x-0 !translate-y-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden !rounded-none !border-0 !px-3 !pt-3 !pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:!top-[50%] sm:!left-[50%] sm:h-[min(80dvh,760px)] sm:!w-[min(92vw,72rem)] sm:max-h-[calc(100dvh-2rem)] sm:!max-w-[calc(100vw-2rem)] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!rounded-lg sm:!border sm:!border-border/35 sm:!px-4 sm:!pt-4 sm:!shadow-xl"
         data-slot="image-preview-dialog"
         focusSurfaceOnOpen
+        showCloseButton={false}
       >
+        <DialogClose
+          className="group absolute top-1 right-1 z-30 flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          aria-label="关闭图片预览"
+        >
+          <span
+            className="flex size-7 items-center justify-center rounded-full bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border/40 backdrop-blur-sm transition-[color,background-color,transform] duration-150 ease-out group-hover:bg-accent group-hover:text-foreground group-active:scale-95 motion-reduce:transition-none"
+            data-slot="image-preview-close-visual"
+          >
+            <XIcon className="size-3.5" aria-hidden="true" />
+          </span>
+        </DialogClose>
         <DialogHeader className="min-w-0 max-w-full pr-10 text-left">
           <DialogTitle className="min-w-0 text-base">图片预览</DialogTitle>
           <DialogDescription
@@ -263,7 +283,7 @@ function ImagePreviewDialog({
         </DialogHeader>
 
         <div
-          className="dev-image-preview-stage relative flex min-h-[18rem] w-full min-w-0 max-w-full items-center justify-center overflow-hidden rounded-md border border-border/70 max-sm:min-h-0"
+          className="dev-image-preview-stage relative flex min-h-[18rem] w-full min-w-0 max-w-full items-center justify-center overflow-hidden rounded-md border border-border/35 max-sm:min-h-0"
           data-slot="image-preview-stage"
           aria-busy={showLoading}
           ref={stageRef}

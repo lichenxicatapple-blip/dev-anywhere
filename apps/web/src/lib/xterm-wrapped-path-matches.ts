@@ -45,8 +45,8 @@ type BufferTextBlock = {
 const MAX_WRAPPED_PATH_LINES = 16;
 const MAX_SEMANTIC_PATH_BLOCKS = 8;
 const SEMANTIC_PATH_START_RE =
-  /(?:^|[\s([{@])@?(?:\/|\.\/|\.\.\/|~\/|\.dev-anywhere\/)[A-Za-z0-9_./~%+,:=#-]*$/;
-const SEMANTIC_PATH_CONTINUATION_RE = /^[A-Za-z0-9_./~%+,:=#-]+$/;
+  /(?:^|[\s([{@])@?(?:\/|\.\/|\.\.\/|~\/|[^\s`"'<>，。；：！？、/@]+\/)[^\n`"'<>，。；：！？、@]*$/u;
+const SEMANTIC_PATH_CONTINUATION_RE = /^[^\n\r\t`"'<>，。；：！？、@]+$/u;
 
 export function findXtermPathMatches(line: string, extractPaths: PathExtractor): XtermPathMatch[] {
   return findPathSpans(line, extractPaths).map((span) => ({
@@ -67,7 +67,7 @@ export function findXtermPathMatchesInWrappedBuffer(
   ].filter((block): block is BufferTextBlock => block !== null);
 
   const seen = new Set<string>();
-  return blocks.flatMap((block) => {
+  const matches = blocks.flatMap((block) => {
     const logicalLine = block.parts.map((part) => part.text).join("");
     return findPathSpans(logicalLine, extractPaths)
       .map((span) => {
@@ -95,6 +95,42 @@ export function findXtermPathMatchesInWrappedBuffer(
         return true;
       });
   });
+
+  // A generic relative path can also look like the beginning of a new semantic block
+  // while it is actually an indented continuation of an earlier path. Keep the widest
+  // match when both resolve to the same terminal region.
+  return matches.filter(
+    (candidate) =>
+      !matches.some(
+        (other) =>
+          other !== candidate &&
+          compareBufferPosition(
+            other.startLineNumber,
+            other.startColumn,
+            candidate.startLineNumber,
+            candidate.startColumn,
+          ) <= 0 &&
+          compareBufferPosition(
+            other.endLineNumber,
+            other.endColumn,
+            candidate.endLineNumber,
+            candidate.endColumn,
+          ) >= 0 &&
+          (other.startLineNumber !== candidate.startLineNumber ||
+            other.startColumn !== candidate.startColumn ||
+            other.endLineNumber !== candidate.endLineNumber ||
+            other.endColumn !== candidate.endColumn),
+      ),
+  );
+}
+
+function compareBufferPosition(
+  leftLine: number,
+  leftColumn: number,
+  rightLine: number,
+  rightColumn: number,
+): number {
+  return leftLine - rightLine || leftColumn - rightColumn;
 }
 
 export function getXtermPathLinkRanges(match: XtermBufferPathMatch): ILink["range"][] {

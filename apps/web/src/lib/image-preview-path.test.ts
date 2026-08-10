@@ -30,6 +30,31 @@ describe("image preview path detection", () => {
     ]);
   });
 
+  it("keeps spaces inside paths that have an explicit directory boundary", () => {
+    expect(
+      extractImagePreviewPaths(
+        "preview @/Users/cat/My Project/final shot.png and ./review assets/second image.webp",
+      ),
+    ).toEqual(["/Users/cat/My Project/final shot.png", "./review assets/second image.webp"]);
+    expect(extractImagePreviewPaths("open docs/My Images/comparison final.jpg now")).toEqual([
+      "docs/My Images/comparison final.jpg",
+    ]);
+    expect(extractImagePreviewPaths("preview @final shot.png now")).toEqual(["final shot.png"]);
+  });
+
+  it("supports Unicode directory and image names", () => {
+    expect(extractImagePreviewPaths("查看 @/Users/cat/项目 素材/最终 截图.png，然后继续")).toEqual([
+      "/Users/cat/项目 素材/最终 截图.png",
+    ]);
+    expect(extractImagePreviewPaths("打开 docs/设计稿/登录页.webp")).toEqual([
+      "docs/设计稿/登录页.webp",
+    ]);
+  });
+
+  it("does not absorb prose before a bare image filename just because it contains spaces", () => {
+    expect(extractImagePreviewPaths("please inspect final.png when ready")).toEqual(["final.png"]);
+  });
+
   it("rejects version-shaped tokens even with image-looking suffix", () => {
     // `.0` 可以是合法扩展但 stem `5` 长度 1 -> reject
     expect(isImagePreviewPath("5.0")).toBe(false);
@@ -49,6 +74,7 @@ describe("image preview path detection", () => {
     expect(isImagePreviewPath("../a.png")).toBe(true);
     expect(isImagePreviewPath("~/a.png")).toBe(true);
     expect(isImagePreviewPath(".dev-anywhere/x.png")).toBe(true);
+    expect(isImagePreviewPath("custom-cache/a.png")).toBe(true);
   });
 
   it("does not extend a match across non-ASCII text into a later @path token", () => {

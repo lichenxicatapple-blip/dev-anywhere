@@ -4,6 +4,21 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.27] - 2026-08-10
+
+### 修复
+
+- 修复 Web 终端在 Vim application cursor mode 下方向键无法移动的问题，同时保持普通 Shell 模式的方向键协议不变。
+- 修复聊天消息中的绝对路径、带空格或 Unicode 的图片与文件路径无法完整识别，以及 Markdown 文件链接附带行号时缺少下载操作的问题。
+- 统一聊天与 PTY 的路径、域名和误判过滤规则，路径识别不再依赖 `.dev-anywhere/` 目录名，并兼容终端中的跨行路径。
+- 弱化图片预览的边框和阴影，缩小关闭按钮的视觉尺寸，同时保留触控热区。
+- 将 Agent CLI 路径输入框中的机器特定示例改为通用路径提示。
+
+### 测试
+
+- 补充 Shell/Vim 方向键、带空格与 Unicode 路径、Markdown 行号链接、域名与 SCP remote 误判、图片预览控件等回归测试。
+- 通过全量单元测试、桌面图片预览 E2E、真实 Relay/PTY/Vim 集成测试、代码检查和生产构建。
+
 ## [0.5.26](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.25...v0.5.26) (2026-08-01)
 
 

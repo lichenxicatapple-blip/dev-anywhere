@@ -37,6 +37,7 @@ import { useAppStore, type InputModePreference } from "@/stores/app-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { encodePtyInputForTerminalModes } from "@/lib/pty-key-encoding";
 import type { PtyScrollDebugProbe } from "@/lib/pty-scroll-debug-snapshot";
 import {
   registerPtyDebugSnapshotProvider,
@@ -284,17 +285,20 @@ export function resolvePtyContainerPaddingBottom({
     : PTY_CONTAINER_BASE_PADDING_PX;
 }
 
-function rawInputForPhysicalKeyboardEvent(event: KeyboardEvent): string | null {
+function rawInputForPhysicalKeyboardEvent(
+  event: KeyboardEvent,
+  modes?: { applicationCursorKeysMode: boolean },
+): string | null {
   if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return null;
   if (event.key.length === 1) return event.key;
   if (event.key === "Enter") return "\r";
   if (event.key === "Backspace") return "\x7f";
   if (event.key === "Tab") return event.shiftKey ? "\x1b[Z" : "\t";
   if (event.key === "Escape") return "\x1b";
-  if (event.key === "ArrowUp") return "\x1b[A";
-  if (event.key === "ArrowDown") return "\x1b[B";
-  if (event.key === "ArrowRight") return "\x1b[C";
-  if (event.key === "ArrowLeft") return "\x1b[D";
+  if (event.key === "ArrowUp") return encodePtyInputForTerminalModes("\x1b[A", modes);
+  if (event.key === "ArrowDown") return encodePtyInputForTerminalModes("\x1b[B", modes);
+  if (event.key === "ArrowRight") return encodePtyInputForTerminalModes("\x1b[C", modes);
+  if (event.key === "ArrowLeft") return encodePtyInputForTerminalModes("\x1b[D", modes);
   if (event.key === "Delete") return "\x1b[3~";
   if (event.key === "Home") return "\x1b[H";
   if (event.key === "End") return "\x1b[F";
@@ -589,7 +593,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
       const host = xtermHostRef.current;
       if (event.target instanceof Node && host?.contains(event.target)) return;
-      const raw = rawInputForPhysicalKeyboardEvent(event);
+      const raw = rawInputForPhysicalKeyboardEvent(event, terminalRef.current?.modes);
       if (!raw || !canAcceptInput()) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1109,7 +1113,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const sendMobileInput = useCallback(
     (data: string): void => {
       if (!canAcceptInput()) return;
-      sendRemoteInputRaw(sessionId, data);
+      const encoded = encodePtyInputForTerminalModes(data, terminalRef.current?.modes);
+      sendRemoteInputRaw(sessionId, encoded);
       scheduleRawInputFollow("mobileControl", { force: true });
       resetHorizontalScrollAfterLineSubmit(data, "mobileControlEnter");
       terminalRef.current?.focus();

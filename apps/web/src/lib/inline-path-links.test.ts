@@ -16,6 +16,30 @@ describe("inline path link detection", () => {
     ]);
   });
 
+  it("keeps an explicitly bounded image path with spaces as one preview action", () => {
+    const text = "preview @/Users/cat/My Project/final shot.png now";
+    const path = "/Users/cat/My Project/final shot.png";
+    const start = text.indexOf("@");
+    expect(findInlinePathLinks(text)).toEqual([
+      { kind: "image", path, start, end: start + path.length + 1 },
+    ]);
+  });
+
+  it("keeps Unicode image and file paths as complete inline actions", () => {
+    const image = "/Users/cat/项目 素材/最终 截图.png";
+    const file = "docs/项目 文档/发布 说明.md";
+    const text = `see @${image} and ${file}`;
+    expect(findInlinePathLinks(text)).toEqual([
+      { kind: "image", path: image, start: 4, end: 5 + image.length },
+      {
+        kind: "file",
+        path: file,
+        start: text.indexOf(file),
+        end: text.indexOf(file) + file.length,
+      },
+    ]);
+  });
+
   it("rejects URLs, version-shaped tokens, and display-truncated paths", () => {
     expect(
       findInlinePathLinks("https://example.com/file.txt Node 22.4.0 apps/web/.../x.test.ts"),
