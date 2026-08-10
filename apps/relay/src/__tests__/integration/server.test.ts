@@ -38,7 +38,9 @@ describe("Relay Server Integration", () => {
     const packagedFontDir = join(tempRoot, "packaged-fonts");
     mkdirSync(join(packagedFontDir, "sarasa-fixed-sc"), { recursive: true });
     writeFileSync(join(packagedFontDir, "sarasa-fixed-sc", "result.css"), "/* packaged font */");
-    const webAssetDir = join(tempRoot, ".package-store", "web");
+    // Match the packaged Docker layout. The Web root itself lives below an
+    // `assets` ancestor, while only its child `assets/` directory is hashed.
+    const webAssetDir = join(tempRoot, "app", "assets", "web");
     mkdirSync(join(webAssetDir, "assets"), { recursive: true });
     writeFileSync(join(webAssetDir, "index.html"), "<!doctype html><main>DEV Anywhere</main>");
     writeFileSync(join(webAssetDir, "assets", "app-abc123.js"), "console.log('app');");
@@ -289,9 +291,7 @@ describe("Relay Server Integration", () => {
     expect(res.headers.get("content-type")).toContain("text/plain");
     const contentDisposition = res.headers.get("content-disposition");
     expect(contentDisposition).toContain("attachment");
-    expect(contentDisposition).toContain(
-      `filename*=UTF-8''${encodeURIComponent(unicodeFileName)}`,
-    );
+    expect(contentDisposition).toContain(`filename*=UTF-8''${encodeURIComponent(unicodeFileName)}`);
     expect(contentDisposition).not.toContain("面试");
     expect(await res.text()).toBe("hello world");
   });

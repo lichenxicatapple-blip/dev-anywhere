@@ -1,7 +1,7 @@
 import compression from "compression";
 import express, { type Express, type Request, type Response } from "express";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import type { Logger } from "@dev-anywhere/shared/logger";
 
 const IMMUTABLE_CACHE_SECONDS = 365 * 24 * 60 * 60;
@@ -24,10 +24,10 @@ function isRelayRoute(pathname: string): boolean {
   return false;
 }
 
-function setStaticCacheHeaders(response: Response, filePath: string): void {
+function setStaticCacheHeaders(response: Response, filePath: string, webAssetDir: string): void {
   const fileName = basename(filePath);
-  const normalizedPath = filePath.replaceAll("\\", "/");
-  if (normalizedPath.includes("/assets/") || /^workbox-.+\.js$/.test(fileName)) {
+  const relativePath = relative(webAssetDir, filePath).replaceAll("\\", "/");
+  if (relativePath.startsWith("assets/") || /^workbox-.+\.js$/.test(fileName)) {
     response.setHeader("Cache-Control", `public, max-age=${IMMUTABLE_CACHE_SECONDS}, immutable`);
     return;
   }
@@ -64,7 +64,7 @@ export function mountWebApp(
     express.static(webAssetDir, {
       index: false,
       fallthrough: true,
-      setHeaders: setStaticCacheHeaders,
+      setHeaders: (response, filePath) => setStaticCacheHeaders(response, filePath, webAssetDir),
     }),
   );
 
