@@ -81,6 +81,8 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const [findHistoryFailed, setFindHistoryFailed] = useState(false);
   const findHistoryLoadGenerationRef = useRef(0);
   const findHistoryLoadingRef = useRef(false);
+  const historyRefreshKeyRef = useRef<string | null>(null);
+  const historyRefreshGenerationRef = useRef(0);
   const preservePrependRef = useRef<{ previousScrollHeight: number } | null>(null);
   const lastTraceGeometryRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const traceJsonScrollRef = useRef<
@@ -130,12 +132,19 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   // 直接 URL 进入 /chat/:id 时, 本 effect 会在 connected/proxyOnline 变 true 后重放
   useEffect(() => {
     const relay = relayClientRef;
-    if (!relay || !sessionId || !connected || !proxyOnline) return;
+    if (!relay || !sessionId || !connected || !proxyOnline) {
+      historyRefreshKeyRef.current = null;
+      historyRefreshGenerationRef.current += 1;
+      return;
+    }
     relay.sendControl({ type: "session_subscribe", sessionId });
+    // React StrictMode 会重复执行 effect。每个连接周期只同步一次，连接中断后再开放重试。
+    if (historyRefreshKeyRef.current === sessionId) return;
+    historyRefreshKeyRef.current = sessionId;
+    const refreshGeneration = ++historyRefreshGenerationRef.current;
     const historySlice = useChatStore.getState().bySessionId[sessionId];
     const isReconcile = historySlice?.historyInitialized === true;
     const refreshStartedAt = Date.now();
-    let cancelled = false;
     traceJsonScrollRef.current(
       isReconcile ? "history-reconcile:request" : "history-initial:request",
     );
@@ -143,7 +152,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     void relay
       .requestSessionMessagesPage(sessionId, { limit: HISTORY_PAGE_SIZE })
       .then((page) => {
-        if (cancelled) return;
+        if (historyRefreshGenerationRef.current !== refreshGeneration) return;
         traceJsonScrollRef.current(
           isReconcile ? "history-reconcile:response" : "history-initial:response",
           {
@@ -159,11 +168,10 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
         });
       })
       .catch(() => {
-        if (!cancelled) useChatStore.getState().setHistoryLoading(sessionId, false);
+        if (historyRefreshGenerationRef.current !== refreshGeneration) return;
+        historyRefreshKeyRef.current = null;
+        useChatStore.getState().setHistoryLoading(sessionId, false);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [sessionId, connected, proxyOnline, setHistoryLoading]);
 
   const loadOlderHistory = useCallback(() => {
