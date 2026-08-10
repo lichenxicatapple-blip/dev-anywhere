@@ -105,7 +105,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     }
   }, [adaptiveInputModality, inputModePreference, setAdaptiveInputModality, softKeyboardDetected]);
   const isLandscape = useMediaQuery("(orientation: landscape)");
-  const [isIpadClient] = useState(() => describeCurrentClientDevice().osName === "iPad");
+  const [clientDevice] = useState(() => describeCurrentClientDevice());
+  const isIpadClient = clientDevice.osName === "iPad";
+  const isAndroidClient = clientDevice.osName === "Android";
   const floatingKeyboardHintShownRef = useRef(false);
   const effectiveKbOffset = hardwareInputActive ? 0 : kbOffset;
   // layoutKbInset is already zero when the browser resizes the layout viewport and
@@ -292,9 +294,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                     : "pb-[max(env(safe-area-inset-bottom),0.5rem)]"
                 }`}
                 data-slot="input-bar-region"
-                // layout inset 负责避开键盘覆盖区；edge guard 是键盘工具栏上方独立的可见间距。
-                // 两者不能互斥，否则 overlay 键盘场景只剩 pb-2，实际间距会不足 8px。
-                data-keyboard-edge-guard={effectiveKbOffset > 0 ? "true" : undefined}
+                // Android 输入法工具栏会侵入 visual viewport 边缘；layout inset 只负责
+                // 键盘覆盖区，不能替代这段 Android 专属的可见安全间距。
+                data-keyboard-edge-guard={
+                  isAndroidClient && effectiveKbOffset > 0 ? "true" : undefined
+                }
               >
                 <div className="dev-message-rail mx-auto w-full">
                   <VoicePilotStatus sessionId={id} />
