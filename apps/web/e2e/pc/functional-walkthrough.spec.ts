@@ -94,7 +94,9 @@ test.describe("functional browser walkthrough", () => {
     await expect
       .poll(() => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""))
       .toBe("Terminal input");
-    await page.keyboard.type("hello");
+    // Exercise real per-key PTY input without compressing the entire word into
+    // the same browser task while xterm finishes its post-mount focus work.
+    await terminalInput.pressSequentially("hello", { delay: 25 });
     await expect
       .poll(async () =>
         (await sentFakeRelayMessages(page))
